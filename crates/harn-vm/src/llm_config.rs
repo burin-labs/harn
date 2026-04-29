@@ -435,6 +435,9 @@ fn infer_provider_with_config(config: &ProvidersConfig, model_id: &str) -> Strin
     if model_id.starts_with("gpt-") || model_id.starts_with("o1") || model_id.starts_with("o3") {
         return "openai".to_string();
     }
+    if model_id.starts_with("gemini-") || model_id.starts_with("models/gemini-") {
+        return "gemini".to_string();
+    }
     if model_id.contains('/') {
         return "openrouter".to_string();
     }
@@ -890,6 +893,32 @@ fn default_config() -> ProvidersConfig {
             cost_per_1k_in: Some(0.0),
             cost_per_1k_out: Some(0.0),
             latency_p50_ms: Some(1200),
+            ..Default::default()
+        },
+    );
+
+    // Google Gemini native API.
+    config.providers.insert(
+        "gemini".to_string(),
+        ProviderDef {
+            base_url: "https://generativelanguage.googleapis.com".to_string(),
+            base_url_env: Some("GEMINI_BASE_URL".to_string()),
+            auth_style: "header".to_string(),
+            auth_header: Some("x-goog-api-key".to_string()),
+            auth_env: AuthEnv::Multiple(vec![
+                "GEMINI_API_KEY".to_string(),
+                "GOOGLE_API_KEY".to_string(),
+            ]),
+            chat_endpoint: "/v1beta/models".to_string(),
+            healthcheck: Some(HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/v1beta/models".to_string()),
+                url: None,
+                body: None,
+            }),
+            cost_per_1k_in: Some(0.00125),
+            cost_per_1k_out: Some(0.005),
+            latency_p50_ms: Some(1800),
             ..Default::default()
         },
     );

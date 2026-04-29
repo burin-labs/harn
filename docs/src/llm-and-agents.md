@@ -70,6 +70,32 @@ let result = llm_call(
 println(result.text)
 ```
 
+With image content:
+
+```harn
+let image = bytes_to_base64(read_file_bytes("diagram.png"))
+let result = llm_call("", nil, {
+  provider: "openai",
+  model: "gpt-4o",
+  messages: [{
+    role: "user",
+    content: [
+      {type: "text", text: "Summarize this diagram."},
+      {type: "image", base64: image, media_type: "image/png", detail: "auto"},
+    ],
+  }],
+})
+println(result.text)
+```
+
+Image blocks use the provider-neutral shape
+`{type: "image", url?: string, base64?: string, media_type: string, detail?: "low"|"high"|"auto"}`.
+Exactly one of `url` or `base64` is required. Harn translates it to
+Anthropic `source`, OpenAI `image_url`, Gemini `inline_data`/`file_data`,
+or Ollama `images` fields at the provider boundary. Ollama's REST API
+only accepts base64 image data, so `url` image blocks are rejected for
+`provider: "ollama"`.
+
 ### Parameters
 
 | Parameter | Type | Required | Description |
@@ -104,7 +130,7 @@ println(result.text)
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `provider` | string | `"anthropic"` | Any configured provider. Built-in names include `"anthropic"`, `"openai"`, `"openrouter"`, `"huggingface"`, `"ollama"`, and `"local"` |
+| `provider` | string | `"anthropic"` | Any configured provider. Built-in names include `"anthropic"`, `"openai"`, `"openrouter"`, `"huggingface"`, `"ollama"`, `"gemini"`, and `"local"` |
 | `model` | string | varies by provider | Model identifier |
 | `max_tokens` | int | `16384` | Maximum tokens in the response |
 | `temperature` | float | provider default | Sampling temperature (0.0-2.0) |
@@ -117,6 +143,7 @@ println(result.text)
 | `response_format` | string | `"text"` | `"text"` or `"json"` |
 | `schema` | dict | nil | JSON Schema, OpenAPI Schema Object, or canonical Harn schema dict for structured output |
 | `thinking` | bool/dict | nil | Enable typed provider reasoning. `true` and `{budget_tokens: N}` remain shorthand for `{mode: "enabled"}`; use `{mode: "enabled", budget_tokens: N}`, `{mode: "adaptive"}`, or `{mode: "effort", level: "low" \| "medium" \| "high"}`. |
+| `vision` | bool | inferred | Require image-input support. Image content blocks set this implicitly; `vision: true` fails before transport unless the selected provider/model declares `vision_supported`. |
 | `tools` | list | nil | Tool definitions |
 | `tool_choice` | string/dict | `"auto"` | `"auto"`, `"none"`, `"required"`, or `{name: "tool"}` |
 | `tool_search` | bool/string/dict | nil | Progressive tool disclosure. See [Tool Vault](#tool-vault) |
@@ -417,7 +444,7 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // {
 //   native_tools: true, defer_loading: true,
 //   tool_search: ["bm25", "regex"], max_tools: 10000,
-//   prompt_caching: true, thinking: true,
+//   prompt_caching: true, thinking: true, vision_supported: true,
 // }
 
 if "bm25" in caps.tool_search {
@@ -466,6 +493,7 @@ Each `[[capabilities.provider.<name>]]` entry accepts these fields:
 | `max_tools` | int | Cap on tool count. `harn lint` will warn if a registry exceeds the smallest cap any active provider advertises. |
 | `prompt_caching` | bool | `cache_control` blocks honored. |
 | `thinking_modes` | list of strings | Supported script-facing thinking modes. Values are `enabled`, `adaptive`, or `effort`. |
+| `vision_supported` | bool | Image content accepted by the provider/model route. |
 
 First match wins. User rules for a given provider are consulted
 before the shipped rules — so the order inside the TOML file matters

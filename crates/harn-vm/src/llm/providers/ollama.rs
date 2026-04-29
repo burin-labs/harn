@@ -40,8 +40,57 @@ impl OllamaProvider {
     /// Build the Ollama-specific request body. Ollama uses OpenAI-style messages
     /// but with additional options and NDJSON streaming.
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
-        let mut body =
-            crate::llm::providers::OpenAiCompatibleProvider::build_request_body(opts, true);
+        let mut msgs = Vec::new();
+        if let Some(ref sys) = opts.system {
+            msgs.push(serde_json::json!({"role": "system", "content": sys}));
+        }
+        msgs.extend(
+            opts.messages
+                .iter()
+                .cloned()
+                .map(crate::llm::content::ollama_message),
+        );
+        if let Some(ref prefill) = opts.prefill {
+            msgs.push(serde_json::json!({
+                "role": "assistant",
+                "content": prefill,
+            }));
+        }
+        let msgs = crate::llm::api::normalize_openai_style_messages(msgs, true);
+
+        let mut body = serde_json::json!({
+            "model": opts.model,
+            "messages": msgs,
+        });
+        if opts.max_tokens > 0 {
+            body["max_tokens"] = serde_json::json!(opts.max_tokens);
+        }
+        if let Some(temp) = opts.temperature {
+            body["temperature"] = serde_json::json!(temp);
+        }
+        if let Some(top_p) = opts.top_p {
+            body["top_p"] = serde_json::json!(top_p);
+        }
+        if let Some(ref stop) = opts.stop {
+            body["stop"] = serde_json::json!(stop);
+        }
+        if let Some(seed) = opts.seed {
+            body["seed"] = serde_json::json!(seed);
+        }
+        if let Some(fp) = opts.frequency_penalty {
+            body["frequency_penalty"] = serde_json::json!(fp);
+        }
+        if let Some(pp) = opts.presence_penalty {
+            body["presence_penalty"] = serde_json::json!(pp);
+        }
+        if let Some(ref tools) = opts.native_tools {
+            if !tools.is_empty() {
+                body["tools"] = serde_json::json!(tools);
+            }
+        }
+        if let Some(ref tc) = opts.tool_choice {
+            body["tool_choice"] = tc.clone();
+        }
 
         if opts.response_format.as_deref() == Some("json") {
             body.as_object_mut()
@@ -513,6 +562,7 @@ mod tests {
             response_format: Some("json".to_string()),
             json_schema: Some(serde_json::json!({"type": "object"})),
             thinking: ThinkingConfig::Disabled,
+            vision: false,
             native_tools: None,
             tool_choice: None,
             cache: false,
@@ -537,6 +587,28 @@ mod tests {
         payload.json_schema = None;
         let body = OllamaProvider::build_request_body(&payload);
         assert!(body.get("format").is_none());
+    }
+
+    #[test]
+    fn image_content_maps_to_ollama_images_array() {
+        let mut payload = base_payload();
+        payload.model = "llava:latest".to_string();
+        payload.response_format = None;
+        payload.json_schema = None;
+        payload.messages = vec![serde_json::json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "caption"},
+                {"type": "image", "base64": "iVBORw0KGgo=", "media_type": "image/png"}
+            ],
+        })];
+
+        let body = OllamaProvider::build_request_body(&payload);
+        assert_eq!(body["messages"][0]["content"], "caption");
+        assert_eq!(
+            body["messages"][0]["images"],
+            serde_json::json!(["iVBORw0KGgo="])
+        );
     }
 
     #[test]

@@ -409,6 +409,21 @@ pub(crate) fn extract_llm_options(
     } else {
         vec![serde_json::json!({"role": "user", "content": prompt})]
     };
+    let vision =
+        opt_bool(&options, "vision") || crate::llm::content::messages_contain_images(&messages)?;
+    if vision && !crate::llm::capabilities::lookup(&provider, &model).vision_supported {
+        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(format!(
+            "llm_call: provider \"{provider}\" model \"{model}\" does not declare vision_supported=true"
+        )))));
+    }
+    if vision
+        && provider == "ollama"
+        && crate::llm::content::messages_contain_url_images(&messages)?
+    {
+        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            "llm_call: provider \"ollama\" requires image base64; url image content is not supported",
+        ))));
+    }
 
     let tools_val = options.as_ref().and_then(|o| o.get("tools")).cloned();
     let mut native_tools = if let Some(tools) = &tools_val {
@@ -663,6 +678,7 @@ pub(crate) fn extract_llm_options(
         output_schema,
         output_validation,
         thinking,
+        vision,
         tools: tools_val,
         native_tools,
         tool_choice,
@@ -1285,5 +1301,89 @@ mod routing_tests {
                 level: crate::llm::api::ReasoningEffort::High
             }
         );
+    }
+
+    #[test]
+    fn image_content_sets_vision_and_requires_capability() {
+        let image_block = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("type".to_string(), VmValue::String(Rc::from("image"))),
+            (
+                "base64".to_string(),
+                VmValue::String(Rc::from("iVBORw0KGgo=")),
+            ),
+            (
+                "media_type".to_string(),
+                VmValue::String(Rc::from("image/png")),
+            ),
+        ])));
+        let message = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("role".to_string(), VmValue::String(Rc::from("user"))),
+            (
+                "content".to_string(),
+                VmValue::List(Rc::new(vec![image_block.clone()])),
+            ),
+        ])));
+        let options = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("provider".to_string(), VmValue::String(Rc::from("mock"))),
+            ("model".to_string(), VmValue::String(Rc::from("gpt-4o"))),
+            (
+                "messages".to_string(),
+                VmValue::List(Rc::new(vec![message.clone()])),
+            ),
+        ])));
+        let opts =
+            extract_llm_options(&[VmValue::String(Rc::from("")), VmValue::Nil, options]).unwrap();
+        assert!(opts.vision);
+
+        let bad_options = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("provider".to_string(), VmValue::String(Rc::from("mock"))),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("gpt-3.5-turbo")),
+            ),
+            (
+                "messages".to_string(),
+                VmValue::List(Rc::new(vec![message])),
+            ),
+        ])));
+        let err = extract_llm_options(&[VmValue::String(Rc::from("")), VmValue::Nil, bad_options])
+            .err()
+            .expect("non-vision model should reject image content");
+        assert!(err.to_string().contains("vision_supported"));
+
+        let url_image = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("type".to_string(), VmValue::String(Rc::from("image"))),
+            (
+                "url".to_string(),
+                VmValue::String(Rc::from("https://example.com/image.png")),
+            ),
+            (
+                "media_type".to_string(),
+                VmValue::String(Rc::from("image/png")),
+            ),
+        ])));
+        let url_message = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("role".to_string(), VmValue::String(Rc::from("user"))),
+            (
+                "content".to_string(),
+                VmValue::List(Rc::new(vec![url_image])),
+            ),
+        ])));
+        let ollama_options = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("provider".to_string(), VmValue::String(Rc::from("ollama"))),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("llava:latest")),
+            ),
+            (
+                "messages".to_string(),
+                VmValue::List(Rc::new(vec![url_message])),
+            ),
+        ])));
+        let err =
+            extract_llm_options(&[VmValue::String(Rc::from("")), VmValue::Nil, ollama_options])
+                .err()
+                .expect("ollama should reject url image content");
+        assert!(err.to_string().contains("requires image base64"));
     }
 }

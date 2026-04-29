@@ -10,11 +10,13 @@
 //! - **Mock** — deterministic test responses without any network I/O
 
 pub(crate) mod anthropic;
+mod gemini;
 mod mock;
 mod ollama;
 pub(crate) mod openai_compat;
 
 pub(crate) use anthropic::AnthropicProvider;
+pub(crate) use gemini::GeminiProvider;
 pub(crate) use mock::MockProvider;
 pub(crate) use ollama::OllamaProvider;
 pub(crate) use openai_compat::OpenAiCompatibleProvider;

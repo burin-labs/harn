@@ -1,0 +1,49 @@
+pipeline test(task) {
+  llm_mock_clear()
+  let png_path = "vision_fixture.png"
+  write_file_bytes(
+    png_path,
+    bytes_from_hex(
+      "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082",
+    ),
+  )
+  let png = read_file_bytes(png_path)
+  let image_base64 = bytes_to_base64(png)
+  delete_file(png_path)
+  llm_mock({text: "seen"})
+  let result = llm_call(
+    "",
+    nil,
+    {
+      provider: "mock",
+      model: "gpt-4o",
+      vision: true,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {type: "text", text: "Caption the image."},
+            {type: "image", base64: image_base64, media_type: "image/png", detail: "low"},
+          ],
+        },
+      ],
+    },
+  )
+  assert_eq(result.text, "seen")
+  let calls = llm_mock_calls()
+  assert_eq(len(calls), 1)
+  let blocks = calls[0].messages[0].content
+  assert_eq(blocks[0].type, "text")
+  assert_eq(blocks[1].type, "image")
+  assert_eq(blocks[1].media_type, "image/png")
+  assert_eq(blocks[1].base64, image_base64)
+  assert_eq(blocks[1].detail, "low")
+  let gate_error = try {
+    llm_call("plain", nil, {provider: "mock", model: "gpt-3.5-turbo", vision: true})
+    "unreachable"
+  } catch (e) {
+    e
+  }
+  assert(contains(gate_error, "vision_supported"), "vision gate should reject non-vision models")
+  log("llm_call_image_content tests passed")
+}

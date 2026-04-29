@@ -30,6 +30,7 @@
 #                     Used by harn-lint to warn about oversized registries.
 #   prompt_caching  : whether the provider honors cache_control blocks.
 #   thinking_modes  : supported script-facing modes: enabled, adaptive, effort.
+#   vision_supported: whether image content blocks are accepted.
 #   preserve_thinking: whether prior <think> blocks should be carried forward.
 #   server_parser   : server-side response parser that transforms model output.
 #   honors_chat_template_kwargs: whether chat_template_kwargs are honored.
@@ -48,6 +49,7 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 thinking_modes = ["adaptive"]
+vision_supported = true
 
 [[provider.anthropic]]
 model_match = "claude-opus-*"
@@ -58,6 +60,7 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 thinking_modes = ["adaptive"]
+vision_supported = true
 
 [[provider.anthropic]]
 model_match = "claude-sonnet-*"
@@ -68,6 +71,7 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 thinking_modes = ["adaptive"]
+vision_supported = true
 
 # Haiku 4.5+ supports server-side tool search.
 [[provider.anthropic]]
@@ -79,6 +83,7 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 thinking_modes = ["enabled"]
+vision_supported = true
 
 # Opus 4.0+ supports tool search.
 [[provider.anthropic]]
@@ -90,6 +95,7 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 thinking_modes = ["enabled"]
+vision_supported = true
 
 # Sonnet 4.0+ supports tool search.
 [[provider.anthropic]]
@@ -101,6 +107,7 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 thinking_modes = ["enabled"]
+vision_supported = true
 
 # OpenRouter-style `anthropic/claude-...` prefixes.
 [[provider.anthropic]]
@@ -112,6 +119,7 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 thinking_modes = ["adaptive"]
+vision_supported = true
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-opus-*"
@@ -122,6 +130,7 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 thinking_modes = ["adaptive"]
+vision_supported = true
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-sonnet-*"
@@ -132,6 +141,7 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 thinking_modes = ["adaptive"]
+vision_supported = true
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-haiku-*"
@@ -142,6 +152,7 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 thinking_modes = ["enabled"]
+vision_supported = true
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-opus-*"
@@ -152,6 +163,7 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 thinking_modes = ["enabled"]
+vision_supported = true
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-sonnet-*"
@@ -162,6 +174,7 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 thinking_modes = ["enabled"]
+vision_supported = true
 
 # Catch-all for older Claude models — native tools + prompt caching +
 # thinking, but no progressive tool disclosure.
@@ -170,6 +183,7 @@ model_match = "claude-*"
 native_tools = true
 prompt_caching = true
 thinking_modes = ["enabled"]
+vision_supported = true
 
 # ---------- OpenAI family -----------------------------------------------------
 #
@@ -185,6 +199,17 @@ version_min = [5, 4]
 native_tools = true
 defer_loading = true
 tool_search = ["hosted", "client"]
+vision_supported = true
+
+[[provider.openai]]
+model_match = "gpt-4o*"
+native_tools = true
+vision_supported = true
+
+[[provider.openai]]
+model_match = "gpt-4.1*"
+native_tools = true
+vision_supported = true
 
 # Legacy GPT: native tool calls only.
 [[provider.openai]]
@@ -206,6 +231,7 @@ thinking_modes = ["effort"]
 model_match = "o4*"
 native_tools = true
 thinking_modes = ["effort"]
+vision_supported = true
 
 # OpenRouter-style provider-prefixed IDs.
 [[provider.openai]]
@@ -214,6 +240,17 @@ version_min = [5, 4]
 native_tools = true
 defer_loading = true
 tool_search = ["hosted", "client"]
+vision_supported = true
+
+[[provider.openai]]
+model_match = "openai/gpt-4o*"
+native_tools = true
+vision_supported = true
+
+[[provider.openai]]
+model_match = "openai/gpt-4.1*"
+native_tools = true
+vision_supported = true
 
 [[provider.openai]]
 model_match = "openai/gpt-*"
@@ -227,6 +264,22 @@ native_tools = true
 # official docs + model pages. Qwen 3.6 adds `preserve_thinking` which
 # Alibaba recommends for multi-turn agentic / coding workflows (the
 # flagship use case we're building for) — keep it on by default.
+
+[[provider.ollama]]
+model_match = "llava*"
+vision_supported = true
+
+[[provider.ollama]]
+model_match = "bakllava*"
+vision_supported = true
+
+[[provider.ollama]]
+model_match = "llama3.2-vision*"
+vision_supported = true
+
+[[provider.ollama]]
+model_match = "gemma3*"
+vision_supported = true
 
 [[provider.ollama]]
 model_match = "qwen3.6*"
@@ -478,6 +531,15 @@ model_match = "google/gemini-2.5*"
 native_tools = true
 thinking_modes = ["enabled", "effort"]
 prompt_caching = true
+vision_supported = true
+
+[[provider.gemini]]
+model_match = "gemini-*"
+vision_supported = true
+
+[[provider.gemini]]
+model_match = "models/gemini-*"
+vision_supported = true
 
 [[provider.openrouter]]
 model_match = "google/gemma-4*"

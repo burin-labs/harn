@@ -66,6 +66,7 @@ pub(super) fn base_opts(messages: Vec<serde_json::Value>) -> LlmCallOptions {
         output_schema: None,
         output_validation: None,
         thinking: crate::llm::api::ThinkingConfig::Disabled,
+        vision: false,
         tools: None,
         native_tools: None,
         tool_choice: None,

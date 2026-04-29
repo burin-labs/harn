@@ -315,6 +315,8 @@ pub(crate) struct LlmCallOptions {
 
     // --- Thinking ---
     pub thinking: ThinkingConfig,
+    /// True when the call explicitly asks for vision or contains image blocks.
+    pub vision: bool,
 
     // --- Tools ---
     pub tools: Option<VmValue>,
@@ -400,6 +402,7 @@ pub(crate) struct LlmRequestPayload {
     pub response_format: Option<String>,
     pub json_schema: Option<serde_json::Value>,
     pub thinking: ThinkingConfig,
+    pub vision: bool,
     pub native_tools: Option<Vec<serde_json::Value>>,
     pub tool_choice: Option<serde_json::Value>,
     pub cache: bool,
@@ -440,6 +443,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             response_format: opts.response_format.clone(),
             json_schema: opts.json_schema.clone(),
             thinking: opts.thinking.clone(),
+            vision: opts.vision,
             native_tools: opts.native_tools.clone(),
             tool_choice: opts.tool_choice.clone(),
             cache: opts.cache,
@@ -479,6 +483,7 @@ pub(super) fn base_opts(provider: &str) -> LlmCallOptions {
         output_schema: Some(serde_json::json!({"type": "object"})),
         output_validation: Some("error".to_string()),
         thinking: ThinkingConfig::Disabled,
+        vision: false,
         tools: Some(VmValue::String(Rc::from("vm-local-tools"))),
         native_tools: Some(vec![
             serde_json::json!({"type": "function", "function": {"name": "tool"}}),

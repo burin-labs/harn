@@ -216,7 +216,22 @@ impl AnthropicProvider {
         } else {
             8192
         };
-        let mut messages = opts.messages.clone();
+        let mut messages: Vec<serde_json::Value> = opts
+            .messages
+            .iter()
+            .cloned()
+            .map(|mut message| {
+                if let Some(object) = message.as_object_mut() {
+                    if let Some(content) = object.get("content").cloned() {
+                        object.insert(
+                            "content".to_string(),
+                            crate::llm::content::anthropic_content(&content),
+                        );
+                    }
+                }
+                message
+            })
+            .collect();
         if let Some(ref prefill) = opts.prefill {
             // Claude 4.6+ deprecated the assistant-prefill feature and
             // returns HTTP 400 when the final message is role=assistant.
@@ -362,6 +377,7 @@ mod tests {
             response_format: None,
             json_schema: None,
             thinking: ThinkingConfig::Disabled,
+            vision: false,
             native_tools: Some(vec![serde_json::json!({
                 "name": "read_file",
                 "description": "Read a file",
@@ -457,6 +473,55 @@ mod tests {
         );
         assert_eq!(info.kind, LlmErrorKind::Terminal);
         assert_eq!(info.reason, LlmErrorReason::AuthFailure);
+    }
+
+    #[test]
+    fn image_content_maps_to_anthropic_source_block() {
+        let mut payload = base_payload();
+        payload.messages = vec![serde_json::json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "caption"},
+                {"type": "image", "base64": "iVBORw0KGgo=", "media_type": "image/png"}
+            ],
+        })];
+
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert_eq!(body["messages"][0]["content"][0]["text"], "caption");
+        assert_eq!(
+            body["messages"][0]["content"][1],
+            serde_json::json!({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": "iVBORw0KGgo=",
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn image_url_content_maps_to_anthropic_url_source() {
+        let mut payload = base_payload();
+        payload.messages = vec![serde_json::json!({
+            "role": "user",
+            "content": [
+                {"type": "image", "url": "https://example.com/image.png", "media_type": "image/png"}
+            ],
+        })];
+
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert_eq!(
+            body["messages"][0]["content"][0],
+            serde_json::json!({
+                "type": "image",
+                "source": {
+                    "type": "url",
+                    "url": "https://example.com/image.png",
+                }
+            })
+        );
     }
 
     #[test]

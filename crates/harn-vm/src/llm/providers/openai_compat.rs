@@ -134,7 +134,17 @@ impl OpenAiCompatibleProvider {
         if let Some(ref sys) = opts.system {
             msgs.push(serde_json::json!({"role": "system", "content": sys}));
         }
-        msgs.extend(opts.messages.iter().cloned());
+        msgs.extend(opts.messages.iter().cloned().map(|mut message| {
+            if let Some(object) = message.as_object_mut() {
+                if let Some(content) = object.get("content").cloned() {
+                    object.insert(
+                        "content".to_string(),
+                        crate::llm::content::openai_content(&content),
+                    );
+                }
+            }
+            message
+        }));
         if let Some(ref prefill) = opts.prefill {
             msgs.push(serde_json::json!({
                 "role": "assistant",
@@ -456,6 +466,58 @@ mod tests {
         assert!(body.get("reasoning_effort").is_none());
     }
 
+    #[test]
+    fn image_content_maps_to_openai_image_url_block() {
+        let mut payload = base_request_payload();
+        payload.provider = "openai".to_string();
+        payload.model = "gpt-4o".to_string();
+        payload.messages = vec![json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "caption"},
+                {"type": "image", "base64": "iVBORw0KGgo=", "media_type": "image/png", "detail": "low"}
+            ],
+        })];
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert_eq!(body["messages"][0]["content"][0]["text"], "caption");
+        assert_eq!(
+            body["messages"][0]["content"][1],
+            json!({
+                "type": "image_url",
+                "image_url": {
+                    "url": "data:image/png;base64,iVBORw0KGgo=",
+                    "detail": "low",
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn image_url_content_maps_to_openai_image_url_block() {
+        let mut payload = base_request_payload();
+        payload.provider = "openai".to_string();
+        payload.model = "gpt-4o".to_string();
+        payload.messages = vec![json!({
+            "role": "user",
+            "content": [
+                {"type": "image", "url": "https://example.com/image.png", "media_type": "image/png", "detail": "high"}
+            ],
+        })];
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert_eq!(
+            body["messages"][0]["content"][0],
+            json!({
+                "type": "image_url",
+                "image_url": {
+                    "url": "https://example.com/image.png",
+                    "detail": "high",
+                }
+            })
+        );
+    }
+
     fn base_request_payload() -> LlmRequestPayload {
         LlmRequestPayload {
             provider: "openrouter".to_string(),
@@ -476,6 +538,7 @@ mod tests {
             response_format: None,
             json_schema: None,
             thinking: ThinkingConfig::Disabled,
+            vision: false,
             native_tools: None,
             tool_choice: None,
             cache: false,
