@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use axum::body::Bytes;
 use axum::extract::{Query, State};
+use axum::http::header::ACCEPT;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -30,6 +31,7 @@ pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 
 const MCP_PROTOCOL_HEADER: &str = "mcp-protocol-version";
 const MCP_SESSION_HEADER: &str = "mcp-session-id";
+const DEPRECATION_HEADER: &str = "deprecation";
 
 #[derive(Clone, Debug)]
 pub struct McpHttpServeOptions {
@@ -764,7 +766,11 @@ async fn http_post_request(
     match state.server.process_message(request, session, auth).await {
         ImmediateResult::Accepted => StatusCode::ACCEPTED.into_response(),
         ImmediateResult::Response(response) => {
-            let mut http = Json(response).into_response();
+            let mut http = if should_stream_post_response(&headers) {
+                sse_single_response(response).into_response()
+            } else {
+                Json(response).into_response()
+            };
             attach_http_headers(
                 &mut http,
                 created.then_some(session_id.as_str()),
@@ -789,6 +795,12 @@ async fn http_get_stream(State(state): State<HttpState>, headers: HeaderMap) -> 
     if let Err(response) = validate_origin(&headers) {
         return *response;
     }
+    if let Err(response) = validate_protocol_header(&headers) {
+        return *response;
+    }
+    if !accepts_media(&headers, "text/event-stream") {
+        return StatusCode::NOT_ACCEPTABLE.into_response();
+    }
     let Some(session_id) = headers
         .get(MCP_SESSION_HEADER)
         .and_then(|value| value.to_str().ok())
@@ -806,10 +818,18 @@ async fn http_get_stream(State(state): State<HttpState>, headers: HeaderMap) -> 
     };
     let (tx, rx) = unbounded::<JsonValue>();
     session.set_stream_tx(Some(tx));
-    sse_response(rx).into_response()
+    let mut response = sse_response(rx).into_response();
+    attach_http_headers(&mut response, None, MCP_PROTOCOL_VERSION);
+    response
 }
 
 async fn http_delete_session(State(state): State<HttpState>, headers: HeaderMap) -> Response {
+    if let Err(response) = validate_origin(&headers) {
+        return *response;
+    }
+    if let Err(response) = validate_protocol_header(&headers) {
+        return *response;
+    }
     let Some(session_id) = headers
         .get(MCP_SESSION_HEADER)
         .and_then(|value| value.to_str().ok())
@@ -821,11 +841,13 @@ async fn http_delete_session(State(state): State<HttpState>, headers: HeaderMap)
         .lock()
         .expect("sessions poisoned")
         .remove(session_id);
-    if removed.is_some() {
+    let mut response = if removed.is_some() {
         StatusCode::NO_CONTENT.into_response()
     } else {
         StatusCode::NOT_FOUND.into_response()
-    }
+    };
+    attach_http_headers(&mut response, None, MCP_PROTOCOL_VERSION);
+    response
 }
 
 async fn legacy_sse_stream(State(state): State<HttpState>, headers: HeaderMap) -> Response {
@@ -847,9 +869,11 @@ async fn legacy_sse_stream(State(state): State<HttpState>, headers: HeaderMap) -
     ));
     let stream =
         stream::once(async move { Ok::<Event, Infallible>(endpoint_event) }).chain(sse_events(rx));
-    Sse::new(stream)
+    let mut response = Sse::new(stream)
         .keep_alive(KeepAlive::default())
-        .into_response()
+        .into_response();
+    attach_legacy_deprecation_headers(&mut response);
+    response
 }
 
 async fn legacy_sse_message(
@@ -862,7 +886,9 @@ async fn legacy_sse_message(
         return *response;
     }
     let Some(session_id) = query.get("session_id") else {
-        return StatusCode::BAD_REQUEST.into_response();
+        let mut response = StatusCode::BAD_REQUEST.into_response();
+        attach_legacy_deprecation_headers(&mut response);
+        return response;
     };
     let Some(session) = state
         .sessions
@@ -871,16 +897,20 @@ async fn legacy_sse_message(
         .get(session_id)
         .cloned()
     else {
-        return StatusCode::NOT_FOUND.into_response();
+        let mut response = StatusCode::NOT_FOUND.into_response();
+        attach_legacy_deprecation_headers(&mut response);
+        return response;
     };
     let request = match serde_json::from_slice::<JsonValue>(body.as_ref()) {
         Ok(value) => value,
         Err(error) => {
-            return (
+            let mut response = (
                 StatusCode::BAD_REQUEST,
                 Json(parse_error_response(&error.to_string())),
             )
-                .into_response()
+                .into_response();
+            attach_legacy_deprecation_headers(&mut response);
+            return response;
         }
     };
     let auth = http_auth_request(
@@ -894,18 +924,28 @@ async fn legacy_sse_message(
         .process_message(request, session.clone(), auth)
         .await
     {
-        ImmediateResult::Accepted => StatusCode::ACCEPTED.into_response(),
+        ImmediateResult::Accepted => {
+            let mut response = StatusCode::ACCEPTED.into_response();
+            attach_legacy_deprecation_headers(&mut response);
+            response
+        }
         ImmediateResult::Response(response) => {
             if let Some(tx) = session.stream_tx() {
                 let _ = tx.unbounded_send(response);
-                StatusCode::ACCEPTED.into_response()
+                let mut response = StatusCode::ACCEPTED.into_response();
+                attach_legacy_deprecation_headers(&mut response);
+                response
             } else {
-                StatusCode::GONE.into_response()
+                let mut response = StatusCode::GONE.into_response();
+                attach_legacy_deprecation_headers(&mut response);
+                response
             }
         }
         ImmediateResult::Stream(job) => {
             let Some(tx) = session.stream_tx() else {
-                return StatusCode::GONE.into_response();
+                let mut response = StatusCode::GONE.into_response();
+                attach_legacy_deprecation_headers(&mut response);
+                return response;
             };
             tokio::spawn(async move {
                 let notifier = notify_channel(move |message| {
@@ -913,9 +953,26 @@ async fn legacy_sse_message(
                 });
                 state.server.execute_streaming_job(*job, notifier).await;
             });
-            StatusCode::ACCEPTED.into_response()
+            let mut response = StatusCode::ACCEPTED.into_response();
+            attach_legacy_deprecation_headers(&mut response);
+            response
         }
     }
+}
+
+fn sse_single_response(
+    message: JsonValue,
+) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
+    let prime = Event::default().id(Uuid::now_v7().to_string()).data("");
+    let message = Event::default()
+        .id(Uuid::now_v7().to_string())
+        .event("message")
+        .data(serde_json::to_string(&message).unwrap_or_else(|_| "{}".to_string()));
+    Sse::new(stream::iter([
+        Ok::<Event, Infallible>(prime),
+        Ok::<Event, Infallible>(message),
+    ]))
+    .keep_alive(KeepAlive::default())
 }
 
 fn spawn_http_stream(
@@ -1193,6 +1250,32 @@ fn attach_http_headers(response: &mut Response, session_id: Option<&str>, protoc
     }
 }
 
+fn attach_legacy_deprecation_headers(response: &mut Response) {
+    response.headers_mut().insert(
+        HeaderName::from_static(DEPRECATION_HEADER),
+        HeaderValue::from_static("true"),
+    );
+}
+
+fn should_stream_post_response(headers: &HeaderMap) -> bool {
+    accepts_media(headers, "text/event-stream") && !accepts_media(headers, "application/json")
+}
+
+fn accepts_media(headers: &HeaderMap, media_type: &str) -> bool {
+    let Some(value) = headers.get(ACCEPT).and_then(|value| value.to_str().ok()) else {
+        return false;
+    };
+    value.split(',').any(|entry| {
+        let media = entry
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        media == media_type || media == "*/*"
+    })
+}
+
 fn validate_protocol_header(headers: &HeaderMap) -> Result<(), Box<Response>> {
     let Some(value) = headers
         .get(MCP_PROTOCOL_HEADER)
@@ -1425,5 +1508,31 @@ pub fn greet(name: string) -> string {
             CallArguments::Named(values) => assert_eq!(values["name"], json!("alice")),
             other => panic!("expected named arguments, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn streamable_http_accept_negotiation_uses_sse_only_when_json_is_absent() {
+        let mut headers = HeaderMap::new();
+        headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
+        assert!(should_stream_post_response(&headers));
+
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/json, text/event-stream"),
+        );
+        assert!(!should_stream_post_response(&headers));
+    }
+
+    #[test]
+    fn legacy_deprecation_header_is_attached() {
+        let mut response = StatusCode::ACCEPTED.into_response();
+        attach_legacy_deprecation_headers(&mut response);
+        assert_eq!(
+            response
+                .headers()
+                .get(DEPRECATION_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some("true")
+        );
     }
 }

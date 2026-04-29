@@ -59,9 +59,19 @@ Example prompts:
 
 HTTP mode exposes:
 
-- Streamable HTTP POST at `--path` (default `/mcp`)
-- Legacy SSE GET at `--sse-path` (default `/sse`)
-- Legacy SSE POST at `--messages-path` (default `/messages`)
+- Streamable HTTP POST, GET, and DELETE at `--path` (default `/mcp`)
+- Legacy SSE GET at `--sse-path` (default `/sse`), marked with
+  `Deprecation: true`
+- Legacy SSE POST at `--messages-path` (default `/messages`), marked with
+  `Deprecation: true`
+
+Streamable HTTP clients initialize with `POST /mcp`. The initialize response
+includes an `Mcp-Session-Id` header, and clients must echo that header on later
+POST, GET, and DELETE requests. Requests normally return one
+`application/json` JSON-RPC response; clients that only accept
+`text/event-stream` receive an SSE stream containing `message` events. `GET
+/mcp` opens the server-to-client SSE stream for notifications, and `DELETE
+/mcp` terminates the session.
 
 Example:
 
