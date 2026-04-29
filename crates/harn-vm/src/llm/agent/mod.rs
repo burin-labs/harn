@@ -6,6 +6,7 @@ use crate::value::{VmError, VmValue};
 
 use super::agent_config::AgentLoopConfig;
 
+mod agent_mcp;
 mod finalize;
 mod helpers;
 mod llm_call;
@@ -16,6 +17,7 @@ mod tool_dispatch;
 mod tool_search_client;
 mod turn_preflight;
 
+pub(crate) use agent_mcp::parse_mcp_server_specs;
 pub use skill_match::{parse_skill_config, parse_skill_match_config_public};
 pub use state::SkillMatchConfig;
 #[allow(unused_imports)]
@@ -321,10 +323,41 @@ impl Drop for AgentSessionGuard {
     }
 }
 
+struct AgentLoopMcpCleanupGuard {
+    clients: agent_mcp::AgentLoopMcpClients,
+    armed: bool,
+}
+
+impl AgentLoopMcpCleanupGuard {
+    fn new(clients: agent_mcp::AgentLoopMcpClients) -> Self {
+        Self {
+            clients,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for AgentLoopMcpCleanupGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            for client in self.clients.values() {
+                client.start_disconnect();
+            }
+        }
+    }
+}
+
 pub async fn run_agent_loop_internal(
     opts: &mut super::api::LlmCallOptions,
-    config: AgentLoopConfig,
+    mut config: AgentLoopConfig,
 ) -> Result<serde_json::Value, VmError> {
+    config.mcp_clients =
+        agent_mcp::bootstrap_agent_loop_mcp_servers(opts, &config.mcp_servers).await?;
+    let mut mcp_cleanup = AgentLoopMcpCleanupGuard::new(config.mcp_clients.clone());
     let mut state = state::AgentLoopState::new(opts, config)?;
     let _session_guard = AgentSessionGuard::install(state.session_id.clone());
 
@@ -400,6 +433,7 @@ pub async fn run_agent_loop_internal(
     let daemon_config = state.daemon_config.clone();
     let custom_nudge = state.custom_nudge.clone();
     let session_id = state.session_id.clone();
+    let mcp_clients = state.config.mcp_clients.clone();
 
     // Warn on unknown `stop_after_successful_tools` names: they're
     // tolerated (forward-compat with late-declared tools) but silently
@@ -508,6 +542,7 @@ pub async fn run_agent_loop_internal(
                         bridge: &bridge,
                         tool_format: &tool_format,
                         tools_val: effective_tools_val,
+                        mcp_clients: &mcp_clients,
                         tool_retries,
                         tool_backoff_ms,
                         loop_detect_enabled,
@@ -594,6 +629,10 @@ pub async fn run_agent_loop_internal(
     // Notify external resource managers (e.g. long-running tool handles)
     // that this session has ended so they can clean up orphaned processes.
     fire_session_end_hooks(&session_id);
+    for client in mcp_clients.values() {
+        let _ = client.disconnect().await;
+    }
+    mcp_cleanup.disarm();
 
     result
 }

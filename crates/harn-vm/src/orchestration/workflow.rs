@@ -1516,6 +1516,8 @@ pub async fn execute_stage_node(
                     skill_registry: resolve_stage_skill_registry(node),
                     skill_match: resolve_stage_skill_match(node),
                     working_files: Vec::new(),
+                    mcp_servers: Vec::new(),
+                    mcp_clients: Default::default(),
                 },
             )
             .await?

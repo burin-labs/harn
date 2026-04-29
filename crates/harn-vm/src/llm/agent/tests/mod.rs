@@ -118,6 +118,8 @@ pub(super) fn base_agent_config() -> AgentLoopConfig {
         skill_registry: None,
         skill_match: Default::default(),
         working_files: Vec::new(),
+        mcp_servers: Vec::new(),
+        mcp_clients: Default::default(),
     }
 }
 

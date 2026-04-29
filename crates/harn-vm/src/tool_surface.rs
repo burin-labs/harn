@@ -290,7 +290,14 @@ fn collect_entries(input: &ToolSurfaceInput) -> Vec<ToolEntry> {
         collect_vm_entries(tools, input.policy.as_ref(), &mut entries);
     }
     if let Some(native) = input.native_tools.as_ref() {
-        collect_native_entries(native, input.policy.as_ref(), &mut entries);
+        let vm_names: BTreeSet<String> = entries.iter().map(|entry| entry.name.clone()).collect();
+        let mut native_entries = Vec::new();
+        collect_native_entries(native, input.policy.as_ref(), &mut native_entries);
+        entries.extend(
+            native_entries
+                .into_iter()
+                .filter(|entry| !vm_names.contains(&entry.name)),
+        );
     }
     entries
 }

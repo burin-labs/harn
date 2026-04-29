@@ -692,11 +692,39 @@ Same as `llm_call`, plus additional options:
 | `skills` | skill_registry or list | nil | Skill registry exposed to the match-and-activate lifecycle phase. See [Skills lifecycle](#skills-lifecycle) |
 | `skill_match` | dict | `{strategy: "metadata", top_n: 1, sticky: true}` | Match configuration — `strategy` (`"metadata"` \| `"host"` \| `"embedding"`), `top_n`, `sticky` |
 | `working_files` | list\|string | `[]` | Paths that feed `paths:` glob auto-trigger in the metadata matcher and ride along as a hint to host-delegated matchers |
+| `mcp_servers` | list | nil | MCP servers to connect for this loop. Harn calls `tools/list` once per server, adds discovered tools as `<server>__<tool>`, and dispatches matching tool calls through `tools/call` |
 
 When `daemon: true`, the loop transitions `active -> idle -> active` instead of
 terminating on a text-only turn. Idle daemons can be woken by queued human
 messages, `agent/resume` bridge notifications, `wake_interval_ms`, or watched
 file changes from `watch_paths`.
+
+#### MCP server tools
+
+Use `mcp_servers` when an agent should use an MCP server's tool catalog without
+manually calling `mcp_connect`, `mcp_list_tools`, and `mcp_call`.
+
+```harn
+let result = agent_loop(
+  "Summarize the latest open issue and draft a reply.",
+  "You are a concise triage assistant.",
+  {
+    provider: "openai",
+    model: "gpt-5.4",
+    mcp_servers: [
+      {name: "github", transport: "http", url: "http://localhost:3030/mcp"},
+      {name: "local_fs", transport: "stdio", command: ["mcp-filesystem", "/tmp/project"]},
+    ],
+    max_iterations: 8,
+  },
+)
+```
+
+Discovered tools are always prefixed with the server name, for example
+`github__search_issues` or `local_fs__read_file`. The prefix makes collisions
+deterministic when two servers both export a tool named `search` or when a
+server tool would otherwise overlap a local Harn tool. The actual MCP
+`tools/call` request still uses the original unprefixed MCP tool name.
 
 Native-tool stages also expose structured fallback / retry metadata in the
 result `trace` summary. Look for `native_text_tool_fallbacks`,
