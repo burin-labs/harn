@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use harn_vm::connectors::ConnectorError;
 use harn_vm::event_log::MemoryEventLog;
 use harn_vm::ProviderId;
+use subtle::ConstantTimeEq;
 use time::{Duration, OffsetDateTime};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,8 +31,7 @@ pub struct AuthRequest {
 
 impl AuthRequest {
     pub fn bearer_token(&self) -> Option<&str> {
-        self.headers
-            .get("authorization")
+        header_value(&self.headers, "authorization")
             .and_then(|value| value.split_once(' '))
             .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
             .map(|(_, token)| token.trim())
@@ -39,12 +39,23 @@ impl AuthRequest {
     }
 
     pub fn api_key(&self) -> Option<&str> {
-        self.headers
-            .get("x-api-key")
-            .map(String::as_str)
+        header_value(&self.headers, "x-api-key")
             .filter(|value| !value.is_empty())
             .or_else(|| self.bearer_token())
     }
+}
+
+fn header_value<'a>(headers: &'a BTreeMap<String, String>, name: &str) -> Option<&'a str> {
+    headers
+        .get(name)
+        .map(String::as_str)
+        .or_else(|| {
+            headers
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                .map(|(_, value)| value.as_str())
+        })
+        .map(str::trim)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,7 +129,7 @@ async fn authorize_method(
             let Some(api_key) = request.api_key() else {
                 return Err("missing API key".to_string());
             };
-            if config.keys.contains(api_key) {
+            if api_key_matches(&config.keys, api_key) {
                 Ok(AuthenticatedPrincipal {
                     subject: "api-key".to_string(),
                     scheme: "api_key".to_string(),
@@ -157,13 +168,11 @@ async fn authorize_method(
                     config.issuer, claims.issuer
                 ));
             }
-            if config
-                .audience
-                .as_ref()
-                .zip(claims.audience.as_ref())
-                .is_some_and(|(expected, actual)| expected != actual)
-            {
-                return Err("oauth audience mismatch".to_string());
+            if let Some(expected) = config.audience.as_ref() {
+                match claims.audience.as_ref() {
+                    Some(actual) if actual == expected => {}
+                    _ => return Err("oauth audience mismatch".to_string()),
+                }
             }
             if !config.required_scopes.is_subset(&claims.scopes) {
                 return Err("oauth scope requirement not satisfied".to_string());
@@ -174,6 +183,11 @@ async fn authorize_method(
             })
         }
     }
+}
+
+fn api_key_matches(keys: &BTreeSet<String>, candidate: &str) -> bool {
+    keys.iter()
+        .any(|key| key.as_bytes().ct_eq(candidate.as_bytes()).into())
 }
 
 fn connector_error_message(error: ConnectorError) -> String {
@@ -197,6 +211,21 @@ mod tests {
         };
         let request = AuthRequest {
             headers: BTreeMap::from([("authorization".to_string(), "Bearer secret".to_string())]),
+            ..AuthRequest::default()
+        };
+        let decision = policy.authorize(&request).await;
+        assert!(matches!(decision, AuthorizationDecision::Authorized(_)));
+    }
+
+    #[tokio::test]
+    async fn api_key_policy_accepts_case_insensitive_header_names() {
+        let policy = AuthPolicy {
+            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+                keys: BTreeSet::from(["secret".to_string()]),
+            })],
+        };
+        let request = AuthRequest {
+            headers: BTreeMap::from([("X-API-Key".to_string(), " secret ".to_string())]),
             ..AuthRequest::default()
         };
         let decision = policy.authorize(&request).await;
@@ -261,6 +290,32 @@ mod tests {
                 subject: "alice".to_string(),
                 scheme: "oauth21".to_string(),
             })
+        );
+    }
+
+    #[tokio::test]
+    async fn oauth_policy_rejects_missing_required_audience() {
+        let policy = AuthPolicy {
+            methods: vec![AuthMethodConfig::OAuth21(OAuth21AuthConfig {
+                issuer: "https://issuer.example".to_string(),
+                audience: Some("harn-serve".to_string()),
+                required_scopes: BTreeSet::new(),
+            })],
+        };
+        let request = AuthRequest {
+            validated_oauth: Some(OAuthClaims {
+                subject: "alice".to_string(),
+                issuer: "https://issuer.example".to_string(),
+                audience: None,
+                scopes: BTreeSet::new(),
+            }),
+            ..AuthRequest::default()
+        };
+
+        let decision = policy.authorize(&request).await;
+        assert_eq!(
+            decision,
+            AuthorizationDecision::Rejected("oauth audience mismatch".to_string())
         );
     }
 }

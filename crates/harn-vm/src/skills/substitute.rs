@@ -34,9 +34,11 @@ pub struct SubstitutionContext {
 /// - `$ARGUMENTS` expands to `arguments.join(" ")`.
 /// - `$1`..`$9` expands to the N-th argument (1-based). `$0` passes
 ///   through unchanged — reserved.
-/// - `${HARN_SKILL_DIR}` / `${HARN_SESSION_ID}` / any other
-///   `${NAME}` looks up `extra_env` and falls back to `std::env::var`
-///   so hosts can scope through the process environment.
+/// - `${HARN_SKILL_DIR}` / `${HARN_SESSION_ID}` / any other `${HARN_*}`
+///   looks up `extra_env` and falls back to `std::env::var` so hosts can
+///   scope safe Harn-specific values through the process environment.
+///   Non-Harn placeholders only use `extra_env`; this keeps arbitrary
+///   process secrets from being exposed by a skill body.
 /// - A literal `$$` escapes to `$`. Everything else is untouched.
 pub fn substitute_skill_body(body: &str, ctx: &SubstitutionContext) -> String {
     let bytes = body.as_bytes();
@@ -113,12 +115,13 @@ fn resolve_named(name: &str, ctx: &SubstitutionContext, original: &str) -> Strin
             .session_id
             .clone()
             .unwrap_or_else(|| original.to_string()),
-        other => ctx
-            .extra_env
-            .get(other)
-            .cloned()
-            .or_else(|| std::env::var(other).ok())
-            .unwrap_or_else(|| original.to_string()),
+        other => ctx.extra_env.get(other).cloned().unwrap_or_else(|| {
+            if other.starts_with("HARN_") {
+                std::env::var(other).unwrap_or_else(|_| original.to_string())
+            } else {
+                original.to_string()
+            }
+        }),
     }
 }
 
@@ -206,6 +209,17 @@ mod tests {
     }
 
     #[test]
+    fn harn_named_placeholder_falls_back_to_process_env() {
+        std::env::set_var("HARN_CI_SUBSTITUTE_TEST_VALUE", "from-env");
+        let ctx = SubstitutionContext::default();
+        assert_eq!(
+            substitute_skill_body("${HARN_CI_SUBSTITUTE_TEST_VALUE}", &ctx),
+            "from-env"
+        );
+        std::env::remove_var("HARN_CI_SUBSTITUTE_TEST_VALUE");
+    }
+
+    #[test]
     fn unknown_named_placeholder_passes_through_when_unset() {
         let ctx = SubstitutionContext::default();
         // Only true when the env var is also unset. This test relies on
@@ -213,6 +227,17 @@ mod tests {
         std::env::remove_var("HARN_CI_UNLIKELY_VAR_NAME_XYZ");
         let body = "value=${HARN_CI_UNLIKELY_VAR_NAME_XYZ}";
         assert_eq!(substitute_skill_body(body, &ctx), body);
+    }
+
+    #[test]
+    fn non_harn_placeholder_does_not_read_process_env() {
+        std::env::set_var("CI_SUBSTITUTE_TEST_SECRET", "secret-value");
+        let ctx = SubstitutionContext::default();
+        assert_eq!(
+            substitute_skill_body("key=${CI_SUBSTITUTE_TEST_SECRET}", &ctx),
+            "key=${CI_SUBSTITUTE_TEST_SECRET}"
+        );
+        std::env::remove_var("CI_SUBSTITUTE_TEST_SECRET");
     }
 
     #[test]

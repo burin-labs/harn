@@ -15,11 +15,23 @@ pub(super) async fn index() -> Response {
 }
 
 pub(super) async fn asset(axum::extract::Path(path): axum::extract::Path<String>) -> Response {
+    if !is_safe_asset_path(&path) {
+        return not_found_error(format!("asset not found: {path}")).into_response();
+    }
     let asset_path = format!("assets/{path}");
     match PORTAL_DIST.get_file(&asset_path) {
         Some(file) => asset_response(file.contents(), content_type_for_path(&asset_path)),
         None => not_found_error(format!("asset not found: {path}")).into_response(),
     }
+}
+
+fn is_safe_asset_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('/')
+        && !path.contains('\\')
+        && path
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
 }
 
 pub(super) fn asset_response(body: &'static [u8], content_type: &'static str) -> Response {

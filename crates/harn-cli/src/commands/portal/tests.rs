@@ -637,6 +637,24 @@ async fn portal_index_and_assets_are_served() {
 }
 
 #[tokio::test]
+async fn portal_assets_reject_traversal_segments() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = build_router(test_portal_state(temp.path()));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/assets/../index.html")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn api_run_rejects_escaping_paths() {
     let temp = tempfile::tempdir().unwrap();
     let app = build_router(test_portal_state(temp.path()));

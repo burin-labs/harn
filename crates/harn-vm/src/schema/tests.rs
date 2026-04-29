@@ -79,6 +79,38 @@ fn validate_union_type_array_input() {
 }
 
 #[test]
+fn all_of_still_applies_sibling_constraints() {
+    let schema = make_vm_dict(vec![
+        (
+            "all_of",
+            make_list(vec![make_vm_dict(vec![("type", s("string"))])]),
+        ),
+        ("min_length", VmValue::Int(3)),
+    ]);
+
+    assert!(schema_is_value(&s("abc"), &schema).unwrap());
+    assert!(!schema_is_value(&s("ab"), &schema).unwrap());
+}
+
+#[test]
+fn union_still_applies_sibling_constraints() {
+    let schema = make_vm_dict(vec![
+        (
+            "union",
+            make_list(vec![
+                make_vm_dict(vec![("type", s("string"))]),
+                make_vm_dict(vec![("type", s("int"))]),
+            ]),
+        ),
+        ("enum", make_list(vec![s("allowed"), VmValue::Int(7)])),
+    ]);
+
+    assert!(schema_is_value(&s("allowed"), &schema).unwrap());
+    assert!(schema_is_value(&VmValue::Int(7), &schema).unwrap());
+    assert!(!schema_is_value(&s("blocked"), &schema).unwrap());
+}
+
+#[test]
 fn export_openapi_nullable() {
     let schema = make_vm_dict(vec![
         ("type", s("string")),

@@ -159,7 +159,7 @@ impl TenantStore {
         };
         let encoded = serde_json::to_string_pretty(&snapshot).map_err(|error| error.to_string())?;
         let path = registry_path(&self.state_dir);
-        std::fs::write(&path, encoded)
+        write_file_replace(&path, encoded.as_bytes())
             .map_err(|error| format!("failed to write {}: {error}", path.display()))
     }
 
@@ -458,6 +458,26 @@ fn registry_path(state_dir: &Path) -> PathBuf {
         .join(TENANT_REGISTRY_FILE)
 }
 
+fn write_file_replace(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let tmp_path = dir.join(format!(
+        ".{}.{}.tmp",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("registry"),
+        uuid::Uuid::now_v7()
+    ));
+    std::fs::write(&tmp_path, contents)?;
+    #[cfg(windows)]
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    std::fs::rename(&tmp_path, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp_path);
+    })?;
+    Ok(())
+}
+
 fn generate_api_key(id: &str) -> String {
     let random: [u8; 32] = rand::random();
     format!("harn_tenant_{id}_{}", hex::encode(random))
@@ -580,5 +600,22 @@ mod tests {
 
         let cross = SecretId::new("harn.tenant.tenant-b", "webhook");
         assert!(provider.get(&cross).await.is_err());
+    }
+
+    #[test]
+    fn tenant_store_save_replaces_registry_without_temp_leak() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut store = TenantStore::load(temp.path()).unwrap();
+        store
+            .create_tenant("tenant-a", TenantBudget::default())
+            .unwrap();
+
+        let registry = registry_path(temp.path());
+        assert!(registry.is_file());
+        let leaked_temp = std::fs::read_dir(registry.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"));
+        assert!(!leaked_temp);
     }
 }
