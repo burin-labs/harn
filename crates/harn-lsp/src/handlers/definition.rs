@@ -377,6 +377,7 @@ fn node_children(node: &SNode) -> Vec<&SNode> {
         Node::ReturnStmt { value } | Node::YieldExpr { value } => {
             value.iter().map(|v| v.as_ref()).collect()
         }
+        Node::EmitExpr { value } => vec![value.as_ref()],
         Node::AttributedDecl { inner, .. } => vec![inner.as_ref()],
         _ => Vec::new(),
     }

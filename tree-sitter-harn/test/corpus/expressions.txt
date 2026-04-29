@@ -100,3 +100,27 @@ pipeline test(task) {
         value: (binary_expression
           (integer_literal)
           (integer_literal))))))
+
+==================
+Stream Function Emit
+==================
+
+gen fn numbers() -> Stream<int> {
+  emit 1
+  emit 2
+}
+
+---
+
+(source_file
+  (fn_declaration
+    name: (identifier)
+    (type_annotation
+      (identifier)
+      (type_annotation
+        (identifier)))
+    body: (block
+      (emit_expression
+        (integer_literal))
+      (emit_expression
+        (integer_literal)))))

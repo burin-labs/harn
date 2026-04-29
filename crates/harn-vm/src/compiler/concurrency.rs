@@ -68,6 +68,7 @@ impl Compiler {
             default_start: None,
             chunk: Rc::new(fn_compiler.chunk),
             is_generator: false,
+            is_stream: false,
             has_rest_param: false,
         };
         let fn_idx = self.chunk.functions.len();
@@ -96,6 +97,7 @@ impl Compiler {
             default_start: None,
             chunk: Rc::new(fn_compiler.chunk),
             is_generator: false,
+            is_stream: false,
             has_rest_param: false,
         };
         let fn_idx = self.chunk.functions.len();

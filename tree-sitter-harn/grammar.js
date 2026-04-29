@@ -253,6 +253,7 @@ module.exports = grammar({
         $.break_statement,
         $.continue_statement,
         $.yield_expression,
+        $.emit_expression,
         $.assignment,
         $.compound_assignment,
         $.expression_statement
@@ -429,9 +430,13 @@ module.exports = grammar({
     yield_expression: ($) =>
       prec.right(seq("yield", optional($._expression))),
 
+    emit_expression: ($) =>
+      prec.right(seq("emit", $._expression)),
+
     fn_declaration: ($) =>
       seq(
         optional("pub"),
+        optional("gen"),
         "fn",
         field("name", $.identifier),
         optional($.generic_params),

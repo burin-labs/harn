@@ -1353,6 +1353,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "emit_expression"
+        },
+        {
+          "type": "SYMBOL",
           "name": "assignment"
         },
         {
@@ -2624,6 +2628,23 @@
         ]
       }
     },
+    "emit_expression": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "emit"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "_expression"
+          }
+        ]
+      }
+    },
     "fn_declaration": {
       "type": "SEQ",
       "members": [
@@ -2633,6 +2654,18 @@
             {
               "type": "STRING",
               "value": "pub"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "gen"
             },
             {
               "type": "BLANK"
@@ -7128,6 +7161,10 @@
         },
         {
           "type": "STRING",
+          "value": "gen"
+        },
+        {
+          "type": "STRING",
           "value": "spawn"
         },
         {
@@ -7181,6 +7218,10 @@
         {
           "type": "STRING",
           "value": "yield"
+        },
+        {
+          "type": "STRING",
+          "value": "emit"
         },
         {
           "type": "STRING",

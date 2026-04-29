@@ -17,6 +17,7 @@ impl Compiler {
         name: &str,
         params: &[TypedParam],
         body: &[SNode],
+        is_stream: bool,
     ) -> Result<(), CompileError> {
         let mut fn_compiler = Compiler::for_nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
@@ -27,7 +28,7 @@ impl Compiler {
         fn_compiler.record_param_types(params);
         fn_compiler.emit_default_preamble(params)?;
         fn_compiler.emit_type_checks(params);
-        let is_gen = body_contains_yield(body);
+        let is_gen = is_stream || body_contains_yield(body);
         fn_compiler.compile_block(body)?;
         // Run pending defers before implicit return
         for fb in fn_compiler.all_pending_finallys() {
@@ -42,6 +43,7 @@ impl Compiler {
             default_start: TypedParam::default_start(params),
             chunk: Rc::new(fn_compiler.chunk),
             is_generator: is_gen,
+            is_stream,
             has_rest_param: params.last().is_some_and(|p| p.rest),
         };
         let fn_idx = self.chunk.functions.len();
@@ -83,6 +85,7 @@ impl Compiler {
             default_start: TypedParam::default_start(params),
             chunk: Rc::new(fn_compiler.chunk),
             is_generator: false,
+            is_stream: false,
             has_rest_param: params.last().is_some_and(|p| p.rest),
         };
         let fn_idx = self.chunk.functions.len();
@@ -271,6 +274,7 @@ impl Compiler {
             default_start: TypedParam::default_start(params),
             chunk: Rc::new(fn_compiler.chunk),
             is_generator: is_gen,
+            is_stream: false,
             has_rest_param: false,
         };
         let fn_idx = self.chunk.functions.len();

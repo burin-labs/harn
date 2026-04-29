@@ -102,6 +102,9 @@ pub(crate) enum IterState {
     Generator {
         gen: crate::value::VmGenerator,
     },
+    Stream {
+        stream: crate::value::VmStream,
+    },
     /// Step through a lazy range without materializing a Vec.
     /// `next` holds the value to emit on the next IterNext; `stop` is
     /// the first value that terminates the iteration (one past the end).
@@ -210,7 +213,7 @@ pub struct Vm {
     pub(crate) error_stack_trace: Vec<(String, usize, usize, Option<String>)>,
     /// Yield channel sender for generator execution. When set, `Op::Yield`
     /// sends values through this channel instead of being a no-op.
-    pub(crate) yield_sender: Option<tokio::sync::mpsc::Sender<VmValue>>,
+    pub(crate) yield_sender: Option<tokio::sync::mpsc::Sender<Result<VmValue, VmError>>>,
     /// Project root directory (detected via harn.toml).
     /// Used as base directory for metadata, store, and checkpoint operations.
     pub(crate) project_root: Option<std::path::PathBuf>,

@@ -1,0 +1,13 @@
+pipeline test(task) {
+  gen fn broken() -> Stream<int> {
+    emit 1
+    throw "stream failed"
+  }
+  try {
+    for n in broken() {
+      println(n)
+    }
+  } catch (err) {
+    println("caught ${err}")
+  }
+}

@@ -267,7 +267,25 @@ impl Parser {
     }
 
     pub(super) fn parse_fn_decl_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
+        self.parse_fn_decl_with_pub_and_stream(is_pub, false)
+    }
+
+    pub(super) fn parse_gen_fn_decl_with_pub(
+        &mut self,
+        is_pub: bool,
+    ) -> Result<SNode, ParserError> {
+        self.parse_fn_decl_with_pub_and_stream(is_pub, true)
+    }
+
+    fn parse_fn_decl_with_pub_and_stream(
+        &mut self,
+        is_pub: bool,
+        is_stream: bool,
+    ) -> Result<SNode, ParserError> {
         let start = self.current_span();
+        if is_stream {
+            self.consume_contextual_keyword("gen", "gen")?;
+        }
         self.consume(&TokenKind::Fn, "fn")?;
         let name = self.consume_identifier("function name")?;
 
@@ -302,6 +320,7 @@ impl Parser {
                 where_clauses,
                 body,
                 is_pub,
+                is_stream,
             },
             Span::merge(start, self.prev_span()),
         ))

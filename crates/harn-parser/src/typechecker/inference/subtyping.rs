@@ -338,6 +338,24 @@ impl TypeChecker {
             }
             (TypeExpr::Named(n), TypeExpr::Iter(_)) if n == "iter" => true,
             (TypeExpr::Iter(_), TypeExpr::Named(n)) if n == "iter" => true,
+            (TypeExpr::Generator(expected_inner), TypeExpr::Generator(actual_inner)) => {
+                self.types_compatible(expected_inner, actual_inner, scope)
+            }
+            (TypeExpr::Named(n), TypeExpr::Generator(_))
+                if n == "generator" || n == "Generator" =>
+            {
+                true
+            }
+            (TypeExpr::Generator(_), TypeExpr::Named(n))
+                if n == "generator" || n == "Generator" =>
+            {
+                true
+            }
+            (TypeExpr::Stream(expected_inner), TypeExpr::Stream(actual_inner)) => {
+                self.types_compatible(expected_inner, actual_inner, scope)
+            }
+            (TypeExpr::Named(n), TypeExpr::Stream(_)) if n == "stream" || n == "Stream" => true,
+            (TypeExpr::Stream(_), TypeExpr::Named(n)) if n == "stream" || n == "Stream" => true,
             // dict<K, V> is invariant in both K and V: dicts are
             // mutable (key/value assignment). See the `list` comment
             // above for the soundness argument.
@@ -420,6 +438,10 @@ impl TypeChecker {
             ),
             TypeExpr::List(inner) => TypeExpr::List(Box::new(self.resolve_alias(inner, scope))),
             TypeExpr::Iter(inner) => TypeExpr::Iter(Box::new(self.resolve_alias(inner, scope))),
+            TypeExpr::Generator(inner) => {
+                TypeExpr::Generator(Box::new(self.resolve_alias(inner, scope)))
+            }
+            TypeExpr::Stream(inner) => TypeExpr::Stream(Box::new(self.resolve_alias(inner, scope))),
             TypeExpr::DictType(key, value) => TypeExpr::DictType(
                 Box::new(self.resolve_alias(key, scope)),
                 Box::new(self.resolve_alias(value, scope)),

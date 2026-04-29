@@ -496,6 +496,7 @@ where
         Node::ReturnStmt { value: Some(v) } | Node::YieldExpr { value: Some(v) } => {
             visit_node(v, visitor)
         }
+        Node::EmitExpr { value } => visit_node(value, visitor),
         Node::AttributedDecl { inner, .. } => visit_node(inner, visitor),
         _ => {}
     }

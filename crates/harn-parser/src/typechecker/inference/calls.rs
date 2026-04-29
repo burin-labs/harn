@@ -207,6 +207,12 @@ impl TypeChecker {
             TypeExpr::Iter(inner) => {
                 TypeExpr::Iter(Box::new(Self::apply_type_bindings(inner, bindings)))
             }
+            TypeExpr::Generator(inner) => {
+                TypeExpr::Generator(Box::new(Self::apply_type_bindings(inner, bindings)))
+            }
+            TypeExpr::Stream(inner) => {
+                TypeExpr::Stream(Box::new(Self::apply_type_bindings(inner, bindings)))
+            }
             TypeExpr::DictType(key, value) => TypeExpr::DictType(
                 Box::new(Self::apply_type_bindings(key, bindings)),
                 Box::new(Self::apply_type_bindings(value, bindings)),
@@ -467,6 +473,9 @@ impl TypeChecker {
                 self.visit_for_deprecation(value);
             }
             Node::ReturnStmt { value: Some(v) } | Node::YieldExpr { value: Some(v) } => {
+                self.visit_for_deprecation(v);
+            }
+            Node::EmitExpr { value: v } => {
                 self.visit_for_deprecation(v);
             }
             Node::ThrowStmt { value }

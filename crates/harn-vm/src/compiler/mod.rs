@@ -291,9 +291,13 @@ impl Compiler {
                 self.compile_interpolated_string(segments)?;
             }
             Node::FnDecl {
-                name, params, body, ..
+                name,
+                params,
+                body,
+                is_stream,
+                ..
             } => {
-                self.compile_fn_decl(name, params, body)?;
+                self.compile_fn_decl(name, params, body, *is_stream)?;
             }
             Node::ToolDecl {
                 name,
@@ -393,6 +397,10 @@ impl Compiler {
                 } else {
                     self.chunk.emit(Op::Nil, self.line);
                 }
+                self.chunk.emit(Op::Yield, self.line);
+            }
+            Node::EmitExpr { value } => {
+                self.compile_node(value)?;
                 self.chunk.emit(Op::Yield, self.line);
             }
             Node::EnumConstruct {

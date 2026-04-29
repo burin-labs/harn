@@ -20,6 +20,7 @@ impl crate::vm::Vm {
                         | VmValue::Dict(_)
                         | VmValue::String(_)
                         | VmValue::Generator(_)
+                        | VmValue::Stream(_)
                         | VmValue::Channel(_)
                         | VmValue::Iter(_)
                 )
@@ -38,6 +39,7 @@ impl crate::vm::Vm {
                     self.call_struct_instance_method(&obj, method, args).await
                 }
                 VmValue::Generator(gen) => self.call_generator_method(gen, method).await,
+                VmValue::Stream(stream) => self.call_stream_method(stream, method).await,
                 VmValue::Iter(handle) => self.call_iter_method(handle, method, args).await,
                 _ => Ok(VmValue::Nil),
             }

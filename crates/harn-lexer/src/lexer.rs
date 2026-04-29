@@ -689,6 +689,7 @@ impl Lexer {
             "enum" => TokenKind::Enum,
             "struct" => TokenKind::Struct,
             "interface" => TokenKind::Interface,
+            "emit" => TokenKind::Emit,
             "pub" => TokenKind::Pub,
             "from" => TokenKind::From,
             "to" => TokenKind::To,

@@ -879,7 +879,7 @@ fn collect_symbols(
                 recurse!(s, Some(snode.span));
             }
         }
-        Node::YieldExpr { value: Some(v) } => {
+        Node::YieldExpr { value: Some(v) } | Node::EmitExpr { value: v } => {
             recurse!(v, scope_span);
         }
         Node::RequireStmt { condition, message } => {

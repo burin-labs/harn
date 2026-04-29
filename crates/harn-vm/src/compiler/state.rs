@@ -83,6 +83,8 @@ impl Compiler {
             ),
             TypeExpr::List(inner) => TypeExpr::List(Box::new(self.expand_alias(inner))),
             TypeExpr::Iter(inner) => TypeExpr::Iter(Box::new(self.expand_alias(inner))),
+            TypeExpr::Generator(inner) => TypeExpr::Generator(Box::new(self.expand_alias(inner))),
+            TypeExpr::Stream(inner) => TypeExpr::Stream(Box::new(self.expand_alias(inner))),
             TypeExpr::DictType(k, v) => TypeExpr::DictType(
                 Box::new(self.expand_alias(k)),
                 Box::new(self.expand_alias(v)),
@@ -460,7 +462,9 @@ impl Compiler {
                 )]))))
             }
             harn_parser::TypeExpr::Applied { .. } => None,
-            harn_parser::TypeExpr::Iter(_) => None,
+            harn_parser::TypeExpr::Iter(_)
+            | harn_parser::TypeExpr::Generator(_)
+            | harn_parser::TypeExpr::Stream(_) => None,
             harn_parser::TypeExpr::Never => None,
             harn_parser::TypeExpr::LitString(s) => Some(VmValue::Dict(Rc::new(BTreeMap::from([
                 ("type".to_string(), VmValue::String(Rc::from("string"))),
@@ -995,6 +999,7 @@ impl Compiler {
             default_start: TypedParam::default_start(params),
             chunk: Rc::new(fn_compiler.chunk),
             is_generator: is_gen,
+            is_stream: false,
             has_rest_param: false,
         })
     }

@@ -85,6 +85,7 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Require
         | TokenKind::Deadline
         | TokenKind::Yield
+        | TokenKind::Emit
         | TokenKind::Mutex
         | TokenKind::Defer
         | TokenKind::Break
@@ -178,7 +179,11 @@ pub(crate) fn build_semantic_tokens(
                     None
                 };
 
-                if matches!(prev_kind, Some(TokenKind::Fn) | Some(TokenKind::Pipeline)) {
+                let next_kind = tokens.get(i + 1).map(|token| &token.kind);
+
+                if name == "gen" && matches!(next_kind, Some(TokenKind::Fn)) {
+                    sem::KEYWORD
+                } else if matches!(prev_kind, Some(TokenKind::Fn) | Some(TokenKind::Pipeline)) {
                     sem::FUNCTION
                 } else if matches!(prev_kind, Some(TokenKind::Enum)) {
                     sem::NAMESPACE

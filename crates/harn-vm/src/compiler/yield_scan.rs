@@ -7,7 +7,7 @@ pub(super) fn body_contains_yield(nodes: &[SNode]) -> bool {
 
 pub(super) fn node_contains_yield(node: &Node) -> bool {
     match node {
-        Node::YieldExpr { .. } => true,
+        Node::YieldExpr { .. } | Node::EmitExpr { .. } => true,
         // Don't recurse into nested fn/closure: yield in a nested fn does
         // NOT make the outer a generator.
         Node::FnDecl { .. } | Node::Closure { .. } => false,

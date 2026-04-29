@@ -199,11 +199,14 @@ impl TypeChecker {
                     }
                 }
             }
-            TypeExpr::List(inner) | TypeExpr::Iter(inner) => {
-                // `list<T>` is invariant; `iter<T>` is covariant.
+            TypeExpr::List(inner)
+            | TypeExpr::Iter(inner)
+            | TypeExpr::Generator(inner)
+            | TypeExpr::Stream(inner) => {
+                // `list<T>` is invariant; iter/generator/stream are covariant.
                 let sub = match ty {
                     TypeExpr::List(_) => Polarity::Invariant,
-                    TypeExpr::Iter(_) => polarity,
+                    TypeExpr::Iter(_) | TypeExpr::Generator(_) | TypeExpr::Stream(_) => polarity,
                     _ => unreachable!(),
                 };
                 self.walk_variance(decl_kind, inner, sub, declared, span);

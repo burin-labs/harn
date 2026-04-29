@@ -130,10 +130,10 @@ impl Vm {
     /// Create a generator value by spawning the closure body as an async task.
     /// The generator body communicates yielded values through an mpsc channel.
     pub(crate) fn create_generator(&self, closure: &VmClosure, args: &[VmValue]) -> VmValue {
-        use crate::value::VmGenerator;
+        use crate::value::{VmGenerator, VmStream};
 
         // Buffer size of 1: the generator produces one value at a time.
-        let (tx, rx) = tokio::sync::mpsc::channel::<VmValue>(1);
+        let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
 
         let mut child = self.child_vm();
         child.yield_sender = Some(tx);
@@ -158,8 +158,9 @@ impl Vm {
         let argc = args.len();
         // Spawn the generator body as an async task.
         // The task will execute until return, sending yielded values through the channel.
+        let tx_for_error = child.yield_sender.clone();
         tokio::task::spawn_local(async move {
-            let _ = child
+            let result = child
                 .run_chunk_ref(
                     chunk,
                     argc,
@@ -169,13 +170,26 @@ impl Vm {
                     Some(local_slots),
                 )
                 .await;
+            if let Err(error) = result {
+                if let Some(sender) = tx_for_error {
+                    let _ = sender.send(Err(error)).await;
+                }
+            }
             // When the generator body finishes (return or fall-through),
             // the sender is dropped, signaling completion to the receiver.
         });
 
+        let receiver = Rc::new(tokio::sync::Mutex::new(rx));
+        if closure.func.is_stream {
+            return VmValue::Stream(VmStream {
+                done: Rc::new(std::cell::Cell::new(false)),
+                receiver,
+            });
+        }
+
         VmValue::Generator(VmGenerator {
             done: Rc::new(std::cell::Cell::new(false)),
-            receiver: Rc::new(tokio::sync::Mutex::new(rx)),
+            receiver,
         })
     }
 }

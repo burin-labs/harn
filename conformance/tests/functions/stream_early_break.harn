@@ -1,0 +1,12 @@
+pipeline test(task) {
+  gen fn many() -> Stream<int> {
+    emit 1
+    emit 2
+    emit 3
+  }
+  for n in many() {
+    println(n)
+    break
+  }
+  println("after break")
+}

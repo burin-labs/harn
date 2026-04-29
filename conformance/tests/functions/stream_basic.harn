@@ -1,0 +1,17 @@
+pipeline test(task) {
+  gen fn numbers(start: int, end: int) -> Stream<int> {
+    var n = start
+    while n < end {
+      emit n
+      n = n + 1
+    }
+  }
+  let stream = numbers(1, 4)
+  println(type_of(stream))
+  let first = stream.next()
+  println(first.value)
+  println(first.done)
+  for n in numbers(10, 13) {
+    println(n)
+  }
+}

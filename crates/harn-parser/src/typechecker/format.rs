@@ -28,6 +28,8 @@ pub fn format_type(ty: &TypeExpr) -> String {
         }
         TypeExpr::List(inner) => format!("list<{}>", format_type(inner)),
         TypeExpr::Iter(inner) => format!("iter<{}>", format_type(inner)),
+        TypeExpr::Generator(inner) => format!("Generator<{}>", format_type(inner)),
+        TypeExpr::Stream(inner) => format!("Stream<{}>", format_type(inner)),
         TypeExpr::DictType(k, v) => format!("dict<{}, {}>", format_type(k), format_type(v)),
         TypeExpr::Applied { name, args } => {
             let args_str = args.iter().map(format_type).collect::<Vec<_>>().join(", ");

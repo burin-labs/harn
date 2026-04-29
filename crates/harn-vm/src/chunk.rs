@@ -490,6 +490,8 @@ pub struct CompiledFunction {
     pub chunk: ChunkRef,
     /// True if the function body contains `yield` expressions (generator function).
     pub is_generator: bool,
+    /// True if the function was declared as `gen fn` and should return Stream.
+    pub is_stream: bool,
     /// True if the last parameter is a rest parameter (`...name`).
     pub has_rest_param: bool,
 }

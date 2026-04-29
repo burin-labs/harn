@@ -719,6 +719,26 @@ async fn read_topic_events(
     log.read_range(&topic, None, usize::MAX).await.unwrap()
 }
 
+async fn wait_for_topic_event(
+    temp: &TempDir,
+    topic: &str,
+    predicate: impl Fn(&harn_vm::event_log::LogEvent) -> bool,
+) {
+    let deadline = Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
+    while Instant::now() < deadline {
+        if read_topic_events(temp, topic)
+            .await
+            .iter()
+            .any(|(_, event)| predicate(event))
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let events = read_topic_events(temp, topic).await;
+    panic!("timed out waiting for matching {topic} event; events={events:?}");
+}
+
 async fn assert_status(response: reqwest::Response, expected: StatusCode) {
     let status = response.status();
     let body = response.text().await.unwrap();
@@ -1200,8 +1220,25 @@ async fn slack_webhook_acknowledges_before_handler_finishes() {
         !marker_path.exists(),
         "dispatch should not have completed before the HTTP ack"
     );
+    wait_for_topic_event(&temp, "orchestrator.lifecycle", |event| {
+        event.kind == "pump_admitted" && event.payload["event_log_id"] == serde_json::json!(1)
+    })
+    .await;
+    wait_for_topic_event(&temp, "orchestrator.lifecycle", |event| {
+        event.kind == "pump_acked" && event.payload["event_log_id"] == serde_json::json!(1)
+    })
+    .await;
+    assert!(
+        !marker_path.exists(),
+        "dispatch should still be blocked on the explicit release gate"
+    );
     fs::write(&release_path, b"release").unwrap();
-    wait_for_path(&marker_path, EVENT_FAIL_FAST_TIMEOUT);
+    wait_for_topic_event(&temp, "orchestrator.lifecycle", |event| {
+        event.kind == "pump_dispatch_completed"
+            && event.payload["event_log_id"] == serde_json::json!(1)
+            && event.payload["status"] == serde_json::json!("completed")
+    })
+    .await;
     let marker = fs::read_to_string(&marker_path).unwrap();
     assert_eq!(marker, "app_mention");
 
@@ -1643,7 +1680,11 @@ async fn stream_trigger_route_uses_generic_stream_connector() {
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    wait_for_path(&marker_path, EVENT_FAIL_FAST_TIMEOUT);
+    wait_for_topic_event(&temp, "orchestrator.lifecycle", |event| {
+        event.kind == "pump_dispatch_completed"
+            && event.payload["status"] == serde_json::json!("completed")
+    })
+    .await;
     let marker: JsonValue =
         serde_json::from_str(&fs::read_to_string(&marker_path).unwrap()).unwrap();
     assert_eq!(

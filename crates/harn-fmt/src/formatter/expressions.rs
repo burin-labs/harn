@@ -268,6 +268,9 @@ impl Formatter<'_> {
                     "yield".to_string()
                 }
             }
+            Node::EmitExpr { value } => {
+                format!("emit {}", self.format_expr(value, indent))
+            }
             Node::ReturnStmt { value } => {
                 if let Some(val) = value {
                     format!("return {}", self.format_expr(val, indent))
@@ -435,8 +438,14 @@ impl Formatter<'_> {
                 where_clauses,
                 body,
                 is_pub,
+                is_stream,
             } => {
-                let pub_prefix = if *is_pub { "pub " } else { "" };
+                let pub_prefix = match (*is_pub, *is_stream) {
+                    (true, true) => "pub gen ",
+                    (true, false) => "pub ",
+                    (false, true) => "gen ",
+                    (false, false) => "",
+                };
                 let sig = self.format_fn_signature(
                     pub_prefix,
                     name,

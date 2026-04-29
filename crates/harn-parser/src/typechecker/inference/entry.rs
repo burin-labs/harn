@@ -105,8 +105,10 @@ impl TypeChecker {
                     return_type,
                     where_clauses,
                     body,
+                    is_stream,
                     ..
                 } => {
+                    let return_type = Self::callable_return_type(*is_stream, return_type, body);
                     let required_params =
                         params.iter().filter(|p| p.default_value.is_none()).count();
                     let sig = FnSignature {
@@ -124,7 +126,14 @@ impl TypeChecker {
                         has_rest: params.last().is_some_and(|p| p.rest),
                     };
                     self.scope.define_fn(name, sig);
-                    self.check_fn_body(type_params, params, return_type, body, where_clauses);
+                    self.check_fn_body(
+                        type_params,
+                        params,
+                        &return_type,
+                        body,
+                        where_clauses,
+                        *is_stream,
+                    );
                 }
                 _ => {
                     let mut scope = self.scope.clone();
@@ -170,14 +179,17 @@ impl TypeChecker {
                     type_params,
                     where_clauses,
                     body,
+                    is_stream,
                     ..
                 } => {
+                    let return_type =
+                        TypeChecker::callable_return_type(*is_stream, return_type, body);
                     let sig = FnSignature {
                         params: params
                             .iter()
                             .map(|p| (p.name.clone(), p.type_expr.clone()))
                             .collect(),
-                        return_type: return_type.clone(),
+                        return_type,
                         type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
                         required_params: params
                             .iter()

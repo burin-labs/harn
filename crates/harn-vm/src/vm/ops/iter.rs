@@ -33,6 +33,10 @@ impl super::super::Vm {
                 self.iterators
                     .push(super::super::IterState::Generator { gen });
             }
+            VmValue::Stream(stream) => {
+                self.iterators
+                    .push(super::super::IterState::Stream { stream });
+            }
             VmValue::Range(r) => {
                 let stop = if r.inclusive {
                     // Saturate to avoid i64 overflow on `i64::MAX to i64::MAX`.
@@ -151,11 +155,45 @@ impl super::super::Vm {
                         let rx = gen.receiver.clone();
                         let mut guard = rx.lock().await;
                         match guard.recv().await {
-                            Some(val) => {
+                            Some(Ok(val)) => {
                                 self.stack.push(val);
+                            }
+                            Some(Err(error)) => {
+                                gen.done.set(true);
+                                drop(guard);
+                                self.iterators.pop();
+                                return Err(error);
                             }
                             None => {
                                 gen.done.set(true);
+                                drop(guard);
+                                self.iterators.pop();
+                                let frame = self.frames.last_mut().unwrap();
+                                frame.ip = target;
+                            }
+                        }
+                    }
+                }
+                super::super::IterState::Stream { stream } => {
+                    if stream.done.get() {
+                        self.iterators.pop();
+                        let frame = self.frames.last_mut().unwrap();
+                        frame.ip = target;
+                    } else {
+                        let rx = stream.receiver.clone();
+                        let mut guard = rx.lock().await;
+                        match guard.recv().await {
+                            Some(Ok(val)) => {
+                                self.stack.push(val);
+                            }
+                            Some(Err(error)) => {
+                                stream.done.set(true);
+                                drop(guard);
+                                self.iterators.pop();
+                                return Err(error);
+                            }
+                            None => {
+                                stream.done.set(true);
                                 drop(guard);
                                 self.iterators.pop();
                                 let frame = self.frames.last_mut().unwrap();

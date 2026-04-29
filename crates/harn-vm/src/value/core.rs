@@ -8,7 +8,7 @@ use crate::BuiltinId;
 
 use super::{
     VmAtomicHandle, VmChannelHandle, VmClosure, VmError, VmGenerator, VmRange, VmRngHandle,
-    VmSyncPermitHandle,
+    VmStream, VmSyncPermitHandle,
 };
 
 /// An async builtin function for the VM.
@@ -120,6 +120,7 @@ pub enum VmValue {
     McpClient(VmMcpClientHandle),
     Set(Rc<Vec<VmValue>>),
     Generator(VmGenerator),
+    Stream(VmStream),
     Range(VmRange),
     /// Lazy iterator handle. Single-pass, fused. See `crate::vm::iter::VmIter`.
     Iter(Rc<RefCell<crate::vm::iter::VmIter>>),
@@ -174,6 +175,7 @@ impl VmValue {
             VmValue::McpClient(_) => true,
             VmValue::Set(s) => !s.is_empty(),
             VmValue::Generator(_) => true,
+            VmValue::Stream(_) => true,
             // Match Python semantics: range objects are always truthy,
             // even the empty range (analogous to generators / iterators).
             VmValue::Range(_) => true,
@@ -206,6 +208,7 @@ impl VmValue {
             VmValue::McpClient(_) => "mcp_client",
             VmValue::Set(_) => "set",
             VmValue::Generator(_) => "generator",
+            VmValue::Stream(_) => "stream",
             VmValue::Range(_) => "range",
             VmValue::Iter(_) => "iter",
             VmValue::Pair(_) => "pair",
@@ -446,6 +449,13 @@ impl VmValue {
                     out.push_str("<generator (done)>");
                 } else {
                     out.push_str("<generator>");
+                }
+            }
+            VmValue::Stream(s) => {
+                if s.done.get() {
+                    out.push_str("<stream (done)>");
+                } else {
+                    out.push_str("<stream>");
                 }
             }
             // Print form mirrors source syntax: `1 to 5` / `0 to 3 exclusive`.

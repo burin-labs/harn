@@ -386,6 +386,9 @@ impl SyncInterpreter {
                 let val = value.as_ref().map(|v| self.eval(v)).transpose()?;
                 Err(EvalStop::Return(val.unwrap_or(Val::Nil)))
             }
+            Node::EmitExpr { .. } => Err(EvalStop::Error(
+                "`emit` is only supported by async VM streams".to_string(),
+            )),
             Node::ThrowStmt { value } => {
                 let val = self.eval(value)?;
                 Err(EvalStop::Error(format!("Thrown: {}", val.as_string())))

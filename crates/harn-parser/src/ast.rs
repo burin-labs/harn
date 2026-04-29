@@ -201,6 +201,7 @@ pub enum Node {
         where_clauses: Vec<WhereClause>,
         body: Vec<SNode>,
         is_pub: bool,
+        is_stream: bool,
     },
     ToolDecl {
         name: String,
@@ -259,6 +260,10 @@ pub enum Node {
     /// Yield expression: yields control to host, optionally with a value.
     YieldExpr {
         value: Option<Box<SNode>>,
+    },
+    /// Emit expression: emits one value from a `gen fn` stream.
+    EmitExpr {
+        value: Box<SNode>,
     },
     /// Mutex block: mutual exclusion for concurrent access.
     MutexBlock {
@@ -478,6 +483,11 @@ pub enum TypeExpr {
     /// A lazy iterator type: `iter<int>`. Yields values of the inner type
     /// via the combinator/sink protocol (`VmValue::Iter` at runtime).
     Iter(Box<TypeExpr>),
+    /// A synchronous generator type: `Generator<int>`. Produced by a regular
+    /// `fn` body containing `yield`.
+    Generator(Box<TypeExpr>),
+    /// An asynchronous stream type: `Stream<int>`. Produced by `gen fn`.
+    Stream(Box<TypeExpr>),
     /// A generic type application: `Option<int>`, `Result<string, int>`.
     Applied { name: String, args: Vec<TypeExpr> },
     /// A function type: `fn(int, string) -> bool`.
