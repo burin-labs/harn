@@ -225,13 +225,37 @@ The server exposes these MCP resources:
 `harn://event/<event_id>` includes the recorded trigger event plus related
 outbox/attempt/DLQ/action-graph trace entries.
 
+## Prompts
+
+The server exposes `.harn.prompt` files from the project root and from
+installed prompt-library packages under `.harn/packages/<alias>`.
+TOML front matter can define display metadata and MCP arguments:
+
+```harn,ignore
+---
+id = "review"
+description = "Review code"
+[[arguments]]
+name = "code"
+description = "Code to review"
+required = true
+---
+Review this:
+{{ code }}
+```
+
+`prompts/get` renders the template with the supplied `arguments` object.
+The server advertises `prompts.listChanged = true` and emits
+`notifications/prompts/list_changed` when watched `.harn.prompt` files or
+package metadata changes.
+
 ## Protocol Support
 
 `harn mcp serve` negotiates MCP protocol version `2025-11-25`. It is a
 control-plane server for Harn orchestration state, so it supports tools,
-resources, logging, cancellation, progress, and streamable HTTP sessions. It
-does not expose prompts, completions, resource subscriptions, roots, sampling,
-elicitation, or MCP tasks.
+resources, prompts, logging, cancellation, progress, and streamable HTTP
+sessions. It does not expose completions, resource subscriptions, roots,
+sampling, elicitation, or MCP tasks.
 
 | Method or feature | Status |
 |---|---|
@@ -241,8 +265,8 @@ elicitation, or MCP tasks.
 | `notifications/progress`, `notifications/cancelled` | Supported for cancellable work |
 | `resources/list`, `resources/read` | Supported for manifest, event, and DLQ resources |
 | `resources/templates/list` | Supported; returns an empty list |
-| `prompts/list` | Supported; returns an empty list |
-| `prompts/get` | Supported error for unknown prompts; the orchestrator server exposes no prompts |
+| `prompts/list` | Supported for `.harn.prompt` files in the project and prompt-library packages |
+| `prompts/get` | Supported; renders prompt templates with supplied arguments |
 | `completion/complete` | Explicitly unsupported |
 | `resources/subscribe`, `resources/unsubscribe` | Explicitly unsupported |
 | `roots/list` | Explicitly unsupported |

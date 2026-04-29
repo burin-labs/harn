@@ -236,6 +236,17 @@ pub(crate) fn render_template_result(
     Ok(rendered)
 }
 
+/// Render a template for callers outside the VM crate that need the same
+/// prompt-template semantics as `render(...)` / `render_prompt(...)`.
+pub fn render_template_to_string(
+    template: &str,
+    bindings: Option<&BTreeMap<String, VmValue>>,
+    base: Option<&Path>,
+    source_path: Option<&Path>,
+) -> Result<String, String> {
+    render_template_result(template, bindings, base, source_path).map_err(|error| error.message())
+}
+
 /// One byte-range in a rendered prompt mapped back to its source
 /// template. Foundation for the prompt-provenance UX (burin-code #93):
 /// hover a chunk of the live prompt in the debugger and jump to the

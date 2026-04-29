@@ -11,22 +11,18 @@ pub(super) fn prompt_value_to_messages(value: &VmValue) -> Vec<serde_json::Value
         }
         VmValue::List(items) => items
             .iter()
-            .map(|item| {
+            .flat_map(|item| {
                 if let VmValue::Dict(d) = item {
                     let role = d
                         .get("role")
                         .map(|v| v.display())
                         .unwrap_or_else(|| "user".into());
-                    let content = d.get("content").map(|v| v.display()).unwrap_or_default();
-                    serde_json::json!({
-                        "role": role,
-                        "content": { "type": "text", "text": content }
-                    })
+                    prompt_content_messages(&role, d.get("content"))
                 } else {
-                    serde_json::json!({
+                    vec![serde_json::json!({
                         "role": "user",
                         "content": { "type": "text", "text": item.display() }
-                    })
+                    })]
                 }
             })
             .collect(),
@@ -36,6 +32,81 @@ pub(super) fn prompt_value_to_messages(value: &VmValue) -> Vec<serde_json::Value
                 "content": { "type": "text", "text": value.display() }
             })]
         }
+    }
+}
+
+fn prompt_content_messages(role: &str, content: Option<&VmValue>) -> Vec<serde_json::Value> {
+    match content {
+        Some(value @ VmValue::Dict(_)) => vec![serde_json::json!({
+            "role": role,
+            "content": normalize_prompt_content(value),
+        })],
+        Some(VmValue::List(items)) => items
+            .iter()
+            .map(|item| {
+                serde_json::json!({
+                    "role": role,
+                    "content": normalize_prompt_content(item),
+                })
+            })
+            .collect(),
+        Some(value) => vec![serde_json::json!({
+            "role": role,
+            "content": { "type": "text", "text": value.display() },
+        })],
+        None => vec![serde_json::json!({
+            "role": role,
+            "content": { "type": "text", "text": "" },
+        })],
+    }
+}
+
+fn normalize_prompt_content(value: &VmValue) -> serde_json::Value {
+    if let VmValue::Dict(d) = value {
+        let content_type = d.get("type").map(|v| v.display()).unwrap_or_default();
+        match content_type.as_str() {
+            "text" => serde_json::json!({
+                "type": "text",
+                "text": d.get("text").map(|v| v.display()).unwrap_or_default(),
+            }),
+            "image" => {
+                let mut content = serde_json::json!({
+                    "type": "image",
+                    "data": d.get("data").map(|v| v.display()).unwrap_or_default(),
+                    "mimeType": d
+                        .get("mimeType")
+                        .or_else(|| d.get("mime_type"))
+                        .map(|v| v.display())
+                        .unwrap_or_else(|| "application/octet-stream".to_string()),
+                });
+                if let Some(annotations) = d.get("annotations") {
+                    content["annotations"] = vm_value_to_json(annotations);
+                }
+                content
+            }
+            "audio" => serde_json::json!({
+                "type": "audio",
+                "data": d.get("data").map(|v| v.display()).unwrap_or_default(),
+                "mimeType": d
+                    .get("mimeType")
+                    .or_else(|| d.get("mime_type"))
+                    .map(|v| v.display())
+                    .unwrap_or_else(|| "application/octet-stream".to_string()),
+            }),
+            "resource" => {
+                let mut content = serde_json::json!({ "type": "resource" });
+                if let Some(resource) = d.get("resource") {
+                    content["resource"] = vm_value_to_json(resource);
+                }
+                content
+            }
+            _ => serde_json::json!({
+                "type": "text",
+                "text": d.get("text").map(|v| v.display()).unwrap_or_else(|| value.display()),
+            }),
+        }
+    } else {
+        serde_json::json!({ "type": "text", "text": value.display() })
     }
 }
 

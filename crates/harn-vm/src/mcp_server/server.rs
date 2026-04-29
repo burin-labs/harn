@@ -142,7 +142,10 @@ impl McpServer {
             capabilities.insert("resources".into(), serde_json::json!({}));
         }
         if !self.prompts.is_empty() {
-            capabilities.insert("prompts".into(), serde_json::json!({}));
+            capabilities.insert(
+                "prompts".into(),
+                serde_json::json!({ "listChanged": false }),
+            );
         }
         capabilities.insert("logging".into(), serde_json::json!({}));
 

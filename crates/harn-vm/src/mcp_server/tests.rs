@@ -96,6 +96,26 @@ fn test_prompt_value_to_messages_list() {
 }
 
 #[test]
+fn test_prompt_value_to_messages_preserves_image_content() {
+    let items = vec![VmValue::Dict(Rc::new({
+        let mut image = BTreeMap::new();
+        image.insert("type".into(), VmValue::String(Rc::from("image")));
+        image.insert("data".into(), VmValue::String(Rc::from("ZmFrZQ==")));
+        image.insert("mimeType".into(), VmValue::String(Rc::from("image/png")));
+
+        let mut message = BTreeMap::new();
+        message.insert("role".into(), VmValue::String(Rc::from("user")));
+        message.insert("content".into(), VmValue::Dict(Rc::new(image)));
+        message
+    }))];
+    let msgs = prompt_value_to_messages(&VmValue::List(Rc::new(items)));
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(msgs[0]["content"]["type"], "image");
+    assert_eq!(msgs[0]["content"]["data"], "ZmFrZQ==");
+    assert_eq!(msgs[0]["content"]["mimeType"], "image/png");
+}
+
+#[test]
 fn test_match_uri_template_simple() {
     let vars = match_uri_template("file:///{path}", "file:///foo/bar.rs").unwrap();
     assert_eq!(vars["path"], "foo/bar.rs");

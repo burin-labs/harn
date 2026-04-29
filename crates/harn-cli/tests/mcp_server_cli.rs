@@ -86,11 +86,20 @@ fn send_request(
     stdout: &mut BufReader<impl std::io::Read>,
     request: JsonValue,
 ) -> JsonValue {
+    let request_id = request.get("id").cloned();
     writeln!(stdin, "{}", serde_json::to_string(&request).unwrap()).unwrap();
     stdin.flush().unwrap();
-    let mut line = String::new();
-    stdout.read_line(&mut line).unwrap();
-    serde_json::from_str(line.trim()).unwrap()
+    loop {
+        let mut line = String::new();
+        stdout.read_line(&mut line).unwrap();
+        let response: JsonValue = serde_json::from_str(line.trim()).unwrap();
+        if request_id
+            .as_ref()
+            .is_none_or(|id| response.get("id") == Some(id))
+        {
+            return response;
+        }
+    }
 }
 
 fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>) -> String {
