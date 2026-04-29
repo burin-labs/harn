@@ -122,12 +122,16 @@ Behavior today:
 - HTTP JSON-RPC endpoint at `/`
 - A2A AgentCard at `/.well-known/agent-card.json`, with compatibility aliases
   at `/.well-known/a2a-agent`, `/.well-known/agent.json`, and `/agent/card`
-- `a2a.SendMessage`, `a2a.SendStreamingMessage`, `a2a.GetTask`,
-  `a2a.CancelTask`, and `a2a.ListTasks`
-- A2A task aliases `tasks/send`, `tasks/send_and_wait`, `tasks/resubscribe`,
-  `tasks/cancel`, and `tasks/list`
-- REST-style POST aliases at `/tasks/send`, `/tasks/send_and_wait`,
-  `/tasks/resubscribe`, and `/tasks/cancel`
+- A2A 0.3.0 JSON-RPC methods `message/send`, `message/stream`, `tasks/get`,
+  `tasks/cancel`, `tasks/resubscribe`,
+  `tasks/pushNotificationConfig/{set,get,list,delete}`, and
+  `agent/getAuthenticatedExtendedCard`
+- one-cycle compatibility aliases for `a2a.*`, `tasks/send`,
+  `tasks/send_and_wait`, `tasks/sendSubscribe`, and `tasks/list`, with
+  `Deprecation: true` on legacy HTTP responses
+- REST-style POST paths at `/message/send`, `/message/stream`,
+  `/tasks/resubscribe`, and `/tasks/cancel`, plus deprecated `/tasks/send` and
+  `/tasks/send_and_wait` aliases
 - cooperative cancel propagation into the shared VM cancel token
 - push notification callbacks from caller-provided task configuration
 - HTTP auth hooks built on the shared `AuthPolicy` surface:

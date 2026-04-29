@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::{HeaderMap, Method, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -26,11 +26,12 @@ use crate::{
     DispatchError, ExportCatalog, HttpTlsConfig, TransportAdapter,
 };
 
-pub const A2A_PROTOCOL_VERSION: &str = "1.0";
+pub const A2A_PROTOCOL_VERSION: &str = "0.3.0";
 
 const A2A_VERSION_HEADER: &str = "a2a-version";
 const A2A_TRACE_HEADER: &str = "a2a-trace-id";
-const A2A_LEGACY_PROTOCOL_VERSION: &str = "1.0.0";
+const A2A_LEGACY_PROTOCOL_VERSIONS: &[&str] = &["1.0", "1.0.0"];
+const A2A_DEPRECATION_HEADER: &str = "deprecation";
 const A2A_AGENT_CARD_PATH: &str = "/.well-known/agent-card.json";
 
 const A2A_TASK_NOT_FOUND: i64 = -32001;
@@ -157,6 +158,11 @@ enum RpcOutcome {
     Sse(UnboundedReceiver<JsonValue>),
 }
 
+struct ProcessedRpc {
+    outcome: RpcOutcome,
+    deprecation: Option<&'static str>,
+}
+
 impl A2aServer {
     pub fn new(config: A2aServerConfig) -> Self {
         let agent_name = config
@@ -213,6 +219,8 @@ impl A2aServer {
             .route("/agent/card", get(agent_card_request))
             .route("/.well-known/a2a-agent", get(agent_card_request))
             .route("/.well-known/agent.json", get(agent_card_request))
+            .route("/message/send", post(rest_message_send))
+            .route("/message/stream", post(rest_message_stream))
             .route("/tasks/send", post(rest_send_task))
             .route("/tasks/send_and_wait", post(rest_send_and_wait_task))
             .route("/tasks/cancel", post(rest_cancel_task))
@@ -270,7 +278,18 @@ impl A2aServer {
         card
     }
 
-    async fn process_rpc(self: Arc<Self>, request: JsonValue, auth: AuthRequest) -> RpcOutcome {
+    #[cfg(test)]
+    async fn process_rpc(self: Arc<Self>, request: JsonValue, auth: AuthRequest) -> ProcessedRpc {
+        self.process_rpc_with_public_url(request, auth, "http://localhost:8080")
+            .await
+    }
+
+    async fn process_rpc_with_public_url(
+        self: Arc<Self>,
+        request: JsonValue,
+        auth: AuthRequest,
+        public_url: &str,
+    ) -> ProcessedRpc {
         let rpc_id = request.get("id").cloned().unwrap_or(JsonValue::Null);
         let method = request
             .get("method")
@@ -278,8 +297,14 @@ impl A2aServer {
             .unwrap_or_default();
         let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
 
-        match method {
-            "a2a.SendMessage" | "tasks/send" | "tasks/send_and_wait" => {
+        let (outcome, deprecation) = match method {
+            "message/send" | "a2a.SendMessage" | "tasks/send" | "tasks/send_and_wait" => {
+                let deprecation = match method {
+                    "a2a.SendMessage" | "tasks/send" | "tasks/send_and_wait" => {
+                        Some("Use A2A 0.3.0 method `message/send`.")
+                    }
+                    _ => None,
+                };
                 let wait = if method == "tasks/send" {
                     false
                 } else if method == "tasks/send_and_wait" {
@@ -290,7 +315,10 @@ impl A2aServer {
                 match self.prepare_task(&params, auth) {
                     Ok(task) if wait => {
                         self.run_task_to_completion(&task).await;
-                        RpcOutcome::Json(task_rpc_response(&rpc_id, self.task_json(&task.id)))
+                        (
+                            RpcOutcome::Json(task_rpc_response(&rpc_id, self.task_json(&task.id))),
+                            deprecation,
+                        )
                     }
                     Ok(task) => {
                         let task_id = task.id.clone();
@@ -298,12 +326,21 @@ impl A2aServer {
                         tokio::spawn(async move {
                             server.run_task_to_completion(&task).await;
                         });
-                        RpcOutcome::Json(task_rpc_response(&rpc_id, self.task_json(&task_id)))
+                        (
+                            RpcOutcome::Json(task_rpc_response(&rpc_id, self.task_json(&task_id))),
+                            deprecation,
+                        )
                     }
-                    Err(response) => RpcOutcome::Json(response.with_id(rpc_id)),
+                    Err(response) => (RpcOutcome::Json(response.with_id(rpc_id)), deprecation),
                 }
             }
-            "a2a.SendStreamingMessage" | "tasks/sendSubscribe" => {
+            "message/stream" | "a2a.SendStreamingMessage" | "tasks/sendSubscribe" => {
+                let deprecation = match method {
+                    "a2a.SendStreamingMessage" | "tasks/sendSubscribe" => {
+                        Some("Use A2A 0.3.0 method `message/stream`.")
+                    }
+                    _ => None,
+                };
                 match self.prepare_task(&params, auth) {
                     Ok(task) => {
                         let rx = self.subscribe(&task.id).unwrap_or_else(empty_stream);
@@ -311,48 +348,72 @@ impl A2aServer {
                         tokio::spawn(async move {
                             server.run_task_to_completion(&task).await;
                         });
-                        RpcOutcome::Sse(rx)
+                        (RpcOutcome::Sse(rx), deprecation)
                     }
-                    Err(response) => RpcOutcome::Json(response.with_id(rpc_id)),
+                    Err(response) => (RpcOutcome::Json(response.with_id(rpc_id)), deprecation),
                 }
             }
             "tasks/resubscribe" | "a2a.ResubscribeTask" => {
+                let deprecation = (method == "a2a.ResubscribeTask")
+                    .then_some("Use A2A 0.3.0 method `tasks/resubscribe`.");
                 let task_id = task_id_param(&params);
                 match task_id.and_then(|id| self.subscribe(id)) {
-                    Some(rx) => RpcOutcome::Sse(rx),
-                    None => RpcOutcome::Json(error_response(
-                        rpc_id,
-                        A2A_TASK_NOT_FOUND,
-                        "Task not found",
-                    )),
+                    Some(rx) => (RpcOutcome::Sse(rx), deprecation),
+                    None => (
+                        RpcOutcome::Json(error_response(
+                            rpc_id,
+                            A2A_TASK_NOT_FOUND,
+                            "Task not found",
+                        )),
+                        deprecation,
+                    ),
                 }
             }
             "a2a.GetTask" | "tasks/get" => {
+                let deprecation =
+                    (method == "a2a.GetTask").then_some("Use A2A 0.3.0 method `tasks/get`.");
                 let task_id = task_id_param(&params);
                 match task_id.map(|id| self.task_json(id)) {
-                    Some(JsonValue::Null) | None => RpcOutcome::Json(error_response(
-                        rpc_id,
-                        A2A_TASK_NOT_FOUND,
-                        "Task not found",
-                    )),
-                    Some(task) => RpcOutcome::Json(task_rpc_response(&rpc_id, task)),
+                    Some(JsonValue::Null) | None => (
+                        RpcOutcome::Json(error_response(
+                            rpc_id,
+                            A2A_TASK_NOT_FOUND,
+                            "Task not found",
+                        )),
+                        deprecation,
+                    ),
+                    Some(task) => (
+                        RpcOutcome::Json(task_rpc_response(&rpc_id, task)),
+                        deprecation,
+                    ),
                 }
             }
             "a2a.CancelTask" | "tasks/cancel" => {
+                let deprecation =
+                    (method == "a2a.CancelTask").then_some("Use A2A 0.3.0 method `tasks/cancel`.");
                 let task_id = task_id_param(&params);
                 match task_id.and_then(|id| self.cancel_task(id).ok()) {
-                    Some(task) => RpcOutcome::Json(task_rpc_response(&rpc_id, task)),
-                    None => RpcOutcome::Json(error_response(
-                        rpc_id,
-                        A2A_TASK_NOT_CANCELABLE,
-                        "Task not cancelable",
-                    )),
+                    Some(task) => (
+                        RpcOutcome::Json(task_rpc_response(&rpc_id, task)),
+                        deprecation,
+                    ),
+                    None => (
+                        RpcOutcome::Json(error_response(
+                            rpc_id,
+                            A2A_TASK_NOT_CANCELABLE,
+                            "Task not cancelable",
+                        )),
+                        deprecation,
+                    ),
                 }
             }
-            "a2a.ListTasks" | "tasks/list" => {
-                RpcOutcome::Json(task_rpc_response(&rpc_id, self.list_tasks()))
-            }
+            "a2a.ListTasks" | "tasks/list" => (
+                RpcOutcome::Json(task_rpc_response(&rpc_id, self.list_tasks())),
+                Some("`tasks/list` is a Harn compatibility method and is not part of A2A 0.3.0."),
+            ),
             "CreateTaskPushNotificationConfig" | "tasks/pushNotificationConfig/set" => {
+                let deprecation = (method == "CreateTaskPushNotificationConfig")
+                    .then_some("Use A2A 0.3.0 method `tasks/pushNotificationConfig/set`.");
                 let task_id = task_id_param(&params);
                 let config = params
                     .get("pushNotificationConfig")
@@ -360,19 +421,85 @@ impl A2aServer {
                     .cloned()
                     .unwrap_or(JsonValue::Null);
                 match task_id.and_then(|id| self.add_push_config(id, config).ok()) {
-                    Some(config) => RpcOutcome::Json(task_rpc_response(&rpc_id, config)),
-                    None => RpcOutcome::Json(error_response(
-                        rpc_id,
-                        A2A_TASK_NOT_FOUND,
-                        "Task not found",
-                    )),
+                    Some(config) => (
+                        RpcOutcome::Json(task_rpc_response(&rpc_id, config)),
+                        deprecation,
+                    ),
+                    None => (
+                        RpcOutcome::Json(error_response(
+                            rpc_id,
+                            A2A_TASK_NOT_FOUND,
+                            "Task not found",
+                        )),
+                        deprecation,
+                    ),
                 }
             }
-            _ => RpcOutcome::Json(error_response(
-                rpc_id,
-                A2A_UNSUPPORTED_OPERATION,
-                &format!("UnsupportedOperationError: {method}"),
-            )),
+            "tasks/pushNotificationConfig/get" => {
+                let task_id = task_id_param(&params);
+                let config_id = push_config_id_param(&params);
+                match task_id.and_then(|id| self.push_config(id, config_id).ok()) {
+                    Some(config) => (RpcOutcome::Json(task_rpc_response(&rpc_id, config)), None),
+                    None => (
+                        RpcOutcome::Json(error_response(
+                            rpc_id,
+                            A2A_TASK_NOT_FOUND,
+                            "Task not found",
+                        )),
+                        None,
+                    ),
+                }
+            }
+            "tasks/pushNotificationConfig/list" => {
+                let task_id = task_id_param(&params);
+                match task_id.and_then(|id| self.push_configs(id).ok()) {
+                    Some(configs) => (RpcOutcome::Json(task_rpc_response(&rpc_id, configs)), None),
+                    None => (
+                        RpcOutcome::Json(error_response(
+                            rpc_id,
+                            A2A_TASK_NOT_FOUND,
+                            "Task not found",
+                        )),
+                        None,
+                    ),
+                }
+            }
+            "tasks/pushNotificationConfig/delete" => {
+                let task_id = task_id_param(&params);
+                let config_id = push_config_id_param(&params);
+                match task_id.zip(config_id).and_then(|(task_id, config_id)| {
+                    self.delete_push_config(task_id, config_id).ok()
+                }) {
+                    Some(()) => (
+                        RpcOutcome::Json(task_rpc_response(&rpc_id, JsonValue::Null)),
+                        None,
+                    ),
+                    None => (
+                        RpcOutcome::Json(error_response(
+                            rpc_id,
+                            A2A_TASK_NOT_FOUND,
+                            "Task not found",
+                        )),
+                        None,
+                    ),
+                }
+            }
+            "agent/getAuthenticatedExtendedCard" => (
+                RpcOutcome::Json(task_rpc_response(&rpc_id, self.agent_card(public_url))),
+                None,
+            ),
+            _ => (
+                RpcOutcome::Json(error_response(
+                    rpc_id,
+                    A2A_UNSUPPORTED_OPERATION,
+                    &format!("UnsupportedOperationError: {method}"),
+                )),
+                None,
+            ),
+        };
+        ProcessedRpc {
+            outcome,
+            deprecation,
         }
     }
 
@@ -638,8 +765,62 @@ impl A2aServer {
             config["id"] = JsonValue::String(Uuid::now_v7().to_string());
         }
         config["taskId"] = JsonValue::String(task_id.to_string());
-        task.push_configs.push(config.clone());
+        let config_id = config["id"].as_str().unwrap_or_default();
+        if let Some(existing) = task.push_configs.iter_mut().find(|candidate| {
+            candidate
+                .get("id")
+                .and_then(JsonValue::as_str)
+                .is_some_and(|id| id == config_id)
+        }) {
+            *existing = config.clone();
+        } else {
+            task.push_configs.push(config.clone());
+        }
         Ok(config)
+    }
+
+    fn push_config(&self, task_id: &str, config_id: Option<&str>) -> Result<JsonValue, String> {
+        let tasks = self.tasks.lock().expect("tasks poisoned");
+        let task = tasks
+            .get(task_id)
+            .ok_or_else(|| format!("TaskNotFoundError: {task_id}"))?;
+        let config = if let Some(config_id) = config_id {
+            task.push_configs.iter().find(|config| {
+                config
+                    .get("id")
+                    .and_then(JsonValue::as_str)
+                    .is_some_and(|id| id == config_id)
+            })
+        } else {
+            task.push_configs.first()
+        };
+        config
+            .cloned()
+            .ok_or_else(|| format!("TaskPushNotificationConfigNotFoundError: {task_id}"))
+    }
+
+    fn push_configs(&self, task_id: &str) -> Result<JsonValue, String> {
+        let tasks = self.tasks.lock().expect("tasks poisoned");
+        let task = tasks
+            .get(task_id)
+            .ok_or_else(|| format!("TaskNotFoundError: {task_id}"))?;
+        Ok(JsonValue::Array(task.push_configs.clone()))
+    }
+
+    fn delete_push_config(&self, task_id: &str, config_id: &str) -> Result<(), String> {
+        let mut tasks = self.tasks.lock().expect("tasks poisoned");
+        let task = tasks
+            .get_mut(task_id)
+            .ok_or_else(|| format!("TaskNotFoundError: {task_id}"))?;
+        let original_len = task.push_configs.len();
+        task.push_configs
+            .retain(|config| config.get("id").and_then(JsonValue::as_str) != Some(config_id));
+        if task.push_configs.len() == original_len {
+            return Err(format!(
+                "TaskPushNotificationConfigNotFoundError: {task_id}/{config_id}"
+            ));
+        }
+        Ok(())
     }
 
     fn deliver_push(&self, task: JsonValue) {
@@ -757,10 +938,29 @@ async fn jsonrpc_request(
         }
     };
     let auth = http_auth_request(method, "/", body.to_vec(), &headers);
-    match state.server.process_rpc(request, auth).await {
-        RpcOutcome::Json(response) => Json(response).into_response(),
-        RpcOutcome::Sse(rx) => sse_response(rx).into_response(),
-    }
+    let processed = state
+        .server
+        .process_rpc_with_public_url(request, auth, &state.public_url)
+        .await;
+    rpc_response(processed)
+}
+
+async fn rest_message_send(
+    State(state): State<HttpState>,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    rest_task_request(state, method, headers, body, "message/send", None).await
+}
+
+async fn rest_message_stream(
+    State(state): State<HttpState>,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    rest_task_request(state, method, headers, body, "message/stream", None).await
 }
 
 async fn rest_send_task(
@@ -769,7 +969,15 @@ async fn rest_send_task(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    rest_task_request(state, method, headers, body, "tasks/send").await
+    rest_task_request(
+        state,
+        method,
+        headers,
+        body,
+        "tasks/send",
+        Some("Use A2A 0.3.0 REST path `/message/send`."),
+    )
+    .await
 }
 
 async fn rest_send_and_wait_task(
@@ -778,7 +986,15 @@ async fn rest_send_and_wait_task(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    rest_task_request(state, method, headers, body, "tasks/send_and_wait").await
+    rest_task_request(
+        state,
+        method,
+        headers,
+        body,
+        "tasks/send_and_wait",
+        Some("Use A2A 0.3.0 REST path `/message/send` with `configuration.blocking = true`."),
+    )
+    .await
 }
 
 async fn rest_cancel_task(
@@ -787,7 +1003,7 @@ async fn rest_cancel_task(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    rest_task_request(state, method, headers, body, "tasks/cancel").await
+    rest_task_request(state, method, headers, body, "tasks/cancel", None).await
 }
 
 async fn rest_resubscribe_task(
@@ -796,7 +1012,7 @@ async fn rest_resubscribe_task(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    rest_task_request(state, method, headers, body, "tasks/resubscribe").await
+    rest_task_request(state, method, headers, body, "tasks/resubscribe", None).await
 }
 
 async fn rest_task_request(
@@ -805,6 +1021,7 @@ async fn rest_task_request(
     headers: HeaderMap,
     body: Bytes,
     rpc_method: &str,
+    rest_deprecation: Option<&'static str>,
 ) -> Response {
     let params = match serde_json::from_slice::<JsonValue>(body.as_ref()) {
         Ok(value) => value,
@@ -823,13 +1040,45 @@ async fn rest_task_request(
     let auth_path = format!("/{rpc_method}");
     let auth = http_auth_request(method, &auth_path, body.to_vec(), &headers);
     let request = harn_vm::jsonrpc::request(Uuid::now_v7().to_string(), rpc_method, params);
-    match state.server.process_rpc(request, auth).await {
-        RpcOutcome::Json(response) if response.get("error").is_some() => {
-            (StatusCode::BAD_REQUEST, Json(response)).into_response()
+    let mut processed = state
+        .server
+        .process_rpc_with_public_url(request, auth, &state.public_url)
+        .await;
+    processed.deprecation = processed.deprecation.or(rest_deprecation);
+    match processed.outcome {
+        RpcOutcome::Json(response) if response.get("error").is_some() => response_with_deprecation(
+            (StatusCode::BAD_REQUEST, Json(response)).into_response(),
+            processed.deprecation,
+        ),
+        RpcOutcome::Json(response) => {
+            response_with_deprecation(Json(response["result"].clone()), processed.deprecation)
         }
-        RpcOutcome::Json(response) => Json(response["result"].clone()).into_response(),
-        RpcOutcome::Sse(rx) => sse_response(rx).into_response(),
+        RpcOutcome::Sse(rx) => response_with_deprecation(sse_response(rx), processed.deprecation),
     }
+}
+
+fn rpc_response(processed: ProcessedRpc) -> Response {
+    match processed.outcome {
+        RpcOutcome::Json(response) => {
+            response_with_deprecation(Json(response), processed.deprecation)
+        }
+        RpcOutcome::Sse(rx) => response_with_deprecation(sse_response(rx), processed.deprecation),
+    }
+}
+
+fn response_with_deprecation(response: impl IntoResponse, message: Option<&str>) -> Response {
+    let mut response = response.into_response();
+    if let Some(message) = message {
+        response
+            .headers_mut()
+            .insert(A2A_DEPRECATION_HEADER, HeaderValue::from_static("true"));
+        if let Ok(value) = HeaderValue::from_str(&format!("299 harn \"{message}\"")) {
+            response
+                .headers_mut()
+                .insert(axum::http::header::WARNING, value);
+        }
+    }
+    response
 }
 
 fn sse_response(
@@ -939,7 +1188,7 @@ fn check_version_header(headers: &HeaderMap, body: &[u8]) -> Option<JsonValue> {
     let version = headers
         .get(A2A_VERSION_HEADER)
         .and_then(|value| value.to_str().ok())?;
-    if version == A2A_PROTOCOL_VERSION || version == A2A_LEGACY_PROTOCOL_VERSION {
+    if version == A2A_PROTOCOL_VERSION || A2A_LEGACY_PROTOCOL_VERSIONS.contains(&version) {
         return None;
     }
     let rpc_id = serde_json::from_slice::<JsonValue>(body)
@@ -973,6 +1222,15 @@ fn task_id_param(params: &JsonValue) -> Option<&str> {
         .get("taskId")
         .or_else(|| params.get("task_id"))
         .or_else(|| params.get("id"))
+        .and_then(JsonValue::as_str)
+        .filter(|value| !value.is_empty())
+}
+
+fn push_config_id_param(params: &JsonValue) -> Option<&str> {
+    params
+        .get("pushNotificationConfigId")
+        .or_else(|| params.get("push_notification_config_id"))
+        .or_else(|| params.get("configId"))
         .and_then(JsonValue::as_str)
         .filter(|value| !value.is_empty())
 }
@@ -1371,6 +1629,175 @@ pub fn triage(task: string) -> string {
     }
 
     #[tokio::test]
+    async fn legacy_jsonrpc_methods_emit_deprecation_header() {
+        let (_dir, server) = test_server(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+        );
+        let router = A2aServer::http_router(HttpState {
+            server,
+            public_url: "http://localhost:8080".to_string(),
+        });
+        let body = serde_json::to_vec(&harn_vm::jsonrpc::request(
+            "legacy-1",
+            "a2a.SendMessage",
+            json!({
+                "function": "triage",
+                "message": {
+                    "parts": [{"type": "text", "text": "legacy"}]
+                }
+            }),
+        ))
+        .expect("request body");
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(A2A_DEPRECATION_HEADER),
+            Some(&HeaderValue::from_static("true"))
+        );
+        assert!(response
+            .headers()
+            .get(axum::http::header::WARNING)
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn canonical_push_notification_config_methods_round_trip() {
+        let (_dir, server) = test_server(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+        );
+        let send = harn_vm::jsonrpc::request(
+            "send-1",
+            "message/send",
+            json!({
+                "function": "triage",
+                "configuration": {"returnImmediately": true},
+                "message": {
+                    "parts": [{"type": "text", "text": "pending"}]
+                }
+            }),
+        );
+        let processed = server
+            .clone()
+            .process_rpc(send, AuthRequest::default())
+            .await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected json response");
+        };
+        assert!(processed.deprecation.is_none());
+        let task_id = response["result"]["id"].as_str().expect("task id");
+
+        let set = harn_vm::jsonrpc::request(
+            "push-set",
+            "tasks/pushNotificationConfig/set",
+            json!({
+                "id": task_id,
+                "pushNotificationConfig": {
+                    "id": "push-1",
+                    "url": "https://client.example/a2a/push"
+                }
+            }),
+        );
+        let processed = server
+            .clone()
+            .process_rpc(set, AuthRequest::default())
+            .await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected push set json response");
+        };
+        assert_eq!(response["result"]["id"], "push-1");
+        assert_eq!(response["result"]["taskId"], task_id);
+
+        let get = harn_vm::jsonrpc::request(
+            "push-get",
+            "tasks/pushNotificationConfig/get",
+            json!({"id": task_id, "pushNotificationConfigId": "push-1"}),
+        );
+        let processed = server
+            .clone()
+            .process_rpc(get, AuthRequest::default())
+            .await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected push get json response");
+        };
+        assert_eq!(response["result"]["url"], "https://client.example/a2a/push");
+
+        let list = harn_vm::jsonrpc::request(
+            "push-list",
+            "tasks/pushNotificationConfig/list",
+            json!({"id": task_id}),
+        );
+        let processed = server
+            .clone()
+            .process_rpc(list, AuthRequest::default())
+            .await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected push list json response");
+        };
+        assert_eq!(response["result"].as_array().expect("configs").len(), 1);
+
+        let delete = harn_vm::jsonrpc::request(
+            "push-delete",
+            "tasks/pushNotificationConfig/delete",
+            json!({"id": task_id, "pushNotificationConfigId": "push-1"}),
+        );
+        let processed = server.process_rpc(delete, AuthRequest::default()).await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected push delete json response");
+        };
+        assert!(response["result"].is_null());
+    }
+
+    #[tokio::test]
+    async fn authenticated_extended_card_method_returns_agent_card() {
+        let (_dir, server) = test_server(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+        );
+        let request =
+            harn_vm::jsonrpc::request("card-1", "agent/getAuthenticatedExtendedCard", json!({}));
+
+        let processed = server
+            .process_rpc_with_public_url(request, AuthRequest::default(), "https://agent.example")
+            .await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected card response");
+        };
+
+        assert_eq!(response["result"]["name"], "server");
+        assert_eq!(
+            response["result"]["supportedInterfaces"][0]["protocolVersion"],
+            A2A_PROTOCOL_VERSION
+        );
+        assert_eq!(
+            response["result"]["supportedInterfaces"][0]["url"],
+            "https://agent.example"
+        );
+    }
+
+    #[tokio::test]
     async fn send_message_dispatches_to_shared_core_export() {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("server.harn");
@@ -1387,7 +1814,7 @@ pub fn triage(task: string) -> string {
         let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
         let request = harn_vm::jsonrpc::request(
             "1",
-            "a2a.SendMessage",
+            "message/send",
             json!({
                 "message": {
                     "metadata": {"target_agent": "triage"},
@@ -1396,8 +1823,8 @@ pub fn triage(task: string) -> string {
             }),
         );
 
-        let RpcOutcome::Json(response) = server.process_rpc(request, AuthRequest::default()).await
-        else {
+        let processed = server.process_rpc(request, AuthRequest::default()).await;
+        let RpcOutcome::Json(response) = processed.outcome else {
             panic!("expected json response");
         };
 
@@ -1452,7 +1879,7 @@ pub fn triage(task: string) -> dict {
         let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
         let request = harn_vm::jsonrpc::request(
             "handoff-1",
-            "a2a.SendMessage",
+            "message/send",
             json!({
                 "message": {
                     "metadata": {"target_agent": "triage"},
@@ -1461,8 +1888,8 @@ pub fn triage(task: string) -> dict {
             }),
         );
 
-        let RpcOutcome::Json(response) = server.process_rpc(request, AuthRequest::default()).await
-        else {
+        let processed = server.process_rpc(request, AuthRequest::default()).await;
+        let RpcOutcome::Json(response) = processed.outcome else {
             panic!("expected json response");
         };
 
@@ -1497,7 +1924,7 @@ pub fn triage(task: string) -> string {
         let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
         let request = harn_vm::jsonrpc::request(
             "stream-1",
-            "a2a.SendStreamingMessage",
+            "message/stream",
             json!({
                 "function": "triage",
                 "message": {
@@ -1506,11 +1933,11 @@ pub fn triage(task: string) -> string {
             }),
         );
 
-        let RpcOutcome::Sse(mut rx) = server
+        let processed = server
             .clone()
             .process_rpc(request, AuthRequest::default())
-            .await
-        else {
+            .await;
+        let RpcOutcome::Sse(mut rx) = processed.outcome else {
             panic!("expected sse response");
         };
         let mut events = Vec::new();
@@ -1544,10 +1971,10 @@ pub fn triage(task: string) -> string {
 
         let resubscribe =
             harn_vm::jsonrpc::request("resub-1", "tasks/resubscribe", json!({"id": task_id}));
-        let RpcOutcome::Sse(replay_rx) = server
+        let processed = server
             .process_rpc(resubscribe, AuthRequest::default())
-            .await
-        else {
+            .await;
+        let RpcOutcome::Sse(replay_rx) = processed.outcome else {
             panic!("expected replay stream");
         };
         let replayed = replay_rx.collect::<Vec<_>>().await;

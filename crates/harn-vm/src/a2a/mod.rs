@@ -12,7 +12,7 @@ const A2A_AGENT_CARD_PATHS: &[&str] = &[
     ".well-known/agent.json",
     "agent/card",
 ];
-const A2A_PROTOCOL_VERSION: &str = "1.0";
+const A2A_PROTOCOL_VERSION: &str = "0.3.0";
 const A2A_PUSH_URL_ENV: &str = "HARN_A2A_PUSH_URL";
 const A2A_PUSH_TOKEN_ENV: &str = "HARN_A2A_PUSH_TOKEN";
 
@@ -128,7 +128,7 @@ pub async fn dispatch_trigger_event(
             "pushNotificationConfig": config,
         });
     }
-    let request = crate::jsonrpc::request(message_id.clone(), "a2a.SendMessage", params);
+    let request = crate::jsonrpc::request(message_id.clone(), "message/send", params);
 
     let body = match send_jsonrpc(&endpoint.rpc_url, &request, &event.trace_id.0, cancel_rx).await {
         Ok(body) => body,
@@ -248,7 +248,7 @@ async fn register_push_notification_config(
 ) -> Result<(), A2aClientError> {
     let request = crate::jsonrpc::request(
         format!("{trace_id}.{task_id}.push-config"),
-        "CreateTaskPushNotificationConfig",
+        "tasks/pushNotificationConfig/set",
         serde_json::json!({
             "taskId": task_id,
             "pushNotificationConfig": config,
@@ -758,7 +758,7 @@ mod tests {
                 "name": "trusted",
                 "supportedInterfaces": [{
                     "protocolBinding": "JSONRPC",
-                    "protocolVersion": "1.0",
+                    "protocolVersion": "0.3.0",
                     "url": "https://trusted.example/rpc"
                 }],
             }),

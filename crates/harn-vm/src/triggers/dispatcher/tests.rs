@@ -542,7 +542,7 @@ fn handle_mock_a2a_connection<T: Read + Write>(
                 "supportedInterfaces": [{
                     "url": format!("{card_scheme}://127.0.0.1:{port}/rpc"),
                     "protocolBinding": "JSONRPC",
-                    "protocolVersion": "1.0"
+                    "protocolVersion": "0.3.0"
                 }],
                 "capabilities": {
                     "streaming": true,
@@ -1321,7 +1321,7 @@ async fn a2a_handler_returns_inline_result_and_emits_a2a_action_graph() {
             );
 
             let request = server.next_request();
-            assert_eq!(request.body["method"], "a2a.SendMessage");
+            assert_eq!(request.body["method"], "message/send");
             assert_eq!(
                 request.headers.get("a2a-trace-id").map(String::as_str),
                 Some("trace_inline")
@@ -1443,7 +1443,7 @@ async fn a2a_handler_returns_pending_task_handle() {
             );
 
             let request = server.next_request();
-            assert_eq!(request.body["method"], "a2a.SendMessage");
+            assert_eq!(request.body["method"], "message/send");
             server.finish();
         })
         .await;
@@ -1577,7 +1577,7 @@ async fn a2a_handler_allows_cleartext_after_opt_in() {
             );
 
             let request = server.next_request();
-            assert_eq!(request.body["method"], "a2a.SendMessage");
+            assert_eq!(request.body["method"], "message/send");
             assert_eq!(
                 request.headers.get("a2a-trace-id").map(String::as_str),
                 Some("trace_http")

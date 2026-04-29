@@ -631,7 +631,7 @@ builtins.
 ## A2A (Agent-to-Agent Protocol)
 
 A2A exposes exported Harn functions as a peer-agent HTTP server that other
-agents can interact with. The server implements A2A protocol version 1.0 and
+agents can interact with. The server implements A2A protocol version 0.3.0 and
 uses the shared `harn-serve` dispatch core.
 
 ### Running the server
@@ -664,9 +664,10 @@ Content-Type: application/json
 {
   "jsonrpc": "2.0",
   "id": "task-1",
-  "method": "tasks/send_and_wait",
+  "method": "message/send",
   "params": {
     "function": "triage",
+    "configuration": {"blocking": true},
     "message": {
       "role": "user",
       "parts": [{"type": "text", "text": "Analyze this codebase"}]
@@ -675,10 +676,12 @@ Content-Type: application/json
 }
 ```
 
-Use `tasks/send` for an asynchronous task, `tasks/send_and_wait` for a blocking
-task, and `a2a.SendStreamingMessage` or `tasks/resubscribe` for SSE task
-updates. If the served file exports exactly one function, the function selector
-can be omitted.
+Use `message/send` with `configuration.returnImmediately = true` for an
+asynchronous task, `configuration.blocking = true` for a blocking task, and
+`message/stream` or `tasks/resubscribe` for SSE task updates. Harn preserves
+the legacy `a2a.*`, `tasks/send`, and `tasks/send_and_wait` names for one minor
+cycle and marks those HTTP responses with a `Deprecation` header. If the served
+file exports exactly one function, the function selector can be omitted.
 
 ### Task status
 
