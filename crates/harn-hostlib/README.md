@@ -100,9 +100,11 @@ workspace roots the embedder configured.
 
 - `tools/run_command` is the canonical command runner. It accepts
   `mode: "argv"` with `argv: [string]` as the recommended path, or
-  `mode: "shell"` with an explicit `shell` object when shell evaluation is
-  required. It captures stdout/stderr, enforces `timeout_ms`, forwards
-  optional `cwd`, `env`, `env_mode`, and `stdin`, and returns a command
+  `mode: "shell"` with an explicit `shell` object or `shell_id` from the
+  shared `process.list_shells` / `process.get_default_shell` host
+  capability when shell evaluation is required. It captures stdout/stderr,
+  enforces `timeout_ms`, forwards optional `cwd`, `env`, `env_mode`, and
+  `stdin`, and returns a command
   envelope with `command_id`, `status`, pid/process-group metadata, inline
   output capped by `capture.max_inline_bytes`, full output artifact paths,
   byte/line counts, `output_sha256`, sandbox metadata, and `audit_id`.

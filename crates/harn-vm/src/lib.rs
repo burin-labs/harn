@@ -33,6 +33,7 @@ pub mod runtime_paths;
 pub mod schema;
 pub mod secrets;
 pub(crate) mod shared_state;
+pub mod shells;
 pub mod skills;
 pub mod stdlib;
 pub mod stdlib_modules;

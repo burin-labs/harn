@@ -142,17 +142,9 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
                 "shell: command string is required",
             ))));
         }
-        let shell = if cfg!(target_os = "windows") {
-            "cmd"
-        } else {
-            "sh"
-        };
-        let flag = if cfg!(target_os = "windows") {
-            "/C"
-        } else {
-            "-c"
-        };
-        let output = exec_shell(None, shell, flag, &cmd)?;
+        let invocation = crate::shells::default_shell_invocation(&cmd)
+            .map_err(|error| VmError::Runtime(format!("shell: {error}")))?;
+        let output = exec_shell_args(None, &invocation.program, &invocation.args)?;
         Ok(vm_output_to_value(output))
     });
 
@@ -182,17 +174,9 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
                 "shell_at: command string is required",
             ))));
         }
-        let shell = if cfg!(target_os = "windows") {
-            "cmd"
-        } else {
-            "sh"
-        };
-        let flag = if cfg!(target_os = "windows") {
-            "/C"
-        } else {
-            "-c"
-        };
-        let output = exec_shell(Some(dir.as_str()), shell, flag, &cmd)?;
+        let invocation = crate::shells::default_shell_invocation(&cmd)
+            .map_err(|error| VmError::Runtime(format!("shell_at: {error}")))?;
+        let output = exec_shell_args(Some(dir.as_str()), &invocation.program, &invocation.args)?;
         Ok(vm_output_to_value(output))
     });
 
@@ -396,6 +380,7 @@ fn exec_command(
         .map_err(|error| prefix_process_error(error, "exec"))
 }
 
+#[cfg(test)]
 fn exec_shell(
     dir: Option<&str>,
     shell: &str,
@@ -403,8 +388,16 @@ fn exec_shell(
     script: &str,
 ) -> Result<std::process::Output, VmError> {
     let args = vec![flag.to_string(), script.to_string()];
+    exec_shell_args(dir, shell, &args)
+}
+
+fn exec_shell_args(
+    dir: Option<&str>,
+    shell: &str,
+    args: &[String],
+) -> Result<std::process::Output, VmError> {
     let config = process_command_config(dir)?;
-    crate::stdlib::sandbox::command_output(shell, &args, &config)
+    crate::stdlib::sandbox::command_output(shell, args, &config)
         .map_err(|error| prefix_process_error(error, "shell"))
 }
 

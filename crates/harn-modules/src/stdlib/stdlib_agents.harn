@@ -95,7 +95,8 @@ pub fn verify_command(config) {
   if config?.command == nil || config?.command == "" {
     return nil
   }
-  let output = host_call("process.exec", {command: config?.command})
+  let shell = host_call("process.get_default_shell", {})
+  let output = host_call("process.exec", {mode: "shell", command: config?.command, shell_id: shell?.id})
   var ok = output?.success
   if config?.expect_status != nil {
     ok = output?.exit_code ?? output?.legacy_status ?? output?.status == config?.expect_status

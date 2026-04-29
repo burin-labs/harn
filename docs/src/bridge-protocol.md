@@ -419,6 +419,80 @@ Invocation:
   existing `builtin_call` bridge request using `name` as the builtin
   name and `args` as the single argument payload.
 
+## Shell discovery host capability
+
+Shell discovery is a typed `process` host capability so IDEs, TUIs,
+headless CLI runs, and cloud workers can share one shell-selection
+contract. Harn's standalone fallback exposes the same operations when no
+bridge host is attached.
+
+### `process.list_shells`
+
+Called through `host_call("process.list_shells", {})`. The response is:
+
+```json
+{
+  "shells": [
+    {
+      "id": "zsh",
+      "label": "zsh",
+      "path": "/bin/zsh",
+      "platform": "darwin",
+      "available": true,
+      "supports_login": true,
+      "supports_interactive": true,
+      "default_args": ["-c"],
+      "login_args": ["-l", "-c"],
+      "source": "env"
+    }
+  ],
+  "default_shell_id": "zsh"
+}
+```
+
+Windows hosts should distinguish `pwsh`, `powershell`, and `cmd`.
+`cmd` uses `["/C"]`; PowerShell variants use
+`["-NoProfile", "-Command"]`.
+
+### `process.get_default_shell` / `process.set_default_shell`
+
+`process.get_default_shell` returns the selected shell object for the
+session. Stateful hosts may implement `process.set_default_shell` with
+`{ "shell_id": "zsh" }`; hosts that keep persistence in editor settings
+can omit persistence and still pass the selected shell on command
+requests.
+
+### `process.shell_invocation`
+
+`process.shell_invocation` resolves a discovered shell ID or shell object
+into executable argv:
+
+```json
+{
+  "shell_id": "zsh",
+  "command": "printf ok",
+  "login": false,
+  "interactive": false
+}
+```
+
+Response:
+
+```json
+{
+  "program": "/bin/zsh",
+  "args": ["-c", "printf ok"],
+  "command_arg_index": 1,
+  "shell": {"id": "zsh"}
+}
+```
+
+Shell-mode command runners must pass a shell object or a shell ID
+resolved through this capability. `argv` mode remains preferred for
+programmatic execution; shell mode is for user-authored commands and
+interactive shell semantics. The normative JSON Schema lives at
+`spec/schemas/host-shell-discovery.schema.json`.
+
 ## Skill registry
 
 Hosts expose their own managed skill store to the VM through three RPCs.
