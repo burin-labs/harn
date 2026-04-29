@@ -647,6 +647,7 @@ pub(crate) fn extract_llm_options(
         });
     let structural_experiment =
         crate::llm::structural_experiments::parse_structural_experiment_option(options.as_ref())?;
+    let budget = crate::llm::cost::parse_budget_envelope(options.as_ref())?;
 
     let opts = LlmCallOptions {
         provider,
@@ -681,6 +682,7 @@ pub(crate) fn extract_llm_options(
         idle_timeout,
         stream,
         provider_overrides,
+        budget,
         prefill,
         structural_experiment,
         applied_structural_experiment: None,

@@ -309,6 +309,10 @@ pub(crate) struct LlmCallOptions {
     // --- Provider-specific overrides ---
     pub provider_overrides: Option<serde_json::Value>,
 
+    // --- Budgets ---
+    /// Optional first-class budget envelope for pre-flight cost/token checks.
+    pub budget: Option<crate::llm::cost::LlmBudgetEnvelope>,
+
     // --- Assistant prefill ---
     /// Optional prefill string. When set, providers append a final
     /// `role: "assistant"` message with this content so the model
@@ -454,6 +458,7 @@ pub(super) fn base_opts(provider: &str) -> LlmCallOptions {
         timeout: Some(5),
         idle_timeout: None,
         provider_overrides: Some(serde_json::json!({"custom_flag": true})),
+        budget: None,
         prefill: None,
         structural_experiment: None,
         applied_structural_experiment: None,
