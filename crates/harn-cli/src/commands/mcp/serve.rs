@@ -12,11 +12,12 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::{stream, StreamExt};
+use notify::Watcher;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use time::OffsetDateTime;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
 
 use harn_vm::event_log::{EventLog, LogEvent, Topic};
@@ -36,6 +37,8 @@ use crate::commands::orchestrator::inspect_data::{
 use crate::commands::orchestrator::listener::ListenerAuth;
 use crate::package::CollectedTriggerHandler;
 
+use super::prompts::FilePromptCatalog;
+
 const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 const MCP_SESSION_HEADER: &str = "mcp-session-id";
 const MCP_PROTOCOL_HEADER: &str = "mcp-protocol-version";
@@ -49,6 +52,9 @@ pub(crate) struct McpOrchestratorService {
     state_dir: PathBuf,
     manifest_source: Arc<String>,
     auth: ListenerAuth,
+    prompt_catalog: Arc<Mutex<FilePromptCatalog>>,
+    prompt_notify_tx: broadcast::Sender<JsonValue>,
+    _prompt_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -220,11 +226,30 @@ impl McpOrchestratorService {
             )
         })?;
         let auth = ListenerAuth::from_env(false)?;
+        let project_root = local
+            .config
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+        let prompt_catalog = Arc::new(Mutex::new(FilePromptCatalog::discover(
+            &project_root,
+            &manifest_source,
+        )));
+        let (prompt_notify_tx, _) = broadcast::channel(32);
+        let prompt_watcher = start_prompt_watcher(
+            project_root,
+            local.config.clone(),
+            prompt_catalog.clone(),
+            prompt_notify_tx.clone(),
+        );
         Ok(Self {
             config_path: local.config,
             state_dir: local.state_dir,
             manifest_source: Arc::new(manifest_source),
             auth,
+            prompt_catalog,
+            prompt_notify_tx,
+            _prompt_watcher: Arc::new(Mutex::new(prompt_watcher)),
         })
     }
 
@@ -233,6 +258,10 @@ impl McpOrchestratorService {
             config: self.config_path.clone(),
             state_dir: self.state_dir.clone(),
         }
+    }
+
+    fn subscribe_prompt_notifications(&self) -> broadcast::Receiver<JsonValue> {
+        self.prompt_notify_tx.subscribe()
     }
 
     async fn handle_request(&self, session: &mut ConnectionState, request: JsonValue) -> JsonValue {
@@ -266,8 +295,8 @@ impl McpOrchestratorService {
             "resources/templates/list" => {
                 harn_vm::jsonrpc::response(id, json!({"resourceTemplates": []}))
             }
-            "prompts/list" => harn_vm::jsonrpc::response(id, json!({"prompts": []})),
-            "prompts/get" => harn_vm::jsonrpc::error_response(id, -32602, "Unknown prompt"),
+            "prompts/list" => self.handle_prompts_list(id),
+            "prompts/get" => self.handle_prompts_get(id, &params),
             _ if mcp_protocol::unsupported_latest_spec_method(method).is_some() => {
                 mcp_protocol::unsupported_latest_spec_method_response(id, method)
                     .expect("checked unsupported MCP method")
@@ -317,6 +346,7 @@ impl McpOrchestratorService {
                 "capabilities": {
                     "tools": { "listChanged": false },
                     "resources": { "listChanged": false },
+                    "prompts": { "listChanged": true },
                     "logging": {},
                 },
                 "serverInfo": {
@@ -327,6 +357,42 @@ impl McpOrchestratorService {
                 "instructions": "Expose Harn trigger and orchestrator controls over MCP."
             }),
         )
+    }
+
+    fn handle_prompts_list(&self, id: JsonValue) -> JsonValue {
+        let prompts = self
+            .prompt_catalog
+            .lock()
+            .expect("prompt catalog poisoned")
+            .list();
+        harn_vm::jsonrpc::response(id, json!({ "prompts": prompts }))
+    }
+
+    fn handle_prompts_get(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
+        let name = params
+            .get("name")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default();
+        let arguments = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let result = self
+            .prompt_catalog
+            .lock()
+            .expect("prompt catalog poisoned")
+            .get(name, &arguments);
+        match result {
+            Ok(value) => harn_vm::jsonrpc::response(id, value),
+            Err(error)
+                if error.starts_with("Unknown prompt")
+                    || error.starts_with("Missing required argument")
+                    || error.starts_with("prompt arguments") =>
+            {
+                harn_vm::jsonrpc::error_response(id, -32602, &error)
+            }
+            Err(error) => harn_vm::jsonrpc::error_response(id, -32603, &error),
+        }
     }
 
     fn handle_tools_list(&self, id: JsonValue) -> JsonValue {
@@ -990,36 +1056,54 @@ async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
     let mut stdout = tokio::io::stdout();
     let mut lines = stdin.lines();
     let mut session = ConnectionState::default();
+    let mut prompt_notifications = service.subscribe_prompt_notifications();
 
     eprintln!("[harn] MCP stdio server ready");
 
-    while let Ok(Some(line)) = lines.next_line().await {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
+    loop {
+        tokio::select! {
+            line = lines.next_line() => {
+                let Some(line) = line.map_err(|error| format!("stdin read failed: {error}"))? else {
+                    break;
+                };
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let request: JsonValue = match serde_json::from_str(trimmed) {
+                    Ok(value) => value,
+                    Err(_) => continue,
+                };
+                let response = service.handle_request(&mut session, request).await;
+                if !response.is_null() {
+                    write_stdio_json(&mut stdout, &response).await?;
+                }
+            }
+            notification = prompt_notifications.recv() => {
+                match notification {
+                    Ok(notification) => write_stdio_json(&mut stdout, &notification).await?,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
         }
-        let request: JsonValue = match serde_json::from_str(trimmed) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-        let response = service.handle_request(&mut session, request).await;
-        if response.is_null() {
-            continue;
-        }
-        let mut encoded = serde_json::to_string(&response)
-            .map_err(|error| format!("serialize error: {error}"))?;
-        encoded.push('\n');
-        stdout
-            .write_all(encoded.as_bytes())
-            .await
-            .map_err(|error| format!("stdout write failed: {error}"))?;
-        stdout
-            .flush()
-            .await
-            .map_err(|error| format!("stdout flush failed: {error}"))?;
     }
 
     Ok(())
+}
+
+async fn write_stdio_json(stdout: &mut tokio::io::Stdout, value: &JsonValue) -> Result<(), String> {
+    let mut encoded =
+        serde_json::to_string(value).map_err(|error| format!("serialize error: {error}"))?;
+    encoded.push('\n');
+    stdout
+        .write_all(encoded.as_bytes())
+        .await
+        .map_err(|error| format!("stdout write failed: {error}"))?;
+    stdout
+        .flush()
+        .await
+        .map_err(|error| format!("stdout flush failed: {error}"))
 }
 
 async fn run_http(service: Arc<McpOrchestratorService>, args: &McpServeArgs) -> Result<(), String> {
@@ -1030,6 +1114,45 @@ async fn run_http(service: Arc<McpOrchestratorService>, args: &McpServeArgs) -> 
         args.messages_path.clone(),
     );
     serve_http_router(router, args.bind, &args.path).await
+}
+
+fn start_prompt_watcher(
+    project_root: PathBuf,
+    config_path: PathBuf,
+    prompt_catalog: Arc<Mutex<FilePromptCatalog>>,
+    prompt_notify_tx: broadcast::Sender<JsonValue>,
+) -> Option<notify::RecommendedWatcher> {
+    let project_root_for_callback = project_root.clone();
+    let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+        let Ok(event) = result else {
+            return;
+        };
+        if !event
+            .paths
+            .iter()
+            .any(|path| is_prompt_reload_path(path.as_path()))
+        {
+            return;
+        }
+        let manifest_source = std::fs::read_to_string(&config_path).unwrap_or_default();
+        let updated = FilePromptCatalog::discover(&project_root_for_callback, &manifest_source);
+        *prompt_catalog.lock().expect("prompt catalog poisoned") = updated;
+        let _ = prompt_notify_tx.send(json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/prompts/list_changed",
+        }));
+    })
+    .ok()?;
+    watcher
+        .watch(&project_root, notify::RecursiveMode::Recursive)
+        .ok()?;
+    Some(watcher)
+}
+
+fn is_prompt_reload_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "harn.toml" || name.ends_with(".harn.prompt"))
 }
 
 pub(crate) fn http_router_for_local(
@@ -1206,6 +1329,28 @@ async fn legacy_sse_stream(State(state): State<HttpState>, headers: HeaderMap) -
     let session = Arc::new(HttpSession::default());
     let (tx, rx) = unbounded::<JsonValue>();
     *session.sse_tx.lock().expect("SSE sender poisoned") = Some(tx);
+    let mut prompt_notifications = state.service.subscribe_prompt_notifications();
+    let prompt_tx = session
+        .sse_tx
+        .lock()
+        .expect("SSE sender poisoned")
+        .as_ref()
+        .cloned();
+    if let Some(prompt_tx) = prompt_tx {
+        tokio::spawn(async move {
+            loop {
+                match prompt_notifications.recv().await {
+                    Ok(message) => {
+                        if prompt_tx.unbounded_send(message).is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
     state
         .sessions
         .lock()
@@ -1610,6 +1755,10 @@ pub fn on_fail(event: TriggerEvent) -> any {
             )
             .await;
         assert_eq!(response["result"]["protocolVersion"], MCP_PROTOCOL_VERSION);
+        assert_eq!(
+            response["result"]["capabilities"]["prompts"]["listChanged"],
+            json!(true)
+        );
         session
     }
 
@@ -1714,6 +1863,97 @@ pub fn on_fail(event: TriggerEvent) -> any {
             )
             .await;
         assert_eq!(prompt["error"]["code"], json!(-32602));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn file_backed_prompts_list_render_and_notify_changes() {
+        let _guard = lock_harn_state();
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        write_file(temp.path(), "pixel.png", "fake");
+        write_file(
+            temp.path(),
+            "review.harn.prompt",
+            r#"---
+id = "review"
+description = "Review code"
+images = [{ path = "pixel.png", mime_type = "image/png" }]
+[[arguments]]
+name = "code"
+description = "Code to review"
+required = true
+---
+Review this: {{ code }}
+"#,
+        );
+        let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+        let mut session = init_session(&service).await;
+        let mut notifications = service.subscribe_prompt_notifications();
+
+        let prompts = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(20, "prompts/list", json!({})),
+            )
+            .await;
+        assert_eq!(prompts["result"]["prompts"][0]["name"], json!("review"));
+        assert_eq!(
+            prompts["result"]["prompts"][0]["arguments"][0]["description"],
+            json!("Code to review")
+        );
+
+        let missing = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(21, "prompts/get", json!({"name": "review"})),
+            )
+            .await;
+        assert_eq!(missing["error"]["code"], json!(-32602));
+
+        let prompt = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(
+                    22,
+                    "prompts/get",
+                    json!({"name": "review", "arguments": {"code": "fn main() {}"}}),
+                ),
+            )
+            .await;
+        assert!(prompt["result"]["messages"][0]["content"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("fn main"));
+        assert_eq!(
+            prompt["result"]["messages"][1]["content"]["type"],
+            json!("image")
+        );
+        assert_eq!(
+            prompt["result"]["messages"][1]["content"]["data"],
+            json!("ZmFrZQ==")
+        );
+
+        write_file(
+            temp.path(),
+            "review.harn.prompt",
+            r#"---
+id = "review"
+[[arguments]]
+name = "code"
+required = true
+---
+Updated: {{ code }}
+"#,
+        );
+        let notification =
+            tokio::time::timeout(std::time::Duration::from_secs(5), notifications.recv())
+                .await
+                .expect("timed out waiting for prompt list_changed")
+                .expect("prompt notification channel closed");
+        assert_eq!(
+            notification["method"],
+            json!("notifications/prompts/list_changed")
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
