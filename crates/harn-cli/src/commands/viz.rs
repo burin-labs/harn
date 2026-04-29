@@ -383,6 +383,7 @@ fn summarize_node(node: &SNode) -> String {
             .as_ref()
             .map(|value| format!("yield {}", inline_label(value)))
             .unwrap_or_else(|| "yield".to_string()),
+        Node::EmitExpr { value } => format!("emit {}", inline_label(value)),
         Node::BreakStmt => "break".to_string(),
         Node::ContinueStmt => "continue".to_string(),
         Node::FunctionCall { name, .. } => format!("{name}(...)"),

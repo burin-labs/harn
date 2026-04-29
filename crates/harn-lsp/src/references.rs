@@ -278,7 +278,7 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
                 collect_references(s, target_name, refs);
             }
         }
-        Node::YieldExpr { value: Some(v) } => {
+        Node::YieldExpr { value: Some(v) } | Node::EmitExpr { value: v } => {
             collect_references(v, target_name, refs);
         }
         Node::EnumDecl { name, .. }

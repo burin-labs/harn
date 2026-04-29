@@ -182,5 +182,14 @@ pub struct VmGenerator {
     /// Receiver end of the yield channel (generator sends values here).
     /// Wrapped in a shared async mutex so recv() can be called without holding
     /// a RefCell borrow across await points.
-    pub receiver: Rc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<VmValue>>>,
+    pub receiver: Rc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<Result<VmValue, VmError>>>>,
+}
+
+/// A stream object: lazily produces values from a `gen fn`.
+#[derive(Debug, Clone)]
+pub struct VmStream {
+    /// Whether the stream has finished (returned, thrown, or exhausted).
+    pub done: Rc<std::cell::Cell<bool>>,
+    /// Receiver end of the stream channel.
+    pub receiver: Rc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<Result<VmValue, VmError>>>>,
 }

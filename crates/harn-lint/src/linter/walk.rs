@@ -862,6 +862,10 @@ impl<'a> Linter<'a> {
                 }
             }
 
+            Node::EmitExpr { value } => {
+                self.lint_node(value);
+            }
+
             Node::EnumConstruct {
                 enum_name, args, ..
             } => {

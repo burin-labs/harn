@@ -112,6 +112,7 @@ impl Parser {
                     | TokenKind::Enum
                     | TokenKind::Struct
                     | TokenKind::Interface
+                    | TokenKind::Emit
                     | TokenKind::Guard
                     | TokenKind::Require
                     | TokenKind::Deadline
@@ -190,6 +191,18 @@ impl Parser {
         matches!(self.current().map(|t| &t.kind), Some(TokenKind::Identifier(s)) if s == name)
     }
 
+    /// `gen` is contextual so existing identifiers named `gen` keep working.
+    /// It starts a stream declaration only when followed by `fn`.
+    pub(super) fn check_contextual_gen_fn(&self) -> bool {
+        if !self.check_identifier("gen") {
+            return false;
+        }
+        matches!(
+            self.tokens.get(self.pos + 1).map(|t| &t.kind),
+            Some(TokenKind::Fn)
+        )
+    }
+
     pub(super) fn advance(&mut self) {
         if self.pos < self.tokens.len() {
             self.pos += 1;
@@ -236,6 +249,22 @@ impl Parser {
         }
     }
 
+    pub(super) fn consume_contextual_keyword(
+        &mut self,
+        name: &str,
+        expected: &str,
+    ) -> Result<Token, ParserError> {
+        self.skip_newlines();
+        let tok = self.current().ok_or_else(|| self.make_error(expected))?;
+        if matches!(&tok.kind, TokenKind::Identifier(id) if id == name) {
+            let tok = tok.clone();
+            self.advance();
+            Ok(tok)
+        } else {
+            Err(self.make_error(expected))
+        }
+    }
+
     /// Like `consume_identifier`, but also accepts keywords as identifiers.
     /// Used for property access (e.g., `obj.type`) and dict keys where
     /// keywords are valid member names.
@@ -278,6 +307,7 @@ impl Parser {
             TokenKind::Enum => "enum",
             TokenKind::Struct => "struct",
             TokenKind::Interface => "interface",
+            TokenKind::Emit => "emit",
             TokenKind::Pub => "pub",
             TokenKind::From => "from",
             TokenKind::To => "to",

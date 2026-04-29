@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::{Duration, Instant};
 
@@ -73,6 +73,26 @@ impl ListenerConfig {
 pub(crate) struct ListenerRuntime {
     server: ServerRuntime,
     routes: Arc<RouteRegistry>,
+    readiness: Arc<ListenerReadiness>,
+}
+
+#[derive(Default)]
+struct ListenerReadiness {
+    ready: AtomicBool,
+}
+
+impl ListenerReadiness {
+    fn mark_ready(&self) {
+        self.ready.store(true, Ordering::Release);
+    }
+
+    fn mark_not_ready(&self) {
+        self.ready.store(false, Ordering::Release);
+    }
+
+    fn is_ready(&self) -> bool {
+        self.ready.load(Ordering::Acquire)
+    }
 }
 
 pub(crate) struct AdminReloadRequest {
@@ -165,6 +185,7 @@ impl ListenerRuntime {
             request_gate,
             config.tenant_store.clone(),
         )?);
+        let readiness = Arc::new(ListenerReadiness::default());
         let mut app = Router::new()
             .route(
                 "/health",
@@ -176,7 +197,7 @@ impl ListenerRuntime {
             )
             .route(
                 "/readyz",
-                get(|| async move { (StatusCode::OK, "ready").into_response() }),
+                get(readyz_endpoint).layer(Extension(readiness.clone())),
             )
             .route(
                 "/metrics",
@@ -208,7 +229,11 @@ impl ListenerRuntime {
             ));
 
         let server = ServerRuntime::start(config.bind, app, config.tls.as_ref()).await?;
-        Ok(Self { server, routes })
+        Ok(Self {
+            server,
+            routes,
+            readiness,
+        })
     }
 
     pub(crate) fn local_addr(&self) -> std::net::SocketAddr {
@@ -227,6 +252,14 @@ impl ListenerRuntime {
         format!("{}://{}", self.scheme(), self.local_addr())
     }
 
+    pub(crate) fn mark_ready(&self) {
+        self.readiness.mark_ready();
+    }
+
+    pub(crate) fn mark_not_ready(&self) {
+        self.readiness.mark_not_ready();
+    }
+
     pub(crate) fn trigger_metrics(&self) -> BTreeMap<String, TriggerMetricSnapshot> {
         self.routes.snapshot_metrics()
     }
@@ -239,7 +272,7 @@ impl ListenerRuntime {
         self,
         timeout: Duration,
     ) -> Result<BTreeMap<String, TriggerMetricSnapshot>, String> {
-        let Self { server, routes } = self;
+        let Self { server, routes, .. } = self;
         server.shutdown(timeout).await?;
         Ok(routes.snapshot_metrics())
     }
@@ -1221,6 +1254,14 @@ async fn metrics_endpoint(
         )],
         metrics.render_prometheus(),
     )
+}
+
+async fn readyz_endpoint(Extension(readiness): Extension<Arc<ListenerReadiness>>) -> Response {
+    if readiness.is_ready() {
+        (StatusCode::OK, "ready").into_response()
+    } else {
+        (StatusCode::SERVICE_UNAVAILABLE, "starting").into_response()
+    }
 }
 
 async fn admin_reload_endpoint(
@@ -3318,6 +3359,35 @@ mod tests {
         )
         .await
         .expect("read claim events")
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn readyz_tracks_listener_readiness_gate() {
+        let _guard = lock_harn_state();
+        reset_active_event_log();
+        let (listener, _log, _dir) = start_acp_test_listener().await;
+        let url = format!("{}/readyz", listener.url());
+        let client = reqwest::Client::new();
+
+        let response = client.get(&url).send().await.expect("readyz before ready");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        listener.mark_ready();
+        let response = client.get(&url).send().await.expect("readyz after ready");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        listener.mark_not_ready();
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .expect("readyz after not ready");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        listener
+            .shutdown(Duration::from_secs(5))
+            .await
+            .expect("shutdown listener");
     }
 
     #[tokio::test(flavor = "current_thread")]

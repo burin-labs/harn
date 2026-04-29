@@ -515,6 +515,9 @@ impl TypeChecker {
                         Some(TypeExpr::List(inner)) => {
                             return Some(TypeExpr::Iter(Box::new((**inner).clone())));
                         }
+                        Some(TypeExpr::Generator(inner)) | Some(TypeExpr::Stream(inner)) => {
+                            return Some(TypeExpr::Iter(Box::new((**inner).clone())));
+                        }
                         Some(TypeExpr::DictType(k, v)) => {
                             return Some(TypeExpr::Iter(Box::new(TypeExpr::Applied {
                                 name: "Pair".into(),

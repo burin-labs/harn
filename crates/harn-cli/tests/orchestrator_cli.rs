@@ -747,16 +747,12 @@ pub fn on_task(event: TriggerEvent) -> string {
         .unwrap();
     assert_eq!(response.status(), reqwest::StatusCode::OK);
 
-    wait_for_consumer_cursor(
-        &state_dir,
-        harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC,
-        &format!(
-            "orchestrator-pump.{}",
-            harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC
-        ),
-        1,
-    )
-    .await;
+    wait_for_topic_event(&state_dir, "orchestrator.lifecycle", |event| {
+        event.kind == "pump_admitted" && event.payload["event_log_id"] == serde_json::json!(1)
+    });
+    wait_for_topic_event(&state_dir, "orchestrator.lifecycle", |event| {
+        event.kind == "pump_acked" && event.payload["event_log_id"] == serde_json::json!(1)
+    });
 
     send_sigterm(&child);
     fs::write(&inbox_release_file, b"release").unwrap();
@@ -770,6 +766,15 @@ pub fn on_task(event: TriggerEvent) -> string {
             .iter()
             .any(|(_, event)| event.kind == "dispatch_succeeded"),
         "outbox={outbox:?}"
+    );
+    let lifecycle = read_topic_events(&state_dir, "orchestrator.lifecycle");
+    assert!(
+        lifecycle.iter().any(|(_, event)| {
+            event.kind == "pump_dispatch_completed"
+                && event.payload["event_log_id"] == serde_json::json!(1)
+                && event.payload["status"] == serde_json::json!("completed")
+        }),
+        "lifecycle={lifecycle:?}"
     );
 
     let snapshot_contents =

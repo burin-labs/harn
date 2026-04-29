@@ -86,6 +86,7 @@ The following identifiers are reserved:
 | `throw` | `.throwKw` |
 | `finally` | `.finally` |
 | `fn` | `.fnKw` |
+| `emit` | `.emit` |
 | `spawn` | `.spawnKw` |
 | `while` | `.whileKw` |
 | `type` | `.typeKw` |
@@ -951,6 +952,8 @@ unresolved import itself still surfaces via the runtime loader.
 | `enum` | `Color.Red` | Enum variant, optionally with associated data |
 | `struct` | `Point({x: 3, y: 4})` | Struct instance with named fields |
 | `taskHandle` | (from `spawn`) | Opaque handle to an async task |
+| `Generator<T>` | regular `fn` containing `yield` | Existing synchronous generator value |
+| `Stream<T>` | `gen fn` containing `emit` | Lazy, single-pass stream value |
 | `Iter<T>` | `x.iter()` / `iter(x)` | Lazy, single-pass, fused iterator. See [Iterator protocol](#iterator-protocol) |
 | `Pair<K, V>` | `pair(k, v)` | Two-element value; access via `.first` / `.second` |
 
@@ -1619,6 +1622,52 @@ without blocking. `timeout` and `default` are mutually exclusive.
 The statement form desugars to the `select(ch1, ch2, ...)` async builtin,
 which returns `{index, value, channel}`. The builtin can be called directly
 for dynamic channel lists.
+
+### Streams
+
+Streams provide script-level lazy production of values. A stream
+producer is declared with the contextual `gen fn` modifier and returns
+`Stream<T>`:
+
+```harn
+gen fn numbers(start: int, end: int) -> Stream<int> {
+  var n = start
+  while n < end {
+    emit n
+    n = n + 1
+  }
+}
+```
+
+`gen` is contextual in this position; existing identifiers named `gen`
+remain valid. `emit expr` is valid only inside a `gen fn`. It emits one
+value to the consumer and resumes when the consumer pulls the next
+item. The existing `yield` form keeps its current semantics and is not
+used for streams.
+
+Streams are single-pass. They can be consumed directly in `for` loops:
+
+```harn
+gen fn numbers(start: int, end: int) -> Stream<int> {
+  var n = start
+  while n < end {
+    emit n
+    n = n + 1
+  }
+}
+
+for n in numbers(1, 4) {
+  println(n)
+}
+```
+
+They also support `.next()`, which returns `{value, done}`. When the
+stream is exhausted, `done` is `true` and `value` is `nil`.
+
+`Stream<T>` is distinct from `Generator<T>` in the type checker.
+Regular functions that contain `yield` keep producing `Generator<T>`;
+`gen fn` produces `Stream<T>`. Throws inside a stream body propagate to
+the consumer at the pull site (`for`, `.next()`, or `.iter()`).
 
 ## Error model
 

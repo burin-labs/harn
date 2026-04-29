@@ -45,6 +45,9 @@ impl Parser {
             TokenKind::Try => self.parse_try_catch(),
             TokenKind::Select => self.parse_select(),
             TokenKind::Fn => self.parse_fn_decl_with_pub(false),
+            TokenKind::Identifier(name) if name == "gen" && self.check_contextual_gen_fn() => {
+                self.parse_gen_fn_decl_with_pub(false)
+            }
             TokenKind::Tool => self.parse_tool_decl(false),
             TokenKind::Skill => self.parse_skill_decl(false),
             TokenKind::Pub => {
@@ -55,6 +58,11 @@ impl Parser {
                 })?;
                 match &tok.kind {
                     TokenKind::Fn => self.parse_fn_decl_with_pub(true),
+                    TokenKind::Identifier(name)
+                        if name == "gen" && self.check_contextual_gen_fn() =>
+                    {
+                        self.parse_gen_fn_decl_with_pub(true)
+                    }
                     TokenKind::Tool => self.parse_tool_decl(true),
                     TokenKind::Skill => self.parse_skill_decl(true),
                     TokenKind::Pipeline => self.parse_pipeline_with_pub(true),
@@ -76,6 +84,7 @@ impl Parser {
             TokenKind::Require => self.parse_require(),
             TokenKind::Deadline => self.parse_deadline(),
             TokenKind::Yield => self.parse_yield(),
+            TokenKind::Emit => self.parse_emit(),
             TokenKind::Mutex => self.parse_mutex(),
             TokenKind::Defer => self.parse_defer(),
             TokenKind::Break => {
@@ -665,6 +674,18 @@ impl Parser {
         Ok(spanned(
             Node::YieldExpr {
                 value: Some(Box::new(value)),
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    pub(super) fn parse_emit(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Emit, "emit")?;
+        let value = self.parse_expression()?;
+        Ok(spanned(
+            Node::EmitExpr {
+                value: Box::new(value),
             },
             Span::merge(start, self.prev_span()),
         ))

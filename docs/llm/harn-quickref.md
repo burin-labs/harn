@@ -144,6 +144,23 @@ Note: `for (a, b) in ...` with parentheses is NOT supported — only list
 patterns `[a, b]` and dict patterns `{name1, name2}`. Use `enumerate()`
 / `entries()` (dict-shaped) or `zip()` (list-shaped) accordingly.
 
+## Streams
+
+- Declare stream producers with `gen fn name(...) -> Stream<T> { ... }`.
+- Emit one value with `emit expr`; `emit` is valid only inside `gen fn`.
+- Consume with `for item in stream`, `.next()` (`{value, done}`), or `.iter()`.
+- `Stream<T>` is distinct from `Generator<T>`; existing `yield` behavior is unchanged.
+- Throws inside a stream propagate when the consumer pulls the next item.
+
+```harn
+gen fn numbers() -> Stream<int> {
+  emit 1
+  emit 2
+}
+
+for n in numbers() { println(n) }
+```
+
 ## Module scope
 
 Top-level `let` / `var` and `fn` declarations are visible inside

@@ -240,6 +240,7 @@ fn collect_static_tool_surface_from_node(
         | Node::VarBinding { value, .. }
         | Node::Assignment { value, .. }
         | Node::ThrowStmt { value }
+        | Node::EmitExpr { value }
         | Node::YieldExpr { value: Some(value) }
         | Node::ReturnStmt { value: Some(value) }
         | Node::Spread(value)
@@ -1158,6 +1159,17 @@ fn scan_node_preflight(
                     diagnostics,
                 );
             }
+        }
+        Node::EmitExpr { value } => {
+            scan_node_preflight(
+                value,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::Parallel { expr, body, .. } => {
             scan_node_preflight(

@@ -140,6 +140,26 @@ let results = parallel settle paths with { max_concurrent: 4 } { p ->
 `concurrency.md` for the RPM rate limiter, channels, `select`,
 `deadline`, and `defer`.
 
+## Streams
+
+Use `gen fn` plus `emit` for lazy script-level streams:
+
+```harn
+gen fn numbers() -> Stream<int> {
+  emit 1
+  emit 2
+}
+
+for n in numbers() {
+  println(n)
+}
+```
+
+`Stream<T>` is distinct from the older `Generator<T>` type. Existing
+`yield` behavior is unchanged; use `emit` inside `gen fn`. Streams are
+single-pass, support `.next()` returning `{value, done}`, and propagate
+throws to the consumer when the next item is pulled.
+
 ## CLI: `argv`
 
 ```bash

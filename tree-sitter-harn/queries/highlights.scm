@@ -18,6 +18,7 @@
 "return" @keyword.return
 "import" @keyword.import
 "fn" @keyword.function
+"gen" @keyword.function
 "spawn" @keyword
 "parallel" @keyword
 "defer" @keyword
@@ -29,6 +30,7 @@
 "interface" @keyword
 "where" @keyword
 "yield" @keyword
+"emit" @keyword
 "deadline" @keyword
 "guard" @keyword
 "mutex" @keyword

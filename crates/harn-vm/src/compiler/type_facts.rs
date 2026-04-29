@@ -172,7 +172,10 @@ impl Compiler {
 
     pub(super) fn infer_for_item_type(&self, iterable: &SNode) -> Option<TypeExpr> {
         match self.infer_expr_type(iterable)? {
-            TypeExpr::List(item) | TypeExpr::Iter(item) => Some(*item),
+            TypeExpr::List(item)
+            | TypeExpr::Iter(item)
+            | TypeExpr::Generator(item)
+            | TypeExpr::Stream(item) => Some(*item),
             TypeExpr::DictType(key, value) => Some(TypeExpr::Applied {
                 name: "Pair".into(),
                 args: vec![*key, *value],

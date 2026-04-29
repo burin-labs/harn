@@ -7,12 +7,84 @@
 //! every reachable return matches the declared return type.
 
 use crate::ast::*;
+use harn_lexer::Span;
 
 use super::super::format::format_type;
 use super::super::scope::TypeScope;
 use super::super::TypeChecker;
 
 impl TypeChecker {
+    pub(in crate::typechecker) fn callable_return_type(
+        is_stream: bool,
+        return_type: &Option<TypeExpr>,
+        body: &[SNode],
+    ) -> Option<TypeExpr> {
+        if is_stream {
+            return Some(
+                return_type
+                    .clone()
+                    .unwrap_or_else(|| TypeExpr::Stream(Box::new(TypeExpr::Named("any".into())))),
+            );
+        }
+        if Self::body_contains_yield(body) {
+            return Some(
+                return_type.clone().unwrap_or_else(|| {
+                    TypeExpr::Generator(Box::new(TypeExpr::Named("any".into())))
+                }),
+            );
+        }
+        return_type.clone()
+    }
+
+    pub(in crate::typechecker) fn body_contains_yield(nodes: &[SNode]) -> bool {
+        nodes
+            .iter()
+            .any(|node| Self::node_contains_yield(&node.node))
+    }
+
+    fn node_contains_yield(node: &Node) -> bool {
+        match node {
+            Node::YieldExpr { .. } => true,
+            Node::FnDecl { .. } | Node::Closure { .. } => false,
+            Node::Block(body)
+            | Node::SpawnExpr { body }
+            | Node::Retry { body, .. }
+            | Node::DeferStmt { body }
+            | Node::MutexBlock { body }
+            | Node::Parallel { body, .. }
+            | Node::TryExpr { body } => Self::body_contains_yield(body),
+            Node::IfElse {
+                then_body,
+                else_body,
+                ..
+            } => {
+                Self::body_contains_yield(then_body)
+                    || else_body
+                        .as_ref()
+                        .is_some_and(|body| Self::body_contains_yield(body))
+            }
+            Node::ForIn { body, .. } | Node::WhileLoop { body, .. } => {
+                Self::body_contains_yield(body)
+            }
+            Node::TryCatch {
+                body,
+                catch_body,
+                finally_body,
+                ..
+            } => {
+                Self::body_contains_yield(body)
+                    || Self::body_contains_yield(catch_body)
+                    || finally_body
+                        .as_ref()
+                        .is_some_and(|body| Self::body_contains_yield(body))
+            }
+            Node::MatchExpr { arms, .. } => {
+                arms.iter().any(|arm| Self::body_contains_yield(&arm.body))
+            }
+            _ => false,
+        }
+    }
+
     pub(in crate::typechecker) fn check_fn_body(
         &mut self,
         type_params: &[TypeParam],
@@ -20,10 +92,40 @@ impl TypeChecker {
         return_type: &Option<TypeExpr>,
         body: &[SNode],
         where_clauses: &[WhereClause],
+        is_stream: bool,
     ) {
         self.fn_depth += 1;
-        self.check_fn_body_inner(type_params, params, return_type, body, where_clauses);
+        let saved_stream_depth = self.stream_fn_depth;
+        let saved_stream_emit_types = self.stream_emit_types.clone();
+        if is_stream {
+            self.stream_fn_depth += 1;
+            self.stream_emit_types
+                .push(Self::stream_emit_type(return_type));
+        } else {
+            self.stream_fn_depth = 0;
+            self.stream_emit_types.clear();
+        }
+        self.check_fn_body_inner(
+            type_params,
+            params,
+            return_type,
+            body,
+            where_clauses,
+            is_stream,
+        );
+        if is_stream {
+            self.stream_emit_types.pop();
+        }
+        self.stream_fn_depth = saved_stream_depth;
+        self.stream_emit_types = saved_stream_emit_types;
         self.fn_depth -= 1;
+    }
+
+    fn stream_emit_type(return_type: &Option<TypeExpr>) -> Option<TypeExpr> {
+        match return_type {
+            Some(TypeExpr::Stream(inner)) => Some((**inner).clone()),
+            _ => None,
+        }
     }
 
     fn check_fn_body_inner(
@@ -33,6 +135,7 @@ impl TypeChecker {
         return_type: &Option<TypeExpr>,
         body: &[SNode],
         where_clauses: &[WhereClause],
+        is_stream: bool,
     ) {
         let mut fn_scope = self.scope.child();
         // Register generic type parameters so they are treated as compatible
@@ -62,6 +165,18 @@ impl TypeChecker {
         };
 
         self.check_block(body, &mut fn_scope);
+
+        if is_stream && !matches!(return_type, None | Some(TypeExpr::Stream(_))) {
+            if let Some(actual) = return_type {
+                self.error_at(
+                    format!(
+                        "`gen fn` must return Stream<T>, got {}",
+                        format_type(actual)
+                    ),
+                    Span::dummy(),
+                );
+            }
+        }
 
         // Check return statements against declared return type
         if let Some(ret_type) = return_type {

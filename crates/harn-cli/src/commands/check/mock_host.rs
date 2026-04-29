@@ -164,6 +164,15 @@ fn collect_mock_host_capabilities_from_node(
                 );
             }
         }
+        Node::EmitExpr { value } => {
+            collect_mock_host_capabilities_from_node(
+                value,
+                file_path,
+                source,
+                visited,
+                capabilities,
+            );
+        }
         Node::RequireStmt { condition, message } => {
             collect_mock_host_capabilities_from_node(
                 condition,

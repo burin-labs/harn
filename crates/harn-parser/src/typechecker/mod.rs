@@ -78,6 +78,10 @@ pub struct TypeChecker {
     /// Lexical depth of enclosing function-like bodies (fn/tool/pipeline/closure).
     /// `try*` requires `fn_depth > 0` so the rethrow has a body to live in.
     fn_depth: usize,
+    /// Lexical depth of enclosing `gen fn` bodies. `emit` is only valid here.
+    stream_fn_depth: usize,
+    /// Expected emitted value type for each enclosing `gen fn`.
+    stream_emit_types: Vec<Option<TypeExpr>>,
     /// Maps function name -> deprecation metadata `(since, use_hint)`. Populated
     /// when an `@deprecated` attribute is encountered on a top-level fn decl
     /// during the `check_inner` pre-pass; consulted at every `FunctionCall`
@@ -121,6 +125,8 @@ impl TypeChecker {
             hints: Vec::new(),
             strict_types: false,
             fn_depth: 0,
+            stream_fn_depth: 0,
+            stream_emit_types: Vec::new(),
             deprecated_fns: std::collections::HashMap::new(),
             imported_names: None,
             imported_type_decls: Vec::new(),
@@ -137,6 +143,8 @@ impl TypeChecker {
             hints: Vec::new(),
             strict_types: strict,
             fn_depth: 0,
+            stream_fn_depth: 0,
+            stream_emit_types: Vec::new(),
             deprecated_fns: std::collections::HashMap::new(),
             imported_names: None,
             imported_type_decls: Vec::new(),
@@ -247,6 +255,8 @@ impl TypeChecker {
                 | TypeExpr::FnType { .. }
                 | TypeExpr::List(_)
                 | TypeExpr::Iter(_)
+                | TypeExpr::Generator(_)
+                | TypeExpr::Stream(_)
                 | TypeExpr::DictType(_, _)
         ) || matches!(ty, TypeExpr::Named(n) if n != "dict" && n != "any" && n != "_")
     }

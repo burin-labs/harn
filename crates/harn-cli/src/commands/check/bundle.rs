@@ -370,6 +370,7 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
         Node::ReturnStmt { value } | Node::YieldExpr { value } => {
             value.iter().map(|value| value.as_ref()).collect()
         }
+        Node::EmitExpr { value } => vec![value.as_ref()],
         Node::TryCatch {
             body,
             catch_body,

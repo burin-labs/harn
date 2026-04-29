@@ -1,0 +1,15 @@
+pipeline test(task) {
+  gen fn inner(base: int) -> Stream<int> {
+    emit base
+    emit base + 1
+  }
+  gen fn outer() -> Stream<Stream<int>> {
+    emit inner(5)
+    emit inner(8)
+  }
+  for stream in outer() {
+    for n in stream {
+      println(n)
+    }
+  }
+}

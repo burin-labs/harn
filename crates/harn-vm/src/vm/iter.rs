@@ -11,7 +11,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
 
-use crate::value::{VmChannelHandle, VmError, VmGenerator, VmValue};
+use crate::value::{VmChannelHandle, VmError, VmGenerator, VmStream, VmValue};
 
 /// Backing enum for `VmValue::Iter`. See module docs.
 #[derive(Debug)]
@@ -33,6 +33,8 @@ pub enum VmIter {
     Chars { s: Rc<str>, byte_idx: usize },
     /// Drains a generator's yield channel.
     Gen { gen: VmGenerator },
+    /// Drains a stream's emit channel.
+    Stream { stream: VmStream },
     /// Reads from a channel handle.
     Chan { handle: VmChannelHandle },
     /// Maps each item through a closure.
@@ -179,9 +181,38 @@ impl VmIter {
                 let rx = gen.receiver.clone();
                 let mut guard = rx.lock().await;
                 match guard.recv().await {
-                    Some(v) => Ok(Some(v)),
+                    Some(Ok(v)) => Ok(Some(v)),
+                    Some(Err(error)) => {
+                        gen.done.set(true);
+                        drop(guard);
+                        *self = VmIter::Exhausted;
+                        Err(error)
+                    }
                     None => {
                         gen.done.set(true);
+                        drop(guard);
+                        *self = VmIter::Exhausted;
+                        Ok(None)
+                    }
+                }
+            }
+            VmIter::Stream { stream } => {
+                if stream.done.get() {
+                    *self = VmIter::Exhausted;
+                    return Ok(None);
+                }
+                let rx = stream.receiver.clone();
+                let mut guard = rx.lock().await;
+                match guard.recv().await {
+                    Some(Ok(v)) => Ok(Some(v)),
+                    Some(Err(error)) => {
+                        stream.done.set(true);
+                        drop(guard);
+                        *self = VmIter::Exhausted;
+                        Err(error)
+                    }
+                    None => {
+                        stream.done.set(true);
                         drop(guard);
                         *self = VmIter::Exhausted;
                         Ok(None)
@@ -524,6 +555,7 @@ pub fn iter_from_value(v: VmValue) -> Result<VmValue, VmError> {
         }
         VmValue::String(s) => VmIter::Chars { s, byte_idx: 0 },
         VmValue::Generator(gen) => VmIter::Gen { gen },
+        VmValue::Stream(stream) => VmIter::Stream { stream },
         VmValue::Channel(handle) => VmIter::Chan { handle },
         other => {
             return Err(VmError::TypeError(format!(

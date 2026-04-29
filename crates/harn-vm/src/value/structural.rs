@@ -210,6 +210,7 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
             a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| values_equal(x, y)))
         }
         (VmValue::Generator(_), VmValue::Generator(_)) => false, // generators are never equal
+        (VmValue::Stream(_), VmValue::Stream(_)) => false,       // streams are never equal
         (VmValue::Range(a), VmValue::Range(b)) => {
             a.start == b.start && a.end == b.end && a.inclusive == b.inclusive
         }

@@ -250,15 +250,18 @@ impl TypeChecker {
                 return_type,
                 where_clauses,
                 body,
+                is_stream,
                 ..
             } => {
+                let callable_return_type =
+                    Self::callable_return_type(*is_stream, return_type, body);
                 let required_params = params.iter().filter(|p| p.default_value.is_none()).count();
                 let sig = FnSignature {
                     params: params
                         .iter()
                         .map(|p| (p.name.clone(), p.type_expr.clone()))
                         .collect(),
-                    return_type: return_type.clone(),
+                    return_type: callable_return_type,
                     type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
                     required_params,
                     where_clauses: where_clauses
@@ -271,7 +274,14 @@ impl TypeChecker {
                 scope.define_var(name, None);
                 scope.clear_nil_widenable(name);
                 self.check_fn_decl_variance(type_params, params, return_type.as_ref(), name, span);
-                self.check_fn_body(type_params, params, return_type, body, where_clauses);
+                self.check_fn_body(
+                    type_params,
+                    params,
+                    return_type,
+                    body,
+                    where_clauses,
+                    *is_stream,
+                );
             }
 
             Node::ToolDecl {
@@ -297,7 +307,7 @@ impl TypeChecker {
                 scope.define_fn(name, sig);
                 scope.define_var(name, None);
                 scope.clear_nil_widenable(name);
-                self.check_fn_body(&[], params, return_type, body, &[]);
+                self.check_fn_body(&[], params, return_type, body, &[], false);
             }
 
             Node::SkillDecl { name, fields, .. } => {
@@ -385,6 +395,8 @@ impl TypeChecker {
                     let elem_type = match iter_type {
                         Some(TypeExpr::List(inner)) => Some(*inner),
                         Some(TypeExpr::Iter(inner)) => Some(*inner),
+                        Some(TypeExpr::Generator(inner)) => Some(*inner),
+                        Some(TypeExpr::Stream(inner)) => Some(*inner),
                         Some(TypeExpr::Applied { ref name, ref args })
                             if name == "Iter" && args.len() == 1 =>
                         {
@@ -405,7 +417,9 @@ impl TypeChecker {
                     // Pair destructuring: `for (k, v) in iter` — extract K, V
                     // from the yielded Pair<K, V>.
                     let (ka, vb) = match &iter_type {
-                        Some(TypeExpr::Iter(inner)) => {
+                        Some(TypeExpr::Iter(inner))
+                        | Some(TypeExpr::Generator(inner))
+                        | Some(TypeExpr::Stream(inner)) => {
                             if let TypeExpr::Applied { name, args } = inner.as_ref() {
                                 if name == "Pair" && args.len() == 2 {
                                     (Some(args[0].clone()), Some(args[1].clone()))
@@ -1132,7 +1146,13 @@ impl TypeChecker {
                     closure_scope.clear_nil_widenable(&p.name);
                 }
                 self.fn_depth += 1;
+                let saved_stream_depth = self.stream_fn_depth;
+                let saved_stream_emit_types = self.stream_emit_types.clone();
+                self.stream_fn_depth = 0;
+                self.stream_emit_types.clear();
                 self.check_block(body, &mut closure_scope);
+                self.stream_fn_depth = saved_stream_depth;
+                self.stream_emit_types = saved_stream_emit_types;
                 self.fn_depth -= 1;
             }
 
@@ -1164,8 +1184,37 @@ impl TypeChecker {
             }
 
             Node::YieldExpr { value } => {
+                if self.stream_fn_depth > 0 {
+                    self.error_at(
+                        "`yield` is not a stream emit; use `emit` inside `gen fn`".to_string(),
+                        span,
+                    );
+                }
                 if let Some(v) = value {
                     self.check_node(v, scope);
+                }
+            }
+
+            Node::EmitExpr { value } => {
+                self.check_node(value, scope);
+                if self.stream_fn_depth == 0 {
+                    self.error_at(
+                        "`emit` can only be used inside a `gen fn`".to_string(),
+                        span,
+                    );
+                } else if let Some(Some(expected)) = self.stream_emit_types.last() {
+                    if let Some(actual) = self.infer_type(value, scope) {
+                        if !self.types_compatible(expected, &actual, scope) {
+                            self.error_at(
+                                format!(
+                                    "emit type doesn't match: expected {}, got {}",
+                                    format_type(expected),
+                                    format_type(&actual)
+                                ),
+                                span,
+                            );
+                        }
+                    }
                 }
             }
 

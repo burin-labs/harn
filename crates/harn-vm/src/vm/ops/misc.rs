@@ -38,7 +38,7 @@ impl super::super::Vm {
         let val = self.pop()?;
         if let Some(sender) = &self.yield_sender {
             // Dropped receiver = generator was abandoned; ignore send error.
-            let _ = sender.send(val).await;
+            let _ = sender.send(Ok(val)).await;
             // Let the consumer pull this value before we produce the next.
             tokio::task::yield_now().await;
         }

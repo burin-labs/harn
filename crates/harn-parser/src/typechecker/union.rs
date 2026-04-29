@@ -120,6 +120,26 @@ pub(super) fn intersect_types(current: &TypeExpr, schema_type: &TypeExpr) -> Opt
         (TypeExpr::List(inner), TypeExpr::Named(name)) if name == "list" => {
             Some(TypeExpr::List(inner.clone()))
         }
+        (TypeExpr::Named(name), TypeExpr::Generator(inner))
+            if name == "generator" || name == "Generator" =>
+        {
+            Some(TypeExpr::Generator(inner.clone()))
+        }
+        (TypeExpr::Generator(inner), TypeExpr::Named(name))
+            if name == "generator" || name == "Generator" =>
+        {
+            Some(TypeExpr::Generator(inner.clone()))
+        }
+        (TypeExpr::Named(name), TypeExpr::Stream(inner))
+            if name == "stream" || name == "Stream" =>
+        {
+            Some(TypeExpr::Stream(inner.clone()))
+        }
+        (TypeExpr::Stream(inner), TypeExpr::Named(name))
+            if name == "stream" || name == "Stream" =>
+        {
+            Some(TypeExpr::Stream(inner.clone()))
+        }
         (TypeExpr::Named(name), TypeExpr::DictType(key, value)) if name == "dict" => {
             Some(TypeExpr::DictType(key.clone(), value.clone()))
         }
@@ -130,6 +150,14 @@ pub(super) fn intersect_types(current: &TypeExpr, schema_type: &TypeExpr) -> Opt
         (TypeExpr::List(current_inner), TypeExpr::List(schema_inner)) => {
             intersect_types(current_inner, schema_inner)
                 .map(|inner| TypeExpr::List(Box::new(inner)))
+        }
+        (TypeExpr::Generator(current_inner), TypeExpr::Generator(schema_inner)) => {
+            intersect_types(current_inner, schema_inner)
+                .map(|inner| TypeExpr::Generator(Box::new(inner)))
+        }
+        (TypeExpr::Stream(current_inner), TypeExpr::Stream(schema_inner)) => {
+            intersect_types(current_inner, schema_inner)
+                .map(|inner| TypeExpr::Stream(Box::new(inner)))
         }
         (
             TypeExpr::DictType(current_key, current_value),

@@ -147,6 +147,7 @@ pub(crate) fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
                 .as_ref()
                 .map(|expr| node_complexity(expr))
                 .unwrap_or(0),
+            Node::EmitExpr { value } => node_complexity(value),
             Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
                 node_complexity(value)
             }

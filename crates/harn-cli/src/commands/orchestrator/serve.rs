@@ -350,14 +350,6 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     } else {
         None
     };
-    eprintln!("[harn] HTTP listener ready on {}", listener.url());
-    tracing::info!(
-        component = "orchestrator",
-        trace_id = "",
-        listener_url = %listener.url(),
-        "HTTP listener ready"
-    );
-
     connector_runtime.activations = connector_runtime
         .registry
         .activate_all(&connector_runtime.trigger_registry)
@@ -366,6 +358,15 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     eprintln!(
         "[harn] activated connectors: {}",
         format_activation_summary(&connector_runtime.activations)
+    );
+
+    listener.mark_ready();
+    eprintln!("[harn] HTTP listener ready on {}", listener.url());
+    tracing::info!(
+        component = "orchestrator",
+        trace_id = "",
+        listener_url = %listener.url(),
+        "HTTP listener ready"
     );
 
     write_state_snapshot(
@@ -456,6 +457,7 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     )
     .await?;
 
+    listener.mark_not_ready();
     let shutdown = graceful_shutdown(
         GracefulShutdownCtx {
             role: args.role,

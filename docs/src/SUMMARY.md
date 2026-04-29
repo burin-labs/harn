@@ -15,6 +15,7 @@
 - [Error handling](./error-handling.md)
 - [Modules and imports](./modules.md)
 - [Concurrency](./concurrency.md)
+- [Streams](./streams.md)
 - [Runtime context](./runtime-context.md)
 - [Language specification](./language-spec.md)
 

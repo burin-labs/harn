@@ -643,8 +643,24 @@ pub(crate) const DICT_METHODS: &[&str] = &[
 
 /// Known type names used after `:` in type annotations.
 pub(crate) const TYPE_NAMES: &[&str] = &[
-    "int", "float", "string", "bool", "nil", "list", "dict", "any", "void", "channel", "atomic",
-    "mutex", "closure",
+    "int",
+    "float",
+    "string",
+    "bool",
+    "nil",
+    "list",
+    "dict",
+    "iter",
+    "Generator",
+    "generator",
+    "Stream",
+    "stream",
+    "any",
+    "void",
+    "channel",
+    "atomic",
+    "mutex",
+    "closure",
 ];
 
 pub(crate) fn builtin_doc(name: &str) -> Option<String> {
