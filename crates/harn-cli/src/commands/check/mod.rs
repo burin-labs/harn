@@ -8,6 +8,7 @@ mod lint;
 mod mock_host;
 mod outcome;
 mod preflight;
+pub(crate) mod provider_matrix;
 
 #[cfg(test)]
 mod tests;

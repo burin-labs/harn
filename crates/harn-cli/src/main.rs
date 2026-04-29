@@ -154,6 +154,13 @@ async fn async_main() {
             }
         }
         Command::Check(args) => {
+            if args.provider_matrix {
+                let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                let extensions = package::load_runtime_extensions(&cwd);
+                package::install_runtime_extensions(&extensions);
+                commands::check::provider_matrix::run(args.format, args.filter.as_deref());
+                return;
+            }
             let mut target_strings: Vec<String> = args.targets.clone();
             if args.workspace {
                 let anchor = target_strings.first().map(Path::new);
@@ -793,6 +800,9 @@ async fn async_main() {
         Command::DumpTriggerQuickref(args) => {
             commands::dump_trigger_quickref::run(&args.output, args.check);
         }
+        Command::DumpProviderMatrix(args) => {
+            commands::check::provider_matrix::run_docs(&args.output, args.check);
+        }
     }
 }
 
@@ -850,6 +860,10 @@ async fn print_model_info(args: &ModelInfoArgs) -> bool {
             "tool_search": capabilities.tool_search,
             "max_tools": capabilities.max_tools,
             "prompt_caching": capabilities.prompt_caching,
+            "vision": capabilities.vision,
+            "vision_supported": capabilities.vision_supported,
+            "audio": capabilities.audio,
+            "json_schema": capabilities.json_schema,
             "thinking": !capabilities.thinking_modes.is_empty(),
             "thinking_modes": capabilities.thinking_modes,
             "preserve_thinking": capabilities.preserve_thinking,

@@ -29,6 +29,9 @@
 #   max_tools       : cap on tool-definition count the provider will accept.
 #                     Used by harn-lint to warn about oversized registries.
 #   prompt_caching  : whether the provider honors cache_control blocks.
+#   vision          : whether Harn can send visual input blocks on this route.
+#   audio           : whether Harn can send audio input blocks on this route.
+#   json_schema     : structured-output transport: native, tool_use, format_kw.
 #   thinking_modes  : supported script-facing modes: enabled, adaptive, effort.
 #   vision_supported: whether image content blocks are accepted.
 #   preserve_thinking: whether prior <think> blocks should be carried forward.
@@ -48,6 +51,8 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
+vision = true
+json_schema = "tool_use"
 thinking_modes = ["adaptive"]
 vision_supported = true
 
@@ -59,6 +64,8 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
+vision = true
+json_schema = "tool_use"
 thinking_modes = ["adaptive"]
 vision_supported = true
 
@@ -70,6 +77,8 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
+vision = true
+json_schema = "tool_use"
 thinking_modes = ["adaptive"]
 vision_supported = true
 
@@ -82,6 +91,8 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
+vision = true
+json_schema = "tool_use"
 thinking_modes = ["enabled"]
 vision_supported = true
 
@@ -94,6 +105,8 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
+vision = true
+json_schema = "tool_use"
 thinking_modes = ["enabled"]
 vision_supported = true
 
@@ -106,6 +119,8 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
+vision = true
+json_schema = "tool_use"
 thinking_modes = ["enabled"]
 vision_supported = true
 
@@ -118,6 +133,8 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
+vision = true
+json_schema = "tool_use"
 thinking_modes = ["adaptive"]
 vision_supported = true
 
@@ -129,6 +146,8 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
+vision = true
+json_schema = "tool_use"
 thinking_modes = ["adaptive"]
 vision_supported = true
 
@@ -140,6 +159,8 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
+vision = true
+json_schema = "tool_use"
 thinking_modes = ["adaptive"]
 vision_supported = true
 
@@ -151,6 +172,8 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
+vision = true
+json_schema = "tool_use"
 thinking_modes = ["enabled"]
 vision_supported = true
 
@@ -162,6 +185,8 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
+vision = true
+json_schema = "tool_use"
 thinking_modes = ["enabled"]
 vision_supported = true
 
@@ -173,6 +198,8 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
+vision = true
+json_schema = "tool_use"
 thinking_modes = ["enabled"]
 vision_supported = true
 
@@ -182,6 +209,8 @@ vision_supported = true
 model_match = "claude-*"
 native_tools = true
 prompt_caching = true
+vision = true
+json_schema = "tool_use"
 thinking_modes = ["enabled"]
 vision_supported = true
 
@@ -194,46 +223,69 @@ vision_supported = true
 
 # gpt-5.4+ exposes native `tool_search` on the Responses API.
 [[provider.openai]]
-model_match = "gpt-*"
-version_min = [5, 4]
-native_tools = true
-defer_loading = true
-tool_search = ["hosted", "client"]
-vision_supported = true
-
-[[provider.openai]]
 model_match = "gpt-4o*"
 native_tools = true
+vision = true
+audio = true
+json_schema = "native"
 vision_supported = true
 
 [[provider.openai]]
 model_match = "gpt-4.1*"
 native_tools = true
 vision_supported = true
+json_schema = "native"
+
+[[provider.openai]]
+model_match = "gpt-*"
+version_min = [5, 4]
+native_tools = true
+defer_loading = true
+tool_search = ["hosted", "client"]
+vision_supported = true
+json_schema = "native"
 
 # Legacy GPT: native tool calls only.
 [[provider.openai]]
 model_match = "gpt-*"
 native_tools = true
+json_schema = "native"
 
 # Reasoning family (o1, o3, o4, ...).
 [[provider.openai]]
 model_match = "o1*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["effort"]
 
 [[provider.openai]]
 model_match = "o3*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["effort"]
 
 [[provider.openai]]
 model_match = "o4*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["effort"]
 vision_supported = true
 
 # OpenRouter-style provider-prefixed IDs.
+[[provider.openai]]
+model_match = "openai/gpt-4o*"
+native_tools = true
+vision = true
+audio = true
+json_schema = "native"
+vision_supported = true
+
+[[provider.openai]]
+model_match = "openai/gpt-4.1*"
+native_tools = true
+vision_supported = true
+json_schema = "native"
+
 [[provider.openai]]
 model_match = "openai/gpt-*"
 version_min = [5, 4]
@@ -241,20 +293,12 @@ native_tools = true
 defer_loading = true
 tool_search = ["hosted", "client"]
 vision_supported = true
-
-[[provider.openai]]
-model_match = "openai/gpt-4o*"
-native_tools = true
-vision_supported = true
-
-[[provider.openai]]
-model_match = "openai/gpt-4.1*"
-native_tools = true
-vision_supported = true
+json_schema = "native"
 
 [[provider.openai]]
 model_match = "openai/gpt-*"
 native_tools = true
+json_schema = "native"
 
 # ---------- Local / Ollama ----------------------------------------------------
 #
@@ -284,6 +328,7 @@ vision_supported = true
 [[provider.ollama]]
 model_match = "qwen3.6*"
 native_tools = true
+json_schema = "format_kw"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "ollama_qwen3coder"
@@ -294,6 +339,7 @@ text_tool_wire_format_supported = false
 [[provider.ollama]]
 model_match = "qwen3*"
 native_tools = true
+json_schema = "format_kw"
 thinking_modes = ["enabled"]
 server_parser = "ollama_qwen3coder"
 honors_chat_template_kwargs = false
@@ -306,6 +352,7 @@ text_tool_wire_format_supported = false
 [[provider.llamacpp]]
 model_match = "*qwen3.6*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -316,6 +363,7 @@ text_tool_wire_format_supported = true
 [[provider.llamacpp]]
 model_match = "*qwen3*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -328,6 +376,7 @@ text_tool_wire_format_supported = true
 [[provider.local]]
 model_match = "*qwen3.6*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -338,6 +387,7 @@ text_tool_wire_format_supported = true
 [[provider.local]]
 model_match = "*qwen3*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -350,6 +400,8 @@ text_tool_wire_format_supported = true
 [[provider.mlx]]
 model_match = "*qwen3.6*"
 native_tools = true
+vision = true
+json_schema = "native"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -360,6 +412,8 @@ text_tool_wire_format_supported = true
 [[provider.mlx]]
 model_match = "*qwen3*"
 native_tools = true
+vision = true
+json_schema = "native"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -378,6 +432,7 @@ text_tool_wire_format_supported = true
 [[provider.dashscope]]
 model_match = "qwen3.6*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -388,6 +443,7 @@ text_tool_wire_format_supported = true
 [[provider.dashscope]]
 model_match = "qwen*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -397,6 +453,7 @@ text_tool_wire_format_supported = true
 [[provider.fireworks]]
 model_match = "*qwen3.6*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -409,6 +466,7 @@ text_tool_wire_format_supported = true
 [[provider.fireworks]]
 model_match = "*qwen3p6*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -419,6 +477,7 @@ text_tool_wire_format_supported = true
 [[provider.fireworks]]
 model_match = "*qwen*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -432,6 +491,7 @@ text_tool_wire_format_supported = true
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["enabled", "effort"]
 preserve_thinking = true
 server_parser = "none"
@@ -442,6 +502,7 @@ text_tool_wire_format_supported = true
 [[provider.openrouter]]
 model_match = "qwen/*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["enabled", "effort"]
 server_parser = "none"
 honors_chat_template_kwargs = false
@@ -453,6 +514,7 @@ text_tool_wire_format_supported = true
 [[provider.huggingface]]
 model_match = "qwen/qwen3.6*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -463,6 +525,7 @@ text_tool_wire_format_supported = true
 [[provider.huggingface]]
 model_match = "qwen/*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -472,6 +535,7 @@ text_tool_wire_format_supported = true
 [[provider.together]]
 model_match = "qwen/qwen3.6*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -482,6 +546,7 @@ text_tool_wire_format_supported = true
 [[provider.together]]
 model_match = "qwen/*"
 native_tools = true
+json_schema = "native"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -501,6 +566,7 @@ model_match = "deepseek-ai/deepseek-v3*"
 native_tools = true
 thinking_modes = ["enabled"]
 prompt_caching = true
+json_schema = "native"
 server_parser = "none"
 honors_chat_template_kwargs = true
 
@@ -509,6 +575,7 @@ model_match = "deepseek-ai/deepseek-v3*"
 native_tools = true
 thinking_modes = ["enabled"]
 prompt_caching = true
+json_schema = "native"
 server_parser = "none"
 honors_chat_template_kwargs = true
 
@@ -517,6 +584,7 @@ model_match = "deepseek/deepseek-v3*"
 native_tools = true
 thinking_modes = ["enabled", "effort"]
 prompt_caching = true
+json_schema = "native"
 server_parser = "none"
 honors_chat_template_kwargs = false
 
@@ -532,6 +600,8 @@ native_tools = true
 thinking_modes = ["enabled", "effort"]
 prompt_caching = true
 vision_supported = true
+vision = true
+json_schema = "native"
 
 [[provider.gemini]]
 model_match = "gemini-*"
@@ -544,6 +614,7 @@ vision_supported = true
 [[provider.openrouter]]
 model_match = "google/gemma-4*"
 native_tools = true
+json_schema = "native"
 
 # ---------- Moonshot Kimi K2.5 (via Together) --------------------------------
 #
@@ -552,6 +623,7 @@ native_tools = true
 [[provider.together]]
 model_match = "moonshotai/*"
 native_tools = true
+json_schema = "native"
 
 # ---------- Mock --------------------------------------------------------------
 #
