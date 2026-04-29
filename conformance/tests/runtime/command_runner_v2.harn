@@ -1,0 +1,13 @@
+pipeline default() {
+  let argv = host_call("process.exec", {mode: "argv", argv: ["printf", "runner-v2"]})
+  println(argv?.status)
+  println(argv?.exit_code)
+  println(argv?.success)
+  println(argv?.stdout)
+  println(argv?.command_id != nil)
+  println(argv?.pid != nil)
+  let shell = host_call("process.exec", {mode: "shell", command: "printf shell-v2", shell: {id: "sh"}})
+  println(shell?.status)
+  println(shell?.exit_code)
+  println(shell?.stdout)
+}

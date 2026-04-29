@@ -218,26 +218,6 @@ pub(crate) fn parse_argv_program(
     Ok((program, argv))
 }
 
-/// Required argv field with at least one element.
-pub(crate) fn require_argv(
-    builtin: &'static str,
-    map: &BTreeMap<String, VmValue>,
-) -> Result<Vec<String>, HostlibError> {
-    let argv =
-        optional_string_list(builtin, map, "argv")?.ok_or(HostlibError::MissingParameter {
-            builtin,
-            param: "argv",
-        })?;
-    if argv.is_empty() {
-        return Err(HostlibError::InvalidParameter {
-            builtin,
-            param: "argv",
-            message: "argv must contain at least one element".to_string(),
-        });
-    }
-    Ok(argv)
-}
-
 fn describe(value: &VmValue) -> &'static str {
     match value {
         VmValue::Int(_) => "int",

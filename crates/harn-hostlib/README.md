@@ -98,9 +98,19 @@ orchestration capability policy: Linux seccomp/landlock filters via
 `pre_exec`, macOS `sandbox-exec` wrapping, and cwd enforcement against the
 workspace roots the embedder configured.
 
-- `tools/run_command` accepts `argv: [string]` (no shell parsing), captures
-  stdout/stderr, enforces `timeout_ms` by killing the child and reporting
-  `timed_out: true`, and forwards optional `cwd`, `env`, and `stdin`.
+- `tools/run_command` is the canonical command runner. It accepts
+  `mode: "argv"` with `argv: [string]` as the recommended path, or
+  `mode: "shell"` with an explicit `shell` object when shell evaluation is
+  required. It captures stdout/stderr, enforces `timeout_ms`, forwards
+  optional `cwd`, `env`, `env_mode`, and `stdin`, and returns a command
+  envelope with `command_id`, `status`, pid/process-group metadata, inline
+  output capped by `capture.max_inline_bytes`, full output artifact paths,
+  byte/line counts, `output_sha256`, sandbox metadata, and `audit_id`.
+  `background: true` returns the same envelope with `status: "running"` and
+  a `handle_id`; the old `long_running` field remains accepted as an alias.
+- `tools/read_command_output` range-reads the artifact for a `command_id`,
+  `handle_id`, or explicit `path`. Use it when `stdout`/`stderr` were capped
+  inline or when an agent needs to inspect large command output.
 - `tools/run_test` runs explicit `argv` verbatim or detects a default test
   runner from manifests in `cwd`. Pytest and vitest get a JUnit XML output
   path so `inspect_test_results` can drill into per-test records.
@@ -153,7 +163,8 @@ directory.
 
 The deterministic-tool surface (`tools/{search, read_file, write_file,
 delete_file, list_directory, get_file_outline, git, run_command,
-run_test, run_build_command, inspect_test_results, manage_packages}`) is
+read_command_output, run_test, run_build_command, inspect_test_results,
+manage_packages}`) is
 **gated**.
 `install_default` registers the contract for every method, but the
 handlers refuse to run until the pipeline opts in by calling

@@ -193,6 +193,7 @@ fn tools_capability_registers_documented_methods() {
             // Process tools. Also gated by
             // `hostlib_enable("tools:deterministic")`.
             "hostlib_tools_run_command",
+            "hostlib_tools_read_command_output",
             "hostlib_tools_run_test",
             "hostlib_tools_run_build_command",
             "hostlib_tools_inspect_test_results",
@@ -216,6 +217,7 @@ fn tools_capability_registers_documented_methods() {
         "hostlib_tools_get_file_outline",
         "hostlib_tools_git",
         "hostlib_tools_run_command",
+        "hostlib_tools_read_command_output",
         "hostlib_tools_run_test",
         "hostlib_tools_run_build_command",
         "hostlib_tools_inspect_test_results",

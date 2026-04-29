@@ -560,9 +560,9 @@ does **not** drain the iterator.
 | `env_or(name, default)` | name: string, default: any | string or default | Read environment variable, or return `default` when unset. One-line replacement for the common `let v = env(K); if v { v } else { default }` pattern |
 | `timestamp()` | none | float | Unix timestamp in seconds with sub-second precision |
 | `elapsed()` | none | int | Milliseconds since VM startup |
-| `exec(cmd, args...)` | cmd: string, args: strings | dict | Execute external command. Returns `{stdout, stderr, status, success}` |
+| `exec(cmd, args...)` | cmd: string, args: strings | dict | Execute external command. Returns stdout/stderr plus status metadata and `success` |
 | `exec_at(dir, cmd, args...)` | dir: string, cmd: string, args: strings | dict | Execute external command inside a specific directory |
-| `shell(cmd)` | cmd: string | dict | Execute command via shell. Returns `{stdout, stderr, status, success}` |
+| `shell(cmd)` | cmd: string | dict | Execute command via shell. Returns stdout/stderr plus status metadata and `success` |
 | `shell_at(dir, cmd)` | dir: string, cmd: string | dict | Execute shell command inside a specific directory |
 | `exit(code)` | code: int (default 0) | never | Terminate the process |
 | `username()` | none | string | Current OS username |

@@ -33,13 +33,14 @@ use std::path::PathBuf;
 use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use harn_vm::VmValue;
 
 use harn_vm::process_sandbox;
 
 use crate::error::HostlibError;
+use crate::tools::proc::{self, CaptureConfig, CommandStatus, EnvMode};
 
 /// Atomic counter for generating unique handle IDs within this process.
 static HANDLE_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -73,10 +74,16 @@ static HANDLE_STORE: LazyLock<Mutex<HandleStore>> =
 /// Metadata returned to the caller immediately when a long-running spawn
 /// succeeds. Serialised as a response dict by the calling builtin.
 pub struct LongRunningHandleInfo {
+    /// Command identifier shared with foreground command responses.
+    pub command_id: String,
     /// Opaque handle identifier, e.g. `"hto-<pid-hex>-<n>"`.
     pub handle_id: String,
-    /// Unix timestamp of the spawn, in milliseconds.
-    pub started_at_ms: u64,
+    /// RFC 3339 timestamp of the spawn.
+    pub started_at: String,
+    /// Raw child process id reported by the platform.
+    pub pid: u32,
+    /// Child process group id when the platform exposes it.
+    pub process_group_id: Option<u32>,
     /// Human-readable display form of the argv (space-joined).
     pub command_display: String,
 }
@@ -84,11 +91,14 @@ pub struct LongRunningHandleInfo {
 impl LongRunningHandleInfo {
     /// Convert into the standard handle response dict returned to the agent.
     pub fn into_handle_response(self) -> VmValue {
-        super::response::ResponseBuilder::new()
-            .str("handle_id", self.handle_id)
-            .int("started_at", self.started_at_ms as i64)
-            .str("command", self.command_display)
-            .build()
+        proc::running_response(
+            self.command_id,
+            self.handle_id,
+            self.pid,
+            self.process_group_id,
+            self.started_at,
+            self.command_display,
+        )
     }
 }
 
@@ -102,6 +112,28 @@ pub fn spawn_long_running(
     args: Vec<String>,
     cwd: Option<PathBuf>,
     env: BTreeMap<String, String>,
+    session_id: String,
+) -> Result<LongRunningHandleInfo, HostlibError> {
+    spawn_long_running_with_options(
+        builtin,
+        program,
+        args,
+        cwd,
+        env,
+        EnvMode::InheritClean,
+        CaptureConfig::default(),
+        session_id,
+    )
+}
+
+pub(crate) fn spawn_long_running_with_options(
+    builtin: &'static str,
+    program: String,
+    args: Vec<String>,
+    cwd: Option<PathBuf>,
+    env: BTreeMap<String, String>,
+    env_mode: EnvMode,
+    capture: CaptureConfig,
     session_id: String,
 ) -> Result<LongRunningHandleInfo, HostlibError> {
     if program.is_empty() {
@@ -126,8 +158,12 @@ pub fn spawn_long_running(
         command.current_dir(cwd_path);
     }
 
-    if !env.is_empty() {
+    proc::configure_background_process_group(&mut command);
+
+    if matches!(env_mode, EnvMode::Replace) {
         command.env_clear();
+    }
+    if !env.is_empty() {
         for (key, value) in &env {
             command.env(key, value);
         }
@@ -151,13 +187,11 @@ pub fn spawn_long_running(
     })?;
 
     let pid = child.id();
+    let process_group_id = proc::child_process_group_id(pid);
     let id = HANDLE_COUNTER.fetch_add(1, Ordering::SeqCst);
     let handle_id = format!("hto-{:x}-{id}", std::process::id());
-
-    let started_at_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let command_id = proc::next_command_id();
+    let started_at = proc::now_rfc3339();
 
     let mut all_argv = vec![program.clone()];
     all_argv.extend(args.iter().cloned());
@@ -182,12 +216,22 @@ pub fn spawn_long_running(
         );
     }
 
+    let waiter_command_id = command_id.clone();
     let waiter_handle_id = handle_id.clone();
     let waiter_session_id = session_id;
+    let waiter_started_at = started_at.clone();
     std::thread::Builder::new()
         .name(format!("hto-waiter-{waiter_handle_id}"))
         .spawn(move || {
-            waiter_thread(waiter_handle_id, waiter_session_id, cancel_state);
+            waiter_thread(
+                waiter_command_id,
+                waiter_handle_id,
+                waiter_session_id,
+                cancel_state,
+                capture,
+                waiter_started_at,
+                process_group_id,
+            );
         })
         .map_err(|e| HostlibError::Backend {
             builtin,
@@ -195,14 +239,25 @@ pub fn spawn_long_running(
         })?;
 
     Ok(LongRunningHandleInfo {
+        command_id,
         handle_id,
-        started_at_ms,
+        started_at,
+        pid,
+        process_group_id,
         command_display,
     })
 }
 
 /// Background thread that waits for a child process and fires feedback.
-fn waiter_thread(handle_id: String, session_id: String, cancel_state: Arc<CancelState>) {
+fn waiter_thread(
+    command_id: String,
+    handle_id: String,
+    session_id: String,
+    cancel_state: Arc<CancelState>,
+    capture: CaptureConfig,
+    started_at: String,
+    process_group_id: Option<u32>,
+) {
     let waiter_start = std::time::Instant::now();
 
     // Take the child out of the store. If the entry is already gone (i.e.
@@ -268,26 +323,69 @@ fn waiter_thread(handle_id: String, session_id: String, cancel_state: Arc<Cancel
         // wait() itself failed — treat as killed (extremely unusual).
         None => (-1, Some("SIGKILL".to_string())),
     };
-    let duration_ms = waiter_start.elapsed().as_millis() as i64;
+    let duration = waiter_start.elapsed();
+    let duration_ms = duration.as_millis() as i64;
+    let artifacts = match proc::persist_artifacts(&command_id, &stdout, &stderr, Some(&handle_id)) {
+        Ok(artifacts) => artifacts,
+        Err(_) => return,
+    };
+    let (inline_stdout, inline_stderr) = proc::inline_output(&stdout, &stderr, capture);
 
     let mut payload = serde_json::Map::new();
+    payload.insert(
+        "command_id".into(),
+        serde_json::Value::String(command_id.clone()),
+    );
+    payload.insert(
+        "status".into(),
+        serde_json::Value::String(CommandStatus::Completed.as_str().to_string()),
+    );
     payload.insert("handle_id".into(), serde_json::Value::String(handle_id));
+    payload.insert("started_at".into(), serde_json::Value::String(started_at));
     payload.insert(
-        "exit_code".into(),
-        serde_json::Value::Number(exit_code.into()),
-    );
-    payload.insert(
-        "stdout".into(),
-        serde_json::Value::String(String::from_utf8_lossy(&stdout).into_owned()),
-    );
-    payload.insert(
-        "stderr".into(),
-        serde_json::Value::String(String::from_utf8_lossy(&stderr).into_owned()),
+        "ended_at".into(),
+        serde_json::Value::String(proc::now_rfc3339()),
     );
     payload.insert(
         "duration_ms".into(),
         serde_json::Value::Number(duration_ms.into()),
     );
+    payload.insert(
+        "exit_code".into(),
+        serde_json::Value::Number(exit_code.into()),
+    );
+    payload.insert("stdout".into(), serde_json::Value::String(inline_stdout));
+    payload.insert("stderr".into(), serde_json::Value::String(inline_stderr));
+    payload.insert(
+        "output_path".into(),
+        serde_json::Value::String(artifacts.output_path.display().to_string()),
+    );
+    payload.insert(
+        "stdout_path".into(),
+        serde_json::Value::String(artifacts.stdout_path.display().to_string()),
+    );
+    payload.insert(
+        "stderr_path".into(),
+        serde_json::Value::String(artifacts.stderr_path.display().to_string()),
+    );
+    payload.insert(
+        "line_count".into(),
+        serde_json::Value::Number(artifacts.line_count.into()),
+    );
+    payload.insert(
+        "byte_count".into(),
+        serde_json::Value::Number(artifacts.byte_count.into()),
+    );
+    payload.insert(
+        "output_sha256".into(),
+        serde_json::Value::String(artifacts.output_sha256),
+    );
+    if let Some(pgid) = process_group_id {
+        payload.insert(
+            "process_group_id".into(),
+            serde_json::Value::Number((pgid as u64).into()),
+        );
+    }
     if let Some(sig) = signal_name {
         payload.insert("signal".into(), serde_json::Value::String(sig));
     } else {
@@ -352,7 +450,7 @@ fn do_kill(pid: u32, child: Option<Child>, cancel_state: Arc<CancelState>) {
         kill_child(&mut c);
     } else {
         // Waiter already took the child; signal by PID.
-        kill_pid(pid);
+        kill_pid_or_group(pid);
     }
 }
 
@@ -370,13 +468,14 @@ pub(crate) fn register_cleanup_hook() {
 }
 
 fn kill_child(child: &mut Child) {
+    kill_pid_or_group(child.id());
     let _ = child.kill();
     let _ = child.wait();
 }
 
 /// Kill a process by its PID. Used when the waiter thread has already taken
 /// ownership of the `Child` object but the process must still be terminated.
-fn kill_pid(pid: u32) {
+fn kill_pid_or_group(pid: u32) {
     #[cfg(unix)]
     {
         // SAFETY: We call kill(2) with a valid PID and SIGKILL (9). On all
@@ -385,7 +484,8 @@ fn kill_pid(pid: u32) {
             fn kill(pid: i32, sig: i32) -> i32;
         }
         unsafe {
-            kill(pid as i32, 9); // SIGKILL
+            kill(-(pid as i32), 9); // SIGKILL process group first.
+            kill(pid as i32, 9);
         }
     }
     #[cfg(not(unix))]

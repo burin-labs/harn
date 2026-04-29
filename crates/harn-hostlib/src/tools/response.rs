@@ -48,6 +48,11 @@ impl ResponseBuilder {
         self
     }
 
+    pub(crate) fn nil(mut self, key: &str) -> Self {
+        self.inner.insert(key.to_string(), VmValue::Nil);
+        self
+    }
+
     pub(crate) fn dict(mut self, key: &str, value: BTreeMap<String, VmValue>) -> Self {
         self.inner
             .insert(key.to_string(), VmValue::Dict(Rc::new(value)));
