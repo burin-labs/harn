@@ -739,6 +739,18 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         Ok(VmValue::String(Rc::from(prompt.trim_end())))
     });
 
+    vm.register_builtin("tool_surface_validate", |args, _out| {
+        let surface = args
+            .first()
+            .cloned()
+            .unwrap_or_else(|| current_tool_registry().unwrap_or(VmValue::Nil));
+        let input = crate::tool_surface::surface_input_from_vm(&surface, args.get(1));
+        let report = crate::tool_surface::validate_tool_surface(&input);
+        Ok(crate::stdlib::json_to_vm_value(
+            &crate::tool_surface::surface_report_to_json(&report),
+        ))
+    });
+
     vm.register_builtin("tool_bind", |args, _out| {
         let registry = match args.first() {
             Some(VmValue::Dict(map)) => {

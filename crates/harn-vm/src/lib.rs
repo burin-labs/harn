@@ -40,6 +40,7 @@ pub mod store;
 pub(crate) mod synchronization;
 pub mod tenant;
 pub mod tool_annotations;
+pub mod tool_surface;
 pub mod tracing;
 pub mod triggers;
 pub mod trust_graph;

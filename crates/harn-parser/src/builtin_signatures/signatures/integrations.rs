@@ -476,6 +476,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "tool_surface_validate",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "transport_mock_calls",
         return_type: Some(BuiltinReturn::Named("list")),
     },
