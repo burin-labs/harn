@@ -9,7 +9,7 @@ transition plan:
 - GitHub, Slack, Linear, and Notion still have deprecated Rust compatibility
   shims, but new provider business logic belongs in pure-Harn packages.
 - Community connectors are Harn packages that export connector contract v1 and
-  pass `harn connector check`.
+  pass `harn connector test`.
 
 For the architecture and ownership split that closes the old connector-library
 epic, see [Connector architecture status](./architecture.md).
@@ -86,23 +86,23 @@ See `examples/triggers/a2a-reviewer-fanout`.
 Each first-party connector repo should publish:
 
 - repository URL and package install command
-- `harn connector check` command
+- `harn connector test` command
 - required secrets and provider scopes
 - supported trigger/event types
 - mocked fixtures so CI does not need live provider credentials
 
-| Provider | Package repo | Install | Contract check | Required secrets/scopes | Supported trigger/event types |
+| Provider | Package repo | Install | Package gate | Required secrets/scopes | Supported trigger/event types |
 |---|---|---|---|---|---|
-| GitHub | <https://github.com/burin-labs/harn-github-connector> | `harn add github.com/burin-labs/harn-github-connector@v0.1.0` | `harn connector check . --provider github` | Webhook secret; for outbound, GitHub App id, installation id, and private key. App permissions depend on methods: issues, pull requests, contents/metadata, checks, deployments. | `issues`, `pull_request`, `issue_comment`, `pull_request_review`, `push`, `workflow_run`, `deployment_status`, `check_run`; outbound REST/GraphQL escape hatches. |
-| Slack | <https://github.com/burin-labs/harn-slack-connector> | `harn add github.com/burin-labs/harn-slack-connector@v0.1.0` | `harn connector check . --provider slack` | Signing secret; for outbound, bot token. Typical scopes: `app_mentions:read`, `channels:history`, `reactions:read`, `chat:write`, `reactions:write`, `users:read`, `files:write`. | URL verification, `message`, `app_mention`, `reaction_added`, `app_home_opened`, `assistant_thread_started`; outbound Web API calls. |
-| Linear | <https://github.com/burin-labs/harn-linear-connector> | `harn add github.com/burin-labs/harn-linear-connector@v0.1.0` | `harn connector check . --provider linear` | Webhook signing secret; optional API key/access token for outbound GraphQL. | `Issue`, `Comment`, `IssueLabel`, `Project`, `Cycle`, `Customer`, `CustomerRequest`; outbound GraphQL. |
-| Notion | <https://github.com/burin-labs/harn-notion-connector> | `harn add github.com/burin-labs/harn-notion-connector@v0.1.0` | `harn connector check . --provider notion --run-poll-tick` | Webhook verification token; outbound API token. Notion integration capabilities depend on pages/databases/comments used. | Webhook events such as subscription verification, page updates, comments, data source schema updates; `poll_tick` database/page watchers; outbound Notion API via `notion-sdk-harn`. |
-| GitLab | <https://github.com/burin-labs/harn-gitlab-connector> | `harn add github.com/burin-labs/harn-gitlab-connector@v0.1.0` | `harn connector check . --provider gitlab` | Webhook signing secret (plain shared-secret `X-Gitlab-Token`, not HMAC); for outbound, an OAuth2 access token, PAT, or project/group access token with `api` scope. | `push`, `tag_push`, `merge_request`, `note`, `issue`, `pipeline`; outbound REST (notes, MR update/changes/approve, commit status, repository files), GraphQL passthrough, and OAuth2 helpers. |
-| Forgejo | <https://github.com/burin-labs/harn-forgejo-connector> | `harn add github.com/burin-labs/harn-forgejo-connector@v0.1.0` | `harn connector check . --provider forgejo` | Webhook signing secret verified as HMAC-SHA256 from `X-Gitea-Signature`; for outbound, a user, organization, or repository access token accepted by the instance API. | `push`, `pull_request`, `issues`, `issue_comment`, `release`, `repository`, `star`; outbound REST for comments, PR updates, commit statuses, repository contents, and raw API passthrough. |
-| Gitea | <https://github.com/burin-labs/harn-gitea-connector> | `harn add github.com/burin-labs/harn-gitea-connector@v0.1.0` | `harn connector check . --provider gitea` | Webhook signing secret verified as HMAC-SHA256 from `X-Gitea-Signature`; for outbound, an access token scoped to the target self-hosted instance. | `push`, `pull_request`, `issues`, `issue_comment`, `release`, `repository`, `star`; outbound REST for comments, PR updates, commit statuses, repository contents, and raw API passthrough. |
-| Bitbucket | <https://github.com/burin-labs/harn-bitbucket-connector> | `harn add github.com/burin-labs/harn-bitbucket-connector@v0.1.0` | `harn connector check . --provider bitbucket` | Optional webhook signing secret verified as HMAC-SHA256 from `X-Hub-Signature`; `X-Hook-UUID` and `X-Request-UUID` are preserved for dedupe. For outbound, app password, OAuth2 token, or Data Center PAT. | Cloud and Data Center `repo:push`, `pullrequest:*`, `issue:*`, `repo:commit_status_*`; outbound PR comments/updates, commit statuses, repository file fetches, and raw API passthrough. |
-| SourceHut | <https://github.com/burin-labs/harn-sourcehut-connector> | `harn add github.com/burin-labs/harn-sourcehut-connector@v0.1.0` | `harn connector check . --provider sourcehut` | Webhook public key verified with Ed25519 over the raw payload; outbound GraphQL/REST calls use an OAuth2 token or PAT. | Repository push/update events, todo/ticket changes, build notifications, mailing-list oriented message metadata; outbound GraphQL/REST passthrough. |
-| Subversion | <https://github.com/burin-labs/harn-svn-connector> | `harn add github.com/burin-labs/harn-svn-connector@v0.1.0` | `harn connector check . --provider svn --run-poll-tick` | Optional post-commit hook HMAC secret; polling credentials are repository URL plus username/password, SSH key, or ambient host-managed credential helper. | `commit`, `branch`, `tag`, `property_change`; webhook-style post-commit normalization plus `poll_tick` revision scanning for repositories that cannot install hooks. |
+| GitHub | <https://github.com/burin-labs/harn-github-connector> | `harn add github.com/burin-labs/harn-github-connector@v0.1.0` | `harn connector test . --provider github` | Webhook secret; for outbound, GitHub App id, installation id, and private key. App permissions depend on methods: issues, pull requests, contents/metadata, checks, deployments. | `issues`, `pull_request`, `issue_comment`, `pull_request_review`, `push`, `workflow_run`, `deployment_status`, `check_run`; outbound REST/GraphQL escape hatches. |
+| Slack | <https://github.com/burin-labs/harn-slack-connector> | `harn add github.com/burin-labs/harn-slack-connector@v0.1.0` | `harn connector test . --provider slack` | Signing secret; for outbound, bot token. Typical scopes: `app_mentions:read`, `channels:history`, `reactions:read`, `chat:write`, `reactions:write`, `users:read`, `files:write`. | URL verification, `message`, `app_mention`, `reaction_added`, `app_home_opened`, `assistant_thread_started`; outbound Web API calls. |
+| Linear | <https://github.com/burin-labs/harn-linear-connector> | `harn add github.com/burin-labs/harn-linear-connector@v0.1.0` | `harn connector test . --provider linear` | Webhook signing secret; optional API key/access token for outbound GraphQL. | `Issue`, `Comment`, `IssueLabel`, `Project`, `Cycle`, `Customer`, `CustomerRequest`; outbound GraphQL. |
+| Notion | <https://github.com/burin-labs/harn-notion-connector> | `harn add github.com/burin-labs/harn-notion-connector@v0.1.0` | `harn connector test . --provider notion --run-poll-tick` | Webhook verification token; outbound API token. Notion integration capabilities depend on pages/databases/comments used. | Webhook events such as subscription verification, page updates, comments, data source schema updates; `poll_tick` database/page watchers; outbound Notion API via `notion-sdk-harn`. |
+| GitLab | <https://github.com/burin-labs/harn-gitlab-connector> | `harn add github.com/burin-labs/harn-gitlab-connector@v0.1.0` | `harn connector test . --provider gitlab` | Webhook signing secret (plain shared-secret `X-Gitlab-Token`, not HMAC); for outbound, an OAuth2 access token, PAT, or project/group access token with `api` scope. | `push`, `tag_push`, `merge_request`, `note`, `issue`, `pipeline`; outbound REST (notes, MR update/changes/approve, commit status, repository files), GraphQL passthrough, and OAuth2 helpers. |
+| Forgejo | <https://github.com/burin-labs/harn-forgejo-connector> | `harn add github.com/burin-labs/harn-forgejo-connector@v0.1.0` | `harn connector test . --provider forgejo` | Webhook signing secret verified as HMAC-SHA256 from `X-Gitea-Signature`; for outbound, a user, organization, or repository access token accepted by the instance API. | `push`, `pull_request`, `issues`, `issue_comment`, `release`, `repository`, `star`; outbound REST for comments, PR updates, commit statuses, repository contents, and raw API passthrough. |
+| Gitea | <https://github.com/burin-labs/harn-gitea-connector> | `harn add github.com/burin-labs/harn-gitea-connector@v0.1.0` | `harn connector test . --provider gitea` | Webhook signing secret verified as HMAC-SHA256 from `X-Gitea-Signature`; for outbound, an access token scoped to the target self-hosted instance. | `push`, `pull_request`, `issues`, `issue_comment`, `release`, `repository`, `star`; outbound REST for comments, PR updates, commit statuses, repository contents, and raw API passthrough. |
+| Bitbucket | <https://github.com/burin-labs/harn-bitbucket-connector> | `harn add github.com/burin-labs/harn-bitbucket-connector@v0.1.0` | `harn connector test . --provider bitbucket` | Optional webhook signing secret verified as HMAC-SHA256 from `X-Hub-Signature`; `X-Hook-UUID` and `X-Request-UUID` are preserved for dedupe. For outbound, app password, OAuth2 token, or Data Center PAT. | Cloud and Data Center `repo:push`, `pullrequest:*`, `issue:*`, `repo:commit_status_*`; outbound PR comments/updates, commit statuses, repository file fetches, and raw API passthrough. |
+| SourceHut | <https://github.com/burin-labs/harn-sourcehut-connector> | `harn add github.com/burin-labs/harn-sourcehut-connector@v0.1.0` | `harn connector test . --provider sourcehut` | Webhook public key verified with Ed25519 over the raw payload; outbound GraphQL/REST calls use an OAuth2 token or PAT. | Repository push/update events, todo/ticket changes, build notifications, mailing-list oriented message metadata; outbound GraphQL/REST passthrough. |
+| Subversion | <https://github.com/burin-labs/harn-svn-connector> | `harn add github.com/burin-labs/harn-svn-connector@v0.1.0` | `harn connector test . --provider svn --run-poll-tick` | Optional post-commit hook HMAC secret; polling credentials are repository URL plus username/password, SSH key, or ambient host-managed credential helper. | `commit`, `branch`, `tag`, `property_change`; webhook-style post-commit normalization plus `poll_tick` revision scanning for repositories that cannot install hooks. |
 
 Direct GitHub installs are the MVP path. Registry names such as
 `@burin/notion-connector` should be used once the hosted first-party index is
@@ -196,7 +196,7 @@ A community connector is any Harn package that:
 3. Exports `provider_id`, `kinds`, `payload_schema`, and the relevant
    `normalize_inbound`, `poll_tick`, or `call` exports.
 4. Ships deterministic `[connector_contract]` fixtures and passes
-   `harn connector check .`.
+   `harn connector test .`.
 
 Minimal package shape:
 
@@ -232,9 +232,7 @@ expect_event_count = 1
 Run:
 
 ```sh
-harn connector check .
-harn package check .
-harn install --locked --offline
+harn connector test .
 ```
 
 Use live credentials only in provider-specific integration tests. Catalog
@@ -249,7 +247,7 @@ Start with [Connector authoring](./authoring.md), then add:
 - contract fixtures that cover normal event, ack-first response, reject, and
   poll cases where relevant
 - a `README.md` with install, setup, required secrets/scopes, supported events,
-  and `harn connector check` command
+  and `harn connector test` command
 - mocked tests for outbound `call(...)` methods
 - a small recipe example under `examples/triggers/` when the connector is
   first-party or broadly useful

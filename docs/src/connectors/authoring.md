@@ -187,16 +187,29 @@ connectors with `HarnConnector::load_with_effect_policies` and
 run that export without the default connector policy, or `set_export_policy` to
 install a narrower host-specific `CapabilityPolicy`.
 
-## Connector contract check
+## Connector package gate
 
-Pure-Harn connector packages should run the package-level contract harness in
-CI:
+Pure-Harn connector packages should run the package-level gate in CI:
+
+```bash
+harn connector test .
+```
+
+The gate validates package metadata, runs `harn check`, `harn lint`,
+`harn fmt --check`, executes package-local `tests/*.harn` fixture programs,
+checks install/import behavior from a clean consumer package, parses standalone
+Harn doc examples, and includes the connector contract check below. Pass
+`--json` to emit a machine-readable readiness report for CI, Harn Cloud, or
+Burin Code.
+
+Use the lower-level contract harness when iterating only on the connector
+module:
 
 ```bash
 harn connector check .
 ```
 
-The command loads the package through its `harn.toml` `[[providers]]` entries,
+That command loads the package through its `harn.toml` `[[providers]]` entries,
 uses the normal Harn-backed connector adapter, and checks connector contract
 v1:
 

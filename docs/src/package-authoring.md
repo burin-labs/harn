@@ -39,16 +39,16 @@ dependencies pinned to a version or rev.
 ```bash
 harn new connector echo-connector
 cd echo-connector
-harn connector check .
-harn test tests/
-harn package check
+harn connector test .
 harn package docs
 harn publish --dry-run
 ```
 
-Connector packages use the same package checks plus `harn connector check .` for
-the pure-Harn connector contract. First-party and community connectors should
-keep this CI shape so package consumers get the same authoring workflow.
+Connector packages use `harn connector test .` as the CI gate. It runs package
+metadata validation, `harn check`, `harn lint`, `harn fmt --check`, connector
+contract fixtures, package-local fixture tests, install/import smoke tests, and
+standalone Harn doc examples. Use `harn connector check .` when you only need
+the lower-level pure-Harn connector contract check.
 
 ## Manifest metadata
 

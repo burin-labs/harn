@@ -580,8 +580,7 @@ jobs:
       - uses: taiki-e/install-action@cargo-binstall
       - run: cargo binstall harn-cli --no-confirm
       - run: harn install --locked --offline || harn install
-      - run: harn test tests/
-      - run: harn connector check .
+      - run: harn connector test .
       - run: harn package check
       - run: harn package docs --check
       - run: harn package pack --dry-run
@@ -598,8 +597,7 @@ Pure-Harn connector package.
 ## Quickstart
 
 ```bash
-harn connector check .
-harn test tests/
+harn connector test .
 harn package check
 harn package docs
 harn package pack

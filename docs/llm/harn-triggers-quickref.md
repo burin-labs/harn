@@ -65,18 +65,18 @@ This table is generated from `std/triggers::list_providers()` / `ProviderCatalog
 
 Prefer pure-Harn packages for provider business logic. The Rust providers remain compatibility defaults while the pure-Harn packages soak.
 
-| Provider | Package | Install | Contract check |
+| Provider | Package | Install | Package gate |
 |---|---|---|---|
-| GitHub | <https://github.com/burin-labs/harn-github-connector> | `harn add github.com/burin-labs/harn-github-connector@v0.1.0` | `harn connector check . --provider github` |
-| Slack | <https://github.com/burin-labs/harn-slack-connector> | `harn add github.com/burin-labs/harn-slack-connector@v0.1.0` | `harn connector check . --provider slack` |
-| Linear | <https://github.com/burin-labs/harn-linear-connector> | `harn add github.com/burin-labs/harn-linear-connector@v0.1.0` | `harn connector check . --provider linear` |
-| Notion | <https://github.com/burin-labs/harn-notion-connector> | `harn add github.com/burin-labs/harn-notion-connector@v0.1.0` | `harn connector check . --provider notion --run-poll-tick` |
-| GitLab | <https://github.com/burin-labs/harn-gitlab-connector> | `harn add github.com/burin-labs/harn-gitlab-connector@v0.1.0` | `harn connector check . --provider gitlab` |
-| Forgejo | <https://github.com/burin-labs/harn-forgejo-connector> | `harn add github.com/burin-labs/harn-forgejo-connector@v0.1.0` | `harn connector check . --provider forgejo` |
-| Gitea | <https://github.com/burin-labs/harn-gitea-connector> | `harn add github.com/burin-labs/harn-gitea-connector@v0.1.0` | `harn connector check . --provider gitea` |
-| Bitbucket | <https://github.com/burin-labs/harn-bitbucket-connector> | `harn add github.com/burin-labs/harn-bitbucket-connector@v0.1.0` | `harn connector check . --provider bitbucket` |
-| SourceHut | <https://github.com/burin-labs/harn-sourcehut-connector> | `harn add github.com/burin-labs/harn-sourcehut-connector@v0.1.0` | `harn connector check . --provider sourcehut` |
-| Subversion | <https://github.com/burin-labs/harn-svn-connector> | `harn add github.com/burin-labs/harn-svn-connector@v0.1.0` | `harn connector check . --provider svn --run-poll-tick` |
+| GitHub | <https://github.com/burin-labs/harn-github-connector> | `harn add github.com/burin-labs/harn-github-connector@v0.1.0` | `harn connector test . --provider github` |
+| Slack | <https://github.com/burin-labs/harn-slack-connector> | `harn add github.com/burin-labs/harn-slack-connector@v0.1.0` | `harn connector test . --provider slack` |
+| Linear | <https://github.com/burin-labs/harn-linear-connector> | `harn add github.com/burin-labs/harn-linear-connector@v0.1.0` | `harn connector test . --provider linear` |
+| Notion | <https://github.com/burin-labs/harn-notion-connector> | `harn add github.com/burin-labs/harn-notion-connector@v0.1.0` | `harn connector test . --provider notion --run-poll-tick` |
+| GitLab | <https://github.com/burin-labs/harn-gitlab-connector> | `harn add github.com/burin-labs/harn-gitlab-connector@v0.1.0` | `harn connector test . --provider gitlab` |
+| Forgejo | <https://github.com/burin-labs/harn-forgejo-connector> | `harn add github.com/burin-labs/harn-forgejo-connector@v0.1.0` | `harn connector test . --provider forgejo` |
+| Gitea | <https://github.com/burin-labs/harn-gitea-connector> | `harn add github.com/burin-labs/harn-gitea-connector@v0.1.0` | `harn connector test . --provider gitea` |
+| Bitbucket | <https://github.com/burin-labs/harn-bitbucket-connector> | `harn add github.com/burin-labs/harn-bitbucket-connector@v0.1.0` | `harn connector test . --provider bitbucket` |
+| SourceHut | <https://github.com/burin-labs/harn-sourcehut-connector> | `harn add github.com/burin-labs/harn-sourcehut-connector@v0.1.0` | `harn connector test . --provider sourcehut` |
+| Subversion | <https://github.com/burin-labs/harn-svn-connector> | `harn add github.com/burin-labs/harn-svn-connector@v0.1.0` | `harn connector test . --provider svn --run-poll-tick` |
 
 Community connectors are Harn packages that declare `connector_contract = "v1"` and export the connector functions below. Direct GitHub refs are enough for private or pre-registry packages; registry names such as `@burin/notion-connector` are for discoverable package-index entries.
 
@@ -118,7 +118,7 @@ expect_type = "immediate_response"
 expect_event_count = 0
 ```
 
-Run `harn connector check .` locally. Use `--provider <id>` for a multi-provider package, `--run-poll-tick` to execute the first poll tick, and `--json` for CI output.
+Run `harn connector test .` locally. Use `--provider <id>` for a multi-provider package, `--run-poll-tick` to execute the first poll tick, and `--json` for CI output.
 
 ## Example Library
 
