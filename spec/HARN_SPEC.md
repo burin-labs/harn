@@ -3040,8 +3040,10 @@ wrappers pick up the same narrowing.
   {ok: bool, data: T | nil, raw_text: string, error: string,
   error_category: string | nil, attempts: int, repaired: bool,
   extracted_json: bool, usage: {input_tokens: int, output_tokens: int,
-  cache_read_tokens: int, cache_write_tokens: int}, model: string,
-  provider: string}`. Never throws on transport / schema failures —
+  cache_read_tokens: int, cache_write_tokens: int,
+  cache_creation_input_tokens: int, cache_hit_ratio: float,
+  cache_savings_usd: float}, model: string, provider: string}`.
+  Never throws on transport / schema failures —
   callers dispatch on `ok` / `error_category`. Recognized
   `error_category` values: `transport`-class categories pass through
   the underlying enum (`rate_limit`, `timeout`, `auth`,

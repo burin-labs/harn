@@ -1322,6 +1322,15 @@ fn register_llm_mock_builtins(vm: &mut Vm) {
 
         let input_tokens = config.get("input_tokens").and_then(|v| v.as_int());
         let output_tokens = config.get("output_tokens").and_then(|v| v.as_int());
+        let cache_read_tokens = config.get("cache_read_tokens").and_then(|v| v.as_int());
+        let cache_write_tokens = config
+            .get("cache_write_tokens")
+            .and_then(|v| v.as_int())
+            .or_else(|| {
+                config
+                    .get("cache_creation_input_tokens")
+                    .and_then(|v| v.as_int())
+            });
         let thinking = config.get("thinking").and_then(|v| {
             if matches!(v, VmValue::Nil) {
                 None
@@ -1404,8 +1413,8 @@ fn register_llm_mock_builtins(vm: &mut Vm) {
             consume_on_match,
             input_tokens,
             output_tokens,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
+            cache_read_tokens,
+            cache_write_tokens,
             thinking,
             stop_reason,
             model,

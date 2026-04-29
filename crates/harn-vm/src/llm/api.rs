@@ -146,6 +146,8 @@ async fn vm_call_llm_full_inner_request(
             request.system.as_deref(),
             request.native_tools.as_deref(),
             &request.thinking,
+            &request.model,
+            request.cache,
         )?;
         super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(&result);
@@ -208,6 +210,8 @@ async fn vm_call_llm_full_inner_offthread(
             request.system.as_deref(),
             request.native_tools.as_deref(),
             &request.thinking,
+            &request.model,
+            request.cache,
         )
         .map_err(|e| e.to_string())?;
         super::trigger_predicate::note_result(request, &result);

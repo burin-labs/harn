@@ -1,0 +1,17 @@
+pipeline default() {
+  var prompt = ""
+  for i in range(0, 80) {
+    prompt += "stable cacheable prefix line " + to_string(i) + ": explain prompt caching usage fields.\n"
+  }
+  let options = {provider: "mock", model: "claude-sonnet-4-20250514", cache: true}
+  let first = llm_call(prompt, nil, options)
+  let second = llm_call(prompt, nil, options)
+  println(first.usage.cache_read_tokens == 0)
+  println(first.usage.cache_write_tokens > 0)
+  println(first.usage.cache_creation_input_tokens == first.usage.cache_write_tokens)
+  println(second.usage.cache_read_tokens > 0)
+  println(second.usage.cache_write_tokens == 0)
+  println(second.usage.cache_hit_ratio == 1.0)
+  println(second.usage.cache_savings_usd > 0.0)
+  println(second.cache_read_tokens == second.usage.cache_read_tokens)
+}

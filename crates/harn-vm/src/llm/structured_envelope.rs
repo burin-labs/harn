@@ -374,6 +374,9 @@ fn empty_usage_dict() -> BTreeMap<String, VmValue> {
     usage.insert("output_tokens".to_string(), VmValue::Int(0));
     usage.insert("cache_read_tokens".to_string(), VmValue::Int(0));
     usage.insert("cache_write_tokens".to_string(), VmValue::Int(0));
+    usage.insert("cache_creation_input_tokens".to_string(), VmValue::Int(0));
+    usage.insert("cache_hit_ratio".to_string(), VmValue::Float(0.0));
+    usage.insert("cache_savings_usd".to_string(), VmValue::Float(0.0));
     usage
 }
 
@@ -382,12 +385,18 @@ fn build_usage_dict(outcome: &SchemaLoopOutcome) -> VmValue {
         Some(d) => d,
         None => return VmValue::Dict(Rc::new(empty_usage_dict())),
     };
+    if let Some(VmValue::Dict(usage)) = dict.get("usage") {
+        return VmValue::Dict(usage.clone());
+    }
     let mut usage = empty_usage_dict();
     for key in [
         "input_tokens",
         "output_tokens",
         "cache_read_tokens",
         "cache_write_tokens",
+        "cache_creation_input_tokens",
+        "cache_hit_ratio",
+        "cache_savings_usd",
     ] {
         if let Some(v) = dict.get(key) {
             usage.insert(key.to_string(), v.clone());

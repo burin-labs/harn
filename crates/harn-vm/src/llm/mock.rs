@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 
 use super::api::LlmResult;
 use crate::orchestration::ToolCallRecord;
@@ -71,6 +72,8 @@ pub(crate) struct LlmMockCall {
     pub thinking: serde_json::Value,
 }
 
+type LlmMockScope = (Vec<LlmMock>, Vec<LlmMockCall>, BTreeSet<String>);
+
 thread_local! {
     static LLM_REPLAY_MODE: RefCell<LlmReplayMode> = const { RefCell::new(LlmReplayMode::Off) };
     static LLM_FIXTURE_DIR: RefCell<String> = const { RefCell::new(String::new()) };
@@ -82,8 +85,8 @@ thread_local! {
     static CLI_LLM_MOCKS: RefCell<Vec<LlmMock>> = const { RefCell::new(Vec::new()) };
     static CLI_LLM_RECORDINGS: RefCell<Vec<LlmMock>> = const { RefCell::new(Vec::new()) };
     static LLM_MOCK_CALLS: RefCell<Vec<LlmMockCall>> = const { RefCell::new(Vec::new()) };
-    static LLM_MOCK_SCOPES: RefCell<Vec<(Vec<LlmMock>, Vec<LlmMockCall>)>> =
-        const { RefCell::new(Vec::new()) };
+    static LLM_PROMPT_CACHE: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
+    static LLM_MOCK_SCOPES: RefCell<Vec<LlmMockScope>> = const { RefCell::new(Vec::new()) };
 }
 
 pub(crate) fn push_llm_mock(mock: LlmMock) {
@@ -100,6 +103,7 @@ pub(crate) fn reset_llm_mock_state() {
     CLI_LLM_MOCKS.with(|v| v.borrow_mut().clear());
     CLI_LLM_RECORDINGS.with(|v| v.borrow_mut().clear());
     LLM_MOCK_CALLS.with(|v| v.borrow_mut().clear());
+    LLM_PROMPT_CACHE.with(|v| v.borrow_mut().clear());
     LLM_MOCK_SCOPES.with(|v| v.borrow_mut().clear());
 }
 
@@ -110,7 +114,8 @@ pub(crate) fn reset_llm_mock_state() {
 pub(crate) fn push_llm_mock_scope() {
     let mocks = LLM_MOCKS.with(|v| std::mem::take(&mut *v.borrow_mut()));
     let calls = LLM_MOCK_CALLS.with(|v| std::mem::take(&mut *v.borrow_mut()));
-    LLM_MOCK_SCOPES.with(|v| v.borrow_mut().push((mocks, calls)));
+    let cache = LLM_PROMPT_CACHE.with(|v| std::mem::take(&mut *v.borrow_mut()));
+    LLM_MOCK_SCOPES.with(|v| v.borrow_mut().push((mocks, calls, cache)));
 }
 
 /// Restore the most recently pushed builtin LLM mock scope. Returns
@@ -121,9 +126,10 @@ pub(crate) fn push_llm_mock_scope() {
 pub(crate) fn pop_llm_mock_scope() -> bool {
     let entry = LLM_MOCK_SCOPES.with(|v| v.borrow_mut().pop());
     match entry {
-        Some((mocks, calls)) => {
+        Some((mocks, calls, cache)) => {
             LLM_MOCKS.with(|v| *v.borrow_mut() = mocks);
             LLM_MOCK_CALLS.with(|v| *v.borrow_mut() = calls);
+            LLM_PROMPT_CACHE.with(|v| *v.borrow_mut() = cache);
             true
         }
         None => false,
@@ -308,6 +314,43 @@ fn mock_last_prompt_text(messages: &[serde_json::Value]) -> String {
     String::new()
 }
 
+fn mock_prompt_cache_key(
+    model: &str,
+    messages: &[serde_json::Value],
+    system: Option<&str>,
+) -> String {
+    serde_json::to_string(&serde_json::json!({
+        "model": model,
+        "system": system,
+        "messages": messages,
+    }))
+    .unwrap_or_default()
+}
+
+fn apply_mock_prompt_cache(result: &mut LlmResult, cache_key: &str) {
+    if result.cache_read_tokens > 0 || result.cache_write_tokens > 0 {
+        return;
+    }
+    let cache_tokens = result.input_tokens.max(0);
+    if cache_tokens == 0 {
+        return;
+    }
+    let cache_hit = LLM_PROMPT_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.contains(cache_key) {
+            true
+        } else {
+            cache.insert(cache_key.to_string());
+            false
+        }
+    });
+    if cache_hit {
+        result.cache_read_tokens = cache_tokens;
+    } else {
+        result.cache_write_tokens = cache_tokens;
+    }
+}
+
 /// Convert a mock's `error` payload into the `VmError` that the
 /// provider path would have raised, so classification, retry, and
 /// `error_category` all behave identically to a real failure.
@@ -455,8 +498,13 @@ pub(crate) fn save_fixture(hash: &str, result: &LlmResult) {
         "tool_calls": result.tool_calls,
         "input_tokens": result.input_tokens,
         "output_tokens": result.output_tokens,
+        "cache_read_tokens": result.cache_read_tokens,
+        "cache_write_tokens": result.cache_write_tokens,
+        "cache_creation_input_tokens": result.cache_write_tokens,
         "model": result.model,
         "provider": result.provider,
+        "thinking": result.thinking,
+        "stop_reason": result.stop_reason,
         "blocks": result.blocks,
     });
     let _ = std::fs::write(
@@ -479,7 +527,10 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
         input_tokens: json["input_tokens"].as_i64().unwrap_or(0),
         output_tokens: json["output_tokens"].as_i64().unwrap_or(0),
         cache_read_tokens: json["cache_read_tokens"].as_i64().unwrap_or(0),
-        cache_write_tokens: json["cache_write_tokens"].as_i64().unwrap_or(0),
+        cache_write_tokens: json["cache_write_tokens"]
+            .as_i64()
+            .or_else(|| json["cache_creation_input_tokens"].as_i64())
+            .unwrap_or(0),
         model: json["model"].as_str().unwrap_or("").to_string(),
         provider: json["provider"].as_str().unwrap_or("mock").to_string(),
         thinking: json["thinking"].as_str().map(|s| s.to_string()),
@@ -549,18 +600,31 @@ pub(crate) fn mock_llm_response(
     system: Option<&str>,
     native_tools: Option<&[serde_json::Value]>,
     thinking: &super::api::ThinkingConfig,
+    model: &str,
+    cache: bool,
 ) -> Result<LlmResult, VmError> {
     record_llm_mock_call(messages, system, native_tools, thinking);
 
     let match_text = mock_match_text(messages);
     let prompt_text = mock_last_prompt_text(messages);
+    let cache_key = mock_prompt_cache_key(model, messages, system);
 
     if let Some(matched) = try_match_cli_mock(&match_text) {
-        return matched;
+        return matched.map(|mut result| {
+            if cache {
+                apply_mock_prompt_cache(&mut result, &cache_key);
+            }
+            result
+        });
     }
 
     if let Some(matched) = try_match_builtin_mock(&match_text) {
-        return matched;
+        return matched.map(|mut result| {
+            if cache {
+                apply_mock_prompt_cache(&mut result, &cache_key);
+            }
+            result
+        });
     }
 
     if cli_llm_mock_replay_active() {
@@ -577,7 +641,7 @@ pub(crate) fn mock_llm_response(
                 .and_then(|n| n.as_str())
                 .unwrap_or("unknown");
             let mock_args = mock_required_args(first_tool);
-            return Ok(LlmResult {
+            let mut result = LlmResult {
                 text: String::new(),
                 tool_calls: vec![serde_json::json!({
                         "id": "mock_call_1",
@@ -589,7 +653,7 @@ pub(crate) fn mock_llm_response(
                 output_tokens: 20,
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
-                model: "mock".to_string(),
+                model: model.to_string(),
                 provider: "mock".to_string(),
                 thinking: None,
                 stop_reason: None,
@@ -600,7 +664,11 @@ pub(crate) fn mock_llm_response(
                     "arguments": mock_args,
                     "visibility": "internal",
                 })],
-            });
+            };
+            if cache {
+                apply_mock_prompt_cache(&mut result, &cache_key);
+            }
+            return Ok(result);
         }
     }
 
@@ -625,14 +693,14 @@ pub(crate) fn mock_llm_response(
         prose_body
     };
 
-    Ok(LlmResult {
+    let mut result = LlmResult {
         text: response.clone(),
         tool_calls: vec![],
         input_tokens: prompt_text.len() as i64,
         output_tokens: 30,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
-        model: "mock".to_string(),
+        model: model.to_string(),
         provider: "mock".to_string(),
         thinking: None,
         stop_reason: None,
@@ -641,7 +709,11 @@ pub(crate) fn mock_llm_response(
             "text": response,
             "visibility": "public",
         })],
-    })
+    };
+    if cache {
+        apply_mock_prompt_cache(&mut result, &cache_key);
+    }
+    Ok(result)
 }
 
 pub fn set_tool_recording_mode(mode: ToolRecordingMode) {
