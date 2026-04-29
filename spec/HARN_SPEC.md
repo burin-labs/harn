@@ -1856,6 +1856,48 @@ blocks and support `harn-tool-surface: ignore-line`,
 `harn-tool-surface: ignore-start` / `ignore-end` comments for
 historical examples.
 
+#### Command execution policy hooks
+
+Command execution policy is a first-class Harn value created with
+`command_policy(config)`. A policy can be installed directly with
+`command_policy_push(policy)` / `command_policy_pop()` or scoped to
+`agent_loop` with `command_policy: policy` or
+`policy: { command_policy: policy }`. While installed,
+`host_call("process.exec", ...)` builds a normalized command context,
+runs deterministic risk classification, executes the policy pre-hook
+before spawning, and records decisions in the returned command envelope
+under `command_policy`.
+
+`command_policy` config fields:
+
+| Field | Description |
+|---|---|
+| `tools` | Agent-visible tool names the policy is intended to guard when threaded through a workflow or harness |
+| `workspace_roots` | Workspace roots used for outside-workspace classification |
+| `default_shell_mode` | Policy hint such as `"argv_only"` for harness/tool authors |
+| `deny_patterns` | Glob/substring patterns that block before spawn |
+| `require_approval` | Risk labels that block with a require-approval decision unless the host grants approval |
+| `pre` | Closure receiving normalized command context; returns `nil`, `{deny}`, `{require_approval}`, `{rewrite}`, `{dry_run}`, or `{explain_only}` |
+| `post` | Closure receiving command context plus the result envelope; may return `{result}`, `{feedback}`, or audit annotations |
+| `allow_recursive` | Allows policy hooks to call the command runner recursively; default is `false` |
+
+The pre-hook context includes the resolved request (`mode`, `argv`,
+`command`, `shell`, `cwd`, redacted env diff, stdin size/hash,
+timeout), active cwd, workspace roots, policy ceiling, tool
+annotations, redacted transcript slots, caller metadata, and
+deterministic scan results. Rewrite is constrained to command-runner
+request fields such as `argv`, `command`, `cwd`, `env`, `timeout_ms`,
+`shell`, and capture settings.
+
+Standard deterministic risk labels include `destructive`,
+`write_intent`, `outside_workspace`, `curl_pipe_shell`,
+`credential_file_read`, `network_exfil`, `sudo`, `package_install`,
+`git_force_push`, and `process_kill`.
+`command_llm_risk_scan(ctx, options?)` returns the same structured
+shape (`risk_labels`, `confidence`, `rationale`,
+`recommended_action`) with redacted scan options; it is safe to use in
+tests without making a network call.
+
 #### Deferred tool loading (`defer_loading`)
 
 A tool registered through `tool_define` may set `defer_loading: true`

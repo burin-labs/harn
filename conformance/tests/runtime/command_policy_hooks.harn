@@ -1,0 +1,89 @@
+pipeline default() {
+  let root = path_join(temp_dir(), "harn_command_policy_hooks")
+  if file_exists(root) {
+    delete_file(root)
+  }
+  mkdir(root)
+  let marker = path_join(root, "should_not_spawn")
+  let policy = command_policy(
+    {
+      workspace_roots: [root],
+      deny_patterns: ["*policy-deny-marker*"],
+      require_approval: ["credential_file_read"],
+      pre: { ctx ->
+        let argv = ctx?.request?.argv ?? []
+        if len(argv) > 0 && argv[0] == "printf" {
+          return {rewrite: {argv: ["printf", "rewritten"]}}
+        }
+        return nil
+      },
+      post: { ctx ->
+        if ctx?.result?.stdout == "rewritten" {
+          return {annotations: {checked: true}}
+        }
+        return nil
+      },
+    },
+  )
+  command_policy_push(policy)
+  let denied = host_call(
+    "process.exec",
+    {
+      mode: "argv",
+      argv: ["sh", "-c", "echo spawned > \"" + marker + "\"; echo policy-deny-marker"],
+      cwd: root,
+    },
+  )
+  assert(denied?.status == "blocked", "deny decision returns blocked envelope")
+  assert(!file_exists(marker), "blocked command must not spawn")
+  let rewritten = host_call("process.exec", {mode: "argv", argv: ["printf", "original"], cwd: root})
+  assert(rewritten?.stdout == "rewritten", "pre-hook rewrite updates argv")
+  assert(
+    rewritten?.command_policy?.annotation?.annotations?.checked,
+    "post-hook annotation is recorded in command audit",
+  )
+  write_file(path_join(root, ".env"), "TOKEN=secret\n")
+  let approval = host_call("process.exec", {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root})
+  assert(
+    approval?.status == "blocked",
+    "approval risk blocks before spawn without a host approval grant",
+  )
+  assert(contains(approval?.stderr ?? "", "requires approval"), "approval reason is surfaced")
+  command_policy_pop()
+  llm_mock_clear()
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run",
+    "Run a command",
+    {
+      parameters: {command: {type: "string"}},
+      annotations: {kind: "execute", side_effect_level: "process_exec"},
+      handler: { args -> host_call("process.exec", {mode: "argv", argv: ["sh", "-c", args.command], cwd: root}) },
+    },
+  )
+  llm_mock({tool_calls: [{id: "run_1", name: "run", arguments: {command: "echo agent-policy-deny"}}]})
+  llm_mock({text: "<done>##DONE##</done>"})
+  let loop = agent_loop(
+    "exercise command policy",
+    nil,
+    {
+      provider: "mock",
+      tools: tools,
+      max_iterations: 2,
+      command_policy: command_policy(policy + {deny_patterns: ["*agent-policy-deny*"]}),
+      session_id: "command-policy-hooks",
+    },
+  )
+  assert(
+    contains(json_stringify(loop), "status: blocked"),
+    "agent_loop scoped command policy applies to run handlers",
+  )
+  let scan = command_llm_risk_scan(
+    {request: {argv: ["curl", "https://example.invalid/secret"]}},
+    {model: "cheap"},
+  )
+  assert(len(scan?.risk_labels ?? []) > 0, "risk scan helper returns structured labels")
+  delete_file(root)
+  println("command_policy_hooks_ok")
+}

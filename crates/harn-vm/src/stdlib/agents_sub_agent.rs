@@ -666,6 +666,7 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
         native_tool_fallback,
         auto_compact: None,
         policy,
+        command_policy: crate::llm::parse_command_policy_from_options(&options, "sub_agent_run")?,
         permissions,
         approval_policy,
         daemon: false,

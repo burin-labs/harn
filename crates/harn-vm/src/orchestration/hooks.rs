@@ -220,6 +220,7 @@ pub fn clear_tool_hooks() {
 
 pub fn clear_runtime_hooks() {
     RUNTIME_HOOKS.with(|hooks| hooks.borrow_mut().clear());
+    super::clear_command_policies();
 }
 
 fn value_at_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {

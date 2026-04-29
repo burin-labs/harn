@@ -476,7 +476,8 @@ pub(crate) use self::agent::{
     run_agent_loop_internal,
 };
 pub(crate) use self::agent_config::{
-    agent_loop_result_from_llm, AgentLoopConfig, DEFAULT_AGENT_LOOP_LLM_RETRIES,
+    agent_loop_result_from_llm, parse_command_policy_from_options, AgentLoopConfig,
+    DEFAULT_AGENT_LOOP_LLM_RETRIES,
 };
 pub use self::agent_config::{
     register_agent_loop_with_bridge, register_llm_call_structured_with_bridge,
@@ -1126,6 +1127,8 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             serde_json::from_value::<crate::orchestration::CapabilityPolicy>(json)
                 .unwrap_or_default()
         });
+        let command_policy =
+            agent_config::parse_command_policy_from_options(&options, "agent_loop")?;
         let turn_policy = options
             .as_ref()
             .and_then(|o| o.get("turn_policy"))
@@ -1167,6 +1170,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 native_tool_fallback,
                 auto_compact,
                 policy,
+                command_policy,
                 permissions,
                 approval_policy,
                 daemon,
