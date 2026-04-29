@@ -10,7 +10,7 @@ use super::openai_normalize::normalize_openai_message_text;
 use super::result::LlmResult;
 
 /// Parse a complete (non-streaming) LLM JSON response into an `LlmResult`.
-pub(super) fn parse_llm_response(
+pub(crate) fn parse_llm_response(
     json: &serde_json::Value,
     provider: &str,
     model: &str,

@@ -59,6 +59,15 @@ pipeline test(task) {
     let caps = provider_capabilities(family, "gpt-5.4")
     assert(caps.defer_loading, family + " inherits openai defer_loading")
   }
+  // Enterprise providers expose native tool schemas without claiming
+  // provider-specific tool_search semantics.
+  let azure = provider_capabilities("azure_openai", "gpt-4o-prod")
+  assert(azure.native_tools, "Azure OpenAI supports native tools")
+  assert(!azure.defer_loading, "Azure chat completions has no Harn tool_search gate")
+  let bedrock = provider_capabilities("bedrock", "meta.llama3-70b-instruct-v1:0")
+  assert(bedrock.native_tools, "Bedrock Converse supports native tools")
+  let vertex = provider_capabilities("vertex", "gemini-1.5-pro-002")
+  assert(vertex.native_tools, "Vertex Gemini supports native tools")
   // Unknown provider + unknown model: all-default dict.
   let unknown = provider_capabilities("my-custom-proxy", "mystery-7b")
   assert(!unknown.native_tools, "unknown provider has no native_tools")

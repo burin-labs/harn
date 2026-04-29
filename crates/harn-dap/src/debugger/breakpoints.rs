@@ -241,8 +241,10 @@ impl Debugger {
         match cond {
             None => true,
             Some(expr) => {
+                self.ensure_runtime();
                 if let Some(vm) = self.vm.as_mut() {
-                    self.runtime
+                    let runtime = self.runtime.as_ref().unwrap();
+                    runtime
                         .block_on(async {
                             let local = tokio::task::LocalSet::new();
                             local.run_until(vm.evaluate_in_frame(&expr, 0)).await

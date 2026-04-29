@@ -1038,6 +1038,71 @@ fn default_config() -> ProvidersConfig {
         },
     );
 
+    // AWS Bedrock Runtime. The provider shim resolves AWS credentials through
+    // env vars, the selected/default profile, container credentials, or EC2
+    // instance profile credentials, then signs Converse API calls with SigV4.
+    config.providers.insert(
+        "bedrock".to_string(),
+        ProviderDef {
+            base_url: String::new(),
+            base_url_env: Some("BEDROCK_BASE_URL".to_string()),
+            auth_style: "aws_sigv4".to_string(),
+            auth_env: AuthEnv::None,
+            chat_endpoint: "/model/{model}/converse".to_string(),
+            features: vec!["native_tools".to_string()],
+            latency_p50_ms: Some(2600),
+            ..Default::default()
+        },
+    );
+
+    // Azure OpenAI. The deployment name is routed in the URL; callers can
+    // use the Harn model field as the deployment name or set
+    // AZURE_OPENAI_DEPLOYMENT.
+    config.providers.insert(
+        "azure_openai".to_string(),
+        ProviderDef {
+            base_url: "https://{resource}.openai.azure.com".to_string(),
+            base_url_env: Some("AZURE_OPENAI_ENDPOINT".to_string()),
+            auth_style: "azure_openai".to_string(),
+            auth_env: AuthEnv::Multiple(vec![
+                "AZURE_OPENAI_API_KEY".to_string(),
+                "AZURE_OPENAI_AD_TOKEN".to_string(),
+                "AZURE_OPENAI_BEARER_TOKEN".to_string(),
+            ]),
+            chat_endpoint:
+                "/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
+                    .to_string(),
+            features: vec!["native_tools".to_string()],
+            cost_per_1k_in: Some(0.0025),
+            cost_per_1k_out: Some(0.010),
+            latency_p50_ms: Some(1900),
+            ..Default::default()
+        },
+    );
+
+    // Google Vertex AI Gemini.
+    config.providers.insert(
+        "vertex".to_string(),
+        ProviderDef {
+            base_url: "https://aiplatform.googleapis.com/v1".to_string(),
+            base_url_env: Some("VERTEX_AI_BASE_URL".to_string()),
+            auth_style: "bearer".to_string(),
+            auth_env: AuthEnv::Multiple(vec![
+                "VERTEX_AI_ACCESS_TOKEN".to_string(),
+                "GOOGLE_OAUTH_ACCESS_TOKEN".to_string(),
+                "GOOGLE_APPLICATION_CREDENTIALS".to_string(),
+            ]),
+            chat_endpoint:
+                "/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent"
+                    .to_string(),
+            features: vec!["native_tools".to_string()],
+            cost_per_1k_in: Some(0.00125),
+            cost_per_1k_out: Some(0.005),
+            latency_p50_ms: Some(2100),
+            ..Default::default()
+        },
+    );
+
     // Local OpenAI-compatible server
     config.providers.insert(
         "local".to_string(),
@@ -1159,6 +1224,42 @@ fn default_config() -> ProvidersConfig {
             contains: None,
             exact: None,
             provider: "local".to_string(),
+        },
+        InferenceRule {
+            pattern: Some("anthropic.claude-*".to_string()),
+            contains: None,
+            exact: None,
+            provider: "bedrock".to_string(),
+        },
+        InferenceRule {
+            pattern: Some("meta.llama*".to_string()),
+            contains: None,
+            exact: None,
+            provider: "bedrock".to_string(),
+        },
+        InferenceRule {
+            pattern: Some("amazon.*".to_string()),
+            contains: None,
+            exact: None,
+            provider: "bedrock".to_string(),
+        },
+        InferenceRule {
+            pattern: Some("mistral.*".to_string()),
+            contains: None,
+            exact: None,
+            provider: "bedrock".to_string(),
+        },
+        InferenceRule {
+            pattern: Some("cohere.*".to_string()),
+            contains: None,
+            exact: None,
+            provider: "bedrock".to_string(),
+        },
+        InferenceRule {
+            pattern: Some("gemini-*".to_string()),
+            contains: None,
+            exact: None,
+            provider: "vertex".to_string(),
         },
         InferenceRule {
             pattern: None,
@@ -1512,6 +1613,9 @@ mod tests {
         assert!(names.contains(&"mlx".to_string()));
         assert!(names.contains(&"openai".to_string()));
         assert!(names.contains(&"ollama".to_string()));
+        assert!(names.contains(&"bedrock".to_string()));
+        assert!(names.contains(&"azure_openai".to_string()));
+        assert!(names.contains(&"vertex".to_string()));
     }
 
     #[test]
@@ -1552,6 +1656,33 @@ mod tests {
         let (model, provider) = resolve_model("mlx-qwen36-27b");
         assert_eq!(model, "unsloth/Qwen3.6-27B-UD-MLX-4bit");
         assert_eq!(provider.as_deref(), Some("mlx"));
+    }
+
+    #[test]
+    fn test_enterprise_provider_defaults_and_inference() {
+        let bedrock = provider_config("bedrock").unwrap();
+        assert_eq!(bedrock.auth_style, "aws_sigv4");
+        assert_eq!(bedrock.base_url_env.as_deref(), Some("BEDROCK_BASE_URL"));
+        assert_eq!(
+            infer_provider("anthropic.claude-3-5-sonnet-20240620-v1:0"),
+            "bedrock"
+        );
+        assert_eq!(infer_provider("meta.llama3-70b-instruct-v1:0"), "bedrock");
+
+        let azure = provider_config("azure_openai").unwrap();
+        assert_eq!(azure.base_url_env.as_deref(), Some("AZURE_OPENAI_ENDPOINT"));
+        assert_eq!(
+            auth_env_names(&azure.auth_env),
+            vec![
+                "AZURE_OPENAI_API_KEY".to_string(),
+                "AZURE_OPENAI_AD_TOKEN".to_string(),
+                "AZURE_OPENAI_BEARER_TOKEN".to_string(),
+            ]
+        );
+
+        let vertex = provider_config("vertex").unwrap();
+        assert_eq!(vertex.base_url, "https://aiplatform.googleapis.com/v1");
+        assert_eq!(infer_provider("gemini-1.5-pro-002"), "vertex");
     }
 
     #[test]

@@ -24,6 +24,9 @@ Each provider defines an `auth_style` and one or more environment variables:
 | OpenAI | `OPENAI_API_KEY` | bearer |
 | OpenRouter | `OPENROUTER_API_KEY` | bearer |
 | HuggingFace | `HF_TOKEN`, `HUGGINGFACE_API_KEY` | bearer |
+| Bedrock | AWS credential chain | SigV4 |
+| Azure OpenAI | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_AD_TOKEN` | api-key or bearer |
+| Vertex AI | `VERTEX_AI_ACCESS_TOKEN`, `GOOGLE_APPLICATION_CREDENTIALS` | bearer |
 | Ollama | (none) | none |
 | Local | (none) | none |
 
@@ -82,6 +85,49 @@ The readiness probe checks `/v1/models` and reports distinct failures for
 an unreachable server, a bad HTTP status, an unparsable model listing, or
 a missing model. Harn does not run optional host launcher scripts; hosts
 should surface launcher failures separately and then re-run the probe.
+
+## Enterprise cloud providers
+
+### Bedrock
+
+Set `HARN_LLM_PROVIDER=bedrock`, a Bedrock model ID, and an AWS region:
+
+```bash
+export HARN_LLM_PROVIDER=bedrock
+export HARN_LLM_MODEL=anthropic.claude-3-5-sonnet-20240620-v1:0
+export AWS_REGION=us-east-1
+```
+
+Credential resolution follows AWS conventions: environment credentials,
+the selected/default profile, container credentials, then instance profile
+credentials. `BEDROCK_BASE_URL` can point tests at a local mock.
+
+### Azure OpenAI
+
+```bash
+export HARN_LLM_PROVIDER=azure_openai
+export AZURE_OPENAI_ENDPOINT=https://my-resource.openai.azure.com
+export AZURE_OPENAI_API_KEY=...
+export HARN_LLM_MODEL=my-gpt4o-deployment
+```
+
+Use `AZURE_OPENAI_DEPLOYMENT` when the deployment name should differ from
+the Harn model value. Set `AZURE_OPENAI_API_VERSION` to override the default
+API version. For Microsoft Entra auth, set `AZURE_OPENAI_AD_TOKEN` or
+`AZURE_OPENAI_BEARER_TOKEN` instead of an API key.
+
+### Vertex AI
+
+```bash
+export HARN_LLM_PROVIDER=vertex
+export HARN_LLM_MODEL=gemini-1.5-pro-002
+export VERTEX_AI_PROJECT=my-project
+export VERTEX_AI_LOCATION=us-central1
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+```
+
+Direct bearer tokens are also accepted through `VERTEX_AI_ACCESS_TOKEN` or
+`GOOGLE_OAUTH_ACCESS_TOKEN`.
 
 Harn will automatically fall back to a local provider if no cloud API key
 is configured. This makes it easy to develop and test without incurring

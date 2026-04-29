@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use harn_vm::VmValue;
 use serde_json::json;
+use tempfile::TempDir;
 
 use super::state::{Debugger, StepMode};
 use crate::protocol::DapMessage;
@@ -17,6 +19,13 @@ fn make_request(seq: i64, command: &str, args: Option<serde_json::Value>) -> Dap
         message: None,
         body: None,
     }
+}
+
+fn write_temp_program(file_name: &str, source: &str) -> (TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("create temp debugger workspace");
+    let file = dir.path().join(file_name);
+    std::fs::write(&file, source).expect("write temp Harn program");
+    (dir, file)
 }
 
 #[test]
@@ -140,10 +149,7 @@ fn test_set_breakpoints() {
 fn test_launch_and_run() {
     let mut dbg = Debugger::new();
 
-    let dir = std::env::temp_dir().join("harn_dap_test");
-    std::fs::create_dir_all(&dir).ok();
-    let file = dir.join("test.harn");
-    std::fs::write(&file, "pipeline test(task) { log(42) }").unwrap();
+    let (_dir, file) = write_temp_program("test.harn", "pipeline test(task) { log(42) }");
 
     dbg.handle_message(make_request(1, "initialize", None));
     dbg.handle_message(make_request(
@@ -179,9 +185,7 @@ fn test_launch_and_run() {
         .iter()
         .find(|r| r.event.as_deref() == Some("terminated"));
     assert!(terminated.is_some());
-
-    std::fs::remove_file(&file).ok();
-    std::fs::remove_dir(&dir).ok();
+    drop(dbg);
 }
 
 #[test]
@@ -416,14 +420,10 @@ fn test_stack_trace() {
 fn test_breakpoint_stop() {
     let mut dbg = Debugger::new();
 
-    let dir = std::env::temp_dir().join("harn_dap_bp_test");
-    std::fs::create_dir_all(&dir).ok();
-    let file = dir.join("test_bp.harn");
-    std::fs::write(
-        &file,
+    let (_dir, file) = write_temp_program(
+        "test_bp.harn",
         "pipeline test(task) {\n  let x = 1\n  let y = 2\n  log(x + y)\n}",
-    )
-    .unwrap();
+    );
 
     dbg.handle_message(make_request(1, "initialize", None));
     dbg.handle_message(make_request(
@@ -462,23 +462,17 @@ fn test_breakpoint_stop() {
         stopped_on_breakpoint,
         "expected a stopped event with reason=breakpoint for the entry script"
     );
-
-    std::fs::remove_file(&file).ok();
-    std::fs::remove_dir(&dir).ok();
+    drop(dbg);
 }
 
 #[test]
 fn test_pause_interrupts_running_vm() {
     let mut dbg = Debugger::new();
 
-    let dir = std::env::temp_dir().join("harn_dap_pause_test");
-    std::fs::create_dir_all(&dir).ok();
-    let file = dir.join("test_pause.harn");
-    std::fs::write(
-        &file,
+    let (_dir, file) = write_temp_program(
+        "test_pause.harn",
         "pipeline test(task) {\n  let x = 1\n  let y = 2\n  let z = 3\n}",
-    )
-    .unwrap();
+    );
 
     dbg.handle_message(make_request(1, "initialize", None));
     dbg.handle_message(make_request(
@@ -502,9 +496,7 @@ fn test_pause_interrupts_running_vm() {
     });
     assert!(paused, "expected a stopped event with reason=pause");
     assert!(!dbg.is_running());
-
-    std::fs::remove_file(&file).ok();
-    std::fs::remove_dir(&dir).ok();
+    drop(dbg);
 }
 
 #[test]
@@ -522,14 +514,10 @@ fn test_harn_ping_reports_state() {
 fn test_completions_returns_frame_scope_and_builtins() {
     let mut dbg = Debugger::new();
 
-    let dir = std::env::temp_dir().join("harn_dap_completions_test");
-    std::fs::create_dir_all(&dir).ok();
-    let file = dir.join("completions.harn");
-    std::fs::write(
-        &file,
+    let (_dir, file) = write_temp_program(
+        "completions.harn",
         "pipeline t(task) { let local_name = 1\nlog(local_name) }",
-    )
-    .unwrap();
+    );
     dbg.handle_message(make_request(1, "initialize", None));
     dbg.handle_message(make_request(
         2,
@@ -552,8 +540,7 @@ fn test_completions_returns_frame_scope_and_builtins() {
     // regardless of user code.
     let labels: Vec<_> = targets.iter().filter_map(|t| t["label"].as_str()).collect();
     assert!(labels.contains(&"log"), "builtin log must appear");
-    std::fs::remove_file(&file).ok();
-    std::fs::remove_dir(&dir).ok();
+    drop(dbg);
 }
 
 #[test]
@@ -765,14 +752,10 @@ fn test_set_function_breakpoints_replaces_prior_list_and_clears_hit_counts() {
 fn test_function_breakpoint_fires_on_matching_call() {
     let mut dbg = Debugger::new();
 
-    let dir = std::env::temp_dir().join("harn_dap_fn_bp_test");
-    std::fs::create_dir_all(&dir).ok();
-    let file = dir.join("fn_bp.harn");
-    std::fs::write(
-        &file,
+    let (_dir, file) = write_temp_program(
+        "fn_bp.harn",
         "fn helper() -> int { return 42 }\npipeline t(task) { let x = helper()\n log(x) }",
-    )
-    .unwrap();
+    );
 
     dbg.handle_message(make_request(1, "initialize", None));
     dbg.handle_message(make_request(
@@ -802,9 +785,7 @@ fn test_function_breakpoint_fires_on_matching_call() {
         stopped_on_fn,
         "function breakpoint on helper() must produce a stopped event"
     );
-
-    std::fs::remove_file(&file).ok();
-    std::fs::remove_dir(&dir).ok();
+    drop(dbg);
 }
 
 #[test]

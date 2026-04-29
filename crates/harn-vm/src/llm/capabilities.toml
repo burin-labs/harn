@@ -625,6 +625,54 @@ model_match = "moonshotai/*"
 native_tools = true
 json_schema = "native"
 
+# ---------- Enterprise cloud providers ---------------------------------------
+
+# Bedrock Converse normalizes native tool calling across Anthropic, Meta,
+# Amazon, Mistral, and other Bedrock-hosted model families. Tool-search and
+# prompt-cache semantics remain provider/model-specific, so don't advertise
+# those through the generic Bedrock route yet.
+[[provider.bedrock]]
+model_match = "*"
+native_tools = true
+recommended_endpoint = "/model/{model}/converse"
+text_tool_wire_format_supported = true
+
+# Azure OpenAI uses deployment-name routing but keeps the OpenAI chat
+# completions tool-call body. Do not inherit OpenAI Responses API
+# tool_search flags: this shim targets Azure's chat-completions endpoint.
+[[provider.azure_openai]]
+model_match = "gpt-*"
+native_tools = true
+recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
+text_tool_wire_format_supported = true
+
+[[provider.azure_openai]]
+model_match = "o1*"
+native_tools = true
+recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
+text_tool_wire_format_supported = true
+
+[[provider.azure_openai]]
+model_match = "o3*"
+native_tools = true
+recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
+text_tool_wire_format_supported = true
+
+[[provider.azure_openai]]
+model_match = "o4*"
+native_tools = true
+recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
+text_tool_wire_format_supported = true
+
+# Vertex Gemini exposes function declarations in generateContent. Harn maps
+# native tool schemas to that shape, but leaves provider-specific cached
+# content / thinking flags off until they are wired as first-class options.
+[[provider.vertex]]
+model_match = "gemini-*"
+native_tools = true
+recommended_endpoint = "/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent"
+text_tool_wire_format_supported = true
+
 # ---------- Mock --------------------------------------------------------------
 #
 # Mock spoofs either Anthropic or OpenAI shape depending on the model ID.
