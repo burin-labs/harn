@@ -38,7 +38,7 @@ use crate::bridge::HostBridge;
 use crate::value::{ErrorCategory, VmError, VmValue};
 
 use super::super::agent_tools::{
-    classify_tool_mutation, declared_paths, denied_tool_result, dispatch_tool_execution,
+    classify_tool_mutation, declared_paths, denied_tool_result, dispatch_tool_execution_with_mcp,
     is_denied_tool_result, loop_intervention_message, render_tool_result, stable_hash,
     stable_hash_str, LoopIntervention, ToolDispatchOutcome,
 };
@@ -57,6 +57,7 @@ pub(super) struct ToolDispatchContext<'a> {
     pub bridge: &'a Option<Rc<HostBridge>>,
     pub tool_format: &'a str,
     pub tools_val: Option<&'a VmValue>,
+    pub mcp_clients: &'a std::collections::BTreeMap<String, crate::mcp::VmMcpClientHandle>,
     pub tool_retries: usize,
     pub tool_backoff_ms: u64,
     pub loop_detect_enabled: bool,
@@ -355,10 +356,11 @@ pub(super) async fn run_tool_dispatch(
             let bridge_local = ctx.bridge.clone();
             let tools_val_local = ctx.tools_val.cloned();
             async move {
-                dispatch_tool_execution(
+                dispatch_tool_execution_with_mcp(
                     &tool_name,
                     &tool_args,
                     tools_val_local.as_ref(),
+                    None,
                     bridge_local.as_ref(),
                     tool_retries_local,
                     tool_backoff_ms_local,
@@ -1158,10 +1160,11 @@ pub(super) async fn run_tool_dispatch(
                 {
                     (cached_result, cached_executor)
                 } else {
-                    let outcome = dispatch_tool_execution(
+                    let outcome = dispatch_tool_execution_with_mcp(
                         tool_name,
                         &tool_args,
                         ctx.tools_val,
+                        Some(ctx.mcp_clients),
                         ctx.bridge.as_ref(),
                         ctx.tool_retries,
                         ctx.tool_backoff_ms,

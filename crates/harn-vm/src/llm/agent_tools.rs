@@ -261,10 +261,32 @@ pub(super) struct ToolDispatchOutcome {
 /// bridge, not handled locally) — i.e. the categorized "tool not
 /// available" error. Retries don't change the executor: a tool that
 /// resolves via the bridge stays a `HostBridge` call across attempts.
+#[cfg(test)]
 pub(super) async fn dispatch_tool_execution(
     tool_name: &str,
     tool_args: &serde_json::Value,
     tools_val: Option<&VmValue>,
+    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    tool_retries: usize,
+    tool_backoff_ms: u64,
+) -> ToolDispatchOutcome {
+    dispatch_tool_execution_with_mcp(
+        tool_name,
+        tool_args,
+        tools_val,
+        None,
+        bridge,
+        tool_retries,
+        tool_backoff_ms,
+    )
+    .await
+}
+
+pub(super) async fn dispatch_tool_execution_with_mcp(
+    tool_name: &str,
+    tool_args: &serde_json::Value,
+    tools_val: Option<&VmValue>,
+    mcp_clients: Option<&std::collections::BTreeMap<String, crate::mcp::VmMcpClientHandle>>,
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
     tool_retries: usize,
     tool_backoff_ms: u64,
@@ -338,10 +360,14 @@ pub(super) async fn dispatch_tool_execution(
             executor = Some(ToolExecutor::McpServer {
                 server_name: server_name.clone(),
             });
-            // MCP-served tools defined by the host are typically served
-            // through the host bridge today; preserve that path. A
-            // Harn-side `handler` overrides (custom MCP wrappers).
-            if let Some(handler) = find_tool_handler(tools_val, tool_name) {
+            if let Some(client) = mcp_clients.and_then(|clients| clients.get(&server_name)) {
+                let original_name = declared_mcp_tool_name_for_tool(tools_val, tool_name)
+                    .unwrap_or_else(|| tool_name.to_string());
+                crate::mcp::call_mcp_tool(client, &original_name, tool_args.clone()).await
+            } else if let Some(handler) = find_tool_handler(tools_val, tool_name) {
+                // MCP-served tools defined by the host are typically served
+                // through the host bridge today; preserve that path. A
+                // Harn-side `handler` overrides (custom MCP wrappers).
                 let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
                     return ToolDispatchOutcome {
                         result: Err(VmError::CategorizedError {
@@ -384,7 +410,7 @@ pub(super) async fn dispatch_tool_execution(
                 Err(VmError::CategorizedError {
                     message: format!(
                         "tool '{tool_name}' (mcp_server: \"{server_name}\") cannot be \
-                         dispatched: no bridge and no Harn handler"
+                         dispatched: no direct MCP client, bridge, or Harn handler"
                     ),
                     category: ErrorCategory::ToolRejected,
                 })
@@ -579,6 +605,28 @@ fn declared_mcp_server_for_tool(tools_val: Option<&VmValue>, tool_name: &str) ->
             continue;
         }
         if let Some(VmValue::String(s)) = entry.get("mcp_server") {
+            return Some(s.to_string());
+        }
+        return None;
+    }
+    None
+}
+
+fn declared_mcp_tool_name_for_tool(tools_val: Option<&VmValue>, tool_name: &str) -> Option<String> {
+    let dict = tools_val?.as_dict()?;
+    let tools_list = match dict.get("tools") {
+        Some(VmValue::List(l)) => l,
+        _ => return None,
+    };
+    for tool in tools_list.iter() {
+        let entry: &std::collections::BTreeMap<String, VmValue> = match tool {
+            VmValue::Dict(d) => d,
+            _ => continue,
+        };
+        if entry.get("name").map(|v| v.display()).as_deref() != Some(tool_name) {
+            continue;
+        }
+        if let Some(VmValue::String(s)) = entry.get("_mcp_tool_name") {
             return Some(s.to_string());
         }
         return None;

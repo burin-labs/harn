@@ -1,0 +1,65 @@
+import { process_exec } from "std/runtime"
+
+fn wait_for_file(path, attempts) {
+  var remaining = attempts
+  while !file_exists(path) && remaining > 0 {
+    sleep(50ms)
+    remaining = remaining - 1
+  }
+  require file_exists(path), "timed out waiting for " + path
+}
+
+pipeline default() {
+  let root = project_root() ?? cwd()
+  let helper_dir = path_join(root, "conformance/helpers")
+  let server_script = path_join(helper_dir, "mcp_http_echo_server.py")
+  let state_dir = path_join(temp_dir(), "harn-agent-loop-mcp-" + uuid())
+  let port_path = path_join(state_dir, "port")
+  let pid_path = path_join(state_dir, "server.pid")
+  let log_path = path_join(state_dir, "server.log")
+  mkdir(state_dir)
+  let start = process_exec(
+    "python3 \"" + server_script + "\" \"" + state_dir + "\" >\"" + log_path
+      + "\" 2>&1 & echo $! > \""
+      + pid_path
+      + "\"",
+  )
+  require start?.success, "MCP mock server started"
+  wait_for_file(port_path, 100)
+  let base = "http://127.0.0.1:" + read_file(port_path).trim()
+  llm_mock_clear()
+  llm_mock(
+    {
+      text: "Calling MCP tools.",
+      tool_calls: [
+        {id: "mcp1", name: "remote__echo", arguments: {message: "hello from remote"}},
+        {id: "mcp2", name: "mirror__echo", arguments: {message: "hello from mirror"}},
+      ],
+    },
+  )
+  llm_mock({text: "<done>##DONE##</done>"})
+  let result = agent_loop(
+    "Use both MCP echo tools",
+    nil,
+    {
+      provider: "mock",
+      tool_format: "native",
+      max_iterations: 3,
+      mcp_servers: [
+        {name: "remote", transport: "http", url: base + "/mcp"},
+        {name: "mirror", transport: "http", url: base + "/mcp"},
+      ],
+    },
+  )
+  let state_response = http_get(base + "/__state")
+  let state = json_parse(state_response.body)
+  let _stop = http_post(base + "/__shutdown", "")
+  process_exec("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
+  println(result?.tools.successful[0])
+  println(result?.tools.successful[1])
+  println(state.list_calls)
+  println(state.tool_calls[0].name)
+  println(state.tool_calls[0].arguments.message)
+  println(state.tool_calls[1].name)
+  println(state.tool_calls[1].arguments.message)
+}

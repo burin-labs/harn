@@ -155,6 +155,10 @@ pub struct AgentLoopConfig {
     pub skill_match: super::agent::SkillMatchConfig,
     /// Working file set fed into `paths:` auto-trigger scoring.
     pub working_files: Vec<String>,
+    /// Declarative MCP server configs bootstrapped for this loop.
+    pub mcp_servers: Vec<serde_json::Value>,
+    /// Live MCP clients created from `mcp_servers` after bootstrap.
+    pub(crate) mcp_clients: std::collections::BTreeMap<String, crate::mcp::VmMcpClientHandle>,
 }
 
 pub(crate) fn parse_command_policy_from_options(
@@ -488,6 +492,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 });
             let (skill_registry, skill_match, working_files) =
                 super::agent::parse_skill_config(&options);
+            let mcp_servers = super::agent::parse_mcp_server_specs(&options)?;
             let mut opts = extract_llm_options(&args)?;
             let result = run_agent_loop_internal(
                 &mut opts,
@@ -540,6 +545,8 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     skill_registry,
                     skill_match,
                     working_files,
+                    mcp_servers,
+                    mcp_clients: Default::default(),
                 },
             )
             .await?;

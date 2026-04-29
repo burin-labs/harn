@@ -90,7 +90,7 @@ impl std::fmt::Debug for VmMcpClientHandle {
 }
 
 impl VmMcpClientHandle {
-    async fn call(
+    pub(crate) async fn call(
         &self,
         method: &str,
         params: serde_json::Value,
@@ -115,6 +115,33 @@ impl VmMcpClientHandle {
         match inner {
             McpClientInner::Stdio(inner) => stdio_notify(inner, method, params).await,
             McpClientInner::Http(inner) => http_notify(inner, method, params).await,
+        }
+    }
+
+    pub(crate) async fn disconnect(&self) -> Result<(), VmError> {
+        let mut guard = self.inner.lock().await;
+        if let Some(inner) = guard.take() {
+            match inner {
+                McpClientInner::Stdio(mut inner) => {
+                    let _ = inner.child.kill().await;
+                }
+                McpClientInner::Http(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn start_disconnect(&self) {
+        let Ok(mut guard) = self.inner.try_lock() else {
+            return;
+        };
+        if let Some(inner) = guard.take() {
+            match inner {
+                McpClientInner::Stdio(mut inner) => {
+                    let _ = inner.child.start_kill();
+                }
+                McpClientInner::Http(_) => {}
+            }
         }
     }
 }
@@ -655,6 +682,45 @@ fn extract_content_text(result: &serde_json::Value) -> String {
     }
 }
 
+pub(crate) async fn call_mcp_tool(
+    client: &VmMcpClientHandle,
+    tool_name: &str,
+    arguments: serde_json::Value,
+) -> Result<serde_json::Value, VmError> {
+    let result = client
+        .call(
+            "tools/call",
+            serde_json::json!({
+                "name": tool_name,
+                "arguments": arguments,
+            }),
+        )
+        .await?;
+
+    if result.get("isError").and_then(|v| v.as_bool()) == Some(true) {
+        let error_text = extract_content_text(&result);
+        return Err(VmError::Thrown(VmValue::String(Rc::from(error_text))));
+    }
+
+    let content = result
+        .get("content")
+        .and_then(|c| c.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    if content.len() == 1 && content[0].get("type").and_then(|t| t.as_str()) == Some("text") {
+        if let Some(text) = content[0].get("text").and_then(|t| t.as_str()) {
+            return Ok(serde_json::Value::String(text.to_string()));
+        }
+    }
+
+    if content.is_empty() {
+        Ok(serde_json::Value::Null)
+    } else {
+        Ok(serde_json::Value::Array(content))
+    }
+}
+
 pub async fn connect_mcp_server(
     name: &str,
     command: &str,
@@ -879,40 +945,9 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             _ => serde_json::json!({}),
         };
 
-        let result = client
-            .call(
-                "tools/call",
-                serde_json::json!({
-                    "name": tool_name,
-                    "arguments": arguments,
-                }),
-            )
-            .await?;
-
-        if result.get("isError").and_then(|v| v.as_bool()) == Some(true) {
-            let error_text = extract_content_text(&result);
-            return Err(VmError::Thrown(VmValue::String(Rc::from(error_text))));
-        }
-
-        let content = result
-            .get("content")
-            .and_then(|c| c.as_array())
-            .cloned()
-            .unwrap_or_default();
-
-        if content.len() == 1 && content[0].get("type").and_then(|t| t.as_str()) == Some("text") {
-            if let Some(text) = content[0].get("text").and_then(|t| t.as_str()) {
-                return Ok(VmValue::String(Rc::from(text)));
-            }
-        }
-
-        if content.is_empty() {
-            Ok(VmValue::Nil)
-        } else {
-            Ok(VmValue::List(Rc::new(
-                content.iter().map(json_to_vm_value).collect(),
-            )))
-        }
+        Ok(json_to_vm_value(
+            &call_mcp_tool(&client, &tool_name, arguments).await?,
+        ))
     });
 
     vm.register_async_builtin("mcp_server_info", |args| async move {
@@ -950,15 +985,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             }
         };
 
-        let mut guard = client.inner.lock().await;
-        if let Some(inner) = guard.take() {
-            match inner {
-                McpClientInner::Stdio(mut inner) => {
-                    let _ = inner.child.kill().await;
-                }
-                McpClientInner::Http(_) => {}
-            }
-        }
+        client.disconnect().await?;
         Ok(VmValue::Nil)
     });
 

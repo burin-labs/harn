@@ -659,6 +659,7 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
         .transpose()?
         .unwrap_or_default();
     let (skill_registry, skill_match, working_files) = crate::llm::parse_skill_config(&options);
+    let mcp_servers = crate::llm::parse_mcp_server_specs(&options)?;
     Ok(crate::llm::AgentLoopConfig {
         persistent: crate::llm::helpers::opt_bool(&options, "persistent"),
         max_iterations: max_iterations as usize,
@@ -712,6 +713,8 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
         skill_registry,
         skill_match,
         working_files,
+        mcp_servers,
+        mcp_clients: Default::default(),
     })
 }
 

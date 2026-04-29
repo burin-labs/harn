@@ -475,8 +475,8 @@ pub use self::agent::{
     register_session_end_hook,
 };
 pub(crate) use self::agent::{
-    current_host_bridge, emit_agent_event as emit_live_agent_event, parse_skill_config,
-    run_agent_loop_internal,
+    current_host_bridge, emit_agent_event as emit_live_agent_event, parse_mcp_server_specs,
+    parse_skill_config, run_agent_loop_internal,
 };
 pub(crate) use self::agent_config::{
     agent_loop_profile_defaults, agent_loop_result_from_llm, parse_command_policy_from_options,
@@ -1192,6 +1192,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let daemon_config = parse_daemon_loop_config(options.as_ref());
         let (skill_registry, skill_match, working_files) =
             crate::llm::agent::parse_skill_config(&options);
+        let mcp_servers = crate::llm::agent::parse_mcp_server_specs(&options)?;
         let mut opts = extract_llm_options(&args)?;
         let result = run_agent_loop_internal(
             &mut opts,
@@ -1238,6 +1239,8 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 skill_registry,
                 skill_match,
                 working_files,
+                mcp_servers,
+                mcp_clients: Default::default(),
             },
         )
         .await?;
