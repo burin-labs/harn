@@ -544,6 +544,10 @@ fn capabilities_to_vm_value(
         string_list_to_vm_value(caps.thinking_modes.clone()),
     );
     dict.insert(
+        "vision_supported".to_string(),
+        VmValue::Bool(caps.vision_supported),
+    );
+    dict.insert(
         "preserve_thinking".to_string(),
         VmValue::Bool(caps.preserve_thinking),
     );

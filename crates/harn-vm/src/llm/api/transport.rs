@@ -194,6 +194,11 @@ async fn dispatch_to_registered_provider(
         return ollama.chat_impl(opts, delta_tx).await;
     }
 
+    if provider == "gemini" {
+        let gemini = crate::llm::providers::GeminiProvider;
+        return gemini.chat_impl(opts, delta_tx).await;
+    }
+
     if resolved.is_anthropic_style {
         let anthropic = crate::llm::providers::AnthropicProvider;
         return anthropic.chat_impl(opts, delta_tx).await;

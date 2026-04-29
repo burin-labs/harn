@@ -18,6 +18,7 @@ mod agent_tools;
 pub(crate) mod api;
 pub mod capabilities;
 mod config_builtins;
+pub(crate) mod content;
 mod conversation;
 pub(crate) mod cost;
 pub(crate) mod daemon;
@@ -1557,6 +1558,7 @@ mod tests {
             })),
             output_validation: Some("error".to_string()),
             thinking: crate::llm::api::ThinkingConfig::Disabled,
+            vision: false,
             tools: None,
             native_tools: None,
             tool_choice: None,

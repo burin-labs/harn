@@ -74,6 +74,9 @@ pub struct ProviderRule {
     /// `thinking_modes` so the capability matrix preserves mode detail.
     #[serde(default)]
     pub thinking: Option<bool>,
+    /// Whether the model accepts image inputs in chat content.
+    #[serde(default)]
+    pub vision_supported: Option<bool>,
     /// Carry `<think>...</think>` blocks in assistant history across turns.
     /// Qwen3.6 exposes this as `chat_template_kwargs.preserve_thinking`;
     /// Alibaba recommends enabling it for long-horizon agent loops so the
@@ -113,6 +116,7 @@ pub struct Capabilities {
     pub max_tools: Option<u32>,
     pub prompt_caching: bool,
     pub thinking_modes: Vec<String>,
+    pub vision_supported: bool,
     pub preserve_thinking: bool,
     pub server_parser: String,
     pub honors_chat_template_kwargs: bool,
@@ -129,6 +133,7 @@ impl Default for Capabilities {
             max_tools: None,
             prompt_caching: false,
             thinking_modes: Vec::new(),
+            vision_supported: false,
             preserve_thinking: false,
             server_parser: "none".to_string(),
             honors_chat_template_kwargs: false,
@@ -296,6 +301,7 @@ fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
         max_tools: rule.max_tools,
         prompt_caching: rule.prompt_caching.unwrap_or(false),
         thinking_modes,
+        vision_supported: rule.vision_supported.unwrap_or(false),
         preserve_thinking: rule.preserve_thinking.unwrap_or(false),
         server_parser: rule
             .server_parser
@@ -380,6 +386,7 @@ mod tests {
         assert_eq!(caps.tool_search, vec!["bm25", "regex"]);
         assert!(caps.prompt_caching);
         assert_eq!(caps.thinking_modes, vec!["adaptive"]);
+        assert!(caps.vision_supported);
         assert_eq!(caps.max_tools, Some(10000));
     }
 
@@ -433,6 +440,7 @@ mod tests {
         let caps = lookup("openai", "gpt-5.3");
         assert!(caps.native_tools);
         assert!(!caps.defer_loading);
+        assert!(!caps.vision_supported);
         assert!(caps.tool_search.is_empty());
     }
 
@@ -441,6 +449,19 @@ mod tests {
         reset();
         let caps = lookup("openai", "o3");
         assert_eq!(caps.thinking_modes, vec!["effort"]);
+    }
+
+    #[test]
+    fn vision_capability_gates_known_multimodal_models() {
+        reset();
+        assert!(lookup("openai", "gpt-4o").vision_supported);
+        assert!(lookup("openai", "gpt-5.4-preview").vision_supported);
+        assert!(lookup("anthropic", "claude-sonnet-4-6").vision_supported);
+        assert!(lookup("openrouter", "google/gemini-2.5-flash").vision_supported);
+        assert!(lookup("gemini", "gemini-2.5-flash").vision_supported);
+        assert!(lookup("ollama", "llava:latest").vision_supported);
+        assert!(!lookup("openai", "gpt-3.5-turbo").vision_supported);
+        assert!(!lookup("ollama", "qwen3.5:35b-a3b-coding-nvfp4").vision_supported);
     }
 
     #[test]

@@ -17,6 +17,7 @@ pipeline test(task) {
   assert(opus.prompt_caching, "Opus 4.7 supports prompt caching")
   assert(opus.thinking, "Opus 4.7 exposes adaptive thinking")
   assert(opus.thinking_modes[0] == "adaptive", "Opus 4.7 exposes adaptive thinking mode")
+  assert(opus.vision_supported, "Opus 4.7 accepts image content")
   assert(opus.max_tools == 10000, "Opus 4.7 max_tools cap is 10000")
   // Older Claude — no tool search, still cache + thinking.
   let old = provider_capabilities("anthropic", "claude-opus-3-5")
@@ -39,12 +40,16 @@ pipeline test(task) {
   // Legacy GPT — native tools only.
   let gpt4o = provider_capabilities("openai", "gpt-4o")
   assert(gpt4o.native_tools, "gpt-4o has native tools")
+  assert(gpt4o.vision_supported, "gpt-4o accepts image content")
   assert(!gpt4o.defer_loading, "gpt-4o has no defer_loading")
   let o3 = provider_capabilities("openai", "o3")
   assert(o3.thinking_modes[0] == "effort", "o3 exposes effort thinking mode")
   // Ollama Qwen 3.5 advertises native tools on the official model page.
   let qwen35 = provider_capabilities("ollama", "qwen3.5:35b-a3b-coding-nvfp4")
   assert(qwen35.native_tools, "qwen3.5 on ollama has native tools")
+  assert(!qwen35.vision_supported, "qwen3.5 is not a vision route")
+  let gemini = provider_capabilities("gemini", "gemini-2.5-flash")
+  assert(gemini.vision_supported, "gemini native route accepts image content")
   // OpenRouter inherits the openai family.
   let routed = provider_capabilities("openrouter", "gpt-5.4")
   assert(routed.defer_loading, "openrouter inherits openai defer_loading")
