@@ -16,7 +16,64 @@ use super::helpers::{
 };
 use super::tools::build_assistant_response_message;
 
-pub(crate) const DEFAULT_AGENT_LOOP_LLM_RETRIES: usize = 4;
+pub(crate) const DEFAULT_AGENT_LOOP_LLM_RETRIES: usize = 2;
+
+#[derive(Clone, Copy)]
+pub(crate) struct AgentLoopProfileDefaults {
+    pub max_iterations: i64,
+    pub max_nudges: i64,
+    pub tool_retries: i64,
+    pub llm_retries: i64,
+    pub schema_retries: i64,
+}
+
+impl AgentLoopProfileDefaults {
+    fn for_name(name: &str) -> Option<Self> {
+        match name {
+            "tool_using" => Some(Self {
+                max_iterations: 50,
+                max_nudges: 8,
+                tool_retries: 0,
+                llm_retries: DEFAULT_AGENT_LOOP_LLM_RETRIES as i64,
+                schema_retries: 0,
+            }),
+            "researcher" => Some(Self {
+                max_iterations: 30,
+                max_nudges: 4,
+                tool_retries: 0,
+                llm_retries: 2,
+                schema_retries: 0,
+            }),
+            "verifier" => Some(Self {
+                max_iterations: 5,
+                max_nudges: 0,
+                tool_retries: 0,
+                llm_retries: 2,
+                schema_retries: 3,
+            }),
+            "completer" => Some(Self {
+                max_iterations: 1,
+                max_nudges: 0,
+                tool_retries: 0,
+                llm_retries: 2,
+                schema_retries: 0,
+            }),
+            _ => None,
+        }
+    }
+}
+
+pub(crate) fn agent_loop_profile_defaults(
+    options: &Option<std::collections::BTreeMap<String, VmValue>>,
+    label: &str,
+) -> Result<AgentLoopProfileDefaults, crate::value::VmError> {
+    let profile = opt_str(options, "profile").unwrap_or_else(|| "tool_using".to_string());
+    AgentLoopProfileDefaults::for_name(&profile).ok_or_else(|| {
+        crate::value::VmError::Runtime(format!(
+            "{label}: profile must be one of tool_using, researcher, verifier, completer; got `{profile}`"
+        ))
+    })
+}
 
 #[derive(Clone)]
 pub struct AgentLoopConfig {
@@ -28,6 +85,8 @@ pub struct AgentLoopConfig {
     pub break_unless_phase: Option<String>,
     pub tool_retries: usize,
     pub tool_backoff_ms: u64,
+    pub schema_retries: usize,
+    pub schema_retry_nudge: super::SchemaNudge,
     pub tool_format: String,
     pub native_tool_fallback: crate::orchestration::NativeToolFallbackPolicy,
     /// Auto-compaction config.
@@ -305,11 +364,20 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
         async move {
             std::mem::drop(captured_bridge);
             let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-            let max_iterations = opt_int(&options, "max_iterations").unwrap_or(50) as usize;
+            let profile_defaults = agent_loop_profile_defaults(&options, "agent_loop")?;
+            let max_iterations =
+                opt_int(&options, "max_iterations").unwrap_or(profile_defaults.max_iterations)
+                    as usize;
             let persistent = opt_bool(&options, "persistent");
-            let max_nudges = opt_int(&options, "max_nudges").unwrap_or(8) as usize;
+            let max_nudges =
+                opt_int(&options, "max_nudges").unwrap_or(profile_defaults.max_nudges) as usize;
             let custom_nudge = opt_str(&options, "nudge");
-            let tool_retries = opt_int(&options, "tool_retries").unwrap_or(0) as usize;
+            let tool_retries =
+                opt_int(&options, "tool_retries").unwrap_or(profile_defaults.tool_retries)
+                    as usize;
+            let schema_retries =
+                opt_int(&options, "schema_retries").unwrap_or(profile_defaults.schema_retries)
+                    as usize;
             let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
             let tool_format = opt_str(&options, "tool_format").unwrap_or_else(|| {
                 let opts = extract_llm_options(&args).ok();
@@ -432,6 +500,8 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     break_unless_phase,
                     tool_retries,
                     tool_backoff_ms,
+                    schema_retries,
+                    schema_retry_nudge: super::parse_schema_nudge(&options),
                     tool_format,
                     native_tool_fallback,
                     auto_compact,
@@ -442,8 +512,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     daemon,
                     daemon_config,
                     llm_retries: opt_int(&options, "llm_retries")
-                        .unwrap_or(DEFAULT_AGENT_LOOP_LLM_RETRIES as i64)
-                        as usize,
+                        .unwrap_or(profile_defaults.llm_retries) as usize,
                     llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
                     token_budget: opt_int(&options, "token_budget"),
                     exit_when_verified: opt_bool(&options, "exit_when_verified"),

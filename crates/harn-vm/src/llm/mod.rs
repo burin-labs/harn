@@ -251,7 +251,10 @@ fn compute_validation_errors(data: &VmValue, opts: &api::LlmCallOptions) -> Vec<
     schema_validation_errors(&validation)
 }
 
-fn structured_output_errors(result: &VmValue, opts: &api::LlmCallOptions) -> Vec<String> {
+pub(crate) fn structured_output_errors(
+    result: &VmValue,
+    opts: &api::LlmCallOptions,
+) -> Vec<String> {
     let Some(dict) = result.as_dict() else {
         return vec!["structured output result was not a dict".to_string()];
     };
@@ -281,7 +284,7 @@ fn structured_output_errors(result: &VmValue, opts: &api::LlmCallOptions) -> Vec
 /// How `llm_call` should nudge the model when `output_schema` validation
 /// fails and `schema_retries > 0`.
 #[derive(Debug, Clone)]
-enum SchemaNudge {
+pub(crate) enum SchemaNudge {
     /// Build a default corrective user message from the schema's top-level
     /// `required` / `properties` keys plus the validation errors. This is
     /// the default when `schema_retry_nudge` is unset or `true`.
@@ -294,7 +297,7 @@ enum SchemaNudge {
     Disabled,
 }
 
-fn parse_schema_nudge(
+pub(crate) fn parse_schema_nudge(
     options: &Option<std::collections::BTreeMap<String, VmValue>>,
 ) -> SchemaNudge {
     let Some(opts) = options.as_ref() else {
@@ -315,7 +318,7 @@ fn parse_schema_nudge(
 /// so small / local models can fix nested object mistakes without seeing
 /// the whole JSON Schema again (see `docs/llm/harn-quickref.md` "Schema
 /// retries").
-fn build_schema_nudge(
+pub(crate) fn build_schema_nudge(
     errors: &[String],
     schema: Option<&serde_json::Value>,
     mode: &SchemaNudge,
@@ -476,8 +479,8 @@ pub(crate) use self::agent::{
     run_agent_loop_internal,
 };
 pub(crate) use self::agent_config::{
-    agent_loop_result_from_llm, parse_command_policy_from_options, AgentLoopConfig,
-    DEFAULT_AGENT_LOOP_LLM_RETRIES,
+    agent_loop_profile_defaults, agent_loop_result_from_llm, parse_command_policy_from_options,
+    AgentLoopConfig,
 };
 pub use self::agent_config::{
     register_agent_loop_with_bridge, register_llm_call_structured_with_bridge,
@@ -1070,11 +1073,19 @@ pub fn register_llm_builtins(vm: &mut Vm) {
 
     vm.register_async_builtin("agent_loop", |args| async move {
         let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-        let max_iterations = opt_int(&options, "max_iterations").unwrap_or(50) as usize;
+        let profile_defaults = agent_config::agent_loop_profile_defaults(&options, "agent_loop")?;
+        let max_iterations =
+            opt_int(&options, "max_iterations").unwrap_or(profile_defaults.max_iterations)
+                as usize;
         let persistent = opt_bool(&options, "persistent");
-        let max_nudges = opt_int(&options, "max_nudges").unwrap_or(3) as usize;
+        let max_nudges =
+            opt_int(&options, "max_nudges").unwrap_or(profile_defaults.max_nudges) as usize;
         let custom_nudge = opt_str(&options, "nudge");
-        let tool_retries = opt_int(&options, "tool_retries").unwrap_or(0) as usize;
+        let tool_retries =
+            opt_int(&options, "tool_retries").unwrap_or(profile_defaults.tool_retries) as usize;
+        let schema_retries =
+            opt_int(&options, "schema_retries").unwrap_or(profile_defaults.schema_retries)
+                as usize;
         let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
         let tool_format = opt_str(&options, "tool_format").unwrap_or_else(|| "text".to_string());
         let native_tool_fallback = opt_str(&options, "native_tool_fallback")
@@ -1166,6 +1177,8 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 break_unless_phase,
                 tool_retries,
                 tool_backoff_ms,
+                schema_retries,
+                schema_retry_nudge: parse_schema_nudge(&options),
                 tool_format,
                 native_tool_fallback,
                 auto_compact,
@@ -1176,7 +1189,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 daemon,
                 daemon_config,
                 llm_retries: opt_int(&options, "llm_retries")
-                    .unwrap_or(DEFAULT_AGENT_LOOP_LLM_RETRIES as i64) as usize,
+                    .unwrap_or(profile_defaults.llm_retries) as usize,
                 llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
                 token_budget: opt_int(&options, "token_budget"),
                 exit_when_verified,

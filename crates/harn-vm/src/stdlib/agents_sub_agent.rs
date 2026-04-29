@@ -609,9 +609,15 @@ fn parse_structured_sub_agent_data(
 
 fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoopConfig, VmError> {
     let options = Some(spec.options.clone());
-    let max_iterations = crate::llm::helpers::opt_int(&options, "max_iterations").unwrap_or(50);
-    let max_nudges = crate::llm::helpers::opt_int(&options, "max_nudges").unwrap_or(3);
-    let tool_retries = crate::llm::helpers::opt_int(&options, "tool_retries").unwrap_or(0);
+    let profile_defaults = crate::llm::agent_loop_profile_defaults(&options, "sub_agent_run")?;
+    let max_iterations = crate::llm::helpers::opt_int(&options, "max_iterations")
+        .unwrap_or(profile_defaults.max_iterations);
+    let max_nudges =
+        crate::llm::helpers::opt_int(&options, "max_nudges").unwrap_or(profile_defaults.max_nudges);
+    let tool_retries = crate::llm::helpers::opt_int(&options, "tool_retries")
+        .unwrap_or(profile_defaults.tool_retries);
+    let schema_retries = crate::llm::helpers::opt_int(&options, "schema_retries")
+        .unwrap_or(profile_defaults.schema_retries) as usize;
     let tool_backoff_ms = crate::llm::helpers::opt_int(&options, "tool_backoff_ms").unwrap_or(1000);
     let tool_format = crate::llm::helpers::opt_str(&options, "tool_format");
     let done_sentinel = crate::llm::helpers::opt_str(&options, "done_sentinel");
@@ -662,6 +668,8 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
         break_unless_phase,
         tool_retries: tool_retries as usize,
         tool_backoff_ms: tool_backoff_ms as u64,
+        schema_retries,
+        schema_retry_nudge: crate::llm::parse_schema_nudge(&options),
         tool_format: tool_format.unwrap_or_default(),
         native_tool_fallback,
         auto_compact: None,
@@ -672,8 +680,7 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
         daemon: false,
         daemon_config: Default::default(),
         llm_retries: crate::llm::helpers::opt_int(&options, "llm_retries")
-            .unwrap_or(crate::llm::DEFAULT_AGENT_LOOP_LLM_RETRIES as i64)
-            as usize,
+            .unwrap_or(profile_defaults.llm_retries) as usize,
         llm_backoff_ms: crate::llm::helpers::opt_int(&options, "llm_backoff_ms").unwrap_or(2000)
             as u64,
         token_budget: crate::llm::helpers::opt_int(&options, "token_budget"),

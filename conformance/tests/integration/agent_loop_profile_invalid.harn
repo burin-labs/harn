@@ -1,0 +1,3 @@
+pipeline default() {
+  agent_loop("finish", nil, {provider: "mock", profile: "planner"})
+}

@@ -663,11 +663,12 @@ Same as `llm_call`, plus additional options:
 
 | Key | Type | Default | Description |
 |---|---|---|---|
+| `profile` | string | `"tool_using"` | Named preset for common loop shapes. One of `"tool_using"`, `"researcher"`, `"verifier"`, or `"completer"`; explicit option keys override profile defaults |
 | `persistent` | bool | `false` | Keep looping until the completion sentinel is emitted (`##DONE##`, or `<done>##DONE##</done>` in tagged text-tool stages) |
 | `max_iterations` | int | `50` | Maximum number of LLM round-trips |
-| `max_nudges` | int | `3` | Max consecutive text-only responses before stopping |
+| `max_nudges` | int | `8` | Max consecutive text-only responses before stopping |
 | `nudge` | string | see below | Custom message to send when nudging the agent |
-| `llm_retries` | int | `4` | Retries on transient HTTP / provider errors. Set to `0` for fail-fast |
+| `llm_retries` | int | `2` | Retries on transient HTTP / provider errors. Set to `0` for fail-fast |
 | `llm_backoff_ms` | int | `2000` | Base exponential backoff in ms between LLM retries |
 | `tool_retries` | int | `0` | Number of retry attempts for failed tool calls |
 | `tool_backoff_ms` | int | `1000` | Base backoff delay in ms for tool retries (doubles each attempt) |
@@ -692,6 +693,16 @@ Same as `llm_call`, plus additional options:
 | `skills` | skill_registry or list | nil | Skill registry exposed to the match-and-activate lifecycle phase. See [Skills lifecycle](#skills-lifecycle) |
 | `skill_match` | dict | `{strategy: "metadata", top_n: 1, sticky: true}` | Match configuration — `strategy` (`"metadata"` \| `"host"` \| `"embedding"`), `top_n`, `sticky` |
 | `working_files` | list\|string | `[]` | Paths that feed `paths:` glob auto-trigger in the metadata matcher and ride along as a hint to host-delegated matchers |
+
+Profiles preload the common loop-budget and retry keys below. Pass any
+key explicitly to override the profile's value for that call.
+
+| Profile | `max_iterations` | `max_nudges` | `tool_retries` | `llm_retries` | `schema_retries` |
+|---|---:|---:|---:|---:|---:|
+| `tool_using` | 50 | 8 | 0 | 2 | 0 |
+| `researcher` | 30 | 4 | 0 | 2 | 0 |
+| `verifier` | 5 | 0 | 0 | 2 | 3 |
+| `completer` | 1 | 0 | 0 | 2 | 0 |
 
 When `daemon: true`, the loop transitions `active -> idle -> active` instead of
 terminating on a text-only turn. Idle daemons can be woken by queued human

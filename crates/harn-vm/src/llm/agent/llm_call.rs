@@ -41,7 +41,7 @@ use crate::orchestration::TurnPolicy;
 use super::super::agent_observe::{
     dump_llm_interpreted_response, observed_llm_call, LlmRetryConfig, StreamingDetectorContext,
 };
-use super::super::helpers::transcript_event;
+use super::super::helpers::{expects_structured_output, transcript_event};
 use super::super::tools::{collect_tool_schemas, parse_text_tool_calls_with_tools};
 use super::helpers::{
     append_message_to_contexts, loop_state_requests_phase_change, prose_exceeds_budget,
@@ -62,6 +62,8 @@ pub(super) struct LlmCallContext<'a> {
     pub turn_policy: Option<&'a TurnPolicy>,
     pub llm_retries: usize,
     pub llm_backoff_ms: u64,
+    pub schema_retries: usize,
+    pub schema_retry_nudge: &'a super::super::SchemaNudge,
     pub tools_val: Option<&'a crate::value::VmValue>,
 }
 
@@ -90,7 +92,7 @@ pub(super) async fn run_llm_call(
     // detector for them would surface false-positive candidates from
     // any tool-shaped narration the model emits before its native
     // tool block.
-    let streaming_detector = if ctx.has_tools && ctx.tool_format != "native" {
+    let mut streaming_detector = if ctx.has_tools && ctx.tool_format != "native" {
         let mut known: std::collections::BTreeSet<String> =
             collect_tool_schemas(ctx.tools_val, None)
                 .into_iter()
@@ -112,20 +114,60 @@ pub(super) async fn run_llm_call(
     // transport has no session to attribute streaming partial-arg events
     // to and falls back to the dispatch-time lifecycle only.
     opts.session_id = Some(state.session_id.clone());
-    let result = observed_llm_call(
-        opts,
-        Some(ctx.tool_format),
-        ctx.bridge.as_ref(),
-        &LlmRetryConfig {
-            retries: ctx.llm_retries,
-            backoff_ms: ctx.llm_backoff_ms,
-        },
-        Some(iteration),
-        true,
-        false, // agent_loop runs on the local set, not offthread
-        streaming_detector,
-    )
-    .await?;
+    let retry_config = LlmRetryConfig {
+        retries: ctx.llm_retries,
+        backoff_ms: ctx.llm_backoff_ms,
+    };
+    let mut schema_attempt = 0usize;
+    let result = loop {
+        let detector = if schema_attempt == 0 {
+            streaming_detector.take()
+        } else {
+            None
+        };
+        let result = observed_llm_call(
+            opts,
+            Some(ctx.tool_format),
+            ctx.bridge.as_ref(),
+            &retry_config,
+            Some(iteration),
+            true,
+            false, // agent_loop runs on the local set, not offthread
+            detector,
+        )
+        .await?;
+
+        if schema_attempt >= ctx.schema_retries || !expects_structured_output(opts) {
+            break result;
+        }
+
+        let vm_result = super::super::agent_config::build_llm_call_result(&result, opts);
+        let errors = super::super::structured_output_errors(&vm_result, opts);
+        if errors.is_empty() {
+            break result;
+        }
+
+        schema_attempt += 1;
+        let nudge = super::super::build_schema_nudge(
+            &errors,
+            opts.output_schema.as_ref(),
+            ctx.schema_retry_nudge,
+        );
+        super::super::trace::emit_agent_event(super::super::trace::AgentTraceEvent::SchemaRetry {
+            attempt: schema_attempt,
+            errors: errors.clone(),
+            nudge_used: !nudge.is_empty(),
+            correction_prompt: nudge.clone(),
+        });
+        if !nudge.is_empty() {
+            append_message_to_contexts(
+                &mut state.visible_messages,
+                &mut state.recorded_messages,
+                runtime_feedback_message("schema_retry", nudge),
+            );
+        }
+        opts.messages = state.visible_messages.clone();
+    };
 
     // Consume the prefill after the call. The provider appended it to
     // the outgoing request as a final `role: "assistant"` message; the

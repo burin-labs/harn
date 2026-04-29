@@ -1,0 +1,36 @@
+pipeline default() {
+  let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  llm_mock_clear()
+  llm_mock({text: "{\"note\": \"missing verdict\"}"})
+  llm_mock({text: "{\"verdict\": \"pass\"}"})
+  let structured = agent_loop(
+    "grade this",
+    nil,
+    {provider: "mock", profile: "verifier", output_schema: schema, output_validation: "error"},
+  )
+  println(structured.visible_text)
+  println(len(llm_mock_calls()))
+  assert(len(llm_mock_calls()) == 2, "verifier profile should retry schema-invalid output")
+  llm_mock_clear()
+  llm_mock({text: "Needs another pass."})
+  let verifier = agent_loop("verify this", nil, {provider: "mock", profile: "verifier", persistent: true})
+  println(verifier.status)
+  println(verifier.llm.iterations)
+  assert(verifier.status == "stuck", "verifier max_nudges default should stop immediately")
+  assert(verifier.llm.iterations == 1, "verifier profile should run one text-only turn before stuck")
+  llm_mock_clear()
+  llm_mock({text: "Still working."})
+  llm_mock({text: "Finished. ##DONE##"})
+  let overridden = agent_loop(
+    "finish in two",
+    nil,
+    {provider: "mock", profile: "completer", persistent: true, max_iterations: 2, max_nudges: 2},
+  )
+  println(overridden.status)
+  println(overridden.llm.iterations)
+  assert(overridden.status == "done", "explicit max_iterations/max_nudges should override profile")
+  assert(
+    overridden.llm.iterations == 2,
+    "explicit max_iterations override should allow a second turn",
+  )
+}

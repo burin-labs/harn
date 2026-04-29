@@ -1447,6 +1447,14 @@ pub async fn execute_stage_node(
                     break_unless_phase: None,
                     tool_retries: 0,
                     tool_backoff_ms: 1000,
+                    schema_retries: 0,
+                    schema_retry_nudge: crate::llm::parse_schema_nudge(
+                        &node
+                            .raw_model_policy
+                            .as_ref()
+                            .and_then(|value| value.as_dict())
+                            .cloned(),
+                    ),
                     tool_format: tool_format.clone(),
                     native_tool_fallback: node.model_policy.native_tool_fallback,
                     auto_compact,

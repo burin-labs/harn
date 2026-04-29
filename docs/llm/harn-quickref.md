@@ -1010,11 +1010,20 @@ Returns a namespaced dict: top-level `status`, `text`, `visible_text`
 (`iterations`, `duration_ms`, `input_tokens`, `output_tokens`); tool
 invocation data nested under `tools` (`calls`, `successful`, `rejected`,
 `mode`). Respects the same `llm_retries` / `llm_backoff_ms` options
-as `llm_call`, with `agent_loop` defaulting `llm_retries` to 4, plus
-its own `tool_retries`, `max_iterations`, `max_nudges`, and
-`native_tool_fallback` (`"allow"`, `"allow_once"`, or `"reject"` for
-native-tool stages that receive text-mode `<tool_call>` fallback
-output).
+as `llm_call`, plus its own `profile`, `tool_retries`,
+`max_iterations`, `max_nudges`, and `native_tool_fallback`
+(`"allow"`, `"allow_once"`, or `"reject"` for native-tool stages that
+receive text-mode `<tool_call>` fallback output).
+
+Profiles preload common loop budgets and retry counts. Explicit keys
+override the profile:
+
+| Profile | `max_iterations` | `max_nudges` | `tool_retries` | `llm_retries` | `schema_retries` |
+|---|---:|---:|---:|---:|---:|
+| `tool_using` (default) | 50 | 8 | 0 | 2 | 0 |
+| `researcher` | 30 | 4 | 0 | 2 | 0 |
+| `verifier` | 5 | 0 | 0 | 2 | 3 |
+| `completer` | 1 | 0 | 0 | 2 | 0 |
 
 Pass `stop_after_successful_tools: ["name", ...]` to terminate the loop
 the moment any of those tools is dispatched successfully. Same shape as
