@@ -380,6 +380,26 @@ pub(crate) fn pricing_per_1k_for(provider: &str, model: &str) -> Option<(f64, f6
     model_pricing_per_1k(model).or_else(|| crate::llm_config::pricing_per_1k_for(provider, model))
 }
 
+fn model_cache_pricing_per_1k(model: &str) -> Option<(f64, Option<f64>, Option<f64>)> {
+    crate::llm_config::model_pricing_per_mtok(model).map(|pricing| {
+        (
+            pricing.input_per_mtok / 1000.0,
+            pricing.cache_read_per_mtok.map(|rate| rate / 1000.0),
+            pricing.cache_write_per_mtok.map(|rate| rate / 1000.0),
+        )
+    })
+}
+
+fn cache_pricing_per_1k_for(
+    provider: &str,
+    model: &str,
+) -> Option<(f64, Option<f64>, Option<f64>)> {
+    model_cache_pricing_per_1k(model).or_else(|| {
+        crate::llm_config::pricing_per_1k_for(provider, model)
+            .map(|(input_rate, _output_rate)| (input_rate, None, None))
+    })
+}
+
 pub(crate) fn latency_p50_ms_for(provider: &str) -> Option<u64> {
     let (_, _, latency) = crate::llm_config::provider_economics(provider);
     latency
@@ -409,6 +429,47 @@ pub fn calculate_cost_for_provider(
         }
         None => 0.0,
     }
+}
+
+pub(crate) fn cache_hit_ratio(
+    input_tokens: i64,
+    cache_read_tokens: i64,
+    cache_write_tokens: i64,
+) -> f64 {
+    let input_tokens = input_tokens.max(0);
+    let cache_read_tokens = cache_read_tokens.max(0);
+    let cache_write_tokens = cache_write_tokens.max(0);
+    let reported_cache_tokens = cache_read_tokens.saturating_add(cache_write_tokens);
+    let total_prompt_tokens = if reported_cache_tokens <= input_tokens {
+        input_tokens
+    } else {
+        input_tokens.saturating_add(reported_cache_tokens)
+    };
+    if total_prompt_tokens == 0 {
+        0.0
+    } else {
+        cache_read_tokens as f64 / total_prompt_tokens as f64
+    }
+}
+
+pub(crate) fn cache_savings_usd_for_provider(
+    provider: &str,
+    model: &str,
+    cache_read_tokens: i64,
+    cache_write_tokens: i64,
+) -> f64 {
+    let Some((input_rate, cache_read_rate, cache_write_rate)) =
+        cache_pricing_per_1k_for(provider, model)
+    else {
+        return 0.0;
+    };
+    let cache_read_savings = cache_read_tokens.max(0) as f64
+        * (input_rate - cache_read_rate.unwrap_or(input_rate))
+        / 1000.0;
+    let cache_write_savings = cache_write_tokens.max(0) as f64
+        * (input_rate - cache_write_rate.unwrap_or(input_rate))
+        / 1000.0;
+    cache_read_savings + cache_write_savings
 }
 
 pub(crate) fn accumulate_cost_for_provider(
@@ -527,5 +588,28 @@ mod tests {
         assert!((cost - 0.03).abs() < f64::EPSILON);
 
         crate::llm_config::clear_user_overrides();
+    }
+
+    #[test]
+    fn cache_savings_uses_catalog_cache_pricing() {
+        let _guard = crate::llm::env_lock().lock().unwrap();
+        crate::llm_config::clear_user_overrides();
+
+        let savings =
+            cache_savings_usd_for_provider("anthropic", "claude-sonnet-4-20250514", 1000, 0);
+        assert!((savings - 0.0027).abs() < 0.0000001);
+
+        let write_delta =
+            cache_savings_usd_for_provider("anthropic", "claude-sonnet-4-20250514", 0, 1000);
+        assert!((write_delta + 0.00075).abs() < 0.0000001);
+
+        crate::llm_config::clear_user_overrides();
+    }
+
+    #[test]
+    fn cache_hit_ratio_handles_subset_and_separate_anthropic_counts() {
+        assert!((cache_hit_ratio(1000, 250, 0) - 0.25).abs() < f64::EPSILON);
+        assert!((cache_hit_ratio(100, 900, 0) - 0.9).abs() < f64::EPSILON);
+        assert_eq!(cache_hit_ratio(0, 0, 0), 0.0);
     }
 }

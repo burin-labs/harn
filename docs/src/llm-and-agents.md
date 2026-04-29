@@ -92,6 +92,10 @@ println(result.text)
 | `output_tokens` | int | Output/completion token count |
 | `cache_read_tokens` | int | Prompt tokens served from provider-side cache when supported |
 | `cache_write_tokens` | int | Prompt tokens written into provider-side cache when supported |
+| `cache_creation_input_tokens` | int | Anthropic-compatible alias for `cache_write_tokens` |
+| `cache_hit_ratio` | float | Fraction of prompt tokens served from provider-side cache |
+| `cache_savings_usd` | float | Estimated prompt-cache savings versus full input-token price; cache writes can be negative when writes cost more than normal input |
+| `usage` | dict | Token and prompt-cache accounting fields, including the cache fields above |
 | `data` | any | Parsed JSON (when `response_format: "json"`) |
 | `tool_calls` | list | Tool calls (when model uses tools) |
 | `thinking` | string | Reasoning trace (when `thinking` is enabled) |
@@ -256,7 +260,7 @@ Envelope fields:
 | `attempts` | int | Number of model calls made. `1` = no retries; `2+` = schema retries kicked in. `0` only when arg parsing failed before any call. |
 | `repaired` | bool | `true` when the repair pass produced valid JSON. |
 | `extracted_json` | bool | `true` when JSON had to be lifted from prose / markdown fences. |
-| `usage` | `{input_tokens, output_tokens, cache_read_tokens, cache_write_tokens}` | Token counts from the final attempt. |
+| `usage` | `{input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_creation_input_tokens, cache_hit_ratio, cache_savings_usd}` | Token and prompt-cache accounting from the final attempt. |
 | `model` | string | Model that produced the final attempt. |
 | `provider` | string | Provider that produced the final attempt. |
 

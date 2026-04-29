@@ -162,7 +162,8 @@ fn parse_cli_llm_mock_value(value: &serde_json::Value) -> Result<harn_vm::llm::L
     let input_tokens = optional_i64_field(object, "input_tokens")?;
     let output_tokens = optional_i64_field(object, "output_tokens")?;
     let cache_read_tokens = optional_i64_field(object, "cache_read_tokens")?;
-    let cache_write_tokens = optional_i64_field(object, "cache_write_tokens")?;
+    let cache_write_tokens = optional_i64_field(object, "cache_write_tokens")?
+        .or(optional_i64_field(object, "cache_creation_input_tokens")?);
     let thinking = optional_string_field(object, "thinking")?;
     let stop_reason = optional_string_field(object, "stop_reason")?;
     let model = optional_string_field(object, "model")?.unwrap_or_else(|| "mock".to_string());
@@ -403,6 +404,10 @@ fn serialize_cli_llm_mock(mock: harn_vm::llm::LlmMock) -> Result<String, String>
     if let Some(cache_write_tokens) = mock.cache_write_tokens {
         object.insert(
             "cache_write_tokens".to_string(),
+            serde_json::Value::Number(cache_write_tokens.into()),
+        );
+        object.insert(
+            "cache_creation_input_tokens".to_string(),
             serde_json::Value::Number(cache_write_tokens.into()),
         );
     }

@@ -492,6 +492,18 @@ pub(super) fn dump_llm_response(
         ),
         "cache_read_tokens": result.cache_read_tokens,
         "cache_write_tokens": result.cache_write_tokens,
+        "cache_creation_input_tokens": result.cache_write_tokens,
+        "cache_hit_ratio": crate::llm::cost::cache_hit_ratio(
+            result.input_tokens,
+            result.cache_read_tokens,
+            result.cache_write_tokens,
+        ),
+        "cache_savings_usd": crate::llm::cost::cache_savings_usd_for_provider(
+            &result.provider,
+            &result.model,
+            result.cache_read_tokens,
+            result.cache_write_tokens,
+        ),
         // Explicit bool for easy cache-regression spotting in tailed logs.
         "cache_hit": result.cache_read_tokens > 0,
         "thinking": result.thinking,

@@ -29,6 +29,51 @@ pub(crate) struct LlmResult {
     pub blocks: Vec<serde_json::Value>,
 }
 
+fn build_usage_dict(result: &LlmResult) -> BTreeMap<String, VmValue> {
+    let cache_hit_ratio = crate::llm::cost::cache_hit_ratio(
+        result.input_tokens,
+        result.cache_read_tokens,
+        result.cache_write_tokens,
+    );
+    let cache_savings_usd = crate::llm::cost::cache_savings_usd_for_provider(
+        &result.provider,
+        &result.model,
+        result.cache_read_tokens,
+        result.cache_write_tokens,
+    );
+
+    let mut usage = BTreeMap::new();
+    usage.insert(
+        "input_tokens".to_string(),
+        VmValue::Int(result.input_tokens),
+    );
+    usage.insert(
+        "output_tokens".to_string(),
+        VmValue::Int(result.output_tokens),
+    );
+    usage.insert(
+        "cache_read_tokens".to_string(),
+        VmValue::Int(result.cache_read_tokens),
+    );
+    usage.insert(
+        "cache_write_tokens".to_string(),
+        VmValue::Int(result.cache_write_tokens),
+    );
+    usage.insert(
+        "cache_creation_input_tokens".to_string(),
+        VmValue::Int(result.cache_write_tokens),
+    );
+    usage.insert(
+        "cache_hit_ratio".to_string(),
+        VmValue::Float(cache_hit_ratio),
+    );
+    usage.insert(
+        "cache_savings_usd".to_string(),
+        VmValue::Float(cache_savings_usd),
+    );
+    usage
+}
+
 pub(crate) fn vm_build_llm_result(
     result: &LlmResult,
     parsed_json: Option<VmValue>,
@@ -67,6 +112,18 @@ pub(crate) fn vm_build_llm_result(
         "cache_write_tokens".to_string(),
         VmValue::Int(result.cache_write_tokens),
     );
+    dict.insert(
+        "cache_creation_input_tokens".to_string(),
+        VmValue::Int(result.cache_write_tokens),
+    );
+    let usage = build_usage_dict(result);
+    if let Some(value) = usage.get("cache_hit_ratio") {
+        dict.insert("cache_hit_ratio".to_string(), value.clone());
+    }
+    if let Some(value) = usage.get("cache_savings_usd") {
+        dict.insert("cache_savings_usd".to_string(), value.clone());
+    }
+    dict.insert("usage".to_string(), VmValue::Dict(Rc::new(usage)));
 
     if let Some(json_val) = parsed_json {
         dict.insert("data".to_string(), json_val);

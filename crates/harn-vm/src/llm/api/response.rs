@@ -295,6 +295,13 @@ pub(super) fn extract_cache_read_tokens(usage: &serde_json::Value) -> i64 {
     {
         return n;
     }
+    if let Some(n) = usage
+        .get("input_tokens_details")
+        .and_then(|d| d.get("cached_tokens"))
+        .and_then(|v| v.as_i64())
+    {
+        return n;
+    }
     // OpenRouter variants: cache_read_tokens / cached_prompt_tokens.
     if let Some(n) = usage.get("cache_read_tokens").and_then(|v| v.as_i64()) {
         return n;
@@ -319,12 +326,30 @@ pub(super) fn extract_cache_write_tokens(usage: &serde_json::Value) -> i64 {
         .get("prompt_tokens_details")
         .and_then(|d| d.get("cache_write_tokens"))
         .and_then(|v| v.as_i64())
+        .or_else(|| {
+            usage
+                .get("prompt_tokens_details")
+                .and_then(|d| d.get("cache_creation_input_tokens"))
+                .and_then(|v| v.as_i64())
+        })
+        .or_else(|| {
+            usage
+                .get("input_tokens_details")
+                .and_then(|d| d.get("cache_write_tokens"))
+                .and_then(|v| v.as_i64())
+        })
+        .or_else(|| {
+            usage
+                .get("input_tokens_details")
+                .and_then(|d| d.get("cache_creation_input_tokens"))
+                .and_then(|v| v.as_i64())
+        })
         .unwrap_or(0)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_cache_write_tokens, parse_llm_response};
+    use super::{extract_cache_read_tokens, extract_cache_write_tokens, parse_llm_response};
 
     // Build a ResolvedProvider for the Anthropic path without going through
     // the thread-local provider registry — these parser tests only need the
@@ -345,6 +370,21 @@ mod tests {
         });
 
         assert_eq!(extract_cache_write_tokens(&usage), 100);
+    }
+
+    #[test]
+    fn cache_tokens_support_openai_responses_details_shape() {
+        let usage = serde_json::json!({
+            "input_tokens": 194,
+            "output_tokens": 2,
+            "input_tokens_details": {
+                "cached_tokens": 120,
+                "cache_creation_input_tokens": 40
+            }
+        });
+
+        assert_eq!(extract_cache_read_tokens(&usage), 120);
+        assert_eq!(extract_cache_write_tokens(&usage), 40);
     }
 
     #[test]
