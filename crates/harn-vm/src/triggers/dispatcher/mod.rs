@@ -12,7 +12,6 @@ use tokio::sync::{Mutex as AsyncMutex, Notify};
 use tracing::Instrument as _;
 
 use crate::event_log::{active_event_log, AnyEventLog, EventLog, LogError, LogEvent, Topic};
-use crate::llm::trigger_predicate::{start_predicate_evaluation, PredicateCacheEntry};
 use crate::llm::vm_value_to_json;
 use crate::orchestration::{
     append_action_graph_update, RunActionGraphEdgeRecord, RunActionGraphNodeRecord,
@@ -32,21 +31,24 @@ use crate::vm::Vm;
 
 use self::uri::DispatchUri;
 use super::registry::{
-    binding_autonomy_budget_would_exceed, binding_budget_would_exceed,
-    expected_predicate_cost_usd_micros, matching_bindings, micros_to_usd, note_autonomous_decision,
-    note_orchestrator_budget_cost, orchestrator_budget_would_exceed, record_predicate_cost_sample,
-    reset_binding_budget_windows, usd_to_micros, TriggerBinding, TriggerBudgetExhaustionStrategy,
-    TriggerHandlerSpec,
+    binding_autonomy_budget_would_exceed, matching_bindings, note_autonomous_decision,
+    TriggerBinding, TriggerBudgetExhaustionStrategy, TriggerHandlerSpec,
 };
 use super::{
     begin_in_flight, finish_in_flight, TriggerDispatchOutcome, TriggerEvent,
     TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_CANCEL_REQUESTS_TOPIC,
-    TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC,
-    TRIGGER_OUTBOX_TOPIC,
+    TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_OUTBOX_TOPIC,
+};
+use circuits::{
+    destination_circuit_key, dlq_node_metadata, DestinationCircuitProbe,
+    DestinationCircuitRegistry, DESTINATION_CIRCUIT_FAILURE_THRESHOLD,
 };
 use flow_control::{BatchDecision, ConcurrencyPermit, FlowControlManager};
+use predicate_eval::predicate_node_metadata;
 
+mod circuits;
 mod flow_control;
+mod predicate_eval;
 pub mod retry;
 pub mod uri;
 
@@ -55,8 +57,6 @@ pub use retry::{RetryPolicy, TriggerRetryConfig, DEFAULT_MAX_ATTEMPTS};
 pub const TRIGGER_ACCEPTED_AT_MS_HEADER: &str = "harn_trigger_accepted_at_ms";
 pub const TRIGGER_NORMALIZED_AT_MS_HEADER: &str = "harn_trigger_normalized_at_ms";
 pub const TRIGGER_QUEUE_APPENDED_AT_MS_HEADER: &str = "harn_trigger_queue_appended_at_ms";
-const DESTINATION_CIRCUIT_FAILURE_THRESHOLD: u32 = 5;
-const DESTINATION_CIRCUIT_BACKOFF: Duration = Duration::from_secs(60);
 
 thread_local! {
     static ACTIVE_DISPATCHER_STATE: RefCell<Option<Arc<DispatcherRuntimeState>>> = const { RefCell::new(None) };
@@ -87,24 +87,6 @@ impl Drop for DispatchExecutionPolicyGuard {
     fn drop(&mut self) {
         crate::orchestration::pop_execution_policy();
     }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct PredicateCacheRecord {
-    trigger_id: String,
-    event_id: String,
-    entries: Vec<PredicateCacheEntry>,
-}
-
-#[derive(Clone, Debug, Default)]
-struct PredicateEvaluationRecord {
-    result: bool,
-    cost_usd: f64,
-    tokens: u64,
-    latency_ms: u64,
-    cached: bool,
-    reason: Option<String>,
-    exhaustion_strategy: Option<TriggerBudgetExhaustionStrategy>,
 }
 
 const DEFAULT_AUTONOMY_BUDGET_REVIEWER: &str = "operator";
@@ -155,91 +137,6 @@ impl DispatcherRuntimeState {
             idle_notify: Notify::new(),
             flow_control: FlowControlManager::new(event_log),
             destination_circuits: DestinationCircuitRegistry::default(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DestinationCircuitProbe {
-    Allow { half_open: bool },
-    Block { retry_after: Duration },
-}
-
-#[derive(Debug)]
-struct DestinationCircuitRegistry {
-    threshold: u32,
-    backoff: Duration,
-    states: Mutex<BTreeMap<String, DestinationCircuitState>>,
-}
-
-#[derive(Clone, Debug)]
-struct DestinationCircuitState {
-    failures: u32,
-    opened_at: Option<Instant>,
-}
-
-impl Default for DestinationCircuitRegistry {
-    fn default() -> Self {
-        Self {
-            threshold: DESTINATION_CIRCUIT_FAILURE_THRESHOLD,
-            backoff: DESTINATION_CIRCUIT_BACKOFF,
-            states: Mutex::new(BTreeMap::new()),
-        }
-    }
-}
-
-impl DestinationCircuitRegistry {
-    fn check(&self, destination: &str) -> DestinationCircuitProbe {
-        let mut states = self
-            .states
-            .lock()
-            .expect("destination circuit registry poisoned");
-        let Some(state) = states.get_mut(destination) else {
-            return DestinationCircuitProbe::Allow { half_open: false };
-        };
-        let Some(opened_at) = state.opened_at else {
-            return DestinationCircuitProbe::Allow { half_open: false };
-        };
-        let elapsed = opened_at.elapsed();
-        if elapsed >= self.backoff {
-            DestinationCircuitProbe::Allow { half_open: true }
-        } else {
-            DestinationCircuitProbe::Block {
-                retry_after: self.backoff.saturating_sub(elapsed),
-            }
-        }
-    }
-
-    fn record_success(&self, destination: &str) {
-        let mut states = self
-            .states
-            .lock()
-            .expect("destination circuit registry poisoned");
-        states.remove(destination);
-    }
-
-    fn record_failure(&self, destination: &str) -> bool {
-        let mut states = self
-            .states
-            .lock()
-            .expect("destination circuit registry poisoned");
-        let state = states
-            .entry(destination.to_string())
-            .or_insert(DestinationCircuitState {
-                failures: 0,
-                opened_at: None,
-            });
-        if state.opened_at.is_some() {
-            state.failures = self.threshold;
-            state.opened_at = Some(Instant::now());
-            return true;
-        }
-        state.failures = state.failures.saturating_add(1);
-        if state.failures >= self.threshold {
-            state.opened_at = Some(Instant::now());
-            true
-        } else {
-            false
         }
     }
 }
@@ -2905,249 +2802,6 @@ impl Dispatcher {
         }
     }
 
-    async fn evaluate_predicate(
-        &self,
-        binding: &TriggerBinding,
-        predicate: &super::registry::TriggerPredicateSpec,
-        event: &TriggerEvent,
-        replay_of_event_id: Option<&String>,
-        autonomy_tier: AutonomyTier,
-    ) -> Result<PredicateEvaluationRecord, DispatchError> {
-        let event_id = event.id.0.clone();
-        let trigger_id = binding.id.as_str().to_string();
-        let now_ms = now_unix_ms();
-        reset_binding_budget_windows(binding);
-
-        let breaker_open_until = {
-            let state = binding
-                .predicate_state
-                .lock()
-                .expect("trigger predicate state poisoned");
-            if state
-                .breaker_open_until_ms
-                .is_some_and(|until_ms| until_ms > now_ms)
-            {
-                state.breaker_open_until_ms
-            } else {
-                None
-            }
-        };
-
-        if breaker_open_until.is_some() {
-            let mut metadata = BTreeMap::new();
-            metadata.insert("trigger_id".to_string(), serde_json::json!(trigger_id));
-            metadata.insert("event_id".to_string(), serde_json::json!(event_id));
-            metadata.insert(
-                "breaker_open_until_ms".to_string(),
-                serde_json::json!(breaker_open_until),
-            );
-            crate::events::log_warn_meta(
-                "trigger.predicate.circuit_breaker",
-                "trigger predicate circuit breaker is open; short-circuiting to false",
-                metadata,
-            );
-            let record = PredicateEvaluationRecord {
-                result: false,
-                reason: Some("circuit_open".to_string()),
-                ..Default::default()
-            };
-            self.append_predicate_evaluated_event(binding, event, &record, replay_of_event_id)
-                .await?;
-            return Ok(record);
-        }
-
-        let expected_cost = expected_predicate_cost_usd_micros(binding);
-        if let Some(reason) = binding_budget_would_exceed(binding, expected_cost)
-            .or_else(|| orchestrator_budget_would_exceed(expected_cost))
-        {
-            self.append_budget_exhausted_event(
-                binding,
-                event,
-                reason,
-                expected_cost,
-                None,
-                replay_of_event_id,
-            )
-            .await?;
-            let record = PredicateEvaluationRecord {
-                result: binding.on_budget_exhausted == TriggerBudgetExhaustionStrategy::Warn,
-                reason: Some(reason.to_string()),
-                exhaustion_strategy: Some(binding.on_budget_exhausted),
-                ..Default::default()
-            };
-            self.append_predicate_evaluated_event(binding, event, &record, replay_of_event_id)
-                .await?;
-            return Ok(record);
-        }
-
-        let replay_cache = self
-            .read_predicate_cache_record(replay_of_event_id.unwrap_or(&event_id))
-            .await?;
-        let guard = start_predicate_evaluation(
-            binding.when_budget.clone().unwrap_or_default(),
-            replay_cache,
-        );
-        let started = std::time::Instant::now();
-        let eval = self
-            .invoke_vm_callable_with_timeout(
-                &predicate.closure,
-                &binding.binding_key(),
-                event,
-                replay_of_event_id,
-                binding.id.as_str(),
-                &format!("{}.{}", event.provider.as_str(), event.kind),
-                autonomy_tier,
-                &mut self.cancel_tx.subscribe(),
-                binding
-                    .when_budget
-                    .as_ref()
-                    .and_then(|budget| budget.timeout()),
-            )
-            .await;
-        let capture = guard.finish();
-        let latency_ms = started.elapsed().as_millis() as u64;
-        if replay_of_event_id.is_none() && !capture.entries.is_empty() {
-            self.append_predicate_cache_record(binding, event, &capture.entries)
-                .await?;
-        }
-
-        let mut record = PredicateEvaluationRecord {
-            result: false,
-            cost_usd: capture.total_cost_usd,
-            tokens: capture.total_tokens,
-            latency_ms,
-            cached: capture.cached,
-            reason: None,
-            exhaustion_strategy: None,
-        };
-
-        let mut count_failure = false;
-        let mut opened_breaker = false;
-
-        match eval {
-            Ok(value) => match predicate_value_as_bool(value) {
-                Ok(result) => {
-                    record.result = result;
-                }
-                Err(reason) => {
-                    count_failure = true;
-                    record.reason = Some(reason);
-                }
-            },
-            Err(error) => {
-                count_failure = true;
-                record.reason = Some(error.to_string());
-            }
-        }
-
-        let cost_usd_micros = usd_to_micros(record.cost_usd);
-        if cost_usd_micros > 0 {
-            binding
-                .metrics
-                .cost_total_usd_micros
-                .fetch_add(cost_usd_micros, Ordering::Relaxed);
-            binding
-                .metrics
-                .cost_today_usd_micros
-                .fetch_add(cost_usd_micros, Ordering::Relaxed);
-            binding
-                .metrics
-                .cost_hour_usd_micros
-                .fetch_add(cost_usd_micros, Ordering::Relaxed);
-            note_orchestrator_budget_cost(cost_usd_micros);
-            record_predicate_cost_sample(binding, cost_usd_micros);
-        }
-
-        let timed_out = matches!(
-            record.reason.as_deref(),
-            Some("predicate evaluation timed out")
-        );
-        if capture.budget_exceeded || timed_out {
-            if binding.on_budget_exhausted != TriggerBudgetExhaustionStrategy::Warn {
-                record.result = false;
-            } else if timed_out {
-                record.result = true;
-            }
-            record.reason = Some("budget_exceeded".to_string());
-            record.exhaustion_strategy = Some(binding.on_budget_exhausted);
-            self.append_budget_exhausted_event(
-                binding,
-                event,
-                "budget_exceeded",
-                cost_usd_micros,
-                Some(record.tokens),
-                replay_of_event_id,
-            )
-            .await?;
-            self.append_lifecycle_event(
-                "predicate.invocation_budget_exceeded",
-                event,
-                binding,
-                serde_json::json!({
-                    "trigger_id": binding.id.as_str(),
-                    "event_id": event.id.0,
-                    "max_cost_usd": binding.when_budget.as_ref().and_then(|budget| budget.max_cost_usd),
-                    "tokens_max": binding.when_budget.as_ref().and_then(|budget| budget.tokens_max),
-                    "cost_usd": record.cost_usd,
-                    "tokens": record.tokens,
-                    "replay_of_event_id": replay_of_event_id,
-                }),
-                replay_of_event_id,
-            )
-            .await?;
-        }
-
-        if let Some(reason) =
-            binding_budget_would_exceed(binding, 0).or_else(|| orchestrator_budget_would_exceed(0))
-        {
-            if binding.on_budget_exhausted != TriggerBudgetExhaustionStrategy::Warn {
-                record.result = false;
-            }
-            record.reason = Some(reason.to_string());
-            record.exhaustion_strategy = Some(binding.on_budget_exhausted);
-            self.append_budget_exhausted_event(binding, event, reason, 0, None, replay_of_event_id)
-                .await?;
-        }
-
-        {
-            let mut state = binding
-                .predicate_state
-                .lock()
-                .expect("trigger predicate state poisoned");
-            if count_failure {
-                state.consecutive_failures = state.consecutive_failures.saturating_add(1);
-                if state.consecutive_failures >= 3 {
-                    state.breaker_open_until_ms = Some(now_ms.saturating_add(5 * 60 * 1000));
-                    opened_breaker = true;
-                }
-            } else {
-                state.consecutive_failures = 0;
-                state.breaker_open_until_ms = None;
-            }
-        }
-
-        if opened_breaker {
-            let mut metadata = BTreeMap::new();
-            metadata.insert(
-                "trigger_id".to_string(),
-                serde_json::json!(binding.id.as_str()),
-            );
-            metadata.insert("event_id".to_string(), serde_json::json!(event.id.0));
-            metadata.insert("failure_count".to_string(), serde_json::json!(3));
-            metadata.insert("reason".to_string(), serde_json::json!(record.reason));
-            crate::events::log_warn_meta(
-                "trigger.predicate.circuit_breaker",
-                "trigger predicate circuit breaker opened for 5 minutes",
-                metadata,
-            );
-        }
-
-        self.append_predicate_evaluated_event(binding, event, &record, replay_of_event_id)
-            .await?;
-        Ok(record)
-    }
-
-    #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_arguments)]
     async fn invoke_vm_callable_with_timeout(
         &self,
@@ -3183,106 +2837,6 @@ impl Dispatcher {
         } else {
             future.await
         }
-    }
-
-    async fn append_predicate_evaluated_event(
-        &self,
-        binding: &TriggerBinding,
-        event: &TriggerEvent,
-        record: &PredicateEvaluationRecord,
-        replay_of_event_id: Option<&String>,
-    ) -> Result<(), DispatchError> {
-        if let Some(metrics) = self.metrics.as_ref() {
-            metrics.record_trigger_predicate_evaluation(
-                binding.id.as_str(),
-                record.result,
-                record.cost_usd,
-            );
-            metrics.set_trigger_budget_cost_today(
-                binding.id.as_str(),
-                current_predicate_daily_cost(binding),
-            );
-            if matches!(
-                record.reason.as_deref(),
-                Some(
-                    "budget_exceeded"
-                        | "daily_budget_exceeded"
-                        | "hourly_budget_exceeded"
-                        | "orchestrator_daily_budget_exceeded"
-                        | "orchestrator_hourly_budget_exceeded"
-                )
-            ) {
-                metrics.record_trigger_budget_exhausted(
-                    binding.id.as_str(),
-                    record
-                        .exhaustion_strategy
-                        .map(TriggerBudgetExhaustionStrategy::as_str)
-                        .unwrap_or_else(|| record.reason.as_deref().unwrap_or("predicate")),
-                );
-            }
-        }
-        self.append_lifecycle_event(
-            "predicate.evaluated",
-            event,
-            binding,
-            serde_json::json!({
-                "trigger_id": binding.id.as_str(),
-                "event_id": event.id.0,
-                "result": record.result,
-                "cost_usd": record.cost_usd,
-                "tokens": record.tokens,
-                "latency_ms": record.latency_ms,
-                "cached": record.cached,
-                "reason": record.reason,
-                "on_budget_exhausted": record.exhaustion_strategy.map(TriggerBudgetExhaustionStrategy::as_str),
-                "replay_of_event_id": replay_of_event_id,
-            }),
-            replay_of_event_id,
-        )
-        .await
-    }
-
-    async fn append_predicate_cache_record(
-        &self,
-        binding: &TriggerBinding,
-        event: &TriggerEvent,
-        entries: &[PredicateCacheEntry],
-    ) -> Result<(), DispatchError> {
-        let topic = Topic::new(TRIGGER_INBOX_LEGACY_TOPIC)
-            .expect("static trigger inbox legacy topic name is valid");
-        let payload = serde_json::to_value(PredicateCacheRecord {
-            trigger_id: binding.id.as_str().to_string(),
-            event_id: event.id.0.clone(),
-            entries: entries.to_vec(),
-        })
-        .map_err(|error| DispatchError::Serde(error.to_string()))?;
-        self.event_log
-            .append(&topic, LogEvent::new("predicate_llm_cache", payload))
-            .await
-            .map_err(DispatchError::from)
-            .map(|_| ())
-    }
-
-    async fn read_predicate_cache_record(
-        &self,
-        event_id: &str,
-    ) -> Result<Vec<PredicateCacheEntry>, DispatchError> {
-        let topic = Topic::new(TRIGGER_INBOX_LEGACY_TOPIC)
-            .expect("static trigger inbox legacy topic name is valid");
-        let records = self
-            .event_log
-            .read_range(&topic, None, usize::MAX)
-            .await
-            .map_err(DispatchError::from)?;
-        Ok(records
-            .into_iter()
-            .filter(|(_, event)| event.kind == "predicate_llm_cache")
-            .filter_map(|(_, event)| {
-                serde_json::from_value::<PredicateCacheRecord>(event.payload).ok()
-            })
-            .filter(|record| record.event_id == event_id)
-            .flat_map(|record| record.entries)
-            .collect())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -3391,55 +2945,6 @@ impl Dispatcher {
             replay_of_event_id,
         )
         .await
-    }
-
-    async fn append_budget_exhausted_event(
-        &self,
-        binding: &TriggerBinding,
-        event: &TriggerEvent,
-        reason: &str,
-        expected_cost_usd_micros: u64,
-        tokens: Option<u64>,
-        replay_of_event_id: Option<&String>,
-    ) -> Result<(), DispatchError> {
-        let payload = serde_json::json!({
-            "trigger_id": binding.id.as_str(),
-            "event_id": event.id.0,
-            "reason": reason,
-            "strategy": binding.on_budget_exhausted.as_str(),
-            "expected_cost_usd": micros_to_usd(expected_cost_usd_micros),
-            "cost_usd": micros_to_usd(expected_cost_usd_micros),
-            "tokens": tokens,
-            "daily_limit_usd": binding.daily_cost_usd,
-            "hourly_limit_usd": binding.hourly_cost_usd,
-            "cost_today_usd": current_predicate_daily_cost(binding),
-            "cost_hour_usd": current_predicate_hourly_cost(binding),
-            "replay_of_event_id": replay_of_event_id,
-        });
-        self.append_lifecycle_event(
-            "predicate.budget_exceeded",
-            event,
-            binding,
-            payload.clone(),
-            replay_of_event_id,
-        )
-        .await?;
-        let legacy_kind = match reason {
-            "daily_budget_exceeded" => Some("predicate.daily_budget_exceeded"),
-            "hourly_budget_exceeded" => Some("predicate.hourly_budget_exceeded"),
-            "orchestrator_daily_budget_exceeded" => {
-                Some("predicate.orchestrator_daily_budget_exceeded")
-            }
-            "orchestrator_hourly_budget_exceeded" => {
-                Some("predicate.orchestrator_hourly_budget_exceeded")
-            }
-            _ => None,
-        };
-        if let Some(kind) = legacy_kind {
-            self.append_lifecycle_event(kind, event, binding, payload, replay_of_event_id)
-                .await?;
-        }
-        Ok(())
     }
 
     async fn append_autonomy_budget_approval_request(
@@ -3669,216 +3174,6 @@ impl Dispatcher {
                 "reason": reason,
                 "retry_at": next_budget_reset_rfc3339(binding),
             }),
-        )
-        .await
-    }
-
-    async fn move_budget_exhausted_to_dlq(
-        &self,
-        binding: &TriggerBinding,
-        route: &DispatchUri,
-        event: &TriggerEvent,
-        replay_of_event_id: Option<&String>,
-        final_error: &str,
-    ) -> Result<(), DispatchError> {
-        let dlq_entry = DlqEntry {
-            trigger_id: binding.id.as_str().to_string(),
-            binding_key: binding.binding_key(),
-            event: event.clone(),
-            attempt_count: 0,
-            final_error: final_error.to_string(),
-            error_class: crate::triggers::classify_trigger_dlq_error(final_error).to_string(),
-            attempts: Vec::new(),
-        };
-        self.state
-            .dlq
-            .lock()
-            .expect("dispatcher dlq poisoned")
-            .push(dlq_entry.clone());
-        if let Some(metrics) = self.metrics.as_ref() {
-            metrics.record_trigger_dlq(binding.id.as_str(), "budget_exhausted");
-            metrics.record_trigger_accepted_to_dlq(
-                binding.id.as_str(),
-                &binding.binding_key(),
-                event.provider.as_str(),
-                tenant_id(event),
-                "budget_exhausted",
-                duration_between_ms(current_unix_ms(), accepted_at_ms(None, event)),
-            );
-        }
-        tracing::info!(
-            component = "dispatcher",
-            lifecycle = "dlq_moved",
-            trigger_id = %binding.id.as_str(),
-            binding_key = %binding.binding_key(),
-            event_id = %event.id.0,
-            reason = "budget_exhausted",
-            trace_id = %event.trace_id.0
-        );
-        self.emit_action_graph(
-            event,
-            vec![RunActionGraphNodeRecord {
-                id: format!("dlq:{}:{}", binding.binding_key(), event.id.0),
-                label: binding.id.as_str().to_string(),
-                kind: ACTION_GRAPH_NODE_KIND_DLQ.to_string(),
-                status: "queued".to_string(),
-                outcome: "budget_exhausted".to_string(),
-                trace_id: Some(event.trace_id.0.clone()),
-                stage_id: None,
-                node_id: None,
-                worker_id: None,
-                run_id: None,
-                run_path: None,
-                metadata: dlq_node_metadata(binding, event, 0, final_error),
-            }],
-            vec![RunActionGraphEdgeRecord {
-                from_id: format!("predicate:{}:{}", binding.binding_key(), event.id.0),
-                to_id: format!("dlq:{}:{}", binding.binding_key(), event.id.0),
-                kind: ACTION_GRAPH_EDGE_KIND_DLQ_MOVE.to_string(),
-                label: Some("budget exhausted".to_string()),
-            }],
-            serde_json::json!({
-                "source": "dispatcher",
-                "trigger_id": binding.id.as_str(),
-                "binding_key": binding.binding_key(),
-                "event_id": event.id.0,
-                "handler_kind": route.kind(),
-                "target_uri": route.target_uri(),
-                "final_error": final_error,
-                "replay_of_event_id": replay_of_event_id,
-            }),
-        )
-        .await?;
-        self.append_lifecycle_event(
-            "DlqMoved",
-            event,
-            binding,
-            serde_json::json!({
-                "event_id": event.id.0,
-                "attempt_count": 0,
-                "final_error": final_error,
-                "reason": "budget_exhausted",
-                "replay_of_event_id": replay_of_event_id,
-            }),
-            replay_of_event_id,
-        )
-        .await?;
-        self.append_topic_event(
-            TRIGGER_DLQ_TOPIC,
-            "dlq_moved",
-            event,
-            Some(binding),
-            None,
-            serde_json::to_value(&dlq_entry)
-                .map_err(|serde_error| DispatchError::Serde(serde_error.to_string()))?,
-            replay_of_event_id,
-        )
-        .await
-    }
-
-    async fn move_circuit_open_to_dlq(
-        &self,
-        binding: &TriggerBinding,
-        route: &DispatchUri,
-        event: &TriggerEvent,
-        replay_of_event_id: Option<&String>,
-        final_error: &str,
-        destination: &str,
-    ) -> Result<(), DispatchError> {
-        let dlq_entry = DlqEntry {
-            trigger_id: binding.id.as_str().to_string(),
-            binding_key: binding.binding_key(),
-            event: event.clone(),
-            attempt_count: 0,
-            final_error: final_error.to_string(),
-            error_class: crate::triggers::classify_trigger_dlq_error(final_error).to_string(),
-            attempts: Vec::new(),
-        };
-        self.state
-            .dlq
-            .lock()
-            .expect("dispatcher dlq poisoned")
-            .push(dlq_entry.clone());
-        if let Some(metrics) = self.metrics.as_ref() {
-            metrics.record_trigger_dlq(binding.id.as_str(), "circuit_open");
-            metrics.record_trigger_accepted_to_dlq(
-                binding.id.as_str(),
-                &binding.binding_key(),
-                event.provider.as_str(),
-                tenant_id(event),
-                "circuit_open",
-                Duration::ZERO,
-            );
-        }
-        tracing::info!(
-            component = "dispatcher",
-            lifecycle = "dlq_moved",
-            trigger_id = %binding.id.as_str(),
-            binding_key = %binding.binding_key(),
-            event_id = %event.id.0,
-            reason = "circuit_open",
-            destination,
-            trace_id = %event.trace_id.0
-        );
-        self.emit_action_graph(
-            event,
-            vec![RunActionGraphNodeRecord {
-                id: format!("dlq:{}:{}", binding.binding_key(), event.id.0),
-                label: binding.id.as_str().to_string(),
-                kind: ACTION_GRAPH_NODE_KIND_DLQ.to_string(),
-                status: "queued".to_string(),
-                outcome: "circuit_open".to_string(),
-                trace_id: Some(event.trace_id.0.clone()),
-                stage_id: None,
-                node_id: None,
-                worker_id: None,
-                run_id: None,
-                run_path: None,
-                metadata: dlq_node_metadata(binding, event, 0, final_error),
-            }],
-            vec![RunActionGraphEdgeRecord {
-                from_id: format!("trigger:{}", event.id.0),
-                to_id: format!("dlq:{}:{}", binding.binding_key(), event.id.0),
-                kind: ACTION_GRAPH_EDGE_KIND_DLQ_MOVE.to_string(),
-                label: Some("circuit open".to_string()),
-            }],
-            serde_json::json!({
-                "source": "dispatcher",
-                "trigger_id": binding.id.as_str(),
-                "binding_key": binding.binding_key(),
-                "event_id": event.id.0,
-                "handler_kind": route.kind(),
-                "target_uri": route.target_uri(),
-                "destination": destination,
-                "final_error": final_error,
-                "replay_of_event_id": replay_of_event_id,
-            }),
-        )
-        .await?;
-        self.append_lifecycle_event(
-            "DlqMoved",
-            event,
-            binding,
-            serde_json::json!({
-                "event_id": event.id.0,
-                "attempt_count": 0,
-                "final_error": final_error,
-                "reason": "circuit_open",
-                "destination": destination,
-                "replay_of_event_id": replay_of_event_id,
-            }),
-            replay_of_event_id,
-        )
-        .await?;
-        self.append_topic_event(
-            TRIGGER_DLQ_TOPIC,
-            "dlq_moved",
-            event,
-            Some(binding),
-            None,
-            serde_json::to_value(&dlq_entry)
-                .map_err(|serde_error| DispatchError::Serde(serde_error.to_string()))?,
-            replay_of_event_id,
         )
         .await
     }
@@ -4167,10 +3462,6 @@ fn dispatch_error_label(error: &DispatchError) -> &'static str {
     }
 }
 
-fn destination_circuit_key(route: &DispatchUri) -> String {
-    format!("{}:{}", route.kind(), route.target_uri())
-}
-
 fn dispatch_success_outcome(route: &DispatchUri, result: &serde_json::Value) -> &'static str {
     match route {
         DispatchUri::Worker { .. } => "enqueued",
@@ -4250,36 +3541,6 @@ fn trigger_node_metadata(event: &TriggerEvent) -> BTreeMap<String, serde_json::V
         "signature_status".to_string(),
         serde_json::json!(signature_status_label(&event.signature_status)),
     );
-    metadata
-}
-
-fn predicate_node_metadata(
-    binding: &TriggerBinding,
-    predicate: &super::registry::TriggerPredicateSpec,
-    event: &TriggerEvent,
-    evaluation: &PredicateEvaluationRecord,
-) -> BTreeMap<String, serde_json::Value> {
-    let mut metadata = BTreeMap::new();
-    metadata.insert(
-        "trigger_id".to_string(),
-        serde_json::json!(binding.id.as_str()),
-    );
-    metadata.insert("predicate".to_string(), serde_json::json!(predicate.raw));
-    metadata.insert("result".to_string(), serde_json::json!(evaluation.result));
-    metadata.insert(
-        "cost_usd".to_string(),
-        serde_json::json!(evaluation.cost_usd),
-    );
-    metadata.insert("tokens".to_string(), serde_json::json!(evaluation.tokens));
-    metadata.insert(
-        "latency_ms".to_string(),
-        serde_json::json!(evaluation.latency_ms),
-    );
-    metadata.insert("cached".to_string(), serde_json::json!(evaluation.cached));
-    metadata.insert("event_id".to_string(), serde_json::json!(event.id.0));
-    if let Some(reason) = evaluation.reason.as_ref() {
-        metadata.insert("reason".to_string(), serde_json::json!(reason));
-    }
     metadata
 }
 
@@ -4380,73 +3641,6 @@ fn retry_node_metadata(
     metadata.insert("delay_ms".to_string(), serde_json::json!(delay.as_millis()));
     metadata.insert("error".to_string(), serde_json::json!(error.to_string()));
     metadata
-}
-
-fn dlq_node_metadata(
-    binding: &TriggerBinding,
-    event: &TriggerEvent,
-    attempt_count: u32,
-    final_error: &str,
-) -> BTreeMap<String, serde_json::Value> {
-    let mut metadata = BTreeMap::new();
-    metadata.insert(
-        "trigger_id".to_string(),
-        serde_json::json!(binding.id.as_str()),
-    );
-    metadata.insert("event_id".to_string(), serde_json::json!(event.id.0));
-    metadata.insert(
-        "attempt_count".to_string(),
-        serde_json::json!(attempt_count),
-    );
-    metadata.insert("final_error".to_string(), serde_json::json!(final_error));
-    metadata.insert(
-        "error_class".to_string(),
-        serde_json::json!(crate::triggers::classify_trigger_dlq_error(final_error)),
-    );
-    metadata
-}
-
-fn predicate_value_as_bool(value: VmValue) -> Result<bool, String> {
-    match value {
-        VmValue::Bool(result) => Ok(result),
-        VmValue::EnumVariant {
-            enum_name,
-            variant,
-            fields,
-        } if enum_name.as_ref() == "Result" && variant.as_ref() == "Ok" => match fields.first() {
-            Some(VmValue::Bool(result)) => Ok(*result),
-            Some(other) => Err(format!(
-                "predicate Result.Ok payload must be bool, got {}",
-                other.type_name()
-            )),
-            None => Err("predicate Result.Ok payload is missing".to_string()),
-        },
-        VmValue::EnumVariant {
-            enum_name,
-            variant,
-            fields,
-        } if enum_name.as_ref() == "Result" && variant.as_ref() == "Err" => Err(fields
-            .first()
-            .map(VmValue::display)
-            .unwrap_or_else(|| "predicate returned Result.Err".to_string())),
-        other => Err(format!(
-            "predicate must return bool or Result<bool, _>, got {}",
-            other.type_name()
-        )),
-    }
-}
-
-fn current_predicate_daily_cost(binding: &TriggerBinding) -> f64 {
-    micros_to_usd(
-        binding
-            .metrics
-            .cost_today_usd_micros
-            .load(Ordering::Relaxed),
-    )
-}
-
-fn current_predicate_hourly_cost(binding: &TriggerBinding) -> f64 {
-    micros_to_usd(binding.metrics.cost_hour_usd_micros.load(Ordering::Relaxed))
 }
 
 fn split_binding_key(binding_key: &str) -> (String, u32) {
