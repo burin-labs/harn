@@ -16,21 +16,23 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, LazyLock, Mutex};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use harn_vm::process_sandbox;
 use harn_vm::VmValue;
-use sha2::{Digest, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::error::HostlibError;
 use crate::tools::response::ResponseBuilder;
 
+mod artifacts;
+
+use self::artifacts::planned_artifact_paths;
+pub(crate) use self::artifacts::{persist_artifacts, resolve_output_path};
+
 static COMMAND_COUNTER: AtomicU64 = AtomicU64::new(1);
-static ARTIFACTS: LazyLock<Mutex<BTreeMap<String, CommandArtifacts>>> =
-    LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
 const DEFAULT_MAX_INLINE_BYTES: usize = 50_000;
 
@@ -114,16 +116,6 @@ impl CommandStatus {
             CommandStatus::Killed => "killed",
         }
     }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct CommandArtifacts {
-    pub(crate) output_path: PathBuf,
-    pub(crate) stdout_path: PathBuf,
-    pub(crate) stderr_path: PathBuf,
-    pub(crate) line_count: u64,
-    pub(crate) byte_count: u64,
-    pub(crate) output_sha256: String,
 }
 
 /// Spawn the configured command, capture stdout + stderr in full, and
@@ -362,55 +354,6 @@ pub(crate) fn running_response(
         .build()
 }
 
-pub(crate) fn persist_artifacts(
-    command_id: &str,
-    stdout: &[u8],
-    stderr: &[u8],
-    handle_id: Option<&str>,
-) -> Result<CommandArtifacts, HostlibError> {
-    let artifacts = planned_artifact_paths(command_id);
-    std::fs::create_dir_all(artifacts.output_path.parent().unwrap()).map_err(|e| {
-        HostlibError::Backend {
-            builtin: "hostlib_tools_run_command",
-            message: format!("failed to create command artifact dir: {e}"),
-        }
-    })?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(
-            artifacts.output_path.parent().unwrap(),
-            std::fs::Permissions::from_mode(0o700),
-        );
-    }
-    std::fs::write(&artifacts.stdout_path, stdout).map_err(|e| HostlibError::Backend {
-        builtin: "hostlib_tools_run_command",
-        message: format!("failed to write stdout artifact: {e}"),
-    })?;
-    std::fs::write(&artifacts.stderr_path, stderr).map_err(|e| HostlibError::Backend {
-        builtin: "hostlib_tools_run_command",
-        message: format!("failed to write stderr artifact: {e}"),
-    })?;
-    let mut combined = Vec::with_capacity(stdout.len() + stderr.len());
-    combined.extend_from_slice(stdout);
-    combined.extend_from_slice(stderr);
-    std::fs::write(&artifacts.output_path, &combined).map_err(|e| HostlibError::Backend {
-        builtin: "hostlib_tools_run_command",
-        message: format!("failed to write combined output artifact: {e}"),
-    })?;
-    let output_sha256 = format!("sha256:{}", hex::encode(Sha256::digest(&combined)));
-    let artifacts = CommandArtifacts {
-        output_path: artifacts.output_path,
-        stdout_path: artifacts.stdout_path,
-        stderr_path: artifacts.stderr_path,
-        line_count: line_count(&combined),
-        byte_count: combined.len() as u64,
-        output_sha256,
-    };
-    register_artifacts(command_id, handle_id, &artifacts);
-    Ok(artifacts)
-}
-
 pub(crate) fn next_command_id() -> String {
     let id = COMMAND_COUNTER.fetch_add(1, Ordering::SeqCst);
     let now_nanos = SystemTime::now()
@@ -459,21 +402,6 @@ pub(crate) fn inline_output(
             String::new()
         },
     )
-}
-
-pub(crate) fn resolve_output_path(
-    command_id: Option<&str>,
-    handle_id: Option<&str>,
-    path: Option<&str>,
-) -> Option<PathBuf> {
-    if let Some(path) = path {
-        return Some(PathBuf::from(path));
-    }
-    let artifacts = ARTIFACTS.lock().expect("command artifact store poisoned");
-    command_id
-        .and_then(|id| artifacts.get(id))
-        .or_else(|| handle_id.and_then(|id| artifacts.get(id)))
-        .map(|a| a.output_path.clone())
 }
 
 pub(crate) fn child_process_group_id(pid: u32) -> Option<u32> {
@@ -541,40 +469,11 @@ fn wait_with_timeout(
     }
 }
 
-fn planned_artifact_paths(command_id: &str) -> CommandArtifacts {
-    let dir = std::env::temp_dir().join(format!("harn-command-{command_id}"));
-    CommandArtifacts {
-        output_path: dir.join("combined.txt"),
-        stdout_path: dir.join("stdout.txt"),
-        stderr_path: dir.join("stderr.txt"),
-        line_count: 0,
-        byte_count: 0,
-        output_sha256: String::new(),
-    }
-}
-
-fn register_artifacts(command_id: &str, handle_id: Option<&str>, artifacts: &CommandArtifacts) {
-    let mut store = ARTIFACTS.lock().expect("command artifact store poisoned");
-    store.insert(command_id.to_string(), artifacts.clone());
-    if let Some(handle_id) = handle_id {
-        store.insert(handle_id.to_string(), artifacts.clone());
-    }
-}
-
 fn lossy_prefix(bytes: &[u8], max_inline_bytes: usize) -> String {
     let cap = bytes.len().min(max_inline_bytes);
-    String::from_utf8_lossy(&bytes[..cap]).into_owned()
-}
-
-fn line_count(bytes: &[u8]) -> u64 {
-    if bytes.is_empty() {
-        return 0;
-    }
-    let newlines = bytes.iter().filter(|b| **b == b'\n').count() as u64;
-    if bytes.ends_with(b"\n") {
-        newlines
-    } else {
-        newlines + 1
+    match std::str::from_utf8(&bytes[..cap]) {
+        Ok(text) => text.to_string(),
+        Err(error) => String::from_utf8_lossy(&bytes[..error.valid_up_to()]).into_owned(),
     }
 }
 
@@ -648,5 +547,44 @@ pub(crate) fn parse_cwd(
             message: format!("not an existing directory: {raw}"),
         });
     }
-    Ok(Some(path.to_path_buf()))
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| HostlibError::InvalidParameter {
+            builtin,
+            param: "cwd",
+            message: format!("failed to canonicalize cwd `{raw}`: {error}"),
+        })?;
+    Ok(Some(canonical))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inline_output_does_not_split_utf8_codepoint() {
+        let (stdout, stderr) = inline_output(
+            "alpha 🚀 beta".as_bytes(),
+            &[],
+            CaptureConfig {
+                max_inline_bytes: b"alpha \xF0\x9F".len(),
+                ..CaptureConfig::default()
+            },
+        );
+
+        assert_eq!(stdout, "alpha ");
+        assert_eq!(stderr, "");
+    }
+
+    #[test]
+    fn parse_cwd_returns_canonical_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let nested = temp.path().join("a").join("..");
+        std::fs::create_dir_all(temp.path().join("a")).unwrap();
+        let parsed = parse_cwd("test", Some(nested.to_str().unwrap()))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(parsed, temp.path().canonicalize().unwrap());
+    }
 }

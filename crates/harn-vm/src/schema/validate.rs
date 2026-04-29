@@ -113,9 +113,10 @@ fn validate_against_schema(
         }
     }
 
+    let mut errors = Vec::new();
+    let mut normalized = value.clone();
+
     if let Some(VmValue::List(branches)) = schema.get("all_of") {
-        let mut normalized = value.clone();
-        let mut errors = Vec::new();
         for branch in branches.iter() {
             let Some(branch_dict) = branch.as_dict() else {
                 continue;
@@ -125,49 +126,46 @@ fn validate_against_schema(
             normalized = branch_result.value;
             errors.extend(branch_result.errors);
         }
-        return ValidationResult {
-            value: normalized,
-            errors,
-        };
     }
 
     if let Some(VmValue::List(union_schemas)) = schema.get("union") {
+        let mut matched = None;
         for branch in union_schemas.iter() {
             if let Some(dict) = branch.as_dict() {
                 let branch_result =
                     validate_against_schema(value, dict, root_schema, path, options);
                 if branch_result.errors.is_empty() {
-                    return branch_result;
+                    matched = Some(branch_result.value);
+                    break;
                 }
             }
         }
-        return ValidationResult {
-            value: value.clone(),
-            errors: vec![format!(
+        if let Some(value) = matched {
+            normalized = value;
+        } else {
+            errors.push(format!(
                 "at {}: value did not match any union branch",
                 location_label(path)
-            )],
-        };
+            ));
+        }
     }
 
     if let Some(expected_type) = schema_type_name(schema) {
         if !value_matches_type(value, expected_type, options.numeric_compat) {
+            errors.push(format!(
+                "at {}: expected type '{}', got '{}'",
+                location_label(path),
+                expected_type,
+                actual_value_type(value)
+            ));
             return ValidationResult {
-                value: value.clone(),
-                errors: vec![format!(
-                    "at {}: expected type '{}', got '{}'",
-                    location_label(path),
-                    expected_type,
-                    actual_value_type(value)
-                )],
+                value: normalized,
+                errors,
             };
         }
     }
 
-    let mut errors = Vec::new();
-    let mut normalized = value.clone();
-
-    match value {
+    match &normalized {
         VmValue::Dict(map) => {
             let (next_value, next_errors) =
                 validate_object_fields(map, None, schema, root_schema, path, options);
@@ -175,7 +173,7 @@ fn validate_against_schema(
             errors.extend(next_errors);
         }
         VmValue::StructInstance { layout, .. } => {
-            let fields = value.struct_fields_map().unwrap_or_default();
+            let fields = normalized.struct_fields_map().unwrap_or_default();
             let (next_value, next_errors) =
                 validate_object_fields(&fields, Some(layout), schema, root_schema, path, options);
             normalized = next_value;
@@ -218,7 +216,7 @@ fn validate_against_schema(
                         errors.extend(child.errors);
                     }
                 }
-                normalized = match value {
+                normalized = match &normalized {
                     VmValue::Set(_) => VmValue::Set(Rc::new(normalized_items)),
                     _ => VmValue::List(Rc::new(normalized_items)),
                 };
@@ -268,7 +266,7 @@ fn validate_against_schema(
             if let Some(VmValue::List(enum_values)) = schema.get("enum") {
                 if !enum_values
                     .iter()
-                    .any(|candidate| values_equal(candidate, value))
+                    .any(|candidate| values_equal(candidate, &normalized))
                 {
                     errors.push(format!(
                         "at {}: value must be one of [{}]",
@@ -284,14 +282,14 @@ fn validate_against_schema(
         }
         VmValue::Int(number) => {
             validate_numeric_constraints(*number as f64, schema, path, &mut errors);
-            validate_enum_membership(value, schema, path, &mut errors);
+            validate_enum_membership(&normalized, schema, path, &mut errors);
         }
         VmValue::Float(number) => {
             validate_numeric_constraints(*number, schema, path, &mut errors);
-            validate_enum_membership(value, schema, path, &mut errors);
+            validate_enum_membership(&normalized, schema, path, &mut errors);
         }
         VmValue::Bool(_) | VmValue::Nil => {
-            validate_enum_membership(value, schema, path, &mut errors);
+            validate_enum_membership(&normalized, schema, path, &mut errors);
         }
         _ => {}
     }

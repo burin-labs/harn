@@ -283,13 +283,9 @@ impl SkillSource for FsSkillSource {
     }
 
     fn fetch(&self, id: &str) -> Result<Skill, String> {
-        let target_name = match id.rsplit_once('/') {
-            Some((_, n)) => n,
-            None => id,
-        };
         for dir in self.iter_skill_dirs() {
             let skill = self.load_from_dir(&dir)?;
-            if skill.id() == id || skill.manifest.name == target_name {
+            if skill.id() == id || (self.namespace.is_none() && skill.manifest.name == id) {
                 return Ok(skill);
             }
         }
@@ -702,6 +698,24 @@ mod tests {
         assert_eq!(listed[0].id, "acme/ops/deploy");
         let skill = src.fetch("acme/ops/deploy").unwrap();
         assert_eq!(skill.id(), "acme/ops/deploy");
+    }
+
+    #[test]
+    fn fs_source_namespaced_fetch_requires_qualified_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "deploy/SKILL.md",
+            "---\nname: deploy\nshort: deploy the service\n---\nbody",
+        );
+        let src = FsSkillSource::new(tmp.path(), Layer::Manifest).with_namespace("acme/ops");
+
+        assert!(src.fetch("deploy").is_err());
+        assert!(src.fetch("other/deploy").is_err());
+        assert_eq!(
+            src.fetch("acme/ops/deploy").unwrap().id(),
+            "acme/ops/deploy"
+        );
     }
 
     #[test]

@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
-use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 
 use async_trait::async_trait;
 use serde_json::{json, Value as JsonValue};
@@ -11,8 +9,8 @@ use time::OffsetDateTime;
 use super::*;
 use crate::connectors::{
     test_util::{
-        accept_http_connection, read_http_request, write_http_response,
-        CapturedHttpRequest as CapturedRequest,
+        spawn_mock_http_server, write_http_response, CapturedHttpRequest as CapturedRequest,
+        MockHttpServer,
     },
     Connector, ConnectorClient, ConnectorCtx, InboxIndex, MetricsRegistry, RateLimiterFactory,
     RawInbound, TriggerBinding,
@@ -419,13 +417,11 @@ struct MockScenario {
 fn spawn_mock_server(
     expected_requests: usize,
     scenario: Arc<Mutex<MockScenario>>,
-) -> (String, JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
-    let addr = listener.local_addr().expect("mock addr");
-    let handle = std::thread::spawn(move || {
-        for _ in 0..expected_requests {
-            let mut stream = accept_http_connection(&listener, "slack mock server");
-            let request = read_http_request(&mut stream);
+) -> MockHttpServer {
+    spawn_mock_http_server(
+        expected_requests,
+        "slack mock server",
+        move |_index, addr, request, stream| {
             scenario
                 .lock()
                 .expect("scenario lock")
@@ -433,43 +429,43 @@ fn spawn_mock_server(
                 .push(request.clone());
             match request.path.as_str() {
                 "/chat.postMessage" => write_http_response(
-                    &mut stream,
+                    stream,
                     200,
                     &[("content-type", "application/json".to_string())],
                     r#"{"ok":true,"channel":"C123ABC456","ts":"1715.000100","message":{"text":"hello from harn"}}"#,
                 ),
                 "/chat.update" => write_http_response(
-                    &mut stream,
+                    stream,
                     200,
                     &[("content-type", "application/json".to_string())],
                     r#"{"ok":true,"channel":"C123ABC456","ts":"1715.000100","text":"updated"}"#,
                 ),
                 "/reactions.add" => write_http_response(
-                    &mut stream,
+                    stream,
                     200,
                     &[("content-type", "application/json".to_string())],
                     r#"{"ok":true}"#,
                 ),
                 "/views.open" => write_http_response(
-                    &mut stream,
+                    stream,
                     200,
                     &[("content-type", "application/json".to_string())],
                     r#"{"ok":true,"view":{"id":"V123ABC456","type":"modal"}}"#,
                 ),
                 path if path.starts_with("/users.info") => write_http_response(
-                    &mut stream,
+                    stream,
                     200,
                     &[("content-type", "application/json".to_string())],
                     r#"{"ok":true,"user":{"id":"U123ABC456","name":"roadrunner"}}"#,
                 ),
                 "/auth.test" => write_http_response(
-                    &mut stream,
+                    stream,
                     200,
                     &[("content-type", "application/json".to_string())],
                     r#"{"ok":true,"url":"https://example.slack.com/","team":"Example","user":"bot"}"#,
                 ),
                 "/files.getUploadURLExternal" => write_http_response(
-                    &mut stream,
+                    stream,
                     200,
                     &[("content-type", "application/json".to_string())],
                     &format!(
@@ -477,25 +473,25 @@ fn spawn_mock_server(
                         addr
                     ),
                 ),
-                "/upload/F123" => write_http_response(&mut stream, 200, &[], ""),
+                "/upload/F123" => write_http_response(stream, 200, &[], ""),
                 "/files.completeUploadExternal" => write_http_response(
-                    &mut stream,
+                    stream,
                     200,
                     &[("content-type", "application/json".to_string())],
                     r#"{"ok":true,"files":[{"id":"F123","title":"notes.txt"}]}"#,
                 ),
                 other => panic!("unexpected path {other}"),
             }
-        }
-    });
-    (format!("http://{addr}"), handle)
+        },
+    )
 }
 
 #[tokio::test]
 async fn slack_outbound_helpers_hit_expected_api_methods() {
     let client = initialized_client().await;
     let scenario = Arc::new(Mutex::new(MockScenario::default()));
-    let (base_url, handle) = spawn_mock_server(9, scenario.clone());
+    let server = spawn_mock_server(9, scenario.clone());
+    let base_url = server.base_url().to_string();
 
     let posted = client
         .call(
@@ -591,7 +587,7 @@ async fn slack_outbound_helpers_hit_expected_api_methods() {
         .await
         .unwrap();
 
-    handle.join().expect("server thread");
+    drop(server);
     let requests = scenario.lock().expect("scenario lock").requests.clone();
     assert_eq!(requests.len(), 9);
     assert_eq!(requests[0].path, "/chat.postMessage");

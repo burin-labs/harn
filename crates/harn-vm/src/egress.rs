@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+#[cfg(test)]
+use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::rc::Rc;
 use std::str::FromStr;
@@ -47,8 +49,14 @@ enum EgressMatcher {
 
 #[derive(Clone, Debug)]
 struct EgressState {
+    #[cfg(not(test))]
     env_checked: bool,
+    #[cfg(not(test))]
     policy: Option<ConfiguredPolicy>,
+    #[cfg(test)]
+    test_env_checked: HashSet<std::thread::ThreadId>,
+    #[cfg(test)]
+    test_policies: HashMap<std::thread::ThreadId, ConfiguredPolicy>,
 }
 
 #[derive(Clone, Debug)]
@@ -71,8 +79,14 @@ static EGRESS_STATE: OnceLock<RwLock<EgressState>> = OnceLock::new();
 fn state() -> &'static RwLock<EgressState> {
     EGRESS_STATE.get_or_init(|| {
         RwLock::new(EgressState {
+            #[cfg(not(test))]
             env_checked: false,
+            #[cfg(not(test))]
             policy: None,
+            #[cfg(test)]
+            test_env_checked: HashSet::new(),
+            #[cfg(test)]
+            test_policies: HashMap::new(),
         })
     })
 }
@@ -140,8 +154,17 @@ pub fn connector_error_for_url(
 
 pub fn reset_egress_policy_for_host() {
     let mut guard = state().write().expect("egress policy state poisoned");
-    guard.env_checked = false;
-    guard.policy = None;
+    #[cfg(test)]
+    {
+        let thread_id = std::thread::current().id();
+        guard.test_env_checked.remove(&thread_id);
+        guard.test_policies.remove(&thread_id);
+    }
+    #[cfg(not(test))]
+    {
+        guard.env_checked = false;
+        guard.policy = None;
+    }
 }
 
 #[cfg(test)]
@@ -153,7 +176,17 @@ fn check_url(surface: &str, raw_url: &str) -> Result<Option<EgressBlocked>, VmEr
     ensure_env_seeded()?;
     let configured = {
         let guard = state().read().expect("egress policy state poisoned");
-        guard.policy.clone()
+        #[cfg(test)]
+        {
+            guard
+                .test_policies
+                .get(&std::thread::current().id())
+                .cloned()
+        }
+        #[cfg(not(test))]
+        {
+            guard.policy.clone()
+        }
     };
     let Some(configured) = configured else {
         return Ok(None);
@@ -194,7 +227,7 @@ fn check_url(surface: &str, raw_url: &str) -> Result<Option<EgressBlocked>, VmEr
 fn blocked(surface: &str, url: &str, target: &EgressTarget, reason: String) -> EgressBlocked {
     EgressBlocked {
         surface: surface.to_string(),
-        url: url.to_string(),
+        url: redact_sensitive_url(url),
         host: target.host.clone(),
         port: target.port,
         reason,
@@ -248,21 +281,50 @@ fn audit_blocked_background(blocked: EgressBlocked) {
 fn install_policy(policy: EgressPolicy, source: &'static str) -> Result<(), VmError> {
     ensure_env_seeded()?;
     let mut guard = state().write().expect("egress policy state poisoned");
-    if let Some(existing) = &guard.policy {
-        return Err(vm_error(format!(
-            "egress_policy: policy already configured from {}",
-            existing.source
-        )));
+    #[cfg(test)]
+    {
+        let thread_id = std::thread::current().id();
+        if let Some(existing) = guard.test_policies.get(&thread_id) {
+            return Err(vm_error(format!(
+                "egress_policy: policy already configured from {}",
+                existing.source
+            )));
+        }
+        guard
+            .test_policies
+            .insert(thread_id, ConfiguredPolicy { source, policy });
+        Ok(())
     }
-    guard.policy = Some(ConfiguredPolicy { source, policy });
-    Ok(())
+    #[cfg(not(test))]
+    {
+        if let Some(existing) = &guard.policy {
+            return Err(vm_error(format!(
+                "egress_policy: policy already configured from {}",
+                existing.source
+            )));
+        }
+        guard.policy = Some(ConfiguredPolicy { source, policy });
+        Ok(())
+    }
 }
 
 fn ensure_env_seeded() -> Result<(), VmError> {
     {
         let guard = state().read().expect("egress policy state poisoned");
-        if guard.env_checked {
-            return Ok(());
+        #[cfg(test)]
+        {
+            if guard
+                .test_env_checked
+                .contains(&std::thread::current().id())
+            {
+                return Ok(());
+            }
+        }
+        #[cfg(not(test))]
+        {
+            if guard.env_checked {
+                return Ok(());
+            }
         }
     }
 
@@ -270,23 +332,50 @@ fn ensure_env_seeded() -> Result<(), VmError> {
     let deny = std::env::var(HARN_EGRESS_DENY_ENV).ok();
     let default = std::env::var(HARN_EGRESS_DEFAULT_ENV).ok();
     let mut guard = state().write().expect("egress policy state poisoned");
-    if guard.env_checked {
-        return Ok(());
+    #[cfg(test)]
+    {
+        let thread_id = std::thread::current().id();
+        if guard.test_env_checked.contains(&thread_id) {
+            return Ok(());
+        }
+        guard.test_env_checked.insert(thread_id);
+        if allow.is_none() && deny.is_none() && default.is_none() {
+            return Ok(());
+        }
+        let policy = EgressPolicy {
+            allow: parse_rule_list(allow.as_deref().unwrap_or(""))?,
+            deny: parse_rule_list(deny.as_deref().unwrap_or(""))?,
+            default: parse_default_action(default.as_deref().unwrap_or("allow"))?,
+        };
+        guard.test_policies.insert(
+            thread_id,
+            ConfiguredPolicy {
+                source: "environment",
+                policy,
+            },
+        );
+        Ok(())
     }
-    guard.env_checked = true;
-    if allow.is_none() && deny.is_none() && default.is_none() {
-        return Ok(());
+    #[cfg(not(test))]
+    {
+        if guard.env_checked {
+            return Ok(());
+        }
+        guard.env_checked = true;
+        if allow.is_none() && deny.is_none() && default.is_none() {
+            return Ok(());
+        }
+        let policy = EgressPolicy {
+            allow: parse_rule_list(allow.as_deref().unwrap_or(""))?,
+            deny: parse_rule_list(deny.as_deref().unwrap_or(""))?,
+            default: parse_default_action(default.as_deref().unwrap_or("allow"))?,
+        };
+        guard.policy = Some(ConfiguredPolicy {
+            source: "environment",
+            policy,
+        });
+        Ok(())
     }
-    let policy = EgressPolicy {
-        allow: parse_rule_list(allow.as_deref().unwrap_or(""))?,
-        deny: parse_rule_list(deny.as_deref().unwrap_or(""))?,
-        default: parse_default_action(default.as_deref().unwrap_or("allow"))?,
-    };
-    guard.policy = Some(ConfiguredPolicy {
-        source: "environment",
-        policy,
-    });
-    Ok(())
 }
 
 fn policy_from_config(config: &BTreeMap<String, VmValue>) -> Result<EgressPolicy, VmError> {
@@ -342,7 +431,17 @@ fn parse_default_action(raw: &str) -> Result<DefaultAction, VmError> {
 fn policy_summary() -> VmValue {
     let configured = {
         let guard = state().read().expect("egress policy state poisoned");
-        guard.policy.clone()
+        #[cfg(test)]
+        {
+            guard
+                .test_policies
+                .get(&std::thread::current().id())
+                .cloned()
+        }
+        #[cfg(not(test))]
+        {
+            guard.policy.clone()
+        }
     };
     let mut dict = BTreeMap::new();
     if let Some(configured) = configured {
@@ -515,6 +614,51 @@ fn normalize_host(host: &str) -> String {
         .to_ascii_lowercase()
 }
 
+fn is_sensitive_url_param(name: &str) -> bool {
+    let normalized = name.to_ascii_lowercase();
+    normalized == "api_key"
+        || normalized == "apikey"
+        || normalized == "access_token"
+        || normalized == "refresh_token"
+        || normalized == "id_token"
+        || normalized == "client_secret"
+        || normalized == "password"
+        || normalized == "secret"
+        || normalized == "token"
+        || normalized.ends_with("_token")
+        || normalized.ends_with("_secret")
+}
+
+fn redact_sensitive_url(url: &str) -> String {
+    let Ok(mut parsed) = Url::parse(url) else {
+        return url.to_string();
+    };
+    let mut redacted_any = false;
+    let pairs: Vec<(String, String)> = parsed
+        .query_pairs()
+        .map(|(key, value)| {
+            let value = if is_sensitive_url_param(&key) {
+                redacted_any = true;
+                "[redacted]".to_string()
+            } else {
+                value.into_owned()
+            };
+            (key.into_owned(), value)
+        })
+        .collect();
+    if !redacted_any {
+        return url.to_string();
+    }
+    parsed.set_query(None);
+    {
+        let mut query = parsed.query_pairs_mut();
+        for (key, value) in pairs {
+            query.append_pair(&key, &value);
+        }
+    }
+    parsed.to_string()
+}
+
 fn vm_error(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::String(Rc::from(message.into())))
 }
@@ -663,16 +807,33 @@ mod tests {
     }
 
     #[test]
+    fn blocked_urls_redact_sensitive_query_values() {
+        let _guard = install(&[("default", VmValue::String(Rc::from("deny")))]);
+        let blocked = check_url(
+            "http_get",
+            "https://api.example.com/resource?access_token=secret-token&ok=1",
+        )
+        .unwrap()
+        .expect("default deny blocks");
+
+        assert_eq!(
+            blocked.url,
+            "https://api.example.com/resource?access_token=%5Bredacted%5D&ok=1"
+        );
+        assert!(!blocked.to_string().contains("secret-token"));
+    }
+
+    #[test]
     fn env_seeding_is_honored() {
         let _guard = ENV_LOCK.lock().unwrap();
         reset_egress_policy_for_tests();
-        std::env::set_var(HARN_EGRESS_ALLOW_ENV, "env.example.com");
-        std::env::set_var(HARN_EGRESS_DENY_ENV, "");
-        std::env::set_var(HARN_EGRESS_DEFAULT_ENV, "deny");
+        std::env::set_var(HARN_EGRESS_ALLOW_ENV, "");
+        std::env::set_var(HARN_EGRESS_DENY_ENV, "blocked-env.example.com");
+        std::env::set_var(HARN_EGRESS_DEFAULT_ENV, "allow");
         assert!(check_url("http_get", "https://env.example.com")
             .unwrap()
             .is_none());
-        assert!(check_url("http_get", "https://other.example.com")
+        assert!(check_url("http_get", "https://blocked-env.example.com")
             .unwrap()
             .is_some());
         std::env::remove_var(HARN_EGRESS_ALLOW_ENV);

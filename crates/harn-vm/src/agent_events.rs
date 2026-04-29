@@ -764,7 +764,17 @@ impl AgentEventSink for MultiSink {
     }
 }
 
-type ExternalSinkRegistry = RwLock<HashMap<String, Vec<Arc<dyn AgentEventSink>>>>;
+#[cfg(test)]
+#[derive(Clone)]
+struct RegisteredSink {
+    owner: std::thread::ThreadId,
+    sink: Arc<dyn AgentEventSink>,
+}
+
+#[cfg(not(test))]
+type RegisteredSink = Arc<dyn AgentEventSink>;
+
+type ExternalSinkRegistry = RwLock<HashMap<String, Vec<RegisteredSink>>>;
 
 fn external_sinks() -> &'static ExternalSinkRegistry {
     static REGISTRY: OnceLock<ExternalSinkRegistry> = OnceLock::new();
@@ -774,6 +784,11 @@ fn external_sinks() -> &'static ExternalSinkRegistry {
 pub fn register_sink(session_id: impl Into<String>, sink: Arc<dyn AgentEventSink>) {
     let session_id = session_id.into();
     let mut reg = external_sinks().write().expect("sink registry poisoned");
+    #[cfg(test)]
+    let sink = RegisteredSink {
+        owner: std::thread::current().id(),
+        sink,
+    };
     reg.entry(session_id).or_default().push(sink);
 }
 
@@ -781,18 +796,45 @@ pub fn register_sink(session_id: impl Into<String>, sink: Arc<dyn AgentEventSink
 /// close the session itself — subscribers and transcript survive, so a
 /// later `agent_loop` call with the same id continues the conversation.
 pub fn clear_session_sinks(session_id: &str) {
-    external_sinks()
-        .write()
-        .expect("sink registry poisoned")
-        .remove(session_id);
+    #[cfg(test)]
+    {
+        let owner = std::thread::current().id();
+        let mut reg = external_sinks().write().expect("sink registry poisoned");
+        if let Some(sinks) = reg.get_mut(session_id) {
+            sinks.retain(|sink| sink.owner != owner);
+            if sinks.is_empty() {
+                reg.remove(session_id);
+            }
+        }
+    }
+    #[cfg(not(test))]
+    {
+        external_sinks()
+            .write()
+            .expect("sink registry poisoned")
+            .remove(session_id);
+    }
 }
 
 pub fn reset_all_sinks() {
-    external_sinks()
-        .write()
-        .expect("sink registry poisoned")
-        .clear();
-    crate::agent_sessions::reset_session_store();
+    #[cfg(test)]
+    {
+        let owner = std::thread::current().id();
+        let mut reg = external_sinks().write().expect("sink registry poisoned");
+        reg.retain(|_, sinks| {
+            sinks.retain(|sink| sink.owner != owner);
+            !sinks.is_empty()
+        });
+        crate::agent_sessions::reset_session_store();
+    }
+    #[cfg(not(test))]
+    {
+        external_sinks()
+            .write()
+            .expect("sink registry poisoned")
+            .clear();
+        crate::agent_sessions::reset_session_store();
+    }
 }
 
 /// Emit an event to external sinks registered for this session. Pipeline
@@ -801,7 +843,23 @@ pub fn reset_all_sinks() {
 pub fn emit_event(event: &AgentEvent) {
     let sinks: Vec<Arc<dyn AgentEventSink>> = {
         let reg = external_sinks().read().expect("sink registry poisoned");
-        reg.get(event.session_id()).cloned().unwrap_or_default()
+        #[cfg(test)]
+        {
+            let owner = std::thread::current().id();
+            reg.get(event.session_id())
+                .map(|sinks| {
+                    sinks
+                        .iter()
+                        .filter(|sink| sink.owner == owner)
+                        .map(|sink| sink.sink.clone())
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+        #[cfg(not(test))]
+        {
+            reg.get(event.session_id()).cloned().unwrap_or_default()
+        }
     };
     for sink in sinks {
         sink.handle_event(event);
@@ -816,12 +874,25 @@ fn now_ms() -> i64 {
 }
 
 pub fn session_external_sink_count(session_id: &str) -> usize {
-    external_sinks()
-        .read()
-        .expect("sink registry poisoned")
-        .get(session_id)
-        .map(|v| v.len())
-        .unwrap_or(0)
+    #[cfg(test)]
+    {
+        let owner = std::thread::current().id();
+        return external_sinks()
+            .read()
+            .expect("sink registry poisoned")
+            .get(session_id)
+            .map(|sinks| sinks.iter().filter(|sink| sink.owner == owner).count())
+            .unwrap_or(0);
+    }
+    #[cfg(not(test))]
+    {
+        external_sinks()
+            .read()
+            .expect("sink registry poisoned")
+            .get(session_id)
+            .map(|v| v.len())
+            .unwrap_or(0)
+    }
 }
 
 pub fn session_closure_subscriber_count(session_id: &str) -> usize {

@@ -177,7 +177,7 @@ fn build_default_argv(
             DiagnosticSource::Generic,
         ),
         Ecosystem::Gradle => (
-            vec!["./gradlew".into(), "build".into()],
+            vec![gradle_wrapper_program().into(), "build".into()],
             DiagnosticSource::Generic,
         ),
         Ecosystem::Maven => (
@@ -217,6 +217,14 @@ fn build_default_argv(
     }
 }
 
+fn gradle_wrapper_program() -> &'static str {
+    if cfg!(windows) {
+        "gradlew.bat"
+    } else {
+        "./gradlew"
+    }
+}
+
 fn infer_diagnostic_source(argv: &[String]) -> DiagnosticSource {
     let joined = argv.join(" ");
     if joined.contains("cargo") && joined.contains("--message-format=json") {
@@ -225,5 +233,20 @@ fn infer_diagnostic_source(argv: &[String]) -> DiagnosticSource {
         DiagnosticSource::GoBuild
     } else {
         DiagnosticSource::Generic
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gradle_default_uses_platform_wrapper() {
+        let (argv, _) = build_default_argv(Ecosystem::Gradle, None, false);
+        if cfg!(windows) {
+            assert_eq!(argv[0], "gradlew.bat");
+        } else {
+            assert_eq!(argv[0], "./gradlew");
+        }
     }
 }

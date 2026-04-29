@@ -4964,9 +4964,7 @@ mod tests {
         vm_sse_server_mock_disconnect, vm_sse_server_mock_receive, vm_sse_server_observed_bool,
         vm_sse_server_response, vm_sse_server_send, HttpMockResponse,
     };
-    use crate::connectors::test_util::{
-        accept_http_connection, read_http_request, write_http_response,
-    };
+    use crate::connectors::test_util::{spawn_mock_http_server, write_http_response};
     use crate::value::VmValue;
     use base64::Engine;
     use rcgen::generate_simple_self_signed;
@@ -5251,32 +5249,29 @@ mod tests {
     #[tokio::test]
     async fn http_proxy_routes_requests_through_configured_proxy() {
         reset_http_state();
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind proxy listener");
-        let proxy_addr = listener.local_addr().expect("proxy addr");
-        let proxy_thread = std::thread::spawn(move || {
-            let mut stream = accept_http_connection(&listener, "proxy listener");
-            let request = read_http_request(&mut stream);
-            assert_eq!(request.method, "GET");
-            assert_eq!(request.path, "http://example.invalid/proxy-check");
-            assert_eq!(
-                request
-                    .headers
-                    .get("proxy-authorization")
-                    .map(String::as_str),
-                Some("Basic dXNlcjpwYXNz")
-            );
-            write_http_response(
-                &mut stream,
-                200,
-                &[("content-type", "text/plain".to_string())],
-                "proxied",
-            );
-        });
+        let proxy =
+            spawn_mock_http_server(1, "proxy listener", |_index, _addr, request, stream| {
+                assert_eq!(request.method, "GET");
+                assert_eq!(request.path, "http://example.invalid/proxy-check");
+                assert_eq!(
+                    request
+                        .headers
+                        .get("proxy-authorization")
+                        .map(String::as_str),
+                    Some("Basic dXNlcjpwYXNz")
+                );
+                write_http_response(
+                    stream,
+                    200,
+                    &[("content-type", "text/plain".to_string())],
+                    "proxied",
+                );
+            });
 
         let options = BTreeMap::from([
             (
                 "proxy".to_string(),
-                VmValue::String(Rc::from(format!("http://{proxy_addr}"))),
+                VmValue::String(Rc::from(proxy.base_url().to_string())),
             ),
             (
                 "proxy_auth".to_string(),
@@ -5295,7 +5290,7 @@ mod tests {
         let response = response.as_dict().expect("response dict");
         assert_eq!(response["status"].as_int(), Some(200));
         assert_eq!(response["body"].display(), "proxied");
-        proxy_thread.join().expect("proxy thread");
+        drop(proxy);
         reset_http_state();
     }
 
