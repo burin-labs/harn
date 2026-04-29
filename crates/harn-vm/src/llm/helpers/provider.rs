@@ -306,6 +306,15 @@ pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
         return Ok(String::new());
     }
 
+    // These providers use multi-step platform auth that is resolved inside
+    // their provider shims: Bedrock walks the AWS credential chain and Vertex
+    // accepts bearer tokens or service-account JSON. Returning an empty string
+    // here keeps generic option extraction from rejecting valid profile /
+    // instance-role / ADC setups before the provider can inspect them.
+    if matches!(provider, "bedrock" | "vertex") {
+        return Ok(String::new());
+    }
+
     // Explain provenance (env vs llm.toml vs default) and how to opt into mock.
     let selection_hint = {
         let config_path = llm_config::loaded_config_path()

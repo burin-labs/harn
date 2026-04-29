@@ -1740,6 +1740,7 @@ dependencies = [
  "harn-vm",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

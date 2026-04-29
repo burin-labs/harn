@@ -331,9 +331,11 @@ impl Debugger {
         }
 
         let mut responses = Vec::new();
+        self.ensure_runtime();
         let step_result = {
+            let runtime = self.runtime.as_ref().unwrap();
             let vm = self.vm.as_mut().unwrap();
-            self.runtime.block_on(async { vm.step_execute().await })
+            runtime.block_on(async { vm.step_execute().await })
         };
 
         for tele in self.drain_telemetry_events() {
@@ -376,9 +378,10 @@ impl Debugger {
                         }
                         if should_stop {
                             if let Some(ref cond) = fb.condition {
+                                self.ensure_runtime();
                                 if let Some(vm) = self.vm.as_mut() {
-                                    let truthy = self
-                                        .runtime
+                                    let runtime = self.runtime.as_ref().unwrap();
+                                    let truthy = runtime
                                         .block_on(async {
                                             let local = tokio::task::LocalSet::new();
                                             local.run_until(vm.evaluate_in_frame(cond, 0)).await

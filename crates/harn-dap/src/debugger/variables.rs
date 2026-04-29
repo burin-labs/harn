@@ -312,12 +312,15 @@ impl Debugger {
     }
 
     fn store_variable(&mut self, name: &str, value_expr: &str) -> Result<VmValue, String> {
+        self.ensure_runtime();
         let Some(vm) = self.vm.as_mut() else {
             return Err("Cannot setVariable: no active VM session".into());
         };
         let name = name.to_string();
         let value_expr = value_expr.to_string();
         self.runtime
+            .as_ref()
+            .unwrap()
             .block_on(async { vm.set_variable_in_frame(&name, &value_expr, 0).await })
             .map_err(|e| format!("setVariable: {e}"))
     }
@@ -344,6 +347,7 @@ impl Debugger {
         &mut self,
         expression: &str,
     ) -> Result<VmValue, String> {
+        self.ensure_runtime();
         let Some(vm) = self.vm.as_mut() else {
             return Err(format!(
                 "Cannot evaluate '{expression}': no active VM session"
@@ -351,6 +355,8 @@ impl Debugger {
         };
         let expression_owned = expression.to_string();
         self.runtime
+            .as_ref()
+            .unwrap()
             .block_on(async { vm.evaluate_in_frame(&expression_owned, 0).await })
             .map_err(|e| format!("Cannot evaluate '{expression}': {e}"))
     }

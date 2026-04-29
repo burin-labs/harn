@@ -114,7 +114,10 @@ pub(crate) fn register_default_providers() {
         names.insert("mock".to_string());
         names.insert("anthropic".to_string());
         names.insert("gemini".to_string());
+        names.insert("azure_openai".to_string());
+        names.insert("bedrock".to_string());
         names.insert("ollama".to_string());
+        names.insert("vertex".to_string());
         for name in [
             "openai",
             "openrouter",

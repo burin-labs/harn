@@ -5,8 +5,9 @@ Harn has built-in support for calling language models and running persistent age
 ## Providers
 
 Harn ships with built-in configs for Anthropic, OpenAI, OpenRouter, Ollama,
-HuggingFace, and a local OpenAI-compatible server. Set the appropriate
-environment variable to authenticate or point Harn at a local endpoint:
+HuggingFace, Bedrock, Azure OpenAI, Vertex AI, and local OpenAI-compatible
+servers. Set the appropriate environment variable to authenticate or point
+Harn at an endpoint:
 
 | Provider | Environment variable | Default model |
 |---|---|---|
@@ -14,6 +15,9 @@ environment variable to authenticate or point Harn at a local endpoint:
 | OpenAI | `OPENAI_API_KEY` | `gpt-4o` |
 | OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4.6` |
 | HuggingFace | `HF_TOKEN` or `HUGGINGFACE_API_KEY` | explicit `model` |
+| Bedrock | AWS env/profile/instance role | explicit Bedrock `model` |
+| Azure OpenAI | `AZURE_OPENAI_API_KEY` or `AZURE_OPENAI_AD_TOKEN` | deployment name in `model` |
+| Vertex AI | `VERTEX_AI_ACCESS_TOKEN` or `GOOGLE_APPLICATION_CREDENTIALS` | Gemini model ID |
 | Ollama | `OLLAMA_HOST` (optional) | `llama3.2` |
 | Local server | `LOCAL_LLM_BASE_URL` | `LOCAL_LLM_MODEL` or explicit `model` |
 | MLX OpenAI-compatible server | `MLX_BASE_URL` | `MLX_MODEL_ID` or `mlx-qwen36-27b` |
@@ -33,6 +37,31 @@ and verify that the configured model or alias is currently served. Harn
 does not launch MLX scripts itself; hosts that support auto-start should
 run their launcher, report launcher failures, then call the Harn readiness
 probe again.
+
+### Enterprise providers
+
+Bedrock uses the AWS credential chain. Harn checks `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN` first, then the
+selected `AWS_PROFILE` or default profile under `~/.aws/credentials`, then
+container credentials, then EC2 instance profile credentials. Set
+`AWS_REGION`, `AWS_DEFAULT_REGION`, or `BEDROCK_REGION`. The model is a
+Bedrock model ID such as `anthropic.claude-3-5-sonnet-20240620-v1:0` or
+`meta.llama3-70b-instruct-v1:0`.
+
+Azure OpenAI requires `AZURE_OPENAI_ENDPOINT`, for example
+`https://my-resource.openai.azure.com`. Harn routes the request to
+`/openai/deployments/{deployment}/chat/completions` and uses the Harn
+`model` value as the deployment name unless `AZURE_OPENAI_DEPLOYMENT` is
+set. `AZURE_OPENAI_API_VERSION` defaults to `2024-10-21`. Authentication
+uses `AZURE_OPENAI_API_KEY` via the `api-key` header, or
+`AZURE_OPENAI_AD_TOKEN` / `AZURE_OPENAI_BEARER_TOKEN` as a bearer token.
+
+Vertex AI requires a project and location. Set `VERTEX_AI_PROJECT` or
+`GOOGLE_CLOUD_PROJECT`; set `VERTEX_AI_LOCATION` when the default
+`us-central1` is not correct. Authentication uses
+`VERTEX_AI_ACCESS_TOKEN` / `GOOGLE_OAUTH_ACCESS_TOKEN`, or a service-account
+JSON file through `GOOGLE_APPLICATION_CREDENTIALS`. Harn exchanges service
+account keys for a short-lived OAuth token with the cloud-platform scope.
 
 ## llm_call
 

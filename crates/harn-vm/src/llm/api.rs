@@ -53,6 +53,7 @@ pub use readiness::{
     probe_openai_compatible_model, selected_model_for_provider, supports_model_readiness_probe,
     ModelReadiness,
 };
+pub(crate) use response::parse_llm_response as parse_llm_response_for_provider;
 pub(crate) use result::{vm_build_llm_result, LlmResult};
 pub(crate) use thinking::{split_openai_thinking_blocks, ThinkingStreamSplitter};
 pub(crate) use transport::vm_call_llm_api_with_body;

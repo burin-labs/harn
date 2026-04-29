@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use harn_vm::{DebugState, Vm, VmValue};
 
@@ -60,7 +61,10 @@ pub struct Debugger {
     /// Structured variable references: reference_id -> children
     pub(crate) var_refs: BTreeMap<i64, Vec<(String, VmValue)>>,
     /// Tokio runtime for async VM execution.
-    pub(crate) runtime: tokio::runtime::Runtime,
+    ///
+    /// Built lazily so protocol-only debugger sessions and unit tests do
+    /// not open runtime I/O/timer descriptors they never use.
+    pub(crate) runtime: Option<tokio::runtime::Runtime>,
     /// Next variable reference ID (start at 100 to avoid conflict with scope refs).
     pub(crate) next_var_ref: i64,
     /// Whether to break on thrown exceptions.
@@ -155,10 +159,7 @@ impl Debugger {
             program_state: ProgramState::NotStarted,
             var_refs: BTreeMap::new(),
             next_var_ref: 100,
-            runtime: tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap(),
+            runtime: None,
             break_on_exceptions: false,
             exception_filters: BTreeMap::new(),
             latest_debug_state: Rc::new(RefCell::new(None)),
@@ -258,6 +259,17 @@ impl Debugger {
         s
     }
 
+    pub(crate) fn ensure_runtime(&mut self) {
+        if self.runtime.is_none() {
+            self.runtime = Some(
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap(),
+            );
+        }
+    }
+
     /// True when the main loop should keep stepping this debugger's VM.
     /// Drives the message-interleave loop in `main.rs` -- when false, the
     /// loop blocks on `request_rx.recv()` instead of busy-stepping.
@@ -282,5 +294,18 @@ impl Debugger {
                 frame_name: "pipeline".to_string(),
                 frame_depth: 0,
             })
+    }
+}
+
+impl Drop for Debugger {
+    fn drop(&mut self) {
+        self.running = false;
+        if let Some(vm) = self.vm.as_mut() {
+            vm.signal_cancel();
+        }
+        self.vm = None;
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown_timeout(Duration::ZERO);
+        }
     }
 }

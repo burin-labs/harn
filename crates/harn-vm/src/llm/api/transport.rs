@@ -199,6 +199,24 @@ async fn dispatch_to_registered_provider(
         return gemini.chat_impl(opts, delta_tx).await;
     }
 
+    if provider == "bedrock" {
+        return crate::llm::providers::BedrockProvider
+            .chat_impl(opts, delta_tx)
+            .await;
+    }
+
+    if provider == "azure_openai" {
+        return crate::llm::providers::AzureOpenAiProvider
+            .chat_impl(opts, delta_tx)
+            .await;
+    }
+
+    if provider == "vertex" {
+        return crate::llm::providers::VertexProvider
+            .chat_impl(opts, delta_tx)
+            .await;
+    }
+
     if resolved.is_anthropic_style {
         let anthropic = crate::llm::providers::AnthropicProvider;
         return anthropic.chat_impl(opts, delta_tx).await;
