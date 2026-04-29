@@ -36,6 +36,7 @@
 - [Skill provenance](./skill-provenance.md)
 - [Sessions](./sessions.md)
 - [Agent state](./agent-state.md)
+- [Memory](./memory.md)
 - [Transcript architecture](./transcript-architecture.md)
 - [Workflow runtime](./workflow-runtime.md)
 - [Team learning and context packs](./team-learning.md)

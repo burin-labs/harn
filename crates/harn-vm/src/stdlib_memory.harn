@@ -1,0 +1,22 @@
+// std/memory — append-only durable memory helpers.
+//
+// Import: import "std/memory"
+/** memory_store. */
+pub fn memory_store(namespace, key, value, tags = nil, options = nil) {
+  return __memory_store(namespace, key, value, tags, options)
+}
+
+/** memory_recall. */
+pub fn memory_recall(namespace, query, k = nil, options = nil) {
+  return __memory_recall(namespace, query, k, options)
+}
+
+/** memory_summarize. */
+pub fn memory_summarize(namespace, window = nil, options = nil) {
+  return __memory_summarize(namespace, window, options)
+}
+
+/** memory_forget. */
+pub fn memory_forget(namespace, predicate, options = nil) {
+  return __memory_forget(namespace, predicate, options)
+}
