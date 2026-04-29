@@ -65,6 +65,15 @@ fn harn_acp_extension_meta() -> serde_json::Value {
             "sessionUpdateExtensions": HARN_SESSION_UPDATE_EXTENSIONS,
             "toolLifecycleExtensionFields": HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
             "contentExtensionFields": HARN_CONTENT_EXTENSION_FIELDS,
+            "hostCapabilityOperations": {
+                "process": [
+                    "exec",
+                    "list_shells",
+                    "get_default_shell",
+                    "set_default_shell",
+                    "shell_invocation"
+                ]
+            },
             "extensionContract": "docs/src/bridge-protocol.md#acp-compatibility-contract",
         }
     })
@@ -1317,6 +1326,37 @@ mod tests {
         assert!(ops
             .iter()
             .any(|value| value.display() == "scope_test_command"));
+    }
+
+    #[test]
+    fn normalize_host_capabilities_derives_ops_from_operation_metadata() {
+        let mut operations = BTreeMap::new();
+        operations.insert(
+            "get_default_shell".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::new())),
+        );
+        let mut process = BTreeMap::new();
+        process.insert("operations".to_string(), VmValue::Dict(Rc::new(operations)));
+        let mut root = BTreeMap::new();
+        root.insert("process".to_string(), VmValue::Dict(Rc::new(process)));
+
+        let normalized = normalize_host_capability_manifest(VmValue::Dict(Rc::new(root)));
+        let manifest = normalized.as_dict().expect("dict manifest");
+        let process = manifest
+            .get("process")
+            .and_then(|value| value.as_dict())
+            .expect("process capability dict");
+        let ops = process
+            .get("ops")
+            .and_then(|value| match value {
+                VmValue::List(list) => Some(list),
+                _ => None,
+            })
+            .expect("ops list");
+
+        assert!(ops
+            .iter()
+            .any(|value| value.display() == "get_default_shell"));
     }
 
     #[test]

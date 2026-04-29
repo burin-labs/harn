@@ -1269,6 +1269,21 @@ host bridge. The local runtime exposes generic `process`, `template`, and
 `interaction` capabilities. Product hosts can add capabilities such as
 `workspace`, `project`, `runtime`, `editor`, `git`, or `diagnostics`.
 
+The `process` capability includes the shell discovery contract used by
+shell-mode command runners:
+
+- `process.list_shells` returns `{shells, default_shell_id}` with stable shell
+  IDs, paths, platform, availability, invocation args, and source.
+- `process.get_default_shell` returns the selected shell object for the
+  current host/session.
+- `process.set_default_shell` selects a shell by `shell_id` for stateful hosts.
+- `process.shell_invocation` resolves `{shell_id | shell, command?, login?,
+  interactive?}` to `{program, args, command_arg_index, shell}`.
+
+Programmatic execution should prefer argv mode (`process.exec` with
+`mode: "argv"`). Shell mode is for user-authored commands and must pass a
+shell object or a shell ID discovered through this capability.
+
 Prefer `host_call("capability.operation", args)` in shared wrappers and
 host-owned `.harn` modules so capability names stay consistent across the
 runtime, host manifest, and preflight validation.

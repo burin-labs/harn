@@ -18,7 +18,16 @@ fn default_host_capabilities() -> HashMap<String, HashSet<String>> {
                 "roots".to_string(),
             ]),
         ),
-        ("process".to_string(), HashSet::from(["exec".to_string()])),
+        (
+            "process".to_string(),
+            HashSet::from([
+                "exec".to_string(),
+                "get_default_shell".to_string(),
+                "list_shells".to_string(),
+                "set_default_shell".to_string(),
+                "shell_invocation".to_string(),
+            ]),
+        ),
         (
             "template".to_string(),
             HashSet::from(["render".to_string()]),

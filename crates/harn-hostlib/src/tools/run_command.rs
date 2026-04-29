@@ -17,6 +17,7 @@
 //!   process exits. See `tools/long_running.rs`.
 
 use harn_vm::VmValue;
+use std::collections::BTreeMap;
 
 use crate::error::HostlibError;
 use crate::tools::payload::{
@@ -103,31 +104,45 @@ fn parse_command(
                     builtin: NAME,
                     param: "command",
                 })?;
-            let shell = match map.get("shell") {
-                Some(VmValue::Dict(shell)) => shell,
-                Some(other) => {
-                    return Err(HostlibError::InvalidParameter {
-                        builtin: NAME,
-                        param: "shell",
-                        message: format!("expected dict, got {}", other.type_name()),
-                    });
+            let mut invocation = BTreeMap::new();
+            invocation.insert(
+                "command".to_string(),
+                VmValue::String(std::rc::Rc::from(command)),
+            );
+            if let Some(shell_id) = optional_string(NAME, map, "shell_id")? {
+                invocation.insert(
+                    "shell_id".to_string(),
+                    VmValue::String(std::rc::Rc::from(shell_id)),
+                );
+            }
+            if let Some(shell) = map.get("shell") {
+                match shell {
+                    VmValue::Dict(_) => {
+                        invocation.insert("shell".to_string(), shell.clone());
+                    }
+                    VmValue::Nil => {}
+                    other => {
+                        return Err(HostlibError::InvalidParameter {
+                            builtin: NAME,
+                            param: "shell",
+                            message: format!("expected dict, got {}", other.type_name()),
+                        });
+                    }
                 }
-                None => {
-                    return Err(HostlibError::MissingParameter {
-                        builtin: NAME,
-                        param: "shell",
-                    });
-                }
-            };
-            let path = shell_string(shell, "path")?
-                .or_else(|| shell_string(shell, "id").ok().flatten())
-                .ok_or(HostlibError::MissingParameter {
+            }
+            if let Some(login) = optional_bool(NAME, map, "login")? {
+                invocation.insert("login".to_string(), VmValue::Bool(login));
+            }
+            if let Some(interactive) = optional_bool(NAME, map, "interactive")? {
+                invocation.insert("interactive".to_string(), VmValue::Bool(interactive));
+            }
+            let resolved = harn_vm::shells::resolve_invocation_from_vm_params(&invocation)
+                .map_err(|message| HostlibError::InvalidParameter {
                     builtin: NAME,
-                    param: "shell.path",
+                    param: "shell",
+                    message,
                 })?;
-            let login = shell_bool(shell, "login")?.unwrap_or(false);
-            let interactive = shell_bool(shell, "interactive")?.unwrap_or(false);
-            Ok(shell_argv(path, command, login, interactive))
+            Ok((resolved.program, resolved.args))
         }
         other => Err(HostlibError::InvalidParameter {
             builtin: NAME,
@@ -189,55 +204,6 @@ fn parse_capture(
         capture.max_inline_bytes = usize::try_from(max).unwrap_or(usize::MAX);
     }
     Ok(capture)
-}
-
-fn shell_argv(
-    shell_path_or_id: String,
-    command: String,
-    login: bool,
-    interactive: bool,
-) -> (String, Vec<String>) {
-    let program = match shell_path_or_id.as_str() {
-        "sh" if cfg!(windows) => "cmd".to_string(),
-        "sh" => "/bin/sh".to_string(),
-        "bash" => "/bin/bash".to_string(),
-        "zsh" => "/bin/zsh".to_string(),
-        "cmd" => "cmd".to_string(),
-        "powershell" => "powershell".to_string(),
-        other => other.to_string(),
-    };
-    if cfg!(windows) && program.eq_ignore_ascii_case("cmd") {
-        return (program, vec!["/C".to_string(), command]);
-    }
-    let mut args = Vec::new();
-    if interactive {
-        args.push("-i".to_string());
-    }
-    args.push(if login { "-lc" } else { "-c" }.to_string());
-    args.push(command);
-    (program, args)
-}
-
-fn shell_string(
-    dict: &std::rc::Rc<std::collections::BTreeMap<String, VmValue>>,
-    key: &'static str,
-) -> Result<Option<String>, HostlibError> {
-    match dict.get(key) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::String(s)) => Ok(Some(s.to_string())),
-        Some(other) => Err(HostlibError::InvalidParameter {
-            builtin: NAME,
-            param: key,
-            message: format!("expected string, got {}", other.type_name()),
-        }),
-    }
-}
-
-fn shell_bool(
-    dict: &std::rc::Rc<std::collections::BTreeMap<String, VmValue>>,
-    key: &'static str,
-) -> Result<Option<bool>, HostlibError> {
-    dict_bool(dict, key)
 }
 
 fn dict_bool(

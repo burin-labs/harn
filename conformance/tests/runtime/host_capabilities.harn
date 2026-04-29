@@ -1,8 +1,10 @@
 pipeline default() {
   let caps = host_capabilities()
   println(host_has("process", "exec"))
+  println(host_has("process", "list_shells"))
   println(caps?.process?.description != nil)
-  let result = host_call("process.exec", {command: "printf hi"})
+  let default_shell = host_call("process.get_default_shell", {})
+  let result = host_call("process.exec", {mode: "shell", command: "printf hi", shell_id: default_shell?.id})
   println(result?.success)
   println(result?.combined)
 }

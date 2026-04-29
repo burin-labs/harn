@@ -11,16 +11,34 @@
       "items": { "type": "string" }
     },
     "command": { "type": "string" },
+    "shell_id": {
+      "type": "string",
+      "description": "Stable id from process.list_shells / process.get_default_shell."
+    },
     "shell": {
       "type": "object",
       "properties": {
         "id": { "type": "string" },
+        "label": { "type": "string" },
         "path": { "type": "string" },
-        "login": { "type": "boolean", "default": false },
-        "interactive": { "type": "boolean", "default": false }
+        "platform": { "type": "string" },
+        "available": { "type": "boolean" },
+        "supports_login": { "type": "boolean" },
+        "supports_interactive": { "type": "boolean" },
+        "default_args": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "login_args": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "source": { "type": "string" }
       },
       "additionalProperties": false
     },
+    "login": { "type": "boolean", "default": false },
+    "interactive": { "type": "boolean", "default": false },
     "cwd": { "type": "string" },
     "env": {
       "type": "object",
@@ -73,7 +91,11 @@
     },
     {
       "properties": { "mode": { "const": "shell" } },
-      "required": ["command", "shell"]
+      "required": ["command"],
+      "anyOf": [
+        { "required": ["shell"] },
+        { "required": ["shell_id"] }
+      ]
     }
   ],
   "additionalProperties": false

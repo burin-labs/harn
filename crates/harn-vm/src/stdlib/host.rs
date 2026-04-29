@@ -70,7 +70,22 @@ fn capability_manifest_map() -> BTreeMap<String, VmValue> {
         "process".to_string(),
         capability(
             "Process execution.",
-            &[op("exec", "Execute a shell command.")],
+            &[
+                op("exec", "Execute a process in argv or explicit shell mode."),
+                op("list_shells", "List shells discovered by the host/session."),
+                op(
+                    "get_default_shell",
+                    "Return the selected default shell for this host/session.",
+                ),
+                op(
+                    "set_default_shell",
+                    "Select the default shell for this host/session.",
+                ),
+                op(
+                    "shell_invocation",
+                    "Resolve a shell id/object plus login/interactive flags into argv.",
+                ),
+            ],
         ),
     );
     root.insert(
@@ -525,6 +540,10 @@ async fn dispatch_host_operation(
                 timed_out,
             }))
         }
+        ("process", "list_shells") => Ok(crate::shells::list_shells_vm_value()),
+        ("process", "get_default_shell") => Ok(crate::shells::default_shell_vm_value()),
+        ("process", "set_default_shell") => crate::shells::set_default_shell_vm_value(params),
+        ("process", "shell_invocation") => crate::shells::shell_invocation_vm_value(params),
         ("template", "render") => {
             let path = require_param(params, "path")?;
             let bindings = params.get("bindings").and_then(|v| v.as_dict());
@@ -671,18 +690,12 @@ fn process_exec_argv(params: &BTreeMap<String, VmValue>) -> Result<(String, Vec<
         }
         "shell" => {
             let command = require_param(params, "command")?;
-            if cfg!(windows) {
-                Ok(("cmd".to_string(), vec!["/C".to_string(), command]))
-            } else {
-                let shell = params
-                    .get("shell")
-                    .and_then(|value| value.as_dict())
-                    .and_then(|dict| dict.get("path").or_else(|| dict.get("id")))
-                    .and_then(vm_string)
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| "/bin/sh".to_string());
-                Ok((shell, vec!["-lc".to_string(), command]))
-            }
+            let mut invocation_params = params.clone();
+            invocation_params.insert("command".to_string(), VmValue::String(Rc::from(command)));
+            let invocation =
+                crate::shells::resolve_invocation_from_vm_params(&invocation_params)
+                    .map_err(|err| VmError::Runtime(format!("host_call process.exec: {err}")))?;
+            Ok((invocation.program, invocation.args))
         }
         other => Err(VmError::Runtime(format!(
             "host_call process.exec unsupported mode {other:?}"

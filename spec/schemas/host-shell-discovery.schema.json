@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/host-shell-discovery.schema.json",
+  "title": "Harn host shell discovery contract",
+  "$defs": {
+    "shell": {
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "path",
+        "platform",
+        "available",
+        "supports_login",
+        "supports_interactive",
+        "default_args",
+        "login_args",
+        "source"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "path": { "type": "string" },
+        "platform": {
+          "type": "string",
+          "description": "Runtime platform such as darwin, linux, or windows."
+        },
+        "available": { "type": "boolean" },
+        "supports_login": { "type": "boolean" },
+        "supports_interactive": { "type": "boolean" },
+        "default_args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Arguments before the command string for normal shell execution."
+        },
+        "login_args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Arguments before the command string for login shell execution."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["configured", "env", "login", "etc_shells", "fallback", "host"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "list_shells_response": {
+      "type": "object",
+      "required": ["shells", "default_shell_id"],
+      "properties": {
+        "shells": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/shell" }
+        },
+        "default_shell_id": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "shell_invocation_request": {
+      "type": "object",
+      "properties": {
+        "shell_id": { "type": "string" },
+        "shell": { "$ref": "#/$defs/shell" },
+        "command": { "type": "string" },
+        "login": { "type": "boolean", "default": false },
+        "interactive": { "type": "boolean", "default": false }
+      },
+      "anyOf": [{ "required": ["shell_id"] }, { "required": ["shell"] }],
+      "additionalProperties": false
+    },
+    "shell_invocation_response": {
+      "type": "object",
+      "required": ["program", "args", "command_arg_index", "shell"],
+      "properties": {
+        "program": { "type": "string" },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "command_arg_index": { "type": "integer", "minimum": 0 },
+        "shell": { "$ref": "#/$defs/shell" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

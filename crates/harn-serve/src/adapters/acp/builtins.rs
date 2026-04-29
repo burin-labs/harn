@@ -22,6 +22,23 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
             normalize_host_capability_manifest(harn_vm::bridge::json_result_to_vm_value(&result))
         })
         .unwrap_or_else(|_| harn_vm::VmValue::Dict(Rc::new(std::collections::BTreeMap::new())));
+    let selected_shell =
+        if manifest_has_operation(&host_capability_manifest, "process", "get_default_shell") {
+            bridge
+                .call_client(
+                    "host/call",
+                    serde_json::json!({
+                        "sessionId": bridge.session_id,
+                        "name": "process.get_default_shell",
+                        "args": {},
+                    }),
+                )
+                .await
+                .map(|result| harn_vm::bridge::json_result_to_vm_value(&result))
+                .unwrap_or_else(|_| harn_vm::shells::default_shell_vm_value())
+        } else {
+            harn_vm::shells::default_shell_vm_value()
+        };
 
     let b = bridge.clone();
     vm.register_builtin("log", move |args, _out| {
@@ -102,9 +119,11 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
     });
 
     let b = bridge.clone();
+    let shell = selected_shell.clone();
     vm.register_async_builtin("run_command", move |args| {
         let bridge = b.clone();
-        async move { acp_terminal_exec(&bridge, &args).await }
+        let shell = shell.clone();
+        async move { acp_terminal_exec(&bridge, &args, &shell).await }
     });
 
     for level in ["log_debug", "log_info", "log_warn", "log_error"] {
@@ -175,15 +194,19 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
     }
 
     let b = bridge.clone();
+    let shell = selected_shell.clone();
     vm.register_async_builtin("exec", move |args| {
         let bridge = b.clone();
-        async move { acp_terminal_exec(&bridge, &args).await }
+        let shell = shell.clone();
+        async move { acp_terminal_exec(&bridge, &args, &shell).await }
     });
 
     let b = bridge;
+    let shell = selected_shell;
     vm.register_async_builtin("shell", move |args| {
         let bridge = b.clone();
-        async move { acp_terminal_exec(&bridge, &args).await }
+        let shell = shell.clone();
+        async move { acp_terminal_exec(&bridge, &args, &shell).await }
     });
 }
 
@@ -191,6 +214,7 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
 pub(super) async fn acp_terminal_exec(
     bridge: &AcpBridge,
     args: &[harn_vm::VmValue],
+    shell: &harn_vm::VmValue,
 ) -> Result<harn_vm::VmValue, harn_vm::VmError> {
     let cmd = args.first().map(|a| a.display()).unwrap_or_default();
     if cmd.is_empty() {
@@ -205,6 +229,7 @@ pub(super) async fn acp_terminal_exec(
             serde_json::json!({
                 "sessionId": bridge.session_id,
                 "command": cmd,
+                "shell": harn_vm::llm::vm_value_to_json(shell),
             }),
         )
         .await?;
@@ -217,7 +242,7 @@ pub(super) async fn acp_terminal_exec(
 
     if terminal_id.is_empty() {
         // Client doesn't support terminal — fall back to local exec.
-        let output = local_shell_exec(&cmd).map_err(|e| {
+        let output = local_shell_exec(&cmd, shell).map_err(|e| {
             harn_vm::VmError::Thrown(harn_vm::VmValue::String(Rc::from(format!(
                 "exec failed: {e}"
             ))))
@@ -333,8 +358,19 @@ pub(super) fn normalize_host_capability_manifest(value: harn_vm::VmValue) -> har
     let mut normalized = BTreeMap::new();
     for (capability, entry) in root.iter() {
         match entry {
-            harn_vm::VmValue::Dict(_) => {
-                normalized.insert(capability.clone(), entry.clone());
+            harn_vm::VmValue::Dict(dict) => {
+                let mut normalized_entry = (**dict).clone();
+                if !normalized_entry.contains_key("ops") {
+                    if let Some(ops) =
+                        operation_names_from_value(normalized_entry.get("operations"))
+                    {
+                        normalized_entry.insert("ops".to_string(), harn_vm::VmValue::List(ops));
+                    }
+                }
+                normalized.insert(
+                    capability.clone(),
+                    harn_vm::VmValue::Dict(Rc::new(normalized_entry)),
+                );
             }
             harn_vm::VmValue::List(list) => {
                 let mut dict = BTreeMap::new();
@@ -348,27 +384,52 @@ pub(super) fn normalize_host_capability_manifest(value: harn_vm::VmValue) -> har
     harn_vm::VmValue::Dict(Rc::new(normalized))
 }
 
+fn operation_names_from_value(
+    value: Option<&harn_vm::VmValue>,
+) -> Option<Rc<Vec<harn_vm::VmValue>>> {
+    let value = value?;
+    match value {
+        harn_vm::VmValue::List(list) => Some(list.clone()),
+        harn_vm::VmValue::Dict(dict) => Some(Rc::new(
+            dict.keys()
+                .map(|name| harn_vm::VmValue::String(Rc::from(name.clone())))
+                .collect(),
+        )),
+        _ => None,
+    }
+}
+
+fn manifest_has_operation(manifest: &harn_vm::VmValue, capability: &str, op: &str) -> bool {
+    manifest
+        .as_dict()
+        .and_then(|root| root.get(capability))
+        .and_then(|value| value.as_dict())
+        .and_then(|capability| capability.get("ops"))
+        .and_then(|ops| match ops {
+            harn_vm::VmValue::List(list) => Some(list.iter().any(|item| item.display() == op)),
+            _ => None,
+        })
+        .unwrap_or(false)
+}
+
 /// Cross-platform fallback shell exec used when the ACP client doesn't
-/// expose a terminal capability. Picks `sh -c` on Unix and `cmd /C` on
-/// Windows; returns an explanatory error on other platforms.
-#[cfg(unix)]
-fn local_shell_exec(cmd: &str) -> std::io::Result<std::process::Output> {
-    std::process::Command::new("sh").arg("-c").arg(cmd).output()
-}
-
-#[cfg(windows)]
-fn local_shell_exec(cmd: &str) -> std::io::Result<std::process::Output> {
-    std::process::Command::new("cmd")
-        .arg("/C")
-        .arg(cmd)
+/// expose a terminal capability. Uses the same selected-shell descriptor
+/// carried on `terminal/create`.
+fn local_shell_exec(cmd: &str, shell: &harn_vm::VmValue) -> std::io::Result<std::process::Output> {
+    let mut params = BTreeMap::new();
+    params.insert(
+        "command".to_string(),
+        harn_vm::VmValue::String(Rc::from(cmd.to_string())),
+    );
+    params.insert("shell".to_string(), shell.clone());
+    let invocation =
+        harn_vm::shells::resolve_invocation_from_vm_params(&params).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("invalid shell invocation: {error}"),
+            )
+        })?;
+    std::process::Command::new(invocation.program)
+        .args(invocation.args)
         .output()
-}
-
-#[cfg(not(any(unix, windows)))]
-fn local_shell_exec(_cmd: &str) -> std::io::Result<std::process::Output> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "local shell exec fallback is not supported on this platform; \
-         the ACP client must advertise the terminal capability",
-    ))
 }
