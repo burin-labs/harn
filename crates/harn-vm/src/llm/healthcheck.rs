@@ -263,11 +263,10 @@ fn body_snippet(body: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
     use std::sync::{Arc, Mutex};
 
     use super::*;
+    use crate::test_stub::{read_http_request_bytes, spawn_stub, write_http_response, StubServer};
 
     fn provider_with_healthcheck(base_url: String, healthcheck: HealthcheckDef) -> ProviderDef {
         ProviderDef {
@@ -291,85 +290,15 @@ mod tests {
         status: u16,
         body: &'static str,
         captured: Arc<Mutex<Option<String>>>,
-    ) -> (String, std::thread::JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind healthcheck stub");
-        let addr = listener.local_addr().expect("stub addr");
-        listener
-            .set_nonblocking(true)
-            .expect("set listener nonblocking");
-
-        // Use a generous deadline so the stub doesn't trip when nextest fans
-        // out across the workspace and starves this thread of CPU. The
-        // healthcheck client itself completes in milliseconds against the
-        // loopback stub once it gets scheduled — the deadline is just an
-        // upper bound to keep a stuck test from hanging forever.
-        let handle = std::thread::spawn(move || {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-            let (mut stream, _) = loop {
-                match listener.accept() {
-                    Ok(pair) => break pair,
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        if std::time::Instant::now() >= deadline {
-                            panic!("healthcheck stub: no client within 30s");
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                    }
-                    Err(error) => panic!("healthcheck stub accept failed: {error}"),
-                }
-            };
-            stream
-                .set_nonblocking(false)
-                .expect("set accepted stream blocking");
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(30)))
-                .ok();
-            stream
-                .set_write_timeout(Some(std::time::Duration::from_secs(30)))
-                .ok();
-
-            let mut bytes = Vec::new();
-            let mut buf = [0u8; 4096];
-            loop {
-                let n = stream.read(&mut buf).expect("read request");
-                if n == 0 {
-                    break;
-                }
-                bytes.extend_from_slice(&buf[..n]);
-                let request = String::from_utf8_lossy(&bytes);
-                if request_complete(&request) {
-                    break;
-                }
-            }
+    ) -> (String, StubServer) {
+        let server = spawn_stub("healthcheck stub", move |mut stream| {
+            let bytes = read_http_request_bytes(&mut stream);
             *captured.lock().expect("capture request") =
                 Some(String::from_utf8_lossy(&bytes).to_string());
-
-            let response = format!(
-                "HTTP/1.1 {status} OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            stream
-                .write_all(response.as_bytes())
-                .expect("write response");
+            write_http_response(&mut stream, status, &[], body);
         });
-
-        (format!("http://{addr}"), handle)
-    }
-
-    fn request_complete(request: &str) -> bool {
-        let Some((headers, body)) = request.split_once("\r\n\r\n") else {
-            return false;
-        };
-        let content_length = headers
-            .lines()
-            .find_map(|line| line.strip_prefix("content-length: "))
-            .or_else(|| {
-                headers
-                    .lines()
-                    .find_map(|line| line.strip_prefix("Content-Length: "))
-            })
-            .and_then(|value| value.trim().parse::<usize>().ok())
-            .unwrap_or(0);
-        body.len() >= content_length
+        let base_url = format!("http://{}", server.addr());
+        (base_url, server)
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -399,7 +328,7 @@ mod tests {
             },
         )
         .await;
-        server.join().expect("stub server");
+        drop(server);
         llm_config::clear_user_overrides();
 
         assert!(result.valid);
@@ -478,7 +407,7 @@ mod tests {
             },
         )
         .await;
-        server.join().expect("stub server");
+        drop(server);
         llm_config::clear_user_overrides();
 
         assert!(!result.valid);

@@ -609,8 +609,9 @@ async fn ollama_warmup(
 mod tests {
     use super::*;
     use crate::llm::env_lock;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
+    use crate::test_stub::{
+        read_http_request_bytes, spawn_stub_n, write_http_response, StubServer,
+    };
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -766,7 +767,7 @@ mod tests {
                 warmup_timeout: Duration::from_secs(2),
             }));
 
-        server.join().expect("stub server");
+        drop(server);
         assert!(result.valid, "result was: {result:?}");
         assert_eq!(result.status, "ok");
         assert_eq!(result.matched_model.as_deref(), Some("qwen3:latest"));
@@ -802,7 +803,7 @@ mod tests {
                 warmup_timeout: Duration::from_secs(2),
             }));
 
-        server.join().expect("stub server");
+        drop(server);
         assert!(!result.valid);
         assert_eq!(result.status, "model_missing");
         assert_eq!(result.available_models, vec!["llama3.2:latest"]);
@@ -812,56 +813,16 @@ mod tests {
     fn spawn_stub(
         responses: Vec<(u16, &'static str)>,
         captured: Arc<Mutex<Vec<String>>>,
-    ) -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ollama stub");
-        let addr = listener.local_addr().expect("stub addr");
-        let handle = std::thread::spawn(move || {
-            for (status, body) in responses {
-                let (mut stream, _) = listener.accept().expect("accept request");
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(2)))
-                    .expect("read timeout");
-                let request = read_http_request(&mut stream);
-                captured.lock().expect("captured").push(request);
-                let reason = if status == 200 { "OK" } else { "ERROR" };
-                let response = format!(
-                    "HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-                stream
-                    .write_all(response.as_bytes())
-                    .expect("write response");
-            }
+    ) -> (std::net::SocketAddr, StubServer) {
+        let expected = responses.len();
+        let server = spawn_stub_n(expected, "ollama stub", move |index, mut stream| {
+            let bytes = read_http_request_bytes(&mut stream);
+            let request = String::from_utf8(bytes).expect("utf8 request");
+            captured.lock().expect("captured").push(request);
+            let (status, body) = responses[index];
+            write_http_response(&mut stream, status, &[], body);
         });
-        (addr, handle)
-    }
-
-    fn read_http_request(stream: &mut std::net::TcpStream) -> String {
-        let mut data = Vec::new();
-        let mut buf = [0_u8; 512];
-        loop {
-            let n = stream.read(&mut buf).expect("read request");
-            if n == 0 {
-                break;
-            }
-            data.extend_from_slice(&buf[..n]);
-            let text = String::from_utf8_lossy(&data);
-            if let Some(header_end) = text.find("\r\n\r\n") {
-                let headers = &text[..header_end];
-                let content_length = headers
-                    .lines()
-                    .find_map(|line| {
-                        let (name, value) = line.split_once(':')?;
-                        name.eq_ignore_ascii_case("content-length")
-                            .then(|| value.trim().parse::<usize>().ok())
-                            .flatten()
-                    })
-                    .unwrap_or(0);
-                if data.len() >= header_end + 4 + content_length {
-                    break;
-                }
-            }
-        }
-        String::from_utf8(data).expect("utf8 request")
+        let addr = server.addr();
+        (addr, server)
     }
 }

@@ -545,96 +545,10 @@ mod tests {
         assert_eq!(messages[0]["role"].as_str(), Some("user"));
     }
 
-    /// Cooperative accept loop: blocks until a client connects or the
-    /// shared `shutdown` flag is set. The shutdown flag is owned by the
-    /// returned [`LlmStub`] guard and flipped on Drop, so the stub thread
-    /// can never outlive the test (replaces the older fixed-deadline loop
-    /// that flaked under heavy CI fan-out).
-    fn accept_with_shutdown(
-        listener: &std::net::TcpListener,
-        label: &str,
-        shutdown: &std::sync::atomic::AtomicBool,
-    ) -> Option<std::net::TcpStream> {
-        listener
-            .set_nonblocking(true)
-            .expect("set listener nonblocking");
-        loop {
-            if shutdown.load(std::sync::atomic::Ordering::Acquire) {
-                return None;
-            }
-            match listener.accept() {
-                Ok((stream, _)) => {
-                    stream
-                        .set_nonblocking(false)
-                        .expect("restore blocking mode");
-                    stream
-                        .set_read_timeout(Some(std::time::Duration::from_secs(30)))
-                        .ok();
-                    stream
-                        .set_write_timeout(Some(std::time::Duration::from_secs(30)))
-                        .ok();
-                    return Some(stream);
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-                Err(e) => panic!("{label}: accept failed: {e}"),
-            }
-        }
-    }
+    use crate::test_stub::{spawn_stub, StubServer};
 
-    /// RAII guard for an in-process LLM stub. Dropping signals the stub
-    /// thread to exit and joins it so no FDs leak past the test, even on
-    /// panic.
-    struct LlmStub {
-        addr: std::net::SocketAddr,
-        shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
-        handle: Option<std::thread::JoinHandle<()>>,
-    }
-
-    impl LlmStub {
-        fn addr(&self) -> std::net::SocketAddr {
-            self.addr
-        }
-    }
-
-    impl Drop for LlmStub {
-        fn drop(&mut self) {
-            self.shutdown
-                .store(true, std::sync::atomic::Ordering::Release);
-            if let Some(handle) = self.handle.take() {
-                let _ = handle.join();
-            }
-        }
-    }
-
-    /// Bind a localhost listener and run `body` on a background thread once
-    /// a client connects. Wraps the listener in an [`LlmStub`] guard whose
-    /// lifetime bounds the stub thread.
-    fn spawn_llm_stub<F>(label: &'static str, body: F) -> LlmStub
-    where
-        F: FnOnce(&mut std::net::TcpStream) + Send + 'static,
-    {
-        use std::net::TcpListener;
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind llm stub");
-        let addr = listener.local_addr().expect("stub addr");
-        let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let shutdown_thread = shutdown.clone();
-        let handle = std::thread::spawn(move || {
-            let Some(mut stream) = accept_with_shutdown(&listener, label, &shutdown_thread) else {
-                return;
-            };
-            body(&mut stream);
-        });
-        LlmStub {
-            addr,
-            shutdown,
-            handle: Some(handle),
-        }
-    }
-
-    fn spawn_ollama_stub() -> LlmStub {
-        spawn_llm_stub("ollama stub", |stream| {
+    fn spawn_ollama_stub() -> StubServer {
+        spawn_stub("ollama stub", |mut stream| {
             use std::io::{Read, Write};
             let mut buf = vec![0u8; 8192];
             let n = stream.read(&mut buf).expect("read request");
@@ -659,8 +573,8 @@ mod tests {
 
     fn spawn_ollama_stub_with_body_capture(
         captured: std::sync::Arc<std::sync::Mutex<Option<String>>>,
-    ) -> LlmStub {
-        spawn_llm_stub("ollama stub (capture)", move |stream| {
+    ) -> StubServer {
+        spawn_stub("ollama stub (capture)", move |mut stream| {
             use std::io::{Read, Write};
             let mut buf = vec![0u8; 16384];
             let n = stream.read(&mut buf).expect("read request");
@@ -689,8 +603,8 @@ mod tests {
 
     fn spawn_ollama_raw_generate_stub(
         captured: std::sync::Arc<std::sync::Mutex<Option<String>>>,
-    ) -> LlmStub {
-        spawn_llm_stub("ollama raw stub", move |stream| {
+    ) -> StubServer {
+        spawn_stub("ollama raw stub", move |mut stream| {
             use std::io::{Read, Write};
             let mut buf = vec![0u8; 16384];
             let n = stream.read(&mut buf).expect("read request");
@@ -943,15 +857,15 @@ mod tests {
     }
 
     /// Bind a stub listener that serves one canned HTTP error response.
-    /// The returned [`LlmStub`] guard owns the listener and the worker
+    /// The returned [`StubServer`] guard owns the listener and the worker
     /// thread, so dropping it (test exit, panic) signals shutdown and
     /// joins — a stuck or misrouted client can never wedge the suite.
     fn spawn_openai_error_stub(
         status_line: &'static str,
         extra_headers: &'static str,
         body: &'static str,
-    ) -> LlmStub {
-        spawn_llm_stub("openai error stub", move |stream| {
+    ) -> StubServer {
+        spawn_stub("openai error stub", move |mut stream| {
             use std::io::{Read, Write};
             let mut buf = vec![0u8; 16384];
             let _ = stream.read(&mut buf);

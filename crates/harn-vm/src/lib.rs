@@ -40,6 +40,8 @@ pub mod stdlib_modules;
 pub mod store;
 pub(crate) mod synchronization;
 pub mod tenant;
+#[cfg(test)]
+pub(crate) mod test_stub;
 pub mod tool_annotations;
 pub mod tool_surface;
 pub mod tracing;

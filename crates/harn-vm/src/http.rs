@@ -4965,6 +4965,7 @@ mod tests {
         vm_sse_server_response, vm_sse_server_send, HttpMockResponse,
     };
     use crate::connectors::test_util::{spawn_mock_http_server, write_http_response};
+    use crate::test_stub::spawn_stub;
     use crate::value::VmValue;
     use base64::Engine;
     use rcgen::generate_simple_self_signed;
@@ -4973,7 +4974,6 @@ mod tests {
     use sha2::{Digest, Sha256};
     use std::collections::BTreeMap;
     use std::io::{Read, Write};
-    use std::net::TcpListener;
     use std::rc::Rc;
     use std::sync::{Arc, Once};
     use std::time::{Duration, SystemTime};
@@ -5307,8 +5307,6 @@ mod tests {
         std::fs::write(&cert_path, cert_pem.as_bytes()).expect("write cert");
         let pin = spki_pin_base64(cert.cert.der().as_ref());
 
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind tls listener");
-        let port = listener.local_addr().expect("tls addr").port();
         let server_config = Arc::new(
             ServerConfig::builder()
                 .with_no_client_auth()
@@ -5318,8 +5316,7 @@ mod tests {
                 )
                 .expect("build tls config"),
         );
-        let thread = std::thread::spawn(move || {
-            let (tcp, _) = listener.accept().expect("accept tls client");
+        let stub = spawn_stub("tls pin allow", move |tcp| {
             let conn = ServerConnection::new(server_config).expect("server connection");
             let mut stream = StreamOwned::new(conn, tcp);
             let request = read_http_request_generic(&mut stream);
@@ -5331,6 +5328,7 @@ mod tests {
                 "secure",
             );
         });
+        let port = stub.addr().port();
 
         let options = BTreeMap::from([(
             "tls".to_string(),
@@ -5351,7 +5349,7 @@ mod tests {
                 .expect("tls request should succeed");
         let response = response.as_dict().expect("response dict");
         assert_eq!(response["body"].display(), "secure");
-        thread.join().expect("tls thread");
+        drop(stub);
         reset_http_state();
     }
 
@@ -5367,8 +5365,6 @@ mod tests {
         let cert_path = temp.path().join("cert.pem");
         std::fs::write(&cert_path, cert_pem.as_bytes()).expect("write cert");
 
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind tls listener");
-        let port = listener.local_addr().expect("tls addr").port();
         let server_config = Arc::new(
             ServerConfig::builder()
                 .with_no_client_auth()
@@ -5378,8 +5374,7 @@ mod tests {
                 )
                 .expect("build tls config"),
         );
-        let thread = std::thread::spawn(move || {
-            let (tcp, _) = listener.accept().expect("accept tls client");
+        let stub = spawn_stub("tls pin reject", move |tcp| {
             let conn = ServerConnection::new(server_config).expect("server connection");
             let mut stream = StreamOwned::new(conn, tcp);
             let _ = read_http_request_generic(&mut stream);
@@ -5390,6 +5385,7 @@ mod tests {
                 "secure",
             );
         });
+        let port = stub.addr().port();
 
         let options = BTreeMap::from([(
             "tls".to_string(),
@@ -5410,7 +5406,7 @@ mod tests {
                 .expect_err("pin mismatch should fail");
         let message = error.to_string();
         assert!(message.contains("TLS SPKI pin mismatch"), "{message}");
-        thread.join().expect("tls thread");
+        drop(stub);
         reset_http_state();
     }
 
