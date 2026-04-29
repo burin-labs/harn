@@ -33,6 +33,9 @@ pub(crate) use auth::apply_auth_headers;
 pub(crate) use completion::vm_call_completion_full;
 pub(crate) use context_window::adapt_auto_compact_to_provider;
 pub use context_window::fetch_provider_max_context;
+pub(crate) use errors::{
+    classify_llm_error, classify_provider_http_error, LlmErrorInfo, LlmErrorKind, LlmErrorReason,
+};
 pub(crate) use ollama::apply_ollama_runtime_settings;
 pub use ollama::{
     normalize_ollama_keep_alive, ollama_readiness, ollama_runtime_settings_from_env,

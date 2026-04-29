@@ -1,8 +1,12 @@
 rate_limit
 true
+transient
+rate_limit
 rate_limit
 2500
 mock
 mock-model
 overloaded
+transient
+server_error
 true

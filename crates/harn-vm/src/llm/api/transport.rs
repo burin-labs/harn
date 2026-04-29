@@ -9,7 +9,6 @@ use std::time::Instant;
 use crate::agent_events::{AgentEvent, ToolCallStatus};
 use crate::value::{VmError, VmValue};
 
-use super::errors::classify_http_error;
 use super::openai_normalize::{
     append_paragraph, debug_log_message_shapes, extract_openai_delta_field_str,
 };
@@ -96,6 +95,39 @@ fn should_request_stream_usage(is_anthropic_style: bool, is_ollama: bool, endpoi
     // this field, but its `/v1/chat/completions` compatibility endpoint
     // does.
     !is_ollama || endpoint.contains("/v1/")
+}
+
+fn classify_transport_http_error(
+    provider: &str,
+    status: reqwest::StatusCode,
+    retry_after: Option<&str>,
+    body: &str,
+    is_anthropic_style: bool,
+    is_ollama: bool,
+) -> String {
+    if is_anthropic_style {
+        return crate::llm::providers::AnthropicProvider::classify_http_error(
+            status,
+            retry_after,
+            body,
+        )
+        .message;
+    }
+    if is_ollama {
+        return crate::llm::providers::OllamaProvider::classify_http_error(
+            status,
+            retry_after,
+            body,
+        )
+        .message;
+    }
+    crate::llm::providers::OpenAiCompatibleProvider::classify_http_error(
+        provider,
+        status,
+        retry_after,
+        body,
+    )
+    .message
 }
 
 /// Dispatch an LLM API call to the appropriate provider. This is the main
@@ -276,7 +308,14 @@ pub(crate) async fn vm_call_llm_api_with_body(
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_string());
             let body = response.text().await.unwrap_or_default();
-            let msg = classify_http_error(provider, status, retry_after.as_deref(), &body);
+            let msg = classify_transport_http_error(
+                provider,
+                status,
+                retry_after.as_deref(),
+                &body,
+                is_anthropic_style,
+                is_ollama,
+            );
             return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
         }
         let ct = response
@@ -315,7 +354,14 @@ pub(crate) async fn vm_call_llm_api_with_body(
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
         let body = response.text().await.unwrap_or_default();
-        let msg = classify_http_error(provider, status, retry_after.as_deref(), &body);
+        let msg = classify_transport_http_error(
+            provider,
+            status,
+            retry_after.as_deref(),
+            &body,
+            is_anthropic_style,
+            is_ollama,
+        );
         return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
     }
 

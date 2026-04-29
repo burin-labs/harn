@@ -104,11 +104,35 @@ fn current_iteration() -> Option<usize> {
 pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
     use crate::value::{classify_error_message, ErrorCategory};
     let msg = match err {
-        VmError::CategorizedError { category, .. } => return category.is_transient(),
+        VmError::CategorizedError { category, message } => {
+            let llm_info = crate::llm::api::classify_llm_error(category.clone(), message);
+            return if llm_info.reason == crate::llm::api::LlmErrorReason::Unknown {
+                category.is_transient()
+            } else {
+                llm_info.kind == crate::llm::api::LlmErrorKind::Transient
+            };
+        }
+        VmError::Thrown(crate::value::VmValue::Dict(d)) => {
+            if let Some(kind) = d.get("kind").map(|v| v.display()) {
+                return kind == "transient";
+            }
+            if let Some(category) = d.get("category").map(|v| v.display()) {
+                return ErrorCategory::parse(&category).is_transient();
+            }
+            return false;
+        }
         VmError::Thrown(crate::value::VmValue::String(s)) => s.as_ref(),
         VmError::Runtime(s) => s.as_str(),
         _ => return false,
     };
+    let category = classify_error_message(msg);
+    let llm_info = crate::llm::api::classify_llm_error(category.clone(), msg);
+    if llm_info.kind == crate::llm::api::LlmErrorKind::Transient {
+        return true;
+    }
+    if llm_info.reason != crate::llm::api::LlmErrorReason::Unknown {
+        return false;
+    }
     let derived = classify_error_message(msg);
     if derived != ErrorCategory::Generic {
         return derived.is_transient();
@@ -152,6 +176,12 @@ fn is_empty_completion_retry_error(err: &VmError) -> bool {
 pub(super) fn extract_retry_after_ms(err: &VmError) -> Option<u64> {
     let msg = match err {
         VmError::Thrown(crate::value::VmValue::String(s)) => s.as_ref(),
+        VmError::Thrown(crate::value::VmValue::Dict(d)) => {
+            return d.get("retry_after_ms").and_then(|v| match v {
+                crate::value::VmValue::Int(ms) if *ms >= 0 => Some(*ms as u64),
+                _ => None,
+            });
+        }
         VmError::CategorizedError { message, .. } => message.as_str(),
         VmError::Runtime(s) => s.as_str(),
         _ => return None,
@@ -957,6 +987,35 @@ mod retry_tests {
         assert!(!is_retryable_llm_error(&categorized(
             "invalid key",
             ErrorCategory::Auth
+        )));
+    }
+
+    #[test]
+    fn llm_error_kind_dict_gates_retry() {
+        let transient =
+            VmError::Thrown(VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
+                ("kind".to_string(), VmValue::String(Rc::from("transient"))),
+                (
+                    "reason".to_string(),
+                    VmValue::String(Rc::from("network_error")),
+                ),
+            ]))));
+        assert!(is_retryable_llm_error(&transient));
+
+        let terminal = VmError::Thrown(VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
+            ("kind".to_string(), VmValue::String(Rc::from("terminal"))),
+            (
+                "reason".to_string(),
+                VmValue::String(Rc::from("context_overflow")),
+            ),
+        ]))));
+        assert!(!is_retryable_llm_error(&terminal));
+    }
+
+    #[test]
+    fn context_overflow_message_is_not_retryable() {
+        assert!(!is_retryable_llm_error(&thrown(
+            "local HTTP 400 Bad Request [context_overflow]: prompt is too long"
         )));
     }
 

@@ -199,6 +199,14 @@ impl LlmProviderChat for AnthropicProvider {
 }
 
 impl AnthropicProvider {
+    pub(crate) fn classify_http_error(
+        status: reqwest::StatusCode,
+        retry_after: Option<&str>,
+        body: &str,
+    ) -> crate::llm::api::LlmErrorInfo {
+        crate::llm::api::classify_provider_http_error("anthropic", status, retry_after, body)
+    }
+
     /// Build the Anthropic-style request body.
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
         let anthropic_max = if opts.max_tokens > 0 {
@@ -324,6 +332,7 @@ impl AnthropicProvider {
 mod tests {
     use super::*;
     use crate::llm::api::LlmRequestPayload;
+    use crate::llm::api::{LlmErrorKind, LlmErrorReason};
 
     fn base_payload() -> LlmRequestPayload {
         LlmRequestPayload {
@@ -418,6 +427,28 @@ mod tests {
         let provider = AnthropicProvider;
         assert!(provider.supports_defer_loading("claude-opus-4-7"));
         assert!(!provider.supports_defer_loading("claude-opus-3-5"));
+    }
+
+    #[test]
+    fn classifies_anthropic_overloaded_error_as_transient_server_error() {
+        let info = AnthropicProvider::classify_http_error(
+            reqwest::StatusCode::from_u16(529).unwrap(),
+            None,
+            r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
+        );
+        assert_eq!(info.kind, LlmErrorKind::Transient);
+        assert_eq!(info.reason, LlmErrorReason::ServerError);
+    }
+
+    #[test]
+    fn classifies_anthropic_auth_error_as_terminal_auth_failure() {
+        let info = AnthropicProvider::classify_http_error(
+            reqwest::StatusCode::UNAUTHORIZED,
+            None,
+            r#"{"type":"error","error":{"type":"authentication_error","message":"bad key"}}"#,
+        );
+        assert_eq!(info.kind, LlmErrorKind::Terminal);
+        assert_eq!(info.reason, LlmErrorReason::AuthFailure);
     }
 
     #[test]

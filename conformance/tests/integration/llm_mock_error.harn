@@ -1,9 +1,9 @@
 /**
- * `llm_call`'s catch value is a dict `{category, message,
- * retry_after_ms?, provider, model}` — the same shape `llm_call_safe`
- * returns inside its `error` envelope. `error_category(e)` and
- * `is_rate_limited(e)` still work (they accept dict or string); scripts
- * can also dispatch directly on `e.category`.
+ * `llm_call`'s catch value is a dict `{kind, reason, category,
+ * message, retry_after_ms?, provider, model}` — the same shape
+ * `llm_call_safe` returns inside its `error` envelope.
+ * `error_category(e)` and `is_rate_limited(e)` still work (they accept
+ * dict or string); scripts can dispatch directly on `e.kind`/`e.reason`.
  */
 pipeline default(task) {
   // `llm_retries: 0` disables the llm_call-internal transient retry so
@@ -14,6 +14,8 @@ pipeline default(task) {
   } catch (e) {
     println(error_category(e))
     println(is_rate_limited(e))
+    println(e.kind)
+    println(e.reason)
     println(e.category)
     println(e.retry_after_ms)
     println(e.provider)
@@ -24,6 +26,8 @@ pipeline default(task) {
     llm_call("hello again", nil, {provider: "mock", llm_retries: 0})
   } catch (e2) {
     println(error_category(e2))
+    println(e2.kind)
+    println(e2.reason)
     // retry_after_ms is omitted when the provider didn't surface one.
     println(e2.retry_after_ms == nil)
   }
