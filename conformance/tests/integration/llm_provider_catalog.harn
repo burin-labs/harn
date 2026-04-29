@@ -1,7 +1,7 @@
 pipeline test(task) {
   let local = llm_resolve_model("local:gemma-4-e4b-it")
   assert_eq(local.id, "gemma-4-e4b-it")
-  assert_eq(local.provider, "local")
+  assert_eq(local.provider, "ollama")
   let ollama = llm_model_info("ollama:qwen3:30b-a3b")
   assert_eq(ollama.id, "qwen3:30b-a3b")
   assert_eq(ollama.provider, "ollama")

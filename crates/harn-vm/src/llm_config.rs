@@ -17,6 +17,8 @@ thread_local! {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ProvidersConfig {
     #[serde(default)]
+    pub default_provider: Option<String>,
+    #[serde(default)]
     pub providers: BTreeMap<String, ProviderDef>,
     #[serde(default)]
     pub aliases: BTreeMap<String, AliasDef>,
@@ -36,7 +38,8 @@ pub struct ProvidersConfig {
 
 impl ProvidersConfig {
     pub fn is_empty(&self) -> bool {
-        self.providers.is_empty()
+        self.default_provider.is_none()
+            && self.providers.is_empty()
             && self.aliases.is_empty()
             && self.models.is_empty()
             && self.qc_defaults.is_empty()
@@ -51,6 +54,10 @@ impl ProvidersConfig {
         self.aliases.extend(overlay.aliases.clone());
         self.models.extend(overlay.models.clone());
         self.qc_defaults.extend(overlay.qc_defaults.clone());
+
+        if overlay.default_provider.is_some() {
+            self.default_provider = overlay.default_provider.clone();
+        }
 
         if !overlay.inference_rules.is_empty() {
             let mut merged = overlay.inference_rules.clone();
@@ -376,7 +383,7 @@ pub fn resolve_model_info(selector: &str) -> ResolvedModel {
         };
     }
 
-    let provider = infer_provider_with_config(&config, selector);
+    let provider = infer_provider_with_config(&config, selector).provider;
     let id = normalize_model_id(selector);
     let tool_format = default_tool_format_with_config(&config, &id, &provider);
     let tier = model_tier_with_config(&config, &id);
@@ -391,60 +398,67 @@ pub fn resolve_model_info(selector: &str) -> ResolvedModel {
 
 /// Infer provider from a model ID using inference rules.
 pub fn infer_provider(model_id: &str) -> String {
+    infer_provider_detail(model_id).provider
+}
+
+/// Infer provider from a model ID and retain whether the configured default was used.
+pub(crate) fn infer_provider_detail(model_id: &str) -> crate::llm::provider::ProviderInference {
     let config = effective_config();
     infer_provider_with_config(&config, model_id)
 }
 
-fn infer_provider_with_config(config: &ProvidersConfig, model_id: &str) -> String {
-    if model_id.starts_with("local:") {
-        return "local".to_string();
-    }
-    if model_id.starts_with("ollama:") {
-        return "ollama".to_string();
+fn infer_provider_with_config(
+    config: &ProvidersConfig,
+    model_id: &str,
+) -> crate::llm::provider::ProviderInference {
+    if model_id.starts_with("local:") || model_id.starts_with("ollama:") {
+        return crate::llm::provider::ProviderInference::builtin("ollama");
     }
     if model_id.starts_with("huggingface:") || model_id.starts_with("hf:") {
-        return "huggingface".to_string();
+        return crate::llm::provider::ProviderInference::builtin("huggingface");
     }
     for rule in &config.inference_rules {
         if let Some(exact) = &rule.exact {
             if model_id == exact {
-                return rule.provider.clone();
+                return crate::llm::provider::ProviderInference::builtin(rule.provider.clone());
             }
         }
         if let Some(pattern) = &rule.pattern {
             if glob_match(pattern, model_id) {
-                return rule.provider.clone();
+                return crate::llm::provider::ProviderInference::builtin(rule.provider.clone());
             }
         }
         if let Some(substr) = &rule.contains {
             if model_id.contains(substr.as_str()) {
-                return rule.provider.clone();
+                return crate::llm::provider::ProviderInference::builtin(rule.provider.clone());
             }
         }
     }
-    // Fallback to hardcoded inference.
-    // Order matters: `local:` must beat the generic `:` → ollama rule, and
-    // any prefix-based rule must beat the generic `/` → openrouter rule for
-    // ids like `local:owner/model`.
-    if model_id.starts_with("claude-") {
-        return "anthropic".to_string();
-    }
-    if model_id.to_lowercase().starts_with("or-") {
-        return "openrouter".to_string();
-    }
-    if model_id.starts_with("gpt-") || model_id.starts_with("o1") || model_id.starts_with("o3") {
-        return "openai".to_string();
-    }
-    if model_id.starts_with("gemini-") || model_id.starts_with("models/gemini-") {
-        return "gemini".to_string();
-    }
-    if model_id.contains('/') {
-        return "openrouter".to_string();
-    }
-    if model_id.contains(':') {
-        return "ollama".to_string();
-    }
-    "anthropic".to_string()
+    crate::llm::provider::infer_provider_from_model_id(
+        model_id,
+        &default_provider_with_config(config),
+    )
+}
+
+pub fn default_provider() -> String {
+    let config = effective_config();
+    default_provider_with_config(&config)
+}
+
+fn default_provider_with_config(config: &ProvidersConfig) -> String {
+    std::env::var("HARN_DEFAULT_PROVIDER")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("auto"))
+        .or_else(|| {
+            config
+                .default_provider
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("auto"))
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "anthropic".to_string())
 }
 
 /// Get model tier ("small", "mid", "frontier").
@@ -767,7 +781,10 @@ pub fn resolve_base_url(pdef: &ProviderDef) -> String {
 }
 
 fn default_config() -> ProvidersConfig {
-    let mut config = ProvidersConfig::default();
+    let mut config = ProvidersConfig {
+        default_provider: Some("anthropic".to_string()),
+        ..Default::default()
+    };
 
     config.providers.insert(
         "anthropic".to_string(),
@@ -1220,10 +1237,10 @@ fn default_config() -> ProvidersConfig {
             provider: "openai".to_string(),
         },
         InferenceRule {
-            pattern: Some("local:*".to_string()),
+            pattern: Some("o4*".to_string()),
             contains: None,
             exact: None,
-            provider: "local".to_string(),
+            provider: "openai".to_string(),
         },
         InferenceRule {
             pattern: Some("anthropic.claude-*".to_string()),
@@ -1259,19 +1276,7 @@ fn default_config() -> ProvidersConfig {
             pattern: Some("gemini-*".to_string()),
             contains: None,
             exact: None,
-            provider: "vertex".to_string(),
-        },
-        InferenceRule {
-            pattern: None,
-            contains: Some("/".to_string()),
-            exact: None,
-            provider: "openrouter".to_string(),
-        },
-        InferenceRule {
-            pattern: None,
-            contains: Some(":".to_string()),
-            exact: None,
-            provider: "ollama".to_string(),
+            provider: "gemini".to_string(),
         },
     ];
 
@@ -1554,30 +1559,63 @@ mod tests {
 
     #[test]
     fn test_infer_provider_from_defaults() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
+        unsafe {
+            std::env::remove_var("HARN_DEFAULT_PROVIDER");
+        }
+
         assert_eq!(infer_provider("claude-sonnet-4-20250514"), "anthropic");
         assert_eq!(infer_provider("gpt-4o"), "openai");
         assert_eq!(infer_provider("o1-preview"), "openai");
         assert_eq!(infer_provider("o3-mini"), "openai");
+        assert_eq!(infer_provider("o4-mini"), "openai");
+        assert_eq!(infer_provider("gemini-2.5-pro"), "gemini");
         assert_eq!(infer_provider("qwen/qwen3-coder"), "openrouter");
         assert_eq!(infer_provider("llama3.2:latest"), "ollama");
         assert_eq!(infer_provider("unknown-model"), "anthropic");
+
+        unsafe {
+            match prev_default_provider {
+                Some(value) => std::env::set_var("HARN_DEFAULT_PROVIDER", value),
+                None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
+            }
+        }
     }
 
     #[test]
-    fn test_infer_provider_local_prefix() {
-        // `local:` must route to the local OpenAI-compatible provider, not
-        // ollama (which would otherwise swallow everything containing `:`).
-        assert_eq!(infer_provider("local:gemma-4-e4b-it"), "local");
-        assert_eq!(infer_provider("local:qwen2.5"), "local");
-        // Even when the id also contains `/`, the `local:` prefix wins.
-        assert_eq!(infer_provider("local:owner/model"), "local");
+    fn test_infer_provider_prefix_rules() {
+        assert_eq!(infer_provider("local:gemma-4-e4b-it"), "ollama");
+        assert_eq!(infer_provider("ollama:qwen3:30b-a3b"), "ollama");
+        // Even when the id also contains `/`, the local transport prefix wins.
+        assert_eq!(infer_provider("local:owner/model"), "ollama");
+        assert_eq!(infer_provider("hf:Qwen/Qwen3.6-35B-A3B"), "huggingface");
+    }
+
+    #[test]
+    fn test_openrouter_inference_requires_one_slash() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
+        unsafe {
+            std::env::remove_var("HARN_DEFAULT_PROVIDER");
+        }
+
+        assert_eq!(infer_provider("org/model"), "openrouter");
+        assert_eq!(infer_provider("org/team/model"), "anthropic");
+
+        unsafe {
+            match prev_default_provider {
+                Some(value) => std::env::set_var("HARN_DEFAULT_PROVIDER", value),
+                None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
+            }
+        }
     }
 
     #[test]
     fn test_resolve_model_info_normalizes_provider_prefixes() {
         let local = resolve_model_info("local:gemma-4-e4b-it");
         assert_eq!(local.id, "gemma-4-e4b-it");
-        assert_eq!(local.provider, "local");
+        assert_eq!(local.provider, "ollama");
 
         let ollama = resolve_model_info("ollama:qwen3:30b-a3b");
         assert_eq!(ollama.id, "qwen3:30b-a3b");
@@ -1682,7 +1720,31 @@ mod tests {
 
         let vertex = provider_config("vertex").unwrap();
         assert_eq!(vertex.base_url, "https://aiplatform.googleapis.com/v1");
-        assert_eq!(infer_provider("gemini-1.5-pro-002"), "vertex");
+        assert_eq!(infer_provider("gemini-1.5-pro-002"), "gemini");
+    }
+
+    #[test]
+    fn test_default_provider_env_override_for_unknown_model() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
+        unsafe {
+            std::env::set_var("HARN_DEFAULT_PROVIDER", "openai");
+        }
+
+        let inference = infer_provider_detail("unknown-model");
+
+        unsafe {
+            match prev_default_provider {
+                Some(value) => std::env::set_var("HARN_DEFAULT_PROVIDER", value),
+                None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
+            }
+        }
+
+        assert_eq!(inference.provider, "openai");
+        assert_eq!(
+            inference.source,
+            crate::llm::provider::ProviderInferenceSource::DefaultFallback
+        );
     }
 
     #[test]

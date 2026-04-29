@@ -286,10 +286,10 @@ mod tests {
     }
 
     #[test]
-    fn provider_auto_with_local_prefix_model_routes_to_local() {
+    fn provider_auto_with_local_prefix_model_routes_to_ollama() {
         // `provider: "auto"` must fall through to inference. With a `local:`
-        // model prefix that inference should resolve to the local provider
-        // rather than anthropic/ollama.
+        // model prefix that inference should resolve to Ollama rather than
+        // the local OpenAI-compatible provider or Anthropic.
         let _guard = crate::llm::env_lock().lock().expect("env lock");
         let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
         let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
@@ -307,7 +307,7 @@ mod tests {
             "model".to_string(),
             VmValue::String(Rc::from("local:gemma-4-e4b-it")),
         );
-        assert_eq!(vm_resolve_provider(&Some(opts)), "local");
+        assert_eq!(vm_resolve_provider(&Some(opts)), "ollama");
 
         // Case-insensitive: "AUTO" should behave the same.
         let mut opts2: BTreeMap<String, VmValue> = BTreeMap::new();
@@ -316,7 +316,7 @@ mod tests {
             "model".to_string(),
             VmValue::String(Rc::from("local:foo/bar")),
         );
-        assert_eq!(vm_resolve_provider(&Some(opts2)), "local");
+        assert_eq!(vm_resolve_provider(&Some(opts2)), "ollama");
 
         // Explicit non-auto provider still wins.
         let mut opts3: BTreeMap<String, VmValue> = BTreeMap::new();
@@ -335,6 +335,65 @@ mod tests {
             match prev_harn_model {
                 Some(v) => std::env::set_var("HARN_LLM_MODEL", v),
                 None => std::env::remove_var("HARN_LLM_MODEL"),
+            }
+            match prev_base {
+                Some(v) => std::env::set_var("LOCAL_LLM_BASE_URL", v),
+                None => std::env::remove_var("LOCAL_LLM_BASE_URL"),
+            }
+        }
+        reset_provider_key_cache();
+    }
+
+    #[test]
+    fn provider_auto_unknown_model_warns_and_uses_default_provider() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
+        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
+        let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
+        let prev_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
+        unsafe {
+            std::env::remove_var("HARN_LLM_PROVIDER");
+            std::env::remove_var("HARN_LLM_MODEL");
+            std::env::remove_var("LOCAL_LLM_BASE_URL");
+            std::env::set_var("HARN_DEFAULT_PROVIDER", "mock");
+        }
+        reset_provider_key_cache();
+
+        crate::events::clear_event_sinks();
+        let sink = Rc::new(crate::events::CollectorSink::new());
+        crate::events::add_event_sink(sink.clone());
+
+        let opts = BTreeMap::from([
+            ("provider".to_string(), VmValue::String(Rc::from("auto"))),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("unclassified-provider-model-for-test")),
+            ),
+        ]);
+
+        assert_eq!(vm_resolve_provider(&Some(opts)), "mock");
+        let logs = sink.logs.borrow();
+        assert!(logs.iter().any(|event| {
+            event.level == crate::events::EventLevel::Warn
+                && event.category == "llm.provider"
+                && event
+                    .message
+                    .contains("falling back to default provider 'mock'")
+        }));
+
+        crate::events::reset_event_sinks();
+        unsafe {
+            match prev_harn_provider {
+                Some(v) => std::env::set_var("HARN_LLM_PROVIDER", v),
+                None => std::env::remove_var("HARN_LLM_PROVIDER"),
+            }
+            match prev_harn_model {
+                Some(v) => std::env::set_var("HARN_LLM_MODEL", v),
+                None => std::env::remove_var("HARN_LLM_MODEL"),
+            }
+            match prev_default_provider {
+                Some(v) => std::env::set_var("HARN_DEFAULT_PROVIDER", v),
+                None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
             }
             match prev_base {
                 Some(v) => std::env::set_var("LOCAL_LLM_BASE_URL", v),
