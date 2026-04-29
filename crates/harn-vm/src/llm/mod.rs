@@ -520,8 +520,9 @@ pub fn reset_llm_state() {
 /// Shared implementation of `llm_call` / `llm_call_safe`. Runs the
 /// full schema-retry loop; on success returns the LLM result dict, on
 /// failure returns the underlying `VmError`. `llm_call` propagates the
-/// error (re-wrapped as a thrown `{category, message, retry_after_ms?,
-/// provider, model}` dict so catch blocks can dispatch on category);
+/// error (re-wrapped as a thrown `{kind, reason, category, message,
+/// retry_after_ms?, provider, model}` dict so catch blocks can dispatch
+/// on the LLM error taxonomy);
 /// `llm_call_safe` wraps it in a `{ok: false, error: …}` envelope with
 /// the same fields.
 async fn llm_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
@@ -537,33 +538,34 @@ async fn llm_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     }
 }
 
-/// Build the `{category, message, retry_after_ms?, provider, model}`
+/// Build the `{kind, reason, category, message, retry_after_ms?, provider, model}`
 /// dict that `llm_call` throws on failure. `retry_after_ms` is only
 /// set when the underlying error carries a parseable `retry-after:`
 /// hint, so callers can pattern-match on its presence:
 ///
 /// ```harn
 /// try { llm_call(prompt, nil, opts) } catch (e) {
-///   if e.category == "rate_limit" {
+///   if e.kind == "transient" && e.reason == "rate_limit" {
 ///     sleep(e.retry_after_ms ?? 1000)
 ///   }
 /// }
 /// ```
 pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -> VmValue {
     let category = crate::value::error_to_category(err);
-    let message = match err {
-        VmError::CategorizedError { message, .. } => message.clone(),
-        VmError::Thrown(VmValue::String(s)) => s.to_string(),
-        VmError::Thrown(VmValue::Dict(d)) => d
-            .get("message")
-            .map(|v| v.display())
-            .unwrap_or_else(|| err.to_string()),
-        _ => err.to_string(),
-    };
+    let message = llm_error_message(err);
+    let llm_error = api::classify_llm_error(category.clone(), &message);
     let mut dict = std::collections::BTreeMap::new();
     dict.insert(
         "category".to_string(),
         VmValue::String(Rc::from(category.as_str())),
+    );
+    dict.insert(
+        "kind".to_string(),
+        VmValue::String(Rc::from(llm_error.kind.as_str())),
+    );
+    dict.insert(
+        "reason".to_string(),
+        VmValue::String(Rc::from(llm_error.reason.as_str())),
     );
     dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
     if let Some(ms) = agent_observe::extract_retry_after_ms(err) {
@@ -572,6 +574,18 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
     dict.insert("provider".to_string(), VmValue::String(Rc::from(provider)));
     dict.insert("model".to_string(), VmValue::String(Rc::from(model)));
     VmValue::Dict(Rc::new(dict))
+}
+
+fn llm_error_message(err: &VmError) -> String {
+    match err {
+        VmError::CategorizedError { message, .. } => message.clone(),
+        VmError::Thrown(VmValue::String(s)) => s.to_string(),
+        VmError::Thrown(VmValue::Dict(d)) => d
+            .get("message")
+            .map(|v| v.display())
+            .unwrap_or_else(|| err.to_string()),
+        _ => err.to_string(),
+    }
 }
 
 pub(crate) async fn execute_llm_call(
@@ -755,8 +769,8 @@ fn llm_safe_envelope_ok(response: VmValue) -> VmValue {
 
 fn llm_safe_envelope_err(err: &VmError) -> VmValue {
     // `llm_call_impl` pre-wraps its errors into a
-    // `VmError::Thrown(VmValue::Dict{category, message, retry_after_ms?,
-    // provider, model})`. Pass that dict through verbatim so
+    // `VmError::Thrown(VmValue::Dict{kind, reason, category, message,
+    // retry_after_ms?, provider, model})`. Pass that dict through verbatim so
     // `llm_call_safe` callers see the same fields as `try/catch`
     // users — with `category` / `message` always populated.
     if let VmError::Thrown(VmValue::Dict(d)) = err {
@@ -767,15 +781,20 @@ fn llm_safe_envelope_err(err: &VmError) -> VmValue {
         return VmValue::Dict(Rc::new(dict));
     }
     let category = crate::value::error_to_category(err);
-    let message = match err {
-        VmError::CategorizedError { message, .. } => message.clone(),
-        VmError::Thrown(VmValue::String(s)) => s.to_string(),
-        _ => err.to_string(),
-    };
+    let message = llm_error_message(err);
+    let llm_error = api::classify_llm_error(category.clone(), &message);
     let mut err_dict = std::collections::BTreeMap::new();
     err_dict.insert(
         "category".to_string(),
         VmValue::String(Rc::from(category.as_str())),
+    );
+    err_dict.insert(
+        "kind".to_string(),
+        VmValue::String(Rc::from(llm_error.kind.as_str())),
+    );
+    err_dict.insert(
+        "reason".to_string(),
+        VmValue::String(Rc::from(llm_error.reason.as_str())),
     );
     err_dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
     let mut dict = std::collections::BTreeMap::new();
@@ -881,20 +900,28 @@ pub(crate) fn structured_safe_envelope_ok(data: VmValue) -> VmValue {
 }
 
 pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
+    if let VmError::Thrown(VmValue::Dict(d)) = err {
+        let mut dict = std::collections::BTreeMap::new();
+        dict.insert("ok".to_string(), VmValue::Bool(false));
+        dict.insert("data".to_string(), VmValue::Nil);
+        dict.insert("error".to_string(), VmValue::Dict(d.clone()));
+        return VmValue::Dict(Rc::new(dict));
+    }
     let category = crate::value::error_to_category(err);
-    let message = match err {
-        VmError::CategorizedError { message, .. } => message.clone(),
-        VmError::Thrown(VmValue::String(s)) => s.to_string(),
-        VmError::Thrown(VmValue::Dict(d)) => d
-            .get("message")
-            .map(|v| v.display())
-            .unwrap_or_else(|| err.to_string()),
-        _ => err.to_string(),
-    };
+    let message = llm_error_message(err);
+    let llm_error = api::classify_llm_error(category.clone(), &message);
     let mut err_dict = std::collections::BTreeMap::new();
     err_dict.insert(
         "category".to_string(),
         VmValue::String(Rc::from(category.as_str())),
+    );
+    err_dict.insert(
+        "kind".to_string(),
+        VmValue::String(Rc::from(llm_error.kind.as_str())),
+    );
+    err_dict.insert(
+        "reason".to_string(),
+        VmValue::String(Rc::from(llm_error.reason.as_str())),
     );
     err_dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
     let mut dict = std::collections::BTreeMap::new();

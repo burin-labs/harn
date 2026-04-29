@@ -80,6 +80,15 @@ impl OpenAiCompatibleProvider {
             provider_name: name,
         }
     }
+
+    pub(crate) fn classify_http_error(
+        provider: &str,
+        status: reqwest::StatusCode,
+        retry_after: Option<&str>,
+        body: &str,
+    ) -> crate::llm::api::LlmErrorInfo {
+        crate::llm::api::classify_provider_http_error(provider, status, retry_after, body)
+    }
 }
 
 impl LlmProvider for OpenAiCompatibleProvider {
@@ -243,8 +252,7 @@ fn openrouter_reasoning_config(thinking: Option<&ThinkingConfig>) -> Option<serd
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::api::LlmRequestPayload;
-    use crate::llm::api::ThinkingConfig;
+    use crate::llm::api::{LlmErrorKind, LlmErrorReason, LlmRequestPayload, ThinkingConfig};
     use serde_json::json;
 
     #[test]
@@ -303,6 +311,31 @@ mod tests {
     fn native_tool_search_variants_empty_for_old_model() {
         let provider = OpenAiCompatibleProvider::new("openai".to_string());
         assert!(provider.native_tool_search_variants("gpt-4o").is_empty());
+    }
+
+    #[test]
+    fn classifies_openai_context_length_as_terminal_context_overflow() {
+        let info = OpenAiCompatibleProvider::classify_http_error(
+            "openai",
+            reqwest::StatusCode::BAD_REQUEST,
+            None,
+            r#"{"error":{"code":"context_length_exceeded","message":"maximum context length"}}"#,
+        );
+        assert_eq!(info.kind, LlmErrorKind::Terminal);
+        assert_eq!(info.reason, LlmErrorReason::ContextOverflow);
+    }
+
+    #[test]
+    fn classifies_openai_rate_limit_as_transient_rate_limit() {
+        let info = OpenAiCompatibleProvider::classify_http_error(
+            "openai",
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            Some("5"),
+            r#"{"error":{"type":"rate_limit_error","message":"slow down"}}"#,
+        );
+        assert_eq!(info.kind, LlmErrorKind::Transient);
+        assert_eq!(info.reason, LlmErrorReason::RateLimit);
+        assert!(info.message.contains("retry-after: 5"));
     }
 
     #[test]

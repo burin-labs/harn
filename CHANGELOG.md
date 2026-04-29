@@ -11,6 +11,15 @@ granular archaeology.
 
 ### Added
 
+- **Canonical LLM error taxonomy (#854).** Provider transport errors now surface
+  `kind` (`"transient"` / `"terminal"`) and `reason` (`"rate_limit"`,
+  `"server_error"`, `"network_error"`, `"timeout"`, `"auth_failure"`,
+  `"context_overflow"`, `"content_policy"`, `"invalid_request"`,
+  `"model_unavailable"`, `"unknown"`) alongside the existing `category`
+  compatibility field. `llm_call` / `agent_loop` retry only transient kinds,
+  and provider-specific HTTP mappings cover OpenAI-compatible, Anthropic, and
+  Ollama error shapes.
+
 - **Command policy hooks (#824/#846).** First-class `command_policy` builtins
   with policy stack management, deterministic command/result risk scanning,
   and a safe `command_llm_risk_scan` fallback shape. `host_call("process.exec",

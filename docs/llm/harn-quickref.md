@@ -1323,14 +1323,15 @@ removed — call the lifecycle verbs explicitly.
 
 `llm_call` throws on transport / schema / budget failures. The thrown
 value is a dict with the same fields `llm_call_safe` exposes under
-`r.error`, so scripts can dispatch on category without string-sniffing:
+`r.error`, so scripts can dispatch on a canonical LLM error taxonomy
+without string-sniffing:
 
 ```harn
 try {
   let r = llm_call(user_prompt, nil, opts)
 } catch (e) {
-  // e is {category, message, retry_after_ms?, provider, model}
-  if e.category == "rate_limit" {
+  // e is {kind, reason, category, message, retry_after_ms?, provider, model}
+  if e.kind == "transient" && e.reason == "rate_limit" {
     sleep(e.retry_after_ms ?? 1000)
     continue
   }
@@ -1371,12 +1372,21 @@ let r = with_rate_limit("openai", fn() {
 ```
 
 `error.category` (both on the thrown dict and on
-`r.error.category`) is one of the canonical `ErrorCategory` strings:
+`r.error.category`) remains for compatibility and is one of the
+canonical `ErrorCategory` strings:
 `"rate_limit"`, `"timeout"`, `"overloaded"`, `"server_error"`,
 `"transient_network"`, `"schema_validation"`, `"auth"`, `"not_found"`,
 `"circuit_open"`, `"tool_error"`, `"tool_rejected"`, `"cancelled"`,
 `"generic"`. `retry_after_ms` is set when the provider surfaced a
 `Retry-After` hint (or `llm_mock` was told to); otherwise omitted.
+
+LLM provider failures also include `error.kind` and `error.reason`.
+`kind` is `"transient"` or `"terminal"`. Transient reasons are
+`"rate_limit"`, `"server_error"`, `"network_error"`, and `"timeout"`;
+terminal reasons are `"auth_failure"`, `"context_overflow"`,
+`"content_policy"`, `"invalid_request"`, `"model_unavailable"`, and
+`"unknown"`. `llm_call` and `agent_loop` spend their retry budget only
+when `kind == "transient"`.
 
 Pair with `llm_mock({error: {category, message, retry_after_ms?}})` to
 write deterministic tests for either helper's error path:
@@ -1386,6 +1396,8 @@ llm_mock({error: {category: "rate_limit", message: "429", retry_after_ms: 2500}}
 try {
   llm_call("hi", nil, {provider: "mock", llm_retries: 0})
 } catch (e) {
+  assert(e.kind == "transient")
+  assert(e.reason == "rate_limit")
   assert(e.category == "rate_limit")
   assert(e.retry_after_ms == 2500)
 }

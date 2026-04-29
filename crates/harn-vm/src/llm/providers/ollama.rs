@@ -29,6 +29,14 @@ impl LlmProviderChat for OllamaProvider {
 }
 
 impl OllamaProvider {
+    pub(crate) fn classify_http_error(
+        status: reqwest::StatusCode,
+        retry_after: Option<&str>,
+        body: &str,
+    ) -> crate::llm::api::LlmErrorInfo {
+        crate::llm::api::classify_provider_http_error("ollama", status, retry_after, body)
+    }
+
     /// Build the Ollama-specific request body. Ollama uses OpenAI-style messages
     /// but with additional options and NDJSON streaming.
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
@@ -172,10 +180,14 @@ impl OllamaProvider {
         })?;
         if !response.status().is_success() {
             let status = response.status();
+            let retry_after = response
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string());
             let body = response.text().await.unwrap_or_default();
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "ollama raw generate API error HTTP {status}: {body}"
-            )))));
+            let msg = Self::classify_http_error(status, retry_after.as_deref(), &body).message;
+            return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
         }
         if request.stream {
             let tx = delta_tx.unwrap_or_else(|| {
@@ -460,6 +472,7 @@ fn blocks_from_text_and_thinking(text: &str, thinking: &str) -> Vec<serde_json::
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::api::{LlmErrorKind, LlmErrorReason};
 
     struct ScopedEnvVar {
         key: &'static str,
@@ -597,6 +610,28 @@ mod tests {
         })]);
 
         assert!(!OllamaProvider::should_route_via_raw_generate(&payload));
+    }
+
+    #[test]
+    fn classifies_ollama_missing_model_as_terminal_model_unavailable() {
+        let info = OllamaProvider::classify_http_error(
+            reqwest::StatusCode::NOT_FOUND,
+            None,
+            r#"{"error":"model not found"}"#,
+        );
+        assert_eq!(info.kind, LlmErrorKind::Terminal);
+        assert_eq!(info.reason, LlmErrorReason::ModelUnavailable);
+    }
+
+    #[test]
+    fn classifies_ollama_timeout_as_transient_timeout() {
+        let info = OllamaProvider::classify_http_error(
+            reqwest::StatusCode::GATEWAY_TIMEOUT,
+            None,
+            r#"{"error":"upstream timeout"}"#,
+        );
+        assert_eq!(info.kind, LlmErrorKind::Transient);
+        assert_eq!(info.reason, LlmErrorReason::Timeout);
     }
 
     #[test]
