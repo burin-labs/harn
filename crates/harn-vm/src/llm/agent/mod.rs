@@ -373,6 +373,8 @@ pub async fn run_agent_loop_internal(
     // them without fighting the `&mut state` borrow in the loop body.
     let llm_retries = state.config.llm_retries;
     let llm_backoff_ms = state.config.llm_backoff_ms;
+    let schema_retries = state.config.schema_retries;
+    let schema_retry_nudge = state.config.schema_retry_nudge.clone();
     let token_budget = state.config.token_budget;
     let turn_policy = state.config.turn_policy.clone();
     let stop_after_successful_tools = state.config.stop_after_successful_tools.clone();
@@ -493,6 +495,8 @@ pub async fn run_agent_loop_internal(
                 turn_policy: turn_policy.as_ref(),
                 llm_retries,
                 llm_backoff_ms,
+                schema_retries,
+                schema_retry_nudge: &schema_retry_nudge,
                 tools_val: effective_tools_val,
             },
             iteration,

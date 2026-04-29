@@ -91,6 +91,8 @@ pub(super) fn base_agent_config() -> AgentLoopConfig {
         break_unless_phase: None,
         tool_retries: 0,
         tool_backoff_ms: 1,
+        schema_retries: 0,
+        schema_retry_nudge: crate::llm::parse_schema_nudge(&None),
         tool_format: "text".to_string(),
         native_tool_fallback: crate::orchestration::NativeToolFallbackPolicy::Allow,
         auto_compact: None,
