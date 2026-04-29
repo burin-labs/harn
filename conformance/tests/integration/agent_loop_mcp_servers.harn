@@ -6,7 +6,7 @@ fn wait_for_file(path, attempts) {
     sleep(50ms)
     remaining = remaining - 1
   }
-  assert(file_exists(path), "timed out waiting for " + path)
+  require file_exists(path), "timed out waiting for " + path
 }
 
 pipeline default() {
@@ -24,7 +24,7 @@ pipeline default() {
       + pid_path
       + "\"",
   )
-  assert(start?.success, "MCP mock server started")
+  require start?.success, "MCP mock server started"
   wait_for_file(port_path, 100)
   let base = "http://127.0.0.1:" + read_file(port_path).trim()
   llm_mock_clear()
@@ -51,7 +51,8 @@ pipeline default() {
       ],
     },
   )
-  let state = json_parse(http_get(base + "/__state").body)
+  let state_response = http_get(base + "/__state")
+  let state = json_parse(state_response.body)
   let _stop = http_post(base + "/__shutdown", "")
   process_exec("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
   println(result?.tools.successful[0])
