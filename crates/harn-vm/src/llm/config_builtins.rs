@@ -535,7 +535,14 @@ fn capabilities_to_vm_value(
         "prompt_caching".to_string(),
         VmValue::Bool(caps.prompt_caching),
     );
-    dict.insert("thinking".to_string(), VmValue::Bool(caps.thinking));
+    dict.insert(
+        "thinking".to_string(),
+        VmValue::Bool(!caps.thinking_modes.is_empty()),
+    );
+    dict.insert(
+        "thinking_modes".to_string(),
+        string_list_to_vm_value(caps.thinking_modes.clone()),
+    );
     dict.insert(
         "preserve_thinking".to_string(),
         VmValue::Bool(caps.preserve_thinking),

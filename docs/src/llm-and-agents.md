@@ -116,7 +116,7 @@ println(result.text)
 | `presence_penalty` | float | nil | Presence penalty (OpenAI only) |
 | `response_format` | string | `"text"` | `"text"` or `"json"` |
 | `schema` | dict | nil | JSON Schema, OpenAPI Schema Object, or canonical Harn schema dict for structured output |
-| `thinking` | bool/dict | nil | Enable provider reasoning. `true` or `{budget_tokens: N}`. Anthropic maps this to thinking/adaptive thinking, OpenRouter maps it to `reasoning`, and Ollama maps it to `think`. |
+| `thinking` | bool/dict | nil | Enable typed provider reasoning. `true` and `{budget_tokens: N}` remain shorthand for `{mode: "enabled"}`; use `{mode: "enabled", budget_tokens: N}`, `{mode: "adaptive"}`, or `{mode: "effort", level: "low" \| "medium" \| "high"}`. |
 | `tools` | list | nil | Tool definitions |
 | `tool_choice` | string/dict | `"auto"` | `"auto"`, `"none"`, `"required"`, or `{name: "tool"}` |
 | `tool_search` | bool/string/dict | nil | Progressive tool disclosure. See [Tool Vault](#tool-vault) |
@@ -440,6 +440,7 @@ native_tools = true
 defer_loading = true
 tool_search = ["hosted"]
 prompt_caching = true
+thinking_modes = ["effort"]
 
 # Shadow the built-in Anthropic rule to force client-executed
 # fallback on every Opus call (e.g. while a regional outage is
@@ -450,7 +451,7 @@ native_tools = true
 defer_loading = false
 tool_search = []
 prompt_caching = true
-thinking = true
+thinking_modes = ["enabled"]
 ```
 
 Each `[[capabilities.provider.<name>]]` entry accepts these fields:
@@ -464,7 +465,7 @@ Each `[[capabilities.provider.<name>]]` entry accepts these fields:
 | `tool_search` | list of strings | Native `tool_search` variants, preferred first. Anthropic: `["bm25", "regex"]`. OpenAI: `["hosted", "client"]`. Empty = no native support (client fallback only). |
 | `max_tools` | int | Cap on tool count. `harn lint` will warn if a registry exceeds the smallest cap any active provider advertises. |
 | `prompt_caching` | bool | `cache_control` blocks honored. |
-| `thinking` | bool | Extended or adaptive thinking available. |
+| `thinking_modes` | list of strings | Supported script-facing thinking modes. Values are `enabled`, `adaptive`, or `effort`. |
 
 First match wins. User rules for a given provider are consulted
 before the shipped rules — so the order inside the TOML file matters

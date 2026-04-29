@@ -177,8 +177,10 @@ impl LlmProvider for AnthropicProvider {
         true
     }
 
-    fn supports_thinking(&self) -> bool {
-        true
+    fn supports_thinking(&self, model: &str) -> bool {
+        !crate::llm::capabilities::lookup(self.name(), model)
+            .thinking_modes
+            .is_empty()
     }
 
     // `supports_defer_loading` and `native_tool_search_variants` are
@@ -289,21 +291,27 @@ impl AnthropicProvider {
                 body["tool_choice"] = serde_json::json!({"type": "tool", "name": "json_response"});
             }
         }
-        if let Some(ref thinking) = opts.thinking {
+        match &opts.thinking {
             // Claude Opus 4.7+ replaced extended thinking with adaptive
             // thinking; `type: enabled` returns HTTP 400. Rewrite the
             // payload transparently rather than fighting the deprecation.
-            if model_requires_adaptive_thinking(&opts.model) {
+            ThinkingConfig::Disabled => {}
+            ThinkingConfig::Adaptive => {
+                body["thinking"] = serde_json::json!({ "type": "adaptive" });
+            }
+            ThinkingConfig::Effort { .. } => {
+                body["thinking"] = serde_json::json!({ "type": "adaptive" });
+            }
+            ThinkingConfig::Enabled { budget_tokens }
+                if model_requires_adaptive_thinking(&opts.model) =>
+            {
                 warn_adaptive_thinking_rewrite(&opts.model);
                 body["thinking"] = serde_json::json!({ "type": "adaptive" });
-            } else {
-                let budget = match thinking {
-                    ThinkingConfig::Enabled => 10000,
-                    ThinkingConfig::WithBudget(b) => *b,
-                };
+            }
+            ThinkingConfig::Enabled { budget_tokens } => {
                 body["thinking"] = serde_json::json!({
                     "type": "enabled",
-                    "budget_tokens": budget,
+                    "budget_tokens": budget_tokens.unwrap_or(10000),
                 });
             }
         }
@@ -353,7 +361,7 @@ mod tests {
             presence_penalty: None,
             response_format: None,
             json_schema: None,
-            thinking: None,
+            thinking: ThinkingConfig::Disabled,
             native_tools: Some(vec![serde_json::json!({
                 "name": "read_file",
                 "description": "Read a file",

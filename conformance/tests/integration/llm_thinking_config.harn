@@ -1,0 +1,29 @@
+pipeline test(task) {
+  llm_mock_clear()
+  llm_call("disabled", nil, {provider: "mock", model: "mock-model", thinking: {mode: "disabled"}})
+  let disabled = llm_mock_calls()[0].thinking
+  assert(disabled.mode == "disabled", "disabled mode reaches mock provider")
+  llm_mock_clear()
+  llm_call(
+    "enabled",
+    nil,
+    {provider: "mock", model: "claude-opus-4-6", thinking: {mode: "enabled", budget_tokens: 8000}},
+  )
+  let enabled = llm_mock_calls()[0].thinking
+  assert(enabled.mode == "enabled", "enabled mode reaches mock provider")
+  assert(enabled.budget_tokens == 8000, "enabled budget reaches mock provider")
+  llm_mock_clear()
+  llm_call(
+    "adaptive",
+    nil,
+    {provider: "mock", model: "claude-opus-4-7", thinking: {mode: "adaptive"}},
+  )
+  let adaptive = llm_mock_calls()[0].thinking
+  assert(adaptive.mode == "adaptive", "adaptive mode reaches mock provider")
+  llm_mock_clear()
+  llm_call("effort", nil, {provider: "mock", model: "o3", thinking: {mode: "effort", level: "high"}})
+  let effort = llm_mock_calls()[0].thinking
+  assert(effort.mode == "effort", "effort mode reaches mock provider")
+  assert(effort.level == "high", "effort level reaches mock provider")
+  log("llm_thinking_config tests passed")
+}

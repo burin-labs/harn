@@ -1440,6 +1440,7 @@ fn register_llm_mock_builtins(vm: &mut Vm) {
                         None => VmValue::Nil,
                     },
                 );
+                dict.insert("thinking".to_string(), json_to_vm_value(&c.thinking));
                 VmValue::Dict(Rc::new(dict))
             })
             .collect();
@@ -1555,7 +1556,7 @@ mod tests {
                 }
             })),
             output_validation: Some("error".to_string()),
-            thinking: None,
+            thinking: crate::llm::api::ThinkingConfig::Disabled,
             tools: None,
             native_tools: None,
             tool_choice: None,

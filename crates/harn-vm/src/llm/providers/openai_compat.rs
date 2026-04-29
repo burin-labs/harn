@@ -169,9 +169,11 @@ impl OpenAiCompatibleProvider {
             body["presence_penalty"] = serde_json::json!(pp);
         }
         if opts.provider == "openrouter" {
-            if let Some(reasoning) = openrouter_reasoning_config(opts.thinking.as_ref()) {
+            if let Some(reasoning) = openrouter_reasoning_config(&opts.thinking) {
                 body["reasoning"] = reasoning;
             }
+        } else if let ThinkingConfig::Effort { level } = &opts.thinking {
+            body["reasoning_effort"] = serde_json::json!(level.as_str());
         }
         if opts.response_format.as_deref() == Some("json") {
             if let Some(ref schema) = opts.json_schema {
@@ -203,7 +205,7 @@ impl OpenAiCompatibleProvider {
             // When prefill is present, continue the final assistant
             // message instead of starting a fresh assistant turn.
             let mut chat_template_kwargs = serde_json::json!({
-                "enable_thinking": opts.thinking.is_some(),
+                "enable_thinking": opts.thinking.is_enabled(),
             });
             if opts.prefill.is_some() {
                 chat_template_kwargs["add_generation_prompt"] = serde_json::json!(false);
@@ -237,22 +239,34 @@ impl OpenAiCompatibleProvider {
     }
 }
 
-fn openrouter_reasoning_config(thinking: Option<&ThinkingConfig>) -> Option<serde_json::Value> {
+fn openrouter_reasoning_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
     match thinking {
-        Some(ThinkingConfig::Enabled) => Some(serde_json::json!({
+        ThinkingConfig::Disabled => None,
+        ThinkingConfig::Enabled {
+            budget_tokens: None,
+        } => Some(serde_json::json!({
             "enabled": true
         })),
-        Some(ThinkingConfig::WithBudget(max_tokens)) => Some(serde_json::json!({
+        ThinkingConfig::Enabled {
+            budget_tokens: Some(max_tokens),
+        } => Some(serde_json::json!({
             "max_tokens": max_tokens
         })),
-        None => None,
+        ThinkingConfig::Adaptive => Some(serde_json::json!({
+            "enabled": true
+        })),
+        ThinkingConfig::Effort { level } => Some(serde_json::json!({
+            "effort": level.as_str()
+        })),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::api::{LlmErrorKind, LlmErrorReason, LlmRequestPayload, ThinkingConfig};
+    use crate::llm::api::{
+        LlmErrorKind, LlmErrorReason, LlmRequestPayload, ReasoningEffort, ThinkingConfig,
+    };
     use serde_json::json;
 
     #[test]
@@ -349,7 +363,9 @@ mod tests {
     fn openrouter_thinking_enabled_maps_to_reasoning_enabled() {
         let provider = OpenAiCompatibleProvider::new("openrouter".to_string());
         let mut payload = base_request_payload();
-        payload.thinking = Some(ThinkingConfig::Enabled);
+        payload.thinking = ThinkingConfig::Enabled {
+            budget_tokens: None,
+        };
         let mut body = OpenAiCompatibleProvider::build_request_body(&payload, false);
         provider.transform_request(&mut body);
 
@@ -361,7 +377,9 @@ mod tests {
     fn openrouter_thinking_budget_maps_to_reasoning_max_tokens() {
         let provider = OpenAiCompatibleProvider::new("openrouter".to_string());
         let mut payload = base_request_payload();
-        payload.thinking = Some(ThinkingConfig::WithBudget(2048));
+        payload.thinking = ThinkingConfig::Enabled {
+            budget_tokens: Some(2048),
+        };
         let mut body = OpenAiCompatibleProvider::build_request_body(&payload, false);
         provider.transform_request(&mut body);
 
@@ -374,7 +392,9 @@ mod tests {
         let mut payload = base_request_payload();
         payload.provider = "local".to_string();
         payload.model = "Qwen/Qwen3.6-35B-A3B".to_string();
-        payload.thinking = Some(ThinkingConfig::Enabled);
+        payload.thinking = ThinkingConfig::Enabled {
+            budget_tokens: None,
+        };
         let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
         assert_eq!(
             body["chat_template_kwargs"]["preserve_thinking"], true,
@@ -388,7 +408,9 @@ mod tests {
         let mut payload = base_request_payload();
         payload.provider = "ollama".to_string();
         payload.model = "qwen3.5:35b-a3b-coding-nvfp4".to_string();
-        payload.thinking = Some(ThinkingConfig::Enabled);
+        payload.thinking = ThinkingConfig::Enabled {
+            budget_tokens: None,
+        };
         let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
         assert!(
             body.get("chat_template_kwargs").is_none(),
@@ -401,9 +423,37 @@ mod tests {
         let mut payload = base_request_payload();
         payload.provider = "local".to_string();
         payload.model = "Qwen/Qwen3.5-Coder-32B".to_string();
-        payload.thinking = None;
+        payload.thinking = ThinkingConfig::Disabled;
         let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
         assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+    }
+
+    #[test]
+    fn openai_effort_maps_to_reasoning_effort() {
+        let mut payload = base_request_payload();
+        payload.provider = "openai".to_string();
+        payload.model = "o3".to_string();
+        payload.thinking = ThinkingConfig::Effort {
+            level: ReasoningEffort::High,
+        };
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["reasoning_effort"], "high");
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn openrouter_effort_maps_to_nested_reasoning_effort() {
+        let provider = OpenAiCompatibleProvider::new("openrouter".to_string());
+        let mut payload = base_request_payload();
+        payload.thinking = ThinkingConfig::Effort {
+            level: ReasoningEffort::Medium,
+        };
+        let mut body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        provider.transform_request(&mut body);
+
+        assert_eq!(body["reasoning"]["effort"], "medium");
+        assert!(body.get("reasoning_effort").is_none());
     }
 
     fn base_request_payload() -> LlmRequestPayload {
@@ -425,7 +475,7 @@ mod tests {
             presence_penalty: None,
             response_format: None,
             json_schema: None,
-            thinking: None,
+            thinking: ThinkingConfig::Disabled,
             native_tools: None,
             tool_choice: None,
             cache: false,

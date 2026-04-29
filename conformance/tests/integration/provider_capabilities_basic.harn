@@ -1,58 +1,65 @@
-// Data-driven provider capabilities (harn#77).
-//
-// `provider_capabilities(provider, model)` returns a dict describing
-// everything the shipped `capabilities.toml` matrix knows about a
-// (provider, model) pair. Scripts branch on the result without
-// carrying vendor-specific knowledge.
+/**
+ * Data-driven provider capabilities (harn#77).
+ *
+ * `provider_capabilities(provider, model)` returns a dict describing
+ * everything the shipped `capabilities.toml` matrix knows about a
+ * (provider, model) pair. Scripts branch on the result without
+ * carrying vendor-specific knowledge.
+ */
 pipeline test(task) {
   // Anthropic Opus 4.7 — full tool-search support.
   let opus = provider_capabilities("anthropic", "claude-opus-4-7")
-  assert(opus.native_tools == true, "Opus 4.7 supports native tools")
-  assert(opus.defer_loading == true, "Opus 4.7 supports defer_loading")
+  assert(opus.native_tools, "Opus 4.7 supports native tools")
+  assert(opus.defer_loading, "Opus 4.7 supports defer_loading")
   assert(len(opus.tool_search) == 2, "Opus 4.7 advertises two tool_search variants")
   assert(opus.tool_search[0] == "bm25", "BM25 ordered first")
   assert(opus.tool_search[1] == "regex", "regex second")
-  assert(opus.prompt_caching == true, "Opus 4.7 supports prompt caching")
-  assert(opus.thinking == true, "Opus 4.7 exposes adaptive thinking")
+  assert(opus.prompt_caching, "Opus 4.7 supports prompt caching")
+  assert(opus.thinking, "Opus 4.7 exposes adaptive thinking")
+  assert(opus.thinking_modes[0] == "adaptive", "Opus 4.7 exposes adaptive thinking mode")
   assert(opus.max_tools == 10000, "Opus 4.7 max_tools cap is 10000")
   // Older Claude — no tool search, still cache + thinking.
   let old = provider_capabilities("anthropic", "claude-opus-3-5")
-  assert(old.native_tools == true, "Claude 3.5 still has native tools")
-  assert(old.defer_loading == false, "Claude 3.5 has no defer_loading")
+  assert(old.native_tools, "Claude 3.5 still has native tools")
+  assert(!old.defer_loading, "Claude 3.5 has no defer_loading")
   assert(len(old.tool_search) == 0, "Claude 3.5 advertises no tool_search variants")
-  assert(old.prompt_caching == true, "Claude 3.5 still supports prompt caching")
+  assert(old.prompt_caching, "Claude 3.5 still supports prompt caching")
+  assert(old.thinking_modes[0] == "enabled", "Claude 3.5 exposes budgeted thinking mode")
   // Haiku version gate — 4.4 is out, 4.5 is in.
   let haiku_44 = provider_capabilities("anthropic", "claude-haiku-4-4")
-  assert(haiku_44.defer_loading == false, "Haiku 4.4 has no tool search")
+  assert(!haiku_44.defer_loading, "Haiku 4.4 has no tool search")
   let haiku_45 = provider_capabilities("anthropic", "claude-haiku-4-5")
-  assert(haiku_45.defer_loading == true, "Haiku 4.5 has tool search")
+  assert(haiku_45.defer_loading, "Haiku 4.5 has tool search")
   // OpenAI Responses API — hosted + client variants from 5.4.
   let gpt = provider_capabilities("openai", "gpt-5.4-preview")
-  assert(gpt.defer_loading == true, "gpt-5.4 supports defer_loading")
+  assert(gpt.defer_loading, "gpt-5.4 supports defer_loading")
   assert(len(gpt.tool_search) == 2, "gpt-5.4 advertises two tool_search modes")
   assert(gpt.tool_search[0] == "hosted", "hosted ordered first")
   assert(gpt.tool_search[1] == "client", "client second")
   // Legacy GPT — native tools only.
   let gpt4o = provider_capabilities("openai", "gpt-4o")
-  assert(gpt4o.native_tools == true, "gpt-4o has native tools")
-  assert(gpt4o.defer_loading == false, "gpt-4o has no defer_loading")
+  assert(gpt4o.native_tools, "gpt-4o has native tools")
+  assert(!gpt4o.defer_loading, "gpt-4o has no defer_loading")
+  let o3 = provider_capabilities("openai", "o3")
+  assert(o3.thinking_modes[0] == "effort", "o3 exposes effort thinking mode")
   // Ollama Qwen 3.5 advertises native tools on the official model page.
   let qwen35 = provider_capabilities("ollama", "qwen3.5:35b-a3b-coding-nvfp4")
-  assert(qwen35.native_tools == true, "qwen3.5 on ollama has native tools")
+  assert(qwen35.native_tools, "qwen3.5 on ollama has native tools")
   // OpenRouter inherits the openai family.
   let routed = provider_capabilities("openrouter", "gpt-5.4")
-  assert(routed.defer_loading == true, "openrouter inherits openai defer_loading")
+  assert(routed.defer_loading, "openrouter inherits openai defer_loading")
   assert(routed.tool_search[0] == "hosted", "openrouter inherits hosted/client variants")
   // Sibling families: together, groq, deepseek, fireworks, huggingface, local.
   for family in ["together", "groq", "deepseek", "fireworks", "huggingface", "local"] {
     let caps = provider_capabilities(family, "gpt-5.4")
-    assert(caps.defer_loading == true, family + " inherits openai defer_loading")
+    assert(caps.defer_loading, family + " inherits openai defer_loading")
   }
   // Unknown provider + unknown model: all-default dict.
   let unknown = provider_capabilities("my-custom-proxy", "mystery-7b")
-  assert(unknown.native_tools == false, "unknown provider has no native_tools")
-  assert(unknown.defer_loading == false, "unknown provider has no defer_loading")
+  assert(!unknown.native_tools, "unknown provider has no native_tools")
+  assert(!unknown.defer_loading, "unknown provider has no defer_loading")
   assert(len(unknown.tool_search) == 0, "unknown provider has no tool_search")
+  assert(len(unknown.thinking_modes) == 0, "unknown provider has no thinking modes")
   assert(unknown.max_tools == nil, "unknown provider has no max_tools cap")
   log("provider_capabilities_basic tests passed")
 }

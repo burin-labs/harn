@@ -750,6 +750,7 @@ per-project via `[[capabilities.provider.<name>]]` in `harn.toml`:
 model_match = "*"
 native_tools = true
 tool_search = ["hosted"]
+thinking_modes = ["effort"]
 ```
 
 Query the effective matrix at runtime:
@@ -761,6 +762,7 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 //   native_tools: true, defer_loading: true,
 //   tool_search: ["bm25", "regex"], max_tools: 10000,
 //   prompt_caching: true, thinking: true,
+//   thinking_modes: ["adaptive"],
 // }
 
 if "bm25" in caps.tool_search {
@@ -787,7 +789,7 @@ Rule schema (per `[[provider.<name>]]` entry):
 | `tool_search` | `[string]` | Native variants (`["bm25", "regex"]` or `["hosted", "client"]`). Empty = no native support. |
 | `max_tools` | int | Cap on tool count (used by `harn lint`). |
 | `prompt_caching` | bool | `cache_control` blocks honored. |
-| `thinking` | bool | Extended / adaptive thinking available. |
+| `thinking_modes` | `[string]` | Supported script-facing modes: `enabled`, `adaptive`, `effort`. |
 
 First match wins within a provider's rule list. `[provider_family]`
 declares siblings that inherit a canonical family's rules

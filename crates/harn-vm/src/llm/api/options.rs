@@ -6,13 +6,48 @@ use crate::value::VmValue;
 /// Sender for streaming text deltas from an in-flight LLM call.
 pub(crate) type DeltaSender = tokio::sync::mpsc::UnboundedSender<String>;
 
-/// Extended thinking configuration.
-#[derive(Clone, Debug, serde::Serialize)]
+/// Provider-agnostic reasoning effort.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ReasoningEffort {
+    Low,
+    Medium,
+    High,
+}
+
+impl ReasoningEffort {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            ReasoningEffort::Low => "low",
+            ReasoningEffort::Medium => "medium",
+            ReasoningEffort::High => "high",
+        }
+    }
+}
+
+/// Typed `llm_call(..., { thinking: ... })` configuration.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
 pub(crate) enum ThinkingConfig {
-    /// Enable with provider defaults.
-    Enabled,
-    /// Enable with a specific token budget.
-    WithBudget(i64),
+    #[default]
+    Disabled,
+    Enabled {
+        budget_tokens: Option<u32>,
+    },
+    Adaptive,
+    Effort {
+        level: ReasoningEffort,
+    },
+}
+
+impl ThinkingConfig {
+    pub(crate) fn is_disabled(&self) -> bool {
+        matches!(self, Self::Disabled)
+    }
+
+    pub(crate) fn is_enabled(&self) -> bool {
+        !self.is_disabled()
+    }
 }
 
 /// Which tool-search variant to use. Two shapes today, matching the two
@@ -279,7 +314,7 @@ pub(crate) struct LlmCallOptions {
     pub output_validation: Option<String>,
 
     // --- Thinking ---
-    pub thinking: Option<ThinkingConfig>,
+    pub thinking: ThinkingConfig,
 
     // --- Tools ---
     pub tools: Option<VmValue>,
@@ -364,7 +399,7 @@ pub(crate) struct LlmRequestPayload {
     pub presence_penalty: Option<f64>,
     pub response_format: Option<String>,
     pub json_schema: Option<serde_json::Value>,
-    pub thinking: Option<ThinkingConfig>,
+    pub thinking: ThinkingConfig,
     pub native_tools: Option<Vec<serde_json::Value>>,
     pub tool_choice: Option<serde_json::Value>,
     pub cache: bool,
@@ -443,7 +478,7 @@ pub(super) fn base_opts(provider: &str) -> LlmCallOptions {
         json_schema: Some(serde_json::json!({"type": "object"})),
         output_schema: Some(serde_json::json!({"type": "object"})),
         output_validation: Some("error".to_string()),
-        thinking: None,
+        thinking: ThinkingConfig::Disabled,
         tools: Some(VmValue::String(Rc::from("vm-local-tools"))),
         native_tools: Some(vec![
             serde_json::json!({"type": "function", "function": {"name": "tool"}}),

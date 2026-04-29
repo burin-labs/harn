@@ -66,6 +66,12 @@ pub struct ProviderRule {
     pub max_tools: Option<u32>,
     #[serde(default)]
     pub prompt_caching: Option<bool>,
+    /// Supported thinking/reasoning modes for this rule. Values are
+    /// script-facing mode names: `enabled`, `adaptive`, and `effort`.
+    #[serde(default)]
+    pub thinking_modes: Option<Vec<String>>,
+    /// Legacy override compatibility. New built-in rules should use
+    /// `thinking_modes` so the capability matrix preserves mode detail.
     #[serde(default)]
     pub thinking: Option<bool>,
     /// Carry `<think>...</think>` blocks in assistant history across turns.
@@ -106,7 +112,7 @@ pub struct Capabilities {
     pub tool_search: Vec<String>,
     pub max_tools: Option<u32>,
     pub prompt_caching: bool,
-    pub thinking: bool,
+    pub thinking_modes: Vec<String>,
     pub preserve_thinking: bool,
     pub server_parser: String,
     pub honors_chat_template_kwargs: bool,
@@ -122,7 +128,7 @@ impl Default for Capabilities {
             tool_search: Vec::new(),
             max_tools: None,
             prompt_caching: false,
-            thinking: false,
+            thinking_modes: Vec::new(),
             preserve_thinking: false,
             server_parser: "none".to_string(),
             honors_chat_template_kwargs: false,
@@ -276,13 +282,20 @@ fn try_match_layer(
 }
 
 fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
+    let thinking_modes = rule.thinking_modes.clone().unwrap_or_else(|| {
+        if rule.thinking.unwrap_or(false) {
+            vec!["enabled".to_string()]
+        } else {
+            Vec::new()
+        }
+    });
     Capabilities {
         native_tools: rule.native_tools.unwrap_or(false),
         defer_loading: rule.defer_loading.unwrap_or(false),
         tool_search: rule.tool_search.clone().unwrap_or_default(),
         max_tools: rule.max_tools,
         prompt_caching: rule.prompt_caching.unwrap_or(false),
-        thinking: rule.thinking.unwrap_or(false),
+        thinking_modes,
         preserve_thinking: rule.preserve_thinking.unwrap_or(false),
         server_parser: rule
             .server_parser
@@ -366,8 +379,15 @@ mod tests {
         assert!(caps.defer_loading);
         assert_eq!(caps.tool_search, vec!["bm25", "regex"]);
         assert!(caps.prompt_caching);
-        assert!(caps.thinking);
+        assert_eq!(caps.thinking_modes, vec!["adaptive"]);
         assert_eq!(caps.max_tools, Some(10000));
+    }
+
+    #[test]
+    fn anthropic_opus_46_uses_budgeted_thinking() {
+        reset();
+        let caps = lookup("anthropic", "claude-opus-4-6");
+        assert_eq!(caps.thinking_modes, vec!["enabled"]);
     }
 
     #[test]
@@ -417,6 +437,13 @@ mod tests {
     }
 
     #[test]
+    fn openai_reasoning_models_support_effort() {
+        reset();
+        let caps = lookup("openai", "o3");
+        assert_eq!(caps.thinking_modes, vec!["effort"]);
+    }
+
+    #[test]
     fn openrouter_inherits_openai() {
         reset();
         let caps = lookup("openrouter", "gpt-5.4");
@@ -452,7 +479,7 @@ mod tests {
         reset();
         let caps = lookup("ollama", "qwen3.6:35b-a3b-coding-nvfp4");
         assert!(caps.native_tools);
-        assert!(caps.thinking);
+        assert!(!caps.thinking_modes.is_empty());
         assert!(
             caps.preserve_thinking,
             "Qwen3.6 should enable preserve_thinking by default for long-horizon loops"
@@ -471,7 +498,7 @@ mod tests {
         reset();
         let caps = lookup("ollama", "qwen3.5:35b-a3b-coding-nvfp4");
         assert!(caps.native_tools);
-        assert!(caps.thinking);
+        assert!(!caps.thinking_modes.is_empty());
         assert!(
             !caps.preserve_thinking,
             "Qwen3.5 lacks the preserve_thinking kwarg — rely on the chat template's rolling checkpoint instead"
@@ -495,7 +522,10 @@ mod tests {
             ("mlx", "Qwen/Qwen3.6-27B"),
         ] {
             let caps = lookup(provider, model);
-            assert!(caps.thinking, "{provider}/{model}: thinking");
+            assert!(
+                !caps.thinking_modes.is_empty(),
+                "{provider}/{model}: thinking"
+            );
             assert!(
                 caps.preserve_thinking,
                 "{provider}/{model}: preserve_thinking must be on for Qwen3.6"

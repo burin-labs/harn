@@ -154,7 +154,9 @@ async fn observed_llm_call_transcript_records_thinking_settings() {
     })]);
     let model_marker = format!("mock-thinking-marker-{}", uuid::Uuid::now_v7());
     opts.model = model_marker.clone();
-    opts.thinking = Some(crate::llm::api::ThinkingConfig::WithBudget(2048));
+    opts.thinking = crate::llm::api::ThinkingConfig::Enabled {
+        budget_tokens: Some(2048),
+    };
 
     let _ = observed_llm_call(
         &opts,
@@ -594,7 +596,9 @@ async fn plain_done_sentinel_can_complete_persistent_loop_without_tools() {
         "role": "user",
         "content": "Count to five, then finish",
     })]);
-    opts.thinking = Some(crate::llm::api::ThinkingConfig::Enabled);
+    opts.thinking = crate::llm::api::ThinkingConfig::Enabled {
+        budget_tokens: None,
+    };
     let mut config = base_agent_config();
     config.persistent = true;
     config.max_iterations = 2;

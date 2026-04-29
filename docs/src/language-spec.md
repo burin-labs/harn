@@ -1952,7 +1952,7 @@ forces the fallback everywhere; `mode: "auto"` (default) picks native
 when available.
 
 The per-provider / per-model capability table that gates native
-`tool_search`, `defer_loading`, prompt caching, and extended thinking
+`tool_search`, `defer_loading`, prompt caching, and typed thinking modes
 is a shipped TOML matrix overridable per-project via
 `[[capabilities.provider.<name>]]` in `harn.toml`. Scripts query the
 effective matrix at runtime with:
@@ -1962,7 +1962,7 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // {
 //   provider, model, native_tools, defer_loading,
 //   tool_search: [string], max_tools: int | nil,
-//   prompt_caching, thinking,
+//   prompt_caching, thinking, thinking_modes: [string],
 // }
 ```
 

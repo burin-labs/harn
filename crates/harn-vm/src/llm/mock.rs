@@ -68,6 +68,7 @@ pub(crate) struct LlmMockCall {
     pub messages: Vec<serde_json::Value>,
     pub system: Option<String>,
     pub tools: Option<Vec<serde_json::Value>>,
+    pub thinking: serde_json::Value,
 }
 
 thread_local! {
@@ -159,12 +160,18 @@ fn record_llm_mock_call(
     messages: &[serde_json::Value],
     system: Option<&str>,
     native_tools: Option<&[serde_json::Value]>,
+    thinking: &super::api::ThinkingConfig,
 ) {
     LLM_MOCK_CALLS.with(|v| {
         v.borrow_mut().push(LlmMockCall {
             messages: messages.to_vec(),
             system: system.map(|s| s.to_string()),
             tools: native_tools.map(|t| t.to_vec()),
+            thinking: serde_json::to_value(thinking).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "mode": "disabled"
+                })
+            }),
         });
     });
 }
@@ -541,8 +548,9 @@ pub(crate) fn mock_llm_response(
     messages: &[serde_json::Value],
     system: Option<&str>,
     native_tools: Option<&[serde_json::Value]>,
+    thinking: &super::api::ThinkingConfig,
 ) -> Result<LlmResult, VmError> {
-    record_llm_mock_call(messages, system, native_tools);
+    record_llm_mock_call(messages, system, native_tools, thinking);
 
     let match_text = mock_match_text(messages);
     let prompt_text = mock_last_prompt_text(messages);
