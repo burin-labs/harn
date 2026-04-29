@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks configure-merge-drivers check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-cargo test-fast conformance protocol-conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref check-trigger-examples check-docs-snippets sync-language-spec check-language-spec
+.PHONY: setup install-hooks configure-merge-drivers check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-cargo test-fast conformance protocol-conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-trigger-examples check-docs-snippets sync-language-spec check-language-spec
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance protocol-conformance check-highlight check-language-spec check-trigger-quickref check-trigger-examples check-docs-snippets portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance protocol-conformance check-highlight check-language-spec check-trigger-quickref check-provider-matrix check-trigger-examples check-docs-snippets portal-check
 
 check: all
 
@@ -184,6 +184,16 @@ check-trigger-quickref:
 	@echo "=== Checking docs/llm/harn-triggers-quickref.md is up to date ==="
 	@cargo run --quiet -p harn-cli -- dump-trigger-quickref --check
 	@echo "    Harn trigger quickref OK."
+
+# Regenerate the provider/model capability matrix from capabilities.toml.
+gen-provider-matrix:
+	cargo run --quiet -p harn-cli -- dump-provider-matrix
+
+# CI guard: fail if the provider matrix docs drift from capabilities.toml.
+check-provider-matrix:
+	@echo "=== Checking docs/src/provider-matrix.md is up to date ==="
+	@cargo run --quiet -p harn-cli -- dump-provider-matrix --check
+	@echo "    Harn provider matrix OK."
 
 # Validate the ready-to-customize trigger example library.
 check-trigger-examples:

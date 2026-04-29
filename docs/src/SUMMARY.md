@@ -120,6 +120,7 @@
 - [Project scanning](./project-scan.md)
 - [Prompt templating](./prompt-templating.md)
 - [Configuring LLM providers](./providers.md)
+- [Provider capability matrix](./provider-matrix.md)
 - [Editor integration](./editor-integration.md)
 - [Testing](./testing.md)
 

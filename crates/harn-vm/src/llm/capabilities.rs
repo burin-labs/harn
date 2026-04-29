@@ -23,7 +23,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::providers::anthropic::claude_generation;
 use super::providers::openai_compat::gpt_generation;
@@ -66,6 +66,18 @@ pub struct ProviderRule {
     pub max_tools: Option<u32>,
     #[serde(default)]
     pub prompt_caching: Option<bool>,
+    /// Whether this provider/model route accepts image or other visual
+    /// input blocks through Harn's LLM message path.
+    #[serde(default)]
+    pub vision: Option<bool>,
+    /// Whether this provider/model route accepts audio input blocks
+    /// through Harn's LLM message path.
+    #[serde(default)]
+    pub audio: Option<bool>,
+    /// Structured-output transport strategy. Known values are:
+    /// `native`, `tool_use`, and `format_kw`.
+    #[serde(default)]
+    pub json_schema: Option<String>,
     /// Supported thinking/reasoning modes for this rule. Values are
     /// script-facing mode names: `enabled`, `adaptive`, and `effort`.
     #[serde(default)]
@@ -115,6 +127,9 @@ pub struct Capabilities {
     pub tool_search: Vec<String>,
     pub max_tools: Option<u32>,
     pub prompt_caching: bool,
+    pub vision: bool,
+    pub audio: bool,
+    pub json_schema: Option<String>,
     pub thinking_modes: Vec<String>,
     pub vision_supported: bool,
     pub preserve_thinking: bool,
@@ -132,6 +147,9 @@ impl Default for Capabilities {
             tool_search: Vec::new(),
             max_tools: None,
             prompt_caching: false,
+            vision: false,
+            audio: false,
+            json_schema: None,
             thinking_modes: Vec::new(),
             vision_supported: false,
             preserve_thinking: false,
@@ -141,6 +159,23 @@ impl Default for Capabilities {
             text_tool_wire_format_supported: true,
         }
     }
+}
+
+/// Display-oriented row for `harn check --provider-matrix` and the generated
+/// docs page. Rows are intentionally rule-shaped: `model` is the rule's
+/// `model_match` pattern, because the shipped capability source of truth is a
+/// first-match rule table rather than an exhaustive remote model inventory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProviderCapabilityMatrixRow {
+    pub provider: String,
+    pub model: String,
+    pub thinking: Vec<String>,
+    pub vision: bool,
+    pub audio: bool,
+    pub json_schema: Option<String>,
+    pub tools: bool,
+    pub cache: bool,
+    pub source: String,
 }
 
 thread_local! {
@@ -217,6 +252,63 @@ pub fn lookup(provider: &str, model: &str) -> Capabilities {
     lookup_with(provider, model, builtin(), user.as_ref())
 }
 
+/// Return the currently-effective provider capability rule matrix. User
+/// override rows, when installed for the current thread, are emitted before
+/// built-in rows so the display mirrors lookup precedence.
+pub fn matrix_rows() -> Vec<ProviderCapabilityMatrixRow> {
+    let user = USER_OVERRIDES.with(|cell| cell.borrow().clone());
+    let mut rows = Vec::new();
+    if let Some(user) = user.as_ref() {
+        push_matrix_rows(&mut rows, user, "project");
+    }
+    push_matrix_rows(&mut rows, builtin(), "builtin");
+    rows
+}
+
+fn push_matrix_rows(
+    rows: &mut Vec<ProviderCapabilityMatrixRow>,
+    file: &CapabilitiesFile,
+    source: &str,
+) {
+    for (provider, rules) in &file.provider {
+        for rule in rules {
+            rows.push(rule_to_matrix_row(provider, rule, source));
+        }
+    }
+}
+
+fn rule_to_matrix_row(
+    provider: &str,
+    rule: &ProviderRule,
+    source: &str,
+) -> ProviderCapabilityMatrixRow {
+    ProviderCapabilityMatrixRow {
+        provider: provider.to_string(),
+        model: rule.model_match.clone(),
+        thinking: rule_thinking_modes(rule),
+        vision: rule_vision(rule),
+        audio: rule.audio.unwrap_or(false),
+        json_schema: rule.json_schema.clone(),
+        tools: rule.native_tools.unwrap_or(false),
+        cache: rule.prompt_caching.unwrap_or(false),
+        source: source.to_string(),
+    }
+}
+
+fn rule_thinking_modes(rule: &ProviderRule) -> Vec<String> {
+    rule.thinking_modes.clone().unwrap_or_else(|| {
+        if rule.thinking.unwrap_or(false) {
+            vec!["enabled".to_string()]
+        } else {
+            Vec::new()
+        }
+    })
+}
+
+fn rule_vision(rule: &ProviderRule) -> bool {
+    rule.vision.or(rule.vision_supported).unwrap_or(false)
+}
+
 fn lookup_with(
     provider: &str,
     model: &str,
@@ -287,19 +379,16 @@ fn try_match_layer(
 }
 
 fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
-    let thinking_modes = rule.thinking_modes.clone().unwrap_or_else(|| {
-        if rule.thinking.unwrap_or(false) {
-            vec!["enabled".to_string()]
-        } else {
-            Vec::new()
-        }
-    });
+    let thinking_modes = rule_thinking_modes(rule);
     Capabilities {
         native_tools: rule.native_tools.unwrap_or(false),
         defer_loading: rule.defer_loading.unwrap_or(false),
         tool_search: rule.tool_search.clone().unwrap_or_default(),
         max_tools: rule.max_tools,
         prompt_caching: rule.prompt_caching.unwrap_or(false),
+        vision: rule_vision(rule),
+        audio: rule.audio.unwrap_or(false),
+        json_schema: rule.json_schema.clone(),
         thinking_modes,
         vision_supported: rule.vision_supported.unwrap_or(false),
         preserve_thinking: rule.preserve_thinking.unwrap_or(false),
@@ -432,6 +521,7 @@ mod tests {
         let caps = lookup("openai", "gpt-5.4");
         assert!(caps.defer_loading);
         assert_eq!(caps.tool_search, vec!["hosted", "client"]);
+        assert_eq!(caps.json_schema.as_deref(), Some("native"));
     }
 
     #[test]
@@ -442,6 +532,16 @@ mod tests {
         assert!(!caps.defer_loading);
         assert!(!caps.vision_supported);
         assert!(caps.tool_search.is_empty());
+    }
+
+    #[test]
+    fn openai_gpt_4o_matrix_fields_include_multimodal_support() {
+        reset();
+        let caps = lookup("openai", "gpt-4o");
+        assert!(caps.native_tools);
+        assert!(caps.vision);
+        assert!(caps.audio);
+        assert_eq!(caps.json_schema.as_deref(), Some("native"));
     }
 
     #[test]
@@ -500,6 +600,7 @@ mod tests {
         reset();
         let caps = lookup("ollama", "qwen3.6:35b-a3b-coding-nvfp4");
         assert!(caps.native_tools);
+        assert_eq!(caps.json_schema.as_deref(), Some("format_kw"));
         assert!(!caps.thinking_modes.is_empty());
         assert!(
             caps.preserve_thinking,
@@ -673,5 +774,19 @@ native_tools = true
         reset();
         let caps = lookup("anthropic", "anthropic/claude-opus-4-7");
         assert!(caps.defer_loading);
+    }
+
+    #[test]
+    fn matrix_rows_include_provider_patterns_and_sources() {
+        reset();
+        let rows = matrix_rows();
+        assert!(rows.iter().any(|row| {
+            row.provider == "openai"
+                && row.model == "gpt-4o*"
+                && row.vision
+                && row.audio
+                && row.json_schema.as_deref() == Some("native")
+                && row.source == "builtin"
+        }));
     }
 }

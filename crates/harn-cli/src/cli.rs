@@ -159,6 +159,13 @@ SCRIPTING
     /// `make gen-trigger-quickref` target.
     #[command(hide = true, name = "dump-trigger-quickref")]
     DumpTriggerQuickref(DumpTriggerQuickrefArgs),
+    /// Regenerate docs/src/provider-matrix.md from the live LLM capability table.
+    ///
+    /// Dev-only. Hidden from `--help` — invoke via
+    /// `cargo run -p harn-cli -- dump-provider-matrix` or the
+    /// `make gen-provider-matrix` target.
+    #[command(hide = true, name = "dump-provider-matrix")]
+    DumpProviderMatrix(DumpProviderMatrixArgs),
 }
 
 #[derive(Debug, Args)]
@@ -208,6 +215,15 @@ pub(crate) struct RunArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct CheckArgs {
+    /// Print the provider/model capability matrix instead of checking files.
+    #[arg(long = "provider-matrix")]
+    pub provider_matrix: bool,
+    /// Output format for `--provider-matrix`.
+    #[arg(long = "format", value_enum, default_value_t = CheckOutputFormat::Text, requires = "provider_matrix")]
+    pub format: CheckOutputFormat,
+    /// Only include provider matrix rows that support the named feature.
+    #[arg(long = "filter", value_name = "FEATURE", requires = "provider_matrix")]
+    pub filter: Option<String>,
     /// Extra host capability schema for preflight validation.
     #[arg(long = "host-capabilities")]
     pub host_capabilities: Option<String>,
@@ -232,6 +248,12 @@ pub(crate) struct CheckArgs {
     /// One or more .harn files or directories. Optional when `--workspace`
     /// is set.
     pub targets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum CheckOutputFormat {
+    Text,
+    Json,
 }
 
 #[derive(Debug, Args)]
@@ -1831,6 +1853,17 @@ pub(crate) struct DumpTriggerQuickrefArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct DumpProviderMatrixArgs {
+    /// Path to the generated provider matrix page (relative to the repo root).
+    #[arg(long, default_value = "docs/src/provider-matrix.md")]
+    pub output: String,
+    /// Verify the on-disk file matches what would be generated; exit non-zero
+    /// if stale. Used by CI to prevent drift from capabilities.toml.
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct InstallArgs {
     /// Fail if harn.lock would need to change.
     #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
@@ -2496,12 +2529,12 @@ mod tests {
     use std::time::Duration as StdDuration;
 
     use super::{
-        Cli, Command, ConnectCommand, ConnectorCommand, CrystallizeCommand, FlowArchivistCommand,
-        FlowCommand, McpCommand, OrchestratorCommand, OrchestratorDeployProvider,
-        OrchestratorLogFormat, OrchestratorQueueCommand, OrchestratorTenantCommand,
-        PackageCacheCommand, PackageCommand, ProjectTemplate, RunsCommand, SkillCommand,
-        SkillKeyCommand, SkillTrustCommand, SkillsCommand, TraceCommand, TriggerCommand,
-        TrustCommand, TrustOutcomeArg, TrustTierArg,
+        CheckOutputFormat, Cli, Command, ConnectCommand, ConnectorCommand, CrystallizeCommand,
+        FlowArchivistCommand, FlowCommand, McpCommand, OrchestratorCommand,
+        OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
+        OrchestratorTenantCommand, PackageCacheCommand, PackageCommand, ProjectTemplate,
+        RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TraceCommand,
+        TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
     };
     use clap::Parser;
 
@@ -4064,5 +4097,26 @@ mod tests {
         assert_eq!(args.model.as_deref(), Some("mlx-qwen36-27b"));
         assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:8002"));
         assert!(args.json);
+    }
+
+    #[test]
+    fn test_parses_check_provider_matrix_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "check",
+            "--provider-matrix",
+            "--format",
+            "json",
+            "--filter",
+            "json-schema",
+        ]);
+
+        let Command::Check(args) = cli.command.unwrap() else {
+            panic!("expected check command");
+        };
+        assert!(args.provider_matrix);
+        assert_eq!(args.format, CheckOutputFormat::Json);
+        assert_eq!(args.filter.as_deref(), Some("json-schema"));
+        assert!(args.targets.is_empty());
     }
 }
