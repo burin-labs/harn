@@ -63,8 +63,16 @@ use transport::vm_call_llm_api;
 /// discarding receiver so all callers share one code path for status/error
 /// handling; non-streaming callers just drop the receiver.
 pub(crate) async fn vm_call_llm_full(opts: &LlmCallOptions) -> Result<LlmResult, VmError> {
+    super::cost::check_llm_preflight_budget(opts)?;
     let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    vm_call_llm_full_inner(opts, Some(delta_tx)).await
+    let result = vm_call_llm_full_inner(opts, Some(delta_tx)).await?;
+    super::cost::record_llm_usage_for_provider(
+        &result.provider,
+        &result.model,
+        result.input_tokens,
+        result.output_tokens,
+    )?;
+    Ok(result)
 }
 
 /// Execute an LLM call, streaming text deltas to `delta_tx`.
@@ -72,7 +80,15 @@ pub(crate) async fn vm_call_llm_full_streaming(
     opts: &LlmCallOptions,
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
-    vm_call_llm_full_inner(opts, Some(delta_tx)).await
+    super::cost::check_llm_preflight_budget(opts)?;
+    let result = vm_call_llm_full_inner(opts, Some(delta_tx)).await?;
+    super::cost::record_llm_usage_for_provider(
+        &result.provider,
+        &result.model,
+        result.input_tokens,
+        result.output_tokens,
+    )?;
+    Ok(result)
 }
 
 /// Execute provider I/O on Tokio's multithreaded scheduler while keeping
@@ -81,17 +97,25 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread(
     opts: &LlmCallOptions,
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
+    super::cost::check_llm_preflight_budget(opts)?;
     let request = LlmRequestPayload::from(opts);
-    tokio::task::spawn(
-        async move { vm_call_llm_full_inner_offthread(&request, Some(delta_tx)).await },
-    )
+    let result = tokio::task::spawn(async move {
+        vm_call_llm_full_inner_offthread(&request, Some(delta_tx)).await
+    })
     .await
     .map_err(|join_err| {
         VmError::Thrown(VmValue::String(Rc::from(format!(
             "llm_call background task failed: {join_err}"
         ))))
     })?
-    .map_err(|message| VmError::Thrown(VmValue::String(Rc::from(message))))
+    .map_err(|message| VmError::Thrown(VmValue::String(Rc::from(message))))?;
+    super::cost::record_llm_usage_for_provider(
+        &result.provider,
+        &result.model,
+        result.input_tokens,
+        result.output_tokens,
+    )?;
+    Ok(result)
 }
 
 async fn vm_call_llm_full_inner(
@@ -165,13 +189,6 @@ async fn vm_call_llm_full_inner_request(
     super::trigger_predicate::note_result(request, &result);
     record_cli_llm_result(&result);
 
-    super::cost::accumulate_cost_for_provider(
-        &result.provider,
-        &result.model,
-        result.input_tokens,
-        result.output_tokens,
-    )?;
-
     Ok(result)
 }
 
@@ -224,14 +241,6 @@ async fn vm_call_llm_full_inner_offthread(
     }
     super::trigger_predicate::note_result(request, &result);
     record_cli_llm_result(&result);
-
-    super::cost::accumulate_cost_for_provider(
-        &result.provider,
-        &result.model,
-        result.input_tokens,
-        result.output_tokens,
-    )
-    .map_err(|err| err.to_string())?;
 
     Ok(result)
 }

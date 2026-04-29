@@ -409,6 +409,7 @@ pub async fn run_agent_loop_internal(
     let schema_retries = state.config.schema_retries;
     let schema_retry_nudge = state.config.schema_retry_nudge.clone();
     let token_budget = state.config.token_budget;
+    let budget = state.config.budget.clone();
     let turn_policy = state.config.turn_policy.clone();
     let stop_after_successful_tools = state.config.stop_after_successful_tools.clone();
     let post_turn_callback = state.config.post_turn_callback.clone();
@@ -462,6 +463,7 @@ pub async fn run_agent_loop_internal(
 
     let mut iteration_exited_via_break = false;
     let mut loop_tokens_used = 0i64;
+    let mut loop_cost_used = 0.0f64;
     for iteration in 0..max_iterations {
         // Skill matching runs at the head of iteration 0 (always) and,
         // when sticky=false, again before each subsequent iteration.
@@ -513,6 +515,15 @@ pub async fn run_agent_loop_internal(
         )
         .await?;
         state.sync_session_store();
+
+        if let Some(budget) = budget.as_ref() {
+            let projection = super::cost::project_llm_call_cost(opts, loop_cost_used);
+            if super::cost::budget_exceeded_limit(budget, &projection).is_some() {
+                iteration_exited_via_break = true;
+                state.final_status = "budget_exhausted";
+                break;
+            }
+        }
 
         let mut call_result = llm_call::run_llm_call(
             &mut state,
@@ -588,11 +599,26 @@ pub async fn run_agent_loop_internal(
         .await?;
         state.sync_session_store();
 
+        loop_cost_used += super::cost::calculate_cost_for_provider(
+            &opts.provider,
+            &opts.model,
+            call_result.input_tokens,
+            call_result.output_tokens,
+        );
+
         if let Some(token_budget) = token_budget {
             loop_tokens_used = loop_tokens_used
                 .saturating_add(call_result.input_tokens)
                 .saturating_add(call_result.output_tokens);
             if loop_tokens_used >= token_budget {
+                iteration_exited_via_break = true;
+                state.final_status = "budget_exhausted";
+                break;
+            }
+        }
+
+        if let Some(total_budget_usd) = budget.as_ref().and_then(|budget| budget.total_budget_usd) {
+            if loop_cost_used >= total_budget_usd {
                 iteration_exited_via_break = true;
                 state.final_status = "budget_exhausted";
                 break;

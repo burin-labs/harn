@@ -111,6 +111,10 @@ pub struct AgentLoopConfig {
     /// loop exits gracefully with a budget-exhausted status after the
     /// current iteration finishes.
     pub token_budget: Option<i64>,
+    /// Optional cost/token budget envelope. Per-call limits are enforced
+    /// before each provider call; `total_budget_usd` is enforced across
+    /// the loop.
+    pub budget: Option<crate::llm::cost::LlmBudgetEnvelope>,
     /// Exit only when verification passes.
     pub exit_when_verified: bool,
     /// Tool loop detection thresholds.
@@ -494,6 +498,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 super::agent::parse_skill_config(&options);
             let mcp_servers = super::agent::parse_mcp_server_specs(&options)?;
             let mut opts = extract_llm_options(&args)?;
+            let budget = opts.budget.clone();
             let result = run_agent_loop_internal(
                 &mut opts,
                 AgentLoopConfig {
@@ -520,6 +525,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                         .unwrap_or(profile_defaults.llm_retries) as usize,
                     llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
                     token_budget: opt_int(&options, "token_budget"),
+                    budget,
                     exit_when_verified: opt_bool(&options, "exit_when_verified"),
                     loop_detect_warn: opt_int(&options, "loop_detect_warn").unwrap_or(2) as usize,
                     loop_detect_block: opt_int(&options, "loop_detect_block").unwrap_or(3) as usize,

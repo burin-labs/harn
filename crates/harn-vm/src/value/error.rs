@@ -56,6 +56,8 @@ pub enum ErrorCategory {
     NotFound,
     /// Circuit breaker is open
     CircuitOpen,
+    /// LLM cost or token budget would be exceeded
+    BudgetExceeded,
     /// Generic/unclassified error
     Generic,
 }
@@ -76,6 +78,7 @@ impl ErrorCategory {
             ErrorCategory::Cancelled => "cancelled",
             ErrorCategory::NotFound => "not_found",
             ErrorCategory::CircuitOpen => "circuit_open",
+            ErrorCategory::BudgetExceeded => "budget_exceeded",
             ErrorCategory::Generic => "generic",
         }
     }
@@ -95,6 +98,7 @@ impl ErrorCategory {
             "cancelled" => ErrorCategory::Cancelled,
             "not_found" => ErrorCategory::NotFound,
             "circuit_open" => ErrorCategory::CircuitOpen,
+            "budget_exceeded" => ErrorCategory::BudgetExceeded,
             _ => ErrorCategory::Generic,
         }
     }

@@ -1,0 +1,63 @@
+pipeline test(task) {
+  llm_mock_clear()
+  llm_mock(
+    {text: "should not be consumed", input_tokens: 1, output_tokens: 1, model: "claude-opus-4-20250514"},
+  )
+  let expensive = try {
+    llm_call(
+      "budget preflight",
+      nil,
+      {
+        provider: "mock",
+        model: "claude-opus-4-20250514",
+        max_tokens: 1024,
+        llm_retries: 0,
+        budget: {max_cost_usd: 0.0001},
+      },
+    )
+  }
+  let expensive_err = unwrap_err(expensive)
+  println(expensive_err.kind)
+  println(expensive_err.reason)
+  println(expensive_err.category)
+  println(expensive_err.projected_cost_usd > 0.0001)
+  println(len(llm_mock_calls()) == 0)
+  let input_limited = try {
+    llm_call(
+      "this prompt is longer than one estimated token",
+      nil,
+      {
+        provider: "mock",
+        model: "gpt-4o-mini",
+        max_tokens: 16,
+        llm_retries: 0,
+        budget: {max_input_tokens: 1},
+      },
+    )
+  }
+  let input_err = unwrap_err(input_limited)
+  println(input_err.limit)
+  println(input_err.projected_input_tokens > 1)
+  llm_mock_clear()
+  llm_mock(
+    {
+      text: "still should not be consumed",
+      input_tokens: 1,
+      output_tokens: 1,
+      model: "claude-opus-4-20250514",
+    },
+  )
+  let loop_result = agent_loop(
+    "agent budget preflight",
+    nil,
+    {
+      provider: "mock",
+      model: "claude-opus-4-20250514",
+      max_tokens: 1024,
+      max_iterations: 2,
+      budget: {total_budget_usd: 0.0001},
+    },
+  )
+  println(loop_result.status)
+  println(len(llm_mock_calls()) == 0)
+}

@@ -15,6 +15,7 @@ pipeline default(task) {
     "auth",
     "not_found",
     "circuit_open",
+    "budget_exceeded",
     "tool_error",
     "tool_rejected",
     "cancelled",
