@@ -564,6 +564,7 @@ mod tests {
             response_format: Some("json".to_string()),
             json_schema: Some(serde_json::json!({"type": "object"})),
             thinking: ThinkingConfig::Disabled,
+            anthropic_beta_features: Vec::new(),
             vision: false,
             native_tools: None,
             tool_choice: None,

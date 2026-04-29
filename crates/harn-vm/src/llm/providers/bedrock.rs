@@ -614,6 +614,7 @@ aws_secret_access_key = dev-secret
             response_format: None,
             json_schema: None,
             thinking: ThinkingConfig::Disabled,
+            anthropic_beta_features: Vec::new(),
             vision: false,
             native_tools: Some(vec![json!({
                 "type": "function",

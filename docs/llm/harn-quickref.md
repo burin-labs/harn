@@ -604,6 +604,9 @@ println(response.output_tokens)
 | `max_tokens` | int | 4096 | |
 | `temperature` | float | provider default | |
 | `tools` | list | nil | Registered tool schemas. |
+| `thinking` | bool \| dict | nil | Typed provider reasoning. `true` / `{mode: "enabled"}` automatically sends Anthropic's `interleaved-thinking-2025-05-14` beta header on supported Claude Opus models. |
+| `interleaved_thinking` | bool | false | Force the Anthropic interleaved-thinking beta header for the call/loop. |
+| `anthropic_beta_features` | string \| list | nil | Extra Anthropic beta feature names for the comma-separated `anthropic-beta` header. |
 | `tool_search` | bool \| string \| dict | nil | Engage progressive tool disclosure. Shorthand `"bm25"` / `"regex"` (variant, mode auto). Dict: `{variant: "bm25" \| "regex", mode: "auto" \| "native" \| "client", strategy: "bm25" \| "regex" \| "semantic" \| "host", always_loaded: [string], budget_tokens: int, name: string, include_stub_listing: bool}`. See "Tool loading & search" below. |
 | `response_format` | string | nil | `"json"` asks the provider for JSON mode. |
 | `output_schema` | `Schema<T>` (dict \| type-alias) | nil | JSON-schema-shaped dict, or a top-level `type T = ...` alias (compiler lowers to the schema dict). The generic parameter `T` flows into the narrowed `r.data: T`. Validated after parse. |
@@ -802,6 +805,7 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 //   thinking_modes: ["adaptive"],
 //   requires_completion_tokens: false,
 //   reasoning_effort_supported: false,
+//   interleaved_thinking_supported: true,
 // }
 
 if "bm25" in caps.tool_search {
@@ -831,6 +835,8 @@ Rule schema (per `[[provider.<name>]]` entry):
 | `thinking_modes` | `[string]` | Supported script-facing modes: `enabled`, `adaptive`, `effort`. |
 | `requires_completion_tokens` | bool | Use OpenAI `max_completion_tokens` instead of `max_tokens`. |
 | `reasoning_effort_supported` | bool | Provider/model accepts OpenAI `reasoning_effort`. |
+| `interleaved_thinking_supported` | bool | `thinking: true` can request Anthropic's interleaved-thinking beta header. |
+| `anthropic_beta_features` | `[string]` | Anthropic beta feature names always requested for this route. |
 
 First match wins within a provider's rule list. `[provider_family]`
 declares siblings that inherit a canonical family's rules
@@ -1056,7 +1062,10 @@ invocation data nested under `tools` (`calls`, `successful`, `rejected`,
 as `llm_call`, plus its own `profile`, `tool_retries`,
 `max_iterations`, `max_nudges`, and `native_tool_fallback`
 (`"allow"`, `"allow_once"`, or `"reject"` for native-tool stages that
-receive text-mode `<tool_call>` fallback output).
+receive text-mode `<tool_call>` fallback output). `thinking`,
+`interleaved_thinking`, and `anthropic_beta_features` apply to every
+model turn; for Claude Opus 4.6/4.7, `thinking: true` is enough to
+enable the interleaved-thinking beta header for the whole loop.
 
 Profiles preload common loop budgets and retry counts. Explicit keys
 override the profile:

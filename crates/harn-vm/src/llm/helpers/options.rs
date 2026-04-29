@@ -377,6 +377,8 @@ pub(crate) fn extract_llm_options(
         &model,
         &provider_thinking_modes(&provider, &model),
     )?;
+    let anthropic_beta_features =
+        parse_anthropic_beta_features_option(options.as_ref(), &thinking, &provider, &model)?;
 
     let json_schema = options
         .as_ref()
@@ -677,6 +679,7 @@ pub(crate) fn extract_llm_options(
         output_schema,
         output_validation,
         thinking,
+        anthropic_beta_features,
         vision,
         tools: tools_val,
         native_tools,
@@ -851,6 +854,95 @@ fn validate_thinking_supported(
     Err(thinking_error(format!(
         "thinking.mode \"{requested}\" is not supported by provider \"{provider}\" model \"{model}\" (supported: {available})"
     )))
+}
+
+fn parse_anthropic_beta_features_option(
+    options: Option<&BTreeMap<String, VmValue>>,
+    thinking: &crate::llm::api::ThinkingConfig,
+    provider: &str,
+    model: &str,
+) -> Result<Vec<String>, VmError> {
+    let mut features = Vec::new();
+    if let Some(raw) = options.and_then(|o| o.get("anthropic_beta_features")) {
+        match raw {
+            VmValue::Nil | VmValue::Bool(false) => {}
+            VmValue::String(feature) => {
+                let feature = feature.as_ref().trim();
+                if !feature.is_empty() {
+                    validate_anthropic_beta_feature_name(feature)?;
+                    crate::llm::api::push_unique_anthropic_beta_feature(&mut features, feature);
+                }
+            }
+            VmValue::List(list) => {
+                for item in list.iter() {
+                    match item {
+                        VmValue::String(feature) => {
+                            let feature = feature.as_ref().trim();
+                            if !feature.is_empty() {
+                                validate_anthropic_beta_feature_name(feature)?;
+                                crate::llm::api::push_unique_anthropic_beta_feature(
+                                    &mut features,
+                                    feature,
+                                );
+                            }
+                        }
+                        other => {
+                            return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                                format!(
+                                    "anthropic_beta_features: expected list<string>, got {}",
+                                    other.type_name()
+                                ),
+                            ))));
+                        }
+                    }
+                }
+            }
+            other => {
+                return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    format!(
+                        "anthropic_beta_features: expected string or list<string>, got {}",
+                        other.type_name()
+                    ),
+                ))));
+            }
+        }
+    }
+
+    if options
+        .and_then(|o| o.get("interleaved_thinking"))
+        .is_some_and(|value| value.is_truthy())
+    {
+        crate::llm::api::push_unique_anthropic_beta_feature(
+            &mut features,
+            crate::llm::providers::anthropic::ANTHROPIC_INTERLEAVED_THINKING_BETA,
+        );
+    }
+
+    let caps = crate::llm::capabilities::lookup(provider, model);
+    if matches!(
+        thinking,
+        crate::llm::api::ThinkingConfig::Enabled { .. } | crate::llm::api::ThinkingConfig::Adaptive
+    ) && caps.interleaved_thinking_supported
+    {
+        crate::llm::api::push_unique_anthropic_beta_feature(
+            &mut features,
+            crate::llm::providers::anthropic::ANTHROPIC_INTERLEAVED_THINKING_BETA,
+        );
+    }
+
+    Ok(features)
+}
+
+fn validate_anthropic_beta_feature_name(feature: &str) -> Result<(), VmError> {
+    if feature
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return Ok(());
+    }
+    Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(format!(
+        "anthropic_beta_features: invalid beta feature name `{feature}`; expected ASCII letters, digits, '-' or '_'"
+    )))))
 }
 
 /// Parse the `tool_search` option into a ToolSearchConfig.
@@ -1262,6 +1354,75 @@ mod routing_tests {
                 budget_tokens: Some(8000)
             }
         );
+        assert_eq!(
+            opts.anthropic_beta_features,
+            vec![crate::llm::providers::anthropic::ANTHROPIC_INTERLEAVED_THINKING_BETA]
+        );
+    }
+
+    #[test]
+    fn anthropic_beta_features_parse_and_dedupe_with_interleaved_flag() {
+        let mut options = BTreeMap::new();
+        options.insert(
+            "provider".to_string(),
+            VmValue::String(Rc::from("mock".to_string())),
+        );
+        options.insert(
+            "model".to_string(),
+            VmValue::String(Rc::from("claude-opus-4-6".to_string())),
+        );
+        options.insert(
+            "anthropic_beta_features".to_string(),
+            VmValue::List(Rc::new(vec![
+                VmValue::String(Rc::from("fine-grained-tool-streaming-2025-05-14")),
+                VmValue::String(Rc::from(
+                    crate::llm::providers::anthropic::ANTHROPIC_INTERLEAVED_THINKING_BETA,
+                )),
+            ])),
+        );
+        options.insert("interleaved_thinking".to_string(), VmValue::Bool(true));
+
+        let opts = extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ])
+        .expect("options");
+        assert_eq!(
+            opts.anthropic_beta_features,
+            vec![
+                "fine-grained-tool-streaming-2025-05-14".to_string(),
+                crate::llm::providers::anthropic::ANTHROPIC_INTERLEAVED_THINKING_BETA.to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn anthropic_beta_features_reject_invalid_header_names() {
+        let options = BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(Rc::from("mock".to_string())),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("claude-opus-4-6".to_string())),
+            ),
+            (
+                "anthropic_beta_features".to_string(),
+                VmValue::String(Rc::from("bad\r\nheader".to_string())),
+            ),
+        ]);
+
+        let err = match extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ]) {
+            Ok(_) => panic!("invalid beta feature should fail before transport"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("invalid beta feature name `bad"));
     }
 
     #[test]

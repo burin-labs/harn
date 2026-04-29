@@ -33,6 +33,12 @@
 #   audio           : whether Harn can send audio input blocks on this route.
 #   json_schema     : structured-output transport: native, tool_use, format_kw.
 #   thinking_modes  : supported script-facing modes: enabled, adaptive, effort.
+#   interleaved_thinking_supported:
+#                     whether `thinking` can opt Anthropic Messages API
+#                     requests into the interleaved-thinking beta header.
+#   anthropic_beta_features:
+#                     unconditional Anthropic beta feature names to request
+#                     for this route.
 #   vision_supported: whether image content blocks are accepted.
 #   preserve_thinking: whether prior <think> blocks should be carried forward.
 #   server_parser   : server-side response parser that transforms model output.
@@ -69,6 +75,7 @@ prompt_caching = true
 vision = true
 json_schema = "tool_use"
 thinking_modes = ["adaptive"]
+interleaved_thinking_supported = true
 vision_supported = true
 
 [[provider.anthropic]]
@@ -98,7 +105,21 @@ json_schema = "tool_use"
 thinking_modes = ["enabled"]
 vision_supported = true
 
-# Opus 4.0+ supports tool search.
+# Opus 4.6+ supports interleaved thinking.
+[[provider.anthropic]]
+model_match = "claude-opus-*"
+version_min = [4, 6]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+json_schema = "tool_use"
+thinking_modes = ["enabled"]
+interleaved_thinking_supported = true
+vision_supported = true
+
 [[provider.anthropic]]
 model_match = "claude-opus-*"
 version_min = [4, 0]
@@ -151,6 +172,7 @@ prompt_caching = true
 vision = true
 json_schema = "tool_use"
 thinking_modes = ["adaptive"]
+interleaved_thinking_supported = true
 vision_supported = true
 
 [[provider.anthropic]]
@@ -177,6 +199,20 @@ prompt_caching = true
 vision = true
 json_schema = "tool_use"
 thinking_modes = ["enabled"]
+vision_supported = true
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-opus-*"
+version_min = [4, 6]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+json_schema = "tool_use"
+thinking_modes = ["enabled"]
+interleaved_thinking_supported = true
 vision_supported = true
 
 [[provider.anthropic]]

@@ -866,6 +866,8 @@ async fn print_model_info(args: &ModelInfoArgs) -> bool {
             "json_schema": capabilities.json_schema,
             "thinking": !capabilities.thinking_modes.is_empty(),
             "thinking_modes": capabilities.thinking_modes,
+            "interleaved_thinking_supported": capabilities.interleaved_thinking_supported,
+            "anthropic_beta_features": capabilities.anthropic_beta_features,
             "preserve_thinking": capabilities.preserve_thinking,
             "server_parser": capabilities.server_parser,
             "honors_chat_template_kwargs": capabilities.honors_chat_template_kwargs,

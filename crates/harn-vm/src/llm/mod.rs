@@ -1573,6 +1573,7 @@ mod tests {
             })),
             output_validation: Some("error".to_string()),
             thinking: crate::llm::api::ThinkingConfig::Disabled,
+            anthropic_beta_features: Vec::new(),
             vision: false,
             tools: None,
             native_tools: None,

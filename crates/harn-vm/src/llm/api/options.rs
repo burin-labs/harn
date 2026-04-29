@@ -315,6 +315,9 @@ pub(crate) struct LlmCallOptions {
 
     // --- Thinking ---
     pub thinking: ThinkingConfig,
+    /// Anthropic beta features to request via the `anthropic-beta`
+    /// header. Transport applies this only on Anthropic-style routes.
+    pub anthropic_beta_features: Vec<String>,
     /// True when the call explicitly asks for vision or contains image blocks.
     pub vision: bool,
 
@@ -380,6 +383,31 @@ impl LlmCallOptions {
     pub(crate) fn resolve_timeout(&self) -> u64 {
         resolve_timeout(self.timeout)
     }
+
+    pub(crate) fn anthropic_beta_features_for_request(&self) -> Vec<String> {
+        let caps = crate::llm::capabilities::lookup(&self.provider, &self.model);
+        let mut features = caps.anthropic_beta_features;
+        for feature in &self.anthropic_beta_features {
+            push_unique_anthropic_beta_feature(&mut features, feature);
+        }
+        if matches!(
+            self.thinking,
+            ThinkingConfig::Enabled { .. } | ThinkingConfig::Adaptive
+        ) && caps.interleaved_thinking_supported
+        {
+            push_unique_anthropic_beta_feature(
+                &mut features,
+                crate::llm::providers::anthropic::ANTHROPIC_INTERLEAVED_THINKING_BETA,
+            );
+        }
+        features
+    }
+}
+
+pub(crate) fn push_unique_anthropic_beta_feature(features: &mut Vec<String>, feature: &str) {
+    if !features.iter().any(|existing| existing == feature) {
+        features.push(feature.to_string());
+    }
 }
 
 /// Send-safe subset of `LlmCallOptions` used for provider transport.
@@ -402,6 +430,7 @@ pub(crate) struct LlmRequestPayload {
     pub response_format: Option<String>,
     pub json_schema: Option<serde_json::Value>,
     pub thinking: ThinkingConfig,
+    pub anthropic_beta_features: Vec<String>,
     pub vision: bool,
     pub native_tools: Option<Vec<serde_json::Value>>,
     pub tool_choice: Option<serde_json::Value>,
@@ -443,6 +472,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             response_format: opts.response_format.clone(),
             json_schema: opts.json_schema.clone(),
             thinking: opts.thinking.clone(),
+            anthropic_beta_features: opts.anthropic_beta_features_for_request(),
             vision: opts.vision,
             native_tools: opts.native_tools.clone(),
             tool_choice: opts.tool_choice.clone(),
@@ -483,6 +513,7 @@ pub(super) fn base_opts(provider: &str) -> LlmCallOptions {
         output_schema: Some(serde_json::json!({"type": "object"})),
         output_validation: Some("error".to_string()),
         thinking: ThinkingConfig::Disabled,
+        anthropic_beta_features: Vec::new(),
         vision: false,
         tools: Some(VmValue::String(Rc::from("vm-local-tools"))),
         native_tools: Some(vec![

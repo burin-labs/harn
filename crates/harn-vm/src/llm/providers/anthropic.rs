@@ -7,6 +7,8 @@ use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ThinkingConfig}
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::VmError;
 
+pub(crate) const ANTHROPIC_INTERLEAVED_THINKING_BETA: &str = "interleaved-thinking-2025-05-14";
+
 thread_local! {
     static ANTHROPIC_PREFILL_WARN_ONCE: RefCell<HashSet<String>> =
         RefCell::new(HashSet::new());
@@ -377,6 +379,7 @@ mod tests {
             response_format: None,
             json_schema: None,
             thinking: ThinkingConfig::Disabled,
+            anthropic_beta_features: Vec::new(),
             vision: false,
             native_tools: Some(vec![serde_json::json!({
                 "name": "read_file",

@@ -114,7 +114,9 @@ only accepts base64 image data, so `url` image blocks are rejected for
 | `schema` | dict | nil | JSON Schema, OpenAPI Schema Object, or canonical Harn schema dict for structured output |
 | `llm_retries` | int | `0` | Retries on transient HTTP / provider errors. Raw `llm_call` is fail-fast by default; set to N to allow N retries after the first attempt |
 | `llm_backoff_ms` | int | `250` | Base exponential backoff in ms between LLM retries |
-| `thinking` | bool/dict | nil | Enable typed provider reasoning. `true` and `{budget_tokens: N}` remain shorthand for `{mode: "enabled"}`; use `{mode: "enabled", budget_tokens: N}`, `{mode: "adaptive"}`, or `{mode: "effort", level: "low" \| "medium" \| "high"}`. |
+| `thinking` | bool/dict | nil | Enable typed provider reasoning. `true` and `{budget_tokens: N}` remain shorthand for `{mode: "enabled"}`; use `{mode: "enabled", budget_tokens: N}`, `{mode: "adaptive"}`, or `{mode: "effort", level: "low" \| "medium" \| "high"}`. On Anthropic Opus models that declare interleaved-thinking support, `{mode: "enabled"}` also sends `anthropic-beta: interleaved-thinking-2025-05-14`. |
+| `interleaved_thinking` | bool | `false` | Add Anthropic's `interleaved-thinking-2025-05-14` beta header for this call. `thinking: true` enables it automatically on supported Anthropic Opus models. |
+| `anthropic_beta_features` | string/list | nil | Extra Anthropic beta feature names to pass in the comma-separated `anthropic-beta` header on Anthropic-style routes. |
 | `vision` | bool | inferred | Require image-input support. Image content blocks set this implicitly; `vision: true` fails before transport unless the selected provider/model declares `vision_supported`. |
 | `tools` | list | nil | Tool definitions |
 | `tool_choice` | string/dict | `"auto"` | `"auto"`, `"none"`, `"required"`, or `{name: "tool"}` |

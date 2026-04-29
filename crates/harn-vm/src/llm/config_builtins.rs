@@ -544,6 +544,14 @@ fn capabilities_to_vm_value(
         string_list_to_vm_value(caps.thinking_modes.clone()),
     );
     dict.insert(
+        "interleaved_thinking_supported".to_string(),
+        VmValue::Bool(caps.interleaved_thinking_supported),
+    );
+    dict.insert(
+        "anthropic_beta_features".to_string(),
+        string_list_to_vm_value(caps.anthropic_beta_features.clone()),
+    );
+    dict.insert(
         "vision_supported".to_string(),
         VmValue::Bool(caps.vision_supported),
     );
