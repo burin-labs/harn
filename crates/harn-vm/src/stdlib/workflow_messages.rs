@@ -150,13 +150,21 @@ fn load_state(target: &WorkflowTarget) -> Result<WorkflowMailboxState, String> {
 
 fn save_state(target: &WorkflowTarget, state: &WorkflowMailboxState) -> Result<(), String> {
     let path = workflow_state_path(target);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("workflow state mkdir error: {error}"))?;
-    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "workflow state path has no parent".to_string())?;
+    std::fs::create_dir_all(parent)
+        .map_err(|error| format!("workflow state mkdir error: {error}"))?;
     let json = serde_json::to_string_pretty(state)
         .map_err(|error| format!("workflow state encode error: {error}"))?;
-    std::fs::write(&path, json).map_err(|error| format!("workflow state write error: {error}"))
+    let tmp_path = parent.join(format!(".state.json.{}.tmp", uuid::Uuid::now_v7()));
+    std::fs::write(&tmp_path, &json)
+        .map_err(|error| format!("workflow state write error: {error}"))?;
+    if let Err(error) = std::fs::rename(&tmp_path, &path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(format!("workflow state rename error: {error}"));
+    }
+    Ok(())
 }
 
 fn parse_target_json(
@@ -391,9 +399,10 @@ pub async fn workflow_update_for_base(
     enqueue_message(&target, "update", name, payload, Some(request_id.clone()))?;
     let started = std::time::Instant::now();
     while started.elapsed() <= timeout {
-        let state = load_state(&target)?;
-        if let Some(response) = state.responses.get(&request_id) {
-            return Ok(response.value.clone());
+        if let Ok(state) = load_state(&target) {
+            if let Some(response) = state.responses.get(&request_id) {
+                return Ok(response.value.clone());
+            }
         }
         tokio::time::sleep(StdDuration::from_millis(UPDATE_POLL_INTERVAL_MS)).await;
     }
