@@ -311,8 +311,10 @@ fn classify_native_shape(
 pub(crate) fn extract_llm_options(
     args: &[VmValue],
 ) -> Result<crate::llm::api::LlmCallOptions, VmError> {
-    use crate::llm::api::{LlmCallOptions, ThinkingConfig, ToolSearchMode, ToolSearchVariant};
-    use crate::llm::provider::{provider_supports_defer_loading, provider_tool_search_variants};
+    use crate::llm::api::{LlmCallOptions, ToolSearchMode, ToolSearchVariant};
+    use crate::llm::provider::{
+        provider_supports_defer_loading, provider_thinking_modes, provider_tool_search_variants,
+    };
     use crate::llm::tools::{extract_deferred_tool_names, vm_tools_to_native};
 
     let prompt = args.first().map(|a| a.display()).unwrap_or_default();
@@ -369,25 +371,13 @@ pub(crate) fn extract_llm_options(
         });
     let output_validation = opt_str(&options, "output_validation");
 
-    let thinking = options
-        .as_ref()
-        .and_then(|o| o.get("thinking"))
-        .and_then(|v| match v {
-            VmValue::Bool(true) => Some(ThinkingConfig::Enabled),
-            VmValue::Dict(d) => {
-                if d.get("enabled").is_some_and(|enabled| !enabled.is_truthy()) {
-                    None
-                } else {
-                    let budget = d
-                        .get("budget_tokens")
-                        .and_then(|b| b.as_int())
-                        .unwrap_or(10000);
-                    Some(ThinkingConfig::WithBudget(budget))
-                }
-            }
-            _ if v.is_truthy() => Some(ThinkingConfig::Enabled),
-            _ => None,
-        });
+    let thinking = parse_thinking_option(options.as_ref())?;
+    validate_thinking_supported(
+        &thinking,
+        &provider,
+        &model,
+        &provider_thinking_modes(&provider, &model),
+    )?;
 
     let json_schema = options
         .as_ref()
@@ -688,6 +678,162 @@ pub(crate) fn extract_llm_options(
 
     validate_options(&opts);
     Ok(opts)
+}
+
+fn thinking_error(message: impl Into<String>) -> VmError {
+    VmError::Thrown(VmValue::String(std::rc::Rc::from(message.into())))
+}
+
+fn parse_reasoning_effort(raw: &str) -> Result<crate::llm::api::ReasoningEffort, VmError> {
+    match raw {
+        "low" => Ok(crate::llm::api::ReasoningEffort::Low),
+        "medium" => Ok(crate::llm::api::ReasoningEffort::Medium),
+        "high" => Ok(crate::llm::api::ReasoningEffort::High),
+        other => Err(thinking_error(format!(
+            "thinking.level: expected \"low\" | \"medium\" | \"high\", got \"{other}\""
+        ))),
+    }
+}
+
+fn parse_thinking_budget(raw: Option<&VmValue>) -> Result<Option<u32>, VmError> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    if matches!(raw, VmValue::Nil) {
+        return Ok(None);
+    }
+    let Some(value) = raw.as_int() else {
+        return Err(thinking_error(
+            "thinking.budget_tokens: expected a non-negative int",
+        ));
+    };
+    u32::try_from(value)
+        .map(Some)
+        .map_err(|_| thinking_error("thinking.budget_tokens: expected a non-negative int"))
+}
+
+/// Parse the script-facing `thinking` option into a provider-agnostic shape.
+///
+/// New shape:
+///   `{mode: "enabled", budget_tokens: 8000}`
+///   `{mode: "adaptive"}`
+///   `{mode: "effort", level: "high"}`
+///
+/// Legacy compatibility:
+///   `true` => enabled with provider defaults
+///   `{budget_tokens: N}` => enabled with a budget
+///   `{enabled: false}` / `false` / `nil` => disabled
+fn parse_thinking_option(
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> Result<crate::llm::api::ThinkingConfig, VmError> {
+    use crate::llm::api::ThinkingConfig;
+
+    let Some(raw) = options.and_then(|o| o.get("thinking")) else {
+        return Ok(ThinkingConfig::Disabled);
+    };
+
+    match raw {
+        VmValue::Nil | VmValue::Bool(false) => Ok(ThinkingConfig::Disabled),
+        VmValue::Bool(true) => Ok(ThinkingConfig::Enabled {
+            budget_tokens: None,
+        }),
+        VmValue::String(s) => match s.as_ref() {
+            "disabled" | "off" | "none" => Ok(ThinkingConfig::Disabled),
+            "enabled" | "on" | "true" => Ok(ThinkingConfig::Enabled {
+                budget_tokens: None,
+            }),
+            "adaptive" => Ok(ThinkingConfig::Adaptive),
+            "low" | "medium" | "high" => Ok(ThinkingConfig::Effort {
+                level: parse_reasoning_effort(s.as_ref())?,
+            }),
+            other => Err(thinking_error(format!(
+                "thinking: expected bool, dict, or one of \"enabled\" | \"adaptive\" | \"low\" | \"medium\" | \"high\", got \"{other}\""
+            ))),
+        },
+        VmValue::Dict(d) => {
+            if d.get("enabled").is_some_and(|enabled| !enabled.is_truthy()) {
+                return Ok(ThinkingConfig::Disabled);
+            }
+
+            let mode = d
+                .get("mode")
+                .and_then(|value| match value {
+                    VmValue::String(s) => Some(s.as_ref()),
+                    _ => None,
+                })
+                .unwrap_or("enabled");
+
+            match mode {
+                "disabled" | "off" | "none" => Ok(ThinkingConfig::Disabled),
+                "enabled" => Ok(ThinkingConfig::Enabled {
+                    budget_tokens: parse_thinking_budget(d.get("budget_tokens"))?,
+                }),
+                "adaptive" => Ok(ThinkingConfig::Adaptive),
+                "effort" => {
+                    let level = d
+                        .get("level")
+                        .and_then(|value| match value {
+                            VmValue::String(s) => Some(s.as_ref()),
+                            _ => None,
+                        })
+                        .ok_or_else(|| {
+                            thinking_error(
+                                "thinking.level is required when thinking.mode is \"effort\"",
+                            )
+                        })?;
+                    Ok(ThinkingConfig::Effort {
+                        level: parse_reasoning_effort(level)?,
+                    })
+                }
+                other => Err(thinking_error(format!(
+                    "thinking.mode: expected \"disabled\" | \"enabled\" | \"adaptive\" | \"effort\", got \"{other}\""
+                ))),
+            }
+        }
+        _ if raw.is_truthy() => Ok(ThinkingConfig::Enabled {
+            budget_tokens: None,
+        }),
+        _ => Ok(ThinkingConfig::Disabled),
+    }
+}
+
+fn validate_thinking_supported(
+    thinking: &crate::llm::api::ThinkingConfig,
+    provider: &str,
+    model: &str,
+    supported_modes: &[String],
+) -> Result<(), VmError> {
+    use crate::llm::api::ThinkingConfig;
+
+    if thinking.is_disabled() {
+        return Ok(());
+    }
+    let supports = |mode: &str| supported_modes.iter().any(|supported| supported == mode);
+    let supported = match thinking {
+        ThinkingConfig::Disabled => true,
+        // `enabled` remains compatible with Anthropic Opus 4.7+ where
+        // providers/anthropic.rs rewrites it to adaptive thinking.
+        ThinkingConfig::Enabled { .. } => supports("enabled") || supports("adaptive"),
+        ThinkingConfig::Adaptive => supports("adaptive"),
+        ThinkingConfig::Effort { .. } => supports("effort"),
+    };
+    if supported {
+        return Ok(());
+    }
+    let requested = match thinking {
+        ThinkingConfig::Disabled => "disabled",
+        ThinkingConfig::Enabled { .. } => "enabled",
+        ThinkingConfig::Adaptive => "adaptive",
+        ThinkingConfig::Effort { .. } => "effort",
+    };
+    let available = if supported_modes.is_empty() {
+        "none".to_string()
+    } else {
+        supported_modes.join(", ")
+    };
+    Err(thinking_error(format!(
+        "thinking.mode \"{requested}\" is not supported by provider \"{provider}\" model \"{model}\" (supported: {available})"
+    )))
 }
 
 /// Parse the `tool_search` option into a ToolSearchConfig.
@@ -1063,6 +1209,79 @@ mod routing_tests {
             VmValue::Dict(Rc::new(options)),
         ])
         .expect("options");
-        assert!(opts.thinking.is_none());
+        assert!(opts.thinking.is_disabled());
+    }
+
+    #[test]
+    fn thinking_dict_enabled_budget_parses_typed_config() {
+        let mut options = BTreeMap::new();
+        options.insert(
+            "provider".to_string(),
+            VmValue::String(Rc::from("mock".to_string())),
+        );
+        options.insert(
+            "model".to_string(),
+            VmValue::String(Rc::from("claude-opus-4-6".to_string())),
+        );
+        options.insert(
+            "thinking".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                (
+                    "mode".to_string(),
+                    VmValue::String(Rc::from("enabled".to_string())),
+                ),
+                ("budget_tokens".to_string(), VmValue::Int(8000)),
+            ]))),
+        );
+        let opts = extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ])
+        .expect("options");
+        assert_eq!(
+            opts.thinking,
+            crate::llm::api::ThinkingConfig::Enabled {
+                budget_tokens: Some(8000)
+            }
+        );
+    }
+
+    #[test]
+    fn thinking_effort_parses_typed_level() {
+        let mut options = BTreeMap::new();
+        options.insert(
+            "provider".to_string(),
+            VmValue::String(Rc::from("mock".to_string())),
+        );
+        options.insert(
+            "model".to_string(),
+            VmValue::String(Rc::from("o3".to_string())),
+        );
+        options.insert(
+            "thinking".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                (
+                    "mode".to_string(),
+                    VmValue::String(Rc::from("effort".to_string())),
+                ),
+                (
+                    "level".to_string(),
+                    VmValue::String(Rc::from("high".to_string())),
+                ),
+            ]))),
+        );
+        let opts = extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ])
+        .expect("options");
+        assert_eq!(
+            opts.thinking,
+            crate::llm::api::ThinkingConfig::Effort {
+                level: crate::llm::api::ReasoningEffort::High
+            }
+        );
     }
 }

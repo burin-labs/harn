@@ -426,17 +426,26 @@ pub(super) fn dump_llm_request(
         "provider": opts.provider,
         "max_tokens": opts.max_tokens,
         "temperature": opts.temperature,
-        "thinking": match opts.thinking.as_ref() {
-            Some(super::api::ThinkingConfig::Enabled) => serde_json::json!({
-                "enabled": true,
+        "thinking": match &opts.thinking {
+            super::api::ThinkingConfig::Disabled => serde_json::json!({
+                "mode": "disabled",
+                "enabled": false,
                 "budget_tokens": serde_json::Value::Null,
             }),
-            Some(super::api::ThinkingConfig::WithBudget(budget_tokens)) => serde_json::json!({
+            super::api::ThinkingConfig::Enabled { budget_tokens } => serde_json::json!({
+                "mode": "enabled",
                 "enabled": true,
                 "budget_tokens": budget_tokens,
             }),
-            None => serde_json::json!({
-                "enabled": false,
+            super::api::ThinkingConfig::Adaptive => serde_json::json!({
+                "mode": "adaptive",
+                "enabled": true,
+                "budget_tokens": serde_json::Value::Null,
+            }),
+            super::api::ThinkingConfig::Effort { level } => serde_json::json!({
+                "mode": "effort",
+                "level": level.as_str(),
+                "enabled": true,
                 "budget_tokens": serde_json::Value::Null,
             }),
         },

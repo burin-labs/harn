@@ -46,6 +46,7 @@ impl MockProvider {
             &request.messages,
             request.system.as_deref(),
             request.native_tools.as_deref(),
+            &request.thinking,
         )
     }
 }

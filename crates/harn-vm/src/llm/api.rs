@@ -46,8 +46,8 @@ pub use ollama::{
 pub(crate) use openai_normalize::{debug_log_message_shapes, normalize_openai_style_messages};
 pub(crate) use options::{
     DeltaSender, LlmCallOptions, LlmRequestPayload, LlmRouteAlternative, LlmRoutePolicy,
-    LlmRoutingDecision, ThinkingConfig, ToolSearchConfig, ToolSearchMode, ToolSearchStrategy,
-    ToolSearchVariant,
+    LlmRoutingDecision, ReasoningEffort, ThinkingConfig, ToolSearchConfig, ToolSearchMode,
+    ToolSearchStrategy, ToolSearchVariant,
 };
 pub use readiness::{
     probe_openai_compatible_model, selected_model_for_provider, supports_model_readiness_probe,
@@ -121,6 +121,7 @@ async fn vm_call_llm_full_inner_request(
             &request.messages,
             request.system.as_deref(),
             request.native_tools.as_deref(),
+            &request.thinking,
         )?;
         super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(&result);
@@ -189,6 +190,7 @@ async fn vm_call_llm_full_inner_offthread(
             &request.messages,
             request.system.as_deref(),
             request.native_tools.as_deref(),
+            &request.thinking,
         )
         .map_err(|e| e.to_string())?;
         super::trigger_predicate::note_result(request, &result);
@@ -475,7 +477,9 @@ mod tests {
 
         let mut opts = base_opts("anthropic");
         opts.model = "claude-opus-4-7".to_string();
-        opts.thinking = Some(ThinkingConfig::Enabled);
+        opts.thinking = ThinkingConfig::Enabled {
+            budget_tokens: None,
+        };
         let payload = LlmRequestPayload::from(&opts);
         let body = AnthropicProvider::build_request_body(&payload);
 
@@ -493,7 +497,9 @@ mod tests {
 
         let mut opts = base_opts("anthropic");
         opts.model = "claude-opus-4-7".to_string();
-        opts.thinking = Some(ThinkingConfig::WithBudget(32000));
+        opts.thinking = ThinkingConfig::Enabled {
+            budget_tokens: Some(32000),
+        };
         let payload = LlmRequestPayload::from(&opts);
         let body = AnthropicProvider::build_request_body(&payload);
 
@@ -508,7 +514,9 @@ mod tests {
 
         let mut opts = base_opts("anthropic");
         opts.model = "claude-opus-4-6".to_string();
-        opts.thinking = Some(ThinkingConfig::WithBudget(16000));
+        opts.thinking = ThinkingConfig::Enabled {
+            budget_tokens: Some(16000),
+        };
         let payload = LlmRequestPayload::from(&opts);
         let body = AnthropicProvider::build_request_body(&payload);
 

@@ -29,7 +29,7 @@
 #   max_tools       : cap on tool-definition count the provider will accept.
 #                     Used by harn-lint to warn about oversized registries.
 #   prompt_caching  : whether the provider honors cache_control blocks.
-#   thinking        : whether extended / adaptive thinking is available.
+#   thinking_modes  : supported script-facing modes: enabled, adaptive, effort.
 #   preserve_thinking: whether prior <think> blocks should be carried forward.
 #   server_parser   : server-side response parser that transforms model output.
 #   honors_chat_template_kwargs: whether chat_template_kwargs are honored.
@@ -37,6 +37,37 @@
 #   text_tool_wire_format_supported: whether Harn text tool calls survive.
 
 # ---------- Anthropic (Claude) ------------------------------------------------
+
+# Claude 4.7+ uses adaptive thinking instead of explicit budgets.
+[[provider.anthropic]]
+model_match = "claude-haiku-*"
+version_min = [4, 7]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+thinking_modes = ["adaptive"]
+
+[[provider.anthropic]]
+model_match = "claude-opus-*"
+version_min = [4, 7]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+thinking_modes = ["adaptive"]
+
+[[provider.anthropic]]
+model_match = "claude-sonnet-*"
+version_min = [4, 7]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+thinking_modes = ["adaptive"]
 
 # Haiku 4.5+ supports server-side tool search.
 [[provider.anthropic]]
@@ -47,7 +78,7 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
-thinking = true
+thinking_modes = ["enabled"]
 
 # Opus 4.0+ supports tool search.
 [[provider.anthropic]]
@@ -58,7 +89,7 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
-thinking = true
+thinking_modes = ["enabled"]
 
 # Sonnet 4.0+ supports tool search.
 [[provider.anthropic]]
@@ -69,9 +100,39 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
-thinking = true
+thinking_modes = ["enabled"]
 
 # OpenRouter-style `anthropic/claude-...` prefixes.
+[[provider.anthropic]]
+model_match = "anthropic/claude-haiku-*"
+version_min = [4, 7]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+thinking_modes = ["adaptive"]
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-opus-*"
+version_min = [4, 7]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+thinking_modes = ["adaptive"]
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-sonnet-*"
+version_min = [4, 7]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+thinking_modes = ["adaptive"]
+
 [[provider.anthropic]]
 model_match = "anthropic/claude-haiku-*"
 version_min = [4, 5]
@@ -80,7 +141,7 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
-thinking = true
+thinking_modes = ["enabled"]
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-opus-*"
@@ -90,7 +151,7 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
-thinking = true
+thinking_modes = ["enabled"]
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-sonnet-*"
@@ -100,7 +161,7 @@ defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
-thinking = true
+thinking_modes = ["enabled"]
 
 # Catch-all for older Claude models — native tools + prompt caching +
 # thinking, but no progressive tool disclosure.
@@ -108,7 +169,7 @@ thinking = true
 model_match = "claude-*"
 native_tools = true
 prompt_caching = true
-thinking = true
+thinking_modes = ["enabled"]
 
 # ---------- OpenAI family -----------------------------------------------------
 #
@@ -134,14 +195,17 @@ native_tools = true
 [[provider.openai]]
 model_match = "o1*"
 native_tools = true
+thinking_modes = ["effort"]
 
 [[provider.openai]]
 model_match = "o3*"
 native_tools = true
+thinking_modes = ["effort"]
 
 [[provider.openai]]
 model_match = "o4*"
 native_tools = true
+thinking_modes = ["effort"]
 
 # OpenRouter-style provider-prefixed IDs.
 [[provider.openai]]
@@ -167,7 +231,7 @@ native_tools = true
 [[provider.ollama]]
 model_match = "qwen3.6*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "ollama_qwen3coder"
 honors_chat_template_kwargs = false
@@ -177,7 +241,7 @@ text_tool_wire_format_supported = false
 [[provider.ollama]]
 model_match = "qwen3*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 server_parser = "ollama_qwen3coder"
 honors_chat_template_kwargs = false
 recommended_endpoint = "/api/generate-raw"
@@ -189,7 +253,7 @@ text_tool_wire_format_supported = false
 [[provider.llamacpp]]
 model_match = "*qwen3.6*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -199,7 +263,7 @@ text_tool_wire_format_supported = true
 [[provider.llamacpp]]
 model_match = "*qwen3*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
@@ -211,7 +275,7 @@ text_tool_wire_format_supported = true
 [[provider.local]]
 model_match = "*qwen3.6*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -221,7 +285,7 @@ text_tool_wire_format_supported = true
 [[provider.local]]
 model_match = "*qwen3*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
@@ -233,7 +297,7 @@ text_tool_wire_format_supported = true
 [[provider.mlx]]
 model_match = "*qwen3.6*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -243,7 +307,7 @@ text_tool_wire_format_supported = true
 [[provider.mlx]]
 model_match = "*qwen3*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
@@ -261,7 +325,7 @@ text_tool_wire_format_supported = true
 [[provider.dashscope]]
 model_match = "qwen3.6*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -271,7 +335,7 @@ text_tool_wire_format_supported = true
 [[provider.dashscope]]
 model_match = "qwen*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
@@ -280,7 +344,7 @@ text_tool_wire_format_supported = true
 [[provider.fireworks]]
 model_match = "*qwen3.6*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -292,7 +356,7 @@ text_tool_wire_format_supported = true
 [[provider.fireworks]]
 model_match = "*qwen3p6*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -302,7 +366,7 @@ text_tool_wire_format_supported = true
 [[provider.fireworks]]
 model_match = "*qwen*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
@@ -315,7 +379,7 @@ text_tool_wire_format_supported = true
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled", "effort"]
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = false
@@ -325,7 +389,7 @@ text_tool_wire_format_supported = true
 [[provider.openrouter]]
 model_match = "qwen/*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled", "effort"]
 server_parser = "none"
 honors_chat_template_kwargs = false
 recommended_endpoint = "/v1/chat/completions"
@@ -336,7 +400,7 @@ text_tool_wire_format_supported = true
 [[provider.huggingface]]
 model_match = "qwen/qwen3.6*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -346,7 +410,7 @@ text_tool_wire_format_supported = true
 [[provider.huggingface]]
 model_match = "qwen/*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
@@ -355,7 +419,7 @@ text_tool_wire_format_supported = true
 [[provider.together]]
 model_match = "qwen/qwen3.6*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -365,7 +429,7 @@ text_tool_wire_format_supported = true
 [[provider.together]]
 model_match = "qwen/*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
@@ -382,7 +446,7 @@ text_tool_wire_format_supported = true
 [[provider.together]]
 model_match = "deepseek-ai/deepseek-v3*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 prompt_caching = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -390,7 +454,7 @@ honors_chat_template_kwargs = true
 [[provider.huggingface]]
 model_match = "deepseek-ai/deepseek-v3*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled"]
 prompt_caching = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -398,7 +462,7 @@ honors_chat_template_kwargs = true
 [[provider.openrouter]]
 model_match = "deepseek/deepseek-v3*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled", "effort"]
 prompt_caching = true
 server_parser = "none"
 honors_chat_template_kwargs = false
@@ -412,7 +476,7 @@ honors_chat_template_kwargs = false
 [[provider.openrouter]]
 model_match = "google/gemini-2.5*"
 native_tools = true
-thinking = true
+thinking_modes = ["enabled", "effort"]
 prompt_caching = true
 
 [[provider.openrouter]]

@@ -1,6 +1,6 @@
 //! Ollama provider — local Ollama server with NDJSON streaming.
 
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ThinkingConfig};
+use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::{VmError, VmValue};
 use std::rc::Rc;
@@ -68,12 +68,7 @@ impl OllamaProvider {
         // passes `think` through to the same template context. Default
         // false for fast tool-call-shaped turns; callers who want
         // reasoning set `thinking` explicitly.
-        body["think"] = match opts.thinking {
-            Some(ThinkingConfig::Enabled) | Some(ThinkingConfig::WithBudget(_)) => {
-                serde_json::json!(true)
-            }
-            None => serde_json::json!(false),
-        };
+        body["think"] = serde_json::json!(opts.thinking.is_enabled());
         crate::llm::api::apply_ollama_runtime_settings(&mut body, opts.provider_overrides.as_ref());
         body
     }
@@ -472,7 +467,7 @@ fn blocks_from_text_and_thinking(text: &str, thinking: &str) -> Vec<serde_json::
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::api::{LlmErrorKind, LlmErrorReason};
+    use crate::llm::api::{LlmErrorKind, LlmErrorReason, ThinkingConfig};
 
     struct ScopedEnvVar {
         key: &'static str,
@@ -517,7 +512,7 @@ mod tests {
             presence_penalty: None,
             response_format: Some("json".to_string()),
             json_schema: Some(serde_json::json!({"type": "object"})),
-            thinking: None,
+            thinking: ThinkingConfig::Disabled,
             native_tools: None,
             tool_choice: None,
             cache: false,

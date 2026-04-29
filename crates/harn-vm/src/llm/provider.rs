@@ -31,9 +31,11 @@ pub(crate) trait LlmProvider {
         false
     }
 
-    /// Whether this provider supports extended thinking.
-    fn supports_thinking(&self) -> bool {
-        false
+    /// Whether this provider/model supports any thinking mode.
+    fn supports_thinking(&self, model: &str) -> bool {
+        !super::capabilities::lookup(self.name(), model)
+            .thinking_modes
+            .is_empty()
     }
 
     /// Whether this is the mock provider (deterministic test responses, no API).
@@ -166,6 +168,11 @@ pub(crate) fn provider_supports_defer_loading(provider: &str, model: &str) -> bo
 /// `capabilities.toml` replaced the per-provider hard-coded gates.
 pub(crate) fn provider_tool_search_variants(provider: &str, model: &str) -> Vec<String> {
     super::capabilities::lookup(provider, model).tool_search
+}
+
+/// Module-level dispatch for `LlmProvider::supports_thinking`.
+pub(crate) fn provider_thinking_modes(provider: &str, model: &str) -> Vec<String> {
+    super::capabilities::lookup(provider, model).thinking_modes
 }
 
 /// Which wire shape to emit for the native tool-search meta-tool. Kept
