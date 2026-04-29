@@ -1,0 +1,53 @@
+pipeline test(task) {
+  let xs = [1, 2, 3, 4]
+  log(stream.collect(stream.map(xs, { x -> x * 10 })))
+  log(stream.collect(stream.filter(xs, { x -> x % 2 == 0 })))
+  let tapped = atomic(0)
+  let tapped_values = stream.collect(stream.tap([1, 2], { x -> atomic_add(tapped, x * 10) }))
+  log(tapped_values)
+  log(atomic_get(tapped))
+  log(stream.collect(stream.scan([1, 2, 3], 0, { acc, x -> acc + x })))
+  log(stream.fold([1, 2, 3, 4], 0, { acc, x -> acc + x }))
+  log(stream.collect([], 5))
+  log(stream.first([]))
+  log(stream.first([7, 8]))
+  log(stream.collect(stream.take(xs, 2)))
+  log(stream.collect(stream.take(xs, 0)))
+  log(stream.collect(stream.take_until(xs, { x -> x == 3 })))
+  log(stream.collect(stream.zip([1, 2, 3], ["a", "b"])))
+  log(stream.collect(stream.merge([1, 3], [2, 4])))
+  log(stream.collect(stream.interleave(["a", "c"], ["b", "d"])))
+  log(stream.collect(stream.race([], [9, 10], [11])))
+  let copies = stream.broadcast([1, 2, 3], 2)
+  log(stream.collect(copies[0]))
+  log(stream.collect(copies[1]))
+  log(stream.collect(stream.throttle([1], 1000)))
+  log(stream.collect(stream.debounce([1, 2, 3], 0)))
+  let cap_error = try {
+    stream.collect([1, 2, 3], {max: 2})
+    "missing"
+  } catch (e) {
+    "cap"
+  }
+  log(cap_error)
+  let mid_error = try {
+    stream
+      .collect(
+      stream
+        .map(
+        [1, 2, 3],
+        { x ->
+          if x == 2 {
+            throw "boom"
+          }
+          return x
+        },
+      ),
+    )
+    "missing"
+  } catch (e) {
+    "mid"
+  }
+  log(mid_error)
+  log("stream_operators_core tests passed")
+}

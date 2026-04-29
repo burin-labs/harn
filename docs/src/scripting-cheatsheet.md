@@ -76,6 +76,32 @@ let body = if len(content) > 2400 {
 }
 ```
 
+## Streams
+
+`stream.*` accepts lists, ranges, channels, generators, and lazy
+`iter(...)` values. Operators stay lazy until a sink such as
+`stream.collect`, `stream.fold`, or `stream.first` pulls from them.
+
+```harn
+let first_three = stream.collect(stream.take(results_channel, 3), {max: 3})
+
+let tool_events = stream.collect(
+  stream.filter(agent_events, { ev -> ev?.topic == "tool_call" }),
+  {max: 100}
+)
+
+let winner = stream.first(stream.race(primary_stream, fallback_stream))
+
+let total = stream.fold(
+  stream.merge(worker_a, worker_b, worker_c),
+  0,
+  { acc, item -> acc + item.cost }
+)
+```
+
+Always pass a realistic `{max: N}` to `stream.collect` when the upstream
+can be unbounded.
+
 ## Module scope
 
 Top-level `let` / `var` and `fn` declarations are visible inside

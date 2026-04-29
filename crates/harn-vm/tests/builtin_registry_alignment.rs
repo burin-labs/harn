@@ -44,6 +44,9 @@ const PARSER_ONLY_EXCEPTIONS: &[&str] = &[
     // registration is normalized.
     "e",
     "pi",
+    // Namespace globals can be called through dotted members, but the
+    // namespace itself is not a builtin-table function.
+    "stream",
 ];
 
 /// Names returned by `stdlib_builtin_names()` that are legitimately NOT

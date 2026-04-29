@@ -1,0 +1,55 @@
+pipeline test(task) {
+  log(stream.collect(stream.map([], { x -> x })))
+  log(stream.collect(stream.filter([1], { x -> x == 1 })))
+  log(
+    stream
+      .collect(
+      stream
+        .tap(
+        [],
+        { x ->
+          throw "tap should not run"
+        },
+      ),
+    ),
+  )
+  log(stream.collect(stream.scan([5], 1, { acc, x -> acc + x })))
+  log(stream.fold([], "seed", { acc, x -> acc + x }))
+  log(stream.collect(stream.take([1], 5)))
+  log(stream.collect(stream.take_until([1], { x -> x == 9 })))
+  log(stream.first([42]))
+  log(stream.collect(stream.merge([], [1])))
+  log(stream.collect(stream.interleave([], [1])))
+  log(stream.collect(stream.zip([], [1])))
+  log(stream.collect(stream.race([], [2])))
+  let copies = stream.broadcast([], 1)
+  log(stream.collect(copies[0]))
+  log(stream.collect(stream.throttle([], 1000)))
+  log(stream.collect(stream.debounce([], 0)))
+  let empty_channel = channel("empty", 1)
+  let ready_channel = channel("ready", 1)
+  send(ready_channel, "ready")
+  log(stream.first(stream.merge(empty_channel, ready_channel)))
+  let slow_channel = channel("slow", 1)
+  let winner_channel = channel("winner", 1)
+  send(winner_channel, "winner")
+  log(stream.first(stream.race(slow_channel, winner_channel)))
+  let source_error = stream
+    .map(
+    [1, 2],
+    { x ->
+      if x == 2 {
+        throw "source failed"
+      }
+      return x
+    },
+  )
+  let propagated = try {
+    stream.collect(stream.merge(source_error, [3]))
+    "missing"
+  } catch (e) {
+    "propagated"
+  }
+  log(propagated)
+  log("stream_operators_edges tests passed")
+}

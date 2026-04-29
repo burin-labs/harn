@@ -10,6 +10,12 @@ impl crate::vm::Vm {
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
+        if matches!(map.get("_namespace"), Some(VmValue::String(name)) if name.as_ref() == "stream")
+        {
+            if let Some(callable) = map.get(method).filter(|v| Self::is_callable_value(v)) {
+                return self.call_callable_value(callable, args).await;
+            }
+        }
         match method {
             "keys" => Ok(VmValue::List(Rc::new(
                 map.keys()
