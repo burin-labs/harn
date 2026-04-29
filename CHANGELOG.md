@@ -7,6 +7,106 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.49
+
+### Added
+
+- **Command policy hooks (#824/#846).** First-class `command_policy` builtins
+  with policy stack management, deterministic command/result risk scanning,
+  and a safe `command_llm_risk_scan` fallback shape. `host_call("process.exec",
+  …)` is now wrapped with preflight/postflight policy handling supporting
+  `deny`, `require_approval`, `dry_run`, `explain_only`, constrained rewrites,
+  audit attachment, feedback, and hook-recursion protection. Command policies
+  thread through `agent_loop`, `sub_agent_run`, and workflow model-policy
+  scoping. Conformance coverage, spec/builtin/highlight docs included.
+
+- **Shell discovery host capability (#826/#845).** New shared shell discovery
+  contract — `process.list_shells`, `process.get_default_shell`,
+  `process.set_default_shell`, `process.shell_invocation` — backed by a JSON
+  schema at `spec/schemas/host-shell-discovery.schema.json`. VM shell builtins,
+  `process.exec` shell mode, hostlib `run_command` shell mode, ACP
+  `terminal/create`, and stdlib wrappers now route through selected-shell
+  metadata instead of hardcoded `sh`/`cmd` assumptions. Conformance and docs
+  included.
+
+- **Harn-owned plan artifacts (#816/#844).** New `import "std/plan"` module with
+  `harn.plan.v1` normalization and VM-owned `emit_plan` / `update_plan` local
+  tool handling. Structured plan transcript events are persisted and surfaced as
+  `AgentEvent::Plan`. Plan artifacts propagate through ACP (`harnPlan`) and A2A
+  (`harn_plan`) while the standard ACP `entries` projection is preserved.
+
+- **Command runner v2 (#823/#842).** Canonical command runner envelope for
+  `run_command`, background command execution, and `process.exec` with
+  argv/shell modes, command IDs, PID/process-group metadata, timing,
+  exit/signal/timeout status, capture counts, artifact paths, hashes, and
+  sandbox/audit metadata. New `read_command_output` builtin reads persisted
+  command artifacts by command ID, handle, or path with bounded reads and path
+  validation.
+
+- **Agent tool surface validation (#825/#843).** VM-level validation of tool
+  surfaces for registries/native tools, capability policies, approval policies,
+  prompt references, deferred tools, side-effect ceilings, and execute artifact
+  result readers. Exposed as `tool_surface_validate(…)` builtin; `harn check`
+  preflight validates literal prompt/tool surfaces statically. Diagnostic codes
+  and artifact-reader annotations documented.
+
+- **`harn connector test` package gate (#812/#841).** Single first-class command
+  that gates connector packages through metadata validation, `harn
+  check`/`lint`/`fmt --check`, contract fixtures, package-local fixture
+  programs, clean consumer install/import smoke, and standalone doc example
+  parsing. Connector docs, trigger quickref, and connector template CI guidance
+  updated.
+
+- **Protocol conformance gate (#807/#840).** New `harn test protocols` command
+  runs offline JSON schema fixture conformance for ACP, A2A, and MCP. Checked-in
+  protocol schemas (`mcp-2025-11-25`, `acp-session-update`, `a2a-1.0`) and
+  positive/negative fixtures live under `conformance/protocols/`. Wired into
+  `make all`, CI, and the release gate.
+
+- **GraphQL connector SDK substrate (#811/#834).** `import "std/graphql"` adds
+  provider-neutral helpers for request bodies, auth headers, normalized
+  `{data, errors, extensions, meta}` response envelopes, rate-limit metadata,
+  cursor pagination, SDL/introspection normalization, and generated-style
+  operation wrappers. The Linear stdlib connector now drives outbound
+  issue/comment/search helpers through shared GraphQL operation specs. Module
+  mirrored to root `stdlib/graphql.harn`. Conformance and Linear fixture schema
+  included.
+
+### Changed
+
+- **MCP latest-spec gap handling documented and enforced (#809/#839).** Shared
+  helper explicitly rejects unsupported MCP 2025-11-25 methods
+  (`completion/*`, `resources/subscribe`, `roots/*`, `sampling/*`,
+  `elicitation/*`, `tasks/*`) with typed JSON-RPC unsupported-feature errors on
+  both client and server paths. MCP client/server support matrices documented
+  in the MCP guides.
+
+- **`self_review` verifier rounds improved (#838).** Schema retry nudges now
+  include bounded nested object/array shape, not just top-level keys. Later
+  `self_review` rounds act as verifier/adjudication passes that keep only
+  diff-supported candidate findings, dropping speculative or verify-only issues.
+  Output instructions tightened to allow only explicit semantic aliases.
+
+- **Hostlib docs decoupled from Burin migration language (#830).** `harn-hostlib`
+  README and host-contracts migration doc rewritten in Harn-generic terms,
+  removing references to Burin-specific implementation waves and burin-code
+  internal paths.
+
+### Fixed
+
+- **`orchestrator_http` and connector test flake eliminated (#837).** Flaky HTTP
+  orchestrator and connector tests refactored architecturally: server lifecycle
+  management and ephemeral port handling made deterministic so the tests no
+  longer race under `cargo nextest`.
+
+- **HTTP mock call records expose response headers (#829).** HTTP mock call
+  records now include the `response_headers` field so scripts can assert on or
+  inspect headers returned from mock endpoints.
+
+- **Release bump PRs auto-merge on CI pass (#835).** Recovery version-bump PRs
+  created by `release_ship.sh` now enable squash auto-merge immediately after
+  creation, removing the manual merge step after CI clears.
+
 ## v0.7.48
 
 ### Added
