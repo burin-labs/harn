@@ -21,6 +21,7 @@ fn build_llm_call_result_extracts_balanced_json_payloads() {
         model: "mock".to_string(),
         provider: "mock".to_string(),
         thinking: None,
+        thinking_summary: None,
         stop_reason: None,
         blocks: Vec::new(),
     };
@@ -58,6 +59,7 @@ fn build_llm_call_result_uses_output_schema_without_response_format_flag() {
         model: "mock".to_string(),
         provider: "mock".to_string(),
         thinking: None,
+        thinking_summary: None,
         stop_reason: None,
         blocks: Vec::new(),
     };
@@ -93,6 +95,7 @@ fn build_llm_call_result_extracts_json_from_tagged_prose() {
         model: "mock".to_string(),
         provider: "mock".to_string(),
         thinking: None,
+        thinking_summary: None,
         stop_reason: None,
         blocks: Vec::new(),
     };
@@ -118,6 +121,7 @@ fn build_llm_call_result_leaves_plain_text_unflagged_without_tools() {
         model: "mock".to_string(),
         provider: "mock".to_string(),
         thinking: None,
+        thinking_summary: None,
         stop_reason: None,
         blocks: Vec::new(),
     };
@@ -147,6 +151,7 @@ fn build_llm_call_result_unwraps_tagged_no_tool_visible_text() {
         model: "mock".to_string(),
         provider: "mock".to_string(),
         thinking: None,
+        thinking_summary: None,
         stop_reason: None,
         blocks: Vec::new(),
     };
@@ -180,6 +185,7 @@ fn build_llm_call_transcript_keeps_private_reasoning_out_of_visible_message_text
         model: "mock".to_string(),
         provider: "mock".to_string(),
         thinking: Some("private chain of thought".to_string()),
+        thinking_summary: None,
         stop_reason: None,
         blocks: vec![
             json!({

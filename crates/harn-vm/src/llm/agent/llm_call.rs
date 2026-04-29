@@ -193,6 +193,7 @@ pub(super) async fn run_llm_call(
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
             "tool_calls": result.tool_calls,
+            "thinking_summary": result.thinking_summary,
             "tool_calling_mode": ctx.tool_format,
             "structural_experiment": opts.applied_structural_experiment.as_ref(),
         })),
@@ -204,6 +205,17 @@ pub(super) async fn run_llm_call(
                 "assistant",
                 "private",
                 &thinking,
+                None,
+            ));
+        }
+    }
+    if let Some(summary) = result.thinking_summary.clone() {
+        if !summary.is_empty() {
+            state.transcript_events.push(transcript_event(
+                "thinking_summary",
+                "assistant",
+                "private",
+                &summary,
                 None,
             ));
         }

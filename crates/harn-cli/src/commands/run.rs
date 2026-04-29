@@ -165,6 +165,7 @@ fn parse_cli_llm_mock_value(value: &serde_json::Value) -> Result<harn_vm::llm::L
     let cache_write_tokens = optional_i64_field(object, "cache_write_tokens")?
         .or(optional_i64_field(object, "cache_creation_input_tokens")?);
     let thinking = optional_string_field(object, "thinking")?;
+    let thinking_summary = optional_string_field(object, "thinking_summary")?;
     let stop_reason = optional_string_field(object, "stop_reason")?;
     let model = optional_string_field(object, "model")?.unwrap_or_else(|| "mock".to_string());
     let provider = optional_string_field(object, "provider")?;
@@ -182,6 +183,7 @@ fn parse_cli_llm_mock_value(value: &serde_json::Value) -> Result<harn_vm::llm::L
         cache_read_tokens,
         cache_write_tokens,
         thinking,
+        thinking_summary,
         stop_reason,
         model,
         provider,

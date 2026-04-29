@@ -37,6 +37,8 @@
 #   preserve_thinking: whether prior <think> blocks should be carried forward.
 #   server_parser   : server-side response parser that transforms model output.
 #   honors_chat_template_kwargs: whether chat_template_kwargs are honored.
+#   requires_completion_tokens: whether to send max_completion_tokens instead of max_tokens.
+#   reasoning_effort_supported: whether reasoning_effort is accepted.
 #   recommended_endpoint: preferred endpoint family for this route.
 #   text_tool_wire_format_supported: whether Harn text tool calls survive.
 
@@ -257,12 +259,16 @@ model_match = "o1*"
 native_tools = true
 json_schema = "native"
 thinking_modes = ["effort"]
+requires_completion_tokens = true
+reasoning_effort_supported = true
 
 [[provider.openai]]
 model_match = "o3*"
 native_tools = true
 json_schema = "native"
 thinking_modes = ["effort"]
+requires_completion_tokens = true
+reasoning_effort_supported = true
 
 [[provider.openai]]
 model_match = "o4*"
@@ -270,6 +276,8 @@ native_tools = true
 json_schema = "native"
 thinking_modes = ["effort"]
 vision_supported = true
+requires_completion_tokens = true
+reasoning_effort_supported = true
 
 # OpenRouter-style provider-prefixed IDs.
 [[provider.openai]]
@@ -299,6 +307,31 @@ json_schema = "native"
 model_match = "openai/gpt-*"
 native_tools = true
 json_schema = "native"
+
+[[provider.openai]]
+model_match = "openai/o1*"
+native_tools = true
+json_schema = "native"
+thinking_modes = ["effort"]
+requires_completion_tokens = true
+reasoning_effort_supported = true
+
+[[provider.openai]]
+model_match = "openai/o3*"
+native_tools = true
+json_schema = "native"
+thinking_modes = ["effort"]
+requires_completion_tokens = true
+reasoning_effort_supported = true
+
+[[provider.openai]]
+model_match = "openai/o4*"
+native_tools = true
+json_schema = "native"
+thinking_modes = ["effort"]
+vision_supported = true
+requires_completion_tokens = true
+reasoning_effort_supported = true
 
 # ---------- Local / Ollama ----------------------------------------------------
 #

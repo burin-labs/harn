@@ -398,6 +398,7 @@ async fn parse_raw_generate_response(
             .to_string(),
         provider: request.provider.clone(),
         thinking: (!thinking.is_empty()).then_some(thinking),
+        thinking_summary: None,
         stop_reason: json
             .get("done_reason")
             .and_then(|value| value.as_str())
@@ -490,6 +491,7 @@ async fn parse_raw_generate_stream(
         model: result_model,
         provider: provider.to_string(),
         thinking: (!thinking.is_empty()).then_some(thinking),
+        thinking_summary: None,
         stop_reason,
     })
 }

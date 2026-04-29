@@ -121,6 +121,7 @@ async fn vm_call_completion_openai_style(
         model: opts.model.clone(),
         provider: opts.provider.clone(),
         thinking: None,
+        thinking_summary: None,
         stop_reason: json["choices"][0]["finish_reason"]
             .as_str()
             .map(|s| s.to_string()),
@@ -221,6 +222,7 @@ async fn vm_call_completion_ollama(
         model: opts.model.clone(),
         provider: opts.provider.clone(),
         thinking: None,
+        thinking_summary: None,
         stop_reason: json["done_reason"].as_str().map(|s| s.to_string()),
         blocks: vec![serde_json::json!({
             "type": "output_text",

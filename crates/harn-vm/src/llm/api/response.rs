@@ -6,8 +6,65 @@ use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 
-use super::openai_normalize::normalize_openai_message_text;
+use super::openai_normalize::{append_paragraph, normalize_openai_message_text};
 use super::result::LlmResult;
+
+fn render_reasoning_summary_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.trim().to_string(),
+        serde_json::Value::Array(items) => {
+            let mut out = String::new();
+            for item in items {
+                append_paragraph(&mut out, &render_reasoning_summary_value(item));
+            }
+            out
+        }
+        serde_json::Value::Object(object) => {
+            if let Some(text) = object.get("text").and_then(|value| value.as_str()) {
+                return text.trim().to_string();
+            }
+            if let Some(summary) = object.get("summary") {
+                return render_reasoning_summary_value(summary);
+            }
+            if let Some(content) = object.get("content") {
+                return render_reasoning_summary_value(content);
+            }
+            String::new()
+        }
+        _ => String::new(),
+    }
+}
+
+fn extract_openai_reasoning_summary(
+    json: &serde_json::Value,
+    message: &serde_json::Value,
+) -> String {
+    let mut summary = String::new();
+    for value in [
+        message.get("reasoning_summary"),
+        message.get("thinking_summary"),
+        message
+            .get("reasoning")
+            .and_then(|value| value.get("summary")),
+        json.get("reasoning_summary"),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        append_paragraph(&mut summary, &render_reasoning_summary_value(value));
+    }
+
+    if let Some(output) = json.get("output").and_then(|value| value.as_array()) {
+        for item in output {
+            if item.get("type").and_then(|value| value.as_str()) == Some("reasoning") {
+                if let Some(value) = item.get("summary") {
+                    append_paragraph(&mut summary, &render_reasoning_summary_value(value));
+                }
+            }
+        }
+    }
+    summary
+}
 
 /// Parse a complete (non-streaming) LLM JSON response into an `LlmResult`.
 pub(crate) fn parse_llm_response(
@@ -120,6 +177,7 @@ pub(crate) fn parse_llm_response(
             } else {
                 Some(thinking_text)
             },
+            thinking_summary: None,
             stop_reason,
             blocks,
         })
@@ -132,6 +190,7 @@ pub(crate) fn parse_llm_response(
 
         let message = &json["choices"][0]["message"];
         let (text, extracted_thinking) = normalize_openai_message_text(message);
+        let reasoning_summary = extract_openai_reasoning_summary(json, message);
         let mut blocks = if text.is_empty() {
             Vec::new()
         } else {
@@ -146,6 +205,13 @@ pub(crate) fn parse_llm_response(
                     "visibility": "private",
                 }),
             );
+        }
+        if !reasoning_summary.is_empty() {
+            blocks.push(serde_json::json!({
+                "type": "reasoning_summary",
+                "text": reasoning_summary.clone(),
+                "visibility": "private",
+            }));
         }
 
         let mut tool_calls = Vec::new();
@@ -247,6 +313,7 @@ pub(crate) fn parse_llm_response(
         });
         if text.is_empty()
             && extracted_thinking.is_empty()
+            && reasoning_summary.is_empty()
             && output_tokens > 0
             && tool_calls.is_empty()
             && !has_tool_search_block
@@ -269,6 +336,11 @@ pub(crate) fn parse_llm_response(
                 None
             } else {
                 Some(extracted_thinking)
+            },
+            thinking_summary: if reasoning_summary.is_empty() {
+                None
+            } else {
+                Some(reasoning_summary)
             },
             stop_reason,
             blocks,
@@ -501,6 +573,39 @@ mod tests {
             .expect("tool_references array");
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0]["tool_name"].as_str(), Some("get_weather"));
+    }
+
+    #[test]
+    fn openai_parser_surfaces_reasoning_summary_separate_from_text() {
+        let resolved = crate::llm::helpers::ResolvedProvider::resolve("openai");
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "Final answer.",
+                    "reasoning_summary": [
+                        {"type": "summary_text", "text": "Checked the constraints."},
+                        {"type": "summary_text", "text": "Chose the direct answer."}
+                    ]
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 7}
+        });
+
+        let result =
+            parse_llm_response(&response, "openai", "o3", &resolved).expect("parser succeeds");
+
+        assert_eq!(result.text, "Final answer.");
+        assert_eq!(
+            result.thinking_summary.as_deref(),
+            Some("Checked the constraints.\nChose the direct answer.")
+        );
+        assert_eq!(result.thinking, None);
+        assert!(result.blocks.iter().any(|block| {
+            block.get("type").and_then(|value| value.as_str()) == Some("reasoning_summary")
+                && block.get("text").and_then(|value| value.as_str())
+                    == Some("Checked the constraints.\nChose the direct answer.")
+        }));
     }
 
     #[test]

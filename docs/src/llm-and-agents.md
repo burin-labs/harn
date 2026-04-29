@@ -155,6 +155,7 @@ only accepts base64 image data, so `url` image blocks are rejected for
 | `tool_calls` | list | Tool calls (when model uses tools) |
 | `thinking` | string | Reasoning trace (when `thinking` is enabled) |
 | `private_reasoning` | string | Provider reasoning metadata kept separate from visible text |
+| `thinking_summary` | string | Provider-supplied reasoning summary kept separate from visible text |
 | `blocks` | list | Canonical structured content blocks across providers |
 | `stop_reason` | string | `"end_turn"`, `"max_tokens"`, `"tool_use"`, `"stop_sequence"` |
 | `transcript` | dict | Transcript carrying message history, events, summary, metadata, and id |
@@ -478,6 +479,8 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 //   native_tools: true, defer_loading: true,
 //   tool_search: ["bm25", "regex"], max_tools: 10000,
 //   prompt_caching: true, thinking: true, vision_supported: true,
+//   requires_completion_tokens: false,
+//   reasoning_effort_supported: false,
 // }
 
 if "bm25" in caps.tool_search {

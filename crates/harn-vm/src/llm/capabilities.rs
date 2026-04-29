@@ -106,6 +106,13 @@ pub struct ProviderRule {
     /// Some OpenAI-compatible servers silently drop unknown kwargs.
     #[serde(default)]
     pub honors_chat_template_kwargs: Option<bool>,
+    /// Whether this route requires OpenAI's `max_completion_tokens`
+    /// request field instead of legacy `max_tokens`.
+    #[serde(default)]
+    pub requires_completion_tokens: Option<bool>,
+    /// Whether this route accepts OpenAI's `reasoning_effort` request field.
+    #[serde(default)]
+    pub reasoning_effort_supported: Option<bool>,
     /// Preferred endpoint family for this provider/model route. Values
     /// are descriptive labels consumed by providers, e.g.
     /// `/api/generate-raw` for Ollama raw prompt bypass.
@@ -135,6 +142,8 @@ pub struct Capabilities {
     pub preserve_thinking: bool,
     pub server_parser: String,
     pub honors_chat_template_kwargs: bool,
+    pub requires_completion_tokens: bool,
+    pub reasoning_effort_supported: bool,
     pub recommended_endpoint: Option<String>,
     pub text_tool_wire_format_supported: bool,
 }
@@ -155,6 +164,8 @@ impl Default for Capabilities {
             preserve_thinking: false,
             server_parser: "none".to_string(),
             honors_chat_template_kwargs: false,
+            requires_completion_tokens: false,
+            reasoning_effort_supported: false,
             recommended_endpoint: None,
             text_tool_wire_format_supported: true,
         }
@@ -397,6 +408,8 @@ fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
             .clone()
             .unwrap_or_else(|| "none".to_string()),
         honors_chat_template_kwargs: rule.honors_chat_template_kwargs.unwrap_or(false),
+        requires_completion_tokens: rule.requires_completion_tokens.unwrap_or(false),
+        reasoning_effort_supported: rule.reasoning_effort_supported.unwrap_or(false),
         recommended_endpoint: rule.recommended_endpoint.clone(),
         text_tool_wire_format_supported: rule.text_tool_wire_format_supported.unwrap_or(true),
     }
@@ -549,6 +562,11 @@ mod tests {
         reset();
         let caps = lookup("openai", "o3");
         assert_eq!(caps.thinking_modes, vec!["effort"]);
+        assert!(caps.requires_completion_tokens);
+        assert!(caps.reasoning_effort_supported);
+        let prefixed = lookup("openrouter", "openai/o4-mini");
+        assert!(prefixed.requires_completion_tokens);
+        assert!(prefixed.reasoning_effort_supported);
     }
 
     #[test]

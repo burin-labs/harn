@@ -985,6 +985,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         } else {
             Some(thinking_text)
         },
+        thinking_summary: None,
         stop_reason,
         blocks,
     })
@@ -1102,6 +1103,7 @@ async fn vm_call_llm_api_ndjson_from_response(
         // right label without additional plumbing.
         provider: provider.to_string(),
         thinking,
+        thinking_summary: None,
         stop_reason: None,
         blocks,
     })

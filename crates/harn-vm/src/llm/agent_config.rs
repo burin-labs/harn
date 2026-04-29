@@ -211,6 +211,7 @@ pub(crate) fn agent_loop_result_from_llm(
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
             "tool_calls": result.tool_calls.clone(),
+            "thinking_summary": result.thinking_summary,
             "cost_usd": crate::llm::cost::calculate_cost_for_provider(
                 &result.provider,
                 &result.model,
@@ -233,11 +234,23 @@ pub(crate) fn agent_loop_result_from_llm(
             ));
         }
     }
+    if let Some(summary) = result.thinking_summary.clone() {
+        if !summary.is_empty() {
+            events.push(transcript_event(
+                "thinking_summary",
+                "assistant",
+                "private",
+                &summary,
+                None,
+            ));
+        }
+    }
     serde_json::json!({
         "status": "done",
         "text": result.text,
         "visible_text": result.text,
         "private_reasoning": result.thinking,
+        "thinking_summary": result.thinking_summary,
         "llm": {
             "iterations": 1,
             "duration_ms": 0,
@@ -289,6 +302,7 @@ pub(crate) fn build_llm_call_result(
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
             "tool_calls": result.tool_calls.clone(),
+            "thinking_summary": result.thinking_summary,
             "structural_experiment": opts.applied_structural_experiment.as_ref(),
         })),
     )];
@@ -299,6 +313,17 @@ pub(crate) fn build_llm_call_result(
                 "assistant",
                 "private",
                 &thinking,
+                None,
+            ));
+        }
+    }
+    if let Some(summary) = result.thinking_summary.clone() {
+        if !summary.is_empty() {
+            extra_events.push(transcript_event(
+                "thinking_summary",
+                "assistant",
+                "private",
+                &summary,
                 None,
             ));
         }

@@ -507,6 +507,7 @@ pub(super) fn dump_llm_response(
         // Explicit bool for easy cache-regression spotting in tailed logs.
         "cache_hit": result.cache_read_tokens > 0,
         "thinking": result.thinking,
+        "thinking_summary": result.thinking_summary,
         "response_ms": response_ms,
         "structural_experiment": structural_experiment,
     }));

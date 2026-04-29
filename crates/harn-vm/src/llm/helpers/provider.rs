@@ -302,7 +302,10 @@ pub(crate) fn vm_resolve_model(
 pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
     use crate::llm_config;
 
-    if provider == "mock" || crate::llm::mock::cli_llm_mock_replay_active() {
+    if provider == "mock"
+        || crate::llm::mock::cli_llm_mock_replay_active()
+        || crate::llm::mock::builtin_llm_mock_active()
+    {
         return Ok(String::new());
     }
 

@@ -55,6 +55,7 @@ pub struct LlmMock {
     pub cache_read_tokens: Option<i64>,
     pub cache_write_tokens: Option<i64>,
     pub thinking: Option<String>,
+    pub thinking_summary: Option<String>,
     pub stop_reason: Option<String>,
     pub model: String,
     pub provider: Option<String>,
@@ -95,6 +96,10 @@ pub(crate) fn push_llm_mock(mock: LlmMock) {
 
 pub(crate) fn get_llm_mock_calls() -> Vec<LlmMockCall> {
     LLM_MOCK_CALLS.with(|v| v.borrow().clone())
+}
+
+pub(crate) fn builtin_llm_mock_active() -> bool {
+    LLM_MOCKS.with(|v| !v.borrow().is_empty())
 }
 
 pub(crate) fn reset_llm_mock_state() {
@@ -233,6 +238,7 @@ fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
         model: mock.model.clone(),
         provider: mock.provider.clone().unwrap_or_else(|| "mock".to_string()),
         thinking: mock.thinking.clone(),
+        thinking_summary: mock.thinking_summary.clone(),
         stop_reason: mock.stop_reason.clone(),
         blocks,
     }
@@ -438,6 +444,7 @@ pub(crate) fn record_cli_llm_result(result: &LlmResult) {
             cache_read_tokens: Some(result.cache_read_tokens),
             cache_write_tokens: Some(result.cache_write_tokens),
             thinking: result.thinking.clone(),
+            thinking_summary: result.thinking_summary.clone(),
             stop_reason: result.stop_reason.clone(),
             model: result.model.clone(),
             provider: Some(result.provider.clone()),
@@ -504,6 +511,7 @@ pub(crate) fn save_fixture(hash: &str, result: &LlmResult) {
         "model": result.model,
         "provider": result.provider,
         "thinking": result.thinking,
+        "thinking_summary": result.thinking_summary,
         "stop_reason": result.stop_reason,
         "blocks": result.blocks,
     });
@@ -534,6 +542,7 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
         model: json["model"].as_str().unwrap_or("").to_string(),
         provider: json["provider"].as_str().unwrap_or("mock").to_string(),
         thinking: json["thinking"].as_str().map(|s| s.to_string()),
+        thinking_summary: json["thinking_summary"].as_str().map(|s| s.to_string()),
         stop_reason: json["stop_reason"].as_str().map(|s| s.to_string()),
         blocks: json["blocks"].as_array().cloned().unwrap_or_default(),
     })
@@ -656,6 +665,7 @@ pub(crate) fn mock_llm_response(
                 model: model.to_string(),
                 provider: "mock".to_string(),
                 thinking: None,
+                thinking_summary: None,
                 stop_reason: None,
                 blocks: vec![serde_json::json!({
                     "type": "tool_call",
@@ -703,6 +713,7 @@ pub(crate) fn mock_llm_response(
         model: model.to_string(),
         provider: "mock".to_string(),
         thinking: None,
+        thinking_summary: None,
         stop_reason: None,
         blocks: vec![serde_json::json!({
             "type": "output_text",

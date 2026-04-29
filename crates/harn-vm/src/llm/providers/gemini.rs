@@ -178,6 +178,7 @@ fn parse_response(
         model: request.model.clone(),
         provider: request.provider.clone(),
         thinking: None,
+        thinking_summary: None,
         stop_reason,
         blocks,
     })

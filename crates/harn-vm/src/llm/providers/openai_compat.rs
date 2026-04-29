@@ -157,8 +157,14 @@ impl OpenAiCompatibleProvider {
             "model": opts.model,
             "messages": msgs,
         });
+        let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
         if opts.max_tokens > 0 {
-            body["max_tokens"] = serde_json::json!(opts.max_tokens);
+            let token_limit_field = if caps.requires_completion_tokens {
+                "max_completion_tokens"
+            } else {
+                "max_tokens"
+            };
+            body[token_limit_field] = serde_json::json!(opts.max_tokens);
         }
         if let Some(temp) = opts.temperature {
             body["temperature"] = serde_json::json!(temp);
@@ -182,8 +188,10 @@ impl OpenAiCompatibleProvider {
             if let Some(reasoning) = openrouter_reasoning_config(&opts.thinking) {
                 body["reasoning"] = reasoning;
             }
-        } else if let ThinkingConfig::Effort { level } = &opts.thinking {
-            body["reasoning_effort"] = serde_json::json!(level.as_str());
+        } else if caps.reasoning_effort_supported {
+            if let ThinkingConfig::Effort { level } = &opts.thinking {
+                body["reasoning_effort"] = serde_json::json!(level.as_str());
+            }
         }
         if opts.response_format.as_deref() == Some("json") {
             if let Some(ref schema) = opts.json_schema {
@@ -207,7 +215,6 @@ impl OpenAiCompatibleProvider {
         if let Some(ref tc) = opts.tool_choice {
             body["tool_choice"] = tc.clone();
         }
-        let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
         if caps.honors_chat_template_kwargs {
             // Always set explicitly for compatible Qwen/DeepSeek
             // templates: some default thinking on when absent, making
@@ -449,7 +456,22 @@ mod tests {
         let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
 
         assert_eq!(body["reasoning_effort"], "high");
+        assert_eq!(body["max_completion_tokens"], 64);
+        assert!(body.get("max_tokens").is_none());
         assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn openai_non_reasoning_model_uses_legacy_max_tokens() {
+        let mut payload = base_request_payload();
+        payload.provider = "openai".to_string();
+        payload.model = "gpt-4o".to_string();
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["max_tokens"], 64);
+        assert!(body.get("max_completion_tokens").is_none());
+        assert!(body.get("reasoning_effort").is_none());
     }
 
     #[test]

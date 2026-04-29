@@ -780,6 +780,8 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 //   tool_search: ["bm25", "regex"], max_tools: 10000,
 //   prompt_caching: true, thinking: true,
 //   thinking_modes: ["adaptive"],
+//   requires_completion_tokens: false,
+//   reasoning_effort_supported: false,
 // }
 
 if "bm25" in caps.tool_search {
@@ -807,6 +809,8 @@ Rule schema (per `[[provider.<name>]]` entry):
 | `max_tools` | int | Cap on tool count (used by `harn lint`). |
 | `prompt_caching` | bool | `cache_control` blocks honored. |
 | `thinking_modes` | `[string]` | Supported script-facing modes: `enabled`, `adaptive`, `effort`. |
+| `requires_completion_tokens` | bool | Use OpenAI `max_completion_tokens` instead of `max_tokens`. |
+| `reasoning_effort_supported` | bool | Provider/model accepts OpenAI `reasoning_effort`. |
 
 First match wins within a provider's rule list. `[provider_family]`
 declares siblings that inherit a canonical family's rules
