@@ -2,32 +2,29 @@
 
 #[path = "support/process.rs"]
 mod process_support;
+mod test_util;
 
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use harn_vm::event_log::{EventLog, SqliteEventLog, Topic};
 use tempfile::TempDir;
+use test_util::timing::{
+    self, ChildExitWatcher, EVENT_FAIL_FAST_TIMEOUT, LOG_RECV_POLL_INTERVAL,
+    PROCESS_FAIL_FAST_TIMEOUT,
+};
 
 // This fixture only exercises cron dispatch + inbox dedupe recovery. Waiting
 // for connector activation is sufficient and avoids a race where the
 // fail-after-emit test hook can terminate the process before the HTTP listener
 // readiness line is logged.
 const STARTUP_NEEDLE: &str = "activated connectors: cron(1)";
-// The previous 5s/2s budgets caused intermittent CI failures on macOS where
-// dyld + amfi cold-cache lookups for the unsigned debug-build binary plus
-// nextest's cargo-test launch overhead pushed subprocess spawn past the
-// budget. Tests serialize through a process-wide file lock, so a generous
-// upper bound only affects the failure path.
-const PROCESS_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(60);
-const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(10);
-
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -57,7 +54,11 @@ fn seed_fixture(temp: &TempDir) {
 fn spawn_orchestrator(
     temp: &TempDir,
     extra_env: &[(&str, &str)],
-) -> (Child, Receiver<String>, thread::JoinHandle<String>) {
+) -> (
+    ChildExitWatcher,
+    Receiver<String>,
+    thread::JoinHandle<String>,
+) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_harn"));
     command
         .current_dir(temp.path())
@@ -94,17 +95,17 @@ fn spawn_orchestrator(
         collected
     });
 
-    (child, rx, handle)
+    (ChildExitWatcher::new(child), rx, handle)
 }
 
-fn wait_for_log_line(child: &mut Child, rx: &Receiver<String>, needle: &str) {
+fn wait_for_log_line(child: &mut ChildExitWatcher, rx: &Receiver<String>, needle: &str) {
     let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
-        match rx.recv_timeout(Duration::from_millis(25)) {
+        match rx.recv_timeout(LOG_RECV_POLL_INTERVAL) {
             Ok(line) if line.contains(needle) => return,
             Ok(_) => continue,
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if let Some(status) = child.try_wait().unwrap() {
+                if let Some(status) = child.try_status().unwrap() {
                     panic!("process exited before '{needle}' appeared: {status}");
                 }
             }
@@ -116,41 +117,16 @@ fn wait_for_log_line(child: &mut Child, rx: &Receiver<String>, needle: &str) {
     panic!("timed out waiting for '{needle}'");
 }
 
-fn wait_for_exit_code(child: &mut Child, expected: i32) {
-    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
-    while Instant::now() < deadline {
-        if let Some(status) = child.try_wait().unwrap() {
-            assert_eq!(
-                status.code(),
-                Some(expected),
-                "unexpected exit status: {status}"
-            );
-            return;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    panic!("timed out waiting for orchestrator exit");
+fn wait_for_exit_code(child: &mut ChildExitWatcher, expected: i32) {
+    child.wait_for_code(PROCESS_FAIL_FAST_TIMEOUT, expected);
 }
 
-fn send_sigterm(child: &Child) {
-    let status = Command::new("kill")
-        .arg("-TERM")
-        .arg(child.id().to_string())
-        .status()
-        .unwrap();
-    assert!(status.success(), "kill exited with {status}");
+fn send_sigterm(child: &mut ChildExitWatcher) {
+    child.terminate();
 }
 
-fn wait_for_successful_exit(child: &mut Child) {
-    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
-    while Instant::now() < deadline {
-        if let Some(status) = child.try_wait().unwrap() {
-            assert!(status.success(), "child exited unsuccessfully: {status}");
-            return;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    panic!("timed out waiting for orchestrator exit");
+fn wait_for_successful_exit(child: &mut ChildExitWatcher) {
+    child.wait_for_success(PROCESS_FAIL_FAST_TIMEOUT);
 }
 
 async fn read_tick_dedupe_counts(temp: &TempDir) -> HashMap<String, usize> {
@@ -181,7 +157,7 @@ async fn wait_for_tick_count(temp: &TempDir, min_count: usize) -> HashMap<String
             Instant::now() < deadline,
             "timed out waiting for {min_count} cron ticks: {counts:?}"
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        timing::sleep_async(timing::RETRY_POLL_INTERVAL).await;
     }
 }
 
@@ -215,7 +191,7 @@ async fn restart_after_emit_does_not_duplicate_cron_dispatch() {
         spawn_orchestrator(&temp, &[("HARN_TEST_CRON_SINGLE_TICK_AT", "1800000001")]);
     wait_for_log_line(&mut second_child, &second_rx, STARTUP_NEEDLE);
     let counts = wait_for_tick_count(&temp, 2).await;
-    send_sigterm(&second_child);
+    send_sigterm(&mut second_child);
     wait_for_successful_exit(&mut second_child);
     let second_stderr = second_handle.join().expect("stderr collector thread");
     assert!(second_stderr.contains("registered connectors (1): cron"));

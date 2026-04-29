@@ -1,8 +1,12 @@
+mod test_util;
+
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
+use std::time::Duration;
 
 use tempfile::TempDir;
+use test_util::timing;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -184,7 +188,7 @@ pub fn on_issue(event: TriggerEvent) -> dict {
     let seeded = seed_event(&temp, "delivery-as-of-v1");
     let event_id = seeded["event_id"].as_str().unwrap().to_string();
     let as_of = OffsetDateTime::now_utc();
-    std::thread::sleep(std::time::Duration::from_millis(10));
+    timing::sleep_blocking(Duration::from_millis(10));
 
     write_file(
         temp.path(),
