@@ -220,6 +220,30 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "command_llm_risk_scan",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "command_policy",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "command_policy_pop",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "command_policy_push",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "command_result_scan",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "command_risk_scan",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "channel_select",
         return_type: None,
     },

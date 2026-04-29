@@ -34,6 +34,8 @@ pub struct AgentLoopConfig {
     pub auto_compact: Option<crate::orchestration::AutoCompactConfig>,
     /// Capability policy scoped to this agent loop.
     pub policy: Option<crate::orchestration::CapabilityPolicy>,
+    /// Command-runner pre/post policy scoped to this agent loop.
+    pub command_policy: Option<crate::orchestration::CommandPolicy>,
     /// Dynamic per-agent permission rules, including VM predicates and escalation.
     pub permissions: Option<crate::llm::permissions::DynamicPermissionPolicy>,
     /// Declarative approval policy (auto-approve / auto-deny / require host confirmation).
@@ -94,6 +96,19 @@ pub struct AgentLoopConfig {
     pub skill_match: super::agent::SkillMatchConfig,
     /// Working file set fed into `paths:` auto-trigger scoring.
     pub working_files: Vec<String>,
+}
+
+pub(crate) fn parse_command_policy_from_options(
+    options: &Option<std::collections::BTreeMap<String, VmValue>>,
+    label: &str,
+) -> Result<Option<crate::orchestration::CommandPolicy>, crate::value::VmError> {
+    let direct = options.as_ref().and_then(|o| o.get("command_policy"));
+    let nested = options
+        .as_ref()
+        .and_then(|o| o.get("policy"))
+        .and_then(|value| value.as_dict())
+        .and_then(|policy| policy.get("command_policy"));
+    crate::orchestration::parse_command_policy_value(direct.or(nested), label)
 }
 
 impl std::fmt::Debug for AgentLoopConfig {
@@ -380,6 +395,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 serde_json::from_value::<crate::orchestration::CapabilityPolicy>(json)
                     .unwrap_or_default()
             });
+            let command_policy = parse_command_policy_from_options(&options, "agent_loop")?;
             let approval_policy =
                 options
                     .as_ref()
@@ -420,6 +436,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     native_tool_fallback,
                     auto_compact,
                     policy,
+                    command_policy,
                     permissions,
                     approval_policy,
                     daemon,

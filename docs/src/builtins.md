@@ -1308,6 +1308,24 @@ let result = try { host_call("project.scan", {}) }
 assert(is_err(result))
 ```
 
+## Command Policy
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `command_policy(config)` | config: dict | dict | Normalize a command-runner policy with workspace roots, deterministic deny/approval rules, and optional pre/post closures |
+| `command_policy_push(policy)` | policy: dict | nil | Install a command policy for the current VM scope |
+| `command_policy_pop()` | — | nil | Remove the most recently installed command policy |
+| `command_risk_scan(ctx)` | ctx: dict | dict | Run deterministic command-risk classification and return labels, confidence, rationale, and recommended action |
+| `command_result_scan(ctx)` | ctx: dict | dict | Classify a command result envelope for unsafe output or audit annotations |
+| `command_llm_risk_scan(ctx, options?)` | ctx: dict, options: dict | dict | Return the structured risk-scan helper shape with redacted options; deterministic fallback does not make network calls |
+
+Install policies directly or pass them to `agent_loop` with
+`command_policy: policy` / `policy: {command_policy: policy}`. Active policies
+wrap `host_call("process.exec", ...)`: pre-hooks run before spawn, blocked
+decisions return a `status: "blocked"` envelope without starting a child
+process, post-hooks can annotate the command audit, and hook recursion is
+denied unless `allow_recursive: true`.
+
 ## Async and timing
 
 | Function | Parameters | Returns | Description |

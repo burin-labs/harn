@@ -9,6 +9,7 @@ pub mod asset_paths;
 mod bytes;
 mod clock;
 mod collections;
+mod command_policy;
 mod compression;
 mod concurrency;
 mod connectors;
@@ -80,6 +81,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     regex::register_regex_builtins(vm);
     bytes::register_bytes_builtins(vm);
     compression::register_compression_builtins(vm);
+    command_policy::register_command_policy_builtins(vm);
     crypto::register_crypto_builtins(vm);
     csv::register_csv_builtins(vm);
     junit::register_junit_builtins(vm);

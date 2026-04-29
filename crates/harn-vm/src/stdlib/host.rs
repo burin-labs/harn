@@ -445,22 +445,46 @@ async fn dispatch_host_operation(
 
     match (capability, operation) {
         ("process", "exec") => {
-            let (program, args) = process_exec_argv(params)?;
-            let timeout_ms = optional_i64(params, "timeout")
-                .or_else(|| optional_i64(params, "timeout_ms"))
+            let caller = serde_json::json!({
+                "surface": "host_call",
+                "capability": "process",
+                "operation": "exec",
+                "session_id": crate::llm::current_agent_session_id(),
+            });
+            let (params, command_policy_context, command_policy_decisions) =
+                match crate::orchestration::run_command_policy_preflight(params, caller).await? {
+                    crate::orchestration::CommandPolicyPreflight::Proceed {
+                        params,
+                        context,
+                        decisions,
+                    } => (params, context, decisions),
+                    crate::orchestration::CommandPolicyPreflight::Blocked {
+                        status,
+                        message,
+                        context,
+                        decisions,
+                    } => {
+                        return Ok(crate::orchestration::blocked_command_response(
+                            params, status, &message, context, decisions,
+                        ));
+                    }
+                };
+            let (program, args) = process_exec_argv(&params)?;
+            let timeout_ms = optional_i64(&params, "timeout")
+                .or_else(|| optional_i64(&params, "timeout_ms"))
                 .filter(|value| *value > 0)
                 .map(|value| value as u64);
             let mut cmd =
                 crate::process_sandbox::tokio_command_for(&program, &args).map_err(|e| {
                     VmError::Runtime(format!("host_call process.exec sandbox setup: {e}"))
                 })?;
-            if let Some(cwd) = optional_string(params, "cwd") {
+            if let Some(cwd) = optional_string(&params, "cwd") {
                 crate::process_sandbox::enforce_process_cwd(std::path::Path::new(&cwd))
                     .map_err(|e| VmError::Runtime(format!("host_call process.exec cwd: {e}")))?;
                 cmd.current_dir(cwd);
             }
-            if let Some(env) = optional_string_dict(params, "env")? {
-                let env_mode = optional_string(params, "env_mode");
+            if let Some(env) = optional_string_dict(&params, "env")? {
+                let env_mode = optional_string(&params, "env_mode");
                 if env_mode.as_deref().unwrap_or("replace") == "replace" {
                     cmd.env_clear();
                 }
@@ -491,7 +515,7 @@ async fn dispatch_host_operation(
                         result
                     }
                     Err(_) => {
-                        return Ok(process_exec_response(ProcessExecResponse {
+                        let response = process_exec_response(ProcessExecResponse {
                             pid,
                             started_at,
                             started,
@@ -501,7 +525,14 @@ async fn dispatch_host_operation(
                             status: "timed_out",
                             success: false,
                             timed_out: true,
-                        }));
+                        });
+                        return crate::orchestration::run_command_policy_postflight(
+                            &params,
+                            response,
+                            command_policy_context,
+                            command_policy_decisions,
+                        )
+                        .await;
                     }
                 }
             } else {
@@ -513,7 +544,7 @@ async fn dispatch_host_operation(
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             let exit_code = output.status.code().unwrap_or(-1);
-            Ok(process_exec_response(ProcessExecResponse {
+            let response = process_exec_response(ProcessExecResponse {
                 pid,
                 started_at,
                 started,
@@ -523,7 +554,14 @@ async fn dispatch_host_operation(
                 status: if timed_out { "timed_out" } else { "completed" },
                 success: output.status.success(),
                 timed_out,
-            }))
+            });
+            crate::orchestration::run_command_policy_postflight(
+                &params,
+                response,
+                command_policy_context,
+                command_policy_decisions,
+            )
+            .await
         }
         ("template", "render") => {
             let path = require_param(params, "path")?;

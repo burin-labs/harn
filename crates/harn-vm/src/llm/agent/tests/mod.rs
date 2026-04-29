@@ -95,6 +95,7 @@ pub(super) fn base_agent_config() -> AgentLoopConfig {
         native_tool_fallback: crate::orchestration::NativeToolFallbackPolicy::Allow,
         auto_compact: None,
         policy: None,
+        command_policy: None,
         permissions: None,
         approval_policy: None,
         daemon: false,

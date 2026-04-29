@@ -1451,6 +1451,21 @@ pub async fn execute_stage_node(
                     native_tool_fallback: node.model_policy.native_tool_fallback,
                     auto_compact,
                     policy: Some(effective_policy),
+                    command_policy: crate::orchestration::parse_command_policy_value(
+                        node.raw_model_policy
+                            .as_ref()
+                            .and_then(|value| value.as_dict())
+                            .and_then(|dict| dict.get("command_policy"))
+                            .or_else(|| {
+                                node.raw_model_policy
+                                    .as_ref()
+                                    .and_then(|value| value.as_dict())
+                                    .and_then(|dict| dict.get("policy"))
+                                    .and_then(|value| value.as_dict())
+                                    .and_then(|policy| policy.get("command_policy"))
+                            }),
+                        "workflow model_policy",
+                    )?,
                     permissions,
                     approval_policy: Some(node.approval_policy.clone()),
                     daemon: false,

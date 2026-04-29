@@ -55,6 +55,20 @@ impl Drop for ApprovalPolicyGuard {
     }
 }
 
+/// Pops the loop-local command-runner policy off the stack when the
+/// loop exits.
+pub(super) struct CommandPolicyGuard {
+    pub(super) active: bool,
+}
+
+impl Drop for CommandPolicyGuard {
+    fn drop(&mut self) {
+        if self.active {
+            crate::orchestration::pop_command_policy();
+        }
+    }
+}
+
 /// Pops the loop-local dynamic permission policy off the stack when
 /// the loop exits. Only pops if the loop actually pushed a policy.
 pub(super) struct DynamicPermissionPolicyGuard {
@@ -562,6 +576,7 @@ pub(super) struct AgentLoopState {
 
     // Drop guards: see "Drop ordering" on the struct docs.
     pub(super) _permission_guard: DynamicPermissionPolicyGuard,
+    pub(super) _command_policy_guard: CommandPolicyGuard,
     pub(super) _approval_guard: ApprovalPolicyGuard,
     pub(super) _policy_guard: ExecutionPolicyGuard,
     pub(super) _sink_guard: SessionSinkGuard,
@@ -965,6 +980,13 @@ impl AgentLoopState {
             active: effective_approval_policy.is_some(),
         };
 
+        if let Some(ref policy) = config.command_policy {
+            crate::orchestration::push_command_policy(policy.clone());
+        }
+        let _command_policy_guard = CommandPolicyGuard {
+            active: config.command_policy.is_some(),
+        };
+
         let effective_permissions = config.permissions.clone();
         if let Some(ref permissions) = effective_permissions {
             crate::llm::permissions::push_dynamic_permission_policy(permissions.clone());
@@ -1307,6 +1329,7 @@ impl AgentLoopState {
             working_files: config_working_files,
             native_tools_snapshot,
             _permission_guard,
+            _command_policy_guard,
             _approval_guard,
             _policy_guard,
             _sink_guard,

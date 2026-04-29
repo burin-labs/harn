@@ -27,6 +27,9 @@ pub(crate) fn default_run_dir() -> PathBuf {
 mod hooks;
 pub use hooks::*;
 
+mod command_policy;
+pub use command_policy::*;
+
 mod compaction;
 pub use compaction::*;
 
