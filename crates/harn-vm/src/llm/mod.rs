@@ -667,15 +667,13 @@ pub(crate) async fn execute_schema_retry_loop(
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
 ) -> Result<SchemaLoopOutcome, VmError> {
     let _ = structural_experiments::apply_structural_experiment(&mut opts, None).await?;
-    // Default `llm_retries` to 2 for resilience against transient
-    // HTTP / provider failures on the non-bridge path; bridge callers
-    // default to 0 to match the historical bridge-aware `llm_call`
-    // behavior (the host drives retries). Pass `llm_retries: 0` to opt
-    // out explicitly.
-    let transient_default = if bridge.is_some() { 0 } else { 2 };
     let retry_config = agent_observe::LlmRetryConfig {
-        retries: helpers::opt_int(&options, "llm_retries").unwrap_or(transient_default) as usize,
-        backoff_ms: helpers::opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
+        retries: helpers::opt_int(&options, "llm_retries")
+            .unwrap_or(agent_observe::DEFAULT_LLM_CALL_RETRIES as i64)
+            .max(0) as usize,
+        backoff_ms: helpers::opt_int(&options, "llm_backoff_ms")
+            .unwrap_or(agent_observe::DEFAULT_LLM_CALL_BACKOFF_MS as i64)
+            .max(0) as u64,
     };
     // Schema retry loop is orthogonal to transient retries. Each
     // schema retry gets a fresh transient budget. Small/local models

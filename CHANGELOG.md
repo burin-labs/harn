@@ -11,6 +11,12 @@ granular archaeology.
 
 ### Added
 
+- **Native `llm_call` transport retries (#853).** Raw `llm_call` and
+  structured wrappers now accept `llm_retries` and `llm_backoff_ms` for
+  transient provider failures, sharing the canonical LLM error taxonomy while
+  keeping schema retries independent. Plain `llm_call` remains fail-fast by
+  default (`llm_retries: 0`, `llm_backoff_ms: 250`).
+
 - **Canonical LLM error taxonomy (#854).** Provider transport errors now surface
   `kind` (`"transient"` / `"terminal"`) and `reason` (`"rate_limit"`,
   `"server_error"`, `"network_error"`, `"timeout"`, `"auth_failure"`,

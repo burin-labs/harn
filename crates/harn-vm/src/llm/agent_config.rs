@@ -9,7 +9,9 @@ use crate::value::VmValue;
 use crate::vm::Vm;
 
 use super::agent::run_agent_loop_internal;
-use super::agent_observe::{observed_llm_call, LlmRetryConfig};
+use super::agent_observe::{
+    observed_llm_call, LlmRetryConfig, DEFAULT_LLM_CALL_BACKOFF_MS, DEFAULT_LLM_CALL_RETRIES,
+};
 use super::daemon::{parse_daemon_loop_config, DaemonLoopConfig};
 use super::helpers::{
     extract_llm_options, opt_bool, opt_int, opt_str, transcript_event, transcript_to_vm_with_events,
@@ -674,13 +676,15 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
             let options = args.get(2).and_then(|a| a.as_dict()).cloned();
             let user_visible = opt_bool(&options, "user_visible");
             // Match the non-bridge `llm_call` default (see
-            // `crate::llm::execute_llm_call`): transient HTTP/provider
-            // failures retry twice by default; pass `llm_retries: 0` to
-            // opt out. Schema validation errors are orthogonal and
-            // handled by `schema_retries`.
+            // `crate::llm::execute_llm_call`): fail fast unless the caller
+            // opts into transient HTTP/provider retries.
             let retry_config = LlmRetryConfig {
-                retries: opt_int(&options, "llm_retries").unwrap_or(2) as usize,
-                backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
+                retries: opt_int(&options, "llm_retries")
+                    .unwrap_or(DEFAULT_LLM_CALL_RETRIES as i64)
+                    .max(0) as usize,
+                backoff_ms: opt_int(&options, "llm_backoff_ms")
+                    .unwrap_or(DEFAULT_LLM_CALL_BACKOFF_MS as i64)
+                    .max(0) as u64,
             };
             let _ =
                 crate::llm::structural_experiments::apply_structural_experiment(&mut opts, None)

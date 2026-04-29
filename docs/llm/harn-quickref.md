@@ -610,8 +610,8 @@ println(response.output_tokens)
 | `output_validation` | string | `"off"` | `"error"` throws on mismatch; `"warn"` logs. |
 | `schema_retries` | int | 1 | When validation fails, re-prompt up to N times with a corrective user turn. Each retry is a single-turn correction — the invalid response is NOT persisted; the original messages are replayed with one appended user-role correction citing the validation errors + schema. Works alongside `output_validation: "error"`. |
 | `schema_retry_nudge` | string \| bool | auto | String = verbatim corrective message (+ validation errors appended). `true` = auto nudge from schema required/properties keys. `false` = bare retry — replays the original messages unchanged, no correction appended. |
-| `llm_retries` | int | 2 | Retries on transient HTTP / provider errors. Set to 0 for fail-fast. |
-| `llm_backoff_ms` | int | 2000 | Base exponential backoff. |
+| `llm_retries` | int | 0 | Retries on transient HTTP / provider errors. Raw `llm_call` is fail-fast by default; set to N to allow N retries after the first attempt. |
+| `llm_backoff_ms` | int | 250 | Base exponential backoff in milliseconds. |
 | `stream` | bool | true | SSE streaming transport. |
 
 ### Tool executor declarations
