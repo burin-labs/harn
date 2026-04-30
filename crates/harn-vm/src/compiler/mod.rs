@@ -496,6 +496,9 @@ impl Compiler {
             Node::Retry { count, body } => {
                 self.compile_retry(count, body)?;
             }
+            Node::CostRoute { options, body } => {
+                self.compile_cost_route(options, body)?;
+            }
             Node::Parallel {
                 mode,
                 expr,

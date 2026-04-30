@@ -69,6 +69,7 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__agent_state_read",
     "__agent_state_resume",
     "__agent_state_write",
+    "__cost_route",
     "__dict_rest",
     "__memory_forget",
     "__memory_recall",

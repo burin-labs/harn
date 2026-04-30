@@ -685,6 +685,12 @@ fn collect_calls(node: &SNode, calls: &mut Vec<CallSite>) {
                 collect_calls_in_body(summarize, calls);
             }
         }
+        Node::CostRoute { options, body } => {
+            for (_, value) in options {
+                collect_calls(value, calls);
+            }
+            collect_calls_in_body(body, calls);
+        }
         Node::ImportDecl { .. }
         | Node::SelectiveImport { .. }
         | Node::EnumDecl { .. }

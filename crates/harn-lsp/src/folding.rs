@@ -96,6 +96,13 @@ fn collect_ast_ranges(
                 collect_body_ranges(summarize, ranges, seen);
             }
         }
+        Node::CostRoute { options, body } => {
+            push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
+            for (_, value) in options {
+                collect_ast_ranges(value, ranges, seen);
+            }
+            collect_body_ranges(body, ranges, seen);
+        }
         Node::EnumDecl { .. }
         | Node::StructDecl { .. }
         | Node::InterfaceDecl { .. }
