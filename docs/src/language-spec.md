@@ -256,6 +256,7 @@ let doc = """
 | `%` | `.percent` | Modulo |
 | `?` | `.question` | Ternary / Result propagation |
 | `\|` | `.bar` | Union types |
+| `&` | `.amp` | Intersection types |
 
 #### Keyword operators
 
@@ -2960,6 +2961,31 @@ type ActionContainer<T> = {action: T, process_action: fn(T) -> nil}
 ActionContainer<"edit">`, and a literal-tagged shape on the right flows
 into the matching branch.
 
+### Intersection types
+
+```harn
+type BaseCtx = {request_id: string}
+type AuthCtx = {user_id: string}
+
+fn use_ctx(ctx: BaseCtx & AuthCtx) -> string {
+  return ctx.request_id + "/" + ctx.user_id
+}
+```
+
+`A & B` requires the value to satisfy *every* component. The intersection
+of two shape types behaves like a dict that has every field from each
+component, so `ctx.request_id` and `ctx.user_id` are both accessible
+above. Shape components may be inline or named aliases; the operator
+nests freely (`A & B & C`).
+
+`&` binds tighter than `|`, so `A & B | C` parses as `(A & B) | C`. Use
+parentheses to write the union-of-intersections form.
+
+At runtime, an intersection annotation lowers to a JSON-Schema `allOf`
+guard. A value that is missing a field required by *any* component is
+rejected by the parameter-annotation runtime check just like a single
+shape mismatch is.
+
 ### Parameterized types
 
 ```harn
@@ -3137,6 +3163,21 @@ wrappers pick up the same narrowing.
 - `schema_parse<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
 - `schema_check<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
 - `schema_expect<T>(value: unknown, schema: Schema<T>) -> T`
+- `schema_recover<T>(text: string, schema: Schema<T>, options?:
+  {llm_repair?: bool | dict, apply_defaults?: bool,
+  ...llm_call_overrides}) -> {ok: bool, data: T | nil, raw_text:
+  string, error: string, error_category: string | nil, attempts: int,
+  stage: string, repaired: bool}`. Best-effort recovery of malformed
+  LLM output against a target schema. Three deterministic stages
+  followed by an optional one-shot LLM repair: `parsed` (direct
+  `serde_json` parse) → `extracted` (lift JSON from prose / code
+  fences) → `regex` (scrape top-level `key: value` lines for scalar
+  fields) → `llm_repair` (single-shot `llm_call` with `schema_retries:
+  0`). `stage` reports which stage produced the result; `failed` means
+  every stage exhausted. Set `{llm_repair: false}` for a fully
+  deterministic recovery pass with no LLM calls. The LLM repair stage
+  accepts the same overrides as `llm_call_structured_result`'s
+  `repair`.
 
 `Schema<T>` denotes a runtime schema value whose static shape is `T`.
 In a parameter position, matching a `Schema<T>` against an argument
@@ -3164,10 +3205,26 @@ typechecker support.
 runtime `schema_of(T)` builtin returns an idiomatic schema dict
 whose static type is `Schema<T>`.
 
-### Human-in-the-loop stdlib
+### Human-in-the-loop primitives
 
-Human-in-the-loop is modeled as typed stdlib primitives rather than special
-syntax. The runtime owns blocking semantics, timeout behavior, event-log
+Human-in-the-loop is modeled as **first-class typed expression syntax**.
+`ask_user`, `request_approval`, `dual_control`, and `escalate_to` are
+reserved keywords with VM-enforced semantics: their names cannot be
+shadowed or rebound, the result envelopes are produced (and signed) by
+the runtime, and quorum approval requires distinct principals. Each
+primitive accepts either named arguments or the legacy positional form;
+both lower to the same runtime.
+
+```harn,ignore
+let answer = ask_user(prompt: "deploy now?", schema: schema_of(Choice))
+let record = request_approval(action: "merge_pr", quorum: 2,
+                              reviewers: ["alice", "bob", "carol"])
+let merged = dual_control(n: 2, m: 3, action: destructive_step,
+                          approvers: ["alice", "bob", "carol"])
+let handle = escalate_to(role: "oncall", reason: "deploy failed")
+```
+
+The runtime owns blocking semantics, timeout behavior, event-log
 records, and replay.
 
 - `ask_user<T>(prompt: string, options?: {schema?: Schema<T>, timeout?: duration, default?: T}) -> T`
@@ -4674,7 +4731,7 @@ Permission denied: builtin 'read_file' is not allowed in sandbox mode
 ### --allow
 
 ```bash
-harn run --allow llm,llm_stream script.harn
+harn run --allow llm,llm_stream,llm_stream_call script.harn
 ```
 
 Allows only the listed builtins plus the core builtins (see below). All
@@ -4769,7 +4826,7 @@ they are intended for test pipelines and the linter warns on non-test use:
 During `harn test`, the `HARN_LLM_PROVIDER` environment variable is
 automatically set to `"mock"` unless explicitly overridden. The mock
 provider returns deterministic placeholder responses, allowing tests
-that call `llm` or `llm_stream` to run without API keys.
+that call `llm`, `llm_stream`, or `llm_stream_call` to run without API keys.
 
 ### CLI options
 
