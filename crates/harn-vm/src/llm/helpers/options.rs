@@ -46,9 +46,8 @@ fn route_target_from_short(target: &str) -> Result<(String, String), crate::valu
             return Ok((resolved_model, provider.trim().to_string()));
         }
     }
-    let (model, provider) = crate::llm_config::resolve_model(target);
-    let provider = provider.unwrap_or_else(|| crate::llm_config::infer_provider(&model));
-    Ok((model, provider))
+    let resolved = crate::llm_config::resolve_model_info(target);
+    Ok((resolved.id, resolved.provider))
 }
 
 fn parse_route_policy_text(text: &str) -> Result<crate::llm::api::LlmRoutePolicy, VmError> {

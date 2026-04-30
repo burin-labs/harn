@@ -10,6 +10,76 @@ use std::collections::HashSet;
 use super::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::value::VmError;
 
+/// Source of an automatic provider inference decision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProviderInferenceSource {
+    /// The model id matched a transport/model prefix that Harn knows natively.
+    BuiltinRule,
+    /// No rule matched and the configured default provider was used.
+    DefaultFallback,
+}
+
+/// Result of resolving `provider: "auto"` from a model id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProviderInference {
+    pub provider: String,
+    pub source: ProviderInferenceSource,
+}
+
+impl ProviderInference {
+    pub(crate) fn builtin(provider: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            source: ProviderInferenceSource::BuiltinRule,
+        }
+    }
+
+    pub(crate) fn default(provider: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            source: ProviderInferenceSource::DefaultFallback,
+        }
+    }
+}
+
+/// Infer a provider from well-known provider/model id shapes.
+///
+/// This is the built-in rule set used after user-configured inference rules.
+/// It deliberately matches only one `/` for OpenRouter so provider-native paths
+/// with deeper resource hierarchies can fall through to explicit config rules
+/// or the default provider instead of being swallowed by OpenRouter.
+pub(crate) fn infer_provider_from_model_id(
+    model_id: &str,
+    default_provider: &str,
+) -> ProviderInference {
+    if model_id.starts_with("local:") || model_id.starts_with("ollama:") {
+        return ProviderInference::builtin("ollama");
+    }
+    if model_id.starts_with("huggingface:") || model_id.starts_with("hf:") {
+        return ProviderInference::builtin("huggingface");
+    }
+    if model_id.matches('/').count() == 1 {
+        return ProviderInference::builtin("openrouter");
+    }
+    if model_id.starts_with("claude-") {
+        return ProviderInference::builtin("anthropic");
+    }
+    if model_id.starts_with("gpt-")
+        || model_id.starts_with("o1")
+        || model_id.starts_with("o3")
+        || model_id.starts_with("o4")
+    {
+        return ProviderInference::builtin("openai");
+    }
+    if model_id.starts_with("gemini-") {
+        return ProviderInference::builtin("gemini");
+    }
+    if model_id.contains(':') {
+        return ProviderInference::builtin("ollama");
+    }
+    ProviderInference::default(default_provider)
+}
+
 /// Trait that all LLM providers implement.
 ///
 /// Dispatch currently goes through concrete types in

@@ -599,8 +599,8 @@ println(response.output_tokens)
 
 | Option | Type | Default | Notes |
 |---|---|---|---|
-| `provider` | string | `"auto"` | `"auto"` infers from `model` (`local:*` → local, `/` → openrouter, `claude-*` → anthropic, `gpt-*` → openai, `llm:` → ollama). Explicit wins. |
-| `model` | string | (inferred) | `local:gemma-4-e4b-it` routes through local. |
+| `provider` | string | `"auto"` | Explicit provider wins. `"auto"` infers from `model`; see the resolution table below. |
+| `model` | string | (inferred) | `local:gemma-4-e4b-it` strips the `local:` transport prefix and routes through Ollama. |
 | `max_tokens` | int | 4096 | |
 | `temperature` | float | provider default | |
 | `tools` | list | nil | Registered tool schemas. |
@@ -613,6 +613,26 @@ println(response.output_tokens)
 | `llm_retries` | int | 0 | Retries on transient HTTP / provider errors. Raw `llm_call` is fail-fast by default; set to N to allow N retries after the first attempt. |
 | `llm_backoff_ms` | int | 250 | Base exponential backoff in milliseconds. |
 | `stream` | bool | true | SSE streaming transport. |
+
+Provider auto-resolution precedence:
+
+1. Explicit `provider` option other than `"auto"` wins.
+2. `provider: "auto"` with a `model` infers from the model selector.
+3. If `provider` is omitted, `HARN_LLM_PROVIDER` wins when set; otherwise a `model` infers the provider.
+4. Unknown model IDs fall back to `HARN_DEFAULT_PROVIDER`, then the
+   configured default provider (`anthropic` in the built-in catalog),
+   and emit a warning.
+
+| Model selector | Provider | Model sent to provider |
+|---|---|---|
+| `local:<model>` | `ollama` | `<model>` |
+| `ollama:<model>` | `ollama` | `<model>` |
+| `<org>/<model>` (one slash) | `openrouter` | unchanged |
+| `claude-*` | `anthropic` | unchanged |
+| `gpt-*`, `o1*`, `o3*`, `o4*` | `openai` | unchanged |
+| `gemini-*` | `gemini` | unchanged |
+| `<model>:<tag>` | `ollama` | unchanged |
+| anything else | `HARN_DEFAULT_PROVIDER` / configured default | unchanged |
 
 ### Tool executor declarations
 
@@ -1495,8 +1515,9 @@ in-flight work. Use both when batching LLM calls at scale.
   `improvement`. Small models often leave them blank, and validation
   will fail every time. Use the system prompt to demand non-empty
   strings instead.
-- On `llm_call`, `provider: "auto"` with `model: "local:foo"` routes
-  to the local provider. Without `"auto"`, explicit `"local"` wins.
+- On `llm_call`, `provider: "auto"` with `model: "local:foo"` strips
+  the `local:` prefix and routes to Ollama. Without `"auto"`, an
+  explicit provider such as `"local"` still wins.
 - `schema_retries` retries schema-validation failures with a
   corrective nudge. `llm_retries` retries transient provider errors.
   They compose orthogonally — each schema retry starts a fresh

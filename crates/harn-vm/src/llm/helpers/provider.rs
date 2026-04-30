@@ -9,6 +9,7 @@ use crate::value::{VmError, VmValue};
 /// Cached for process lifetime since env vars don't change mid-run.
 static PROVIDER_KEY_CACHE: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
 static MODEL_TIER_WARNING_CACHE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static PROVIDER_INFERENCE_WARNING_CACHE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 /// Check whether `provider` has a usable API key (or needs none). Cached.
 pub(crate) fn provider_key_available(provider: &str) -> bool {
@@ -63,6 +64,53 @@ fn warn_model_tier_fallback(target: &str, requested_provider: Option<&str>, chos
         ),
         BTreeMap::new(),
     );
+}
+
+fn warn_provider_default_fallback(model_id: &str, provider: &str) {
+    let key = format!("{model_id}|{provider}");
+    let cache = PROVIDER_INFERENCE_WARNING_CACHE.get_or_init(|| Mutex::new(HashSet::new()));
+    let mut guard = cache.lock().unwrap();
+    if !guard.insert(key) {
+        return;
+    }
+    drop(guard);
+
+    crate::events::log_warn_meta(
+        "llm.provider",
+        &format!(
+            "could not infer provider from model id '{model_id}'; falling back to default provider '{provider}'"
+        ),
+        BTreeMap::from([
+            (
+                "model".to_string(),
+                serde_json::Value::String(model_id.to_string()),
+            ),
+            (
+                "provider".to_string(),
+                serde_json::Value::String(provider.to_string()),
+            ),
+            (
+                "reason".to_string(),
+                serde_json::Value::String("default_provider_fallback".to_string()),
+            ),
+        ]),
+    );
+}
+
+fn infer_provider_from_model_selector(raw_model: &str, warn_on_default: bool) -> String {
+    use crate::llm::provider::ProviderInferenceSource;
+    use crate::llm_config;
+
+    let (_resolved_model, resolved_provider) = llm_config::resolve_model(raw_model);
+    if let Some(provider) = resolved_provider {
+        return provider;
+    }
+
+    let inference = llm_config::infer_provider_detail(raw_model);
+    if warn_on_default && inference.source == ProviderInferenceSource::DefaultFallback {
+        warn_provider_default_fallback(raw_model, &inference.provider);
+    }
+    inference.provider
 }
 
 fn env_selected_model_for_tier() -> Option<(String, String)> {
@@ -201,6 +249,13 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
         if !p.eq_ignore_ascii_case("auto") {
             return p;
         }
+        if let Some(m) = options
+            .as_ref()
+            .and_then(|o| o.get("model"))
+            .map(|v| v.display())
+        {
+            return infer_provider_from_model_selector(&m, true);
+        }
     }
     if let Ok(p) = std::env::var("HARN_LLM_PROVIDER") {
         return p;
@@ -218,7 +273,7 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
         .and_then(|o| o.get("model"))
         .map(|v| v.display())
     {
-        return llm_config::infer_provider(&m);
+        return infer_provider_from_model_selector(&m, true);
     }
     if let Some(tier) = options
         .as_ref()
@@ -230,14 +285,14 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
         }
     }
     if let Ok(m) = std::env::var("HARN_LLM_MODEL") {
-        return llm_config::infer_provider(&m);
+        return infer_provider_from_model_selector(&m, true);
     }
     // Default to anthropic, but fall back to keyless providers when its
     // key is missing - avoids noisy errors when a sub-pipeline (e.g.
     // enrichment) didn't inherit the provider env.
-    let default = "anthropic";
-    if provider_key_available(default) {
-        return default.to_string();
+    let default = llm_config::default_provider();
+    if provider_key_available(&default) {
+        return default;
     }
     for fallback in ["ollama", "local"] {
         if provider_key_available(fallback) {
@@ -245,7 +300,7 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
         }
     }
     // Let resolve_api_key surface its descriptive error.
-    default.to_string()
+    default
 }
 
 pub(crate) fn vm_resolve_model(
