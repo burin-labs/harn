@@ -227,7 +227,7 @@ fn persona_manifest_flag_loads_fixer_persona() {
 
 #[test]
 fn persona_manifest_flag_loads_merge_captain_persona() {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_harn"))
         .args([
             "persona",
             "--manifest",
