@@ -124,8 +124,8 @@ log("dead")
     );
     assert!(has_rule(&diags, "unused-variable"));
     assert!(has_rule(&diags, "mutable-never-reassigned"));
-    assert!(has_rule(&diags, "unreachable-code"));
-    assert_eq!(count_rule(&diags, "unreachable-code"), 1);
+    assert!(has_rule(&diags, "dead-code-after-return"));
+    assert_eq!(count_rule(&diags, "dead-code-after-return"), 1);
 }
 
 #[test]
@@ -184,22 +184,22 @@ fn test_no_fix_for_unused_variable_in_dict_destructuring() {
     let diags = lint_source(source);
     let unused: Vec<_> = diags
         .iter()
-        .filter(|d| d.rule == "unused-variable")
+        .filter(|d| d.rule == "unused-pattern-binding")
         .collect();
     assert!(
         unused.iter().any(|d| d.message.contains("`b`")),
-        "expected unused-variable for `b`, got: {diags:?}"
+        "expected unused-pattern-binding for `b`, got: {diags:?}"
     );
     for diag in &unused {
         if diag.message.contains("`b`") {
             assert!(
                 diag.fix.is_none(),
-                "destructuring unused-variable must not autofix, got: {:?}",
+                "destructuring unused-pattern-binding must not autofix, got: {:?}",
                 diag.fix
             );
             assert!(
                 diag.suggestion.is_some(),
-                "destructuring unused-variable must keep its suggestion"
+                "destructuring unused-pattern-binding must keep its suggestion"
             );
         }
     }

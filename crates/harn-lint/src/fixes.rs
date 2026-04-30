@@ -78,6 +78,22 @@ pub(crate) fn unnecessary_cast_fix(
     }])
 }
 
+/// Replace an outer method call expression with its receiver text. Used for
+/// syntactic wrappers like `value.clone()` where removing the method call is
+/// the whole fix.
+pub(crate) fn remove_method_call_wrapper_fix(
+    source: Option<&str>,
+    call_span: Span,
+    receiver_span: Span,
+) -> Option<Vec<FixEdit>> {
+    let src = source?;
+    let receiver_text = src.get(receiver_span.start..receiver_span.end)?;
+    Some(vec![FixEdit {
+        span: call_span,
+        replacement: receiver_text.to_string(),
+    }])
+}
+
 /// Append a sink call (`.to_list()` / `.to_set()` / `.to_dict()`) to the
 /// end of an expression span.
 pub(crate) fn append_sink_fix(expr_span: Span, sink: &str) -> Vec<FixEdit> {

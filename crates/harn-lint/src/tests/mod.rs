@@ -81,6 +81,7 @@ mod file_header;
 mod formatting;
 mod harndoc;
 mod hitl;
+mod hygiene;
 mod imports;
 mod invalid_binop;
 mod llm_rules;

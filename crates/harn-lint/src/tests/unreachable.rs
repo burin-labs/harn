@@ -1,4 +1,4 @@
-//! `unreachable-code` coverage — return/throw/break/composite-exit.
+//! `dead-code-after-return` coverage — return/throw/break/composite-exit.
 
 use super::*;
 
@@ -13,8 +13,8 @@ log("never reached")
 "#,
     );
     assert!(
-        has_rule(&diags, "unreachable-code"),
-        "expected unreachable-code warning, got: {diags:?}"
+        has_rule(&diags, "dead-code-after-return"),
+        "expected dead-code-after-return warning, got: {diags:?}"
     );
 }
 
@@ -29,8 +29,8 @@ return 1
 "#,
     );
     assert!(
-        !has_rule(&diags, "unreachable-code"),
-        "return at end should not trigger unreachable-code: {diags:?}"
+        !has_rule(&diags, "dead-code-after-return"),
+        "return at end should not trigger dead-code-after-return: {diags:?}"
     );
 }
 
@@ -38,8 +38,8 @@ return 1
 fn test_unreachable_after_throw() {
     let diags = lint_source("pipeline t(task) { throw \"err\"\nlog(\"unreachable\") }");
     assert!(
-        diags.iter().any(|d| d.rule == "unreachable-code"),
-        "expected unreachable-code after throw, got: {diags:?}"
+        diags.iter().any(|d| d.rule == "dead-code-after-return"),
+        "expected dead-code-after-return after throw, got: {diags:?}"
     );
 }
 
@@ -56,8 +56,8 @@ while true {
 "#,
     );
     assert!(
-        has_rule(&diags, "unreachable-code"),
-        "expected unreachable-code after break, got: {diags:?}"
+        has_rule(&diags, "dead-code-after-return"),
+        "expected dead-code-after-return after break, got: {diags:?}"
     );
 }
 
@@ -75,8 +75,8 @@ foo(true)
 "#,
     );
     assert!(
-        has_rule(&diags, "unreachable-code"),
-        "expected unreachable-code after composite exit, got: {diags:?}"
+        has_rule(&diags, "dead-code-after-return"),
+        "expected dead-code-after-return after composite exit, got: {diags:?}"
     );
 }
 
@@ -94,7 +94,22 @@ foo(true)
 "#,
     );
     assert!(
-        !has_rule(&diags, "unreachable-code"),
+        !has_rule(&diags, "dead-code-after-return"),
         "should not flag reachable code: {diags:?}"
+    );
+}
+
+#[test]
+fn test_legacy_unreachable_code_disabled_rule_alias() {
+    let source = "pipeline default(task) {\n  return 1\n  log(\"never reached\")\n}";
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let diags =
+        lint_with_config_and_source(&program, &["unreachable-code".to_string()], Some(source));
+    assert!(
+        !has_rule(&diags, "dead-code-after-return"),
+        "legacy disabled rule should suppress renamed diagnostic: {diags:?}"
     );
 }
