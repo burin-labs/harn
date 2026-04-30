@@ -558,6 +558,10 @@ pub enum TypeExpr {
     Named(String),
     /// A union type: `string | nil`, `int | float`.
     Union(Vec<TypeExpr>),
+    /// An intersection type: `{x: int} & {y: int}`. The value must satisfy
+    /// every component simultaneously. Useful for layered context types
+    /// such as `fn use(ctx: BaseCtx & AuthCtx)`.
+    Intersection(Vec<TypeExpr>),
     /// A dict shape type: `{name: string, age: int, active?: bool}`.
     Shape(Vec<ShapeField>),
     /// A list type: `list<int>`.

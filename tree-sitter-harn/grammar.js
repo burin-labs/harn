@@ -1003,6 +1003,7 @@ module.exports = grammar({
         seq($.identifier, "<", $.type_annotation, ",", $.type_annotation, ">"),
         seq($.identifier, "<", $.type_annotation, ">"),
         prec.left(1, seq($.type_annotation, "|", $.type_annotation)),
+        prec.left(2, seq($.type_annotation, "&", $.type_annotation)),
         $.shape_type,
         $.identifier,
         $.string_literal,

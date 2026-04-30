@@ -1,0 +1,19 @@
+/**
+ * Three-way intersections still resolve every field. Type aliases
+ * can compose with inline shapes, and `type T = A & B` is itself a
+ * reusable composition.
+ */
+type WithId = {id: string}
+
+type WithName = {name: string}
+
+type Identified = WithId & WithName
+
+fn describe(rec: Identified & {kind: string}) -> string {
+  return rec.kind + ":" + rec.id + ":" + rec.name
+}
+
+pipeline test(task) {
+  let rec = {id: "i-1", name: "alpha", kind: "node"}
+  println(describe(rec))
+}

@@ -254,6 +254,7 @@ let doc = """
 | `%` | `.percent` | Modulo |
 | `?` | `.question` | Ternary / Result propagation |
 | `\|` | `.bar` | Union types |
+| `&` | `.amp` | Intersection types |
 
 #### Keyword operators
 
@@ -2957,6 +2958,31 @@ type ActionContainer<T> = {action: T, process_action: fn(T) -> nil}
 `ActionContainer<Action>` resolves to `ActionContainer<"create"> |
 ActionContainer<"edit">`, and a literal-tagged shape on the right flows
 into the matching branch.
+
+### Intersection types
+
+```harn
+type BaseCtx = {request_id: string}
+type AuthCtx = {user_id: string}
+
+fn use_ctx(ctx: BaseCtx & AuthCtx) -> string {
+  return ctx.request_id + "/" + ctx.user_id
+}
+```
+
+`A & B` requires the value to satisfy *every* component. The intersection
+of two shape types behaves like a dict that has every field from each
+component, so `ctx.request_id` and `ctx.user_id` are both accessible
+above. Shape components may be inline or named aliases; the operator
+nests freely (`A & B & C`).
+
+`&` binds tighter than `|`, so `A & B | C` parses as `(A & B) | C`. Use
+parentheses to write the union-of-intersections form.
+
+At runtime, an intersection annotation lowers to a JSON-Schema `allOf`
+guard. A value that is missing a field required by *any* component is
+rejected by the parameter-annotation runtime check just like a single
+shape mismatch is.
 
 ### Parameterized types
 

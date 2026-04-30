@@ -198,6 +198,12 @@ impl TypeChecker {
                     .map(|item| Self::apply_type_bindings(item, bindings))
                     .collect(),
             ),
+            TypeExpr::Intersection(items) => TypeExpr::Intersection(
+                items
+                    .iter()
+                    .map(|item| Self::apply_type_bindings(item, bindings))
+                    .collect(),
+            ),
             TypeExpr::Shape(fields) => TypeExpr::Shape(
                 fields
                     .iter()

@@ -16,6 +16,15 @@ pub fn format_type(ty: &TypeExpr) -> String {
             .map(format_type)
             .collect::<Vec<_>>()
             .join(" | "),
+        TypeExpr::Intersection(types) => types
+            .iter()
+            .map(|m| match m {
+                // Parenthesise nested unions so `(A | B) & C` reads back unambiguously.
+                TypeExpr::Union(_) => format!("({})", format_type(m)),
+                _ => format_type(m),
+            })
+            .collect::<Vec<_>>()
+            .join(" & "),
         TypeExpr::Shape(fields) => {
             let inner: Vec<String> = fields
                 .iter()

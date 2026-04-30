@@ -376,6 +376,27 @@ let containers: list<ActionContainer<Action>> = [
 ActionContainer<"edit">`, so the literal-tagged elements fit one
 specific branch each — no contravariance grief.
 
+### Intersection types (`A & B`)
+
+`A & B` requires the value to satisfy *every* component, not just
+one. The intersection of two shape types behaves like a dict that
+has every field from each component, so both fields are accessible:
+
+```harn,ignore
+type BaseCtx = {request_id: string}
+type AuthCtx = {user_id: string}
+
+fn use_ctx(ctx: BaseCtx & AuthCtx) -> string {
+  return ctx.request_id + "/" + ctx.user_id
+}
+```
+
+`&` binds tighter than `|`, so `A & B | C` parses as `(A & B) | C`.
+Inline shapes work too: `fn f(env: {region: string} & {tier: string})`.
+Lowering: at runtime an intersection annotation becomes a JSON-Schema
+`allOf` guard, so missing a field from any component triggers the
+parameter-runtime check just like a single-shape mismatch.
+
 ### Variance (`in T` / `out T`)
 
 User-declared generics default to **invariant**. Mark a type

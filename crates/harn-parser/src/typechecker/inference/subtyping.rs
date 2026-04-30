@@ -294,6 +294,24 @@ impl TypeChecker {
             (expected_type, TypeExpr::Union(members)) => members
                 .iter()
                 .all(|m| self.types_compatible(expected_type, m, scope)),
+            // Intersection on the expected side: the actual must satisfy
+            // every component (`actual <: A` AND `actual <: B`).
+            // Intersection on the actual side: the value already satisfies
+            // every component, so it flows into any expected type that one
+            // of those components satisfies.
+            (TypeExpr::Intersection(exp_members), TypeExpr::Intersection(act_members)) => {
+                exp_members.iter().all(|em| {
+                    act_members
+                        .iter()
+                        .any(|am| self.types_compatible(em, am, scope))
+                })
+            }
+            (TypeExpr::Intersection(members), actual_type) => members
+                .iter()
+                .all(|m| self.types_compatible(m, actual_type, scope)),
+            (expected_type, TypeExpr::Intersection(members)) => members
+                .iter()
+                .any(|m| self.types_compatible(expected_type, m, scope)),
             (TypeExpr::Shape(_), TypeExpr::Named(n)) if n == "dict" => true,
             (TypeExpr::Named(n), TypeExpr::Shape(_)) if n == "dict" => true,
             (TypeExpr::Shape(ef), TypeExpr::Shape(af)) => ef.iter().all(|expected_field| {
@@ -421,6 +439,12 @@ impl TypeChecker {
                 ty.clone()
             }
             TypeExpr::Union(types) => TypeExpr::Union(
+                types
+                    .iter()
+                    .map(|ty| self.resolve_alias(ty, scope))
+                    .collect(),
+            ),
+            TypeExpr::Intersection(types) => TypeExpr::Intersection(
                 types
                     .iter()
                     .map(|ty| self.resolve_alias(ty, scope))

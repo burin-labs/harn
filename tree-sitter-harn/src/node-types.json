@@ -1367,6 +1367,10 @@
           "named": true
         },
         {
+          "type": "eval_pack_declaration",
+          "named": true
+        },
+        {
           "type": "expression_statement",
           "named": true
         },
@@ -2641,6 +2645,10 @@
             "named": true
           },
           {
+            "type": "cost_route_block",
+            "named": true
+          },
+          {
             "type": "deadline_block",
             "named": true
           },
@@ -2825,6 +2833,10 @@
         },
         {
           "type": "continue_statement",
+          "named": true
+        },
+        {
+          "type": "cost_route_block",
           "named": true
         },
         {
@@ -12276,6 +12288,10 @@
   },
   {
     "type": "%=",
+    "named": false
+  },
+  {
+    "type": "&",
     "named": false
   },
   {

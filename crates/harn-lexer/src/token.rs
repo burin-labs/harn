@@ -235,6 +235,7 @@ pub enum TokenKind {
     Gt,       // >
     Question, // ?
     Bar,      // |  (for union types)
+    Amp,      // &  (for intersection types)
 
     LBrace,    // {
     RBrace,    // }
@@ -348,6 +349,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Gt => write!(f, ">"),
             TokenKind::Question => write!(f, "?"),
             TokenKind::Bar => write!(f, "|"),
+            TokenKind::Amp => write!(f, "&"),
             TokenKind::LBrace => write!(f, "{{"),
             TokenKind::RBrace => write!(f, "}}"),
             TokenKind::LParen => write!(f, "("),
