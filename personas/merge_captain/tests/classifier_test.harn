@@ -1,0 +1,165 @@
+// Run: harn test personas/merge_captain/tests/classifier_test.harn
+import { classify, verify } from "../lib/classifier"
+import { from_github } from "../lib/observation"
+import { with_defaults } from "../lib/policy"
+
+fn _policy(extra) {
+  let base = {
+    repo: "x/y",
+    merge_queue_enabled: true,
+    required_checks: ["ci"],
+    required_review_count: 1,
+    blocking_labels: ["do-not-merge"],
+  }
+  let extras = extra ?? {}
+  return with_defaults(base + extras)
+}
+
+fn _pr(overrides) {
+  let base = {
+    repo: "x/y",
+    number: 1,
+    title: "T",
+    head_sha: "abc",
+    head_ref: "feat",
+    base_ref: "main",
+    state: "open",
+    draft: false,
+    merged: false,
+    mergeable: true,
+    mergeable_state: "clean",
+    behind_by: 0,
+    labels: [],
+    review_decision: "APPROVED",
+    approvals: 1,
+    in_merge_queue: false,
+    merge_group_active: false,
+  }
+  let extras = overrides ?? {}
+  return base + extras
+}
+
+fn _checks(success) {
+  if success {
+    return [{name: "ci", status: "completed", conclusion: "success"}]
+  }
+  return [{name: "ci", status: "completed", conclusion: "failure"}]
+}
+
+pipeline test_clean_pr_with_passing_checks_enqueues(task) {
+  let policy = _policy({})
+  let obs = from_github(_pr({}), _checks(true), policy.required_checks)
+  let result = classify(obs, policy, "discovered")
+  assert_eq(result.state, "queued")
+  assert_eq(result.action, "enqueue_merge_queue")
+}
+
+pipeline test_draft_waits(task) {
+  let policy = _policy({})
+  let obs = from_github(_pr({draft: true}), [], policy.required_checks)
+  let result = classify(obs, policy, "discovered")
+  assert_eq(result.state, "draft")
+  assert_eq(result.action, "wait")
+}
+
+pipeline test_dirty_pr_comments(task) {
+  let policy = _policy({})
+  let obs = from_github(
+    _pr({mergeable: false, mergeable_state: "dirty"}),
+    _checks(true),
+    policy.required_checks,
+  )
+  let result = classify(obs, policy, "discovered")
+  assert_eq(result.state, "dirty")
+  assert_eq(result.action, "comment")
+}
+
+pipeline test_behind_branch_updates(task) {
+  let policy = _policy({})
+  let obs = from_github(_pr({behind_by: 4, mergeable_state: "behind"}), _checks(true), policy.required_checks)
+  let result = classify(obs, policy, "discovered")
+  assert_eq(result.state, "behind")
+  assert_eq(result.action, "update_branch")
+}
+
+pipeline test_failing_ci_with_local_verify_repairs(task) {
+  let policy = _policy({local_verification: [{name: "t", command: "true"}]})
+  let obs = from_github(_pr({}), _checks(false), policy.required_checks)
+  let result = classify(obs, policy, "waiting_checks")
+  assert_eq(result.state, "local_repair")
+  assert_eq(result.action, "run_local_verification")
+}
+
+pipeline test_failing_ci_without_local_verify_escalates(task) {
+  let policy = _policy({local_verification: []})
+  let obs = from_github(_pr({}), _checks(false), policy.required_checks)
+  let result = classify(obs, policy, "waiting_checks")
+  assert_eq(result.state, "failing_ci")
+  assert_eq(result.action, "escalate_human")
+}
+
+pipeline test_blocked_label_escalates(task) {
+  let policy = _policy({})
+  let obs = from_github(_pr({labels: ["do-not-merge"]}), _checks(true), policy.required_checks)
+  let result = classify(obs, policy, "queued")
+  assert_eq(result.state, "blocked")
+  assert_eq(result.action, "escalate_human")
+}
+
+pipeline test_missing_approvals_requests_review(task) {
+  let policy = _policy({required_review_count: 2})
+  let obs = from_github(_pr({approvals: 1}), _checks(true), policy.required_checks)
+  let result = classify(obs, policy, "discovered")
+  assert_eq(result.state, "blocked")
+  assert_eq(result.action, "request_review")
+}
+
+pipeline test_pending_checks_wait(task) {
+  let policy = _policy({})
+  let obs = from_github(_pr({}), [], policy.required_checks)
+  let result = classify(obs, policy, "discovered")
+  assert_eq(result.state, "waiting_checks")
+  assert_eq(result.action, "wait")
+}
+
+pipeline test_merged_observation_marks_merged(task) {
+  let policy = _policy({})
+  let obs = from_github(_pr({merged: true, state: "closed"}), _checks(true), policy.required_checks)
+  let result = classify(obs, policy, "merge_group_running")
+  assert_eq(result.state, "merged")
+  assert_eq(result.action, "mark_merged")
+}
+
+pipeline test_closed_observation_archives(task) {
+  let policy = _policy({})
+  let obs = from_github(_pr({merged: false, state: "closed"}), [], policy.required_checks)
+  let result = classify(obs, policy, "queued")
+  assert_eq(result.state, "closed")
+  assert_eq(result.action, "archive")
+}
+
+pipeline test_in_merge_queue_holds_state(task) {
+  let policy = _policy({})
+  let obs = from_github(_pr({in_merge_queue: true}), _checks(true), policy.required_checks)
+  let result = classify(obs, policy, "queued")
+  assert_eq(result.state, "queued")
+  assert_eq(result.action, "wait")
+}
+
+pipeline test_active_merge_group_visible(task) {
+  let policy = _policy({})
+  let obs = from_github(_pr({merge_group_active: true}), _checks(true), policy.required_checks)
+  let result = classify(obs, policy, "queued")
+  assert_eq(result.state, "merge_group_running")
+}
+
+pipeline test_verify_rejects_illegal_edge(task) {
+  let edge = verify("merged", {state: "queued", action: "wait", reason: "x", evidence: {}})
+  assert(!edge.ok)
+  assert(edge.error.contains("illegal transition"))
+}
+
+pipeline test_verify_accepts_legal_edge(task) {
+  let edge = verify("waiting_checks", {state: "queued", action: "wait", reason: "x", evidence: {}})
+  assert(edge.ok)
+}

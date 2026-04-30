@@ -1,0 +1,89 @@
+// Merge Captain entry pipeline.
+//
+// One invocation runs a single sweep across all configured repos. The
+// pipeline accepts arguments via runtime_pipeline_input(); when no input
+// is provided it falls back to the smoke fixture so `harn run
+// personas/merge_captain/manifest.harn` still produces a deterministic
+// receipt.
+import { runtime_pipeline_input } from "std/runtime"
+import { open_checkpoints } from "lib/checkpoint_store"
+import { fixture_adapter, live_adapter } from "lib/github_adapter"
+import { load_policies, sweep } from "lib/scheduler"
+
+fn _default_input() {
+  return {
+    mode: "fixture",
+    fixture_path: "personas/merge_captain/fixtures/github_snapshot.json",
+    policy_paths: [
+      "personas/merge_captain/policies/harn.json",
+      "personas/merge_captain/policies/harn-cloud.json",
+      "personas/merge_captain/policies/burin-code.json",
+    ],
+    state_root: ".harn/merge-captain/state",
+    session_id: "smoke",
+    writer_id: "merge_captain",
+    dry_run: true,
+    sweep_id: "merge-captain-smoke",
+  }
+}
+
+fn _resolve_input() {
+  let attempt = try {
+    runtime_pipeline_input()
+  }
+  let provided = if is_ok(attempt) {
+    unwrap(attempt) ?? {}
+  } else {
+    {}
+  }
+  let defaults = _default_input()
+  return {
+    mode: provided.mode ?? defaults.mode,
+    fixture_path: provided.fixture_path ?? defaults.fixture_path,
+    policy_paths: provided.policy_paths ?? defaults.policy_paths,
+    state_root: provided.state_root ?? defaults.state_root,
+    session_id: provided.session_id ?? defaults.session_id,
+    writer_id: provided.writer_id ?? defaults.writer_id,
+    dry_run: provided.dry_run ?? defaults.dry_run,
+    sweep_id: provided.sweep_id ?? defaults.sweep_id,
+  }
+}
+
+fn _adapter_for(input) {
+  if input.mode == "live" {
+    return live_adapter()
+  }
+  let raw = read_file(input.fixture_path)
+  let parsed = json_parse(raw)
+  return fixture_adapter(parsed)
+}
+
+pipeline run(task) {
+  let input = _resolve_input()
+  let policies_load = load_policies(input.policy_paths)
+  if len(policies_load.errors) > 0 {
+    let summary = {
+      persona: "merge_captain",
+      sweep_id: input.sweep_id,
+      status: "policy_load_failed",
+      errors: policies_load.errors,
+    }
+    println(json_stringify(summary))
+    return summary
+  }
+  let adapter = _adapter_for(input)
+  let checkpoint_handle = open_checkpoints(input.state_root, input.session_id, input.writer_id)
+  let summary = sweep(
+    {
+      adapter: adapter,
+      policies: policies_load.policies,
+      checkpoint_handle: checkpoint_handle,
+      dry_run: input.dry_run,
+      sweep_id: input.sweep_id,
+    },
+  )
+  let visible = "merge_captain swept ${to_string(summary.pr_count)} PRs across ${to_string(len(policies_load.policies))} repos (dry_run=${to_string(input.dry_run)})"
+  println(visible)
+  println(json_stringify(summary))
+  return summary
+}

@@ -1,0 +1,323 @@
+// Sweep scheduler.
+//
+// One sweep iterates every configured repo, discovers open PRs (live or
+// from fixture), classifies each PR, persists the resulting checkpoint,
+// runs whatever local action the classification calls for, and records
+// the merge receipt. Newly opened PRs are picked up automatically
+// because discovery runs every sweep; PRs that disappear from the open
+// list because they were merged or closed receive a final receipt and
+// have their checkpoint dropped.
+import {
+  forget_checkpoint,
+  list_all_checkpoints,
+  prior_state_for,
+  save_checkpoint,
+} from "checkpoint_store"
+import { classify, verify } from "classifier"
+import {
+  add_label,
+  comment,
+  enqueue_merge_queue,
+  get_pr_details,
+  list_open_prs,
+  request_review,
+  update_branch,
+} from "github_adapter"
+import { run_local_verify } from "local_verify"
+import { from_github } from "observation"
+import { load_policy } from "policy"
+import { build_receipt, summarize_sweep } from "receipt"
+import { is_terminal } from "states"
+
+fn _gen_sweep_id() {
+  return "sweep-${to_string(now_ms())}"
+}
+
+/** Apply the action a classification calls for, returning an outcome string. */
+pub fn apply_action(adapter, policy, observation, classification, dry_run) {
+  let action = classification.action
+  if action == "noop" || action == "wait" {
+    return {outcome: "wait", commands: []}
+  }
+  if action == "mark_merged" {
+    return {outcome: "merged", commands: []}
+  }
+  if action == "archive" {
+    return {outcome: "closed", commands: []}
+  }
+  if action == "update_branch" {
+    let resp = update_branch(adapter, observation.repo, observation.number, dry_run)
+    return {
+      outcome: if dry_run {
+        "dry_run"
+      } else {
+        "branch_updated"
+      },
+      commands: [{action: "update_branch", response: resp}],
+    }
+  }
+  if action == "enqueue_merge_queue" {
+    let resp = enqueue_merge_queue(adapter, observation.repo, observation.number, policy.merge_method, dry_run)
+    return {
+      outcome: if dry_run {
+        "dry_run"
+      } else {
+        "enqueued"
+      },
+      commands: [{action: "enqueue_merge_queue", response: resp}],
+    }
+  }
+  if action == "request_review" {
+    let resp = request_review(adapter, observation.repo, observation.number, [], dry_run)
+    return {
+      outcome: if dry_run {
+        "dry_run"
+      } else {
+        "review_requested"
+      },
+      commands: [{action: "request_review", response: resp}],
+    }
+  }
+  if action == "comment" {
+    let body = "merge_captain: ${classification.reason}"
+    let resp = comment(adapter, observation.repo, observation.number, body, dry_run)
+    return {
+      outcome: if dry_run {
+        "dry_run"
+      } else {
+        "commented"
+      },
+      commands: [{action: "comment", body: body, response: resp}],
+    }
+  }
+  if action == "add_label" {
+    let label = "merge-captain-blocked"
+    let resp = add_label(adapter, observation.repo, observation.number, label, dry_run)
+    return {
+      outcome: if dry_run {
+        "dry_run"
+      } else {
+        "labeled"
+      },
+      commands: [{action: "add_label", label: label, response: resp}],
+    }
+  }
+  if action == "run_local_verification" {
+    let results = run_local_verify(policy.local_verification, dry_run)
+    return {
+      outcome: if dry_run {
+        "dry_run"
+      } else {
+        "verified"
+      },
+      commands: [{action: "run_local_verification", results: results}],
+    }
+  }
+  if action == "escalate_human" {
+    return {outcome: "escalated", commands: [{action: "escalate_human"}]}
+  }
+  return {outcome: "noop", commands: []}
+}
+
+/** Process a single PR: classify, persist, act, build receipt. */
+pub fn process_pr(args) {
+  let adapter = args.adapter
+  let policy = args.policy
+  let raw_pr = args.pr
+  let checkpoint_handle = args.checkpoint_handle
+  let sweep_id = args.sweep_id
+  let dry_run = args.dry_run
+  let detail = get_pr_details(adapter, policy.repo, raw_pr.number)
+  if detail == nil {
+    return nil
+  }
+  let observation = from_github(detail.pr, detail.checks, policy.required_checks)
+  let prior = prior_state_for(checkpoint_handle, observation.repo, observation.number)
+  let classification = classify(observation, policy, prior)
+  let edge = verify(prior, classification)
+  if !edge.ok {
+    let safe_class = {
+      state: classification.state,
+      action: "escalate_human",
+      reason: "${classification.reason} (illegal transition; ${edge.error})",
+      evidence: classification.evidence,
+    }
+    let action_result = apply_action(adapter, policy, observation, safe_class, dry_run)
+    save_checkpoint(checkpoint_handle, sweep_id, observation, safe_class)
+    return build_receipt(
+      {
+        sweep_id: sweep_id,
+        observed_at: now_ms(),
+        policy: policy,
+        observation: observation,
+        classification: safe_class,
+        prior_state: prior,
+        commands_run: action_result.commands,
+        outcome: action_result.outcome,
+        dry_run: dry_run,
+      },
+    )
+  }
+  let action_result = apply_action(adapter, policy, observation, classification, dry_run)
+  if is_terminal(classification.state) {
+    forget_checkpoint(checkpoint_handle, observation.repo, observation.number)
+  } else {
+    save_checkpoint(checkpoint_handle, sweep_id, observation, classification)
+  }
+  return build_receipt(
+    {
+      sweep_id: sweep_id,
+      observed_at: now_ms(),
+      policy: policy,
+      observation: observation,
+      classification: classification,
+      prior_state: prior,
+      commands_run: action_result.commands,
+      outcome: action_result.outcome,
+      dry_run: dry_run,
+    },
+  )
+}
+
+/** Reconcile PRs that disappeared from the open list (merged or closed remotely). */
+pub fn reconcile_disappeared(args) {
+  let adapter = args.adapter
+  let checkpoint_handle = args.checkpoint_handle
+  let policy = args.policy
+  let sweep_id = args.sweep_id
+  let dry_run = args.dry_run
+  let observed_numbers = args.observed_numbers
+  var receipts = []
+  let stale = list_all_checkpoints(checkpoint_handle)
+    .filter(
+    { env -> env.repo == policy.repo && !observed_numbers.contains(env.number) },
+  )
+  for env in stale {
+    let detail = get_pr_details(adapter, env.repo, env.number)
+    let final_obs = if detail != nil {
+      from_github(detail.pr, detail.checks, policy.required_checks)
+    } else {
+      {
+        repo: env.repo,
+        number: env.number,
+        title: env.snapshot?.title ?? "",
+        head_sha: env.head_sha,
+        base_ref: env.snapshot?.base_ref ?? "main",
+        head_ref: env.snapshot?.head_ref ?? "",
+        state: "closed",
+        draft: false,
+        merged: false,
+        mergeable: nil,
+        mergeable_state: "unknown",
+        behind_by: 0,
+        labels: env.snapshot?.labels ?? [],
+        review_decision: "REVIEW_REQUIRED",
+        approvals: env.snapshot?.approvals ?? 0,
+        in_merge_queue: false,
+        merge_group_active: false,
+        checks: [],
+        missing_required_checks: [],
+        failed_required_checks: [],
+      }
+    }
+    let next_state = if final_obs.merged {
+      "merged"
+    } else {
+      "closed"
+    }
+    let action = if final_obs.merged {
+      "mark_merged"
+    } else {
+      "archive"
+    }
+    let synthetic = {
+      state: next_state,
+      action: action,
+      reason: "PR no longer in open list",
+      evidence: {previously: env.last_state},
+    }
+    let action_result = apply_action(adapter, policy, final_obs, synthetic, dry_run)
+    forget_checkpoint(checkpoint_handle, env.repo, env.number)
+    let receipt = build_receipt(
+      {
+        sweep_id: sweep_id,
+        observed_at: now_ms(),
+        policy: policy,
+        observation: final_obs,
+        classification: synthetic,
+        prior_state: env.last_state,
+        commands_run: action_result.commands,
+        outcome: action_result.outcome,
+        dry_run: dry_run,
+      },
+    )
+    receipts = receipts + [receipt]
+  }
+  return receipts
+}
+
+/** Run a single sweep across all configured repos. */
+pub fn sweep(args) {
+  let adapter = args.adapter
+  let policies = args.policies
+  let checkpoint_handle = args.checkpoint_handle
+  let dry_run = args.dry_run ?? true
+  let sweep_id = args.sweep_id ?? _gen_sweep_id()
+  let started_at = now_ms()
+  var all_receipts = []
+  for policy in policies {
+    var receipts_for_repo = []
+    var observed_numbers = []
+    let open_prs = list_open_prs(adapter, policy.repo)
+    let trimmed = if len(open_prs) > policy.max_in_flight {
+      open_prs[0:policy.max_in_flight]
+    } else {
+      open_prs
+    }
+    for pr in trimmed {
+      observed_numbers = observed_numbers + [pr.number]
+      let receipt = process_pr(
+        {
+          adapter: adapter,
+          policy: policy,
+          pr: pr,
+          checkpoint_handle: checkpoint_handle,
+          sweep_id: sweep_id,
+          dry_run: dry_run,
+        },
+      )
+      if receipt != nil {
+        receipts_for_repo = receipts_for_repo + [receipt]
+      }
+    }
+    let disappeared = reconcile_disappeared(
+      {
+        adapter: adapter,
+        policy: policy,
+        checkpoint_handle: checkpoint_handle,
+        sweep_id: sweep_id,
+        dry_run: dry_run,
+        observed_numbers: observed_numbers,
+      },
+    )
+    all_receipts = all_receipts + receipts_for_repo + disappeared
+  }
+  let finished_at = now_ms()
+  return summarize_sweep(all_receipts, sweep_id, started_at, finished_at)
+}
+
+/** Helper for fixture-based runs: load a list of policy json paths. */
+pub fn load_policies(paths) {
+  var ok_policies = []
+  var errors = []
+  for path in paths {
+    let raw = read_file(path)
+    let res = load_policy(raw)
+    if res.ok {
+      ok_policies = ok_policies + [res.policy]
+    } else {
+      errors = errors + ["${path}: ${res.error}"]
+    }
+  }
+  return {policies: ok_policies, errors: errors}
+}

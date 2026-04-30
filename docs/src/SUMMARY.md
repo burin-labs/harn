@@ -42,6 +42,7 @@
 - [Trust graph](./trust-graph.md)
 - [Skills](./skills.md)
 - [Personas](./personas.md)
+  - [Merge Captain](./personas/merge-captain.md)
 - [Skill provenance](./skill-provenance.md)
 - [Sessions](./sessions.md)
 - [Agent state](./agent-state.md)

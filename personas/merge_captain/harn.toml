@@ -1,0 +1,40 @@
+[package]
+name = "harn-merge-captain-persona"
+version = "0.1.0"
+
+[[personas]]
+name = "merge_captain"
+version = "0.1.0"
+description = "Harn-native merge captain. Owns multi-repo PR queue scheduling and per-PR state transitions with durable checkpoints and merge receipts."
+entry_workflow = "manifest.harn#run"
+tools = ["github", "ci"]
+capabilities = [
+  "git.get_branch",
+  "git.get_diff",
+  "process.exec",
+  "interaction.ask",
+  "runtime.approved_plan",
+  "runtime.dry_run",
+  "runtime.pipeline_input",
+  "runtime.record_run",
+  "runtime.task",
+  "workspace.read_text",
+  "workspace.list",
+]
+autonomy_tier = "act_with_approval"
+receipt_policy = "required"
+triggers = [
+  "github.pr_opened",
+  "github.pr_synchronized",
+  "github.check_failed",
+  "github.merge_group_completed",
+]
+schedules = ["*/10 * * * *"]
+handoffs = []
+context_packs = ["repo_policy", "merge_policy", "release_policy"]
+evals = ["merge_captain_smoke"]
+owner = "platform"
+budget = { daily_usd = 12.0, frontier_escalations = 2, max_tokens = 80000, max_runtime_seconds = 900 }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "medium" }
+rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["merge-captain-v1"] }
+package_source = { package = "harn-merge-captain-persona", path = "personas/merge_captain" }

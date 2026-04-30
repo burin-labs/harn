@@ -1,0 +1,138 @@
+// PR observation -> next state + action.
+//
+// Pure: takes (observation, policy, prior_state) and returns
+// {state, action, reason, evidence}. Tests cover every branch.
+import {
+  checks_pass,
+  has_required_approvals,
+  is_behind,
+  is_blocked_by_label,
+  is_closed,
+  is_dirty,
+  is_merged,
+} from "observation"
+import { allowed_next, is_valid_transition, unknown_state } from "states"
+
+/** Result of classifying a single observation. */
+fn _result(state, action, reason, evidence) {
+  return {state: state, action: action, reason: reason, evidence: evidence}
+}
+
+/** Classify an observation under a repo policy. */
+pub fn classify(observation, policy, prior_state) {
+  let obs = observation
+  // Terminal observations override anything we previously thought.
+  if is_merged(obs) {
+    return _result("merged", "mark_merged", "PR is merged on remote", {merged: true})
+  }
+  if is_closed(obs) {
+    return _result("closed", "archive", "PR is closed without merge", {state: obs.state})
+  }
+  // Drafts wait until they are marked ready.
+  if obs.draft {
+    return _result("draft", "wait", "PR is still in draft", {draft: true})
+  }
+  // Already in the merge queue or actively running through it.
+  if obs.merge_group_active {
+    return _result("merge_group_running", "wait", "merge group is running", {})
+  }
+  if obs.in_merge_queue {
+    return _result("queued", "wait", "PR is on the merge queue", {})
+  }
+  // Hard blockers come next: explicit labels and dirty branches.
+  if is_blocked_by_label(obs, policy.blocking_labels) {
+    let hits = obs.labels.filter({ l -> policy.blocking_labels.contains(l) })
+    return _result("blocked", "escalate_human", "blocked by label", {labels: hits})
+  }
+  if is_dirty(obs) {
+    return _result(
+      "dirty",
+      "comment",
+      "PR has merge conflicts",
+      {mergeable_state: obs.mergeable_state, mergeable: obs.mergeable},
+    )
+  }
+  // Required CI: if anything failed we either escalate or repair locally.
+  if len(obs.failed_required_checks) > 0 {
+    let action = if len(policy.local_verification) > 0 {
+      "run_local_verification"
+    } else {
+      "escalate_human"
+    }
+    let next = if len(policy.local_verification) > 0 {
+      "local_repair"
+    } else {
+      "failing_ci"
+    }
+    return _result(next, action, "required CI checks failed", {failed: obs.failed_required_checks})
+  }
+  // Branch is behind base: update before requeuing.
+  if is_behind(obs) {
+    return _result(
+      "behind",
+      "update_branch",
+      "branch is behind base",
+      {behind_by: obs.behind_by, mergeable_state: obs.mergeable_state},
+    )
+  }
+  // Required CI: if anything is still pending, just wait.
+  if !checks_pass(obs) {
+    return _result(
+      "waiting_checks",
+      "wait",
+      "required checks still running",
+      {missing: obs.missing_required_checks},
+    )
+  }
+  // Approvals: ensure the human review gate is satisfied.
+  if !has_required_approvals(obs, policy.required_review_count) {
+    let needed = policy.required_review_count - obs.approvals
+    return _result(
+      "blocked",
+      "request_review",
+      "need ${to_string(needed)} more approvals",
+      {have: obs.approvals, need: policy.required_review_count},
+    )
+  }
+  // Ready label gate (optional, when policy declares one).
+  if policy.ready_label != nil && !obs.labels.contains(policy.ready_label) {
+    return _result(
+      "blocked",
+      "wait",
+      "missing required ready_label '${policy.ready_label}'",
+      {ready_label: policy.ready_label, observed_labels: obs.labels},
+    )
+  }
+  // Cleared all gates: queue or admin-merge depending on repo policy.
+  if policy.merge_queue_enabled {
+    return _result(
+      "queued",
+      "enqueue_merge_queue",
+      "all gates passed; enqueueing on the merge queue",
+      {merge_method: policy.merge_method},
+    )
+  }
+  return _result(
+    "queued",
+    "enqueue_merge_queue",
+    "all gates passed; ready to merge",
+    {merge_method: policy.merge_method},
+  )
+}
+
+/** Compute the prior state to use when starting from no checkpoint. */
+pub fn initial_prior() {
+  return unknown_state()
+}
+
+/** Sanity-check a classification against the legal-edge table. */
+pub fn verify(prior_state, classification) {
+  if !is_valid_transition(prior_state, classification.state) {
+    return {
+      ok: false,
+      error: "illegal transition: ${prior_state} -> ${classification.state}",
+      allowed: allowed_next(prior_state),
+    }
+  }
+  return {ok: true}
+}

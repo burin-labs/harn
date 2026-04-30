@@ -1,0 +1,69 @@
+// Local verification commands.
+//
+// Runs each command listed in the per-repo policy and returns a record
+// the receipt can attach. In dry-run mode the commands are recorded but
+// not executed.
+import { process_exec_with_timeout } from "std/runtime"
+
+/** Run all local verification commands for a repo. */
+pub fn run_local_verify(commands, dry_run) {
+  let timeout_ms = 600000
+  return commands
+    .map(
+    { cmd ->
+      if dry_run {
+        {
+          name: cmd.name ?? cmd.command,
+          command: cmd.command,
+          status: "skipped_dry_run",
+          exit_code: nil,
+          stdout: "",
+          stderr: "",
+        }
+      } else {
+        let started = now_ms()
+        let result = try {
+          process_exec_with_timeout(cmd.command, cmd.timeout_ms ?? timeout_ms)
+        }
+        let finished = now_ms()
+        if !is_ok(result) {
+          {
+            name: cmd.name ?? cmd.command,
+            command: cmd.command,
+            status: "error",
+            exit_code: nil,
+            stdout: "",
+            stderr: to_string(unwrap_err(result)),
+            duration_ms: finished - started,
+          }
+        } else {
+          let v = unwrap(result)
+          let exit_code = v.exit_code ?? 0
+          {
+            name: cmd.name ?? cmd.command,
+            command: cmd.command,
+            status: if exit_code == 0 {
+              "ok"
+            } else {
+              "failed"
+            },
+            exit_code: exit_code,
+            stdout: v.stdout ?? "",
+            stderr: v.stderr ?? "",
+            duration_ms: finished - started,
+          }
+        }
+      }
+    },
+  )
+}
+
+/** True when every command in the verification result succeeded. */
+pub fn all_ok(results) {
+  for r in results {
+    if r.status != "ok" && r.status != "skipped_dry_run" {
+      return false
+    }
+  }
+  return true
+}
