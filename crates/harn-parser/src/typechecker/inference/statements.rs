@@ -1121,7 +1121,7 @@ impl TypeChecker {
                 if let Some(var) = variable {
                     let var_type = match mode {
                         ParallelMode::Count => Some(TypeExpr::Named("int".into())),
-                        ParallelMode::Each | ParallelMode::Settle => {
+                        ParallelMode::Each | ParallelMode::EachStream | ParallelMode::Settle => {
                             match self.infer_type(expr, scope) {
                                 Some(TypeExpr::List(inner)) => Some(*inner),
                                 _ => None,

@@ -1,6 +1,6 @@
 //! Core stdlib builtin signatures that are not in the higher-level namespaces.
 
-use super::{BuiltinReturn, BuiltinSig, UNION_STRING_NIL};
+use super::{BuiltinReturn, BuiltinSig, UNION_INT_NIL, UNION_STRING_NIL};
 
 pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
@@ -536,8 +536,20 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("int")),
     },
     BuiltinSig {
+        name: "event_log.emit",
+        return_type: Some(BuiltinReturn::Named("int")),
+    },
+    BuiltinSig {
         name: "event_log_emit",
         return_type: None,
+    },
+    BuiltinSig {
+        name: "event_log.latest",
+        return_type: Some(BuiltinReturn::Union(UNION_INT_NIL)),
+    },
+    BuiltinSig {
+        name: "event_log.subscribe",
+        return_type: Some(BuiltinReturn::Named("stream")),
     },
     BuiltinSig {
         name: "execution_root",
@@ -850,6 +862,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "pair",
         return_type: Some(BuiltinReturn::Named("pair")),
+    },
+    BuiltinSig {
+        name: "parallel_race",
+        return_type: None,
     },
     BuiltinSig {
         name: "pascal_to_camel",

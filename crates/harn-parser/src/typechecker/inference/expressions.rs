@@ -663,6 +663,19 @@ impl TypeChecker {
                 })
             }
 
+            Node::Parallel { mode, body, .. } => {
+                let item_type = self
+                    .infer_block_type(body, scope)
+                    .unwrap_or_else(Self::wildcard_type);
+                match mode {
+                    ParallelMode::Count | ParallelMode::Each => {
+                        Some(TypeExpr::List(Box::new(item_type)))
+                    }
+                    ParallelMode::EachStream => Some(TypeExpr::Stream(Box::new(item_type))),
+                    ParallelMode::Settle => Some(TypeExpr::Named("dict".into())),
+                }
+            }
+
             // `try* EXPR` evaluates to EXPR's value on success; rethrow on
             // error never returns. Type is therefore EXPR's inferred type.
             Node::TryStar { operand } => self.infer_type(operand, scope),

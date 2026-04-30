@@ -18,6 +18,26 @@ for n in numbers(1, 4) {
 }
 ```
 
+`parallel each` can also return a stream instead of waiting for the
+whole batch. The streamed form preserves the `max_concurrent` cap but
+emits each result as soon as that task completes:
+
+```harn
+let results = parallel each [30, 5, 10] with { max_concurrent: 2 } { ms ->
+  sleep(ms)
+  return ms
+} as stream
+
+for result in results {
+  println(result) // 5, then 10, then 30
+}
+```
+
+Use `parallel_race(items, callable, options?)` when only the first
+successful result matters. It returns the first plain value or
+`Result.Ok` payload, cancels remaining work, and throws an aggregate
+error when every task throws or returns `Result.Err`.
+
 `gen` is contextual in the `gen fn` declaration form, so existing
 identifiers named `gen` remain valid. `emit expr` is only valid inside
 `gen fn`. It sends one value to the consumer and then the function
@@ -62,3 +82,9 @@ Breaking out of a `for` loop stops consuming the stream. Stream
 operators such as map/filter/merge/throttle and built-in LLM token
 streaming are separate runtime features layered on top of this base
 value type.
+
+The `event_log` namespace exposes the active runtime EventLog as stream
+values. `event_log.subscribe({topic, from_cursor})` returns a
+`Stream<dict>` whose events include `{id, cursor, topic, kind, payload,
+headers, occurred_at_ms}`. Dropping the stream closes the underlying
+subscription.

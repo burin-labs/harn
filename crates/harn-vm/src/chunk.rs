@@ -133,6 +133,9 @@ pub enum Op {
     /// Execute closure for each item in list, push results as list.
     /// Stack: list, closure → result_list
     ParallelMap,
+    /// Execute closure for each item in list, push a stream that emits in completion order.
+    /// Stack: list, closure → stream
+    ParallelMapStream,
     /// Like ParallelMap but wraps each result in Result.Ok/Err, never fails.
     /// Stack: list, closure → {results: [Result], succeeded: int, failed: int}
     ParallelSettle,
@@ -304,6 +307,7 @@ impl Op {
         Op::PopHandler,
         Op::Parallel,
         Op::ParallelMap,
+        Op::ParallelMapStream,
         Op::ParallelSettle,
         Op::Spawn,
         Op::SyncMutexEnter,
@@ -946,6 +950,7 @@ impl Chunk {
                 x if x == Op::Pipe as u8 => out.push_str("PIPE\n"),
                 x if x == Op::Parallel as u8 => out.push_str("PARALLEL\n"),
                 x if x == Op::ParallelMap as u8 => out.push_str("PARALLEL_MAP\n"),
+                x if x == Op::ParallelMapStream as u8 => out.push_str("PARALLEL_MAP_STREAM\n"),
                 x if x == Op::ParallelSettle as u8 => out.push_str("PARALLEL_SETTLE\n"),
                 x if x == Op::Spawn as u8 => out.push_str("SPAWN\n"),
                 x if x == Op::Import as u8 => {

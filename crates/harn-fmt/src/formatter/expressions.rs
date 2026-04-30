@@ -426,7 +426,7 @@ impl Formatter<'_> {
                 let e = self.format_expr(expr, indent);
                 let keyword = match mode {
                     ParallelMode::Count => "parallel",
-                    ParallelMode::Each => "parallel each",
+                    ParallelMode::Each | ParallelMode::EachStream => "parallel each",
                     ParallelMode::Settle => "parallel settle",
                 };
                 let options_clause = if options.is_empty() {
@@ -443,7 +443,11 @@ impl Formatter<'_> {
                 } else {
                     format!("{keyword} {e}{options_clause} {{")
                 };
-                self.format_block_expr(&opening, body, indent)
+                let mut formatted = self.format_block_expr(&opening, body, indent);
+                if matches!(mode, ParallelMode::EachStream) {
+                    formatted.push_str(" as stream");
+                }
+                formatted
             }
             // Declaration nodes rendered as placeholders when used in expr position.
             Node::Pipeline { name, .. } => format!("/* pipeline {name} */"),

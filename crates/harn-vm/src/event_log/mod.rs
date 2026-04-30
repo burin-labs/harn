@@ -595,18 +595,23 @@ fn stream_from_broadcast(
         }
 
         loop {
-            match live_rx.recv().await {
-                Ok((event_id, event)) if event_id > last_seen => {
-                    last_seen = event_id;
-                    if tx.send(Ok((event_id, event))).await.is_err() {
-                        return;
+            tokio::select! {
+                _ = tx.closed() => return,
+                received = live_rx.recv() => {
+                    match received {
+                        Ok((event_id, event)) if event_id > last_seen => {
+                            last_seen = event_id;
+                            if tx.send(Ok((event_id, event))).await.is_err() {
+                                return;
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(broadcast::error::RecvError::Closed) => return,
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            let _ = tx.try_send(Err(LogError::ConsumerLagged(last_seen)));
+                            return;
+                        }
                     }
-                }
-                Ok(_) => {}
-                Err(broadcast::error::RecvError::Closed) => return,
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    let _ = tx.try_send(Err(LogError::ConsumerLagged(last_seen)));
-                    return;
                 }
             }
         }
@@ -1922,6 +1927,22 @@ mod tests {
             Some(Err(LogError::ConsumerLagged(last_seen))) => assert_eq!(last_seen, 0),
             other => panic!("subscriber should surface lag, got {other:?}"),
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn broadcast_forwarder_stops_when_consumer_drops_stream() {
+        let (sender, rx) = broadcast::channel(2);
+        let stream = stream_from_broadcast(Vec::new(), None, rx, 2);
+        assert_eq!(sender.receiver_count(), 1);
+        drop(stream);
+
+        tokio::time::timeout(std::time::Duration::from_millis(100), async {
+            while sender.receiver_count() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("subscription receiver should close after consumer drop");
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -17,6 +17,7 @@ mod cookies;
 mod crypto;
 mod csv;
 mod datetime;
+mod event_log;
 mod flow;
 mod fs;
 pub(crate) mod hitl;
@@ -94,6 +95,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     sets::register_set_builtins(vm);
     collections::register_collection_builtins(vm);
     iter::register_iter_builtins(vm);
+    event_log::register_event_log_builtins(vm);
     shapes::register_shape_builtins(vm);
     testing::register_testing_builtins(vm);
     flow::register_flow_builtins(vm);

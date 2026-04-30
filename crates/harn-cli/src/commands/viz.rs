@@ -242,6 +242,7 @@ impl MermaidGraph {
                 let mode_label = match mode {
                     harn_parser::ParallelMode::Count => "parallel count",
                     harn_parser::ParallelMode::Each => "parallel each",
+                    harn_parser::ParallelMode::EachStream => "parallel each stream",
                     harn_parser::ParallelMode::Settle => "parallel settle",
                 };
                 let worker = variable
