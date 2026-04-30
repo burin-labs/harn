@@ -5,7 +5,11 @@
 //! registers it here, and returns a handle dict immediately:
 //!
 //! ```json
-//! { "handle_id": "hto-<pid-hex>-<n>", "started_at": <unix_ms>, "command": "..." }
+//! {
+//!   "handle_id": "hto-<pid-hex>-<n>",
+//!   "started_at": "...",
+//!   "command_or_op_descriptor": "..."
+//! }
 //! ```
 //!
 //! A background thread waits for the child and, when it exits, calls
@@ -220,6 +224,7 @@ pub(crate) fn spawn_long_running_with_options(
     let waiter_handle_id = handle_id.clone();
     let waiter_session_id = session_id;
     let waiter_started_at = started_at.clone();
+    let waiter_command_display = command_display.clone();
     std::thread::Builder::new()
         .name(format!("hto-waiter-{waiter_handle_id}"))
         .spawn(move || {
@@ -231,6 +236,7 @@ pub(crate) fn spawn_long_running_with_options(
                 capture,
                 waiter_started_at,
                 process_group_id,
+                waiter_command_display,
             );
         })
         .map_err(|e| HostlibError::Backend {
@@ -257,6 +263,7 @@ fn waiter_thread(
     capture: CaptureConfig,
     started_at: String,
     process_group_id: Option<u32>,
+    command_display: String,
 ) {
     let waiter_start = std::time::Instant::now();
 
@@ -341,6 +348,10 @@ fn waiter_thread(
         serde_json::Value::String(CommandStatus::Completed.as_str().to_string()),
     );
     payload.insert("handle_id".into(), serde_json::Value::String(handle_id));
+    payload.insert(
+        "command_or_op_descriptor".into(),
+        serde_json::Value::String(command_display),
+    );
     payload.insert("started_at".into(), serde_json::Value::String(started_at));
     payload.insert(
         "ended_at".into(),

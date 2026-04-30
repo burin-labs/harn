@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 use std::{cell::RefCell, thread_local};
 
@@ -24,6 +25,27 @@ pub(crate) fn reset_fs_state() {
     FILE_TEXT_CACHE.with(|cache| cache.borrow_mut().clear());
 }
 
+#[derive(Clone, Copy)]
+struct WalkDirOptions {
+    max_depth: Option<usize>,
+    follow_symlinks: bool,
+    long_running: bool,
+}
+
+#[derive(Clone)]
+struct WalkDirEntry {
+    path: String,
+    is_dir: bool,
+    is_file: bool,
+    depth: i64,
+}
+
+#[derive(Clone)]
+struct GlobOptions {
+    base: String,
+    long_running: bool,
+}
+
 fn resolve_fs_path(path: &str) -> PathBuf {
     crate::stdlib::process::resolve_source_relative_path(path)
 }
@@ -34,6 +56,154 @@ fn result_ok(value: VmValue) -> VmValue {
 
 fn result_err(value: VmValue) -> VmValue {
     VmValue::enum_variant("Result", "Err", vec![value])
+}
+
+fn bool_option(opts: &BTreeMap<String, VmValue>, key: &str) -> Option<bool> {
+    match opts.get(key) {
+        Some(VmValue::Bool(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+fn string_option(opts: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+    match opts.get(key) {
+        Some(VmValue::String(value)) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn parse_walk_dir_options(args: &[VmValue]) -> WalkDirOptions {
+    let mut options = WalkDirOptions {
+        max_depth: None,
+        follow_symlinks: false,
+        long_running: false,
+    };
+    if let Some(VmValue::Dict(opts)) = args.get(1) {
+        if let Some(v) = opts.get("max_depth").and_then(|v| v.as_int()) {
+            if v >= 0 {
+                options.max_depth = Some(v as usize);
+            }
+        }
+        options.follow_symlinks = bool_option(opts, "follow_symlinks").unwrap_or(false);
+        options.long_running = bool_option(opts, "long_running")
+            .or_else(|| bool_option(opts, "background"))
+            .unwrap_or(false);
+    }
+    options
+}
+
+fn walk_dir_entries(
+    resolved: &PathBuf,
+    options: WalkDirOptions,
+    cancel: Option<&AtomicBool>,
+) -> Vec<WalkDirEntry> {
+    let mut walker = walkdir::WalkDir::new(resolved).follow_links(options.follow_symlinks);
+    if let Some(d) = options.max_depth {
+        walker = walker.max_depth(d);
+    }
+    let mut entries = Vec::new();
+    for entry in walker.into_iter().filter_map(|e| e.ok()) {
+        if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            break;
+        }
+        let path = entry.path();
+        entries.push(WalkDirEntry {
+            path: path.to_string_lossy().replace('\\', "/"),
+            is_dir: entry.file_type().is_dir(),
+            is_file: entry.file_type().is_file(),
+            depth: entry.depth() as i64,
+        });
+    }
+    entries
+}
+
+fn walk_entry_to_vm(entry: WalkDirEntry) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert("path".to_string(), VmValue::String(Rc::from(entry.path)));
+    dict.insert("is_dir".to_string(), VmValue::Bool(entry.is_dir));
+    dict.insert("is_file".to_string(), VmValue::Bool(entry.is_file));
+    dict.insert("depth".to_string(), VmValue::Int(entry.depth));
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn walk_entries_to_json(entries: Vec<WalkDirEntry>) -> serde_json::Value {
+    serde_json::Value::Array(
+        entries
+            .into_iter()
+            .map(|entry| {
+                serde_json::json!({
+                    "path": entry.path,
+                    "is_dir": entry.is_dir,
+                    "is_file": entry.is_file,
+                    "depth": entry.depth,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn parse_glob_options(args: &[VmValue]) -> GlobOptions {
+    let mut options = GlobOptions {
+        base: ".".to_string(),
+        long_running: false,
+    };
+    match args.get(1) {
+        Some(VmValue::Dict(opts)) => {
+            options.base = string_option(opts, "base").unwrap_or_else(|| ".".to_string());
+            options.long_running = bool_option(opts, "long_running")
+                .or_else(|| bool_option(opts, "background"))
+                .unwrap_or(false);
+        }
+        Some(value) => {
+            let base = value.display();
+            if !base.is_empty() {
+                options.base = base;
+            }
+            if let Some(VmValue::Dict(opts)) = args.get(2) {
+                options.long_running = bool_option(opts, "long_running")
+                    .or_else(|| bool_option(opts, "background"))
+                    .unwrap_or(false);
+            }
+        }
+        None => {}
+    }
+    options
+}
+
+fn glob_matches(
+    pattern: &str,
+    base: &PathBuf,
+    cancel: Option<&AtomicBool>,
+) -> Result<Vec<String>, VmError> {
+    let mut builder = globset::GlobSetBuilder::new();
+    let glob = globset::Glob::new(pattern)
+        .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("glob: {e}")))))?;
+    builder.add(glob);
+    let set = builder
+        .build()
+        .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("glob: {e}")))))?;
+    let mut matches = Vec::new();
+    for entry in walkdir::WalkDir::new(base)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            break;
+        }
+        let rel = match entry.path().strip_prefix(base) {
+            Ok(p) => p.to_path_buf(),
+            Err(_) => continue,
+        };
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        if rel_str.is_empty() {
+            continue;
+        }
+        if set.is_match(&rel_str) {
+            matches.push(entry.path().to_string_lossy().replace('\\', "/"));
+        }
+    }
+    matches.sort();
+    Ok(matches)
 }
 
 fn metadata_signature(path: &PathBuf) -> Option<(u64, Option<SystemTime>)> {
@@ -476,40 +646,29 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
             &resolved,
             crate::stdlib::sandbox::FsAccess::Read,
         )?;
-        let mut max_depth: Option<usize> = None;
-        let mut follow_symlinks = false;
-        if let Some(VmValue::Dict(opts)) = args.get(1) {
-            if let Some(v) = opts.get("max_depth").and_then(|v| v.as_int()) {
-                if v >= 0 {
-                    max_depth = Some(v as usize);
-                }
-            }
-            if let Some(VmValue::Bool(b)) = opts.get("follow_symlinks") {
-                follow_symlinks = *b;
-            }
+        let options = parse_walk_dir_options(args);
+        if options.long_running {
+            let session_id = crate::llm::current_agent_session_id().unwrap_or_default();
+            let descriptor = format!("walk_dir {}", resolved.display());
+            let handle = crate::stdlib::long_running::spawn_json_operation(
+                "walk_dir",
+                descriptor,
+                session_id,
+                move |cancel| {
+                    Ok(walk_entries_to_json(walk_dir_entries(
+                        &resolved,
+                        options,
+                        Some(&cancel),
+                    )))
+                },
+            )
+            .map_err(VmError::Runtime)?;
+            return Ok(handle.into_vm_value());
         }
-        let mut walker = walkdir::WalkDir::new(&resolved).follow_links(follow_symlinks);
-        if let Some(d) = max_depth {
-            walker = walker.max_depth(d);
-        }
-        let mut entries: Vec<VmValue> = Vec::new();
-        for entry in walker.into_iter().filter_map(|e| e.ok()) {
-            let path = entry.path();
-            let depth = entry.depth() as i64;
-            let is_dir = entry.file_type().is_dir();
-            let mut dict = BTreeMap::new();
-            dict.insert(
-                "path".to_string(),
-                VmValue::String(Rc::from(path.to_string_lossy().replace('\\', "/"))),
-            );
-            dict.insert("is_dir".to_string(), VmValue::Bool(is_dir));
-            dict.insert(
-                "is_file".to_string(),
-                VmValue::Bool(entry.file_type().is_file()),
-            );
-            dict.insert("depth".to_string(), VmValue::Int(depth));
-            entries.push(VmValue::Dict(Rc::new(dict)));
-        }
+        let entries = walk_dir_entries(&resolved, options, None)
+            .into_iter()
+            .map(walk_entry_to_vm)
+            .collect::<Vec<_>>();
         Ok(VmValue::List(Rc::new(entries)))
     });
 
@@ -520,48 +679,37 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
                 "glob: pattern is required",
             ))));
         }
-        // The pattern is matched against paths relative to the configured
-        // base. Default base is the script source directory; an explicit
-        // second argument overrides.
-        let base_str = args
-            .get(1)
-            .map(|a| a.display())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| ".".to_string());
-        let base = resolve_fs_path(&base_str);
+        let options = parse_glob_options(args);
+        let base = resolve_fs_path(&options.base);
         crate::stdlib::sandbox::enforce_fs_path(
             "glob",
             &base,
             crate::stdlib::sandbox::FsAccess::Read,
         )?;
-        let mut builder = globset::GlobSetBuilder::new();
-        let glob = globset::Glob::new(&pattern)
-            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("glob: {e}")))))?;
-        builder.add(glob);
-        let set = builder
-            .build()
-            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("glob: {e}")))))?;
-        let mut matches: Vec<VmValue> = Vec::new();
-        for entry in walkdir::WalkDir::new(&base)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            // Match against path relative to base, using forward slashes.
-            let rel = match entry.path().strip_prefix(&base) {
-                Ok(p) => p.to_path_buf(),
-                Err(_) => continue,
-            };
-            let rel_str = rel.to_string_lossy().replace('\\', "/");
-            if rel_str.is_empty() {
-                continue;
-            }
-            if set.is_match(&rel_str) {
-                matches.push(VmValue::String(Rc::from(
-                    entry.path().to_string_lossy().replace('\\', "/"),
-                )));
-            }
+        if options.long_running {
+            let session_id = crate::llm::current_agent_session_id().unwrap_or_default();
+            let descriptor = format!("glob {} in {}", pattern, base.display());
+            let handle = crate::stdlib::long_running::spawn_json_operation(
+                "glob",
+                descriptor,
+                session_id,
+                move |cancel| {
+                    glob_matches(&pattern, &base, Some(&cancel))
+                        .map(|items| {
+                            serde_json::Value::Array(
+                                items.into_iter().map(serde_json::Value::String).collect(),
+                            )
+                        })
+                        .map_err(|error| error.to_string())
+                },
+            )
+            .map_err(VmError::Runtime)?;
+            return Ok(handle.into_vm_value());
         }
-        matches.sort_by_key(|a| a.display());
+        let matches = glob_matches(&pattern, &base, None)?
+            .into_iter()
+            .map(|path| VmValue::String(Rc::from(path)))
+            .collect::<Vec<_>>();
         Ok(VmValue::List(Rc::new(matches)))
     });
 }
@@ -569,6 +717,9 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{LazyLock, Mutex};
+
+    static LONG_RUNNING_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     fn vm() -> Vm {
         let mut vm = Vm::new();
@@ -584,6 +735,33 @@ mod tests {
 
     fn s(v: &str) -> VmValue {
         VmValue::String(Rc::from(v))
+    }
+
+    fn b(v: bool) -> VmValue {
+        VmValue::Bool(v)
+    }
+
+    fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {
+        VmValue::Dict(Rc::new(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key.to_string(), value))
+                .collect(),
+        ))
+    }
+
+    fn drain_feedback(handle_id: &str) -> serde_json::Value {
+        for _ in 0..50 {
+            for (kind, content) in crate::llm::drain_global_pending_feedback("") {
+                assert_eq!(kind, "tool_result");
+                let payload: serde_json::Value = serde_json::from_str(&content).unwrap();
+                if payload["handle_id"] == handle_id {
+                    return payload;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!("timed out waiting for feedback for {handle_id}");
     }
 
     #[test]
@@ -608,5 +786,75 @@ mod tests {
                 .display(),
             "two updated"
         );
+    }
+
+    #[test]
+    fn walk_dir_long_running_returns_handle_and_feedback() {
+        let _guard = LONG_RUNNING_TEST_LOCK.lock().unwrap();
+        crate::stdlib::long_running::reset_state();
+        let _ = crate::llm::drain_global_pending_feedback("");
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/lib.harn"), "fn main() {}\n").unwrap();
+        let mut vm = vm();
+
+        let response = call(
+            &mut vm,
+            "walk_dir",
+            vec![
+                s(&dir.path().to_string_lossy()),
+                dict(vec![("long_running", b(true))]),
+            ],
+        )
+        .unwrap();
+        let response = response.as_dict().expect("handle dict");
+        assert_eq!(response["status"].display(), "running");
+        assert_eq!(response["operation"].display(), "walk_dir");
+        assert!(response["command_or_op_descriptor"]
+            .display()
+            .contains("walk_dir"));
+        let handle_id = response["handle_id"].display();
+        let payload = drain_feedback(&handle_id);
+
+        assert_eq!(payload["status"], "completed");
+        assert_eq!(payload["operation"], "walk_dir");
+        assert!(payload["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["path"].as_str().unwrap().ends_with("src/lib.harn")));
+    }
+
+    #[test]
+    fn glob_long_running_returns_handle_and_feedback() {
+        let _guard = LONG_RUNNING_TEST_LOCK.lock().unwrap();
+        crate::stdlib::long_running::reset_state();
+        let _ = crate::llm::drain_global_pending_feedback("");
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/lib.harn"), "fn main() {}\n").unwrap();
+        std::fs::write(dir.path().join("README.md"), "# test\n").unwrap();
+        let mut vm = vm();
+
+        let response = call(
+            &mut vm,
+            "glob",
+            vec![
+                s("**/*.harn"),
+                s(&dir.path().to_string_lossy()),
+                dict(vec![("background", b(true))]),
+            ],
+        )
+        .unwrap();
+        let response = response.as_dict().expect("handle dict");
+        assert_eq!(response["status"].display(), "running");
+        assert_eq!(response["operation"].display(), "glob");
+        let handle_id = response["handle_id"].display();
+        let payload = drain_feedback(&handle_id);
+
+        assert_eq!(payload["status"], "completed");
+        let result = payload["result"].as_array().unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].as_str().unwrap().ends_with("src/lib.harn"));
     }
 }

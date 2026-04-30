@@ -81,6 +81,9 @@ pub(crate) struct Linter<'a> {
     /// Stack of connector exports whose default effect policy restricts
     /// direct builtin calls.
     pub(super) connector_effect_export_stack: Vec<String>,
+    /// Whether the current body contains a defer/finally path that cancels
+    /// long-running handles.
+    pub(super) long_running_cleanup_stack: Vec<bool>,
 }
 
 impl<'a> Linter<'a> {
@@ -112,6 +115,7 @@ impl<'a> Linter<'a> {
             complexity_threshold: DEFAULT_COMPLEXITY_THRESHOLD,
             value_block_depth: 0,
             connector_effect_export_stack: Vec::new(),
+            long_running_cleanup_stack: Vec::new(),
         }
     }
 
@@ -470,6 +474,226 @@ impl<'a> Linter<'a> {
     fn string_literal_value(node: &SNode) -> Option<&str> {
         match &node.node {
             Node::StringLiteral(value) | Node::RawStringLiteral(value) => Some(value.as_str()),
+            _ => None,
+        }
+    }
+
+    pub(super) fn enter_long_running_body(&mut self, body: &[SNode]) {
+        self.long_running_cleanup_stack
+            .push(Self::body_has_long_running_cleanup(body));
+    }
+
+    pub(super) fn exit_long_running_body(&mut self) {
+        self.long_running_cleanup_stack.pop();
+    }
+
+    pub(super) fn current_body_has_long_running_cleanup(&self) -> bool {
+        self.long_running_cleanup_stack
+            .last()
+            .copied()
+            .unwrap_or(false)
+    }
+
+    pub(super) fn warn_unmanaged_long_running_call(&mut self, name: &str, span: Span) {
+        if self.current_body_has_long_running_cleanup() {
+            return;
+        }
+        self.diagnostics.push(LintDiagnostic {
+            rule: "long-running-without-cleanup",
+            message: format!(
+                "`{name}` starts long-running work without a defer/finally cleanup path"
+            ),
+            span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(
+                "store the returned handle and cancel it from a defer or finally block with `tools.cancel_handle`"
+                    .to_string(),
+            ),
+            fix: None,
+        });
+    }
+
+    pub(super) fn call_uses_long_running_flag(name: &str, args: &[SNode]) -> bool {
+        if !Self::long_running_capable_call(name, args) {
+            return false;
+        }
+        args.iter().any(Self::expr_has_long_running_flag)
+    }
+
+    fn long_running_capable_call(name: &str, args: &[SNode]) -> bool {
+        matches!(
+            name,
+            "walk_dir"
+                | "glob"
+                | "http_get"
+                | "http_request"
+                | "http_download"
+                | "run_command"
+                | "run_test"
+                | "run_build_command"
+        ) || matches!(
+            (name, args.first().and_then(Self::string_literal_value)),
+            (
+                "host_tool_call",
+                Some(
+                    "run_command"
+                        | "run_test"
+                        | "run_build_command"
+                        | "tools.run_command"
+                        | "tools.run_test"
+                        | "tools.run_build_command"
+                )
+            )
+        )
+    }
+
+    fn expr_has_long_running_flag(node: &SNode) -> bool {
+        match &node.node {
+            Node::DictLiteral(entries) => entries.iter().any(|entry| {
+                matches!(
+                    Self::dict_key_name(&entry.key).as_deref(),
+                    Some("long_running" | "background")
+                ) && matches!(entry.value.node, Node::BoolLiteral(true))
+            }),
+            _ => false,
+        }
+    }
+
+    fn body_has_long_running_cleanup(body: &[SNode]) -> bool {
+        body.iter().any(Self::node_has_long_running_cleanup)
+    }
+
+    fn node_has_long_running_cleanup(node: &SNode) -> bool {
+        match &node.node {
+            Node::DeferStmt { body } => Self::block_calls_cancel_handle(body),
+            Node::TryCatch {
+                body,
+                catch_body,
+                finally_body,
+                ..
+            } => {
+                finally_body
+                    .as_ref()
+                    .is_some_and(|body| Self::block_calls_cancel_handle(body))
+                    || Self::body_has_long_running_cleanup(body)
+                    || Self::body_has_long_running_cleanup(catch_body)
+            }
+            Node::IfElse {
+                then_body,
+                else_body,
+                ..
+            } => {
+                Self::body_has_long_running_cleanup(then_body)
+                    || else_body
+                        .as_ref()
+                        .is_some_and(|body| Self::body_has_long_running_cleanup(body))
+            }
+            Node::ForIn { body, .. }
+            | Node::WhileLoop { body, .. }
+            | Node::Retry { body, .. }
+            | Node::Block(body)
+            | Node::SpawnExpr { body }
+            | Node::Closure { body, .. } => Self::body_has_long_running_cleanup(body),
+            _ => false,
+        }
+    }
+
+    fn block_calls_cancel_handle(body: &[SNode]) -> bool {
+        body.iter().any(Self::node_calls_cancel_handle)
+    }
+
+    fn node_calls_cancel_handle(node: &SNode) -> bool {
+        match &node.node {
+            Node::FunctionCall { name, args } => {
+                name == "cancel_handle"
+                    || matches!(
+                        (
+                            name.as_str(),
+                            args.first().and_then(Self::string_literal_value)
+                        ),
+                        (
+                            "host_tool_call",
+                            Some("cancel_handle" | "tools.cancel_handle")
+                        )
+                    )
+                    || args.iter().any(Self::node_calls_cancel_handle)
+            }
+            Node::DictLiteral(entries) => entries.iter().any(|entry| {
+                Self::node_calls_cancel_handle(&entry.key)
+                    || Self::node_calls_cancel_handle(&entry.value)
+            }),
+            Node::ListLiteral(items) => items.iter().any(Self::node_calls_cancel_handle),
+            Node::IfElse {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                Self::node_calls_cancel_handle(condition)
+                    || Self::block_calls_cancel_handle(then_body)
+                    || else_body
+                        .as_ref()
+                        .is_some_and(|body| Self::block_calls_cancel_handle(body))
+            }
+            Node::TryCatch {
+                body,
+                catch_body,
+                finally_body,
+                ..
+            } => {
+                Self::block_calls_cancel_handle(body)
+                    || Self::block_calls_cancel_handle(catch_body)
+                    || finally_body
+                        .as_ref()
+                        .is_some_and(|body| Self::block_calls_cancel_handle(body))
+            }
+            Node::DeferStmt { body }
+            | Node::ForIn { body, .. }
+            | Node::WhileLoop { body, .. }
+            | Node::Retry { body, .. }
+            | Node::Block(body)
+            | Node::SpawnExpr { body }
+            | Node::Closure { body, .. } => Self::block_calls_cancel_handle(body),
+            Node::MethodCall { object, args, .. }
+            | Node::OptionalMethodCall { object, args, .. } => {
+                Self::node_calls_cancel_handle(object)
+                    || args.iter().any(Self::node_calls_cancel_handle)
+            }
+            Node::PropertyAccess { object, .. }
+            | Node::OptionalPropertyAccess { object, .. }
+            | Node::SubscriptAccess { object, .. }
+            | Node::OptionalSubscriptAccess { object, .. }
+            | Node::SliceAccess { object, .. } => Self::node_calls_cancel_handle(object),
+            Node::BinaryOp { left, right, .. } => {
+                Self::node_calls_cancel_handle(left) || Self::node_calls_cancel_handle(right)
+            }
+            Node::UnaryOp { operand, .. }
+            | Node::TryOperator { operand }
+            | Node::TryStar { operand } => Self::node_calls_cancel_handle(operand),
+            Node::Ternary {
+                condition,
+                true_expr,
+                false_expr,
+            } => {
+                Self::node_calls_cancel_handle(condition)
+                    || Self::node_calls_cancel_handle(true_expr)
+                    || Self::node_calls_cancel_handle(false_expr)
+            }
+            Node::ReturnStmt { value } | Node::YieldExpr { value } => value
+                .as_ref()
+                .is_some_and(|value| Self::node_calls_cancel_handle(value)),
+            Node::ThrowStmt { value } | Node::EmitExpr { value } => {
+                Self::node_calls_cancel_handle(value)
+            }
+            Node::AttributedDecl { inner, .. } => Self::node_calls_cancel_handle(inner),
+            _ => false,
+        }
+    }
+
+    fn dict_key_name(node: &SNode) -> Option<String> {
+        match &node.node {
+            Node::Identifier(value)
+            | Node::StringLiteral(value)
+            | Node::RawStringLiteral(value) => Some(value.clone()),
             _ => None,
         }
     }
