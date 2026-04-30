@@ -219,8 +219,9 @@ Key options:
 | `schema_retry_nudge` | auto | String (verbatim), `true` (auto), or `false` (bare retry). |
 | `output_validation` | `"off"` | `"error"` throws on mismatch; `"warn"` logs. |
 
-See `docs/src/llm-and-agents.md` for `agent_loop`, tool dispatch, and
-the full option surface.
+See `docs/src/llm-and-agents.md` for the overview, or
+`docs/src/llm/agent_loop.md` for `agent_loop`, tool dispatch, and the full
+option surface.
 
 ## Rate limiting
 
