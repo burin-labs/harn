@@ -1,14 +1,14 @@
 {
   "name": "a2a.agent_card.missing_supported_interfaces",
   "protocol": "a2a",
-  "schema": "schemas/a2a-1.0.schema.json",
+  "schema": "schemas/a2a-0.3.0.schema.json",
   "expect": "invalid",
   "documents": [
     {
       "name": "legacy-agent",
       "description": "Legacy discovery shape",
       "url": "https://agent.example.com/rpc",
-      "protocolVersion": "1.0",
+      "protocolVersion": "0.3.0",
       "version": "0.7.48",
       "capabilities": {},
       "skills": []

@@ -1,13 +1,13 @@
 {
   "name": "a2a.task_and_stream.messages",
   "protocol": "a2a",
-  "schema": "schemas/a2a-1.0.schema.json",
+  "schema": "schemas/a2a-0.3.0.schema.json",
   "expect": "valid",
   "documents": [
     {
       "jsonrpc": "2.0",
       "id": 1,
-      "method": "SendMessage",
+      "method": "message/send",
       "params": {
         "message": {
           "id": "msg-1",

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://harnlang.com/conformance/protocols/a2a-1.0.schema.json",
-  "title": "Harn A2A 1.0 adapter profile",
-  "description": "Pinned profile derived from the A2A specification and a2aproject/A2A specification/a2a.proto for the JSON-RPC/card/task surface Harn serves.",
+  "$id": "https://harnlang.com/conformance/protocols/a2a-0.3.0.schema.json",
+  "title": "Harn A2A 0.3.0 adapter profile",
+  "description": "Pinned profile derived from the A2A v0.3.0 specification and a2aproject/A2A specification/a2a.proto for the JSON-RPC/card/task surface Harn serves.",
   "anyOf": [
     { "$ref": "#/$defs/AgentCard" },
     { "$ref": "#/$defs/JsonRpcRequest" },
@@ -65,7 +65,7 @@
         "protocolBinding": {
           "enum": ["JSONRPC", "GRPC", "HTTP+JSON"]
         },
-        "protocolVersion": { "const": "1.0" }
+        "protocolVersion": { "const": "0.3.0" }
       }
     },
     "AgentCapabilities": {
@@ -109,6 +109,16 @@
         "id": { "$ref": "#/$defs/RequestId" },
         "method": {
           "enum": [
+            "message/send",
+            "message/stream",
+            "tasks/get",
+            "tasks/cancel",
+            "tasks/resubscribe",
+            "tasks/pushNotificationConfig/set",
+            "tasks/pushNotificationConfig/get",
+            "tasks/pushNotificationConfig/list",
+            "tasks/pushNotificationConfig/delete",
+            "agent/getAuthenticatedExtendedCard",
             "SendMessage",
             "SendStreamingMessage",
             "GetTask",
@@ -146,7 +156,14 @@
             { "$ref": "#/$defs/Task" },
             { "$ref": "#/$defs/TaskList" },
             { "$ref": "#/$defs/TaskEvent" },
-            { "$ref": "#/$defs/Message" }
+            { "$ref": "#/$defs/Message" },
+            { "$ref": "#/$defs/AgentCard" },
+            { "$ref": "#/$defs/TaskPushNotificationConfig" },
+            {
+              "type": "array",
+              "items": { "$ref": "#/$defs/TaskPushNotificationConfig" }
+            },
+            { "type": "null" }
           ]
         }
       }
@@ -207,6 +224,19 @@
         },
         "artifacts": { "type": "array" },
         "metadata": { "type": "object" }
+      }
+    },
+    "TaskPushNotificationConfig": {
+      "type": "object",
+      "required": ["taskId"],
+      "additionalProperties": true,
+      "properties": {
+        "taskId": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "pushNotificationConfig": { "type": "object" },
+        "url": { "type": "string", "format": "uri" },
+        "authentication": { "type": "object" },
+        "token": { "type": "string" }
       }
     },
     "TaskStatus": {

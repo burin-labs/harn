@@ -61,7 +61,7 @@ For `a2a://host[:port]/path` routes, the dispatcher:
   dispatch
 - treats the URI path as the `target_agent` label that propagates into the
   outbound envelope and the action graph
-- sends the `TriggerEvent` envelope over `a2a.SendMessage`
+- sends the `TriggerEvent` envelope over `message/send`
 - returns either the inline agent result (when the peer completes
   synchronously) or a pending task handle payload for the caller
 
@@ -179,7 +179,7 @@ event back to the original event id.
 
 ## Current MVP limits
 
-- `a2a://...` currently uses the single-shot `a2a.SendMessage` path only; push
+- `a2a://...` currently uses the single-shot `message/send` path only; push
   callbacks, streaming chunk accumulation, and remote cancel/resubscribe stay
   deferred
 - worker consumers use polling claim/ack/TTL semantics today through

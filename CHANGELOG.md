@@ -181,7 +181,7 @@ granular archaeology.
 
 - **Protocol conformance gate (#807/#840).** New `harn test protocols` command
   runs offline JSON schema fixture conformance for ACP, A2A, and MCP. Checked-in
-  protocol schemas (`mcp-2025-11-25`, `acp-session-update`, `a2a-1.0`) and
+  protocol schemas (`mcp-2025-11-25`, `acp-session-update`, `a2a-0.3.0`) and
   positive/negative fixtures live under `conformance/protocols/`. Wired into
   `make all`, CI, and the release gate.
 
@@ -195,6 +195,14 @@ granular archaeology.
   included.
 
 ### Changed
+
+- **A2A 0.3.0 RPC names (#886).** `harn serve a2a` now advertises protocol
+  version `0.3.0`, accepts canonical A2A methods such as `message/send`,
+  `message/stream`, `tasks/get`, `tasks/cancel`, `tasks/resubscribe`, push
+  notification config methods, and `agent/getAuthenticatedExtendedCard`, and
+  emits `Deprecation: true` for the legacy `a2a.*`, `tasks/send`,
+  `tasks/send_and_wait`, and `tasks/sendSubscribe` aliases. Outbound
+  `a2a://...` trigger dispatch now sends canonical `message/send`.
 
 - **MCP latest-spec gap handling documented and enforced (#809/#839).** Shared
   helper explicitly rejects unsupported MCP 2025-11-25 methods
