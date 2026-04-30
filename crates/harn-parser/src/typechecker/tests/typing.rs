@@ -52,8 +52,8 @@ fn test_match_expression_assignment_uses_arm_value_type() {
 }"#,
     );
     assert_eq!(errs.len(), 1);
-    assert!(errs[0].contains("declared as int"));
-    assert!(errs[0].contains("assigned string"));
+    assert!(errs[0].contains("expected int"));
+    assert!(errs[0].contains("found string"));
 }
 
 #[test]
@@ -82,8 +82,8 @@ fn test_match_expression_infers_list_pattern_binding_type() {
 }"#,
     );
     assert_eq!(errs.len(), 1);
-    assert!(errs[0].contains("declared as string"));
-    assert!(errs[0].contains("assigned int"));
+    assert!(errs[0].contains("expected string"));
+    assert!(errs[0].contains("found int"));
 }
 
 #[test]
@@ -129,6 +129,69 @@ fn deploy_activate() -> string { return "ready" }
             .all(|warning| !warning.contains("unknown attribute")
                 && !warning.contains("only applies")),
         "runtime attributes should not warn on valid declarations: {warns:?}"
+    );
+}
+
+#[test]
+fn test_durable_persona_annotations_are_recognized_and_validated() {
+    let warns = warnings(
+        r#"
+@persona(
+  triggers: [github.pr_opened, schedule("*/30 * * * *")],
+  tools: [github, ci, linear],
+  autonomy: act_with_approval,
+  budget: {daily_usd: 20, frontier_escalations: 3},
+  handoffs: [review_captain, human_maintainer],
+  receipts: required,
+)
+@trigger(github.check_failed)
+@handoff(target: review_captain, reason: "risky diff")
+@budget(daily_usd: 20, max_tokens: 100000)
+fn merge_captain(ctx) -> string { return "ok" }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .all(|warning| !warning.contains("unknown attribute")
+                && !warning.contains("only applies")
+                && !warning.contains("must")),
+        "durable persona annotations should validate cleanly: {warns:?}"
+    );
+}
+
+#[test]
+fn test_durable_persona_annotation_arg_type_warnings() {
+    let warns = warnings(
+        r#"
+@persona(triggers: "github.pr_opened", tools: [github, 1], budget: {daily_usd: "twenty"})
+@budget(max_tokens: "many")
+fn bad_persona(ctx) { return ctx }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|warning| warning.contains("`@persona(triggers: ...)` must be a list")),
+        "expected persona trigger list warning, got {warns:?}"
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|warning| warning.contains("`@persona(tools: ...)` must contain only")),
+        "expected persona tools warning, got {warns:?}"
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|warning| warning.contains("`@persona(daily_usd: ...)` must be a number")),
+        "expected inline budget warning, got {warns:?}"
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|warning| warning.contains("`@budget(max_tokens: ...)` must be a number")),
+        "expected budget warning, got {warns:?}"
     );
 }
 

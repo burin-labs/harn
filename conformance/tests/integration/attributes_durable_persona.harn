@@ -1,0 +1,30 @@
+// Durable persona annotations are compile-time metadata. The runtime
+// still executes the attached declarations unchanged, and legacy dict-
+// style persona metadata remains ordinary Harn data.
+@persona(triggers: [github.pr_opened, schedule("*/30 * * * *")], tools: [github, ci, linear], autonomy: act_with_approval, budget: {daily_usd: 20, frontier_escalations: 3}, handoffs: [review_captain, human_maintainer], receipts: required)
+@trigger(github.check_failed)
+@handoff(target: review_captain, reason: "risky diff")
+@budget(daily_usd: 20, max_tokens: 100000)
+pub fn merge_captain(ctx) -> string {
+  return "persona:${ctx.autonomy}:${ctx.triggers[0]}"
+}
+
+@deprecated(since: "0.9", use: "merge_captain")
+pub fn legacy_merge_captain(ctx) -> string {
+  return "legacy:${ctx.autonomy}"
+}
+
+@test
+pipeline test_durable_persona_attributes(task) {
+  let legacy = {
+    triggers: ["github.pr_opened", "github.check_failed"],
+    tools: ["github", "ci", "linear"],
+    autonomy: "act_with_approval",
+    budget: {daily_usd: 20, frontier_escalations: 3},
+    handoffs: ["review_captain", "human_maintainer"],
+  }
+  assert_eq(merge_captain(legacy), "persona:act_with_approval:github.pr_opened")
+  assert_eq(legacy.budget.daily_usd, 20)
+  assert_eq(legacy.handoffs[1], "human_maintainer")
+  log("attributes_durable_persona ok")
+}

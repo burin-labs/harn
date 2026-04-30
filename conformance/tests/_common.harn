@@ -1,4 +1,4 @@
-// Shared conformance helper for fixtures that exec the built `harn` binary.
+/** Shared conformance helper for fixtures that exec the built `harn` binary. */
 fn first_group(pattern, text) {
   let matches = regex_captures(pattern, text)
   if len(matches) == 0 {
@@ -8,6 +8,10 @@ fn first_group(pattern, text) {
 }
 
 pub fn resolve_harn_bin(repo_root) {
+  let env_target_dir = env("CARGO_TARGET_DIR")
+  if env_target_dir {
+    return path_join(env_target_dir, "debug/harn")
+  }
   let cargo_config = path_join(repo_root, ".cargo/config.toml")
   if file_exists(cargo_config) {
     let config = exec("cat", cargo_config).stdout
@@ -16,6 +20,5 @@ pub fn resolve_harn_bin(repo_root) {
       return path_join(configured, "debug/harn")
     }
   }
-  let target_dir = env("CARGO_TARGET_DIR") ?? path_join(repo_root, "target")
-  return path_join(target_dir, "debug/harn")
+  return path_join(repo_root, "target/debug/harn")
 }

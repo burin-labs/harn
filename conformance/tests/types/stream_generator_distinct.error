@@ -1,1 +1,1 @@
-declared as Generator<int>, but assigned Stream<int>
+expected Generator<int>, found Stream<int>

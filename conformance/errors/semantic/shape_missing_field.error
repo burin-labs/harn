@@ -1,1 +1,1 @@
-declared as {name: string, age: int}, but assigned {age: int}
+expected {name: string, age: int}, found {age: int}

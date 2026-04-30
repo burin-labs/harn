@@ -168,6 +168,38 @@ interface Repository<T> {
     }
 
     #[test]
+    fn parses_durable_persona_annotation_values() {
+        let source = r#"
+@persona(
+  triggers: [github.pr_opened, schedule("*/30 * * * *")],
+  tools: [github, ci],
+  autonomy: act_with_approval,
+  budget: {daily_usd: 20, frontier_escalations: 3},
+  handoffs: [review_captain],
+)
+fn merge_captain(ctx) {
+  return ctx
+}
+"#;
+
+        let program = parse_source(source).expect("should parse persona annotations");
+        let Node::AttributedDecl { attributes, inner } = &program[0].node else {
+            panic!("expected attributed decl");
+        };
+        assert_eq!(attributes[0].name, "persona");
+        assert!(matches!(inner.node, Node::FnDecl { .. }));
+        let triggers = attributes[0].named_arg("triggers").expect("triggers arg");
+        let Node::ListLiteral(items) = &triggers.node else {
+            panic!("expected trigger list");
+        };
+        assert!(matches!(&items[0].node, Node::Identifier(name) if name == "github.pr_opened"));
+        assert!(matches!(
+            &items[1].node,
+            Node::FunctionCall { name, args, .. } if name == "schedule" && args.len() == 1
+        ));
+    }
+
+    #[test]
     fn parses_generic_structs_and_enums() {
         let source = r#"
 struct Pair<A, B> {

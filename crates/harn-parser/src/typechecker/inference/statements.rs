@@ -1516,10 +1516,10 @@ impl TypeChecker {
     }
 
     /// Validate attribute usage and emit warnings for unknown attributes.
-    /// Recognized attribute names: `deprecated`, `test`, `complexity`,
-    /// `acp_tool`, `acp_skill`, `invariant`, `deterministic`, `semantic`,
-    /// `archivist`, `retroactive`. All other names produce a warning so
-    /// misspellings surface early without breaking compilation.
+    /// Recognized attribute names are the runtime/tooling attributes plus
+    /// the durable-persona annotation set: `persona`, `trigger`, `handoff`,
+    /// and `budget`. All other names produce a warning so misspellings
+    /// surface early without breaking compilation.
     ///
     /// Flow predicate cross-attribute rules (epic #571 / #579):
     /// - A bare `@invariant` (no arguments) is the Flow predicate marker.
@@ -1538,11 +1538,13 @@ impl TypeChecker {
         for attr in attributes {
             match attr.name.as_str() {
                 "deprecated" | "test" | "complexity" | "acp_tool" | "acp_skill" | "invariant"
-                | "deterministic" | "semantic" | "archivist" | "retroactive" => {}
+                | "deterministic" | "semantic" | "archivist" | "retroactive" | "persona"
+                | "trigger" | "handoff" | "budget" => {}
                 other => {
                     self.warning_at(format!("unknown attribute `@{}`", other), attr.span);
                 }
             }
+            self.validate_standard_attribute_args(attr);
             // `@test` marks test pipelines discovered by `harn test`.
             if attr.name == "test" && !matches!(inner.node, Node::Pipeline { .. }) {
                 self.warning_at(
@@ -1559,6 +1561,21 @@ impl TypeChecker {
             if attr.name == "acp_skill" && !matches!(inner.node, Node::FnDecl { .. }) {
                 self.warning_at(
                     "`@acp_skill` only applies to function declarations".to_string(),
+                    attr.span,
+                );
+            }
+            if matches!(
+                attr.name.as_str(),
+                "persona" | "trigger" | "handoff" | "budget"
+            ) && !matches!(
+                inner.node,
+                Node::FnDecl { .. } | Node::ToolDecl { .. } | Node::Pipeline { .. }
+            ) {
+                self.warning_at(
+                    format!(
+                        "`@{}` only applies to function, tool, or pipeline declarations",
+                        attr.name
+                    ),
                     attr.span,
                 );
             }
@@ -1648,6 +1665,273 @@ impl TypeChecker {
         }
     }
 
+    pub(in crate::typechecker) fn validate_standard_attribute_args(&mut self, attr: &Attribute) {
+        match attr.name.as_str() {
+            "persona" => self.validate_persona_args(attr),
+            "trigger" => self.validate_trigger_args(attr),
+            "handoff" => self.validate_handoff_args(attr),
+            "budget" => self.validate_budget_args(attr),
+            "deprecated" => self.validate_deprecated_args(attr),
+            "test" if !attr.args.is_empty() => {
+                self.warning_at("`@test` does not accept arguments".to_string(), attr.span);
+            }
+            _ => {}
+        }
+    }
+
+    fn validate_persona_args(&mut self, attr: &Attribute) {
+        const KNOWN_KEYS: &[&str] = &[
+            "name",
+            "description",
+            "triggers",
+            "schedules",
+            "tools",
+            "autonomy",
+            "budget",
+            "handoffs",
+            "context_packs",
+            "evals",
+            "receipts",
+            "model",
+            "owner",
+        ];
+        for arg in &attr.args {
+            let Some(name) = self.require_named_arg("@persona", arg) else {
+                continue;
+            };
+            if !KNOWN_KEYS.contains(&name) {
+                self.warning_at(
+                    format!("unknown `@persona` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
+                    arg.span,
+                );
+                continue;
+            }
+            match name {
+                "triggers" | "schedules" => {
+                    self.expect_list_of_trigger_specs("@persona", name, &arg.value, arg.span)
+                }
+                "tools" | "handoffs" | "context_packs" | "evals" => {
+                    self.expect_list_of_symbols("@persona", name, &arg.value, arg.span)
+                }
+                "budget" => self.expect_budget_dict("@persona", name, &arg.value, arg.span),
+                "receipts" => {
+                    if !is_symbol_like(&arg.value.node)
+                        && !matches!(arg.value.node, Node::BoolLiteral(_))
+                    {
+                        self.warning_at(
+                            "`@persona(receipts: ...)` must be a string/symbol or bool".to_string(),
+                            arg.span,
+                        );
+                    }
+                }
+                _ => self.expect_symbol_like("@persona", name, &arg.value, arg.span),
+            }
+        }
+    }
+
+    fn validate_trigger_args(&mut self, attr: &Attribute) {
+        const KNOWN_KEYS: &[&str] = &[
+            "id", "provider", "kind", "event", "when", "schedule", "budget",
+        ];
+        for arg in &attr.args {
+            if arg.name.is_none() {
+                if !is_trigger_spec(&arg.value.node) {
+                    self.warning_at(
+                        "`@trigger(...)` positional arguments must be strings, dotted trigger ids, or schedule(...)"
+                            .to_string(),
+                        arg.span,
+                    );
+                }
+                continue;
+            }
+            let name = arg.name.as_deref().unwrap();
+            if !KNOWN_KEYS.contains(&name) {
+                self.warning_at(
+                    format!("unknown `@trigger` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
+                    arg.span,
+                );
+                continue;
+            }
+            match name {
+                "schedule" => {
+                    if !is_trigger_spec(&arg.value.node) {
+                        self.warning_at(
+                            "`@trigger(schedule: ...)` must be a string/symbol or schedule(...)"
+                                .to_string(),
+                            arg.span,
+                        );
+                    }
+                }
+                "budget" => self.expect_budget_dict("@trigger", name, &arg.value, arg.span),
+                _ => self.expect_symbol_like("@trigger", name, &arg.value, arg.span),
+            }
+        }
+    }
+
+    fn validate_handoff_args(&mut self, attr: &Attribute) {
+        const KNOWN_KEYS: &[&str] = &["target", "to", "reason", "schema", "artifact"];
+        for arg in &attr.args {
+            let Some(name) = self.require_named_arg("@handoff", arg) else {
+                continue;
+            };
+            if !KNOWN_KEYS.contains(&name) {
+                self.warning_at(
+                    format!("unknown `@handoff` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
+                    arg.span,
+                );
+                continue;
+            }
+            match name {
+                "target" | "to" => {
+                    if is_symbol_like(&arg.value.node) {
+                        continue;
+                    }
+                    self.expect_list_of_symbols("@handoff", name, &arg.value, arg.span);
+                }
+                _ => self.expect_symbol_like("@handoff", name, &arg.value, arg.span),
+            }
+        }
+    }
+
+    fn validate_budget_args(&mut self, attr: &Attribute) {
+        for arg in &attr.args {
+            let Some(name) = self.require_named_arg("@budget", arg) else {
+                continue;
+            };
+            self.expect_budget_value("@budget", name, &arg.value, arg.span);
+        }
+    }
+
+    fn validate_deprecated_args(&mut self, attr: &Attribute) {
+        const KNOWN_KEYS: &[&str] = &["since", "use"];
+        for arg in &attr.args {
+            let Some(name) = self.require_named_arg("@deprecated", arg) else {
+                continue;
+            };
+            if !KNOWN_KEYS.contains(&name) {
+                self.warning_at(
+                    format!(
+                        "unknown `@deprecated` argument `{name}`; expected one of {KNOWN_KEYS:?}"
+                    ),
+                    arg.span,
+                );
+                continue;
+            }
+            self.expect_symbol_like("@deprecated", name, &arg.value, arg.span);
+        }
+    }
+
+    fn require_named_arg<'a>(&mut self, attr_name: &str, arg: &'a AttributeArg) -> Option<&'a str> {
+        match arg.name.as_deref() {
+            Some(name) => Some(name),
+            None => {
+                self.warning_at(
+                    format!("`{attr_name}(...)` arguments must be named"),
+                    arg.span,
+                );
+                None
+            }
+        }
+    }
+
+    fn expect_symbol_like(&mut self, attr_name: &str, key: &str, value: &SNode, span: Span) {
+        if !is_symbol_like(&value.node) {
+            self.warning_at(
+                format!("`{attr_name}({key}: ...)` must be a string or symbol"),
+                span,
+            );
+        }
+    }
+
+    fn expect_list_of_symbols(&mut self, attr_name: &str, key: &str, value: &SNode, span: Span) {
+        let Node::ListLiteral(items) = &value.node else {
+            self.warning_at(
+                format!("`{attr_name}({key}: ...)` must be a list of strings or symbols"),
+                span,
+            );
+            return;
+        };
+        if items.iter().any(|item| !is_symbol_like(&item.node)) {
+            self.warning_at(
+                format!("`{attr_name}({key}: ...)` must contain only strings or symbols"),
+                span,
+            );
+        }
+    }
+
+    fn expect_list_of_trigger_specs(
+        &mut self,
+        attr_name: &str,
+        key: &str,
+        value: &SNode,
+        span: Span,
+    ) {
+        let Node::ListLiteral(items) = &value.node else {
+            self.warning_at(
+                format!(
+                    "`{attr_name}({key}: ...)` must be a list of strings, dotted trigger ids, or schedule(...)"
+                ),
+                span,
+            );
+            return;
+        };
+        if items.iter().any(|item| !is_trigger_spec(&item.node)) {
+            self.warning_at(
+                format!(
+                    "`{attr_name}({key}: ...)` must contain only strings, dotted trigger ids, or schedule(...)"
+                ),
+                span,
+            );
+        }
+    }
+
+    fn expect_budget_dict(&mut self, attr_name: &str, key: &str, value: &SNode, span: Span) {
+        let Node::DictLiteral(entries) = &value.node else {
+            self.warning_at(
+                format!("`{attr_name}({key}: ...)` must be a dict of budget fields"),
+                span,
+            );
+            return;
+        };
+        for entry in entries {
+            let Some(field_name) = attr_key_name(&entry.key.node) else {
+                self.warning_at(
+                    "budget field names must be strings or identifiers".to_string(),
+                    entry.key.span,
+                );
+                continue;
+            };
+            self.expect_budget_value(attr_name, field_name, &entry.value, entry.value.span);
+        }
+    }
+
+    fn expect_budget_value(&mut self, attr_name: &str, key: &str, value: &SNode, span: Span) {
+        const NUMBER_KEYS: &[&str] = &[
+            "daily_usd",
+            "hourly_usd",
+            "run_usd",
+            "max_tokens",
+            "frontier_escalations",
+            "max_autonomous_decisions_per_hour",
+            "max_autonomous_decisions_per_day",
+        ];
+        const STRING_KEYS: &[&str] = &["on_exhausted", "on_budget_exhausted"];
+        if NUMBER_KEYS.contains(&key) {
+            if !matches!(value.node, Node::IntLiteral(_) | Node::FloatLiteral(_)) {
+                self.warning_at(format!("`{attr_name}({key}: ...)` must be a number"), span);
+            }
+        } else if STRING_KEYS.contains(&key) {
+            self.expect_symbol_like(attr_name, key, value, span);
+        } else {
+            self.warning_at(
+                format!(
+                    "unknown `{attr_name}` budget field `{key}`; expected one of {NUMBER_KEYS:?} or {STRING_KEYS:?}"
+                ),
+                span,
+            );
+        }
+    }
+
     /// Sanity-check the shape of an `@archivist(...)` block.
     ///
     /// Recognized arguments (all optional individually, but `evidence`
@@ -1715,6 +1999,33 @@ impl TypeChecker {
             );
         }
     }
+}
+
+fn attr_key_name(node: &Node) -> Option<&str> {
+    match node {
+        Node::Identifier(name) | Node::StringLiteral(name) | Node::RawStringLiteral(name) => {
+            Some(name.as_str())
+        }
+        _ => None,
+    }
+}
+
+fn is_symbol_like(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::Identifier(_) | Node::StringLiteral(_) | Node::RawStringLiteral(_)
+    )
+}
+
+fn is_trigger_spec(node: &Node) -> bool {
+    if is_symbol_like(node) {
+        return true;
+    }
+    matches!(
+        node,
+        Node::FunctionCall { name, args, .. }
+            if name == "schedule" && args.len() == 1 && is_symbol_like(&args[0].node)
+    )
 }
 
 /// Narrow a union-typed match value by a single arm pattern. Returns

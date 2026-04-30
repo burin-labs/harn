@@ -1,8 +1,10 @@
-// Verify `mcp_server_card(path)` loads a local Server Card JSON file
-// and surfaces the expected fields as a VmValue dict.
+/**
+ * Verify `mcp_server_card(path)` loads a local Server Card JSON file
+ * and surfaces the expected fields as a VmValue dict.
+ */
 pipeline default() {
   let root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let card_path = root + "/conformance/helpers/mcp_test_card.json"
+  let card_path = path_join(root, "conformance/helpers/mcp_test_card.json")
   // Direct path access — bypass the registered-server lookup.
   let card = mcp_server_card(card_path)
   println(card.name)

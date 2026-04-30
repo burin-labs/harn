@@ -1,1 +1,1 @@
-return type doesn't match: expected int, got string
+return value: expected int, found string

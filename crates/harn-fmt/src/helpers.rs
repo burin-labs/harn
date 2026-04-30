@@ -39,10 +39,61 @@ pub(crate) fn format_attributes(attrs: &[Attribute]) -> String {
 }
 
 fn format_attribute_arg(arg: &AttributeArg) -> String {
-    let value = format_default_expr(&arg.value);
+    let value = format_attribute_value(&arg.value);
     match &arg.name {
         Some(k) => format!("{}: {}", k, value),
         None => value,
+    }
+}
+
+fn format_attribute_value(node: &SNode) -> String {
+    match &node.node {
+        Node::StringLiteral(s) => format!("\"{}\"", escape_string(s)),
+        Node::RawStringLiteral(s) => format!("r\"{s}\""),
+        Node::IntLiteral(i) => i.to_string(),
+        Node::FloatLiteral(f) => format_float(*f),
+        Node::BoolLiteral(b) => b.to_string(),
+        Node::NilLiteral => "nil".to_string(),
+        Node::Identifier(name) => name.clone(),
+        Node::ListLiteral(items) => {
+            let items = items
+                .iter()
+                .map(format_attribute_value)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("[{items}]")
+        }
+        Node::DictLiteral(entries) => {
+            let entries = entries
+                .iter()
+                .map(|entry| {
+                    let key = match &entry.key.node {
+                        Node::Identifier(name) => name.clone(),
+                        Node::StringLiteral(name) | Node::RawStringLiteral(name)
+                            if is_identifier(name) =>
+                        {
+                            name.clone()
+                        }
+                        Node::StringLiteral(name) | Node::RawStringLiteral(name) => {
+                            format!("\"{}\"", escape_string(name))
+                        }
+                        _ => format!("[{}]", format_attribute_value(&entry.key)),
+                    };
+                    format!("{key}: {}", format_attribute_value(&entry.value))
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{{{entries}}}")
+        }
+        Node::FunctionCall { name, args, .. } => {
+            let args = args
+                .iter()
+                .map(format_attribute_value)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{name}({args})")
+        }
+        _ => format_default_expr(node),
     }
 }
 

@@ -88,13 +88,23 @@ slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 # Bound parallelism for any harn-cli integration test that spawns the
 # `harn` debug binary as a subprocess. See the `[test-groups]` block
 # above for rationale.
+#
+# harn-cli also contains hundreds of fast parser/unit tests in the same
+# binary as subprocess-heavy integration tests. Under full workspace fan-out
+# on macOS, nextest can attribute delayed captured-output teardown to an
+# arbitrary fast test after libtest has already reported success. Keep the
+# leak wait bounded so real runaway tests still finish the suite, but treat
+# this package's leaked-handle signal as diagnostic until the upstream
+# nextest/libtest attribution is precise enough to gate on.
 [[profile.default.overrides]]
 filter = "package(harn-cli) and kind(test)"
 test-group = "harn-subprocess"
+leak-timeout = { period = "10s", result = "pass" }
 
 [[profile.default.overrides]]
 filter = "package(harn-cli) and binary(harn)"
 test-group = "harn-cli-bin"
+leak-timeout = { period = "10s", result = "pass" }
 
 [[profile.default.overrides]]
 filter = "package(harn-dap)"
@@ -103,10 +113,12 @@ test-group = "harn-dap"
 [[profile.ci.overrides]]
 filter = "package(harn-cli) and kind(test)"
 test-group = "harn-subprocess"
+leak-timeout = { period = "10s", result = "pass" }
 
 [[profile.ci.overrides]]
 filter = "package(harn-cli) and binary(harn)"
 test-group = "harn-cli-bin"
+leak-timeout = { period = "10s", result = "pass" }
 
 [[profile.ci.overrides]]
 filter = "package(harn-dap)"

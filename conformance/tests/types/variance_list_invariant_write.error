@@ -1,1 +1,1 @@
-'ys' declared as list<float>
+expected list<float>, found list<int>
