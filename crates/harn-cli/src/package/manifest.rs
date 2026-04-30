@@ -1,4 +1,7 @@
 use super::*;
+pub use harn_modules::personas::{
+    PersonaAutonomyTier, PersonaManifestEntry, PersonaValidationError, ResolvedPersonaManifest,
+};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Manifest {
@@ -461,151 +464,6 @@ impl TriggerDlqAlertDestination {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct PersonaManifestEntry {
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub version: Option<String>,
-    #[serde(default)]
-    pub description: Option<String>,
-    #[serde(default, alias = "entry", alias = "entry_pipeline")]
-    pub entry_workflow: Option<String>,
-    #[serde(default)]
-    pub tools: Vec<String>,
-    #[serde(default)]
-    pub capabilities: Vec<String>,
-    #[serde(default, alias = "tier")]
-    pub autonomy_tier: Option<harn_vm::AutonomyTier>,
-    #[serde(default, alias = "receipts")]
-    pub receipt_policy: Option<PersonaReceiptPolicy>,
-    #[serde(default)]
-    pub triggers: Vec<String>,
-    #[serde(default)]
-    pub schedules: Vec<String>,
-    #[serde(default)]
-    pub model_policy: PersonaModelPolicy,
-    #[serde(default)]
-    pub budget: PersonaBudget,
-    #[serde(default)]
-    pub handoffs: Vec<String>,
-    #[serde(default)]
-    pub context_packs: Vec<String>,
-    #[serde(default, alias = "eval_packs")]
-    pub evals: Vec<String>,
-    #[serde(default)]
-    pub owner: Option<String>,
-    #[serde(default)]
-    pub package_source: PersonaPackageSource,
-    #[serde(default)]
-    pub rollout_policy: PersonaRolloutPolicy,
-    #[serde(flatten, default)]
-    pub extra: BTreeMap<String, toml::Value>,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PersonaReceiptPolicy {
-    #[default]
-    Optional,
-    Required,
-    Disabled,
-}
-
-impl PersonaReceiptPolicy {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Optional => "optional",
-            Self::Required => "required",
-            Self::Disabled => "disabled",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct PersonaModelPolicy {
-    #[serde(default)]
-    pub default_model: Option<String>,
-    #[serde(default)]
-    pub escalation_model: Option<String>,
-    #[serde(default)]
-    pub fallback_models: Vec<String>,
-    #[serde(default)]
-    pub reasoning_effort: Option<String>,
-    #[serde(flatten, default)]
-    pub extra: BTreeMap<String, toml::Value>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct PersonaBudget {
-    #[serde(default)]
-    pub daily_usd: Option<f64>,
-    #[serde(default)]
-    pub hourly_usd: Option<f64>,
-    #[serde(default)]
-    pub run_usd: Option<f64>,
-    #[serde(default)]
-    pub frontier_escalations: Option<u32>,
-    #[serde(default)]
-    pub max_tokens: Option<u64>,
-    #[serde(default)]
-    pub max_runtime_seconds: Option<u64>,
-    #[serde(flatten, default)]
-    pub extra: BTreeMap<String, toml::Value>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct PersonaPackageSource {
-    #[serde(default)]
-    pub package: Option<String>,
-    #[serde(default)]
-    pub path: Option<String>,
-    #[serde(default)]
-    pub git: Option<String>,
-    #[serde(default)]
-    pub rev: Option<String>,
-    #[serde(flatten, default)]
-    pub extra: BTreeMap<String, toml::Value>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct PersonaRolloutPolicy {
-    #[serde(default)]
-    pub mode: Option<String>,
-    #[serde(default)]
-    pub percentage: Option<u8>,
-    #[serde(default)]
-    pub cohorts: Vec<String>,
-    #[serde(flatten, default)]
-    pub extra: BTreeMap<String, toml::Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct ResolvedPersonaManifest {
-    pub manifest_path: PathBuf,
-    pub manifest_dir: PathBuf,
-    pub personas: Vec<PersonaManifestEntry>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct PersonaValidationError {
-    pub manifest_path: PathBuf,
-    pub field_path: String,
-    pub message: String,
-}
-
-impl std::fmt::Display for PersonaValidationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} {}: {}",
-            self.manifest_path.display(),
-            self.field_path,
-            self.message
-        )
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TriggerHandlerUri {
     Local(TriggerFunctionRef),
@@ -615,6 +473,9 @@ pub enum TriggerHandlerUri {
     },
     Worker {
         queue: String,
+    },
+    Persona {
+        name: String,
     },
 }
 
@@ -912,6 +773,8 @@ pub(crate) fn toml_string_literal(value: &str) -> Result<String, String> {
 #[derive(Debug, Default, Clone)]
 pub struct RuntimeExtensions {
     pub root_manifest: Option<Manifest>,
+    pub root_manifest_path: Option<PathBuf>,
+    pub root_manifest_dir: Option<PathBuf>,
     pub llm: Option<harn_vm::llm_config::ProvidersConfig>,
     pub capabilities: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
     pub hooks: Vec<ResolvedHookConfig>,
@@ -1081,6 +944,9 @@ pub enum CollectedTriggerHandler {
     },
     Worker {
         queue: String,
+    },
+    Persona {
+        binding: harn_vm::PersonaRuntimeBinding,
     },
 }
 

@@ -12,6 +12,7 @@ include = [
 ]
 
 [dependencies]
+croner = "3.0.1"
 harn-lexer = { path = "../harn-lexer", version = "0.7" }
 harn-parser = { path = "../harn-parser", version = "0.7" }
 serde = { version = "1", features = ["derive"] }

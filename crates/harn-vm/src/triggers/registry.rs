@@ -146,6 +146,9 @@ pub enum TriggerHandlerSpec {
     Worker {
         queue: String,
     },
+    Persona {
+        binding: crate::PersonaRuntimeBinding,
+    },
 }
 
 impl std::fmt::Debug for TriggerHandlerSpec {
@@ -161,6 +164,10 @@ impl std::fmt::Debug for TriggerHandlerSpec {
                 .field("allow_cleartext", allow_cleartext)
                 .finish(),
             Self::Worker { queue } => f.debug_struct("Worker").field("queue", queue).finish(),
+            Self::Persona { binding } => f
+                .debug_struct("Persona")
+                .field("name", &binding.name)
+                .finish(),
         }
     }
 }
@@ -171,6 +178,7 @@ impl TriggerHandlerSpec {
             Self::Local { .. } => "local",
             Self::A2a { .. } => "a2a",
             Self::Worker { .. } => "worker",
+            Self::Persona { .. } => "persona",
         }
     }
 }

@@ -6,6 +6,7 @@ use harn_parser::{BindingPattern, Node, Parser, SNode};
 use serde::Deserialize;
 
 pub mod asset_paths;
+pub mod personas;
 mod stdlib;
 
 /// Kind of symbol that can be exported by a module.
