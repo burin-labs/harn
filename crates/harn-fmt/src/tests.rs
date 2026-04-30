@@ -269,6 +269,21 @@ fn test_wraps_long_function_call_arguments() {
 }
 
 #[test]
+fn test_removes_single_line_trailing_commas() {
+    let source = r#"pipeline default(task) {
+  let xs = [1, 2, 3,]
+  let d = {name: "ship", enabled: true,}
+  log("ready",)
+}"#;
+    let result = format_source(source).unwrap();
+    assert_eq!(
+        result,
+        "pipeline default(task) {\n  let xs = [1, 2, 3]\n  let d = {name: \"ship\", enabled: true}\n  log(\"ready\")\n}\n"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_wraps_long_method_call_arguments() {
     let source = r#"pipeline default(task) {
   let x = some_really_long_receiver_name.with_a_very_long_prefix().and_another_segment().call_some_extremely_long_method_name(with_a_really_long_argument_name_one, with_a_really_long_argument_name_two, with_a_really_long_argument_name_three, with_a_really_long_argument_name_four, with_a_really_long_argument_name_five)
@@ -286,6 +301,30 @@ fn test_wraps_long_list_literals() {
     let result = format_source(source).unwrap();
     assert!(result.contains("[\n"));
     assert!(result.contains("with_a_really_long_item_name_five,\n"));
+}
+
+#[test]
+fn test_adds_trailing_commas_when_wrapping_existing_multiline_sequences() {
+    let source = r#"pipeline default(task) {
+  let xs = [
+    with_a_really_long_item_name_one,
+    with_a_really_long_item_name_two
+  ]
+  send(
+    with_a_really_long_argument_name_one,
+    with_a_really_long_argument_name_two
+  )
+}"#;
+    let result = fmt_opts(source, 60);
+    assert!(
+        result.contains("with_a_really_long_item_name_two,\n"),
+        "Expected wrapped list to end the last item with a comma, got:\n{result}"
+    );
+    assert!(
+        result.contains("with_a_really_long_argument_name_two,\n"),
+        "Expected wrapped call to end the last arg with a comma, got:\n{result}"
+    );
+    assert_roundtrip(source);
 }
 
 #[test]

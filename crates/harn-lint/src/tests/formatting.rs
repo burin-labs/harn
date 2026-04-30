@@ -128,6 +128,46 @@ fn test_trailing_comma_fires_on_multiline_list() {
 }
 
 #[test]
+fn test_trailing_comma_autofixes_multiline_single_item_list() {
+    let source = "pipeline default(task) {\n  let xs = [\n    1\n  ]\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "trailing-comma"),
+        "expected trailing-comma on multiline single-item list, got: {diags:?}"
+    );
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains("    1,\n"),
+        "expected autofix to insert trailing comma, got: {fixed}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_autofixes_multiline_single_arg_call() {
+    let source = "pipeline default(task) {\n  log(\n    \"hello\"\n  )\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "trailing-comma"),
+        "expected trailing-comma on multiline single-arg call, got: {diags:?}"
+    );
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains("    \"hello\",\n"),
+        "expected autofix to insert call trailing comma, got: {fixed}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_fires_on_computed_dict_key() {
+    let source = "pipeline default(task) {\n  let k = \"a\"\n  let d = {\n    [k]: 1\n  }\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "trailing-comma"),
+        "expected trailing-comma on multiline computed-key dict, got: {diags:?}"
+    );
+}
+
+#[test]
 fn test_trailing_comma_ok_when_present() {
     let source =
         "pipeline default(task) {\n  let xs = [\n    1,\n    2,\n    3,\n  ]\n  log(xs[0])\n}\n";
@@ -135,6 +175,51 @@ fn test_trailing_comma_ok_when_present() {
     assert!(
         !has_rule(&diags, "trailing-comma"),
         "should not fire when comma already present, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_removes_single_line_list_comma() {
+    let source = "pipeline default(task) {\n  let xs = [1, 2, 3, ]\n  log(xs[0])\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "trailing-comma"),
+        "expected trailing-comma on single-line trailing comma, got: {diags:?}"
+    );
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains("[1, 2, 3]"),
+        "expected autofix to remove trailing comma and padding, got: {fixed}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_removes_single_line_call_comma() {
+    let source = "pipeline default(task) {\n  log(\"hello\", )\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "trailing-comma"),
+        "expected trailing-comma on single-line call trailing comma, got: {diags:?}"
+    );
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains("log(\"hello\")"),
+        "expected autofix to remove call trailing comma, got: {fixed}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_removes_single_line_dict_comma() {
+    let source = "pipeline default(task) {\n  let d = {name: \"ship\", }\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "trailing-comma"),
+        "expected trailing-comma on single-line dict trailing comma, got: {diags:?}"
+    );
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains("{name: \"ship\"}"),
+        "expected autofix to remove dict trailing comma, got: {fixed}"
     );
 }
 
@@ -156,6 +241,16 @@ fn test_trailing_comma_ignores_fn_body_block() {
     assert!(
         !has_rule(&diags, "trailing-comma"),
         "fn body block should not fire, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_ignores_multiline_parenthesized_expression() {
+    let source = "pipeline default(task) {\n  let x = (\n    1 + 2\n  )\n  log(x)\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "trailing-comma"),
+        "parenthesized expression should not fire, got: {diags:?}"
     );
 }
 
