@@ -12,6 +12,8 @@ harn run --trace <file.harn>
 harn run -e 'println("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
+harn run --attest <file.harn>
+harn run --attest --receipt-out receipt.json <file.harn>
 ```
 
 | Flag | Description |
@@ -20,6 +22,9 @@ harn run --allow read_file,write_file <file.harn>
 | `-e <code>` | Evaluate inline code instead of a file |
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
+| `--attest` | Emit a signed provenance receipt after execution |
+| `--receipt-out <path>` | Write the receipt to a specific JSON path |
+| `--attest-agent <id>` | Agent id used to load or create the Ed25519 signing key |
 
 You can also run a file directly without the `run` subcommand:
 
@@ -33,6 +38,25 @@ targets produce a static error and the VM is never started — the same
 `call target ... is not defined or imported` message you see from
 `harn check`. The inline `-e <code>` form has no importing file and
 therefore skips the cross-module check.
+
+When `--attest` is present, Harn records run start/finish events in an
+EventLog, stamps each record with `prev_hash` and `record_hash` provenance
+headers, signs the receipt with an Ed25519 key loaded through the configured
+secret provider chain, and writes the receipt under `.harn/receipts/` unless
+`--receipt-out` is set.
+
+## harn verify
+
+Verify a signed Harn provenance receipt.
+
+```bash
+harn verify .harn/receipts/<receipt>.json
+harn verify receipt.json --json
+```
+
+Verification recomputes the EventLog record chain, the receipt event root, the
+receipt hash, and the Ed25519 signature. It exits non-zero if any receipt event
+or signature material has been changed.
 
 ## harn playground
 

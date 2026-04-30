@@ -421,6 +421,16 @@ pub enum AnyEventLog {
     Sqlite(SqliteEventLog),
 }
 
+impl AnyEventLog {
+    pub async fn topics(&self) -> Result<Vec<Topic>, LogError> {
+        match self {
+            Self::Memory(log) => log.topics().await,
+            Self::File(log) => log.topics(),
+            Self::Sqlite(log) => log.topics(),
+        }
+    }
+}
+
 impl EventLog for AnyEventLog {
     fn describe(&self) -> EventLogDescription {
         match self {
@@ -625,6 +635,17 @@ impl MemoryEventLog {
             queue_depth: queue_depth.max(1),
         }
     }
+
+    async fn topics(&self) -> Result<Vec<Topic>, LogError> {
+        let state = self.state.lock().await;
+        let mut topics = state
+            .topics
+            .keys()
+            .map(|topic| Topic::new(topic.clone()))
+            .collect::<Result<Vec<_>, _>>()?;
+        topics.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        Ok(topics)
+    }
 }
 
 impl EventLog for MemoryEventLog {
@@ -640,6 +661,24 @@ impl EventLog for MemoryEventLog {
     async fn append(&self, topic: &Topic, event: LogEvent) -> Result<EventId, LogError> {
         let mut state = self.state.lock().await;
         let event_id = state.latest.get(topic.as_str()).copied().unwrap_or(0) + 1;
+        let previous_hash = state
+            .topics
+            .get(topic.as_str())
+            .and_then(|events| events.back())
+            .map(|(previous_id, previous_event)| {
+                crate::provenance::event_record_hash_from_headers(
+                    topic.as_str(),
+                    *previous_id,
+                    previous_event,
+                )
+            })
+            .transpose()?;
+        let event = crate::provenance::prepare_event_for_append(
+            topic.as_str(),
+            event_id,
+            previous_hash,
+            event,
+        )?;
         state.latest.insert(topic.as_str().to_string(), event_id);
         state
             .topics
@@ -828,6 +867,30 @@ impl FileEventLog {
         }
         Ok(events)
     }
+
+    fn topics(&self) -> Result<Vec<Topic>, LogError> {
+        let topics_dir = self.root.join("topics");
+        if !topics_dir.is_dir() {
+            return Ok(Vec::new());
+        }
+        let mut topics = Vec::new();
+        for entry in std::fs::read_dir(&topics_dir)
+            .map_err(|error| LogError::Io(format!("event log topics read error: {error}")))?
+        {
+            let entry = entry
+                .map_err(|error| LogError::Io(format!("event log topic entry error: {error}")))?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            topics.push(Topic::new(stem.to_string())?);
+        }
+        topics.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        Ok(topics)
+    }
 }
 
 fn read_file_records(path: &Path) -> Result<Vec<FileRecord>, LogError> {
@@ -874,6 +937,23 @@ impl EventLog for FileEventLog {
             .lock()
             .expect("file event log write lock poisoned");
         let next_id = self.latest_id_for_topic(topic)? + 1;
+        let previous_hash = self
+            .read_range_sync(topic, None, usize::MAX)?
+            .last()
+            .map(|(previous_id, previous_event)| {
+                crate::provenance::event_record_hash_from_headers(
+                    topic.as_str(),
+                    *previous_id,
+                    previous_event,
+                )
+            })
+            .transpose()?;
+        let event = crate::provenance::prepare_event_for_append(
+            topic.as_str(),
+            next_id,
+            previous_hash,
+            event,
+        )?;
         let record = FileRecord {
             id: next_id,
             event: event.clone(),
@@ -1095,6 +1175,28 @@ impl SqliteEventLog {
             queue_depth: queue_depth.max(1),
         })
     }
+
+    fn topics(&self) -> Result<Vec<Topic>, LogError> {
+        let connection = self
+            .connection
+            .lock()
+            .expect("sqlite event log connection poisoned");
+        let mut statement = connection
+            .prepare("SELECT DISTINCT topic FROM events ORDER BY topic ASC")
+            .map_err(|error| {
+                LogError::Sqlite(format!("event log topics prepare error: {error}"))
+            })?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| LogError::Sqlite(format!("event log topics query error: {error}")))?;
+        let mut topics = Vec::new();
+        for row in rows {
+            topics.push(Topic::new(row.map_err(|error| {
+                LogError::Sqlite(format!("event log topic row error: {error}"))
+            })?)?);
+        }
+        Ok(topics)
+    }
 }
 
 impl EventLog for SqliteEventLog {
@@ -1134,6 +1236,58 @@ impl EventLog for SqliteEventLog {
             .map_err(|error| LogError::Sqlite(format!("event log head read error: {error}")))
             .and_then(sqlite_i64_to_event_id)?;
         let event_id_sql = event_id_to_sqlite_i64(event_id)?;
+        let previous = tx
+            .query_row(
+                "SELECT event_id, kind, payload, headers, occurred_at_ms
+                 FROM events
+                 WHERE topic = ?1 AND event_id < ?2
+                 ORDER BY event_id DESC
+                 LIMIT 1",
+                params![topic.as_str(), event_id_sql],
+                |row| {
+                    let payload = sqlite_json_bytes_for_row(row, 2, "payload")?;
+                    let headers: String = row.get(3)?;
+                    Ok((
+                        sqlite_i64_to_event_id_for_row(row.get::<_, i64>(0)?)?,
+                        LogEvent {
+                            kind: row.get(1)?,
+                            payload: serde_json::from_slice(&payload).map_err(|error| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    payload.len(),
+                                    rusqlite::types::Type::Blob,
+                                    Box::new(error),
+                                )
+                            })?,
+                            headers: serde_json::from_str(&headers).map_err(|error| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    headers.len(),
+                                    rusqlite::types::Type::Text,
+                                    Box::new(error),
+                                )
+                            })?,
+                            occurred_at_ms: row.get(4)?,
+                        },
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| LogError::Sqlite(format!("event log previous read error: {error}")))?;
+        let previous_hash = previous
+            .as_ref()
+            .map(|(previous_id, previous_event)| {
+                crate::provenance::event_record_hash_from_headers(
+                    topic.as_str(),
+                    *previous_id,
+                    previous_event,
+                )
+            })
+            .transpose()?;
+        let event = crate::provenance::prepare_event_for_append(
+            topic.as_str(),
+            event_id,
+            previous_hash,
+            event,
+        )?;
         tx.execute(
             "INSERT INTO events(topic, event_id, kind, payload, headers, occurred_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",

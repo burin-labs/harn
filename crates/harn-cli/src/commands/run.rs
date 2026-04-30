@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use harn_parser::DiagnosticSeverity;
+use harn_vm::event_log::EventLog;
 
 use crate::commands::mcp::{self, AuthResolution};
 use crate::package;
@@ -118,6 +119,12 @@ pub(crate) enum CliLlmMockMode {
     Record {
         fixture_path: PathBuf,
     },
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RunAttestationOptions {
+    pub receipt_out: Option<PathBuf>,
+    pub agent_id: Option<String>,
 }
 
 fn load_cli_llm_mocks(path: &Path) -> Result<Vec<harn_vm::llm::LlmMock>, String> {
@@ -448,6 +455,7 @@ pub(crate) async fn run_file(
     denied_builtins: HashSet<String>,
     script_argv: Vec<String>,
     llm_mock_mode: CliLlmMockMode,
+    attestation: Option<RunAttestationOptions>,
 ) {
     run_file_with_skill_dirs(
         path,
@@ -456,6 +464,7 @@ pub(crate) async fn run_file(
         script_argv,
         Vec::new(),
         llm_mock_mode,
+        attestation,
     )
     .await;
 }
@@ -467,6 +476,7 @@ pub(crate) async fn run_file_with_skill_dirs(
     script_argv: Vec<String>,
     skill_dirs_raw: Vec<String>,
     llm_mock_mode: CliLlmMockMode,
+    attestation: Option<RunAttestationOptions>,
 ) {
     let (source, program) = parse_source_file(path);
 
@@ -537,6 +547,24 @@ pub(crate) async fn run_file_with_skill_dirs(
     // Metadata/store rooted at harn.toml when present; source dir otherwise.
     let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
     let store_base = project_root.as_deref().unwrap_or(source_parent);
+    let attestation_started_at_ms = now_ms();
+    let attestation_log = if attestation.is_some() {
+        Some(harn_vm::event_log::install_memory_for_current_thread(256))
+    } else {
+        None
+    };
+    if let Some(log) = attestation_log.as_ref() {
+        append_run_provenance_event(
+            log,
+            "started",
+            serde_json::json!({
+                "pipeline": path,
+                "argv": &script_argv,
+                "project_root": store_base.display().to_string(),
+            }),
+        )
+        .await;
+    }
     harn_vm::register_store_builtins(&mut vm, store_base);
     harn_vm::register_metadata_builtins(&mut vm, store_base);
     let pipeline_name = std::path::Path::new(path)
@@ -643,6 +671,29 @@ pub(crate) async fn run_file_with_skill_dirs(
         io::stderr().write_all(buffered_stderr.as_bytes()).ok();
     }
 
+    let exit_code = match &execution {
+        Ok((_, return_value)) => exit_code_from_return_value(return_value),
+        Err(_) if cancelled.load(Ordering::SeqCst) => 124,
+        Err(_) => 1,
+    };
+
+    if let (Some(options), Some(log)) = (attestation.as_ref(), attestation_log.as_ref()) {
+        if let Err(error) = emit_run_attestation(
+            log,
+            path,
+            store_base,
+            attestation_started_at_ms,
+            exit_code,
+            options,
+        )
+        .await
+        {
+            eprintln!("error: failed to emit provenance receipt: {error}");
+            process::exit(1);
+        }
+        harn_vm::event_log::reset_active_event_log();
+    }
+
     match execution {
         Ok((output, return_value)) => {
             if !output.is_empty() {
@@ -651,8 +702,8 @@ pub(crate) async fn run_file_with_skill_dirs(
             if trace {
                 print_trace_summary();
             }
-            let exit_code = exit_code_from_return_value(&return_value);
             if exit_code != 0 {
+                emit_return_value_error(&return_value);
                 process::exit(exit_code);
             }
         }
@@ -666,11 +717,102 @@ pub(crate) async fn run_file_with_skill_dirs(
     }
 }
 
+async fn append_run_provenance_event(
+    log: &Arc<harn_vm::event_log::AnyEventLog>,
+    kind: &str,
+    payload: serde_json::Value,
+) {
+    let Ok(topic) = harn_vm::event_log::Topic::new("run.provenance") else {
+        return;
+    };
+    let _ = log
+        .append(&topic, harn_vm::event_log::LogEvent::new(kind, payload))
+        .await;
+}
+
+async fn emit_run_attestation(
+    log: &Arc<harn_vm::event_log::AnyEventLog>,
+    path: &str,
+    store_base: &Path,
+    started_at_ms: i64,
+    exit_code: i32,
+    options: &RunAttestationOptions,
+) -> Result<(), String> {
+    let finished_at_ms = now_ms();
+    let status = if exit_code == 0 { "success" } else { "failure" };
+    append_run_provenance_event(
+        log,
+        "finished",
+        serde_json::json!({
+            "pipeline": path,
+            "status": status,
+            "exit_code": exit_code,
+        }),
+    )
+    .await;
+    log.flush()
+        .await
+        .map_err(|error| format!("failed to flush attestation event log: {error}"))?;
+    let secret_provider = harn_vm::secrets::configured_default_chain("harn.provenance")
+        .map_err(|error| format!("failed to configure provenance secrets: {error}"))?;
+    let (signing_key, key_id) =
+        harn_vm::load_or_generate_agent_signing_key(&secret_provider, options.agent_id.as_deref())
+            .await
+            .map_err(|error| format!("failed to load provenance signing key: {error}"))?;
+    let receipt = harn_vm::build_signed_receipt(
+        log,
+        harn_vm::ReceiptBuildOptions {
+            pipeline: path.to_string(),
+            status: status.to_string(),
+            started_at_ms,
+            finished_at_ms,
+            exit_code,
+            producer_name: "harn-cli".to_string(),
+            producer_version: env!("CARGO_PKG_VERSION").to_string(),
+        },
+        &signing_key,
+        key_id,
+    )
+    .await
+    .map_err(|error| format!("failed to build provenance receipt: {error}"))?;
+    let receipt_path = receipt_output_path(store_base, options, &receipt.receipt_id);
+    if let Some(parent) = receipt_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    let encoded = serde_json::to_vec_pretty(&receipt)
+        .map_err(|error| format!("failed to encode provenance receipt: {error}"))?;
+    fs::write(&receipt_path, encoded)
+        .map_err(|error| format!("failed to write {}: {error}", receipt_path.display()))?;
+    eprintln!("provenance receipt: {}", receipt_path.display());
+    Ok(())
+}
+
+fn receipt_output_path(
+    store_base: &Path,
+    options: &RunAttestationOptions,
+    receipt_id: &str,
+) -> PathBuf {
+    if let Some(path) = options.receipt_out.as_ref() {
+        return path.clone();
+    }
+    harn_vm::runtime_paths::state_root(store_base)
+        .join("receipts")
+        .join(format!("{receipt_id}.json"))
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 /// Map a script's top-level return value to a process exit code.
 ///
 /// - `int n`             → exit n (clamped to 0..=255)
 /// - `Result::Ok(_)`     → exit 0
-/// - `Result::Err(msg)`  → write msg to stderr, exit 1
+/// - `Result::Err(_)`    → exit 1
 /// - anything else       → exit 0
 fn exit_code_from_return_value(value: &harn_vm::VmValue) -> i32 {
     use harn_vm::VmValue;
@@ -680,20 +822,32 @@ fn exit_code_from_return_value(value: &harn_vm::VmValue) -> i32 {
             enum_name,
             variant,
             fields,
-        } if enum_name.as_ref() == "Result" && variant.as_ref() == "Err" => {
-            let rendered = fields.first().map(|p| p.display()).unwrap_or_default();
-            let line = if rendered.is_empty() {
-                "error\n".to_string()
-            } else if rendered.ends_with('\n') {
-                rendered
-            } else {
-                format!("{rendered}\n")
-            };
-            io::stderr().write_all(line.as_bytes()).ok();
-            1
-        }
+        } if enum_name.as_ref() == "Result" && variant.as_ref() == "Err" => 1,
         _ => 0,
     }
+}
+
+fn emit_return_value_error(value: &harn_vm::VmValue) {
+    let harn_vm::VmValue::EnumVariant {
+        enum_name,
+        variant,
+        fields,
+    } = value
+    else {
+        return;
+    };
+    if enum_name.as_ref() != "Result" || variant.as_ref() != "Err" {
+        return;
+    }
+    let rendered = fields.first().map(|p| p.display()).unwrap_or_default();
+    let line = if rendered.is_empty() {
+        "error\n".to_string()
+    } else if rendered.ends_with('\n') {
+        rendered
+    } else {
+        format!("{rendered}\n")
+    };
+    io::stderr().write_all(line.as_bytes()).ok();
 }
 
 /// Connect to MCP servers declared in `harn.toml` and register them as
@@ -1052,6 +1206,7 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
         denied_builtins.clone(),
         Vec::new(),
         CliLlmMockMode::Off,
+        None,
     )
     .await;
 
@@ -1106,6 +1261,7 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
             denied_builtins.clone(),
             Vec::new(),
             CliLlmMockMode::Off,
+            None,
         )
         .await;
     }
