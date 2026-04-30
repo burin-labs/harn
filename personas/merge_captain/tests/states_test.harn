@@ -1,0 +1,68 @@
+// Run: harn test personas/merge_captain/tests/states_test.harn
+import {
+  action_is_mutating,
+  all_actions,
+  all_states,
+  allowed_next,
+  is_state,
+  is_terminal,
+  is_valid_transition,
+  unknown_state,
+} from "../lib/states"
+
+pipeline test_all_states_distinct(task) {
+  let states = all_states()
+  assert_eq(len(states), 12)
+  assert(is_state("queued"))
+  assert(is_state("merge_group_running"))
+  assert(!is_state("nope"))
+}
+
+pipeline test_terminal_states(task) {
+  assert(is_terminal("merged"))
+  assert(is_terminal("closed"))
+  assert(!is_terminal("queued"))
+  assert(!is_terminal("blocked"))
+}
+
+pipeline test_unknown_state_default(task) {
+  assert_eq(unknown_state(), "discovered")
+}
+
+pipeline test_transitions_legality(task) {
+  // Discovered can fan out to nearly anything.
+  assert(is_valid_transition("discovered", "queued"))
+  assert(is_valid_transition("discovered", "draft"))
+  assert(is_valid_transition("waiting_checks", "queued"))
+  assert(is_valid_transition("queued", "merge_group_running"))
+  assert(is_valid_transition("merge_group_running", "merged"))
+  // Idempotent self-transitions are permitted (mostly for sticky waits).
+  assert(is_valid_transition("waiting_checks", "waiting_checks"))
+  // Terminal -> anywhere is illegal.
+  assert(!is_valid_transition("merged", "queued"))
+  assert(!is_valid_transition("closed", "queued"))
+  // Random nonsense is rejected.
+  assert(!is_valid_transition("queued", "draft"))
+  assert(!is_valid_transition("dirty", "queued"))
+}
+
+pipeline test_allowed_next_lists_are_subsets_of_all_states(task) {
+  let known = all_states()
+  for s in known {
+    let next = allowed_next(s)
+    for n in next {
+      assert(known.contains(n), "${s} -> ${n} references unknown state")
+    }
+  }
+}
+
+pipeline test_actions_catalogue(task) {
+  let actions = all_actions()
+  assert(actions.contains("noop"))
+  assert(actions.contains("enqueue_merge_queue"))
+  assert(actions.contains("escalate_human"))
+  assert(!action_is_mutating("noop"))
+  assert(!action_is_mutating("wait"))
+  assert(action_is_mutating("enqueue_merge_queue"))
+  assert(action_is_mutating("update_branch"))
+}

@@ -1,0 +1,252 @@
+{
+  "burin-labs/harn": {
+    "pulls": [
+      {
+        "repo": "burin-labs/harn",
+        "number": 1010,
+        "title": "Add merge captain skeleton",
+        "head_sha": "aaaaaaaa",
+        "head_ref": "ksinder/merge-captain",
+        "base_ref": "main",
+        "state": "open",
+        "draft": false,
+        "merged": false,
+        "mergeable": true,
+        "mergeable_state": "clean",
+        "behind_by": 0,
+        "labels": [],
+        "review_decision": "APPROVED",
+        "approvals": 1,
+        "in_merge_queue": false,
+        "merge_group_active": false
+      },
+      {
+        "repo": "burin-labs/harn",
+        "number": 1012,
+        "title": "Refactor lexer fast path",
+        "head_sha": "bbbbbbbb",
+        "head_ref": "ksinder/lexer-fast",
+        "base_ref": "main",
+        "state": "open",
+        "draft": true,
+        "merged": false,
+        "mergeable": null,
+        "mergeable_state": "unknown",
+        "behind_by": 0,
+        "labels": [],
+        "review_decision": "REVIEW_REQUIRED",
+        "approvals": 0,
+        "in_merge_queue": false,
+        "merge_group_active": false
+      },
+      {
+        "repo": "burin-labs/harn",
+        "number": 1013,
+        "title": "Bump tree-sitter grammar",
+        "head_sha": "cccccccc",
+        "head_ref": "ksinder/ts-bump",
+        "base_ref": "main",
+        "state": "open",
+        "draft": false,
+        "merged": false,
+        "mergeable": true,
+        "mergeable_state": "behind",
+        "behind_by": 4,
+        "labels": [],
+        "review_decision": "APPROVED",
+        "approvals": 1,
+        "in_merge_queue": false,
+        "merge_group_active": false
+      },
+      {
+        "repo": "burin-labs/harn",
+        "number": 1014,
+        "title": "Risky CI change",
+        "head_sha": "dddddddd",
+        "head_ref": "ksinder/ci-risky",
+        "base_ref": "main",
+        "state": "open",
+        "draft": false,
+        "merged": false,
+        "mergeable": true,
+        "mergeable_state": "clean",
+        "behind_by": 0,
+        "labels": [],
+        "review_decision": "APPROVED",
+        "approvals": 1,
+        "in_merge_queue": false,
+        "merge_group_active": false
+      },
+      {
+        "repo": "burin-labs/harn",
+        "number": 1015,
+        "title": "Held by review label",
+        "head_sha": "eeeeeeee",
+        "head_ref": "ksinder/blocked",
+        "base_ref": "main",
+        "state": "open",
+        "draft": false,
+        "merged": false,
+        "mergeable": true,
+        "mergeable_state": "clean",
+        "behind_by": 0,
+        "labels": ["needs-revision"],
+        "review_decision": "CHANGES_REQUESTED",
+        "approvals": 0,
+        "in_merge_queue": false,
+        "merge_group_active": false
+      }
+    ],
+    "checks": {
+      "1010": [
+        {"name": "ci / rust", "status": "completed", "conclusion": "success"},
+        {"name": "ci / portal", "status": "completed", "conclusion": "success"},
+        {"name": "ci / conformance", "status": "completed", "conclusion": "success"}
+      ],
+      "1012": [],
+      "1013": [
+        {"name": "ci / rust", "status": "completed", "conclusion": "success"},
+        {"name": "ci / portal", "status": "completed", "conclusion": "success"},
+        {"name": "ci / conformance", "status": "completed", "conclusion": "success"}
+      ],
+      "1014": [
+        {"name": "ci / rust", "status": "completed", "conclusion": "failure"},
+        {"name": "ci / portal", "status": "completed", "conclusion": "success"},
+        {"name": "ci / conformance", "status": "in_progress", "conclusion": null}
+      ],
+      "1015": [
+        {"name": "ci / rust", "status": "completed", "conclusion": "success"},
+        {"name": "ci / portal", "status": "completed", "conclusion": "success"},
+        {"name": "ci / conformance", "status": "completed", "conclusion": "success"}
+      ]
+    }
+  },
+  "burin-labs/harn-cloud": {
+    "pulls": [
+      {
+        "repo": "burin-labs/harn-cloud",
+        "number": 72,
+        "title": "Spec out managed agents API",
+        "head_sha": "11111111",
+        "head_ref": "ksinder/agents-api",
+        "base_ref": "main",
+        "state": "open",
+        "draft": false,
+        "merged": false,
+        "mergeable": true,
+        "mergeable_state": "clean",
+        "behind_by": 0,
+        "labels": ["ready-to-merge"],
+        "review_decision": "APPROVED",
+        "approvals": 1,
+        "in_merge_queue": false,
+        "merge_group_active": false
+      },
+      {
+        "repo": "burin-labs/harn-cloud",
+        "number": 73,
+        "title": "Migrations missing review",
+        "head_sha": "22222222",
+        "head_ref": "ksinder/migrations",
+        "base_ref": "main",
+        "state": "open",
+        "draft": false,
+        "merged": false,
+        "mergeable": true,
+        "mergeable_state": "clean",
+        "behind_by": 0,
+        "labels": [],
+        "review_decision": "REVIEW_REQUIRED",
+        "approvals": 0,
+        "in_merge_queue": false,
+        "merge_group_active": false
+      },
+      {
+        "repo": "burin-labs/harn-cloud",
+        "number": 74,
+        "title": "Conflict on schema",
+        "head_sha": "33333333",
+        "head_ref": "ksinder/schema",
+        "base_ref": "main",
+        "state": "open",
+        "draft": false,
+        "merged": false,
+        "mergeable": false,
+        "mergeable_state": "dirty",
+        "behind_by": 0,
+        "labels": [],
+        "review_decision": "APPROVED",
+        "approvals": 1,
+        "in_merge_queue": false,
+        "merge_group_active": false
+      }
+    ],
+    "checks": {
+      "72": [
+        {"name": "ci / build", "status": "completed", "conclusion": "success"},
+        {"name": "ci / test", "status": "completed", "conclusion": "success"},
+        {"name": "ci / migrations", "status": "completed", "conclusion": "success"}
+      ],
+      "73": [
+        {"name": "ci / build", "status": "completed", "conclusion": "success"},
+        {"name": "ci / test", "status": "completed", "conclusion": "success"},
+        {"name": "ci / migrations", "status": "completed", "conclusion": "success"}
+      ],
+      "74": []
+    }
+  },
+  "burin-labs/burin-code": {
+    "pulls": [
+      {
+        "repo": "burin-labs/burin-code",
+        "number": 4221,
+        "title": "Bridge improvements",
+        "head_sha": "AAAAAAAA",
+        "head_ref": "ksinder/bridge",
+        "base_ref": "main",
+        "state": "open",
+        "draft": false,
+        "merged": false,
+        "mergeable": true,
+        "mergeable_state": "clean",
+        "behind_by": 0,
+        "labels": [],
+        "review_decision": "APPROVED",
+        "approvals": 1,
+        "in_merge_queue": false,
+        "merge_group_active": false
+      },
+      {
+        "repo": "burin-labs/burin-code",
+        "number": 4222,
+        "title": "Held PR with do-not-merge label",
+        "head_sha": "BBBBBBBB",
+        "head_ref": "ksinder/hold",
+        "base_ref": "main",
+        "state": "open",
+        "draft": false,
+        "merged": false,
+        "mergeable": true,
+        "mergeable_state": "clean",
+        "behind_by": 0,
+        "labels": ["do-not-merge"],
+        "review_decision": "APPROVED",
+        "approvals": 1,
+        "in_merge_queue": false,
+        "merge_group_active": false
+      }
+    ],
+    "checks": {
+      "4221": [
+        {"name": "swift / build", "status": "completed", "conclusion": "success"},
+        {"name": "swift / test", "status": "completed", "conclusion": "success"},
+        {"name": "lint", "status": "completed", "conclusion": "success"}
+      ],
+      "4222": [
+        {"name": "swift / build", "status": "completed", "conclusion": "success"},
+        {"name": "swift / test", "status": "completed", "conclusion": "success"},
+        {"name": "lint", "status": "completed", "conclusion": "success"}
+      ]
+    }
+  }
+}

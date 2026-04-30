@@ -1,0 +1,92 @@
+// Per-repo Merge Captain policy.
+//
+// Policies are simple JSON documents loaded from disk. This module
+// validates the shape, applies defaults, and exposes typed accessors.
+/** Default policy values for fields the user can omit. */
+pub fn defaults() {
+  return {
+    merge_method: "squash",
+    merge_queue_enabled: false,
+    required_checks: [],
+    required_review_count: 1,
+    blocking_labels: ["do-not-merge", "needs-revision", "blocked"],
+    ready_label: nil,
+    max_in_flight: 4,
+    local_verification: [],
+    downstream: [],
+    bump_after_merge: nil,
+    autopilot_states: ["queued", "waiting_checks"],
+    require_human_for: ["blocked", "local_repair"],
+  }
+}
+
+/** Merge a parsed policy on top of the defaults. */
+pub fn with_defaults(policy) {
+  let base = defaults()
+  return {
+    repo: policy.repo,
+    default_branch: policy.default_branch ?? "main",
+    merge_method: policy.merge_method ?? base.merge_method,
+    merge_queue_enabled: policy.merge_queue_enabled ?? base.merge_queue_enabled,
+    required_checks: policy.required_checks ?? base.required_checks,
+    required_review_count: policy.required_review_count ?? base.required_review_count,
+    blocking_labels: policy.blocking_labels ?? base.blocking_labels,
+    ready_label: policy.ready_label ?? base.ready_label,
+    max_in_flight: policy.max_in_flight ?? base.max_in_flight,
+    local_verification: policy.local_verification ?? base.local_verification,
+    downstream: policy.downstream ?? base.downstream,
+    bump_after_merge: policy.bump_after_merge ?? base.bump_after_merge,
+    autopilot_states: policy.autopilot_states ?? base.autopilot_states,
+    require_human_for: policy.require_human_for ?? base.require_human_for,
+  }
+}
+
+/** Validate a policy. Returns nil on success or a string error. */
+pub fn validate(policy) {
+  if policy.repo == nil || len(to_string(policy.repo)) == 0 {
+    return "policy.repo is required"
+  }
+  let valid_methods = ["merge", "squash", "rebase"]
+  if !valid_methods.contains(policy.merge_method) {
+    return "policy.merge_method must be one of merge|squash|rebase"
+  }
+  if policy.required_review_count < 0 {
+    return "policy.required_review_count must be >= 0"
+  }
+  if policy.max_in_flight <= 0 {
+    return "policy.max_in_flight must be > 0"
+  }
+  for cmd in policy.local_verification {
+    if cmd.command == nil || len(to_string(cmd.command)) == 0 {
+      return "policy.local_verification[].command is required"
+    }
+  }
+  return nil
+}
+
+/** Parse + default + validate. Returns {ok: true, policy} or {ok: false, error}. */
+pub fn load_policy(json_text) {
+  let parsed_result = try {
+    json_parse(json_text)
+  }
+  if !is_ok(parsed_result) {
+    return {ok: false, error: "policy json parse failed: ${unwrap_err(parsed_result)}"}
+  }
+  let parsed = unwrap(parsed_result)
+  let policy = with_defaults(parsed)
+  let err = validate(policy)
+  if err != nil {
+    return {ok: false, error: err}
+  }
+  return {ok: true, policy: policy}
+}
+
+/** Returns true when a state is on the per-repo autopilot list. */
+pub fn autopilot_for(policy, state) {
+  return policy.autopilot_states.contains(state)
+}
+
+/** Returns true when a state requires a human-in-the-loop step. */
+pub fn requires_human(policy, state) {
+  return policy.require_human_for.contains(state)
+}

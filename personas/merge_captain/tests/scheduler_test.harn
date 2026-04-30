@@ -1,0 +1,191 @@
+// Run: harn test personas/merge_captain/tests/scheduler_test.harn
+//
+// End-to-end exercises that the sweep loop reads from the fixture
+// adapter, classifies each PR correctly, persists checkpoints, and
+// surfaces newly arrived PRs across two sweeps.
+import { list_all_checkpoints, open_checkpoints, prior_state_for } from "../lib/checkpoint_store"
+import { fixture_adapter } from "../lib/github_adapter"
+import { with_defaults } from "../lib/policy"
+import { sweep } from "../lib/scheduler"
+
+fn _policy_for(repo, queue_enabled) {
+  return with_defaults(
+    {repo: repo, merge_queue_enabled: queue_enabled, required_checks: ["ci"], required_review_count: 1},
+  )
+}
+
+fn _snapshot(prs, checks_map) {
+  return {[_default_repo()]: {pulls: prs, checks: checks_map}}
+}
+
+fn _default_repo() {
+  return "x/y"
+}
+
+fn _pr(num, overrides) {
+  let base = {
+    repo: "x/y",
+    number: num,
+    title: "PR ${to_string(num)}",
+    head_sha: "sha${to_string(num)}",
+    head_ref: "feat-${to_string(num)}",
+    base_ref: "main",
+    state: "open",
+    draft: false,
+    merged: false,
+    mergeable: true,
+    mergeable_state: "clean",
+    behind_by: 0,
+    labels: [],
+    review_decision: "APPROVED",
+    approvals: 1,
+    in_merge_queue: false,
+    merge_group_active: false,
+  }
+  let extras = overrides ?? {}
+  return base + extras
+}
+
+fn _ok_check() {
+  return [{name: "ci", status: "completed", conclusion: "success"}]
+}
+
+fn _fail_check() {
+  return [{name: "ci", status: "completed", conclusion: "failure"}]
+}
+
+fn _open_handle(suffix) {
+  // Unique per invocation so re-running tests does not see stale state.
+  let session = "scheduler-test-${suffix}-${to_string(now_ms())}"
+  return open_checkpoints(".harn/test/merge-captain", session, "merge_captain_test")
+}
+
+pipeline test_sweep_classifies_clean_pr(task) {
+  let snapshot = _snapshot([_pr(1, {})], {["1"]: _ok_check()})
+  let adapter = fixture_adapter(snapshot)
+  let handle = _open_handle("classify-clean")
+  let summary = sweep(
+    {
+      adapter: adapter,
+      policies: [_policy_for(_default_repo(), true)],
+      checkpoint_handle: handle,
+      dry_run: true,
+      sweep_id: "test-clean",
+    },
+  )
+  assert_eq(summary.pr_count, 1)
+  assert_eq(summary.by_state.queued, 1)
+  assert_eq(summary.by_action.enqueue_merge_queue, 1)
+}
+
+pipeline test_sweep_persists_checkpoints(task) {
+  let snapshot = _snapshot([_pr(1, {behind_by: 2, mergeable_state: "behind"})], {["1"]: _ok_check()})
+  let adapter = fixture_adapter(snapshot)
+  let handle = _open_handle("persist")
+  sweep(
+    {
+      adapter: adapter,
+      policies: [_policy_for(_default_repo(), true)],
+      checkpoint_handle: handle,
+      dry_run: true,
+      sweep_id: "test-persist",
+    },
+  )
+  let prior = prior_state_for(handle, _default_repo(), 1)
+  assert_eq(prior, "behind")
+  let all = list_all_checkpoints(handle)
+  assert_eq(len(all), 1)
+}
+
+pipeline test_resume_picks_up_new_pr(task) {
+  let policy = _policy_for(_default_repo(), true)
+  let snapshot1 = _snapshot([_pr(1, {})], {["1"]: _ok_check()})
+  let snapshot2 = _snapshot([_pr(1, {}), _pr(2, {})], {["1"]: _ok_check(), ["2"]: _ok_check()})
+  let handle = _open_handle("resume-add")
+  // First sweep tracks PR 1 only.
+  sweep(
+    {
+      adapter: fixture_adapter(snapshot1),
+      policies: [policy],
+      checkpoint_handle: handle,
+      dry_run: true,
+      sweep_id: "test-resume-1",
+    },
+  )
+  assert_eq(prior_state_for(handle, _default_repo(), 1), "queued")
+  assert_eq(prior_state_for(handle, _default_repo(), 2), "discovered")
+  // Second sweep absorbs the newly opened PR 2.
+  let summary = sweep(
+    {
+      adapter: fixture_adapter(snapshot2),
+      policies: [policy],
+      checkpoint_handle: handle,
+      dry_run: true,
+      sweep_id: "test-resume-2",
+    },
+  )
+  assert_eq(summary.pr_count, 2)
+  assert_eq(prior_state_for(handle, _default_repo(), 2), "queued")
+}
+
+pipeline test_disappeared_pr_gets_terminal_receipt(task) {
+  let policy = _policy_for(_default_repo(), true)
+  let snapshot1 = _snapshot([_pr(1, {})], {["1"]: _ok_check()})
+  let snapshot2 = _snapshot([], {})
+  let handle = _open_handle("disappear")
+  sweep(
+    {
+      adapter: fixture_adapter(snapshot1),
+      policies: [policy],
+      checkpoint_handle: handle,
+      dry_run: true,
+      sweep_id: "test-disappear-1",
+    },
+  )
+  let summary = sweep(
+    {
+      adapter: fixture_adapter(snapshot2),
+      policies: [policy],
+      checkpoint_handle: handle,
+      dry_run: true,
+      sweep_id: "test-disappear-2",
+    },
+  )
+  // Reconciliation produced a closed-receipt for PR 1.
+  assert_eq(summary.pr_count, 1)
+  assert_eq(summary.by_state.closed, 1)
+  // Checkpoint was forgotten so the next sweep stays clean.
+  let all = list_all_checkpoints(handle)
+  assert_eq(len(all), 0)
+}
+
+pipeline test_failing_ci_with_local_verify_runs_dry(task) {
+  let policy_extra = with_defaults(
+    {
+      repo: _default_repo(),
+      merge_queue_enabled: true,
+      required_checks: ["ci"],
+      local_verification: [{name: "tests", command: "true"}],
+    },
+  )
+  let snapshot = _snapshot([_pr(1, {})], {["1"]: _fail_check()})
+  let handle = _open_handle("local-verify")
+  let summary = sweep(
+    {
+      adapter: fixture_adapter(snapshot),
+      policies: [policy_extra],
+      checkpoint_handle: handle,
+      dry_run: true,
+      sweep_id: "test-local-verify",
+    },
+  )
+  assert_eq(summary.by_state.local_repair, 1)
+  assert_eq(summary.by_action.run_local_verification, 1)
+  // Per-PR receipt records the (skipped) command.
+  let receipt = summary.receipts[0]
+  assert_eq(len(receipt.commands_run), 1)
+  let cmd = receipt.commands_run[0]
+  assert_eq(cmd.action, "run_local_verification")
+  let local_results = cmd.results
+  assert_eq(local_results[0].status, "skipped_dry_run")
+}

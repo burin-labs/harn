@@ -1,0 +1,25 @@
+{
+  "repo": "burin-labs/burin-code",
+  "default_branch": "main",
+  "merge_method": "squash",
+  "merge_queue_enabled": false,
+  "required_checks": [
+    "swift / build",
+    "swift / test",
+    "lint"
+  ],
+  "required_review_count": 1,
+  "blocking_labels": [
+    "do-not-merge",
+    "needs-revision"
+  ],
+  "ready_label": null,
+  "max_in_flight": 4,
+  "local_verification": [
+    {"name": "swift-test", "command": "swift test"}
+  ],
+  "downstream": [],
+  "bump_after_merge": "harn",
+  "autopilot_states": ["queued"],
+  "require_human_for": ["blocked", "local_repair", "dirty", "behind"]
+}

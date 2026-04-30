@@ -1,0 +1,114 @@
+import { from_github } from "../lib/observation"
+import { with_defaults } from "../lib/policy"
+// Run: harn test personas/merge_captain/tests/receipt_test.harn
+import { approval_state, build_receipt, summarize_sweep } from "../lib/receipt"
+
+fn _policy() {
+  return with_defaults(
+    {
+      repo: "x/y",
+      merge_queue_enabled: true,
+      autopilot_states: ["queued"],
+      require_human_for: ["blocked"],
+    },
+  )
+}
+
+fn _obs() {
+  return from_github(
+    {
+      repo: "x/y",
+      number: 1,
+      title: "T",
+      head_sha: "abc",
+      state: "open",
+      mergeable: true,
+      mergeable_state: "clean",
+      approvals: 1,
+      labels: [],
+    },
+    [{name: "ci", status: "completed", conclusion: "success"}],
+    ["ci"],
+  )
+}
+
+pipeline test_approval_state_branches(task) {
+  let policy = _policy()
+  // Non-mutating actions skip approval altogether.
+  let no_op = approval_state(policy, {state: "waiting_checks", action: "wait"}, false)
+  assert_eq(no_op, "no_mutation")
+  // Dry-run trumps autopilot.
+  let dry = approval_state(policy, {state: "queued", action: "enqueue_merge_queue"}, true)
+  assert_eq(dry, "dry_run")
+  // require_human_for forces a human review even on no-op-ish actions.
+  let blocked = approval_state(policy, {state: "blocked", action: "request_review"}, false)
+  assert_eq(blocked, "needs_human")
+  // Autopilot lets queued mutations proceed.
+  let auto = approval_state(policy, {state: "queued", action: "enqueue_merge_queue"}, false)
+  assert_eq(auto, "autopilot")
+}
+
+pipeline test_build_receipt_shape(task) {
+  let receipt = build_receipt(
+    {
+      sweep_id: "s",
+      observed_at: 1,
+      policy: _policy(),
+      observation: _obs(),
+      classification: {
+        state: "queued",
+        action: "enqueue_merge_queue",
+        reason: "ready",
+        evidence: {merge_method: "squash"},
+      },
+      prior_state: "discovered",
+      commands_run: [{action: "enqueue_merge_queue"}],
+      outcome: "dry_run",
+      dry_run: true,
+    },
+  )
+  assert_eq(receipt._type, "merge_receipt")
+  assert_eq(receipt.persona, "merge_captain")
+  assert_eq(receipt.repo, "x/y")
+  assert_eq(receipt.classification.state, "queued")
+  assert_eq(receipt.approval_state, "dry_run")
+  assert_eq(receipt.final_outcome, "dry_run")
+  assert_eq(len(receipt.commands_run), 1)
+  assert_eq(receipt.policy_summary.merge_method, "squash")
+}
+
+pipeline test_summarize_sweep_aggregates(task) {
+  let r1 = build_receipt(
+    {
+      sweep_id: "s",
+      observed_at: 1,
+      policy: _policy(),
+      observation: _obs(),
+      classification: {state: "queued", action: "enqueue_merge_queue", reason: "ok", evidence: {}},
+      prior_state: "discovered",
+      commands_run: [],
+      outcome: "dry_run",
+      dry_run: true,
+    },
+  )
+  let r2 = build_receipt(
+    {
+      sweep_id: "s",
+      observed_at: 1,
+      policy: _policy(),
+      observation: _obs(),
+      classification: {state: "blocked", action: "request_review", reason: "needs review", evidence: {}},
+      prior_state: "discovered",
+      commands_run: [],
+      outcome: "wait",
+      dry_run: true,
+    },
+  )
+  let summary = summarize_sweep([r1, r2], "s", 1, 2)
+  assert_eq(summary._type, "merge_sweep_summary")
+  assert_eq(summary.pr_count, 2)
+  assert_eq(summary.by_state.queued, 1)
+  assert_eq(summary.by_state.blocked, 1)
+  assert_eq(summary.by_action.enqueue_merge_queue, 1)
+  assert_eq(summary.by_action.request_review, 1)
+}
