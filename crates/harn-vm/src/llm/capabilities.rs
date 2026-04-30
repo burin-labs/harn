@@ -82,6 +82,13 @@ pub struct ProviderRule {
     /// script-facing mode names: `enabled`, `adaptive`, and `effort`.
     #[serde(default)]
     pub thinking_modes: Option<Vec<String>>,
+    /// Whether Anthropic interleaved thinking is supported for this
+    /// provider/model route.
+    #[serde(default)]
+    pub interleaved_thinking_supported: Option<bool>,
+    /// Anthropic beta features that should be requested for this route.
+    #[serde(default)]
+    pub anthropic_beta_features: Option<Vec<String>>,
     /// Legacy override compatibility. New built-in rules should use
     /// `thinking_modes` so the capability matrix preserves mode detail.
     #[serde(default)]
@@ -138,6 +145,8 @@ pub struct Capabilities {
     pub audio: bool,
     pub json_schema: Option<String>,
     pub thinking_modes: Vec<String>,
+    pub interleaved_thinking_supported: bool,
+    pub anthropic_beta_features: Vec<String>,
     pub vision_supported: bool,
     pub preserve_thinking: bool,
     pub server_parser: String,
@@ -160,6 +169,8 @@ impl Default for Capabilities {
             audio: false,
             json_schema: None,
             thinking_modes: Vec::new(),
+            interleaved_thinking_supported: false,
+            anthropic_beta_features: Vec::new(),
             vision_supported: false,
             preserve_thinking: false,
             server_parser: "none".to_string(),
@@ -401,6 +412,8 @@ fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
         audio: rule.audio.unwrap_or(false),
         json_schema: rule.json_schema.clone(),
         thinking_modes,
+        interleaved_thinking_supported: rule.interleaved_thinking_supported.unwrap_or(false),
+        anthropic_beta_features: rule.anthropic_beta_features.clone().unwrap_or_default(),
         vision_supported: rule.vision_supported.unwrap_or(false),
         preserve_thinking: rule.preserve_thinking.unwrap_or(false),
         server_parser: rule
@@ -497,6 +510,33 @@ mod tests {
         reset();
         let caps = lookup("anthropic", "claude-opus-4-6");
         assert_eq!(caps.thinking_modes, vec!["enabled"]);
+        assert!(caps.interleaved_thinking_supported);
+    }
+
+    #[test]
+    fn anthropic_opus_45_does_not_support_interleaved_thinking() {
+        reset();
+        let caps = lookup("anthropic", "claude-opus-4-5");
+        assert_eq!(caps.thinking_modes, vec!["enabled"]);
+        assert!(!caps.interleaved_thinking_supported);
+    }
+
+    #[test]
+    fn override_can_supply_anthropic_beta_features() {
+        reset();
+        let toml_src = r#"
+[[provider.anthropic]]
+model_match = "claude-custom-*"
+native_tools = true
+anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
+"#;
+        set_user_overrides_toml(toml_src).unwrap();
+        let caps = lookup("anthropic", "claude-custom-1");
+        assert_eq!(
+            caps.anthropic_beta_features,
+            vec!["fine-grained-tool-streaming-2025-05-14"]
+        );
+        reset();
     }
 
     #[test]

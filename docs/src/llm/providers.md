@@ -78,6 +78,7 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 //   native_tools: true, defer_loading: true,
 //   tool_search: ["bm25", "regex"], max_tools: 10000,
 //   prompt_caching: true, thinking: true, vision_supported: true,
+//   interleaved_thinking_supported: true,
 // }
 
 if "bm25" in caps.tool_search {
@@ -126,6 +127,8 @@ Each `[[capabilities.provider.<name>]]` entry accepts these fields:
 | `max_tools` | int | Cap on tool count. `harn lint` will warn if a registry exceeds the smallest cap any active provider advertises. |
 | `prompt_caching` | bool | `cache_control` blocks honored. |
 | `thinking_modes` | list of strings | Supported script-facing thinking modes. Values are `enabled`, `adaptive`, or `effort`. |
+| `interleaved_thinking_supported` | bool | `thinking: true` can request Anthropic's `interleaved-thinking-2025-05-14` beta header. |
+| `anthropic_beta_features` | list of strings | Anthropic beta feature names always requested for this provider/model route. |
 | `vision_supported` | bool | Image content accepted by the provider/model route. |
 
 First match wins. User rules for a given provider are consulted

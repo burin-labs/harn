@@ -45,9 +45,9 @@ pub use ollama::{
 };
 pub(crate) use openai_normalize::{debug_log_message_shapes, normalize_openai_style_messages};
 pub(crate) use options::{
-    DeltaSender, LlmCallOptions, LlmRequestPayload, LlmRouteAlternative, LlmRoutePolicy,
-    LlmRoutingDecision, ReasoningEffort, ThinkingConfig, ToolSearchConfig, ToolSearchMode,
-    ToolSearchStrategy, ToolSearchVariant,
+    push_unique_anthropic_beta_feature, DeltaSender, LlmCallOptions, LlmRequestPayload,
+    LlmRouteAlternative, LlmRoutePolicy, LlmRoutingDecision, ReasoningEffort, ThinkingConfig,
+    ToolSearchConfig, ToolSearchMode, ToolSearchStrategy, ToolSearchVariant,
 };
 pub use readiness::{
     probe_openai_compatible_model, selected_model_for_provider, supports_model_readiness_probe,
@@ -741,6 +741,90 @@ mod tests {
                 .write_all(response.as_bytes())
                 .expect("write response");
         })
+    }
+
+    fn spawn_anthropic_stub_with_request_capture(
+        captured: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    ) -> LlmStub {
+        spawn_llm_stub("anthropic stub (capture)", move |stream| {
+            use std::io::{Read, Write};
+            let mut buf = vec![0u8; 16384];
+            let n = stream.read(&mut buf).expect("read request");
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            *captured.lock().expect("capture request") = Some(request);
+
+            let body = concat!(
+                r#"{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-4-6","#,
+                r#""content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","#,
+                r#""usage":{"input_tokens":1,"output_tokens":1}}"#
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        })
+    }
+
+    #[test]
+    fn anthropic_interleaved_thinking_beta_header_is_sent_for_supported_model() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _allow_llm_transport = allow_stubbed_llm_transport();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        runtime.block_on(async {
+            let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let server = spawn_anthropic_stub_with_request_capture(captured.clone());
+            let mut overlay = crate::llm_config::ProvidersConfig::default();
+            overlay.providers.insert(
+                "anthropic".to_string(),
+                crate::llm_config::ProviderDef {
+                    base_url: format!("http://{}", server.addr()),
+                    auth_style: "none".to_string(),
+                    auth_env: crate::llm_config::AuthEnv::None,
+                    extra_headers: std::collections::BTreeMap::from([(
+                        "anthropic-version".to_string(),
+                        "2023-06-01".to_string(),
+                    )]),
+                    chat_endpoint: "/messages".to_string(),
+                    ..Default::default()
+                },
+            );
+            crate::llm_config::set_user_overrides(Some(overlay));
+            crate::llm::helpers::reset_provider_key_cache();
+
+            let mut opts = base_opts("anthropic");
+            opts.model = "claude-opus-4-6".to_string();
+            opts.stream = false;
+            opts.thinking = ThinkingConfig::Enabled {
+                budget_tokens: Some(8000),
+            };
+            let result = vm_call_llm_full(&opts)
+                .await
+                .expect("stubbed Anthropic response");
+
+            crate::llm_config::clear_user_overrides();
+            crate::llm::helpers::reset_provider_key_cache();
+            drop(server);
+
+            assert_eq!(result.text, "ok");
+            let request = captured
+                .lock()
+                .expect("captured request")
+                .clone()
+                .expect("request captured")
+                .to_lowercase();
+            assert!(
+                request.contains("anthropic-beta: interleaved-thinking-2025-05-14\r\n"),
+                "{request}"
+            );
+        });
     }
 
     #[test]

@@ -84,6 +84,7 @@ pub(crate) fn request_hash(request: &LlmRequestPayload) -> String {
         "response_format": request.response_format,
         "json_schema": request.json_schema,
         "thinking": request.thinking,
+        "anthropic_beta_features": request.anthropic_beta_features,
         "native_tools": request.native_tools,
         "tool_choice": request.tool_choice,
         "cache": request.cache,

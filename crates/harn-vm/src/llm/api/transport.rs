@@ -294,7 +294,10 @@ pub(crate) async fn vm_call_llm_api_with_body(
         .header("Content-Type", "application/json")
         .timeout(std::time::Duration::from_secs(opts.resolve_timeout()))
         .json(&body);
-    let req = resolved.apply_headers(req, &opts.api_key);
+    let mut req = resolved.apply_headers(req, &opts.api_key);
+    if is_anthropic_style && !opts.anthropic_beta_features.is_empty() {
+        req = req.header("anthropic-beta", opts.anthropic_beta_features.join(","));
+    }
 
     if use_stream_transport {
         let tx = if let Some(tx) = delta_tx {

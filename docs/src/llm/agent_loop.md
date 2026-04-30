@@ -111,6 +111,11 @@ Same as `llm_call`, plus additional options:
 | `working_files` | list\|string | `[]` | Paths that feed `paths:` glob auto-trigger in the metadata matcher and ride along as a hint to host-delegated matchers |
 | `mcp_servers` | list | nil | MCP servers to connect for this loop. Harn calls `tools/list` once per server, adds discovered tools as `<server>__<tool>`, and dispatches matching tool calls through `tools/call` |
 
+`agent_loop` forwards `thinking`, `interleaved_thinking`, and
+`anthropic_beta_features` to every model turn. For Claude Opus 4.6/4.7
+agent loops, `thinking: true` is the single switch that enables extended
+thinking and the Anthropic interleaved-thinking beta header.
+
 Profiles preload the common loop-budget and retry keys below. Pass any
 key explicitly to override the profile's value for that call.
 
