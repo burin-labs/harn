@@ -1096,6 +1096,40 @@ fn test_roundtrip_never_type_annotation() {
 }
 
 #[test]
+fn test_type_decl_shape_wraps_when_too_wide() {
+    // A shape with many fields exceeds the 100-column line width
+    // when rendered inline, so the formatter must split it onto
+    // one-field-per-line. This was the round-trip regression that
+    // collapsed `stdlib_hitl.harn` to a single line on every fmt run.
+    let source = "type Big = {alpha: int, beta: string, gamma: bool, delta: list<dict<string, int>>, epsilon: duration, zeta: string}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains("\n  alpha: int,"),
+        "expected wrapped one-field-per-line shape, got:\n{formatted}"
+    );
+    assert!(
+        formatted.contains("\n  zeta: string,"),
+        "expected last field on its own line with trailing comma, got:\n{formatted}"
+    );
+    // And the wrapped form must round-trip cleanly.
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_type_decl_shape_stays_inline_when_short() {
+    // Short shapes that fit comfortably stay on one line — the
+    // wrapping decision is line-width driven, not a blanket
+    // "always wrap shapes" rule.
+    let source = "type Small = {x: int, y: int}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains("type Small = {x: int, y: int}"),
+        "expected single-line form, got:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_doc_comment_triple_slash_multiline() {
     let source =
         "/// First line.\n/// Second line.\npub fn exposed() -> string {\n  return \"x\"\n}\n";

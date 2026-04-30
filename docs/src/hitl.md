@@ -1,12 +1,63 @@
 # Human In The Loop
 
-Harn's human-in-the-loop surface is a typed stdlib, not special syntax.
-Scripts call builtins such as `ask_user(...)` and `request_approval(...)`,
-while the VM enforces the waiting, timeout, quorum, escalation, event-log,
-and replay behavior.
+Harn's human-in-the-loop surface is **first-class typed syntax**.
+`ask_user`, `request_approval`, `dual_control`, and `escalate_to` are
+reserved keywords parsed as language-level expressions (not regular
+function calls). The VM enforces waiting, timeouts, quorum,
+escalation, signed receipts, the event log, and replay determinism, and
+since the names are reserved, user code cannot shadow them, redefine
+them, or compose around them to bypass approval.
 
 Use `import "std/hitl"` when you want shared type aliases such as
-`ApprovalRecord` or `EscalationHandle`. The builtins themselves are global.
+`ApprovalRecord` or `EscalationHandle`. The keywords themselves are
+always available — no import is required.
+
+## Call shapes: named or positional
+
+Each primitive accepts either named arguments (the recommended form) or
+the legacy positional shape. Both lower to the same VM-enforced runtime,
+so existing scripts keep working without migration:
+
+```harn,ignore
+// Named-argument form (recommended)
+let record = request_approval(
+  action: "deploy production",
+  quorum: 2,
+  reviewers: ["alice", "bob", "carol"],
+)
+
+// Positional form (kept for back-compat with the original stdlib API)
+let record = request_approval(
+  "deploy production",
+  {quorum: 2, reviewers: ["alice", "bob", "carol"]},
+)
+```
+
+The typechecker validates required arguments and rejects unknown names
+per primitive (e.g. `request_approval(bogus_arg: 1)` is a compile-time
+error).
+
+## VM-enforced invariants
+
+Because the four primitives are language-level keywords:
+
+- **Names cannot be shadowed.** `let request_approval = "fake"` is a
+  syntax error (reserved keyword), so user code cannot replace the
+  primitive with a counterfeit function or value.
+- **Approval cannot be bypassed by composition.** The result envelope is
+  produced by the VM, including a SHA-256 receipt over reviewer
+  identity, signing time, and the approval verdict. Forging the
+  envelope by constructing a dict literal does not yield valid
+  signatures, so downstream consumers can verify provenance.
+- **Dual-control quorum requires distinct principals.** The runtime
+  deduplicates reviewer IDs before counting approvals; replaying a
+  single signer's approval cannot satisfy `n` of `m`.
+- **Audit log records every decision.** Each request, response,
+  approval, denial, and timeout is appended to the event log on a
+  topic determined by the primitive.
+- **Replay is deterministic.** Given the same recorded approval
+  outcomes, a replay of a script produces the same envelope (including
+  the same signatures), enabling reproducible audits.
 
 ## Primitives
 

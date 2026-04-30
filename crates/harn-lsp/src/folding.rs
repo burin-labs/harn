@@ -270,6 +270,11 @@ fn collect_ast_ranges(
             push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
             collect_body_ranges(stmts, ranges, seen);
         }
+        Node::HitlExpr { args, .. } => {
+            for arg in args {
+                collect_ast_ranges(&arg.value, ranges, seen);
+            }
+        }
         Node::ImportDecl { .. }
         | Node::SelectiveImport { .. }
         | Node::DurationLiteral(_)

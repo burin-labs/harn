@@ -1368,15 +1368,33 @@ query_stringify([{key: "name", value: "ali ce"}])
 - `http_mock(method, url_pattern, response)` can script multiple responses
   with `{responses: [...]}` and `http_mock_calls()` records each attempt.
 
-### Human-in-the-loop builtins
+### Human-in-the-loop primitives
 
-These are typed stdlib primitives, not language syntax. Shared type aliases
-live in `std/hitl`; the builtins themselves are always available.
+`ask_user`, `request_approval`, `dual_control`, and `escalate_to` are
+**reserved keywords** — first-class typed expression syntax. The names
+cannot be shadowed; envelopes are signed by the VM; quorum requires
+distinct principals; replay is deterministic. Shared type aliases live
+in `std/hitl`.
 
-- `ask_user<T>(prompt, {schema?: Schema<T>, timeout?: duration, default?: T}) -> T`
-- `request_approval(action, ApprovalRequestOptions?) -> {approved, reviewers, approved_at, reason, signatures}`
+Each primitive accepts named arguments (preferred) or the legacy
+positional form. Both lower to the same VM-enforced runtime.
+
+```harn,ignore
+let answer  = ask_user(prompt: "choose A or B", schema: schema_of(Choice))
+let record  = request_approval(action: "merge_pr", args: {pr: 123}, quorum: 2,
+                               reviewers: ["alice", "bob", "carol"])
+let result  = dual_control(n: 2, m: 3, action: destructive_step,
+                           approvers: ["alice", "bob", "carol"])
+let handle  = escalate_to(role: "oncall", reason: "deploy failed")
+```
+
+- `ask_user<T>(prompt, schema?, timeout?, default?) -> T`
+- `request_approval(action, args?, detail?, quorum?, reviewers?, deadline?,
+  principal?, evidence_refs?, undo_metadata?, capabilities_requested?)
+  -> {approved, reviewers, approved_at, reason, signatures}`
 - `dual_control<T>(n, m, action: fn() -> T, approvers?) -> T`
-- `escalate_to(role, reason) -> {request_id, role, reason, trace_id, status, accepted_at, reviewer}`
+- `escalate_to(role, reason)
+  -> {request_id, role, reason, trace_id, status, accepted_at, reviewer}`
 - `hitl_pending({since?, until?, kinds?, agent?, limit?} | nil)
   -> list<{request_id, request_kind, agent, prompt, trace_id, timestamp, approvers, metadata}>`
 

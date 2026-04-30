@@ -127,6 +127,7 @@ impl TypeChecker {
             // Expose it as a named `range` type; for-in and method resolution
             // special-case this type where needed.
             Node::RangeExpr { .. } => Some(TypeExpr::Named("range".into())),
+            Node::HitlExpr { kind, args } => Some(self.hitl_expr_inferred_type(*kind, args, scope)),
             Node::DictLiteral(entries) => {
                 // Infer shape type when all keys are string literals
                 let mut fields = Vec::new();

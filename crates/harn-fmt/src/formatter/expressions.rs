@@ -638,6 +638,19 @@ impl Formatter<'_> {
                 .map(|p| self.format_expr(p, indent))
                 .collect::<Vec<_>>()
                 .join(" | "),
+            Node::HitlExpr { kind, args } => {
+                let arg_strs: Vec<String> = args
+                    .iter()
+                    .map(|arg| {
+                        let value = self.format_expr(&arg.value, indent);
+                        match &arg.name {
+                            Some(name) => format!("{name}: {value}"),
+                            None => value,
+                        }
+                    })
+                    .collect();
+                format!("{}({})", kind.as_keyword(), arg_strs.join(", "))
+            }
         }
     }
 

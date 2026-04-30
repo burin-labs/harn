@@ -223,17 +223,7 @@ pub(crate) fn format_type_expr(te: &TypeExpr) -> String {
             .map(format_type_expr)
             .collect::<Vec<_>>()
             .join(" | "),
-        TypeExpr::Shape(fields) => {
-            let items = fields
-                .iter()
-                .map(|f| {
-                    let opt = if f.optional { "?" } else { "" };
-                    format!("{}{opt}: {}", f.name, format_type_expr(&f.type_expr))
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{{{items}}}")
-        }
+        TypeExpr::Shape(fields) => format_shape_inline(fields),
         TypeExpr::List(inner) => {
             format!("list<{}>", format_type_expr(inner))
         }
@@ -272,6 +262,71 @@ pub(crate) fn format_type_expr(te: &TypeExpr) -> String {
         TypeExpr::LitString(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
         TypeExpr::LitInt(v) => v.to_string(),
     }
+}
+
+fn format_shape_inline(fields: &[harn_parser::ShapeField]) -> String {
+    let items = fields
+        .iter()
+        .map(|f| {
+            let opt = if f.optional { "?" } else { "" };
+            format!("{}{opt}: {}", f.name, format_type_expr(&f.type_expr))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{{{items}}}")
+}
+
+/// Like [`format_type_expr`] but wraps top-level shape fields onto
+/// multiple lines when the inline rendering, prefixed with
+/// `prefix_len` columns and aligned to `indent` levels, would exceed
+/// `line_width`. Mirrors the parser's preference for one-field-per-
+/// line shapes in source — collapsing a 10-field options shape to a
+/// single line on `harn fmt` was the source of repeated round-trip
+/// noise in `stdlib_hitl.harn`, the example workflows, etc.
+pub(crate) fn format_type_expr_wrapped(
+    te: &TypeExpr,
+    indent: usize,
+    prefix_len: usize,
+    line_width: usize,
+) -> String {
+    let inline = format_type_expr(te);
+    if prefix_len + inline.len() <= line_width {
+        return inline;
+    }
+    match te {
+        TypeExpr::Shape(fields) => format_shape_wrapped(fields, indent, line_width),
+        TypeExpr::Union(types) => {
+            // Wrap each union arm; if any arm is itself a Shape it can
+            // recurse and emit its own multi-line form.
+            let arms: Vec<String> = types
+                .iter()
+                .map(|arm| format_type_expr_wrapped(arm, indent, prefix_len, line_width))
+                .collect();
+            arms.join(" | ")
+        }
+        _ => inline,
+    }
+}
+
+fn format_shape_wrapped(
+    fields: &[harn_parser::ShapeField],
+    indent: usize,
+    line_width: usize,
+) -> String {
+    let pad_inner = "  ".repeat(indent + 1);
+    let pad_close = "  ".repeat(indent);
+    let lines: Vec<String> = fields
+        .iter()
+        .map(|f| {
+            let opt = if f.optional { "?" } else { "" };
+            // Recurse so nested shape fields wrap relative to their
+            // own indent, not the outer one.
+            let prefix_len = pad_inner.len() + f.name.len() + opt.len() + 2;
+            let value = format_type_expr_wrapped(&f.type_expr, indent + 1, prefix_len, line_width);
+            format!("{pad_inner}{}{opt}: {value},", f.name)
+        })
+        .collect();
+    format!("{{\n{}\n{pad_close}}}", lines.join("\n"))
 }
 
 pub(crate) fn format_type_params(type_params: &[TypeParam]) -> String {

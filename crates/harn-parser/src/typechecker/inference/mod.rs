@@ -17,6 +17,7 @@ mod decls;
 mod entry;
 mod expressions;
 mod flow;
+mod hitl;
 mod statements;
 mod subtyping;
 mod variance;

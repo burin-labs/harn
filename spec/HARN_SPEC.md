@@ -3177,10 +3177,26 @@ typechecker support.
 runtime `schema_of(T)` builtin returns an idiomatic schema dict
 whose static type is `Schema<T>`.
 
-### Human-in-the-loop stdlib
+### Human-in-the-loop primitives
 
-Human-in-the-loop is modeled as typed stdlib primitives rather than special
-syntax. The runtime owns blocking semantics, timeout behavior, event-log
+Human-in-the-loop is modeled as **first-class typed expression syntax**.
+`ask_user`, `request_approval`, `dual_control`, and `escalate_to` are
+reserved keywords with VM-enforced semantics: their names cannot be
+shadowed or rebound, the result envelopes are produced (and signed) by
+the runtime, and quorum approval requires distinct principals. Each
+primitive accepts either named arguments or the legacy positional form;
+both lower to the same runtime.
+
+```harn,ignore
+let answer = ask_user(prompt: "deploy now?", schema: schema_of(Choice))
+let record = request_approval(action: "merge_pr", quorum: 2,
+                              reviewers: ["alice", "bob", "carol"])
+let merged = dual_control(n: 2, m: 3, action: destructive_step,
+                          approvers: ["alice", "bob", "carol"])
+let handle = escalate_to(role: "oncall", reason: "deploy failed")
+```
+
+The runtime owns blocking semantics, timeout behavior, event-log
 records, and replay.
 
 - `ask_user<T>(prompt: string, options?: {schema?: Schema<T>, timeout?: duration, default?: T}) -> T`

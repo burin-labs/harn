@@ -665,6 +665,15 @@ fn collect_calls(node: &SNode, calls: &mut Vec<CallSite>) {
                 collect_calls(arg, calls);
             }
         }
+        Node::HitlExpr { kind, args } => {
+            calls.push(CallSite {
+                name: kind.as_keyword().to_string(),
+                span: node.span,
+            });
+            for arg in args {
+                collect_calls(&arg.value, calls);
+            }
+        }
         Node::ImplBlock { methods, .. } => collect_calls_in_body(methods, calls),
         Node::SkillDecl { fields, .. } => {
             for (_, value) in fields {

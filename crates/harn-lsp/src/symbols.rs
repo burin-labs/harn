@@ -874,6 +874,11 @@ fn collect_symbols(
         Node::Spread(inner) => {
             recurse!(inner, scope_span);
         }
+        Node::HitlExpr { args, .. } => {
+            for arg in args {
+                recurse!(&arg.value, scope_span);
+            }
+        }
         Node::SelectExpr {
             cases,
             timeout,

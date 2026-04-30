@@ -90,7 +90,11 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Mutex
         | TokenKind::Defer
         | TokenKind::Break
-        | TokenKind::Continue => Some(sem::KEYWORD),
+        | TokenKind::Continue
+        | TokenKind::RequestApproval
+        | TokenKind::DualControl
+        | TokenKind::AskUser
+        | TokenKind::EscalateTo => Some(sem::KEYWORD),
 
         // Strings
         TokenKind::StringLiteral(_)
