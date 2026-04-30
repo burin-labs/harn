@@ -663,7 +663,7 @@ pub(crate) fn register_workflow_message_builtins(vm: &mut Vm) {
 mod tests {
     use super::*;
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn update_round_trip_waits_for_response() {
         let dir = tempfile::tempdir().expect("tempdir");
         let workflow_id = "wf-update";
