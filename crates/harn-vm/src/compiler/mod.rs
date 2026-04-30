@@ -312,6 +312,16 @@ impl Compiler {
             Node::SkillDecl { name, fields, .. } => {
                 self.compile_skill_decl(name, fields)?;
             }
+            Node::EvalPackDecl {
+                binding_name,
+                pack_id,
+                fields,
+                body,
+                summarize,
+                ..
+            } => {
+                self.compile_eval_pack_decl(binding_name, pack_id, fields, body, summarize, true)?;
+            }
             Node::Closure { params, body, .. } => {
                 self.compile_closure(params, body)?;
             }

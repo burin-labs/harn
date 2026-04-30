@@ -2119,6 +2119,8 @@ These builtins expose Harn's typed orchestration runtime.
 | `run_record_eval(run, fixture?)` | run, fixture | dict | Evaluate a run against an embedded or explicit fixture |
 | `run_record_eval_suite(cases)` | cases: list | dict | Evaluate a list of `{run, fixture?, path?}` cases as a regression suite |
 | `run_record_diff(left, right)` | left, right | dict | Compare two run records and summarize stage/status deltas |
+| `eval_pack_manifest(payload)` | payload: dict | dict | Normalize an eval pack manifest |
+| `eval_pack_run(manifest)` | manifest: dict | dict | Evaluate an eval pack manifest |
 | `eval_suite_manifest(payload)` | payload: dict | dict | Normalize a grouped eval suite manifest |
 | `eval_suite_run(manifest)` | manifest: dict | dict | Evaluate a manifest of saved runs, fixtures, and optional baselines |
 | `friction_event(payload)` | payload: dict | dict | Normalize a redacted friction event for repeated queries, clarifications, approval stalls, missing context, handoffs, tool gaps, failed assumptions, expensive deterministic steps, or human hypotheses |

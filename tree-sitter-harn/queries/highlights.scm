@@ -40,6 +40,7 @@
 "default" @keyword
 "tool" @keyword
 "skill" @keyword
+"eval_pack" @keyword
 "not" @keyword.operator
 "to" @keyword.operator
 "exclusive" @keyword.operator
@@ -75,6 +76,9 @@
   name: (identifier) @function)
 
 (skill_declaration
+  name: (identifier) @function)
+
+(eval_pack_declaration
   name: (identifier) @function)
 
 ; Function calls

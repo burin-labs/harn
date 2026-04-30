@@ -687,6 +687,7 @@ impl Lexer {
             "while" => TokenKind::While,
             "type" => TokenKind::TypeKw,
             "enum" => TokenKind::Enum,
+            "eval_pack" => TokenKind::EvalPack,
             "struct" => TokenKind::Struct,
             "interface" => TokenKind::Interface,
             "emit" => TokenKind::Emit,

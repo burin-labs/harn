@@ -847,18 +847,35 @@ impl Compiler {
                 Node::AttributedDecl { inner, .. } => &inner.node,
                 other => other,
             };
-            if matches!(
-                inner_kind,
+            match inner_kind {
+                Node::EvalPackDecl {
+                    binding_name,
+                    pack_id,
+                    fields,
+                    body,
+                    summarize,
+                    ..
+                } => {
+                    self.compile_eval_pack_decl(
+                        binding_name,
+                        pack_id,
+                        fields,
+                        body,
+                        summarize,
+                        false,
+                    )?;
+                }
                 Node::FnDecl { .. }
-                    | Node::ToolDecl { .. }
-                    | Node::SkillDecl { .. }
-                    | Node::ImplBlock { .. }
-                    | Node::StructDecl { .. }
-                    | Node::EnumDecl { .. }
-                    | Node::InterfaceDecl { .. }
-                    | Node::TypeDecl { .. }
-            ) {
-                self.compile_node(sn)?;
+                | Node::ToolDecl { .. }
+                | Node::SkillDecl { .. }
+                | Node::ImplBlock { .. }
+                | Node::StructDecl { .. }
+                | Node::EnumDecl { .. }
+                | Node::InterfaceDecl { .. }
+                | Node::TypeDecl { .. } => {
+                    self.compile_node(sn)?;
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -883,6 +900,20 @@ impl Compiler {
                 Node::SkillDecl { fields, .. } => {
                     for (_k, v) in fields {
                         Self::collect_enum_names(std::slice::from_ref(v), names);
+                    }
+                }
+                Node::EvalPackDecl {
+                    fields,
+                    body,
+                    summarize,
+                    ..
+                } => {
+                    for (_k, v) in fields {
+                        Self::collect_enum_names(std::slice::from_ref(v), names);
+                    }
+                    Self::collect_enum_names(body, names);
+                    if let Some(summary_body) = summarize {
+                        Self::collect_enum_names(summary_body, names);
                     }
                 }
                 Node::Block(stmts) => {
@@ -918,6 +949,20 @@ impl Compiler {
                         Self::collect_struct_layouts(std::slice::from_ref(v), layouts);
                     }
                 }
+                Node::EvalPackDecl {
+                    fields,
+                    body,
+                    summarize,
+                    ..
+                } => {
+                    for (_k, v) in fields {
+                        Self::collect_struct_layouts(std::slice::from_ref(v), layouts);
+                    }
+                    Self::collect_struct_layouts(body, layouts);
+                    if let Some(summary_body) = summarize {
+                        Self::collect_struct_layouts(summary_body, layouts);
+                    }
+                }
                 Node::Block(stmts) => {
                     Self::collect_struct_layouts(stmts, layouts);
                 }
@@ -948,6 +993,20 @@ impl Compiler {
                 Node::SkillDecl { fields, .. } => {
                     for (_k, v) in fields {
                         Self::collect_interface_methods(std::slice::from_ref(v), interfaces);
+                    }
+                }
+                Node::EvalPackDecl {
+                    fields,
+                    body,
+                    summarize,
+                    ..
+                } => {
+                    for (_k, v) in fields {
+                        Self::collect_interface_methods(std::slice::from_ref(v), interfaces);
+                    }
+                    Self::collect_interface_methods(body, interfaces);
+                    if let Some(summary_body) = summarize {
+                        Self::collect_interface_methods(summary_body, interfaces);
                     }
                 }
                 Node::Block(stmts) => {
@@ -1014,6 +1073,7 @@ impl Compiler {
             | Node::FnDecl { .. }
             | Node::ToolDecl { .. }
             | Node::SkillDecl { .. }
+            | Node::EvalPackDecl { .. }
             | Node::ImplBlock { .. }
             | Node::StructDecl { .. }
             | Node::EnumDecl { .. }

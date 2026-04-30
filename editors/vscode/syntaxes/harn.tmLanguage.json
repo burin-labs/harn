@@ -77,7 +77,7 @@
         },
         {
           "name": "keyword.declaration.harn",
-          "match": "\\b(pipeline|fn|tool|skill|enum|struct|interface|extends|override|pub)\\b"
+          "match": "\\b(pipeline|fn|tool|skill|eval_pack|enum|struct|interface|extends|override|pub)\\b"
         }
       ]
     },

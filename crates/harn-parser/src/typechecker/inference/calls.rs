@@ -416,6 +416,24 @@ impl TypeChecker {
                     self.visit_for_deprecation(v);
                 }
             }
+            Node::EvalPackDecl {
+                fields,
+                body,
+                summarize,
+                ..
+            } => {
+                for (_k, v) in fields {
+                    self.visit_for_deprecation(v);
+                }
+                for s in body {
+                    self.visit_for_deprecation(s);
+                }
+                if let Some(summary_body) = summarize {
+                    for s in summary_body {
+                        self.visit_for_deprecation(s);
+                    }
+                }
+            }
             Node::IfElse {
                 condition,
                 then_body,

@@ -57,6 +57,8 @@ impl Parser {
                 self.parse_attributed_decl()
             } else if self.check(&TokenKind::Pipeline) {
                 self.parse_pipeline()
+            } else if self.check(&TokenKind::EvalPack) {
+                self.parse_eval_pack_decl(false)
             } else {
                 self.parse_statement()
             };
@@ -110,6 +112,7 @@ impl Parser {
                     | TokenKind::Import
                     | TokenKind::Parallel
                     | TokenKind::Enum
+                    | TokenKind::EvalPack
                     | TokenKind::Struct
                     | TokenKind::Interface
                     | TokenKind::Emit

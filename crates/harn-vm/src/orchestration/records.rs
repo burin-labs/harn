@@ -411,6 +411,7 @@ pub struct EvalPackManifest {
     pub name: Option<String>,
     pub description: Option<String>,
     pub base_dir: Option<String>,
+    pub baseline: Option<String>,
     pub package: Option<EvalPackPackage>,
     pub defaults: EvalPackDefaults,
     pub fixtures: Vec<EvalPackFixtureRef>,
@@ -1786,6 +1787,12 @@ pub fn load_eval_pack_manifest(path: &Path) -> Result<EvalPackManifest, VmError>
     Ok(manifest)
 }
 
+pub fn normalize_eval_pack_manifest_value(value: &VmValue) -> Result<EvalPackManifest, VmError> {
+    let mut manifest: EvalPackManifest = parse_json_value(value)?;
+    normalize_eval_pack_manifest(&mut manifest);
+    Ok(manifest)
+}
+
 fn normalize_eval_pack_manifest(manifest: &mut EvalPackManifest) {
     if manifest.version == 0 {
         manifest.version = 1;
@@ -1974,7 +1981,7 @@ pub fn evaluate_eval_pack_manifest(manifest: &EvalPackManifest) -> Result<EvalPa
         apply_eval_pack_thresholds(&run, &manifest.defaults.thresholds, &mut failures);
         apply_eval_pack_thresholds(&run, &case.thresholds, &mut failures);
 
-        let comparison = match &case.compare_to {
+        let comparison = match case.compare_to.as_ref().or(manifest.baseline.as_ref()) {
             Some(path) => {
                 let baseline_path = resolve_manifest_path(base_dir, path);
                 let baseline = load_run_record(&baseline_path)?;

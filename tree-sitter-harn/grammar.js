@@ -31,6 +31,8 @@ module.exports = grammar({
     [$.match_statement],
     [$.skill_declaration, $.pipe_expression, $.binary_expression, $.method_call, $.property_access],
     [$.skill_declaration, $.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.method_call, $.property_access],
+    [$.eval_pack_declaration, $.pipe_expression, $.binary_expression, $.method_call, $.property_access],
+    [$.eval_pack_declaration, $.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.method_call, $.property_access],
     [$.pipe_expression, $.binary_expression, $.unary_expression, $.method_call, $.property_access],
     [$.pipe_expression, $.binary_expression, $.method_call, $.property_access],
     [$.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.method_call, $.property_access],
@@ -63,6 +65,7 @@ module.exports = grammar({
         choice(
           $.pipeline_declaration,
           $.fn_declaration,
+          $.eval_pack_declaration,
           $.struct_declaration,
           $.enum_declaration,
           $.type_declaration,
@@ -236,6 +239,7 @@ module.exports = grammar({
         $.fn_declaration,
         $.tool_declaration,
         $.skill_declaration,
+        $.eval_pack_declaration,
         $.override_declaration,
         $.enum_declaration,
         $.struct_declaration,
@@ -477,6 +481,26 @@ module.exports = grammar({
           seq(
             field("field_name", $.identifier),
             field("field_value", $._expression)
+          )
+        ),
+        "}"
+      ),
+
+    eval_pack_declaration: ($) =>
+      seq(
+        optional("pub"),
+        "eval_pack",
+        choice(
+          seq(field("name", $.identifier), optional(field("id", $.string_literal))),
+          field("id", $.string_literal)
+        ),
+        "{",
+        statementSeparated(
+          $,
+          choice(
+            seq(field("field_name", $.identifier), ":", field("field_value", $._expression)),
+            seq("summarize", $.block),
+            $._statement
           )
         ),
         "}"

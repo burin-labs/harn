@@ -322,6 +322,39 @@ fn collect_static_tool_surface_from_node(
                 );
             }
         }
+        Node::EvalPackDecl {
+            fields,
+            body,
+            summarize,
+            ..
+        } => {
+            for (_, value) in fields {
+                collect_static_tool_surface_from_node(
+                    value,
+                    tool_defs,
+                    prompt_targets,
+                    tool_search_active,
+                );
+            }
+            for child in body {
+                collect_static_tool_surface_from_node(
+                    child,
+                    tool_defs,
+                    prompt_targets,
+                    tool_search_active,
+                );
+            }
+            if let Some(summary_body) = summarize {
+                for child in summary_body {
+                    collect_static_tool_surface_from_node(
+                        child,
+                        tool_defs,
+                        prompt_targets,
+                        tool_search_active,
+                    );
+                }
+            }
+        }
         Node::TryCatch {
             body,
             catch_body,
@@ -1494,6 +1527,44 @@ fn scan_node_preflight(
             for (_k, v) in fields {
                 scan_node_preflight(
                     v,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
+            }
+        }
+        Node::EvalPackDecl {
+            fields,
+            body,
+            summarize,
+            ..
+        } => {
+            for (_k, v) in fields {
+                scan_node_preflight(
+                    v,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
+            }
+            scan_children(
+                body,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            if let Some(summary_body) = summarize {
+                scan_children(
+                    summary_body,
                     file_path,
                     source,
                     config,

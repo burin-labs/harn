@@ -27,6 +27,7 @@ module.exports = [
   "while",
   "type",
   "enum",
+  "eval_pack",
   "struct",
   "interface",
   "pub",

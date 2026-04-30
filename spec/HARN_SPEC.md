@@ -89,6 +89,7 @@ The following identifiers are reserved:
 | `while` | `.whileKw` |
 | `type` | `.typeKw` |
 | `enum` | `.enum` |
+| `eval_pack` | `.evalPack` |
 | `struct` | `.struct` |
 | `interface` | `.interface` |
 | `pub` | `.pub` |
@@ -4389,6 +4390,36 @@ Threshold severity controls deployment-gate behavior:
 
 Run a pack directly with `harn eval harn.eval.toml`, or run package-declared
 packs with `harn test package --evals`.
+
+Harn source may also declare an eval pack directly:
+
+```harn
+eval_pack regression "slack-connector" {
+  baseline: "fixtures/baseline.run.json"
+  fixtures: [{id: "candidate", kind: "run-record", path: "fixtures/candidate.run.json"}]
+  rubrics: [{id: "status", kind: "deterministic", assertions: [{kind: "run-status", expected: "completed"}]}]
+  cases: [{id: "url-verification", run: "candidate", rubrics: ["status"]}]
+}
+```
+
+`eval_pack NAME { ... }` binds `NAME` to `eval_pack_manifest({ ... })`. If a
+string id is supplied after the name, that string becomes the manifest id; if
+the declaration starts with a string id, Harn derives a valid binding name from
+the id. Missing `version` defaults to `1`, and missing `id` defaults to the
+header id.
+
+Field entries use `field: expression` and are normalized through the same
+eval-pack runtime data model as TOML packs. A top-level `baseline` field acts
+as a default `compare_to` path for cases that do not specify their own
+baseline.
+
+An `eval_pack` block may include ordinary Harn statements and one
+`summarize { ... }` block. These statements run when the declaration is
+executed in script or block position, with the binding name, `id`, `version`,
+and all declared field names in scope. When a file has pipelines, top-level
+`eval_pack` declarations are preloaded as manifest values without running
+their executable body, so importing or running an unrelated pipeline does not
+trigger eval side effects.
 
 ### Package registry index
 

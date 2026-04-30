@@ -671,6 +671,20 @@ fn collect_calls(node: &SNode, calls: &mut Vec<CallSite>) {
                 collect_calls(value, calls);
             }
         }
+        Node::EvalPackDecl {
+            fields,
+            body,
+            summarize,
+            ..
+        } => {
+            for (_, value) in fields {
+                collect_calls(value, calls);
+            }
+            collect_calls_in_body(body, calls);
+            if let Some(summarize) = summarize {
+                collect_calls_in_body(summarize, calls);
+            }
+        }
         Node::ImportDecl { .. }
         | Node::SelectiveImport { .. }
         | Node::EnumDecl { .. }

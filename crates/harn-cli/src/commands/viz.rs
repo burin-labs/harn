@@ -452,6 +452,7 @@ fn summarize_node(node: &SNode) -> String {
         Node::FnDecl { name, .. } => format!("fn {name}"),
         Node::ToolDecl { name, .. } => format!("tool {name}"),
         Node::SkillDecl { name, .. } => format!("skill {name}"),
+        Node::EvalPackDecl { binding_name, .. } => format!("eval_pack {binding_name}"),
         Node::OverrideDecl { name, .. } => format!("override {name}"),
         Node::IfElse { condition, .. } => format!("if {}", inline_label(condition)),
         Node::ForIn {

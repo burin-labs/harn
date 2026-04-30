@@ -81,6 +81,21 @@ fn collect_ast_ranges(
                 collect_ast_ranges(value, ranges, seen);
             }
         }
+        Node::EvalPackDecl {
+            fields,
+            body,
+            summarize,
+            ..
+        } => {
+            push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
+            for (_, value) in fields {
+                collect_ast_ranges(value, ranges, seen);
+            }
+            collect_body_ranges(body, ranges, seen);
+            if let Some(summarize) = summarize {
+                collect_body_ranges(summarize, ranges, seen);
+            }
+        }
         Node::EnumDecl { .. }
         | Node::StructDecl { .. }
         | Node::InterfaceDecl { .. }

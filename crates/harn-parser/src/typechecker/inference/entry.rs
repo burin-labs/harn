@@ -232,6 +232,19 @@ impl TypeChecker {
                     scope.define_var(name, None);
                     scope.clear_nil_widenable(name);
                 }
+                Node::EvalPackDecl {
+                    binding_name,
+                    body,
+                    summarize,
+                    ..
+                } => {
+                    scope.define_var(binding_name, Some(TypeExpr::Named("dict".into())));
+                    scope.clear_nil_widenable(binding_name);
+                    walk_all(scope, body);
+                    if let Some(summary_body) = summarize {
+                        walk_all(scope, summary_body);
+                    }
+                }
                 Node::LetBinding { pattern, .. } | Node::VarBinding { pattern, .. } => {
                     // Only bare-identifier patterns at module scope
                     // need forward-ref placeholders; destructuring

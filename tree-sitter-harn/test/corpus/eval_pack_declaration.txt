@@ -1,0 +1,50 @@
+==================
+Eval Pack Declaration
+==================
+
+pub eval_pack pack "regression-pack" {
+  baseline: "candidate.json"
+  cases: [{id: "case_1"}]
+
+  for case in cases {
+    log(case.id)
+  }
+
+  summarize {
+    log(pack.id)
+  }
+}
+
+---
+
+(source_file
+  (eval_pack_declaration
+    name: (identifier)
+    id: (string_literal)
+    field_name: (identifier)
+    field_value: (string_literal)
+    field_name: (identifier)
+    field_value: (list_literal
+      (dict_literal
+        (dict_entry
+          key: (identifier)
+          value: (string_literal))))
+    (for_statement
+      variable: (identifier)
+      iterable: (identifier)
+      body: (block
+        (expression_statement
+          (call_expression
+            function: (identifier)
+            (argument_list
+              (property_access
+                object: (identifier)
+                property: (identifier)))))))
+    (block
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (argument_list
+            (property_access
+              object: (identifier)
+              property: (identifier))))))))
