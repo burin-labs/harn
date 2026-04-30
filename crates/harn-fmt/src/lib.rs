@@ -10,13 +10,19 @@ use harn_parser::Parser;
 
 pub(crate) use formatter::{Comment, Formatter};
 
+/// `FmtOptions::separator_width` value that resolves section-header bars from
+/// `line_width` minus the current indent.
+pub const AUTO_SEPARATOR_WIDTH: usize = 0;
+
 /// Options controlling formatter behavior.
 #[derive(Debug, Clone)]
 pub struct FmtOptions {
     /// Maximum line width before wrapping (default: 100).
     pub line_width: usize,
     /// Total width of `// ----` separator bars rendered by the formatter
-    /// when it normalizes section-header comment blocks (default: 80).
+    /// when it normalizes section-header comment blocks. Use
+    /// `AUTO_SEPARATOR_WIDTH` to resolve from `line_width` minus the current
+    /// indent.
     pub separator_width: usize,
 }
 
@@ -24,7 +30,7 @@ impl Default for FmtOptions {
     fn default() -> Self {
         Self {
             line_width: 100,
-            separator_width: 80,
+            separator_width: AUTO_SEPARATOR_WIDTH,
         }
     }
 }

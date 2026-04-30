@@ -251,17 +251,26 @@ impl Formatter<'_> {
     }
 
     fn emit_separator_bar(&mut self) {
-        let dashes = self.separator_width.saturating_sub(3);
+        let dashes = self.section_separator_width().saturating_sub(3);
         let bar: String = "-".repeat(dashes);
         self.writeln(&format!("// {bar}"));
     }
 
     fn emit_section_header(&mut self, title: &str) {
-        let dashes = self.separator_width.saturating_sub(3);
+        let title = title.trim_end();
+        let dashes = self.section_separator_width().saturating_sub(3);
         let bar: String = "-".repeat(dashes);
         self.writeln(&format!("// {bar}"));
         self.writeln(&format!("// {title}"));
         self.writeln(&format!("// {bar}"));
+    }
+
+    fn section_separator_width(&self) -> usize {
+        if self.separator_width == crate::AUTO_SEPARATOR_WIDTH {
+            self.line_width.saturating_sub(self.indent * 2)
+        } else {
+            self.separator_width
+        }
     }
 }
 
