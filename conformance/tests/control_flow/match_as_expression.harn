@@ -1,0 +1,25 @@
+pipeline default() {
+  let input = "b"
+  let label = match input {
+    "a" -> { "alpha" }
+    "b" -> { "bravo" }
+    _ -> { "other" }
+  }
+  println(label)
+  let n = 7
+  let size = match n {
+    0 -> { "zero" }
+    x if x > 5 -> {
+      let prefix = "large"
+      prefix + ":" + to_string(x)
+    }
+    _ -> { "small" }
+  }
+  println(size)
+  let pair = [10, 20]
+  let second = match pair {
+    [_, value] -> { value }
+    _ -> { 0 }
+  }
+  println(second)
+}

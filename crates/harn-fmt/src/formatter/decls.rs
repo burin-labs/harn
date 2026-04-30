@@ -565,11 +565,16 @@ impl Formatter<'_> {
 
     fn format_match_arm(&mut self, arm: &harn_parser::MatchArm) {
         let pattern = self.format_expr(&arm.pattern, self.indent);
+        let guard = if let Some(ref guard) = arm.guard {
+            format!(" if {}", self.format_expr(guard, self.indent))
+        } else {
+            String::new()
+        };
         if arm.body.len() == 1 && crate::helpers::is_simple_expr(&arm.body[0]) {
             let expr = self.format_expr(&arm.body[0], self.indent);
-            self.writeln(&format!("{pattern} -> {{ {expr} }}"));
+            self.writeln(&format!("{pattern}{guard} -> {{ {expr} }}"));
         } else {
-            self.writeln(&format!("{pattern} -> {{"));
+            self.writeln(&format!("{pattern}{guard} -> {{"));
             self.indent();
             self.format_body(&arm.body, arm.pattern.span.line);
             self.dedent();

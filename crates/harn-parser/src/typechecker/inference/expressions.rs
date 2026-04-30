@@ -108,6 +108,126 @@ impl TypeChecker {
             .unwrap_or_else(|| TypeExpr::Named("list".into()))
     }
 
+    fn infer_match_expr_type(
+        &self,
+        value: &SNode,
+        arms: &[MatchArm],
+        scope: &TypeScope,
+    ) -> InferredType {
+        let value_type = self.infer_type(value, scope);
+        let mut arm_types = Vec::new();
+        for arm in arms {
+            let mut arm_scope = scope.child();
+            self.define_match_pattern_bindings(&arm.pattern, value_type.as_ref(), &mut arm_scope);
+            if let Some(arm_type) = self.infer_block_type(&arm.body, &arm_scope) {
+                arm_types.push(arm_type);
+            }
+        }
+        match (arms.is_empty(), arm_types.len()) {
+            (true, _) => Some(TypeExpr::Never),
+            (false, 0) => None,
+            (false, 1) => arm_types.pop(),
+            (false, _) => Some(simplify_union(arm_types)),
+        }
+    }
+
+    fn define_match_pattern_bindings(
+        &self,
+        pattern: &SNode,
+        value_type: Option<&TypeExpr>,
+        scope: &mut TypeScope,
+    ) {
+        match &pattern.node {
+            Node::Identifier(name) if name != "_" => {
+                scope.define_var(name, value_type.cloned());
+            }
+            Node::ListLiteral(elements) => {
+                let item_type = value_type.and_then(|ty| match self.resolve_alias(ty, scope) {
+                    TypeExpr::List(inner) => Some(*inner),
+                    _ => None,
+                });
+                for element in elements {
+                    if let Node::Identifier(name) = &element.node {
+                        if name != "_" {
+                            scope.define_var(name, item_type.clone());
+                        }
+                    }
+                }
+            }
+            Node::DictLiteral(entries) => {
+                for entry in entries {
+                    let Some(key) = (match &entry.key.node {
+                        Node::StringLiteral(key) | Node::Identifier(key) => Some(key.as_str()),
+                        _ => None,
+                    }) else {
+                        continue;
+                    };
+                    let Node::Identifier(name) = &entry.value.node else {
+                        continue;
+                    };
+                    if name == "_" {
+                        continue;
+                    }
+                    let binding_type =
+                        value_type.and_then(|ty| match self.resolve_alias(ty, scope) {
+                            TypeExpr::Shape(fields) => fields
+                                .into_iter()
+                                .find(|field| field.name == key)
+                                .map(|field| field.type_expr),
+                            TypeExpr::DictType(_, value) => Some(*value),
+                            _ => None,
+                        });
+                    scope.define_var(name, binding_type);
+                }
+            }
+            Node::EnumConstruct {
+                enum_name,
+                variant,
+                args,
+            } => {
+                self.define_enum_pattern_bindings(enum_name, variant, args, scope);
+            }
+            Node::MethodCall {
+                object,
+                method,
+                args,
+            } => {
+                if let Node::Identifier(enum_name) = &object.node {
+                    self.define_enum_pattern_bindings(enum_name, method, args, scope);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn define_enum_pattern_bindings(
+        &self,
+        enum_name: &str,
+        variant: &str,
+        args: &[SNode],
+        scope: &mut TypeScope,
+    ) {
+        let Some(enum_info) = scope.get_enum(enum_name) else {
+            return;
+        };
+        let Some(variant_info) = enum_info.variants.iter().find(|v| v.name == variant) else {
+            return;
+        };
+        let bindings: Vec<(String, InferredType)> = args
+            .iter()
+            .zip(&variant_info.fields)
+            .filter_map(|(arg, field)| match &arg.node {
+                Node::Identifier(name) if name != "_" => {
+                    Some((name.clone(), field.type_expr.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        for (name, ty) in bindings {
+            scope.define_var(&name, ty);
+        }
+    }
+
     /// Infer the type of an expression.
     pub(in crate::typechecker) fn infer_type(
         &self,
@@ -676,6 +796,8 @@ impl TypeChecker {
                     args: vec![ok_type, err_type],
                 })
             }
+
+            Node::MatchExpr { value, arms } => self.infer_match_expr_type(value, arms, scope),
 
             Node::Parallel { mode, body, .. } => {
                 let item_type = self
