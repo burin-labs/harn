@@ -52,8 +52,8 @@ fn test_match_expression_assignment_uses_arm_value_type() {
 }"#,
     );
     assert_eq!(errs.len(), 1);
-    assert!(errs[0].contains("declared as int"));
-    assert!(errs[0].contains("assigned string"));
+    assert!(errs[0].contains("expected int"));
+    assert!(errs[0].contains("found string"));
 }
 
 #[test]
@@ -82,8 +82,8 @@ fn test_match_expression_infers_list_pattern_binding_type() {
 }"#,
     );
     assert_eq!(errs.len(), 1);
-    assert!(errs[0].contains("declared as string"));
-    assert!(errs[0].contains("assigned int"));
+    assert!(errs[0].contains("expected string"));
+    assert!(errs[0].contains("found int"));
 }
 
 #[test]
