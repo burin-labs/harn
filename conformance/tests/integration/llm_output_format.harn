@@ -1,0 +1,26 @@
+pipeline default() {
+  let schema = {type: "object", required: ["answer"], properties: {answer: {type: "string"}}}
+  llm_mock({text: "{\"answer\":\"typed\"}"})
+  let typed = llm_call(
+    "Return JSON",
+    nil,
+    {
+      provider: "mock",
+      output_format: {kind: "json_schema", schema: schema, strict: true},
+      output_validation: "error",
+    },
+  )
+  println(typed.data.answer)
+  llm_mock_clear()
+  llm_mock({text: "{\"answer\":\"legacy\"}"})
+  let legacy = llm_call(
+    "Return JSON",
+    nil,
+    {provider: "mock", response_format: "json", json_schema: schema, output_validation: "error"},
+  )
+  println(legacy.data.answer)
+  llm_mock_clear()
+  llm_mock({text: "{\"answer\":\"loose\"}"})
+  let loose = llm_call("Return JSON", nil, {provider: "mock", output_format: {kind: "json_object"}})
+  println(loose.data.answer)
+}

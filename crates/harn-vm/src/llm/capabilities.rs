@@ -75,7 +75,11 @@ pub struct ProviderRule {
     #[serde(default)]
     pub audio: Option<bool>,
     /// Structured-output transport strategy. Known values are:
-    /// `native`, `tool_use`, and `format_kw`.
+    /// `native`, `tool_use`, `format_kw`, and `none`.
+    #[serde(default)]
+    pub structured_output: Option<String>,
+    /// Legacy name retained for project overrides written before
+    /// `structured_output` became the canonical capability.
     #[serde(default)]
     pub json_schema: Option<String>,
     /// Supported thinking/reasoning modes for this rule. Values are
@@ -143,6 +147,8 @@ pub struct Capabilities {
     pub prompt_caching: bool,
     pub vision: bool,
     pub audio: bool,
+    pub structured_output: Option<String>,
+    /// Legacy mirror for CLI display and older callers.
     pub json_schema: Option<String>,
     pub thinking_modes: Vec<String>,
     pub interleaved_thinking_supported: bool,
@@ -167,6 +173,7 @@ impl Default for Capabilities {
             prompt_caching: false,
             vision: false,
             audio: false,
+            structured_output: None,
             json_schema: None,
             thinking_modes: Vec::new(),
             interleaved_thinking_supported: false,
@@ -310,7 +317,7 @@ fn rule_to_matrix_row(
         thinking: rule_thinking_modes(rule),
         vision: rule_vision(rule),
         audio: rule.audio.unwrap_or(false),
-        json_schema: rule.json_schema.clone(),
+        json_schema: rule_structured_output(rule),
         tools: rule.native_tools.unwrap_or(false),
         cache: rule.prompt_caching.unwrap_or(false),
         source: source.to_string(),
@@ -410,7 +417,8 @@ fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
         prompt_caching: rule.prompt_caching.unwrap_or(false),
         vision: rule_vision(rule),
         audio: rule.audio.unwrap_or(false),
-        json_schema: rule.json_schema.clone(),
+        structured_output: rule_structured_output(rule),
+        json_schema: rule_structured_output(rule),
         thinking_modes,
         interleaved_thinking_supported: rule.interleaved_thinking_supported.unwrap_or(false),
         anthropic_beta_features: rule.anthropic_beta_features.clone().unwrap_or_default(),
@@ -426,6 +434,13 @@ fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
         recommended_endpoint: rule.recommended_endpoint.clone(),
         text_tool_wire_format_supported: rule.text_tool_wire_format_supported.unwrap_or(true),
     }
+}
+
+fn rule_structured_output(rule: &ProviderRule) -> Option<String> {
+    rule.structured_output
+        .clone()
+        .or_else(|| rule.json_schema.clone())
+        .filter(|value| value != "none")
 }
 
 fn rule_matches(rule: &ProviderRule, model: &str) -> bool {

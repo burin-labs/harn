@@ -17,9 +17,7 @@ pub(crate) fn extract_json(text: &str) -> String {
 }
 
 pub(crate) fn expects_structured_output(opts: &crate::llm::api::LlmCallOptions) -> bool {
-    opts.response_format.as_deref() == Some("json")
-        || opts.json_schema.is_some()
-        || opts.output_schema.is_some()
+    opts.output_format.is_structured() || opts.output_schema.is_some()
 }
 
 fn quality_rank(tier: &str) -> i32 {
@@ -306,6 +304,142 @@ fn classify_native_shape(
     NativeToolSearchShape::OpenAi
 }
 
+fn parse_schema_value(
+    raw: Option<&VmValue>,
+    field: &str,
+) -> Result<Option<serde_json::Value>, VmError> {
+    match raw {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(value) => value
+            .as_dict()
+            .map(vm_value_dict_to_json)
+            .map(Some)
+            .ok_or_else(|| {
+                VmError::Thrown(VmValue::String(std::rc::Rc::from(format!(
+                    "{field}: expected a JSON Schema object"
+                ))))
+            }),
+    }
+}
+
+fn output_format_error(message: impl Into<String>) -> VmError {
+    VmError::Thrown(VmValue::String(std::rc::Rc::from(message.into())))
+}
+
+fn parse_output_format_kind(raw: &str) -> Result<&'static str, VmError> {
+    let normalized = raw.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "text" | "none" | "off" => Ok("text"),
+        "json" | "json_object" => Ok("json_object"),
+        "json_schema" | "schema" => Ok("json_schema"),
+        other => Err(output_format_error(format!(
+            "output_format.kind: expected \"text\" | \"json_object\" | \"json_schema\", got \"{other}\""
+        ))),
+    }
+}
+
+fn parse_output_format_option(
+    options: Option<&BTreeMap<String, VmValue>>,
+    legacy_response_format: Option<&str>,
+    legacy_json_schema: Option<&serde_json::Value>,
+) -> Result<crate::llm::api::OutputFormat, VmError> {
+    use crate::llm::api::OutputFormat;
+
+    let Some(raw) = options.and_then(|o| o.get("output_format")) else {
+        if let Some(schema) = legacy_json_schema {
+            return Ok(OutputFormat::JsonSchema {
+                schema: schema.clone(),
+                strict: true,
+            });
+        }
+        return match legacy_response_format {
+            Some("json") | Some("json_object") => Ok(OutputFormat::JsonObject),
+            Some("text") | None => Ok(OutputFormat::Text),
+            Some(other) => Err(output_format_error(format!(
+                "response_format: expected \"json\", \"json_object\", or \"text\", got \"{other}\""
+            ))),
+        };
+    };
+
+    match raw {
+        VmValue::Nil => Ok(OutputFormat::Text),
+        VmValue::String(kind) => match parse_output_format_kind(kind)? {
+            "text" => Ok(OutputFormat::Text),
+            "json_object" => Ok(OutputFormat::JsonObject),
+            "json_schema" => {
+                let Some(schema) = legacy_json_schema else {
+                    return Err(output_format_error(
+                        "output_format: kind \"json_schema\" requires a `schema` field",
+                    ));
+                };
+                Ok(OutputFormat::JsonSchema {
+                    schema: schema.clone(),
+                    strict: true,
+                })
+            }
+            _ => unreachable!(),
+        },
+        VmValue::Dict(d) => {
+            let kind_raw = d
+                .get("kind")
+                .map(|value| value.display())
+                .unwrap_or_else(|| "text".to_string());
+            match parse_output_format_kind(&kind_raw)? {
+                "text" => Ok(OutputFormat::Text),
+                "json_object" => Ok(OutputFormat::JsonObject),
+                "json_schema" => {
+                    let schema = parse_schema_value(
+                        d.get("schema").or_else(|| d.get("json_schema")),
+                        "output_format.schema",
+                    )?
+                    .ok_or_else(|| {
+                        output_format_error(
+                            "output_format: kind \"json_schema\" requires a `schema` field",
+                        )
+                    })?;
+                    let strict = d.get("strict").map(VmValue::is_truthy).unwrap_or(true);
+                    Ok(OutputFormat::JsonSchema { schema, strict })
+                }
+                _ => unreachable!(),
+            }
+        }
+        _ => Err(output_format_error(
+            "output_format: expected string or dict",
+        )),
+    }
+}
+
+fn validate_output_format_supported(
+    output_format: &crate::llm::api::OutputFormat,
+    provider: &str,
+    model: &str,
+) -> Result<(), VmError> {
+    use crate::llm::api::OutputFormat;
+
+    match output_format {
+        OutputFormat::Text => Ok(()),
+        OutputFormat::JsonObject => Ok(()),
+        OutputFormat::JsonSchema { strict, .. } => {
+            if provider == "mock" {
+                return Ok(());
+            }
+            let strategy = crate::llm::capabilities::lookup(provider, model).structured_output;
+            match strategy.as_deref() {
+                Some("native" | "tool_use" | "format_kw") => Ok(()),
+                Some(other) => Err(output_format_error(format!(
+                    "output_format: provider \"{provider}\" model \"{model}\" declares unsupported structured_output strategy \"{other}\""
+                ))),
+                None => {
+                    let strict_msg = if *strict { " strict" } else { "" };
+                    Err(output_format_error(format!(
+                        "output_format: provider \"{provider}\" model \"{model}\" cannot enforce{strict_msg} json_schema output"
+                    )))
+                }
+            }
+        }
+    }
+}
+
 /// Extract all LLM call options from the standard (prompt, system, options) args.
 pub(crate) fn extract_llm_options(
     args: &[VmValue],
@@ -355,7 +489,6 @@ pub(crate) fn extract_llm_options(
         opt_float(&options, "frequency_penalty").or_else(|| default_float("frequency_penalty"));
     let presence_penalty =
         opt_float(&options, "presence_penalty").or_else(|| default_float("presence_penalty"));
-    let response_format = opt_str(&options, "response_format");
     let timeout = opt_int(&options, "timeout").map(|t| t as u64);
     let idle_timeout = opt_int(&options, "idle_timeout").map(|t| t as u64);
     let cache = opt_bool(&options, "cache");
@@ -380,16 +513,28 @@ pub(crate) fn extract_llm_options(
     let anthropic_beta_features =
         parse_anthropic_beta_features_option(options.as_ref(), &thinking, &provider, &model)?;
 
-    let json_schema = options
-        .as_ref()
-        .and_then(|o| o.get("schema"))
-        .and_then(|v| v.as_dict())
-        .map(vm_value_dict_to_json);
-    let output_schema = options
-        .as_ref()
-        .and_then(|o| o.get("output_schema").or_else(|| o.get("schema")))
-        .and_then(|v| v.as_dict())
-        .map(vm_value_dict_to_json);
+    let response_format = opt_str(&options, "response_format");
+    let json_schema = parse_schema_value(
+        options
+            .as_ref()
+            .and_then(|o| o.get("json_schema").or_else(|| o.get("schema"))),
+        "json_schema",
+    )?;
+    let output_schema = parse_schema_value(
+        options.as_ref().and_then(|o| {
+            o.get("output_schema")
+                .or_else(|| o.get("json_schema"))
+                .or_else(|| o.get("schema"))
+        }),
+        "output_schema",
+    )?;
+    let output_format = parse_output_format_option(
+        options.as_ref(),
+        response_format.as_deref(),
+        json_schema.as_ref(),
+    )?;
+    validate_output_format_supported(&output_format, &provider, &model)?;
+    let output_schema = output_schema.or_else(|| output_format.schema().cloned());
 
     // Reject the deprecated `transcript` option key. Conversation
     // lifecycle is expressed through `session_id` + the explicit
@@ -674,6 +819,7 @@ pub(crate) fn extract_llm_options(
         seed,
         frequency_penalty,
         presence_penalty,
+        output_format,
         response_format,
         json_schema,
         output_schema,
@@ -1170,6 +1316,95 @@ fn validate_options(opts: &crate::llm::api::LlmCallOptions) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod output_format_tests {
+    use super::*;
+    use std::rc::Rc;
+
+    #[test]
+    fn parses_explicit_json_schema_output_format() {
+        let mut fmt = BTreeMap::new();
+        fmt.insert("kind".to_string(), VmValue::String(Rc::from("json_schema")));
+        fmt.insert(
+            "schema".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([(
+                "type".to_string(),
+                VmValue::String(Rc::from("object")),
+            )]))),
+        );
+        fmt.insert("strict".to_string(), VmValue::Bool(false));
+        let options = BTreeMap::from([("output_format".to_string(), VmValue::Dict(Rc::new(fmt)))]);
+
+        let parsed = parse_output_format_option(Some(&options), None, None).expect("output_format");
+
+        assert_eq!(
+            parsed,
+            crate::llm::api::OutputFormat::JsonSchema {
+                schema: serde_json::json!({"type": "object"}),
+                strict: false,
+            }
+        );
+    }
+
+    #[test]
+    fn legacy_response_format_and_json_schema_map_to_typed_output_format() {
+        let schema = serde_json::json!({"type": "object"});
+
+        let parsed =
+            parse_output_format_option(Some(&BTreeMap::new()), Some("json"), Some(&schema))
+                .expect("legacy output format");
+
+        assert_eq!(
+            parsed,
+            crate::llm::api::OutputFormat::JsonSchema {
+                schema,
+                strict: true,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_json_schema_when_capability_is_absent() {
+        crate::llm::capabilities::clear_user_overrides();
+        let err = validate_output_format_supported(
+            &crate::llm::api::OutputFormat::JsonSchema {
+                schema: serde_json::json!({"type": "object"}),
+                strict: true,
+            },
+            "custom-provider",
+            "custom-model",
+        )
+        .expect_err("unsupported structured output should fail");
+
+        assert!(err
+            .to_string()
+            .contains("cannot enforce strict json_schema output"));
+    }
+
+    #[test]
+    fn accepts_json_schema_when_capability_declares_strategy() {
+        crate::llm::capabilities::set_user_overrides_toml(
+            r#"
+[[provider.custom-provider]]
+model_match = "*"
+structured_output = "format_kw"
+"#,
+        )
+        .expect("capability override");
+
+        validate_output_format_supported(
+            &crate::llm::api::OutputFormat::JsonSchema {
+                schema: serde_json::json!({"type": "object"}),
+                strict: true,
+            },
+            "custom-provider",
+            "custom-model",
+        )
+        .expect("supported structured output");
+        crate::llm::capabilities::clear_user_overrides();
     }
 }
 

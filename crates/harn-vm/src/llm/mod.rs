@@ -881,7 +881,21 @@ pub(crate) fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>
             .or_insert(VmValue::Int(3));
     }
 
-    options.entry("output_schema".to_string()).or_insert(schema);
+    options
+        .entry("output_schema".to_string())
+        .or_insert(schema.clone());
+    options
+        .entry("json_schema".to_string())
+        .or_insert(schema.clone());
+    options
+        .entry("output_format".to_string())
+        .or_insert_with(|| {
+            let mut fmt = std::collections::BTreeMap::new();
+            fmt.insert("kind".to_string(), VmValue::String(Rc::from("json_schema")));
+            fmt.insert("schema".to_string(), schema);
+            fmt.insert("strict".to_string(), VmValue::Bool(true));
+            VmValue::Dict(Rc::new(fmt))
+        });
     options
         .entry("response_format".to_string())
         .or_insert(VmValue::String(Rc::from("json")));
@@ -1536,6 +1550,7 @@ mod tests {
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            output_format: super::api::OutputFormat::JsonObject,
             response_format: Some("json".to_string()),
             json_schema: None,
             output_schema: Some(serde_json::json!({

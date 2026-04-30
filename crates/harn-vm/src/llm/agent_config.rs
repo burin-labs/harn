@@ -373,6 +373,14 @@ fn structured_output_candidates(
         .collect::<String>();
     push_structured_output_candidate(&mut candidates, public_blocks.trim().to_string());
 
+    for call in &result.tool_calls {
+        if let Some(arguments) = call.get("arguments") {
+            if let Ok(serialized) = serde_json::to_string(arguments) {
+                push_structured_output_candidate(&mut candidates, serialized);
+            }
+        }
+    }
+
     let derived = candidates.clone();
     for candidate in derived {
         let parsed = crate::llm::tools::parse_text_tool_calls_with_tools(&candidate, tools);
@@ -731,4 +739,38 @@ pub fn register_llm_call_structured_with_bridge(
                 .await
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn structured_output_candidates_include_tool_call_arguments() {
+        let result = crate::llm::api::LlmResult {
+            text: String::new(),
+            tool_calls: vec![serde_json::json!({
+                "id": "call_1",
+                "type": "tool_call",
+                "name": "json_response",
+                "arguments": {"answer": "ok"},
+            })],
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            model: "claude-sonnet-4-6".to_string(),
+            provider: "anthropic".to_string(),
+            thinking: None,
+            thinking_summary: None,
+            stop_reason: None,
+            blocks: Vec::new(),
+        };
+
+        let candidates = structured_output_candidates(&result, None);
+
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate == r#"{"answer":"ok"}"#));
+    }
 }

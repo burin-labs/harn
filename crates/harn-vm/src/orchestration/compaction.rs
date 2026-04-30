@@ -374,8 +374,10 @@ async fn llm_compaction_summary(
     compact_opts.transcript_summary = None;
     compact_opts.native_tools = None;
     compact_opts.tool_choice = None;
+    compact_opts.output_format = crate::llm::api::OutputFormat::Text;
     compact_opts.response_format = None;
     compact_opts.json_schema = None;
+    compact_opts.output_schema = None;
     let prompt = render_llm_compaction_prompt(summarize_prompt, &formatted, archived_count)?;
     compact_opts.messages = vec![serde_json::json!({
         "role": "user",

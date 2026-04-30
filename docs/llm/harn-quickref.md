@@ -650,7 +650,9 @@ println(response.output_tokens)
 | `interleaved_thinking` | bool | false | Force the Anthropic interleaved-thinking beta header for the call/loop. |
 | `anthropic_beta_features` | string \| list | nil | Extra Anthropic beta feature names for the comma-separated `anthropic-beta` header. |
 | `tool_search` | bool \| string \| dict | nil | Engage progressive tool disclosure. Shorthand `"bm25"` / `"regex"` (variant, mode auto). Dict: `{variant: "bm25" \| "regex", mode: "auto" \| "native" \| "client", strategy: "bm25" \| "regex" \| "semantic" \| "host", always_loaded: [string], budget_tokens: int, name: string, include_stub_listing: bool}`. See "Tool loading & search" below. |
-| `response_format` | string | nil | `"json"` asks the provider for JSON mode. |
+| `output_format` | dict \| string | `{kind: "text"}` | Provider-agnostic output shape. Dicts: `{kind: "json_schema", schema: {...}, strict: true}`, `{kind: "json_object"}`, `{kind: "text"}`. Strings: `"json_schema"`, `"json_object"`/`"json"`, `"text"`. |
+| `response_format` | string | nil | Legacy alias. `"json"` maps to `output_format: {kind: "json_object"}` unless `json_schema`/`schema` is also supplied, in which case it maps to `kind: "json_schema"`. |
+| `json_schema` | dict | nil | Legacy alias for `output_format.schema` and `output_schema`. Prefer `output_format`. |
 | `output_schema` | `Schema<T>` (dict \| type-alias) | nil | JSON-schema-shaped dict, or a top-level `type T = ...` alias (compiler lowers to the schema dict). The generic parameter `T` flows into the narrowed `r.data: T`. Validated after parse. |
 | `output_validation` | string | `"off"` | `"error"` throws on mismatch; `"warn"` logs. |
 | `schema_retries` | int | 1 | When validation fails, re-prompt up to N times with a corrective user turn. Each retry is a single-turn correction — the invalid response is NOT persisted; the original messages are replayed with one appended user-role correction citing the validation errors + schema. Works alongside `output_validation: "error"`. |
@@ -924,7 +926,8 @@ Known-key validation in `skill_define`: `description`, `when_to_use`,
 Structured output with automatic retry — prefer
 `llm_call_structured(prompt, schema, options?)`, which returns the
 validated data directly (no `.data` unwrap) and forces the schema
-defaults (`response_format: "json"`, `output_validation: "error"`,
+defaults (`output_format: {kind: "json_schema", schema, strict: true}`,
+`output_validation: "error"`,
 `schema_retries: 3`). Throws on exhausted retries or transport
 failure:
 
@@ -1007,7 +1010,7 @@ let r = llm_call(prompt, sys, {
   output_schema: schema,
   output_validation: "error",
   schema_retries: 2,
-  response_format: "json",
+  output_format: {kind: "json_schema", schema: schema, strict: true},
 })
 println(r.data.verdict)
 println(r.input_tokens)
@@ -1053,7 +1056,7 @@ let outcome = parallel settle paths with { max_concurrent: 4 } { path ->
     output_schema: grader_schema,
     output_validation: "error",
     schema_retries: 2,
-    response_format: "json",
+    output_format: {kind: "json_schema", schema: grader_schema, strict: true},
   })
 }
 ```
@@ -1458,7 +1461,7 @@ let data = r.response.data
 // `llm_call_structured` / `*_safe` instead: `.data` is
 // pre-unwrapped and the schema-validated-JSON options are forced
 // by default (no boilerplate `output_validation` / `schema_retries`
-// / `response_format` keys at each callsite).
+// / `output_format` keys at each callsite).
 let verdict = llm_call_structured(user_prompt, schema, {provider: "auto"})
 // ...or non-throwing:
 let r = llm_call_structured_safe(user_prompt, schema, {provider: "auto"})
