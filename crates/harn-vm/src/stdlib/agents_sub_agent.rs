@@ -1020,6 +1020,7 @@ mod tests {
             cache_read_tokens: None,
             cache_write_tokens: None,
             thinking: None,
+            thinking_summary: None,
             stop_reason: None,
             model: "mock".to_string(),
             provider: None,

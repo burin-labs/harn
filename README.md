@@ -229,7 +229,8 @@ enforcement.
   decisions, verification outcomes, delegated child lineage, and
   inspection/replay/eval entrypoints including recursive run-tree loading.
 - Provider-normalized LLM output with `visible_text`, `private_reasoning`,
-  `tool_calls`, `blocks`, `provider`, `stop_reason`, and transcript events.
+  `thinking_summary`, `tool_calls`, `blocks`, `provider`, `stop_reason`, and
+  transcript events.
 - Structured transcript lifecycle support: continue, fork, compact,
   summarize, render public-only output, or render full execution history.
 - Workflow meta-editing builtins such as `workflow.inspect`, clone/insert/
@@ -417,6 +418,7 @@ separates human-visible output from internal execution state:
 
 - `visible_text`: safe assistant-visible text
 - `private_reasoning`: provider reasoning metadata when available
+- `thinking_summary`: provider-supplied reasoning summary when available
 - `tool_calls`: normalized tool intent
 - `blocks`: canonical structured blocks across providers
 - `provider`: normalized provider identity

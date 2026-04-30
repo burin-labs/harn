@@ -44,6 +44,8 @@ pipeline test(task) {
   assert(!gpt4o.defer_loading, "gpt-4o has no defer_loading")
   let o3 = provider_capabilities("openai", "o3")
   assert(o3.thinking_modes[0] == "effort", "o3 exposes effort thinking mode")
+  assert(o3.requires_completion_tokens, "o3 requires max_completion_tokens")
+  assert(o3.reasoning_effort_supported, "o3 supports reasoning_effort")
   // Ollama Qwen 3.5 advertises native tools on the official model page.
   let qwen35 = provider_capabilities("ollama", "qwen3.5:35b-a3b-coding-nvfp4")
   assert(qwen35.native_tools, "qwen3.5 on ollama has native tools")

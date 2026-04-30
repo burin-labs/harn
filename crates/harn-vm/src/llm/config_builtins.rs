@@ -551,6 +551,14 @@ fn capabilities_to_vm_value(
         "preserve_thinking".to_string(),
         VmValue::Bool(caps.preserve_thinking),
     );
+    dict.insert(
+        "requires_completion_tokens".to_string(),
+        VmValue::Bool(caps.requires_completion_tokens),
+    );
+    dict.insert(
+        "reasoning_effort_supported".to_string(),
+        VmValue::Bool(caps.reasoning_effort_supported),
+    );
     VmValue::Dict(Rc::new(dict))
 }
 

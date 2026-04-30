@@ -60,6 +60,7 @@ pub(super) fn empty_result(provider: &str, model: &str) -> LlmResult {
         model: model.to_string(),
         provider: provider.to_string(),
         thinking: None,
+        thinking_summary: None,
         stop_reason: None,
         blocks: Vec::new(),
     }

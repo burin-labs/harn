@@ -34,7 +34,9 @@ impl LlmProviderChat for MockProvider {
 
 impl MockProvider {
     pub(crate) fn should_intercept(provider: &str) -> bool {
-        provider == "mock" || crate::llm::mock::cli_llm_mock_replay_active()
+        provider == "mock"
+            || crate::llm::mock::cli_llm_mock_replay_active()
+            || crate::llm::mock::builtin_llm_mock_active()
     }
 
     pub(crate) async fn chat_impl(

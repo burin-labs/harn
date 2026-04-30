@@ -1336,6 +1336,13 @@ fn register_llm_mock_builtins(vm: &mut Vm) {
                 Some(v.display())
             }
         });
+        let thinking_summary = config.get("thinking_summary").and_then(|v| {
+            if matches!(v, VmValue::Nil) {
+                None
+            } else {
+                Some(v.display())
+            }
+        });
         let stop_reason = config.get("stop_reason").and_then(|v| {
             if matches!(v, VmValue::Nil) {
                 None
@@ -1414,6 +1421,7 @@ fn register_llm_mock_builtins(vm: &mut Vm) {
             cache_read_tokens,
             cache_write_tokens,
             thinking,
+            thinking_summary,
             stop_reason,
             model,
             provider: None,
@@ -1678,6 +1686,7 @@ mod tests {
             cache_read_tokens: None,
             cache_write_tokens: None,
             thinking: None,
+            thinking_summary: None,
             stop_reason: None,
             model: "mock".to_string(),
             provider: Some("mock".to_string()),
@@ -1694,6 +1703,7 @@ mod tests {
             cache_read_tokens: None,
             cache_write_tokens: None,
             thinking: None,
+            thinking_summary: None,
             stop_reason: None,
             model: "mock".to_string(),
             provider: Some("mock".to_string()),

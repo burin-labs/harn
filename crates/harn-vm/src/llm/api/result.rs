@@ -25,6 +25,7 @@ pub(crate) struct LlmResult {
     pub model: String,
     pub provider: String,
     pub thinking: Option<String>,
+    pub thinking_summary: Option<String>,
     pub stop_reason: Option<String>,
     pub blocks: Vec<serde_json::Value>,
 }
@@ -221,6 +222,12 @@ pub(crate) fn vm_build_llm_result(
             VmValue::String(Rc::from(thinking.as_str())),
         );
     }
+    if let Some(ref summary) = result.thinking_summary {
+        dict.insert(
+            "thinking_summary".to_string(),
+            VmValue::String(Rc::from(summary.as_str())),
+        );
+    }
 
     if let Some(ref stop_reason) = result.stop_reason {
         dict.insert(
@@ -281,6 +288,7 @@ pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> Ll
         model: "mock".to_string(),
         provider: "mock".to_string(),
         thinking: None,
+        thinking_summary: None,
         stop_reason: Some("stop".to_string()),
         blocks: vec![serde_json::json!({
             "type": "output_text",
