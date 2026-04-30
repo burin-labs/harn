@@ -28,6 +28,7 @@ const MANIFEST: &str = "harn.toml";
 const LOCK_FILE: &str = "harn.lock";
 const TRIGGER_RETRY_MAX_LIMIT: u32 = 100;
 
+pub(crate) mod errors;
 mod extensions;
 mod lockfile;
 mod manifest;
@@ -35,6 +36,9 @@ mod package_ops;
 mod registry;
 mod skills;
 mod validation;
+
+#[allow(unused_imports)]
+pub use errors::{PackageError, PackageResult};
 
 pub use extensions::*;
 #[cfg(test)]

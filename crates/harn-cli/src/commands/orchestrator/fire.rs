@@ -1,8 +1,9 @@
+use super::errors::OrchestratorError;
 use crate::cli::OrchestratorFireArgs;
 
 use super::common::{load_local_runtime, synthetic_event_for_binding, trigger_fire};
 
-pub(super) async fn run(args: OrchestratorFireArgs) -> Result<(), String> {
+pub(super) async fn run(args: OrchestratorFireArgs) -> Result<(), OrchestratorError> {
     let mut ctx = load_local_runtime(&args.local).await?;
     let event = synthetic_event_for_binding(&ctx, &args.binding_id)?;
     let handle = trigger_fire(&mut ctx, &args.binding_id, event).await?;

@@ -1,3 +1,4 @@
+use super::errors::OrchestratorError;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
@@ -146,7 +147,7 @@ struct ProviderAccumulator {
     cost_usd: f64,
 }
 
-pub(super) async fn run(args: OrchestratorStatsArgs) -> Result<(), String> {
+pub(super) async fn run(args: OrchestratorStatsArgs) -> Result<(), OrchestratorError> {
     let ctx = load_local_runtime(&args.local).await?;
     let top_n = args.top.max(1);
     let mut payload =
@@ -232,7 +233,7 @@ async fn collect_stats(
     window: StdDuration,
     top_n: usize,
     tenant: Option<String>,
-) -> Result<OrchestratorStatsPayload, String> {
+) -> Result<OrchestratorStatsPayload, OrchestratorError> {
     let generated_at = OffsetDateTime::now_utc();
     let since_ms = generated_at
         .unix_timestamp()
@@ -551,7 +552,7 @@ async fn collect_stats(
 async fn persist_stats_snapshot(
     log: &Arc<AnyEventLog>,
     payload: &OrchestratorStatsPayload,
-) -> Result<u64, String> {
+) -> Result<u64, OrchestratorError> {
     let topic = Topic::new(STATS_TOPIC).map_err(|error| error.to_string())?;
     let mut headers = BTreeMap::new();
     headers.insert(

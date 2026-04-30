@@ -1,3 +1,4 @@
+use super::errors::PackageError;
 use super::*;
 pub use harn_modules::personas::{
     PersonaAutonomyTier, PersonaManifestEntry, PersonaValidationError, ResolvedPersonaManifest,
@@ -729,7 +730,7 @@ impl Dependency {
     }
 }
 
-pub(crate) fn validate_package_alias(alias: &str) -> Result<(), String> {
+pub(crate) fn validate_package_alias(alias: &str) -> Result<(), PackageError> {
     let valid = !alias.is_empty()
         && alias != "."
         && alias != ".."
@@ -739,13 +740,13 @@ pub(crate) fn validate_package_alias(alias: &str) -> Result<(), String> {
     if valid {
         Ok(())
     } else {
-        Err(format!(
+        Err(PackageError::Validation(format!(
             "invalid dependency alias {alias:?}; use ASCII letters, numbers, '.', '_' or '-'"
-        ))
+        )))
     }
 }
 
-pub(crate) fn toml_string_literal(value: &str) -> Result<String, String> {
+pub(crate) fn toml_string_literal(value: &str) -> Result<String, PackageError> {
     use std::fmt::Write as _;
 
     let mut encoded = String::with_capacity(value.len() + 2);
@@ -760,8 +761,9 @@ pub(crate) fn toml_string_literal(value: &str) -> Result<String, String> {
             '"' => encoded.push_str("\\\""),
             '\\' => encoded.push_str("\\\\"),
             ch if ch <= '\u{1F}' || ch == '\u{7F}' => {
-                write!(&mut encoded, "\\u{:04X}", ch as u32)
-                    .map_err(|error| format!("failed to encode TOML string: {error}"))?;
+                write!(&mut encoded, "\\u{:04X}", ch as u32).map_err(|error| {
+                    PackageError::Manifest(format!("failed to encode TOML string: {error}"))
+                })?;
             }
             ch => encoded.push(ch),
         }
@@ -969,25 +971,27 @@ pub(crate) async fn lock_manifest_provider_schemas() -> tokio::sync::MutexGuard<
         .await
 }
 
-pub(crate) fn read_manifest_from_path(path: &Path) -> Result<Manifest, String> {
+pub(crate) fn read_manifest_from_path(path: &Path) -> Result<Manifest, PackageError> {
     let content = fs::read_to_string(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
-            format!(
+            PackageError::Manifest(format!(
                 "No {} found in {}.",
                 MANIFEST,
                 path.parent().unwrap_or_else(|| Path::new(".")).display()
-            )
+            ))
         } else {
-            format!("failed to read {}: {error}", path.display())
+            PackageError::Manifest(format!("failed to read {}: {error}", path.display()))
         }
     })?;
-    toml::from_str::<Manifest>(&content)
-        .map_err(|error| format!("failed to parse {}: {error}", path.display()))
+    toml::from_str::<Manifest>(&content).map_err(|error| {
+        PackageError::Manifest(format!("failed to parse {}: {error}", path.display()))
+    })
 }
 
-pub(crate) fn write_manifest_content(path: &Path, content: &str) -> Result<(), String> {
-    harn_vm::atomic_io::atomic_write(path, content.as_bytes())
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+pub(crate) fn write_manifest_content(path: &Path, content: &str) -> Result<(), PackageError> {
+    harn_vm::atomic_io::atomic_write(path, content.as_bytes()).map_err(|error| {
+        PackageError::Manifest(format!("failed to write {}: {error}", path.display()))
+    })
 }
 
 pub(crate) fn absolutize_check_config_paths(
@@ -1077,12 +1081,14 @@ pub fn load_workspace_config(anchor: Option<&Path>) -> Option<(WorkspaceConfig, 
     Some((manifest.workspace, dir))
 }
 
-pub fn load_package_eval_pack_paths(anchor: Option<&Path>) -> Result<Vec<PathBuf>, String> {
+pub fn load_package_eval_pack_paths(anchor: Option<&Path>) -> Result<Vec<PathBuf>, PackageError> {
     let anchor = anchor
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let Some((manifest, dir)) = find_nearest_manifest(&anchor) else {
-        return Err("no harn.toml found for package eval discovery".to_string());
+        return Err(PackageError::Manifest(
+            "no harn.toml found for package eval discovery".to_string(),
+        ));
     };
 
     let declared = manifest
@@ -1112,13 +1118,16 @@ pub fn load_package_eval_pack_paths(anchor: Option<&Path>) -> Result<Vec<PathBuf
     };
     paths.sort();
     if paths.is_empty() {
-        return Err(
+        return Err(PackageError::Manifest(
             "package declares no eval packs; add [package].evals or harn.eval.toml".to_string(),
-        );
+        ));
     }
     for path in &paths {
         if !path.is_file() {
-            return Err(format!("eval pack does not exist: {}", path.display()));
+            return Err(PackageError::Manifest(format!(
+                "eval pack does not exist: {}",
+                path.display()
+            )));
         }
     }
     Ok(paths)
@@ -1144,8 +1153,9 @@ impl ManifestContext {
     }
 }
 
-pub(crate) fn load_current_manifest_context() -> Result<ManifestContext, String> {
-    let dir = std::env::current_dir().map_err(|error| format!("failed to read cwd: {error}"))?;
+pub(crate) fn load_current_manifest_context() -> Result<ManifestContext, PackageError> {
+    let dir = std::env::current_dir()
+        .map_err(|error| PackageError::Manifest(format!("failed to read cwd: {error}")))?;
     let manifest_path = dir.join(MANIFEST);
     let manifest = read_manifest_from_path(&manifest_path)?;
     Ok(ManifestContext { manifest, dir })

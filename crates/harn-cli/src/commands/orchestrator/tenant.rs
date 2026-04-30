@@ -1,3 +1,4 @@
+use super::errors::OrchestratorError;
 use serde::Serialize;
 
 use crate::cli::{
@@ -13,7 +14,7 @@ struct TenantCreateOutput {
     api_key: String,
 }
 
-pub(crate) async fn run(args: OrchestratorTenantArgs) -> Result<(), String> {
+pub(crate) async fn run(args: OrchestratorTenantArgs) -> Result<(), OrchestratorError> {
     let state_dir = absolutize_from_cwd(&args.local.state_dir)?;
     std::fs::create_dir_all(&state_dir).map_err(|error| {
         format!(
@@ -33,15 +34,19 @@ pub(crate) async fn run(args: OrchestratorTenantArgs) -> Result<(), String> {
 fn create_tenant(
     store: &mut harn_vm::TenantStore,
     args: OrchestratorTenantCreateArgs,
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     if let Some(value) = args.daily_cost_usd {
         if value < 0.0 {
-            return Err("--daily-cost-usd must be greater than or equal to 0".to_string());
+            return Err("--daily-cost-usd must be greater than or equal to 0"
+                .to_string()
+                .into());
         }
     }
     if let Some(value) = args.hourly_cost_usd {
         if value < 0.0 {
-            return Err("--hourly-cost-usd must be greater than or equal to 0".to_string());
+            return Err("--hourly-cost-usd must be greater than or equal to 0"
+                .to_string()
+                .into());
         }
     }
     let budget = harn_vm::TenantBudget {
@@ -68,7 +73,7 @@ fn create_tenant(
 fn list_tenants(
     store: &harn_vm::TenantStore,
     args: OrchestratorTenantLsArgs,
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     let tenants = store.list();
     if args.json {
         return print_json(&tenants);
@@ -92,7 +97,7 @@ fn list_tenants(
 fn suspend_tenant(
     store: &mut harn_vm::TenantStore,
     args: OrchestratorTenantSuspendArgs,
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     let tenant = store.suspend(&args.id)?;
     if args.json {
         return print_json(&tenant);
@@ -104,9 +109,11 @@ fn suspend_tenant(
 fn delete_tenant(
     store: &mut harn_vm::TenantStore,
     args: OrchestratorTenantDeleteArgs,
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     if !args.confirm {
-        return Err("tenant delete is destructive; pass --confirm".to_string());
+        return Err("tenant delete is destructive; pass --confirm"
+            .to_string()
+            .into());
     }
     let tenant = store.delete(&args.id)?;
     if args.json {

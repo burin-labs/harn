@@ -1,3 +1,4 @@
+use super::errors::OrchestratorError;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
@@ -182,7 +183,7 @@ struct SkipDisposition {
 
 pub(crate) async fn collect_orchestrator_inspect_data(
     ctx: &mut LoadedOrchestratorContext,
-) -> Result<OrchestratorInspectData, String> {
+) -> Result<OrchestratorInspectData, OrchestratorError> {
     let runtime_bindings = trigger_list(ctx).await?;
     let snapshot = ctx.snapshot.clone();
     let snapshot_by_id = snapshot_trigger_map(snapshot.as_ref());
@@ -388,7 +389,7 @@ async fn build_flow_control_inspect(
     skipped: &BTreeMap<(String, String), SkipDisposition>,
     cost_by_binding_key: &BTreeMap<String, f64>,
     hourly_cost_by_binding_key: &BTreeMap<String, f64>,
-) -> Result<TriggerFlowControlInspect, String> {
+) -> Result<TriggerFlowControlInspect, OrchestratorError> {
     let flow = &trigger.flow_control;
     let mut inspect = TriggerFlowControlInspect::default();
 
@@ -512,7 +513,7 @@ async fn queue_depth_by_key(
     ctx: &mut LoadedOrchestratorContext,
     expr: Option<&harn_vm::TriggerExpressionSpec>,
     events: &[harn_vm::TriggerEvent],
-) -> Result<BTreeMap<String, u64>, String> {
+) -> Result<BTreeMap<String, u64>, OrchestratorError> {
     let mut counts = BTreeMap::new();
     for event in events {
         let key = evaluate_flow_key(&mut ctx.vm, expr, event).await?;
@@ -529,7 +530,7 @@ async fn rate_limit_util_by_key(
     skipped: &BTreeMap<(String, String), SkipDisposition>,
     period: std::time::Duration,
     limit: u32,
-) -> Result<BTreeMap<String, RateLimitUtilInspect>, String> {
+) -> Result<BTreeMap<String, RateLimitUtilInspect>, OrchestratorError> {
     let mut util = BTreeMap::new();
     let Some(window_start) =
         OffsetDateTime::now_utc().checked_sub(period.try_into().unwrap_or_default())
@@ -561,7 +562,7 @@ async fn evaluate_flow_key(
     vm: &mut harn_vm::Vm,
     expr: Option<&harn_vm::TriggerExpressionSpec>,
     event: &harn_vm::TriggerEvent,
-) -> Result<String, String> {
+) -> Result<String, OrchestratorError> {
     let Some(expr) = expr else {
         return Ok(GLOBAL_FLOW_KEY.to_string());
     };

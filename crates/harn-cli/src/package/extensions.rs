@@ -1,3 +1,4 @@
+use super::errors::PackageError;
 use super::*;
 
 pub(crate) fn manifest_capabilities(
@@ -12,7 +13,7 @@ pub(crate) fn is_empty_capabilities(file: &harn_vm::llm::capabilities::Capabilit
 
 /// Load the nearest project manifest plus any installed package manifests and
 /// merge the root project's runtime extensions.
-pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, String> {
+pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, PackageError> {
     ensure_dependencies_materialized(anchor)?;
     let Some((root_manifest, manifest_dir)) = find_nearest_manifest(anchor) else {
         return Ok(RuntimeExtensions::default());
@@ -79,7 +80,7 @@ pub fn install_orchestrator_budget(extensions: &RuntimeExtensions) {
 pub async fn install_manifest_hooks(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
-) -> Result<(), String> {
+) -> Result<(), PackageError> {
     harn_vm::orchestration::clear_runtime_hooks();
     let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
     for hook in &extensions.hooks {
@@ -87,7 +88,8 @@ pub async fn install_manifest_hooks(
             return Err(format!(
                 "invalid hook handler '{}': expected <module>::<function>",
                 hook.handler
-            ));
+            )
+            .into());
         };
         let cache_key = (
             hook.manifest_dir.clone(),
@@ -112,7 +114,8 @@ pub async fn install_manifest_hooks(
             return Err(format!(
                 "hook handler '{}' is not exported by module '{}'",
                 function_name, module_name
-            ));
+            )
+            .into());
         };
         harn_vm::orchestration::register_vm_hook(
             hook.event,
@@ -127,7 +130,7 @@ pub async fn install_manifest_hooks(
 pub async fn collect_manifest_triggers(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
-) -> Result<Vec<CollectedManifestTrigger>, String> {
+) -> Result<Vec<CollectedManifestTrigger>, PackageError> {
     let _provider_schema_guard = lock_manifest_provider_schemas().await;
     install_manifest_provider_schemas(extensions).await?;
     validate_orchestrator_budget(extensions.root_manifest.as_ref())?;
@@ -296,7 +299,7 @@ pub async fn collect_manifest_triggers(
 pub(crate) async fn collect_trigger_flow_control(
     vm: &mut harn_vm::Vm,
     trigger: &ResolvedTriggerConfig,
-) -> Result<harn_vm::TriggerFlowControlConfig, String> {
+) -> Result<harn_vm::TriggerFlowControlConfig, PackageError> {
     let mut flow = harn_vm::TriggerFlowControlConfig::default();
 
     let concurrency = if let Some(spec) = &trigger.concurrency {
@@ -398,7 +401,7 @@ fn persona_runtime_binding_for_handler(
     extensions: &RuntimeExtensions,
     trigger: &ResolvedTriggerConfig,
     name: &str,
-) -> Result<harn_vm::PersonaRuntimeBinding, String> {
+) -> Result<harn_vm::PersonaRuntimeBinding, PackageError> {
     let Some(manifest) = extensions.root_manifest.as_ref() else {
         return Err(trigger_error(
             trigger,
@@ -435,7 +438,7 @@ pub(crate) async fn compile_optional_trigger_expression(
     trigger: &ResolvedTriggerConfig,
     field_name: &str,
     expr: Option<&str>,
-) -> Result<Option<harn_vm::TriggerExpressionSpec>, String> {
+) -> Result<Option<harn_vm::TriggerExpressionSpec>, PackageError> {
     match expr {
         Some(expr) => compile_trigger_expression(vm, trigger, field_name, expr)
             .await
@@ -449,7 +452,7 @@ pub(crate) async fn compile_trigger_expression(
     trigger: &ResolvedTriggerConfig,
     field_name: &str,
     expr: &str,
-) -> Result<harn_vm::TriggerExpressionSpec, String> {
+) -> Result<harn_vm::TriggerExpressionSpec, PackageError> {
     let synthetic = PathBuf::from(format!(
         "<trigger-expr>/{}/{:04}-{}.harn",
         harn_vm::event_log::sanitize_topic_component(&trigger.id),
@@ -671,7 +674,7 @@ pub fn manifest_trigger_binding_spec(
 pub async fn install_manifest_triggers(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
-) -> Result<(), String> {
+) -> Result<(), PackageError> {
     install_orchestrator_budget(extensions);
     let collected = collect_manifest_triggers(vm, extensions).await?;
     let mut bindings: Vec<_> = collected
@@ -682,12 +685,12 @@ pub async fn install_manifest_triggers(
     bindings.extend(collect_persona_trigger_binding_specs(extensions)?);
     harn_vm::install_manifest_triggers(bindings)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| PackageError::Extensions(error.to_string()))
 }
 
 pub async fn install_collected_manifest_triggers(
     collected: &[CollectedManifestTrigger],
-) -> Result<(), String> {
+) -> Result<(), PackageError> {
     let bindings = collected
         .iter()
         .cloned()
@@ -695,12 +698,12 @@ pub async fn install_collected_manifest_triggers(
         .collect();
     harn_vm::install_manifest_triggers(bindings)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| PackageError::Extensions(error.to_string()))
 }
 
 pub fn collect_persona_trigger_binding_specs(
     extensions: &RuntimeExtensions,
-) -> Result<Vec<harn_vm::TriggerBindingSpec>, String> {
+) -> Result<Vec<harn_vm::TriggerBindingSpec>, PackageError> {
     let Some(manifest) = extensions.root_manifest.clone() else {
         return Ok(Vec::new());
     };
@@ -871,7 +874,7 @@ pub fn load_personas_from_manifest_path(
             return Err(vec![PersonaValidationError {
                 manifest_path: manifest_path.clone(),
                 field_path: "harn.toml".to_string(),
-                message,
+                message: message.to_string(),
             }]);
         }
     };

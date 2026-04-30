@@ -1,3 +1,4 @@
+use super::errors::OrchestratorError;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -42,12 +43,12 @@ const TEST_INBOX_TASK_RELEASE_FILE_ENV: &str = "HARN_TEST_ORCHESTRATOR_INBOX_TAS
 const TEST_FAIL_PENDING_PUMP_ENV: &str = "HARN_TEST_ORCHESTRATOR_FAIL_PENDING_PUMP";
 const WAITPOINT_SERVICE_INTERVAL: Duration = Duration::from_millis(250);
 
-pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
+pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), OrchestratorError> {
     let local = tokio::task::LocalSet::new();
     local.run_until(async move { run_local(args).await }).await
 }
 
-async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
+async fn run_local(args: OrchestratorServeArgs) -> Result<(), OrchestratorError> {
     harn_vm::reset_thread_local_state();
 
     // Install signal streams BEFORE any startup log a supervisor (test harness,
@@ -164,7 +165,9 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     let secret_chain = harn_vm::secrets::configured_default_chain(secret_namespace.clone())
         .map_err(|error| format!("failed to configure secret providers: {error}"))?;
     if secret_chain.providers().is_empty() {
-        return Err("secret provider chain resolved to zero providers".to_string());
+        return Err("secret provider chain resolved to zero providers"
+            .to_string()
+            .into());
     }
     eprintln!(
         "[harn] secret providers: {} (namespace {})",
@@ -214,10 +217,10 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     let (mcp_router, mcp_service) = if args.mcp {
         validate_mcp_paths(&args.mcp_path, &args.mcp_sse_path, &args.mcp_messages_path)?;
         if !has_orchestrator_api_keys_configured() {
-            return Err(
+            return Err(OrchestratorError::Serve(
                 "--mcp requires HARN_ORCHESTRATOR_API_KEYS so the embedded MCP management surface is authenticated"
                     .to_string(),
-            );
+            ));
         }
         let service = Arc::new(
             crate::commands::mcp::serve::McpOrchestratorService::new_local(
@@ -492,7 +495,7 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     .await;
     if let Err(error) = observability.shutdown() {
         if shutdown.is_ok() {
-            return Err(error);
+            return Err(OrchestratorError::Serve(error));
         }
         eprintln!("[harn] observability shutdown warning: {error}");
     }
@@ -514,7 +517,11 @@ fn has_orchestrator_api_keys_configured() -> bool {
         .is_some_and(|value| value.split(',').any(|segment| !segment.trim().is_empty()))
 }
 
-fn validate_mcp_paths(path: &str, sse_path: &str, messages_path: &str) -> Result<(), String> {
+fn validate_mcp_paths(
+    path: &str,
+    sse_path: &str,
+    messages_path: &str,
+) -> Result<(), OrchestratorError> {
     let reserved = [
         "/health",
         "/healthz",
@@ -530,20 +537,16 @@ fn validate_mcp_paths(path: &str, sse_path: &str, messages_path: &str) -> Result
         ("--mcp-messages-path", messages_path),
     ] {
         if !value.starts_with('/') {
-            return Err(format!("{label} must start with '/'"));
+            return Err(format!("{label} must start with '/'").into());
         }
         if value == "/" {
-            return Err(format!("{label} cannot be '/'"));
+            return Err(format!("{label} cannot be '/'").into());
         }
         if reserved.contains(&value) {
-            return Err(format!(
-                "{label} cannot use reserved listener path '{value}'"
-            ));
+            return Err(format!("{label} cannot use reserved listener path '{value}'").into());
         }
         if !seen.insert(value) {
-            return Err(format!(
-                "embedded MCP paths must be unique; duplicate '{value}'"
-            ));
+            return Err(format!("embedded MCP paths must be unique; duplicate '{value}'").into());
         }
     }
     Ok(())
@@ -574,7 +577,7 @@ async fn initialize_connectors(
     secrets: Arc<dyn harn_vm::secrets::SecretProvider>,
     metrics: Arc<harn_vm::MetricsRegistry>,
     provider_overrides: &[ResolvedProviderConnectorConfig],
-) -> Result<ConnectorRuntime, String> {
+) -> Result<ConnectorRuntime, OrchestratorError> {
     let mut registry = harn_vm::ConnectorRegistry::default();
     let mut trigger_registry = harn_vm::TriggerRegistry::default();
     let mut grouped_kinds: BTreeMap<harn_vm::ProviderId, BTreeSet<String>> = BTreeMap::new();
@@ -654,7 +657,9 @@ async fn initialize_connectors(
     })
 }
 
-fn trigger_binding_for(config: &ResolvedTriggerConfig) -> Result<harn_vm::TriggerBinding, String> {
+fn trigger_binding_for(
+    config: &ResolvedTriggerConfig,
+) -> Result<harn_vm::TriggerBinding, OrchestratorError> {
     Ok(harn_vm::TriggerBinding {
         provider: config.provider.clone(),
         kind: harn_vm::TriggerKind::from(trigger_kind_name(config.kind)),
@@ -665,14 +670,18 @@ fn trigger_binding_for(config: &ResolvedTriggerConfig) -> Result<harn_vm::Trigge
     })
 }
 
-fn connector_binding_config(config: &ResolvedTriggerConfig) -> Result<JsonValue, String> {
+fn connector_binding_config(
+    config: &ResolvedTriggerConfig,
+) -> Result<JsonValue, OrchestratorError> {
     match config.kind {
         crate::package::TriggerKind::Cron => {
             serde_json::to_value(&config.kind_specific).map_err(|error| {
-                format!(
-                    "failed to encode cron trigger config '{}': {error}",
-                    config.id
-                )
+                OrchestratorError::Serve({
+                    format!(
+                        "failed to encode cron trigger config '{}': {error}",
+                        config.id
+                    )
+                })
             })
         }
         crate::package::TriggerKind::Webhook => Ok(serde_json::json!({
@@ -704,18 +713,20 @@ fn connector_binding_config(config: &ResolvedTriggerConfig) -> Result<JsonValue,
 
 fn a2a_push_connector_config(
     kind_specific: &BTreeMap<String, toml::Value>,
-) -> Result<JsonValue, String> {
+) -> Result<JsonValue, OrchestratorError> {
     if let Some(nested) = kind_specific.get("a2a_push") {
-        return serde_json::to_value(nested)
-            .map_err(|error| format!("failed to encode a2a_push trigger config: {error}"));
+        return serde_json::to_value(nested).map_err(|error| {
+            OrchestratorError::Serve(format!("failed to encode a2a_push trigger config: {error}"))
+        });
     }
     let filtered = kind_specific
         .iter()
         .filter(|(key, _)| key.as_str() != "path")
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect::<BTreeMap<_, _>>();
-    serde_json::to_value(filtered)
-        .map_err(|error| format!("failed to encode a2a_push trigger config: {error}"))
+    serde_json::to_value(filtered).map_err(|error| {
+        OrchestratorError::Serve(format!("failed to encode a2a_push trigger config: {error}"))
+    })
 }
 
 fn connector_for(
@@ -747,7 +758,7 @@ fn rust_deprecated_provider_warning(provider: &str) -> Option<String> {
 async fn connector_override_for(
     provider: &harn_vm::ProviderId,
     provider_overrides: &[ResolvedProviderConnectorConfig],
-) -> Result<Option<Box<dyn harn_vm::Connector>>, String> {
+) -> Result<Option<Box<dyn harn_vm::Connector>>, OrchestratorError> {
     let Some(override_config) = provider_overrides
         .iter()
         .find(|entry| entry.id == *provider)
@@ -756,7 +767,9 @@ async fn connector_override_for(
     };
     match &override_config.connector {
         ResolvedProviderConnectorKind::RustBuiltin => Ok(None),
-        ResolvedProviderConnectorKind::Invalid(message) => Err(message.clone()),
+        ResolvedProviderConnectorKind::Invalid(message) => {
+            Err(OrchestratorError::Serve(message.clone()))
+        }
         ResolvedProviderConnectorKind::Harn { module } => {
             let module_path =
                 harn_vm::resolve_module_import_path(&override_config.manifest_dir, module);
@@ -777,7 +790,7 @@ async fn connector_override_for(
 fn build_route_configs(
     triggers: &[CollectedManifestTrigger],
     binding_versions: &BTreeMap<String, u32>,
-) -> Result<Vec<RouteConfig>, String> {
+) -> Result<Vec<RouteConfig>, OrchestratorError> {
     let mut seen_paths = BTreeSet::new();
     let mut routes = Vec::new();
     for trigger in triggers {
@@ -785,14 +798,16 @@ fn build_route_configs(
             return Err(format!(
                 "trigger registry is missing active manifest binding '{}'",
                 trigger.config.id
-            ));
+            )
+            .into());
         };
         if let Some(route) = RouteConfig::from_trigger(trigger, binding_version)? {
             if !seen_paths.insert(route.path.clone()) {
                 return Err(format!(
                     "trigger route '{}' is configured more than once",
                     route.path
-                ));
+                )
+                .into());
             }
             routes.push(route);
         }
@@ -804,7 +819,7 @@ fn attach_route_connectors(
     routes: Vec<RouteConfig>,
     registry: &harn_vm::ConnectorRegistry,
     provider_overrides: &[ResolvedProviderConnectorConfig],
-) -> Result<Vec<RouteConfig>, String> {
+) -> Result<Vec<RouteConfig>, OrchestratorError> {
     routes
         .into_iter()
         .map(|mut route| {
@@ -1014,7 +1029,7 @@ impl PumpDrainReport {
 
 struct PumpHandle {
     mode_tx: watch::Sender<PumpMode>,
-    join: tokio::task::JoinHandle<Result<PumpDrainReport, String>>,
+    join: tokio::task::JoinHandle<Result<PumpDrainReport, OrchestratorError>>,
 }
 
 impl PumpHandle {
@@ -1023,7 +1038,7 @@ impl PumpHandle {
         up_to: u64,
         config: DrainConfig,
         overall_deadline: tokio::time::Instant,
-    ) -> Result<PumpDrainReport, String> {
+    ) -> Result<PumpDrainReport, OrchestratorError> {
         let drain_deadline = std::cmp::min(
             tokio::time::Instant::now() + config.deadline,
             overall_deadline,
@@ -1038,22 +1053,22 @@ impl PumpHandle {
         }
         match self.join.await {
             Ok(result) => result,
-            Err(error) => Err(format!("pump task join failed: {error}")),
+            Err(error) => Err(format!("pump task join failed: {error}").into()),
         }
     }
 }
 
 struct WaitpointSweepHandle {
     stop_tx: watch::Sender<bool>,
-    join: tokio::task::JoinHandle<Result<(), String>>,
+    join: tokio::task::JoinHandle<Result<(), OrchestratorError>>,
 }
 
 impl WaitpointSweepHandle {
-    async fn shutdown(self) -> Result<(), String> {
+    async fn shutdown(self) -> Result<(), OrchestratorError> {
         let _ = self.stop_tx.send(true);
         match self.join.await {
             Ok(result) => result,
-            Err(error) => Err(format!("waitpoint sweeper join failed: {error}")),
+            Err(error) => Err(format!("waitpoint sweeper join failed: {error}").into()),
         }
     }
 }
@@ -1071,7 +1086,7 @@ fn spawn_pending_pump(
     pump_config: PumpConfig,
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
     topic_name: &str,
-) -> Result<PumpHandle, String> {
+) -> Result<PumpHandle, OrchestratorError> {
     let topic = harn_vm::event_log::Topic::new(topic_name).map_err(|error| error.to_string())?;
     spawn_topic_pump(
         event_log,
@@ -1082,7 +1097,7 @@ fn spawn_pending_pump(
             let dispatcher = dispatcher.clone();
             async move {
                 if pending_pump_test_should_fail() {
-                    return Err("test pending pump failure".to_string());
+                    return Err("test pending pump failure".to_string().into());
                 }
                 if logged.kind != "trigger_event" {
                     return Ok(false);
@@ -1109,7 +1124,7 @@ fn spawn_cron_pump(
     dispatcher: harn_vm::Dispatcher,
     pump_config: PumpConfig,
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
-) -> Result<PumpHandle, String> {
+) -> Result<PumpHandle, OrchestratorError> {
     let topic =
         harn_vm::event_log::Topic::new(CRON_TICK_TOPIC).map_err(|error| error.to_string())?;
     spawn_topic_pump(
@@ -1147,7 +1162,7 @@ fn spawn_inbox_pump(
     pump_config: PumpConfig,
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
     topic_name: &str,
-) -> Result<PumpHandle, String> {
+) -> Result<PumpHandle, OrchestratorError> {
     let topic = harn_vm::event_log::Topic::new(topic_name).map_err(|error| error.to_string())?;
     let consumer = pump_consumer_id(&topic)?;
     let inbox_task_release_file = inbox_task_test_release_file();
@@ -1221,7 +1236,7 @@ fn spawn_inbox_pump(
                                 .set_orchestrator_pump_outstanding(topic.as_str(), tasks.len());
                         }
                         Some(Err(error)) => {
-                            return Err(format!("inbox dispatch task join failed: {error}"));
+                            return Err(format!("inbox dispatch task join failed: {error}").into());
                         }
                         None => {}
                     }
@@ -1391,7 +1406,7 @@ fn spawn_waitpoint_resume_pump(
     dispatcher: harn_vm::Dispatcher,
     pump_config: PumpConfig,
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
-) -> Result<PumpHandle, String> {
+) -> Result<PumpHandle, OrchestratorError> {
     let topic = harn_vm::event_log::Topic::new(harn_vm::WAITPOINT_RESUME_TOPIC)
         .map_err(|error| error.to_string())?;
     spawn_topic_pump(
@@ -1401,7 +1416,11 @@ fn spawn_waitpoint_resume_pump(
         metrics_registry,
         move |logged| {
             let dispatcher = dispatcher.clone();
-            async move { harn_vm::process_waitpoint_resume_event(&dispatcher, logged).await }
+            async move {
+                harn_vm::process_waitpoint_resume_event(&dispatcher, logged)
+                    .await
+                    .map_err(OrchestratorError::from)
+            }
         },
     )
 }
@@ -1411,7 +1430,7 @@ fn spawn_waitpoint_cancel_pump(
     dispatcher: harn_vm::Dispatcher,
     pump_config: PumpConfig,
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
-) -> Result<PumpHandle, String> {
+) -> Result<PumpHandle, OrchestratorError> {
     let topic = harn_vm::event_log::Topic::new(harn_vm::TRIGGER_CANCEL_REQUESTS_TOPIC)
         .map_err(|error| error.to_string())?;
     spawn_topic_pump(
@@ -1466,10 +1485,10 @@ fn spawn_topic_pump<F, Fut>(
     _pump_config: PumpConfig,
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
     process: F,
-) -> Result<PumpHandle, String>
+) -> Result<PumpHandle, OrchestratorError>
 where
     F: Fn(harn_vm::event_log::LogEvent) -> Fut + 'static,
-    Fut: std::future::Future<Output = Result<bool, String>> + 'static,
+    Fut: std::future::Future<Output = Result<bool, OrchestratorError>> + 'static,
 {
     let consumer = pump_consumer_id(&topic)?;
     let test_release_file = pump_test_release_file();
@@ -1607,7 +1626,7 @@ async fn graceful_shutdown(
     waitpoint_pump: PumpHandle,
     waitpoint_cancel_pump: PumpHandle,
     waitpoint_sweeper: WaitpointSweepHandle,
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     eprintln!("[harn] signal received, starting graceful shutdown...");
     tracing::info!(
         component = "orchestrator",
@@ -1791,20 +1810,24 @@ async fn append_lifecycle_event(
     log: &Arc<harn_vm::event_log::AnyEventLog>,
     kind: &str,
     payload: JsonValue,
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     let topic =
         harn_vm::event_log::Topic::new(LIFECYCLE_TOPIC).map_err(|error| error.to_string())?;
     log.append(&topic, harn_vm::event_log::LogEvent::new(kind, payload))
         .await
         .map(|_| ())
-        .map_err(|error| format!("failed to append orchestrator lifecycle event: {error}"))
+        .map_err(|error| {
+            OrchestratorError::Serve(format!(
+                "failed to append orchestrator lifecycle event: {error}"
+            ))
+        })
 }
 
 async fn append_pump_lifecycle_event(
     log: &Arc<harn_vm::event_log::AnyEventLog>,
     kind: &str,
     payload: JsonValue,
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     append_lifecycle_event(log, kind, payload).await
 }
 
@@ -1831,13 +1854,17 @@ async fn append_manifest_event(
     log: &Arc<harn_vm::event_log::AnyEventLog>,
     kind: &str,
     payload: JsonValue,
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     let topic =
         harn_vm::event_log::Topic::new(MANIFEST_TOPIC).map_err(|error| error.to_string())?;
     log.append(&topic, harn_vm::event_log::LogEvent::new(kind, payload))
         .await
         .map(|_| ())
-        .map_err(|error| format!("failed to append orchestrator manifest event: {error}"))
+        .map_err(|error| {
+            OrchestratorError::Serve(format!(
+                "failed to append orchestrator manifest event: {error}"
+            ))
+        })
 }
 
 async fn emit_drain_truncated(
@@ -1845,7 +1872,7 @@ async fn emit_drain_truncated(
     topic_name: &str,
     report: PumpDrainReport,
     config: DrainConfig,
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     if !report.truncated() {
         return Ok(());
     }
@@ -1874,12 +1901,16 @@ async fn emit_drain_truncated(
 async fn topic_latest_id(
     log: &Arc<harn_vm::event_log::AnyEventLog>,
     topic_name: &str,
-) -> Result<u64, String> {
+) -> Result<u64, OrchestratorError> {
     let topic = harn_vm::event_log::Topic::new(topic_name).map_err(|error| error.to_string())?;
     log.latest(&topic)
         .await
         .map(|value| value.unwrap_or(0))
-        .map_err(|error| format!("failed to read topic head for {topic_name}: {error}"))
+        .map_err(|error| {
+            OrchestratorError::Serve(format!(
+                "failed to read topic head for {topic_name}: {error}"
+            ))
+        })
 }
 
 async fn drain_pump_best_effort(
@@ -1888,7 +1919,7 @@ async fn drain_pump_best_effort(
     pump: PumpHandle,
     config: DrainConfig,
     overall_deadline: tokio::time::Instant,
-) -> Result<PumpDrainReport, String> {
+) -> Result<PumpDrainReport, OrchestratorError> {
     let topic = harn_vm::event_log::Topic::new(topic_name).map_err(|error| error.to_string())?;
     let consumer = pump_consumer_id(&topic)?;
     let start_seen = log
@@ -1942,7 +1973,7 @@ async fn best_effort_pump_report(
     start_seen: u64,
     up_to: u64,
     stop_reason: PumpDrainStopReason,
-) -> Result<PumpDrainReport, String> {
+) -> Result<PumpDrainReport, OrchestratorError> {
     let last_seen = log
         .consumer_cursor(topic, consumer)
         .await
@@ -2023,9 +2054,10 @@ fn pump_drain_report(
     }
 }
 
-fn pump_consumer_id(topic: &harn_vm::event_log::Topic) -> Result<ConsumerId, String> {
-    ConsumerId::new(format!("orchestrator-pump.{}", topic.as_str()))
-        .map_err(|error| format!("failed to create consumer id for {topic}: {error}"))
+fn pump_consumer_id(topic: &harn_vm::event_log::Topic) -> Result<ConsumerId, OrchestratorError> {
+    ConsumerId::new(format!("orchestrator-pump.{}", topic.as_str())).map_err(|error| {
+        OrchestratorError::Serve(format!("failed to create consumer id for {topic}: {error}"))
+    })
 }
 
 fn pump_test_release_file() -> Option<PathBuf> {
@@ -2056,15 +2088,15 @@ async fn wait_for_test_release_file(path: &Path) {
     }
 }
 
-async fn mark_test_file(path: &Path) -> Result<(), String> {
+async fn mark_test_file(path: &Path) -> Result<(), OrchestratorError> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
             .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
     }
-    tokio::fs::write(path, b"1")
-        .await
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+    tokio::fs::write(path, b"1").await.map_err(|error| {
+        OrchestratorError::Serve(format!("failed to write {}: {error}", path.display()))
+    })
 }
 
 fn pending_pump_test_should_fail() -> bool {
@@ -2076,7 +2108,7 @@ fn pending_pump_test_should_fail() -> bool {
 fn spawn_manifest_watcher(
     config_path: PathBuf,
     reload: AdminReloadHandle,
-) -> Result<notify::RecommendedWatcher, String> {
+) -> Result<notify::RecommendedWatcher, OrchestratorError> {
     use notify::{Event, EventKind, RecursiveMode, Watcher};
 
     let watch_dir = config_path.parent().ok_or_else(|| {
@@ -2164,7 +2196,7 @@ struct SignalStreams {
 }
 
 #[cfg(unix)]
-fn install_signal_streams() -> Result<SignalStreams, String> {
+fn install_signal_streams() -> Result<SignalStreams, OrchestratorError> {
     use tokio::signal::unix::{signal, SignalKind};
     Ok(SignalStreams {
         sigterm: signal(SignalKind::terminate())
@@ -2179,7 +2211,7 @@ fn install_signal_streams() -> Result<SignalStreams, String> {
 async fn wait_for_runtime_signal_loop(
     #[cfg_attr(not(unix), allow(unused_mut, unused_variables))] mut ctx: RuntimeSignalCtx<'_>,
     #[cfg(unix)] mut signals: SignalStreams,
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     #[cfg(unix)]
     {
         let SignalStreams {
@@ -2217,7 +2249,7 @@ async fn wait_for_runtime_signal_loop(
 async fn handle_reload_request(
     ctx: &mut RuntimeSignalCtx<'_>,
     request: AdminReloadRequest,
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     let source = request.source.clone();
     match reload_manifest(ctx).await {
         Ok(summary) => {
@@ -2241,10 +2273,9 @@ async fn handle_reload_request(
                 summary.removed.len()
             );
             if let Some(response_tx) = request.response_tx {
-                let _ = response_tx.send(
-                    serde_json::to_value(&summary)
-                        .map_err(|error| format!("failed to encode reload summary: {error}")),
-                );
+                let _ = response_tx.send(serde_json::to_value(&summary).map_err(|error| {
+                    OrchestratorError::Serve(format!("failed to encode reload summary: {error}"))
+                }));
             }
         }
         Err(error) => {
@@ -2254,7 +2285,7 @@ async fn handle_reload_request(
                 "reload_failed",
                 json!({
                     "source": source,
-                    "error": error,
+                    "error": error.to_string(),
                 }),
             )
             .await?;
@@ -2267,7 +2298,7 @@ async fn handle_reload_request(
 }
 
 #[cfg_attr(not(unix), allow(dead_code))]
-fn write_running_state_snapshot(ctx: &RuntimeSignalCtx<'_>) -> Result<(), String> {
+fn write_running_state_snapshot(ctx: &RuntimeSignalCtx<'_>) -> Result<(), OrchestratorError> {
     let listener_metrics = ctx.listener.trigger_metrics();
     write_state_snapshot(
         &ctx.state_dir.join(STATE_SNAPSHOT_FILE),
@@ -2303,7 +2334,9 @@ fn write_running_state_snapshot(ctx: &RuntimeSignalCtx<'_>) -> Result<(), String
 }
 
 #[cfg_attr(not(unix), allow(dead_code))]
-async fn reload_manifest(ctx: &mut RuntimeSignalCtx<'_>) -> Result<ManifestReloadSummary, String> {
+async fn reload_manifest(
+    ctx: &mut RuntimeSignalCtx<'_>,
+) -> Result<ManifestReloadSummary, OrchestratorError> {
     let (manifest, manifest_dir) = load_manifest(ctx.config_path)?;
     let mut vm = ctx
         .role
@@ -2391,7 +2424,7 @@ async fn rollback_manifest_reload(
     ctx: &mut RuntimeSignalCtx<'_>,
     previous_manifest: &Manifest,
     previous_triggers: &[CollectedManifestTrigger],
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     package::install_collected_manifest_triggers(previous_triggers).await?;
     let binding_versions = live_manifest_binding_versions();
     let route_configs = build_route_configs(previous_triggers, &binding_versions)?;
@@ -2507,9 +2540,9 @@ fn is_http_managed_trigger(trigger: &CollectedManifestTrigger) -> bool {
     )
 }
 
-fn load_manifest(config_path: &Path) -> Result<(Manifest, PathBuf), String> {
+fn load_manifest(config_path: &Path) -> Result<(Manifest, PathBuf), OrchestratorError> {
     if !config_path.is_file() {
-        return Err(format!("manifest not found: {}", config_path.display()));
+        return Err(format!("manifest not found: {}", config_path.display()).into());
     }
     let content = std::fs::read_to_string(config_path)
         .map_err(|error| format!("failed to read {}: {error}", config_path.display()))?;
@@ -2524,7 +2557,7 @@ fn load_manifest(config_path: &Path) -> Result<(Manifest, PathBuf), String> {
     Ok((manifest, manifest_dir))
 }
 
-fn absolutize_from_cwd(path: &Path) -> Result<PathBuf, String> {
+fn absolutize_from_cwd(path: &Path) -> Result<PathBuf, OrchestratorError> {
     let candidate = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -2559,21 +2592,25 @@ fn secret_namespace_for(manifest_dir: &Path) -> String {
     }
 }
 
-fn now_rfc3339() -> Result<String, String> {
+fn now_rfc3339() -> Result<String, OrchestratorError> {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
-        .map_err(|error| format!("failed to format timestamp: {error}"))
+        .map_err(|error| OrchestratorError::Serve(format!("failed to format timestamp: {error}")))
 }
 
-fn write_state_snapshot(path: &Path, snapshot: &ServeStateSnapshot) -> Result<(), String> {
+fn write_state_snapshot(
+    path: &Path,
+    snapshot: &ServeStateSnapshot,
+) -> Result<(), OrchestratorError> {
     let encoded = serde_json::to_vec_pretty(snapshot)
         .map_err(|error| format!("failed to encode orchestrator state snapshot: {error}"))?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
     }
-    std::fs::write(path, encoded)
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+    std::fs::write(path, encoded).map_err(|error| {
+        OrchestratorError::Serve(format!("failed to write {}: {error}", path.display()))
+    })
 }
 
 struct GracefulShutdownCtx<'a> {

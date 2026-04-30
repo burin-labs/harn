@@ -1,3 +1,4 @@
+use super::errors::PackageError;
 use super::*;
 
 #[derive(Debug, Clone, Serialize)]
@@ -133,7 +134,9 @@ pub fn publish_package(anchor: Option<&Path>, dry_run: bool, registry: Option<&s
     }
 }
 
-pub(crate) fn check_package_impl(anchor: Option<&Path>) -> Result<PackageCheckReport, String> {
+pub(crate) fn check_package_impl(
+    anchor: Option<&Path>,
+) -> Result<PackageCheckReport, PackageError> {
     let ctx = load_manifest_context_for_anchor(anchor)?;
     let manifest_path = ctx.manifest_path();
     let mut errors = Vec::new();
@@ -223,7 +226,7 @@ pub(crate) fn pack_package_impl(
     anchor: Option<&Path>,
     output: Option<&Path>,
     dry_run: bool,
-) -> Result<PackagePackReport, String> {
+) -> Result<PackagePackReport, PackageError> {
     let report = check_package_impl(anchor)?;
     fail_if_package_errors(&report)?;
     let ctx = load_manifest_context_for_anchor(anchor)?;
@@ -234,10 +237,9 @@ pub(crate) fn pack_package_impl(
 
     if !dry_run {
         if artifact_dir.exists() {
-            return Err(format!(
-                "artifact output {} already exists",
-                artifact_dir.display()
-            ));
+            return Err(
+                format!("artifact output {} already exists", artifact_dir.display()).into(),
+            );
         }
         fs::create_dir_all(&artifact_dir)
             .map_err(|error| format!("failed to create {}: {error}", artifact_dir.display()))?;
@@ -272,7 +274,7 @@ pub(crate) fn generate_package_docs_impl(
     anchor: Option<&Path>,
     output: Option<&Path>,
     check: bool,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, PackageError> {
     let report = check_package_impl(anchor)?;
     let ctx = load_manifest_context_for_anchor(anchor)?;
     let output_path = output
@@ -286,7 +288,8 @@ pub(crate) fn generate_package_docs_impl(
             return Err(format!(
                 "{} is stale; run `harn package docs`",
                 output_path.display()
-            ));
+            )
+            .into());
         }
         return Ok(output_path);
     }
@@ -298,7 +301,7 @@ pub(crate) fn generate_package_docs_impl(
 pub(crate) fn publish_package_impl(
     anchor: Option<&Path>,
     registry: Option<&str>,
-) -> Result<PackagePublishReport, String> {
+) -> Result<PackagePublishReport, PackageError> {
     let pack = pack_package_impl(anchor, None, true)?;
     let registry = resolve_configured_registry_source(registry)?;
     Ok(PackagePublishReport {
@@ -312,7 +315,7 @@ pub(crate) fn publish_package_impl(
 
 pub(crate) fn load_manifest_context_for_anchor(
     anchor: Option<&Path>,
-) -> Result<ManifestContext, String> {
+) -> Result<ManifestContext, PackageError> {
     let anchor = anchor
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
@@ -542,24 +545,27 @@ pub(crate) fn validate_exports_for_publish(
     exports
 }
 
-pub(crate) fn parse_harn_source(source: &str) -> Result<(), String> {
+pub(crate) fn parse_harn_source(source: &str) -> Result<(), PackageError> {
     let mut lexer = harn_lexer::Lexer::new(source);
     let tokens = lexer.tokenize().map_err(|error| error.to_string())?;
     let mut parser = harn_parser::Parser::new(tokens);
     parser
         .parse()
         .map(|_| ())
-        .map_err(|error| error.to_string())
+        .map_err(|error| PackageError::Ops(error.to_string()))
 }
 
-pub(crate) fn safe_package_relative_path(root: &Path, rel_path: &str) -> Result<PathBuf, String> {
+pub(crate) fn safe_package_relative_path(
+    root: &Path,
+    rel_path: &str,
+) -> Result<PathBuf, PackageError> {
     let rel = PathBuf::from(rel_path);
     if rel.is_absolute()
         || rel
             .components()
             .any(|component| matches!(component, std::path::Component::ParentDir))
     {
-        return Err(format!("path {rel_path:?} escapes package root"));
+        return Err(format!("path {rel_path:?} escapes package root").into());
     }
     Ok(root.join(rel))
 }
@@ -678,7 +684,7 @@ pub(crate) fn parse_major_minor(raw: &str) -> Option<(u64, u64)> {
     Some((major, minor))
 }
 
-pub(crate) fn collect_package_files(root: &Path) -> Result<Vec<String>, String> {
+pub(crate) fn collect_package_files(root: &Path) -> Result<Vec<String>, PackageError> {
     let mut files = Vec::new();
     collect_package_files_inner(root, root, &mut files)?;
     files.sort();
@@ -689,7 +695,7 @@ pub(crate) fn collect_package_files_inner(
     root: &Path,
     dir: &Path,
     out: &mut Vec<String>,
-) -> Result<(), String> {
+) -> Result<(), PackageError> {
     for entry in
         fs::read_dir(dir).map_err(|error| format!("failed to read {}: {error}", dir.display()))?
     {
@@ -730,7 +736,7 @@ pub(crate) fn default_artifact_dir(ctx: &ManifestContext, report: &PackageCheckR
         .join(format!("{name}-{version}"))
 }
 
-pub(crate) fn fail_if_package_errors(report: &PackageCheckReport) -> Result<(), String> {
+pub(crate) fn fail_if_package_errors(report: &PackageCheckReport) -> Result<(), PackageError> {
     if report.errors.is_empty() {
         return Ok(());
     }
@@ -742,7 +748,8 @@ pub(crate) fn fail_if_package_errors(report: &PackageCheckReport) -> Result<(), 
             .map(|diagnostic| format!("- {}: {}", diagnostic.field, diagnostic.message))
             .collect::<Vec<_>>()
             .join("\n")
-    ))
+    )
+    .into())
 }
 
 pub(crate) fn render_package_api_docs(report: &PackageCheckReport) -> String {

@@ -1,15 +1,16 @@
+use super::errors::OrchestratorError;
 use crate::cli::OrchestratorRecoverArgs;
 
 use super::common::{
     format_duration, format_timestamp, load_local_runtime, stranded_envelopes, trigger_replay,
 };
 
-pub(super) async fn run(args: OrchestratorRecoverArgs) -> Result<(), String> {
+pub(super) async fn run(args: OrchestratorRecoverArgs) -> Result<(), OrchestratorError> {
     if !args.dry_run && !args.yes {
-        return Err(
+        return Err(OrchestratorError::Recover(
             "refusing to replay stranded envelopes without --yes; pass --dry-run to inspect first"
                 .to_string(),
-        );
+        ));
     }
 
     let mut ctx = load_local_runtime(&args.local).await?;

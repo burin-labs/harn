@@ -1,3 +1,4 @@
+use super::errors::OrchestratorError;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -118,7 +119,7 @@ pub(crate) struct StrandedEnvelopeRecord {
 
 pub(crate) async fn load_local_runtime(
     args: &OrchestratorLocalArgs,
-) -> Result<LoadedOrchestratorContext, String> {
+) -> Result<LoadedOrchestratorContext, OrchestratorError> {
     harn_vm::reset_thread_local_state();
 
     let config_path = absolutize_from_cwd(&args.config)?;
@@ -154,21 +155,21 @@ pub(crate) async fn load_local_runtime(
 
 pub(crate) async fn trigger_list(
     ctx: &mut LoadedOrchestratorContext,
-) -> Result<Vec<harn_vm::TriggerBindingSnapshot>, String> {
+) -> Result<Vec<harn_vm::TriggerBindingSnapshot>, OrchestratorError> {
     eval_json(&mut ctx.vm, "trigger_list()").await
 }
 
 pub(crate) async fn trigger_replay(
     ctx: &mut LoadedOrchestratorContext,
     event_id: &str,
-) -> Result<DispatchHandleRecord, String> {
+) -> Result<DispatchHandleRecord, OrchestratorError> {
     let event_id = serde_json::to_string(event_id).map_err(|error| error.to_string())?;
     eval_json(&mut ctx.vm, &format!("trigger_replay({event_id})")).await
 }
 
 pub(crate) async fn trigger_inspect_dlq(
     ctx: &mut LoadedOrchestratorContext,
-) -> Result<Vec<DlqEntryRecord>, String> {
+) -> Result<Vec<DlqEntryRecord>, OrchestratorError> {
     eval_json(&mut ctx.vm, "trigger_inspect_dlq()").await
 }
 
@@ -176,7 +177,7 @@ pub(crate) async fn trigger_fire(
     ctx: &mut LoadedOrchestratorContext,
     binding_id: &str,
     event: serde_json::Value,
-) -> Result<DispatchHandleRecord, String> {
+) -> Result<DispatchHandleRecord, OrchestratorError> {
     let binding_id = serde_json::to_string(binding_id).map_err(|error| error.to_string())?;
     let event_json = serde_json::to_string(&event).map_err(|error| error.to_string())?;
     let event_literal = serde_json::to_string(&event_json).map_err(|error| error.to_string())?;
@@ -190,7 +191,7 @@ pub(crate) async fn trigger_fire(
 pub(crate) fn synthetic_event_for_binding(
     ctx: &LoadedOrchestratorContext,
     binding_id: &str,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, OrchestratorError> {
     let trigger = ctx
         .collected_triggers
         .iter()
@@ -223,17 +224,17 @@ pub(crate) fn synthetic_event_for_binding(
 pub(crate) async fn read_topic(
     log: &Arc<AnyEventLog>,
     topic_name: &str,
-) -> Result<Vec<(u64, LogEvent)>, String> {
+) -> Result<Vec<(u64, LogEvent)>, OrchestratorError> {
     let topic = Topic::new(topic_name).map_err(|error| error.to_string())?;
     log.read_range(&topic, None, usize::MAX)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| OrchestratorError::Common(error.to_string()))
 }
 
 pub(crate) async fn stranded_envelopes(
     log: &Arc<AnyEventLog>,
     min_age: StdDuration,
-) -> Result<Vec<StrandedEnvelopeRecord>, String> {
+) -> Result<Vec<StrandedEnvelopeRecord>, OrchestratorError> {
     let envelopes = read_topic(log, TRIGGER_INBOX_ENVELOPES_TOPIC).await?;
     let legacy_inbox = read_topic(log, TRIGGER_INBOX_LEGACY_TOPIC).await?;
     let outbox = read_topic(log, TRIGGER_OUTBOX_TOPIC).await?;
@@ -301,16 +302,18 @@ pub(crate) async fn stranded_envelopes(
 pub(crate) async fn append_dlq_entry(
     log: &Arc<AnyEventLog>,
     entry: &DlqEntryRecord,
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     let topic = Topic::new(TRIGGER_DLQ_TOPIC).map_err(|error| error.to_string())?;
     let payload = serde_json::to_value(entry).map_err(|error| error.to_string())?;
     log.append(&topic, LogEvent::new("dlq_entry", payload))
         .await
         .map(|_| ())
-        .map_err(|error| error.to_string())
+        .map_err(|error| OrchestratorError::Common(error.to_string()))
 }
 
-pub(crate) fn discard_dlq_entry(entry: &DlqEntryRecord) -> Result<DlqEntryRecord, String> {
+pub(crate) fn discard_dlq_entry(
+    entry: &DlqEntryRecord,
+) -> Result<DlqEntryRecord, OrchestratorError> {
     let mut next = entry.clone();
     next.state = "discarded".to_string();
     next.retry_history.push(DlqAttemptRecord {
@@ -324,7 +327,7 @@ pub(crate) fn discard_dlq_entry(entry: &DlqEntryRecord) -> Result<DlqEntryRecord
     Ok(next)
 }
 
-pub(crate) fn print_json<T>(value: &T) -> Result<(), String>
+pub(crate) fn print_json<T>(value: &T) -> Result<(), OrchestratorError>
 where
     T: Serialize,
 {
@@ -333,7 +336,7 @@ where
     Ok(())
 }
 
-fn read_state_snapshot(path: &Path) -> Result<Option<PersistedStateSnapshot>, String> {
+fn read_state_snapshot(path: &Path) -> Result<Option<PersistedStateSnapshot>, OrchestratorError> {
     if !path.is_file() {
         return Ok(None);
     }
@@ -344,7 +347,7 @@ fn read_state_snapshot(path: &Path) -> Result<Option<PersistedStateSnapshot>, St
     Ok(Some(snapshot))
 }
 
-async fn eval_json<T>(vm: &mut harn_vm::Vm, expr: &str) -> Result<T, String>
+async fn eval_json<T>(vm: &mut harn_vm::Vm, expr: &str) -> Result<T, OrchestratorError>
 where
     T: DeserializeOwned,
 {
@@ -354,13 +357,14 @@ where
         .execute(&chunk)
         .await
         .map_err(|error| error.to_string())?;
-    serde_json::from_value(harn_vm::llm::vm_value_to_json(&value))
-        .map_err(|error| format!("failed to decode builtin result: {error}"))
+    serde_json::from_value(harn_vm::llm::vm_value_to_json(&value)).map_err(|error| {
+        OrchestratorError::Common(format!("failed to decode builtin result: {error}"))
+    })
 }
 
-fn load_manifest(config_path: &Path) -> Result<(Manifest, PathBuf), String> {
+fn load_manifest(config_path: &Path) -> Result<(Manifest, PathBuf), OrchestratorError> {
     if !config_path.is_file() {
-        return Err(format!("manifest not found: {}", config_path.display()));
+        return Err(format!("manifest not found: {}", config_path.display()).into());
     }
     let content = std::fs::read_to_string(config_path)
         .map_err(|error| format!("failed to read {}: {error}", config_path.display()))?;
@@ -375,7 +379,7 @@ fn load_manifest(config_path: &Path) -> Result<(Manifest, PathBuf), String> {
     Ok((manifest, manifest_dir))
 }
 
-pub(crate) fn absolutize_from_cwd(path: &Path) -> Result<PathBuf, String> {
+pub(crate) fn absolutize_from_cwd(path: &Path) -> Result<PathBuf, OrchestratorError> {
     let candidate = if path.is_absolute() {
         path.to_path_buf()
     } else {

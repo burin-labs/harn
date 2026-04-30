@@ -1,3 +1,4 @@
+use super::errors::OrchestratorError;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
 use std::fs;
@@ -45,7 +46,7 @@ struct DeployEnv {
     missing_secret_env: Vec<String>,
 }
 
-pub(crate) async fn run(args: OrchestratorDeployArgs) -> Result<(), String> {
+pub(crate) async fn run(args: OrchestratorDeployArgs) -> Result<(), OrchestratorError> {
     let validated = validate_manifest(&args).await?;
     let env = collect_deploy_env(&args, &validated.manifest)?;
     let bundle = write_bundle(&args, &validated, &env.public)?;
@@ -114,7 +115,9 @@ pub(crate) async fn run(args: OrchestratorDeployArgs) -> Result<(), String> {
     Ok(())
 }
 
-async fn validate_manifest(args: &OrchestratorDeployArgs) -> Result<ValidatedManifest, String> {
+async fn validate_manifest(
+    args: &OrchestratorDeployArgs,
+) -> Result<ValidatedManifest, OrchestratorError> {
     let manifest_path = absolutize_from_cwd(&args.manifest)?;
     let manifest_dir = manifest_path
         .parent()
@@ -161,7 +164,7 @@ fn write_bundle(
     args: &OrchestratorDeployArgs,
     validated: &ValidatedManifest,
     public_env: &BTreeMap<String, String>,
-) -> Result<DeployBundle, String> {
+) -> Result<DeployBundle, OrchestratorError> {
     let provider_dir = validated
         .manifest_dir
         .join(&args.deploy_dir)
@@ -193,7 +196,7 @@ fn write_bundle(
 fn collect_deploy_env(
     args: &OrchestratorDeployArgs,
     manifest: &Manifest,
-) -> Result<DeployEnv, String> {
+) -> Result<DeployEnv, OrchestratorError> {
     let state_dir = format!("{}/state", args.data_dir.trim_end_matches('/'));
     let sqlite_path = format!("{}/events.sqlite", args.data_dir.trim_end_matches('/'));
     let mut public = BTreeMap::from([
@@ -376,7 +379,7 @@ kill_timeout = "{shutdown_timeout}s"
 fn render_railway_json(
     args: &OrchestratorDeployArgs,
     public_env: &BTreeMap<String, String>,
-) -> Result<String, String> {
+) -> Result<String, OrchestratorError> {
     let value = serde_json::json!({
         "$schema": "https://railway.app/railway.schema.json",
         "build": {
@@ -398,7 +401,9 @@ fn render_railway_json(
     });
     serde_json::to_string_pretty(&value)
         .map(|json| format!("{json}\n"))
-        .map_err(|error| format!("failed to render railway.json: {error}"))
+        .map_err(|error| {
+            OrchestratorError::Deploy(format!("failed to render railway.json: {error}"))
+        })
 }
 
 fn build_image_command(args: &OrchestratorDeployArgs, bundle: &DeployBundle) -> PlannedCommand {
@@ -467,7 +472,7 @@ impl SecretSyncPlan {
 fn secret_sync_plan(
     args: &OrchestratorDeployArgs,
     secrets: &BTreeMap<String, String>,
-) -> Result<SecretSyncPlan, String> {
+) -> Result<SecretSyncPlan, OrchestratorError> {
     match args.provider {
         OrchestratorDeployProvider::Render => {
             let service = args.render_service.as_ref().ok_or_else(|| {
@@ -536,15 +541,15 @@ fn optional_api_token(
     token: Option<&str>,
     dry_run: bool,
     missing_message: &str,
-) -> Result<String, String> {
+) -> Result<String, OrchestratorError> {
     match token {
         Some(token) if !token.is_empty() => Ok(token.to_string()),
         _ if dry_run => Ok(String::new()),
-        _ => Err(missing_message.to_string()),
+        _ => Err(OrchestratorError::Deploy(missing_message.to_string())),
     }
 }
 
-fn run_secret_sync(plan: SecretSyncPlan) -> Result<(), String> {
+fn run_secret_sync(plan: SecretSyncPlan) -> Result<(), OrchestratorError> {
     println!("running: {}", plan.display());
     let client = Client::builder()
         .timeout(Duration::from_secs(30))
@@ -557,7 +562,7 @@ fn run_secret_sync(plan: SecretSyncPlan) -> Result<(), String> {
     }
 }
 
-fn sync_render_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), String> {
+fn sync_render_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), OrchestratorError> {
     for (key, value) in &plan.secrets {
         let url = format!(
             "{}/services/{}/env-vars/{}",
@@ -579,7 +584,7 @@ fn sync_render_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), Str
     Ok(())
 }
 
-fn sync_fly_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), String> {
+fn sync_fly_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), OrchestratorError> {
     let url = format!(
         "{}/apps/{}/secrets",
         FLY_MACHINES_API_BASE,
@@ -602,7 +607,7 @@ fn sync_fly_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), String
     ensure_success(response, "sync Fly secrets")
 }
 
-fn sync_railway_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), String> {
+fn sync_railway_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), OrchestratorError> {
     let project_id = plan
         .railway_project
         .as_deref()
@@ -640,7 +645,7 @@ fn sync_railway_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), St
         .map_err(|error| format!("failed to sync Railway secrets: {error}"))?;
     let payload = ensure_success_json(response, "sync Railway secrets")?;
     if let Some(errors) = payload.get("errors") {
-        return Err(format!("Railway GraphQL secret sync failed: {errors}"));
+        return Err(format!("Railway GraphQL secret sync failed: {errors}").into());
     }
     Ok(())
 }
@@ -769,7 +774,7 @@ impl PlannedCommand {
     }
 }
 
-fn run_checked(command: PlannedCommand) -> Result<(), String> {
+fn run_checked(command: PlannedCommand) -> Result<(), OrchestratorError> {
     println!("running: {}", command.display());
     let mut process = Command::new(&command.program);
     process.args(&command.args);
@@ -782,38 +787,39 @@ fn run_checked(command: PlannedCommand) -> Result<(), String> {
     if status.success() {
         Ok(())
     } else {
-        Err(format!(
-            "command failed with {status}: {}",
-            command.display()
-        ))
+        Err(format!("command failed with {status}: {}", command.display()).into())
     }
 }
 
-fn ensure_success(response: reqwest::blocking::Response, action: &str) -> Result<(), String> {
+fn ensure_success(
+    response: reqwest::blocking::Response,
+    action: &str,
+) -> Result<(), OrchestratorError> {
     let status = response.status();
     if status.is_success() {
         return Ok(());
     }
     let body = response.text().unwrap_or_default();
-    Err(format!("{action} failed with HTTP {status}: {body}"))
+    Err(format!("{action} failed with HTTP {status}: {body}").into())
 }
 
 fn ensure_success_json(
     response: reqwest::blocking::Response,
     action: &str,
-) -> Result<JsonValue, String> {
+) -> Result<JsonValue, OrchestratorError> {
     let status = response.status();
     let body = response
         .text()
         .map_err(|error| format!("{action} failed to read response body: {error}"))?;
     if !status.is_success() {
-        return Err(format!("{action} failed with HTTP {status}: {body}"));
+        return Err(format!("{action} failed with HTTP {status}: {body}").into());
     }
-    serde_json::from_str(&body)
-        .map_err(|error| format!("{action} returned invalid JSON: {error}: {body}"))
+    serde_json::from_str(&body).map_err(|error| {
+        OrchestratorError::Deploy(format!("{action} returned invalid JSON: {error}: {body}"))
+    })
 }
 
-fn probe_health(url: &str) -> Result<(), String> {
+fn probe_health(url: &str) -> Result<(), OrchestratorError> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -826,10 +832,7 @@ fn probe_health(url: &str) -> Result<(), String> {
         println!("health check passed: {url}");
         Ok(())
     } else {
-        Err(format!(
-            "health probe failed for {url}: HTTP {}",
-            response.status()
-        ))
+        Err(format!("health probe failed for {url}: HTTP {}", response.status()).into())
     }
 }
 
@@ -848,38 +851,44 @@ fn provider_spec_file(provider: OrchestratorDeployProvider) -> &'static str {
     }
 }
 
-fn read_manifest(path: &Path) -> Result<Manifest, String> {
+fn read_manifest(path: &Path) -> Result<Manifest, OrchestratorError> {
     if !path.is_file() {
-        return Err(format!("manifest not found: {}", path.display()));
+        return Err(format!("manifest not found: {}", path.display()).into());
     }
     let content = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    toml::from_str(&content).map_err(|error| format!("failed to parse {}: {error}", path.display()))
+    toml::from_str(&content).map_err(|error| {
+        OrchestratorError::Deploy(format!("failed to parse {}: {error}", path.display()))
+    })
 }
 
-fn absolutize_from_cwd(path: &Path) -> Result<PathBuf, String> {
+fn absolutize_from_cwd(path: &Path) -> Result<PathBuf, OrchestratorError> {
     if path.is_absolute() {
         return Ok(path.to_path_buf());
     }
     std::env::current_dir()
         .map(|cwd| cwd.join(path))
-        .map_err(|error| format!("failed to read current directory: {error}"))
+        .map_err(|error| {
+            OrchestratorError::Deploy(format!("failed to read current directory: {error}"))
+        })
 }
 
-fn write_if_changed(path: &Path, content: &str) -> Result<(), String> {
+fn write_if_changed(path: &Path, content: &str) -> Result<(), OrchestratorError> {
     if fs::read_to_string(path).is_ok_and(|existing| existing == content) {
         return Ok(());
     }
-    fs::write(path, content).map_err(|error| format!("failed to write {}: {error}", path.display()))
+    fs::write(path, content).map_err(|error| {
+        OrchestratorError::Deploy(format!("failed to write {}: {error}", path.display()))
+    })
 }
 
-fn parse_key_value(raw: &str) -> Result<(String, String), String> {
+fn parse_key_value(raw: &str) -> Result<(String, String), OrchestratorError> {
     let Some((key, value)) = raw.split_once('=') else {
-        return Err(format!("expected KEY=VALUE, got '{raw}'"));
+        return Err(format!("expected KEY=VALUE, got '{raw}'").into());
     };
     let key = key.trim();
     if key.is_empty() {
-        return Err(format!("expected non-empty KEY in '{raw}'"));
+        return Err(format!("expected non-empty KEY in '{raw}'").into());
     }
     Ok((key.to_string(), value.to_string()))
 }

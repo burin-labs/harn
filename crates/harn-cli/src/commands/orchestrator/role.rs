@@ -1,3 +1,4 @@
+use super::errors::OrchestratorError;
 use std::path::Path;
 
 use clap::ValueEnum;
@@ -29,7 +30,7 @@ impl OrchestratorRole {
         workspace_root: &Path,
         source_dir: &Path,
         state_dir: &Path,
-    ) -> Result<harn_vm::Vm, String> {
+    ) -> Result<harn_vm::Vm, OrchestratorError> {
         match self {
             Self::SingleTenant | Self::MultiTenant => {
                 std::env::set_var(

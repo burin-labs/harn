@@ -1,3 +1,4 @@
+use super::errors::OrchestratorError;
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::sync::Once;
@@ -17,12 +18,12 @@ impl TlsFiles {
     pub(crate) fn from_args(
         cert: Option<PathBuf>,
         key: Option<PathBuf>,
-    ) -> Result<Option<Self>, String> {
+    ) -> Result<Option<Self>, OrchestratorError> {
         match (cert, key) {
             (None, None) => Ok(None),
             (Some(cert), Some(key)) => Ok(Some(Self { cert, key })),
-            (Some(_), None) => Err("`--cert` requires `--key`".to_string()),
-            (None, Some(_)) => Err("`--key` requires `--cert`".to_string()),
+            (Some(_), None) => Err("`--cert` requires `--key`".to_string().into()),
+            (None, Some(_)) => Err("`--key` requires `--cert`".to_string().into()),
         }
     }
 }
@@ -30,7 +31,7 @@ impl TlsFiles {
 pub(crate) struct ServerRuntime {
     local_addr: SocketAddr,
     handle: Handle<SocketAddr>,
-    task: tokio::task::JoinHandle<Result<(), String>>,
+    task: tokio::task::JoinHandle<Result<(), OrchestratorError>>,
     tls_enabled: bool,
 }
 
@@ -39,7 +40,7 @@ impl ServerRuntime {
         bind: SocketAddr,
         app: Router,
         tls: Option<&TlsFiles>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, OrchestratorError> {
         let listener = bind_listener(bind)?;
         let local_addr = listener
             .local_addr()
@@ -55,7 +56,9 @@ impl ServerRuntime {
                     .handle(handle_for_task)
                     .serve(app.into_make_service())
                     .await
-                    .map_err(|error| format!("HTTPS listener failed: {error}"))
+                    .map_err(|error| {
+                        OrchestratorError::Tls(format!("HTTPS listener failed: {error}"))
+                    })
             })
         } else {
             tokio::spawn(async move {
@@ -64,7 +67,9 @@ impl ServerRuntime {
                     .handle(handle_for_task)
                     .serve(app.into_make_service())
                     .await
-                    .map_err(|error| format!("HTTP listener failed: {error}"))
+                    .map_err(|error| {
+                        OrchestratorError::Tls(format!("HTTP listener failed: {error}"))
+                    })
             })
         };
 
@@ -84,32 +89,34 @@ impl ServerRuntime {
         self.tls_enabled
     }
 
-    pub(crate) async fn shutdown(self, timeout: Duration) -> Result<(), String> {
+    pub(crate) async fn shutdown(self, timeout: Duration) -> Result<(), OrchestratorError> {
         self.handle.graceful_shutdown(Some(timeout));
         match self.task.await {
             Ok(result) => result,
-            Err(error) => Err(format!("listener task join failed: {error}")),
+            Err(error) => Err(format!("listener task join failed: {error}").into()),
         }
     }
 }
 
-async fn load_rustls_config(cert: &Path, key: &Path) -> Result<RustlsConfig, String> {
+async fn load_rustls_config(cert: &Path, key: &Path) -> Result<RustlsConfig, OrchestratorError> {
     install_crypto_provider();
     if !cert.is_file() {
-        return Err(format!("TLS certificate not found: {}", cert.display()));
+        return Err(format!("TLS certificate not found: {}", cert.display()).into());
     }
     if !key.is_file() {
-        return Err(format!("TLS private key not found: {}", key.display()));
+        return Err(format!("TLS private key not found: {}", key.display()).into());
     }
 
     RustlsConfig::from_pem_file(cert.to_path_buf(), key.to_path_buf())
         .await
         .map_err(|error| {
-            format!(
-                "failed to load TLS certificate {} and key {}: {error}",
-                cert.display(),
-                key.display()
-            )
+            OrchestratorError::Tls({
+                format!(
+                    "failed to load TLS certificate {} and key {}: {error}",
+                    cert.display(),
+                    key.display()
+                )
+            })
         })
 }
 
@@ -120,7 +127,7 @@ fn install_crypto_provider() {
     });
 }
 
-fn bind_listener(bind: SocketAddr) -> Result<TcpListener, String> {
+fn bind_listener(bind: SocketAddr) -> Result<TcpListener, OrchestratorError> {
     let listener = TcpListener::bind(bind)
         .map_err(|error| format!("failed to bind listener on {bind}: {error}"))?;
     listener

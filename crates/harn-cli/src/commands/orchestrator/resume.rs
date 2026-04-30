@@ -1,3 +1,4 @@
+use super::errors::OrchestratorError;
 use serde::Serialize;
 
 use crate::cli::OrchestratorResumeArgs;
@@ -12,7 +13,7 @@ struct ResumeResult {
     accepted: bool,
 }
 
-pub(super) async fn run(args: OrchestratorResumeArgs) -> Result<(), String> {
+pub(super) async fn run(args: OrchestratorResumeArgs) -> Result<(), OrchestratorError> {
     let _ctx = load_local_runtime(&args.local).await?;
     let response = harn_vm::HitlHostResponse {
         request_id: args.event_id.clone(),

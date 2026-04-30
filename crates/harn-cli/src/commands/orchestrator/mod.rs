@@ -1,6 +1,7 @@
 pub(crate) mod common;
 mod deploy;
 mod dlq;
+pub(crate) mod errors;
 mod fire;
 mod inspect;
 pub(crate) mod inspect_data;
@@ -17,9 +18,12 @@ mod stats;
 mod tenant;
 mod tls;
 
+#[allow(unused_imports)]
+pub(crate) use errors::{OrchestratorError, OrchestratorResult};
+
 use crate::cli::{OrchestratorArgs, OrchestratorCommand};
 
-pub(crate) async fn handle(args: OrchestratorArgs) -> Result<(), String> {
+pub(crate) async fn handle(args: OrchestratorArgs) -> OrchestratorResult<()> {
     match args.command {
         OrchestratorCommand::Serve(serve_args) => serve::run(serve_args).await,
         OrchestratorCommand::Deploy(deploy_args) => deploy::run(*deploy_args).await,
