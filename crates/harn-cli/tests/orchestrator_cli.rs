@@ -18,6 +18,7 @@ use harn_vm::event_log::{
 };
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use tempfile::TempDir;
+use test_util::process::harn_command;
 use test_util::timing::{
     self, ChildExitWatcher, EVENT_FAIL_FAST_TIMEOUT, LOG_RECV_POLL_INTERVAL,
     PROCESS_FAIL_FAST_TIMEOUT,
@@ -68,7 +69,7 @@ fn spawn_orchestrator_with(
     Receiver<String>,
     thread::JoinHandle<String>,
 ) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut child = harn_command();
     child
         .current_dir(temp.path())
         .arg("orchestrator")
@@ -215,7 +216,7 @@ async fn wait_for_metrics_contains(
 }
 
 fn run_harn_with_env(temp: &TempDir, args: &[&str], envs: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut command = harn_command();
     command.current_dir(temp.path()).args(args);
     for (key, value) in envs {
         command.env(key, value);

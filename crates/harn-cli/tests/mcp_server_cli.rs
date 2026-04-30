@@ -6,16 +6,18 @@
 
 #[path = "support/mcp.rs"]
 mod mcp_support;
+mod test_util;
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
+use test_util::process::harn_command;
 
 // See `harn_serve_mcp_cli::PROCESS_READY_TIMEOUT` for the rationale on the 60s
 // budget — cold-starting the debug `harn` binary takes 30–40s under full
@@ -118,7 +120,7 @@ fn mcp_server_stdio_roundtrips_tools_and_resources() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let mut child = harn_command()
         .current_dir(temp.path())
         .arg("mcp")
         .arg("serve")
@@ -382,7 +384,7 @@ async fn mcp_server_http_roundtrips_initialize_and_fire() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let mut child = harn_command()
         .current_dir(temp.path())
         .arg("mcp")
         .arg("serve")

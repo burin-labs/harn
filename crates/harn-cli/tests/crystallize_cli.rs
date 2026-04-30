@@ -1,12 +1,15 @@
+mod test_util;
+
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 use serde_json::{json, Value};
 use tempfile::TempDir;
+use test_util::process::harn_command;
 
 fn run_harn(cwd: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_harn"))
+    harn_command()
         .current_dir(cwd)
         .args(args)
         .output()

@@ -30,25 +30,42 @@ fail-fast = false
 failure-output = "immediate-final"
 success-output = "never"
 
-# Tests that spawn the `harn` debug binary as a subprocess are CPU- and
-# I/O-bound during cold start (dyld + amfi cold-cache + Harn pipeline
-# load is ~1–3s per spawn on a warm cache, much higher on a cold one).
-# When the workspace runs at full nextest worker fan-out, dozens of these
-# subprocesses can be in flight at once, which both starves the kernel
-# scheduler and makes each individual subprocess startup slow enough to
-# trip the 60s slow-test ceiling.
+# Tests that spawn the `harn` debug binary as a subprocess used to need a
+# bounded `max-threads = 4` cap to avoid macOS dyld + AMFI cold-cache
+# scheduler starvation: when N tests simultaneously cold-spawn the
+# freshly-built binary, the kernel page-ins, dyld closure construction,
+# and AMFI signature validation contend on the same shared resources, and
+# every individual subprocess startup balloons from ~300 ms to several
+# seconds — the tail of that cohort then trips the 60 s slow-test ceiling.
 #
-# Until April 2026 this was enforced by a `flock(2)`-backed cross-process
-# lock that made every subprocess test fully serial — which was *too*
-# tight: the tail of the queue waited 30–40s for its turn under the lock
-# alone, even before doing any work of its own. The correct shape is
-# bounded parallelism, not full serialization. Cap this group at 4
-# in-flight tests so a) cold-start latency stays low (peak concurrency is
-# four, not thirty) while b) wall-clock parallelism remains substantial
-# vs. the old serial behavior.
+# That cap was a workaround, not a fix. As of harn#949 the architectural
+# fix is in place: every harn-cli subprocess test spawns through
+# `crates/harn-cli/tests/test_util/process.rs::harn_command()`, which
+# pre-warms the binary's dyld page cache and AMFI signature with a single
+# synchronous `harn --version` invocation on first call within each test
+# binary process. Subsequent spawns short-circuit the cold-cache path
+# entirely, so wall-clock parallelism is no longer bounded by
+# shared-OS-resource contention.
+#
+# That fix lifts the cold-cache wall but does not remove the second,
+# softer constraint: several orchestrator integration tests (e.g.
+# `bounded_pump_drain_truncates_and_replays_remaining_backlog_after_restart`)
+# spawn an orchestrator subprocess and then assert that 60+ events
+# dispatch within `EVENT_FAIL_FAST_TIMEOUT` (10 s, see
+# `tests/test_util/timing.rs`). Under nextest's full workspace fan-out
+# every additional concurrent subprocess steals CPU from the in-flight
+# dispatcher, so at high concurrency the dispatch budget itself starts
+# tipping over.
+#
+# 8 is the sweet spot empirically: double the previous ceiling, no
+# regression in 5x stress runs (`scripts/stress_subprocess_tests.sh`),
+# and leaves enough CPU headroom for the time-sensitive dispatcher
+# assertions to stay well within budget. Push higher only after relaxing
+# `EVENT_FAIL_FAST_TIMEOUT` — the limiter becomes the test, not the
+# scheduler.
 [test-groups]
-harn-subprocess = { max-threads = 4 }
-harn-cli-bin = { max-threads = 4 }
+harn-subprocess = { max-threads = 8 }
+harn-cli-bin = { max-threads = 8 }
 # harn-dap's unit tests are short, but several construct debugger VMs,
 # Tokio runtimes, and host-bridge state. Under full workspace fan-out on
 # macOS, that binary can report a passed test as "leaky" while teardown is

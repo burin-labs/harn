@@ -23,6 +23,15 @@ use crate::test_util::timing::{self, ChildExitWatcher};
 /// previously relied on `let _lock = lock_orchestrator_process_tests();`
 /// run in parallel under nextest and rely on tempdir + ephemeral-port
 /// isolation for correctness.
+///
+/// **Subprocess concurrency note.** As of harn#949, the workspace
+/// nextest config (`.config/nextest.toml`) relaxes the `harn-subprocess`
+/// and `harn-cli-bin` group caps from 4 to 8. The architectural
+/// predicate for that change is the dyld/AMFI pre-warm in
+/// `crates/harn-cli/tests/test_util/process.rs` — every subprocess test
+/// spawns through `harn_command()`, which warms the binary cache once
+/// per test-binary process before any parallel cohort starts. Do not
+/// reintroduce a lock here without also accounting for that contract.
 #[allow(dead_code)]
 pub type OrchestratorProcessTestLock = process::HarnProcessTestNoLock;
 
