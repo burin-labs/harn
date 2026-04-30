@@ -331,10 +331,7 @@ pub(crate) async fn maybe_auto_compact_agent_messages(
                         &crate::agent_events::AgentEvent::TranscriptCompacted {
                             session_id,
                             mode: "auto".to_string(),
-                            strategy: crate::orchestration::compact_strategy_name(
-                                &ac.compact_strategy,
-                            )
-                            .to_string(),
+                            strategy: ac.policy_strategy.clone(),
                             archived_messages,
                             estimated_tokens_before: approx_tokens,
                             estimated_tokens_after,

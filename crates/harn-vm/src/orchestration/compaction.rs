@@ -46,6 +46,10 @@ pub fn compact_strategy_name(strategy: &CompactStrategy) -> &'static str {
 ///     transcript approaches the model's actual context window.
 #[derive(Clone, Debug)]
 pub struct AutoCompactConfig {
+    /// Number of earliest messages to keep verbatim before the compacted
+    /// summary. The system prompt is not part of this list and is always
+    /// preserved separately by the caller.
+    pub keep_first: usize,
     /// Tier-1 threshold: estimated tokens before lightweight compaction.
     pub token_threshold: usize,
     /// Maximum character length for a single tool result before microcompaction.
@@ -79,11 +83,16 @@ pub struct AutoCompactConfig {
     /// selected. The rendered template becomes the user message sent to
     /// the summarizer.
     pub summarize_prompt: Option<String>,
+    /// User-facing policy label for replay and observability. This can be
+    /// broader than the engine strategy, e.g. `hybrid` lowers to LLM
+    /// summarization plus truncate fallback.
+    pub policy_strategy: String,
 }
 
 impl Default for AutoCompactConfig {
     fn default() -> Self {
         Self {
+            keep_first: 0,
             token_threshold: 48_000,
             tool_output_max_chars: 16_000,
             keep_last: 12,
@@ -94,6 +103,7 @@ impl Default for AutoCompactConfig {
             mask_callback: None,
             compress_callback: None,
             summarize_prompt: None,
+            policy_strategy: compact_strategy_name(&CompactStrategy::ObservationMask).to_string(),
         }
     }
 }
@@ -615,15 +625,17 @@ pub(crate) async fn auto_compact_messages(
     config: &AutoCompactConfig,
     llm_opts: Option<&crate::llm::api::LlmCallOptions>,
 ) -> Result<Option<String>, VmError> {
-    if messages.len() <= config.keep_last {
+    if messages.len() <= config.keep_first.saturating_add(config.keep_last) {
         return Ok(None);
     }
+    let compact_start = config.keep_first.min(messages.len());
     let original_split = messages.len().saturating_sub(config.keep_last);
     let mut split_at = original_split;
     // Snap back to a user-role boundary so the kept suffix begins at a clean
     // turn. OpenAI-compatible APIs reject tool results orphaned from their
     // assistant request, so splitting mid-turn corrupts the transcript.
-    while split_at > 0
+    while split_at > compact_start
+        && split_at < messages.len()
         && messages[split_at]
             .get("role")
             .and_then(|r| r.as_str())
@@ -633,7 +645,7 @@ pub(crate) async fn auto_compact_messages(
     }
     // Fall back to the naive split (e.g. tool-heavy transcripts with the sole
     // user message at index 0) rather than skipping compaction entirely.
-    if split_at == 0 {
+    if split_at == compact_start {
         split_at = original_split;
     }
     if let Some(volatile_start) = messages[split_at..]
@@ -644,15 +656,15 @@ pub(crate) async fn auto_compact_messages(
         if let Some(boundary) = volatile_start
             .checked_sub(1)
             .and_then(|idx| find_prev_user_boundary(messages, idx))
-            .filter(|boundary| *boundary > 0)
+            .filter(|boundary| *boundary > compact_start)
         {
             split_at = boundary;
         }
     }
-    if split_at == 0 {
+    if split_at <= compact_start {
         return Ok(None);
     }
-    let old_messages: Vec<_> = messages.drain(..split_at).collect();
+    let old_messages: Vec<_> = messages.drain(compact_start..split_at).collect();
     let archived_count = old_messages.len();
 
     let mut summary = apply_compaction_strategy(
@@ -690,7 +702,7 @@ pub(crate) async fn auto_compact_messages(
     }
 
     messages.insert(
-        0,
+        compact_start,
         serde_json::json!({
             "role": "user",
             "content": summary,

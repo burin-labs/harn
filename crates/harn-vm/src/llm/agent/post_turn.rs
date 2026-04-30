@@ -257,20 +257,20 @@ pub(super) async fn run_post_turn(
                         "Transcript compacted during agent loop",
                         Some(serde_json::json!({
                             "mode": "auto",
-                            "strategy": crate::orchestration::compact_strategy_name(&ac.compact_strategy),
+                            "strategy": ac.policy_strategy.clone(),
+                            "engine_strategy": crate::orchestration::compact_strategy_name(&ac.compact_strategy),
                             "archived_messages": archived_messages,
                             "estimated_tokens_before": est,
                             "estimated_tokens_after": estimated_tokens_after,
+                            "keep_first": ac.keep_first,
+                            "keep_last": ac.keep_last,
                         })),
                     ));
                     super::emit_agent_event(
                         &crate::agent_events::AgentEvent::TranscriptCompacted {
                             session_id: ctx.session_id.to_string(),
                             mode: "auto".to_string(),
-                            strategy: crate::orchestration::compact_strategy_name(
-                                &ac.compact_strategy,
-                            )
-                            .to_string(),
+                            strategy: ac.policy_strategy.clone(),
                             archived_messages,
                             estimated_tokens_before: est,
                             estimated_tokens_after,

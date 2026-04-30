@@ -17,6 +17,7 @@ mod agent_observe;
 mod agent_tools;
 pub(crate) mod api;
 pub mod capabilities;
+mod compaction;
 mod config_builtins;
 pub(crate) mod content;
 mod conversation;
@@ -492,6 +493,7 @@ pub use self::api::{
     fetch_provider_max_context, probe_openai_compatible_model, selected_model_for_provider,
     supports_model_readiness_probe, ModelReadiness,
 };
+pub(crate) use self::compaction::resolve_agent_loop_auto_compact;
 pub use self::cost::{calculate_cost_for_provider, peek_total_cost};
 pub use self::healthcheck::{
     build_healthcheck_url, run_provider_healthcheck, run_provider_healthcheck_with_options,
@@ -1143,36 +1145,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         // this path and does not persist). A caller-provided id flows
         // through as the session's persistent identity.
         let session_id = opt_str(&options, "session_id").unwrap_or_default();
-        let auto_compact = if opt_bool(&options, "auto_compact") {
-            let mut ac = crate::orchestration::AutoCompactConfig::default();
-            if let Some(v) = opt_int(&options, "compact_threshold") {
-                ac.token_threshold = v as usize;
-            }
-            if let Some(v) = opt_int(&options, "tool_output_max_chars") {
-                ac.tool_output_max_chars = v as usize;
-            }
-            if let Some(v) = opt_int(&options, "compact_keep_last") {
-                ac.keep_last = v as usize;
-            }
-            if let Some(strategy) = opt_str(&options, "compact_strategy") {
-                ac.compact_strategy = crate::orchestration::parse_compact_strategy(&strategy)?;
-            }
-            if let Some(callback) = options.as_ref().and_then(|o| o.get("compact_callback")) {
-                ac.custom_compactor = Some(callback.clone());
-                if !options
-                    .as_ref()
-                    .is_some_and(|o| o.contains_key("compact_strategy"))
-                {
-                    ac.compact_strategy = crate::orchestration::CompactStrategy::Custom;
-                }
-            }
-            if let Some(callback) = options.as_ref().and_then(|o| o.get("compress_callback")) {
-                ac.compress_callback = Some(callback.clone());
-            }
-            Some(ac)
-        } else {
-            None
-        };
+        let auto_compact = resolve_agent_loop_auto_compact(&args, &options).await?;
         let policy = options.as_ref().and_then(|o| o.get("policy")).map(|v| {
             let json = crate::llm::helpers::vm_value_to_json(v);
             serde_json::from_value::<crate::orchestration::CapabilityPolicy>(json)

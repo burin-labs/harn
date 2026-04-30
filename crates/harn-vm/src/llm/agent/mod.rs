@@ -510,6 +510,7 @@ pub async fn run_agent_loop_internal(
                 base_system: base_system.as_deref(),
                 tool_contract_prompt: tool_contract_prompt.as_deref(),
                 persistent_system_prompt: persistent_system_prompt.as_deref(),
+                auto_compact: &auto_compact,
                 scoped_tools_val: scoped_tools.as_ref(),
             },
         )
