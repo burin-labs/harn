@@ -4723,6 +4723,7 @@ The following environment variables configure runtime behavior:
 | `OLLAMA_HOST` | Override the Ollama host. Default `http://localhost:11434`. |
 | `HARN_OLLAMA_NUM_CTX` | Preferred Ollama context window for Harn-owned Ollama chat, completion, context-window fallback, and warmup requests. Must be a positive integer. Takes precedence over `OLLAMA_CONTEXT_LENGTH` and `OLLAMA_NUM_CTX`; default `32768`. Hosts that persist IDE preferences should pass the raw stored value here and let Harn validate/default it. |
 | `HARN_OLLAMA_KEEP_ALIVE` | Preferred Ollama keep-alive for Harn-owned Ollama chat, completion, and warmup requests. Takes precedence over `OLLAMA_KEEP_ALIVE`; default `30m`. `forever`, `infinite`, and `-1` normalize to Ollama's numeric `-1`; `default` normalizes to `30m`. |
+| `HARN_OLLAMA_UNLOAD_GRACE_MS` | Preferred Ollama unload/warmup grace in milliseconds before Harn emits a one-time progress notification for an Ollama stream that has produced no chunks yet. Takes precedence over `OLLAMA_UNLOAD_GRACE_MS`; default `10000`. Set `0` to disable the notification. |
 | `LOCAL_LLM_BASE_URL` | Base URL for a local OpenAI-compatible server. Default `http://localhost:8000`. |
 | `LOCAL_LLM_MODEL` | Default model ID for the local OpenAI-compatible provider. |
 | `MLX_BASE_URL` | Base URL for the MLX OpenAI-compatible provider. Default `http://127.0.0.1:8002`. |

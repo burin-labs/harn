@@ -80,6 +80,11 @@ pub(crate) fn classify_provider_http_error(
 ) -> LlmErrorInfo {
     let (kind, reason) = classify_http_status_and_body(status, body);
     let mut msg = format!("{provider} HTTP {status} [{}]: {body}", reason.legacy_tag());
+    if reason == LlmErrorReason::ContextOverflow {
+        if let Some(tokens) = extract_token_count_hint(body) {
+            msg.push_str(&format!(" (offending_tokens: {tokens})"));
+        }
+    }
     if let Some(ra) = retry_after {
         msg.push_str(&format!(" (retry-after: {ra})"));
     }
@@ -234,13 +239,39 @@ fn classify_error_message_taxonomy(msg: &str) -> Option<(LlmErrorKind, LlmErrorR
 fn is_context_overflow(lower: &str) -> bool {
     lower.contains("maximum context length")
         || lower.contains("context length")
+        || lower.contains("model context exceeded")
+        || lower.contains("context exceeded")
         || lower.contains("context_length_exceeded")
         || lower.contains("context_overflow")
         || lower.contains("prompt is too long")
         || lower.contains("prompt_tokens_exceeded")
         || lower.contains("this model's maximum context")
         || lower.contains("exceeds the maximum")
+        || (lower.contains("context") && lower.contains("exceed"))
         || (lower.contains("max_tokens") && lower.contains("exceed"))
+}
+
+fn extract_token_count_hint(body: &str) -> Option<u64> {
+    let mut max_number = None;
+    let mut current = String::new();
+    for ch in body.chars() {
+        if ch.is_ascii_digit() {
+            current.push(ch);
+            continue;
+        }
+        if !current.is_empty() {
+            if let Ok(parsed) = current.parse::<u64>() {
+                max_number = Some(max_number.map_or(parsed, |n: u64| n.max(parsed)));
+            }
+            current.clear();
+        }
+    }
+    if !current.is_empty() {
+        if let Ok(parsed) = current.parse::<u64>() {
+            max_number = Some(max_number.map_or(parsed, |n: u64| n.max(parsed)));
+        }
+    }
+    max_number
 }
 
 fn is_content_policy(lower: &str) -> bool {
@@ -341,6 +372,20 @@ mod tests {
         assert_eq!(info.kind, LlmErrorKind::Terminal);
         assert_eq!(info.reason, LlmErrorReason::ContextOverflow);
         assert!(msg.contains("[context_overflow]"), "msg was: {msg}");
+    }
+
+    #[test]
+    fn classify_ollama_model_context_exceeded_as_context_overflow() {
+        let info = classify_provider_http_error(
+            "ollama",
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            None,
+            r#"{"error":"model context exceeded: requested 49152 tokens"}"#,
+        );
+        assert_eq!(info.kind, LlmErrorKind::Terminal);
+        assert_eq!(info.reason, LlmErrorReason::ContextOverflow);
+        assert!(info.message.contains("[context_overflow]"));
+        assert!(info.message.contains("offending_tokens: 49152"));
     }
 
     #[test]
