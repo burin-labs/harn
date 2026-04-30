@@ -1080,30 +1080,22 @@ impl EventLog for FileEventLog {
         }
         let retained = self.read_range_sync(topic, Some(before), usize::MAX)?;
         let removed = self.read_range_sync(topic, None, usize::MAX)?.len() - retained.len();
-        let tmp = path.with_extension("jsonl.tmp");
         if retained.is_empty() {
             let _ = std::fs::remove_file(&path);
         } else {
-            let mut writer =
-                std::io::BufWriter::new(std::fs::File::create(&tmp).map_err(|error| {
-                    LogError::Io(format!("event log tmp create error: {error}"))
-                })?);
-            use std::io::Write as _;
-            for (event_id, event) in &retained {
-                let line = serde_json::to_string(&FileRecord {
-                    id: *event_id,
-                    event: event.clone(),
-                })
-                .map_err(|error| LogError::Serde(format!("event log encode error: {error}")))?;
-                writeln!(writer, "{line}")
-                    .map_err(|error| LogError::Io(format!("event log write error: {error}")))?;
-            }
-            writer
-                .flush()
-                .map_err(|error| LogError::Io(format!("event log flush error: {error}")))?;
-            std::fs::rename(&tmp, &path).map_err(|error| {
-                LogError::Io(format!("event log compact finalize error: {error}"))
-            })?;
+            crate::atomic_io::atomic_write_with(&path, |writer| {
+                use std::io::Write as _;
+                for (event_id, event) in &retained {
+                    let line = serde_json::to_string(&FileRecord {
+                        id: *event_id,
+                        event: event.clone(),
+                    })
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+                    writeln!(writer, "{line}")?;
+                }
+                Ok(())
+            })
+            .map_err(|error| LogError::Io(format!("event log compact finalize error: {error}")))?;
         }
         let latest = retained.last().map(|(event_id, _)| *event_id);
         self.latest_ids
@@ -1555,18 +1547,10 @@ fn resolve_path(base_dir: &Path, value: &str) -> PathBuf {
 }
 
 fn write_json_atomically(path: &Path, payload: &serde_json::Value) -> Result<(), LogError> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| LogError::Io(format!("event log mkdir error: {error}")))?;
-    }
-    let tmp = path.with_extension("tmp");
     let encoded = serde_json::to_vec_pretty(payload)
         .map_err(|error| LogError::Serde(format!("event log encode error: {error}")))?;
-    std::fs::write(&tmp, encoded)
-        .map_err(|error| LogError::Io(format!("event log write error: {error}")))?;
-    std::fs::rename(&tmp, path)
-        .map_err(|error| LogError::Io(format!("event log rename error: {error}")))?;
-    Ok(())
+    crate::atomic_io::atomic_write(path, &encoded)
+        .map_err(|error| LogError::Io(format!("event log write error: {error}")))
 }
 
 fn sanitize_filename(value: &str) -> String {

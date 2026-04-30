@@ -986,7 +986,8 @@ pub(crate) fn read_manifest_from_path(path: &Path) -> Result<Manifest, String> {
 }
 
 pub(crate) fn write_manifest_content(path: &Path, content: &str) -> Result<(), String> {
-    fs::write(path, content).map_err(|error| format!("failed to write {}: {error}", path.display()))
+    harn_vm::atomic_io::atomic_write(path, content.as_bytes())
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
 pub(crate) fn absolutize_check_config_paths(

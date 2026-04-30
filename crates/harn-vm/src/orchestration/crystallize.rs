@@ -439,41 +439,26 @@ pub fn write_crystallization_artifacts(
     report_path: &Path,
     eval_pack_path: Option<&Path>,
 ) -> Result<CrystallizationReport, VmError> {
-    if let Some(parent) = workflow_path
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-    {
-        std::fs::create_dir_all(parent).map_err(|error| {
+    crate::atomic_io::atomic_write(workflow_path, artifacts.harn_code.as_bytes()).map_err(
+        |error| {
             VmError::Runtime(format!(
-                "failed to create workflow output dir {}: {error}",
-                parent.display()
+                "failed to write generated workflow {}: {error}",
+                workflow_path.display()
             ))
-        })?;
-    }
-    std::fs::write(workflow_path, &artifacts.harn_code).map_err(|error| {
-        VmError::Runtime(format!(
-            "failed to write generated workflow {}: {error}",
-            workflow_path.display()
-        ))
-    })?;
+        },
+    )?;
 
     artifacts.report.harn_code_path = Some(workflow_path.display().to_string());
     if let Some(path) = eval_pack_path {
         if !artifacts.eval_pack_toml.trim().is_empty() {
-            if let Some(parent) = path.parent().filter(|path| !path.as_os_str().is_empty()) {
-                std::fs::create_dir_all(parent).map_err(|error| {
+            crate::atomic_io::atomic_write(path, artifacts.eval_pack_toml.as_bytes()).map_err(
+                |error| {
                     VmError::Runtime(format!(
-                        "failed to create eval pack output dir {}: {error}",
-                        parent.display()
+                        "failed to write eval pack {}: {error}",
+                        path.display()
                     ))
-                })?;
-            }
-            std::fs::write(path, &artifacts.eval_pack_toml).map_err(|error| {
-                VmError::Runtime(format!(
-                    "failed to write eval pack {}: {error}",
-                    path.display()
-                ))
-            })?;
+                },
+            )?;
             artifacts.report.eval_pack_path = Some(path.display().to_string());
             if let Some(candidate) = artifacts.report.candidates.first_mut() {
                 candidate.promotion.eval_pack_link = Some(path.display().to_string());
@@ -481,20 +466,9 @@ pub fn write_crystallization_artifacts(
         }
     }
 
-    if let Some(parent) = report_path
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-    {
-        std::fs::create_dir_all(parent).map_err(|error| {
-            VmError::Runtime(format!(
-                "failed to create report output dir {}: {error}",
-                parent.display()
-            ))
-        })?;
-    }
     let report_json = serde_json::to_string_pretty(&artifacts.report)
         .map_err(|error| VmError::Runtime(format!("failed to encode report JSON: {error}")))?;
-    std::fs::write(report_path, report_json).map_err(|error| {
+    crate::atomic_io::atomic_write(report_path, report_json.as_bytes()).map_err(|error| {
         VmError::Runtime(format!(
             "failed to write crystallization report {}: {error}",
             report_path.display()
@@ -2173,18 +2147,7 @@ pub fn shadow_replay_bundle(
 }
 
 fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), VmError> {
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        std::fs::create_dir_all(parent).map_err(|error| {
-            VmError::Runtime(format!(
-                "failed to create parent dir {}: {error}",
-                parent.display()
-            ))
-        })?;
-    }
-    std::fs::write(path, bytes)
+    crate::atomic_io::atomic_write(path, bytes)
         .map_err(|error| VmError::Runtime(format!("failed to write {}: {error}", path.display())))
 }
 
