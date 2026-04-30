@@ -1,0 +1,34 @@
+import "std/memory"
+
+pipeline default() {
+  let root = path_join(temp_dir(), "harn-memory-primitives-" + uuid())
+  let options = {root: root, now: "2026-04-29T00:00:00Z"}
+  let namespace = "agent/customer"
+  let first = memory_store(
+    namespace,
+    "alice-profile",
+    {text: "Alice prefers Rust examples and concise plans"},
+    ["profile", "preference"],
+    options,
+  )
+  memory_store(
+    namespace,
+    "bob-profile",
+    {text: "Bob prefers TypeScript examples"},
+    ["profile"],
+    {root: root, now: "2026-04-29T00:00:01Z"},
+  )
+  let recalled = memory_recall(namespace, "rust preference", 2, {root: root})
+  println(first._type)
+  println(len(recalled))
+  println(recalled[0].key)
+  println(recalled[0].score > 0.0)
+  let summary = memory_summarize(namespace, {limit: 2}, {root: root})
+  println(summary._type)
+  println(summary.count)
+  println(contains(summary.text, "Alice prefers Rust examples"))
+  let forgotten = memory_forget(namespace, {tag: "profile"}, {root: root, now: "2026-04-29T00:00:02Z"})
+  println(forgotten.forgotten)
+  println(len(memory_recall(namespace, "rust", 5, {root: root})))
+  delete_file(root)
+}

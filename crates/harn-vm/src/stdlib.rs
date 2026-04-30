@@ -29,6 +29,7 @@ mod json_query;
 mod junit;
 mod logging;
 mod math;
+mod memory;
 mod monitors;
 mod multipart;
 mod path;
@@ -104,6 +105,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     fs::register_fs_builtins(vm);
     vision::register_vision_builtins(vm);
     agent_state::register_agent_state_builtins(vm);
+    memory::register_memory_builtins(vm);
     process::register_process_builtins(vm);
     process::register_path_builtins(vm);
     // Clock builtins overlay process::timestamp/elapsed so they honor

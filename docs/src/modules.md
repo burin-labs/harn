@@ -80,7 +80,7 @@ code or inside any pipeline.
 `import "std/..."` is only needed for the Harn-written helper modules
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/path`, `std/vision`, `std/context`, `std/agent_state`, `std/agents`,
-`std/runtime`, `std/review`, `std/experiments`, `std/project`,
+`std/runtime`, `std/review`, `std/experiments`, `std/project`, `std/memory`,
 `std/prompt_library`, `std/monitors`, `std/worktree`,
 `std/checkpoint`). These add layered
 utilities on top of the core builtins; the core builtins themselves are
@@ -334,6 +334,25 @@ backend:
 
 See [Agent state](./agent-state.md) for the handle format, conflict
 policies, and backend details.
+
+### std/memory
+
+Append-only durable memory helpers for observations that should be recalled by
+later runs:
+
+| Function | Description |
+|---|---|
+| `memory_store(namespace, key, value, tags?, options?)` | Append a memory observation and return a `memory_record` dict |
+| `memory_recall(namespace, query, k?, options?)` | Return active records ranked by deterministic BM25-style lexical recall |
+| `memory_summarize(namespace, window?, options?)` | Return an extractive summary dict for a recent or query-filtered slice |
+| `memory_forget(namespace, predicate, options?)` | Append a soft-delete tombstone for matching records |
+
+The default backend writes JSONL events under `.harn/memory/<namespace>/`.
+Pass `{root: "path"}` in options to choose a different memory root. Forgetting
+is a tombstone operation, so the event log remains auditable.
+
+See [Memory](./memory.md) for record shape, predicate options, and replay
+notes.
 
 ### std/postgres
 

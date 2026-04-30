@@ -360,6 +360,8 @@ Imports starting with `std/` load embedded stdlib modules:
   (agent_state_init, agent_state_resume, agent_state_write,
   agent_state_read, agent_state_list, agent_state_delete,
   agent_state_handoff)
+- `import "std/memory"` — append-only durable memory helpers
+  (memory_store, memory_recall, memory_summarize, memory_forget)
 - `import "std/postgres"` — Postgres persistence helpers (pg_pool,
   pg_connect, pg_query, pg_query_one, pg_execute, pg_transaction, pg_close,
   pg_mock_pool, pg_mock_calls)
@@ -4041,6 +4043,46 @@ caller-supplied directory.
 
 Keys must be relative paths inside the session root. Absolute paths and
 parent-directory escapes are rejected.
+
+### std/memory module
+
+```harn
+import "std/memory"
+```
+
+Provides a first-class durable memory log for observations that should be
+available across later runs. The VM-native backend is append-only JSONL under
+`.harn/memory/<namespace>/events.jsonl` by default. Callers may pass
+`{root: "path"}` in options to place the memory root elsewhere. Namespace path
+segments must be relative and cannot escape the memory root.
+
+| Function | Notes |
+|---|---|
+| `memory_store(namespace, key, value, tags?, options?)` | Appends a memory observation and returns a `memory_record` dict |
+| `memory_recall(namespace, query, k?, options?)` | Returns up to `k` active records ranked by deterministic BM25-style lexical recall |
+| `memory_summarize(namespace, window?, options?)` | Returns `{_type: "memory_summary", count, text, records}` for a recent or query-filtered slice |
+| `memory_forget(namespace, predicate, options?)` | Appends a soft-delete event and returns `{forgotten, forgotten_ids}` |
+
+Records contain `{id, namespace, key, value, text, tags, stored_at,
+provenance}`. `memory_store` accepts `options.id`, `options.now`, and
+`options.provenance`; `id` defaults to UUIDv7 and `stored_at` defaults to the
+current UTC timestamp.
+
+`memory_recall` is deterministic and local: it tokenizes the key, tags, text,
+and JSON value, then ranks active records with BM25 plus small exact key/tag
+boosts. It does not call an embedding provider. Future vector or host-backed
+stores may reuse the same stdlib shape as long as recalled snippets are
+captured by the run record before replay.
+
+`memory_summarize` is deterministic by default. `window` may be `nil`, an
+integer limit, or a dict with `limit`, `query`, and `tag` / `tags`. The summary
+text is an extractive bullet list capped to a bounded size; callers that need
+LLM prose can pass `summary.records` to `llm_call`.
+
+`memory_forget` never rewrites or removes prior observations. It appends a
+tombstone event. Predicates may be a string (substring match against searchable
+record text) or a dict using any combination of `id`, `key`, `tag` / `tags`,
+and `query`; all provided dict predicates must match.
 
 ### std/postgres module
 

@@ -22,6 +22,7 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "async" => Some(include_str!("stdlib_async.harn")),
         "agents" => Some(include_str!("stdlib_agents.harn")),
         "agent_state" => Some(include_str!("stdlib_agent_state.harn")),
+        "memory" => Some(include_str!("stdlib_memory.harn")),
         "postgres" => Some(include_str!("stdlib_postgres.harn")),
         "checkpoint" => Some(include_str!("stdlib_checkpoint.harn")),
         "host" => Some(include_str!("stdlib_host.harn")),

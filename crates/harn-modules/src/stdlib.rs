@@ -39,6 +39,7 @@ pub(crate) const STDLIB_SOURCES: &[(&str, &str)] = &[
         "agent_state",
         include_str!("stdlib/stdlib_agent_state.harn"),
     ),
+    ("memory", include_str!("stdlib/stdlib_memory.harn")),
     ("postgres", include_str!("stdlib/stdlib_postgres.harn")),
     ("checkpoint", include_str!("stdlib/stdlib_checkpoint.harn")),
     ("host", include_str!("stdlib/stdlib_host.harn")),
