@@ -1,1 +1,1 @@
-declared as list<int>, but assigned iter
+expected list<int>, found iter

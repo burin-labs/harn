@@ -1,1 +1,1 @@
-declared as int, but assigned string
+expected int, found string

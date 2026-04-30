@@ -14,10 +14,15 @@ use super::scope::{InferredType, TypeScope};
 
 /// Simplify a union by removing `Never` members and collapsing.
 pub(super) fn simplify_union(members: Vec<TypeExpr>) -> TypeExpr {
-    let filtered: Vec<TypeExpr> = members
+    let mut filtered: Vec<TypeExpr> = Vec::new();
+    for member in members
         .into_iter()
         .filter(|m| !matches!(m, TypeExpr::Never))
-        .collect();
+    {
+        if !filtered.contains(&member) {
+            filtered.push(member);
+        }
+    }
     match filtered.len() {
         0 => TypeExpr::Never,
         1 => filtered.into_iter().next().unwrap(),
