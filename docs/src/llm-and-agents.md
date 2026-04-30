@@ -22,7 +22,8 @@ servers. Most scripts choose a provider with the `provider` option, the
 `HARN_LLM_PROVIDER` environment variable, or a model name that Harn can infer.
 
 See [LLM providers](./llm/providers.md) for API keys, local model setup,
-enterprise provider notes, and the capability matrix.
+enterprise provider notes, Ollama runtime environment variables, and the
+capability matrix.
 
 ## Capability matrix + `harn.toml` overrides
 

@@ -219,7 +219,10 @@ and model aliases without editing Rust-side registration code.
   `30m`; `forever`, `infinite`, and `-1` normalize to numeric `-1`, while
   `default` normalizes to `30m`. Hosts that persist IDE preferences should pass
   the raw stored values via `HARN_OLLAMA_*` and let Harn own validation and
-  defaults.
+  defaults. `HARN_OLLAMA_UNLOAD_GRACE_MS` wins over `OLLAMA_UNLOAD_GRACE_MS`
+  and defaults to `10000`; when an Ollama stream produces no chunks for longer
+  than this after the request starts, Harn emits one progress notification that
+  the model is warming up.
 
 ### Local OpenAI-compatible server
 

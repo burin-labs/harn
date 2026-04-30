@@ -74,8 +74,11 @@ pub fn ollama_keep_alive_override() -> Option<serde_json::Value> {
 
 pub const OLLAMA_DEFAULT_NUM_CTX: u64 = 32_768;
 pub const OLLAMA_DEFAULT_KEEP_ALIVE: &str = "30m";
+pub const OLLAMA_DEFAULT_UNLOAD_GRACE_MS: u64 = 10_000;
 pub const HARN_OLLAMA_NUM_CTX_ENV: &str = "HARN_OLLAMA_NUM_CTX";
 pub const HARN_OLLAMA_KEEP_ALIVE_ENV: &str = "HARN_OLLAMA_KEEP_ALIVE";
+pub const HARN_OLLAMA_UNLOAD_GRACE_MS_ENV: &str = "HARN_OLLAMA_UNLOAD_GRACE_MS";
+pub const OLLAMA_UNLOAD_GRACE_MS_ENV: &str = "OLLAMA_UNLOAD_GRACE_MS";
 pub const OLLAMA_HOST_ENV: &str = "OLLAMA_HOST";
 
 const OLLAMA_NUM_CTX_ENV_KEYS: [&str; 3] = [
@@ -84,6 +87,8 @@ const OLLAMA_NUM_CTX_ENV_KEYS: [&str; 3] = [
     "OLLAMA_NUM_CTX",
 ];
 const OLLAMA_KEEP_ALIVE_ENV_KEYS: [&str; 2] = [HARN_OLLAMA_KEEP_ALIVE_ENV, "OLLAMA_KEEP_ALIVE"];
+const OLLAMA_UNLOAD_GRACE_MS_ENV_KEYS: [&str; 2] =
+    [HARN_OLLAMA_UNLOAD_GRACE_MS_ENV, OLLAMA_UNLOAD_GRACE_MS_ENV];
 const OLLAMA_DEFAULT_BASE_URL: &str = "http://localhost:11434";
 
 #[derive(Clone, Debug, PartialEq)]
@@ -123,6 +128,15 @@ impl OllamaRuntimeSettings {
 
 pub fn ollama_runtime_settings_from_env() -> OllamaRuntimeSettings {
     OllamaRuntimeSettings::from_env()
+}
+
+pub(crate) fn ollama_unload_grace_duration_from_env() -> Duration {
+    Duration::from_millis(
+        OLLAMA_UNLOAD_GRACE_MS_ENV_KEYS
+            .iter()
+            .find_map(|key| std::env::var(key).ok().and_then(|raw| parse_grace_ms(&raw)))
+            .unwrap_or(OLLAMA_DEFAULT_UNLOAD_GRACE_MS),
+    )
 }
 
 pub async fn warm_ollama_model(model: &str, base_url: Option<&str>) -> Result<(), String> {
@@ -222,6 +236,10 @@ fn keep_alive_from_overrides(overrides: Option<&Value>) -> Option<Value> {
 
 fn parse_num_ctx(raw: &str) -> Option<u64> {
     raw.trim().parse::<u64>().ok().filter(|parsed| *parsed > 0)
+}
+
+fn parse_grace_ms(raw: &str) -> Option<u64> {
+    raw.trim().parse::<u64>().ok()
 }
 
 fn parse_num_ctx_value(value: &Value) -> Option<u64> {

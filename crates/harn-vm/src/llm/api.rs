@@ -37,6 +37,7 @@ pub(crate) use errors::{
     classify_llm_error, classify_provider_http_error, LlmErrorInfo, LlmErrorKind, LlmErrorReason,
 };
 pub(crate) use ollama::apply_ollama_runtime_settings;
+pub(crate) use ollama::ollama_unload_grace_duration_from_env;
 pub use ollama::{
     normalize_ollama_keep_alive, ollama_readiness, ollama_runtime_settings_from_env,
     warm_ollama_model, warm_ollama_model_with_settings, OllamaReadinessOptions,
@@ -658,6 +659,31 @@ mod tests {
         }
     }
 
+    fn spawn_llm_stub_many<F>(label: &'static str, connections: usize, mut body: F) -> LlmStub
+    where
+        F: FnMut(usize, &mut std::net::TcpStream) + Send + 'static,
+    {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind llm stub");
+        let addr = listener.local_addr().expect("stub addr");
+        let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let shutdown_thread = shutdown.clone();
+        let handle = std::thread::spawn(move || {
+            for attempt in 0..connections {
+                let Some(mut stream) = accept_with_shutdown(&listener, label, &shutdown_thread)
+                else {
+                    return;
+                };
+                body(attempt, &mut stream);
+            }
+        });
+        LlmStub {
+            addr,
+            shutdown,
+            handle: Some(handle),
+        }
+    }
+
     fn spawn_ollama_stub() -> LlmStub {
         spawn_llm_stub("ollama stub", |stream| {
             use std::io::{Read, Write};
@@ -671,6 +697,36 @@ mod tests {
                 "{\"message\":{\"role\":\"assistant\",\"content\":\"world\"},\"done\":false}\n",
                 "{\"done\":true,\"prompt_eval_count\":3,\"eval_count\":2,\"model\":\"stub-model\"}\n"
             );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/x-ndjson\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        })
+    }
+
+    fn spawn_ollama_empty_then_success_stub(
+        request_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) -> LlmStub {
+        spawn_llm_stub_many("ollama retry stub", 2, move |attempt, stream| {
+            use std::io::{Read, Write};
+            request_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut buf = vec![0u8; 8192];
+            let n = stream.read(&mut buf).expect("read request");
+            let request = String::from_utf8_lossy(&buf[..n]);
+            assert!(request.starts_with("POST /api/chat HTTP/1.1\r\n"));
+
+            let body = if attempt == 0 {
+                "{\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"prompt_eval_count\":5,\"eval_count\":3}\n"
+            } else {
+                concat!(
+                    "{\"message\":{\"role\":\"assistant\",\"content\":\"retried\"},\"done\":false,\"model\":\"stub-model\"}\n",
+                    "{\"done\":true,\"prompt_eval_count\":5,\"eval_count\":1,\"model\":\"stub-model\"}\n"
+                )
+            };
             let response = format!(
                 "HTTP/1.1 200 OK\r\ncontent-type: application/x-ndjson\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                 body.len(),
@@ -883,6 +939,60 @@ mod tests {
             assert_eq!(result.input_tokens, 3);
             assert_eq!(result.output_tokens, 2);
             assert_eq!(deltas.join(""), "hello world");
+        });
+    }
+
+    #[test]
+    fn ollama_empty_content_done_frame_retries_once() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _allow_llm_transport = allow_stubbed_llm_transport();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(2)
+            .build()
+            .expect("runtime");
+
+        runtime.block_on(async {
+            let request_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let server = spawn_ollama_empty_then_success_stub(request_count.clone());
+            let addr = server.addr();
+            let prev_ollama_host = std::env::var("OLLAMA_HOST").ok();
+            unsafe {
+                std::env::set_var("OLLAMA_HOST", format!("http://{addr}"));
+            }
+
+            let local = tokio::task::LocalSet::new();
+            let result = local
+                .run_until(async {
+                    let opts = base_opts("ollama");
+                    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                    let result = tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        vm_call_llm_full_streaming_offthread(&opts, tx),
+                    )
+                    .await
+                    .expect("llm call timed out")
+                    .expect("retry should recover from empty done frame");
+
+                    let mut deltas = Vec::new();
+                    while let Ok(delta) = rx.try_recv() {
+                        deltas.push(delta);
+                    }
+                    (result, deltas)
+                })
+                .await;
+
+            match prev_ollama_host {
+                Some(value) => unsafe { std::env::set_var("OLLAMA_HOST", value) },
+                None => unsafe { std::env::remove_var("OLLAMA_HOST") },
+            }
+
+            drop(server);
+
+            let (result, deltas) = result;
+            assert_eq!(request_count.load(std::sync::atomic::Ordering::SeqCst), 2);
+            assert_eq!(result.text, "retried");
+            assert_eq!(deltas.join(""), "retried");
         });
     }
 

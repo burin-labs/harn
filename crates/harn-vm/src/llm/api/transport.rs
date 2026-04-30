@@ -4,7 +4,7 @@
 //! the wire-format layer below that.
 
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::agent_events::{AgentEvent, ToolCallStatus};
 use crate::value::{VmError, VmValue};
@@ -306,61 +306,94 @@ pub(crate) async fn vm_call_llm_api_with_body(
             let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
             tx
         };
-        let response = req.send().await.map_err(|e| {
-            let kind = if e.is_timeout() {
-                "timeout"
-            } else if e.is_connect() {
-                "connect"
-            } else if e.is_request() {
-                "request_build"
-            } else if e.is_body() {
-                "body"
-            } else {
-                "unknown"
-            };
-            // "unknown" uses Debug repr to surface the inner cause.
-            let detail = if kind == "unknown" {
-                format!("{provider} stream error ({kind}): {e:?}")
-            } else {
-                format!("{provider} stream error ({kind}): {e}")
-            };
-            VmError::Thrown(VmValue::String(Rc::from(detail)))
-        })?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let retry_after = response
-                .headers()
-                .get("retry-after")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string());
-            let body = response.text().await.unwrap_or_default();
-            let msg = classify_transport_http_error(
+        let max_attempts = if is_ollama { 2 } else { 1 };
+        let unload_grace = if is_ollama {
+            crate::llm::api::ollama_unload_grace_duration_from_env()
+        } else {
+            Duration::ZERO
+        };
+        let mut ollama_warmup_gate = false;
+        for attempt in 0..max_attempts {
+            let req = client
+                .post(resolved.url())
+                .header("Content-Type", "application/json")
+                .timeout(std::time::Duration::from_secs(opts.resolve_timeout()))
+                .json(&body);
+            let mut req = resolved.apply_headers(req, &opts.api_key);
+            if is_anthropic_style && !opts.anthropic_beta_features.is_empty() {
+                req = req.header("anthropic-beta", opts.anthropic_beta_features.join(","));
+            }
+            let response = send_stream_request_with_ollama_warmup(
+                req,
                 provider,
-                status,
-                retry_after.as_deref(),
-                &body,
-                is_anthropic_style,
+                model,
                 is_ollama,
-            );
-            return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
-        }
-        let ct = response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        if ct.contains("text/event-stream") {
-            return vm_call_llm_api_sse_from_response(
+                unload_grace,
+                &mut ollama_warmup_gate,
+            )
+            .await?;
+            if !response.status().is_success() {
+                let status = response.status();
+                let retry_after = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+                let body = response.text().await.unwrap_or_default();
+                let msg = classify_transport_http_error(
+                    provider,
+                    status,
+                    retry_after.as_deref(),
+                    &body,
+                    is_anthropic_style,
+                    is_ollama,
+                );
+                return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
+            }
+            let is_sse = response
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|ct| ct.contains("text/event-stream"));
+            if is_sse {
+                return vm_call_llm_api_sse_from_response(
+                    response,
+                    provider,
+                    model,
+                    &resolved,
+                    tx,
+                    opts.session_id.as_deref(),
+                )
+                .await;
+            }
+            match vm_call_llm_api_ndjson_from_response(
                 response,
                 provider,
                 model,
-                &resolved,
-                tx,
-                opts.session_id.as_deref(),
+                tx.clone(),
+                unload_grace,
+                &mut ollama_warmup_gate,
             )
-            .await;
+            .await
+            {
+                Ok(result) => return Ok(result),
+                Err(err)
+                    if is_ollama
+                        && attempt + 1 < max_attempts
+                        && is_ollama_empty_content_parser_bug(&err) =>
+                {
+                    crate::events::log_warn(
+                        "llm",
+                        &format!(
+                            "ollama model {model} returned empty content with eval_count; retrying once"
+                        ),
+                    );
+                    continue;
+                }
+                Err(err) => return Err(err),
+            }
         }
-        return vm_call_llm_api_ndjson_from_response(response, provider, model, tx).await;
+        unreachable!("streaming LLM attempt loop exhausted without returning");
     }
 
     let response = req.send().await.map_err(|e| {
@@ -469,6 +502,53 @@ fn try_emit_partial_tool_args(
         parsing: None,
     };
     crate::llm::agent::emit_agent_event_sync(&event);
+}
+
+async fn send_stream_request_with_ollama_warmup(
+    req: reqwest::RequestBuilder,
+    provider: &str,
+    model: &str,
+    is_ollama: bool,
+    unload_grace: Duration,
+    warmup_gate: &mut bool,
+) -> Result<reqwest::Response, VmError> {
+    let send = req.send();
+    if !is_ollama || *warmup_gate || unload_grace.is_zero() {
+        return send
+            .await
+            .map_err(|error| stream_send_error(provider, error));
+    }
+
+    tokio::pin!(send);
+    tokio::select! {
+        response = &mut send => response.map_err(|error| stream_send_error(provider, error)),
+        _ = tokio::time::sleep(unload_grace) => {
+            *warmup_gate = true;
+            emit_ollama_warmup_progress(model);
+            send.await.map_err(|error| stream_send_error(provider, error))
+        }
+    }
+}
+
+fn stream_send_error(provider: &str, error: reqwest::Error) -> VmError {
+    let kind = if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() {
+        "connect"
+    } else if error.is_request() {
+        "request_build"
+    } else if error.is_body() {
+        "body"
+    } else {
+        "unknown"
+    };
+    // "unknown" uses Debug repr to surface the inner cause.
+    let detail = if kind == "unknown" {
+        format!("{provider} stream error ({kind}): {error:?}")
+    } else {
+        format!("{provider} stream error ({kind}): {error}")
+    };
+    VmError::Thrown(VmValue::String(Rc::from(detail)))
 }
 
 /// Map an Anthropic `tool_use` block id (or, as a fallback, an
@@ -1007,14 +1087,31 @@ async fn vm_call_llm_api_ndjson_from_response(
     provider: &str,
     model: &str,
     delta_tx: DeltaSender,
+    unload_grace: Duration,
+    warmup_gate: &mut bool,
 ) -> Result<LlmResult, VmError> {
-    use tokio::io::AsyncBufReadExt;
     use tokio_stream::StreamExt;
 
     let stream = response.bytes_stream();
     let reader = tokio::io::BufReader::new(tokio_util::io::StreamReader::new(
         stream.map(|r| r.map_err(std::io::Error::other)),
     ));
+    consume_ollama_ndjson_lines(reader, provider, model, delta_tx, unload_grace, warmup_gate).await
+}
+
+async fn consume_ollama_ndjson_lines<R>(
+    reader: R,
+    provider: &str,
+    model: &str,
+    delta_tx: DeltaSender,
+    unload_grace: Duration,
+    warmup_gate: &mut bool,
+) -> Result<LlmResult, VmError>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
+    use tokio::io::AsyncBufReadExt;
+
     let mut lines = reader.lines();
 
     let mut text = String::new();
@@ -1025,15 +1122,35 @@ async fn vm_call_llm_api_ndjson_from_response(
     let mut thinking_text = String::new();
     let mut tool_calls = Vec::new();
     let mut blocks = Vec::new();
+    let mut saw_done = false;
+    let mut saw_chunk = false;
 
-    while let Ok(Some(line)) = lines.next_line().await {
+    loop {
+        let line = next_ollama_ndjson_line(&mut lines, model, unload_grace, warmup_gate)
+            .await
+            .map_err(|error| {
+                VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "ollama stream error: unexpected EOF or read failure before done=true: {error}"
+                ))))
+            })?;
+        let Some(line) = line else {
+            break;
+        };
+        *warmup_gate = true;
         if line.is_empty() {
             continue;
         }
-        let json: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
+        let data = line.strip_prefix("data: ").unwrap_or(&line);
+        if data == "[DONE]" {
+            break;
+        }
+        let json: serde_json::Value = serde_json::from_str(data).map_err(|error| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "ollama stream parse error: partial or invalid NDJSON frame before done=true: {error}; line={}",
+                &data[..data.len().min(200)]
+            ))))
+        })?;
+        saw_chunk = true;
 
         // Ollama streams content and thinking as separate channels for
         // reasoning-capable models (gemma3/4, qwen3, etc.); we always set
@@ -1066,8 +1183,20 @@ async fn vm_call_llm_api_ndjson_from_response(
             if let Some(n) = json["eval_count"].as_i64() {
                 output_tokens = n;
             }
+            saw_done = true;
             break;
         }
+    }
+
+    if !saw_done {
+        let suffix = if saw_chunk {
+            " after partial content"
+        } else {
+            " before any chunks"
+        };
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "ollama stream error: unexpected EOF before done=true{suffix}"
+        )))));
     }
 
     let thinking = if thinking_text.is_empty() {
@@ -1087,7 +1216,7 @@ async fn vm_call_llm_api_ndjson_from_response(
     // iterations on a no-op.
     if text.is_empty() && tool_calls.is_empty() && output_tokens > 0 {
         return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "ollama model {model} reported eval_count={output_tokens} but delivered no content or thinking — likely a server-side parser bug; try a different model"
+            "ollama model {model} reported eval_count={output_tokens} but delivered no content or thinking [ollama_empty_content_parser_bug]"
         )))));
     }
 
@@ -1112,11 +1241,64 @@ async fn vm_call_llm_api_ndjson_from_response(
     })
 }
 
+async fn next_ollama_ndjson_line<R>(
+    lines: &mut tokio::io::Lines<R>,
+    model: &str,
+    unload_grace: Duration,
+    warmup_progress_sent: &mut bool,
+) -> std::io::Result<Option<String>>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
+    if *warmup_progress_sent || unload_grace.is_zero() {
+        return lines.next_line().await;
+    }
+
+    tokio::select! {
+        line = lines.next_line() => line,
+        _ = tokio::time::sleep(unload_grace) => {
+            *warmup_progress_sent = true;
+            emit_ollama_warmup_progress(model);
+            lines.next_line().await
+        }
+    }
+}
+
+fn emit_ollama_warmup_progress(model: &str) {
+    let message = format!("warming up Ollama model {model}");
+    if let Some(bridge) = crate::llm::current_host_bridge() {
+        bridge.send_progress(
+            "llm",
+            &message,
+            None,
+            None,
+            Some(serde_json::json!({
+                "provider": "ollama",
+                "model": model,
+                "reason": "model_unload",
+            })),
+        );
+    }
+    crate::events::log_info("llm", &message);
+}
+
+fn is_ollama_empty_content_parser_bug(err: &VmError) -> bool {
+    match err {
+        VmError::Thrown(VmValue::String(message)) => {
+            message.contains("[ollama_empty_content_parser_bug]")
+        }
+        VmError::Runtime(message) => message.contains("[ollama_empty_content_parser_bug]"),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        append_ollama_tool_calls, parse_ollama_tool_arguments, should_request_stream_usage,
+        append_ollama_tool_calls, consume_ollama_ndjson_lines, parse_ollama_tool_arguments,
+        should_request_stream_usage,
     };
+    use std::time::Duration;
 
     #[test]
     fn stream_usage_requested_for_openai_compatible_endpoints() {
@@ -1169,6 +1351,47 @@ mod tests {
         assert_eq!(tool_calls[0]["arguments"]["path"], "README.md");
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0]["type"], "tool_call");
+    }
+
+    #[tokio::test]
+    async fn ollama_ndjson_empty_content_eval_count_is_marked_for_retry() {
+        let body = b"{\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"prompt_eval_count\":10,\"eval_count\":4}\n";
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut warmup_gate = false;
+        let err = consume_ollama_ndjson_lines(
+            &body[..],
+            "ollama",
+            "stub-model",
+            tx,
+            Duration::ZERO,
+            &mut warmup_gate,
+        )
+        .await
+        .expect_err("empty Ollama parser-bug response should fail");
+        assert!(
+            err.to_string()
+                .contains("[ollama_empty_content_parser_bug]"),
+            "err was: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ollama_ndjson_requires_done_frame() {
+        let body =
+            b"{\"message\":{\"role\":\"assistant\",\"content\":\"partial\"},\"done\":false}\n";
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut warmup_gate = false;
+        let err = consume_ollama_ndjson_lines(
+            &body[..],
+            "ollama",
+            "stub-model",
+            tx,
+            Duration::ZERO,
+            &mut warmup_gate,
+        )
+        .await
+        .expect_err("truncated Ollama stream should fail");
+        assert!(err.to_string().contains("unexpected EOF before done=true"));
     }
 }
 
