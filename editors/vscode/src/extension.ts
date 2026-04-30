@@ -54,11 +54,11 @@ class HarnDebugAdapterFactory
 export function activate(context: vscode.ExtensionContext) {
   const config = vscode.workspace.getConfiguration("harn");
   const harnPath = config.get<string>("path", "harn");
+  const lspPath = config.get<string>("lspPath", "harn-lsp");
 
   // --- LSP client ---
   const serverOptions: ServerOptions = {
-    command: harnPath,
-    args: ["lsp"],
+    command: lspPath,
   };
 
   const clientOptions: LanguageClientOptions = {

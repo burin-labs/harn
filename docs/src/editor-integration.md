@@ -49,6 +49,7 @@ over stdin/stdout using the Language Server Protocol.
 | **Completions** | Scope-aware: pipelines, functions, variables, parameters, enums, structs, interfaces. Dot-completions for methods plus inferred shape fields, struct members, and enum payload fields. Builtins and keywords. |
 | **Go-to-definition** | Jump to the declaration of pipelines, functions, variables, enums, structs, and interfaces. Cross-file navigation walks the recursive module graph (relative paths and `.harn/packages/`), so symbols reachable through any number of transitive imports resolve. |
 | **Find references** | Locate all usages of a symbol across the document |
+| **Call hierarchy** | Navigate incoming and outgoing calls for pipelines, functions, tools, and methods in open documents |
 | **Hover** | Shows type information and documentation for builtins |
 | **Signature help** | Parameter hints while typing function arguments |
 | **Document symbols** | Outline view of pipelines, functions, structs, enums |
@@ -57,6 +58,8 @@ over stdin/stdout using the Language Server Protocol.
 | **Code actions** | Per-diagnostic quick fixes for lint warnings (`var`→`let`, boolean simplification, unused-import removal, string-interpolation conversion, unnecessary-cast removal) and type errors. A bulk `source.fixAll.harn` action applies every available autofix in the document at once — wire it into `editor.codeActionsOnSave` to autofix on save. |
 | **Rename** | Rename symbols across the document |
 | **Document formatting** | Delegates to `harn-fmt` for format-on-save support |
+| **On-type formatting** | Reuses `harn-fmt` after semicolons and closing braces for format-as-you-type |
+| **Folding ranges** | Folds declaration bodies, multiline strings/comments, block expressions, and multiline match arms |
 
 ### Configuration
 
@@ -64,6 +67,9 @@ Most editors auto-detect the LSP binary. For manual configuration, point
 your editor's LSP client at the `harn-lsp` binary with no arguments. The
 server uses `TextDocumentSyncKind::FULL` and debounces full-document reparses
 so diagnostics stay responsive while you are typing.
+
+The VS Code extension starts `harn-lsp` by default. Set `harn.lspPath` if
+the language server is installed somewhere else.
 
 ## Debug adapter (DAP)
 

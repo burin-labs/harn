@@ -61,6 +61,12 @@ impl HarnLsp {
                 )),
                 rename_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
+                document_on_type_formatting_provider: Some(DocumentOnTypeFormattingOptions {
+                    first_trigger_character: ";".to_string(),
+                    more_trigger_character: Some(vec!["}".to_string()]),
+                }),
+                folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
                 inlay_hint_provider: Some(OneOf::Right(InlayHintServerCapabilities::Options(
                     InlayHintOptions {
                         work_done_progress_options: Default::default(),

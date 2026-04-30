@@ -1,5 +1,7 @@
+mod call_hierarchy;
 mod constants;
 mod document;
+mod folding;
 mod handlers;
 mod helpers;
 mod references;
