@@ -1,8 +1,9 @@
+use super::errors::OrchestratorError;
 use crate::cli::OrchestratorReplayArgs;
 
 use super::common::{load_local_runtime, print_json, trigger_replay};
 
-pub(super) async fn run(args: OrchestratorReplayArgs) -> Result<(), String> {
+pub(super) async fn run(args: OrchestratorReplayArgs) -> Result<(), OrchestratorError> {
     let mut ctx = load_local_runtime(&args.local).await?;
     let handle = trigger_replay(&mut ctx, &args.event_id).await?;
     if args.json {

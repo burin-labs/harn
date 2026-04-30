@@ -1,3 +1,4 @@
+use super::errors::OrchestratorError;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -97,7 +98,7 @@ impl ListenerReadiness {
 
 pub(crate) struct AdminReloadRequest {
     pub(crate) source: String,
-    pub(crate) response_tx: Option<oneshot::Sender<Result<JsonValue, String>>>,
+    pub(crate) response_tx: Option<oneshot::Sender<Result<JsonValue, OrchestratorError>>>,
 }
 
 #[derive(Clone)]
@@ -111,16 +112,19 @@ impl AdminReloadHandle {
         (Self { tx }, rx)
     }
 
-    pub(crate) fn trigger(&self, source: impl Into<String>) -> Result<(), String> {
+    pub(crate) fn trigger(&self, source: impl Into<String>) -> Result<(), OrchestratorError> {
         self.tx
             .send(AdminReloadRequest {
                 source: source.into(),
                 response_tx: None,
             })
-            .map_err(|_| "reload channel is closed".to_string())
+            .map_err(|_| OrchestratorError::Listener("reload channel is closed".to_string()))
     }
 
-    pub(crate) async fn request(&self, source: impl Into<String>) -> Result<JsonValue, String> {
+    pub(crate) async fn request(
+        &self,
+        source: impl Into<String>,
+    ) -> Result<JsonValue, OrchestratorError> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(AdminReloadRequest {
@@ -134,7 +138,7 @@ impl AdminReloadHandle {
 }
 
 impl ListenerRuntime {
-    pub(crate) async fn start(config: ListenerConfig) -> Result<Self, String> {
+    pub(crate) async fn start(config: ListenerConfig) -> Result<Self, OrchestratorError> {
         let pending_topic =
             Topic::new(PENDING_TOPIC).map_err(|error| format!("invalid pending topic: {error}"))?;
         let inbox_metrics = Arc::new(harn_vm::MetricsRegistry::default());
@@ -264,14 +268,14 @@ impl ListenerRuntime {
         self.routes.snapshot_metrics()
     }
 
-    pub(crate) fn reload_routes(&self, routes: Vec<RouteConfig>) -> Result<(), String> {
+    pub(crate) fn reload_routes(&self, routes: Vec<RouteConfig>) -> Result<(), OrchestratorError> {
         self.routes.reload(routes)
     }
 
     pub(crate) async fn shutdown(
         self,
         timeout: Duration,
-    ) -> Result<BTreeMap<String, TriggerMetricSnapshot>, String> {
+    ) -> Result<BTreeMap<String, TriggerMetricSnapshot>, OrchestratorError> {
         let Self { server, routes, .. } = self;
         server.shutdown(timeout).await?;
         Ok(routes.snapshot_metrics())
@@ -301,7 +305,7 @@ impl RouteConfig {
     pub(crate) fn from_trigger(
         trigger: &CollectedManifestTrigger,
         binding_version: u32,
-    ) -> Result<Option<Self>, String> {
+    ) -> Result<Option<Self>, OrchestratorError> {
         match trigger.config.kind {
             TriggerKind::Webhook => {
                 let provider = trigger.config.provider.clone();
@@ -323,7 +327,7 @@ impl RouteConfig {
                         _ => {
                             return Err(format!(
                                 "HTTP listener does not yet support webhook provider '{other}' on this branch"
-                            ))
+                            ).into())
                         }
                     },
                 };
@@ -538,7 +542,7 @@ impl RouteRegistry {
         pending_topic: Topic,
         request_gate: TestRequestGate,
         tenant_store: Option<Arc<harn_vm::TenantStore>>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, OrchestratorError> {
         let registry = Self {
             routes_by_path: RwLock::new(BTreeMap::new()),
             metrics_by_trigger_id: Mutex::new(BTreeMap::new()),
@@ -556,7 +560,7 @@ impl RouteRegistry {
         Ok(registry)
     }
 
-    fn reload(&self, routes: Vec<RouteConfig>) -> Result<(), String> {
+    fn reload(&self, routes: Vec<RouteConfig>) -> Result<(), OrchestratorError> {
         validate_unique_route_paths(&routes)?;
         let mut next_routes = BTreeMap::new();
         let mut metrics_by_trigger_id = self
@@ -797,14 +801,15 @@ fn finalize_response(context: &RouteContext, mut response: Response) -> Response
     response
 }
 
-fn validate_unique_route_paths(routes: &[RouteConfig]) -> Result<(), String> {
+fn validate_unique_route_paths(routes: &[RouteConfig]) -> Result<(), OrchestratorError> {
     let mut seen_paths = BTreeSet::new();
     for route in routes {
         if !seen_paths.insert(route.path.clone()) {
             return Err(format!(
                 "trigger route '{}' is configured more than once",
                 route.path
-            ));
+            )
+            .into());
         }
     }
     Ok(())
@@ -1115,7 +1120,7 @@ async fn ingest_trigger(
                 );
                 let response = finalize_response(
                     &context,
-                    (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+                    (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
                 );
                 context.metrics_registry.record_http_request(
                     &context.route.path,
@@ -1311,7 +1316,7 @@ async fn admin_reload_endpoint(
             axum::Json(json!({
                 "status": "error",
                 "source": source,
-                "error": error,
+                "error": error.to_string(),
             })),
         )
             .into_response(),
@@ -1327,7 +1332,10 @@ impl AcpWebSocketHub {
         })
     }
 
-    fn spawn_worker(self: &Arc<Self>, pipeline: Option<String>) -> Result<Arc<AcpWorker>, String> {
+    fn spawn_worker(
+        self: &Arc<Self>,
+        pipeline: Option<String>,
+    ) -> Result<Arc<AcpWorker>, OrchestratorError> {
         let worker_id = uuid::Uuid::new_v4().to_string();
         let (to_acp_tx, to_acp_rx) = mpsc::unbounded_channel::<JsonValue>();
         let (from_acp_tx, mut from_acp_rx) = mpsc::unbounded_channel::<String>();
@@ -1765,7 +1773,7 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
                                                 &state.event_log,
                                                 &connection_id,
                                                 "connection_failed",
-                                                json!({"reason": error}),
+                                                json!({"reason": error.to_string()}),
                                             )
                                             .await;
                                             break;
@@ -2505,7 +2513,7 @@ fn enqueue_summary_response(context: &RouteContext, summary: EnqueueSummary) -> 
         .into_response()
 }
 
-fn trigger_path(trigger: &CollectedManifestTrigger) -> Result<String, String> {
+fn trigger_path(trigger: &CollectedManifestTrigger) -> Result<String, OrchestratorError> {
     let path = trigger
         .config
         .kind_specific
@@ -2514,10 +2522,7 @@ fn trigger_path(trigger: &CollectedManifestTrigger) -> Result<String, String> {
         .map(str::to_string)
         .unwrap_or_else(|| format!("/triggers/{}", trigger.config.id));
     if !path.starts_with('/') {
-        return Err(format!(
-            "trigger '{}' path must start with '/'",
-            trigger.config.id
-        ));
+        return Err(format!("trigger '{}' path must start with '/'", trigger.config.id).into());
     }
     Ok(path)
 }
@@ -2583,7 +2588,7 @@ pub(crate) struct ListenerAuth {
 }
 
 impl ListenerAuth {
-    pub(crate) fn from_env(required: bool) -> Result<Self, String> {
+    pub(crate) fn from_env(required: bool) -> Result<Self, OrchestratorError> {
         let api_keys = std::env::var(API_KEYS_ENV)
             .ok()
             .map(|value| {
@@ -2603,12 +2608,13 @@ impl ListenerAuth {
         if required && api_keys.is_empty() {
             return Err(format!(
                 "{API_KEYS_ENV} must contain at least one API key when a2a-push routes are configured"
-            ));
+            ).into());
         }
         if required && hmac_secret.is_none() {
             return Err(format!(
                 "{HMAC_SECRET_ENV} must be set when a2a-push routes are configured"
-            ));
+            )
+            .into());
         }
 
         Ok(Self {
@@ -2986,15 +2992,15 @@ async fn wait_for_test_release_file(path: &Path) {
     }
 }
 
-async fn mark_test_file(path: &Path) -> Result<(), String> {
+async fn mark_test_file(path: &Path) -> Result<(), OrchestratorError> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
             .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
     }
-    tokio::fs::write(path, b"1")
-        .await
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+    tokio::fs::write(path, b"1").await.map_err(|error| {
+        OrchestratorError::Listener(format!("failed to write {}: {error}", path.display()))
+    })
 }
 
 fn listener_binding_key(trigger_id: &str, binding_version: u32) -> String {

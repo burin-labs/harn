@@ -704,7 +704,10 @@ pub fn on_new_issue(event: TriggerEvent) -> string {
     let error = collect_manifest_triggers(&mut test_vm(), &load_runtime_extensions(&harn_file))
         .await
         .expect_err("missing match should be rejected");
-    assert!(error.contains("trigger table missing match"), "{error}");
+    assert!(
+        error.to_string().contains("trigger table missing match"),
+        "{error}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -743,7 +746,9 @@ pub fn on_market_event(event: TriggerEvent) -> string {
         .await
         .expect_err("missing source match should be rejected");
     assert!(
-        error.contains("trigger source 'quotes' missing match"),
+        error
+            .to_string()
+            .contains("trigger source 'quotes' missing match"),
         "{error}"
     );
 }
@@ -914,7 +919,9 @@ secrets = { signing_secret = "github/webhook-secret" }
     let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
         .unwrap_err();
-    assert!(error.contains("duplicate trigger id 'duplicate'"));
+    assert!(error
+        .to_string()
+        .contains("duplicate trigger id 'duplicate'"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -936,7 +943,9 @@ handler = "worker://queue"
     let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
         .unwrap_err();
-    assert!(error.contains("provider 'made-up' is not registered"));
+    assert!(error
+        .to_string()
+        .contains("provider 'made-up' is not registered"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -960,7 +969,9 @@ secrets = { signing_secret = "github/webhook-secret" }
     let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
         .unwrap_err();
-    assert!(error.contains("`allow_cleartext` must be a boolean"));
+    assert!(error
+        .to_string()
+        .contains("`allow_cleartext` must be a boolean"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -998,7 +1009,7 @@ pub fn on_new_issue(event: TriggerEvent) -> string {
     let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
         .unwrap_err();
-    assert!(error.contains("priority requires concurrency"));
+    assert!(error.to_string().contains("priority requires concurrency"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1022,7 +1033,9 @@ secrets = { signing_secret = "github/webhook-secret" }
     let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
         .unwrap_err();
-    assert!(error.contains("only valid for `a2a://...` handlers"));
+    assert!(error
+        .to_string()
+        .contains("only valid for `a2a://...` handlers"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1047,7 +1060,9 @@ secrets = { signing_secret = "github/webhook-secret" }
     let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
         .unwrap_err();
-    assert!(error.contains("does not support trigger kind 'cron'"));
+    assert!(error
+        .to_string()
+        .contains("does not support trigger kind 'cron'"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1069,7 +1084,9 @@ handler = "worker://queue"
     let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
         .unwrap_err();
-    assert!(error.contains("requires secret 'signing_secret'"));
+    assert!(error
+        .to_string()
+        .contains("requires secret 'signing_secret'"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1106,7 +1123,9 @@ pub fn on_new_issue(event: TriggerEvent) {
     let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
         .unwrap_err();
-    assert!(error.contains("handler 'handlers::missing' is not exported"));
+    assert!(error
+        .to_string()
+        .contains("handler 'handlers::missing' is not exported"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1130,7 +1149,7 @@ timezone = "America/Los_Angeles"
     let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
         .unwrap_err();
-    assert!(error.contains("invalid cron schedule"));
+    assert!(error.to_string().contains("invalid cron schedule"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1154,7 +1173,7 @@ timezone = "+02:00"
     let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
         .unwrap_err();
-    assert!(error.contains("use an IANA timezone name"));
+    assert!(error.to_string().contains("use an IANA timezone name"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1178,7 +1197,7 @@ secrets = { signing_secret = "github/webhook-secret" }
     let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
         .unwrap_err();
-    assert!(error.contains("dedupe_key"));
+    assert!(error.to_string().contains("dedupe_key"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1203,7 +1222,7 @@ retry = { retention_days = 0 }
         .await
         .unwrap_err();
     assert!(
-        error.contains("retry.retention_days"),
+        error.to_string().contains("retry.retention_days"),
         "actual error: {error}"
     );
 }
@@ -1228,7 +1247,7 @@ secrets = { signing_secret = "slack/webhook-secret" }
     let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
         .unwrap_err();
-    assert!(error.contains("uses namespace 'slack'"));
+    assert!(error.to_string().contains("uses namespace 'slack'"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1266,7 +1285,9 @@ pub fn should_handle(event: TriggerEvent) -> string {
     let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
         .unwrap_err();
-    assert!(error.contains("must have signature fn(TriggerEvent) -> bool or Result<bool, _>"));
+    assert!(error
+        .to_string()
+        .contains("must have signature fn(TriggerEvent) -> bool or Result<bool, _>"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1290,7 +1311,9 @@ secrets = { signing_secret = "github/webhook-secret" }
     let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
         .unwrap_err();
-    assert!(error.contains("when_budget requires a when predicate"));
+    assert!(error
+        .to_string()
+        .contains("when_budget requires a when predicate"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1329,5 +1352,5 @@ pub fn should_handle(event: TriggerEvent) -> bool {
     let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
         .unwrap_err();
-    assert!(error.contains("when_budget.timeout"));
+    assert!(error.to_string().contains("when_budget.timeout"));
 }

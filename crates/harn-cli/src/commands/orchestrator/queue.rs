@@ -1,3 +1,4 @@
+use super::errors::OrchestratorError;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
@@ -15,7 +16,7 @@ use super::common::{
     TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OUTBOX_TOPIC,
 };
 
-pub(super) async fn run(args: OrchestratorQueueArgs) -> Result<(), String> {
+pub(super) async fn run(args: OrchestratorQueueArgs) -> Result<(), OrchestratorError> {
     match args.command.unwrap_or(OrchestratorQueueCommand::Ls(
         OrchestratorQueueLsArgs::default(),
     )) {
@@ -28,7 +29,7 @@ pub(super) async fn run(args: OrchestratorQueueArgs) -> Result<(), String> {
 async fn run_ls(
     local: crate::cli::OrchestratorLocalArgs,
     args: OrchestratorQueueLsArgs,
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     let ctx = load_local_runtime(&local).await?;
     let overview = build_overview(&ctx.event_log).await?;
     if args.json {
@@ -180,7 +181,7 @@ async fn run_ls(
 async fn run_drain(
     local: crate::cli::OrchestratorLocalArgs,
     args: OrchestratorQueueDrainArgs,
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     let ctx = load_local_runtime(&local).await?;
     let queue = harn_vm::WorkerQueue::new(ctx.event_log.clone());
     let dispatcher = harn_vm::Dispatcher::with_event_log(ctx.vm, ctx.event_log.clone());
@@ -325,11 +326,11 @@ async fn run_drain(
 async fn run_purge(
     local: crate::cli::OrchestratorLocalArgs,
     args: OrchestratorQueuePurgeArgs,
-) -> Result<(), String> {
+) -> Result<(), OrchestratorError> {
     if !args.confirm {
-        return Err(
+        return Err(OrchestratorError::Queue(
             "queue purge is destructive; rerun with `--confirm` to drop ready jobs".to_string(),
-        );
+        ));
     }
     let ctx = load_local_runtime(&local).await?;
     let queue = harn_vm::WorkerQueue::new(ctx.event_log.clone());
@@ -370,7 +371,7 @@ async fn run_purge(
 
 async fn build_overview(
     event_log: &Arc<harn_vm::event_log::AnyEventLog>,
-) -> Result<QueueOverview, String> {
+) -> Result<QueueOverview, OrchestratorError> {
     let dispatcher = harn_vm::snapshot_dispatcher_stats();
     let outbox = read_topic(event_log, TRIGGER_OUTBOX_TOPIC).await?;
     let attempts = read_topic(event_log, TRIGGER_ATTEMPTS_TOPIC).await?;

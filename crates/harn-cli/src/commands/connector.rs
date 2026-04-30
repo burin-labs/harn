@@ -376,7 +376,7 @@ fn validate_connector_package_metadata(anchor: &Path) -> ConnectorGateCheck {
                 extensions.provider_connectors.len()
             ));
         }
-        Err(error) => failures.push(error),
+        Err(error) => failures.push(error.to_string()),
     }
 
     gate_check_from_findings("package metadata", started, failures, details)

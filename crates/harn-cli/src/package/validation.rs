@@ -1,3 +1,4 @@
+use super::errors::PackageError;
 use super::*;
 
 pub(crate) fn merge_capability_overrides(
@@ -290,8 +291,15 @@ pub(crate) fn manifest_trigger_location(trigger: &ResolvedTriggerConfig) -> Stri
     )
 }
 
-pub(crate) fn trigger_error(trigger: &ResolvedTriggerConfig, message: impl Into<String>) -> String {
-    format!("{}: {}", manifest_trigger_location(trigger), message.into())
+pub(crate) fn trigger_error(
+    trigger: &ResolvedTriggerConfig,
+    message: impl Into<String>,
+) -> PackageError {
+    PackageError::Validation(format!(
+        "{}: {}",
+        manifest_trigger_location(trigger),
+        message.into()
+    ))
 }
 
 pub(crate) fn valid_identifier(value: &str) -> bool {
@@ -307,7 +315,7 @@ pub(crate) fn parse_local_trigger_ref(
     raw: &str,
     field_name: &str,
     trigger: &ResolvedTriggerConfig,
-) -> Result<TriggerFunctionRef, String> {
+) -> Result<TriggerFunctionRef, PackageError> {
     if raw.trim().is_empty() {
         return Err(trigger_error(
             trigger,
@@ -354,7 +362,7 @@ pub(crate) fn parse_local_trigger_ref(
 
 pub(crate) fn parse_trigger_handler_uri(
     trigger: &ResolvedTriggerConfig,
-) -> Result<TriggerHandlerUri, String> {
+) -> Result<TriggerHandlerUri, PackageError> {
     let raw = trigger.handler.trim();
     if let Some(target) = raw.strip_prefix("a2a://") {
         if target.is_empty() {
@@ -454,7 +462,7 @@ pub(crate) fn parse_jmespath_expression(
     trigger: &ResolvedTriggerConfig,
     field_name: &str,
     expr: &str,
-) -> Result<(), String> {
+) -> Result<(), PackageError> {
     jmespath::compile(expr).map(|_| ()).map_err(|error| {
         trigger_error(
             trigger,
@@ -463,10 +471,10 @@ pub(crate) fn parse_jmespath_expression(
     })
 }
 
-pub(crate) fn parse_duration_millis(raw: &str) -> Result<u64, String> {
+pub(crate) fn parse_duration_millis(raw: &str) -> Result<u64, PackageError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err("duration cannot be empty".to_string());
+        return Err("duration cannot be empty".to_string().into());
     }
     let (value, unit) = trimmed
         .char_indices()
@@ -482,9 +490,7 @@ pub(crate) fn parse_duration_millis(raw: &str) -> Result<u64, String> {
         "m" => 60_000,
         "h" => 3_600_000,
         _ => {
-            return Err(format!(
-                "invalid duration unit in '{raw}'; expected ms, s, m, or h"
-            ))
+            return Err(format!("invalid duration unit in '{raw}'; expected ms, s, m, or h").into())
         }
     };
     Ok(amount.saturating_mul(multiplier))
@@ -492,7 +498,7 @@ pub(crate) fn parse_duration_millis(raw: &str) -> Result<u64, String> {
 
 pub(crate) fn validate_static_trigger_config(
     trigger: &ResolvedTriggerConfig,
-) -> Result<(), String> {
+) -> Result<(), PackageError> {
     if let Some(message) = &trigger.shape_error {
         return Err(trigger_error(trigger, message));
     }
@@ -765,7 +771,9 @@ pub(crate) fn validate_static_trigger_config(
     Ok(())
 }
 
-pub(crate) fn validate_orchestrator_budget(manifest: Option<&Manifest>) -> Result<(), String> {
+pub(crate) fn validate_orchestrator_budget(
+    manifest: Option<&Manifest>,
+) -> Result<(), PackageError> {
     let Some(manifest) = manifest else {
         return Ok(());
     };
@@ -775,9 +783,9 @@ pub(crate) fn validate_orchestrator_budget(manifest: Option<&Manifest>) -> Resul
         .daily_cost_usd
         .is_some_and(|value| value.is_sign_negative())
     {
-        return Err(
+        return Err(PackageError::Validation(
             "orchestrator.budget.daily_cost_usd must be greater than or equal to 0".to_string(),
-        );
+        ));
     }
     if manifest
         .orchestrator
@@ -785,16 +793,16 @@ pub(crate) fn validate_orchestrator_budget(manifest: Option<&Manifest>) -> Resul
         .hourly_cost_usd
         .is_some_and(|value| value.is_sign_negative())
     {
-        return Err(
+        return Err(PackageError::Validation(
             "orchestrator.budget.hourly_cost_usd must be greater than or equal to 0".to_string(),
-        );
+        ));
     }
     Ok(())
 }
 
 pub(crate) fn validate_stream_trigger_config(
     trigger: &ResolvedTriggerConfig,
-) -> Result<(), String> {
+) -> Result<(), PackageError> {
     if let Some(window) = &trigger.window {
         validate_stream_window(trigger, window)?;
     }
@@ -831,7 +839,7 @@ pub(crate) fn validate_stream_trigger_config(
 pub(crate) fn validate_stream_window(
     trigger: &ResolvedTriggerConfig,
     window: &TriggerStreamWindowManifestSpec,
-) -> Result<(), String> {
+) -> Result<(), PackageError> {
     if window.max_items == Some(0) {
         return Err(trigger_error(
             trigger,
@@ -899,7 +907,7 @@ pub(crate) fn validate_stream_window(
 
 pub(crate) fn validate_static_trigger_configs(
     triggers: &[ResolvedTriggerConfig],
-) -> Result<(), String> {
+) -> Result<(), PackageError> {
     let mut seen_ids = HashSet::new();
     for trigger in triggers {
         validate_static_trigger_config(trigger)?;
@@ -916,10 +924,10 @@ pub(crate) fn validate_static_trigger_configs(
     Ok(())
 }
 
-pub(crate) fn parse_trigger_allow_cleartext(value: &toml::Value) -> Result<bool, String> {
+pub(crate) fn parse_trigger_allow_cleartext(value: &toml::Value) -> Result<bool, PackageError> {
     value
         .as_bool()
-        .ok_or_else(|| "`allow_cleartext` must be a boolean".to_string())
+        .ok_or_else(|| PackageError::Validation("`allow_cleartext` must be a boolean".to_string()))
 }
 
 pub(crate) fn manifest_module_source_path(
@@ -927,7 +935,7 @@ pub(crate) fn manifest_module_source_path(
     package_name: Option<&str>,
     exports: &HashMap<String, String>,
     module_name: Option<&str>,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, PackageError> {
     match module_name {
         None => {
             let path = manifest_dir.join("lib.harn");
@@ -937,7 +945,8 @@ pub(crate) fn manifest_module_source_path(
                 Err(format!(
                     "no lib.harn found next to manifest in {}",
                     manifest_dir.display()
-                ))
+                )
+                .into())
             }
         }
         Some(module_name) if package_name.is_some_and(|pkg| pkg == module_name) => {
@@ -949,7 +958,8 @@ pub(crate) fn manifest_module_source_path(
                     "module '{}' resolves to local lib.harn, but {} is missing",
                     module_name,
                     path.display()
-                ))
+                )
+                .into())
             }
         }
         Some(module_name) if exports.contains_key(module_name) => {
@@ -962,7 +972,8 @@ pub(crate) fn manifest_module_source_path(
                     "export '{}' resolves to {}, but that path does not exist",
                     module_name,
                     path.display()
-                ))
+                )
+                .into())
             }
         }
         Some(module_name) => {
@@ -974,7 +985,8 @@ pub(crate) fn manifest_module_source_path(
                     "module '{}' could not be resolved from {}",
                     module_name,
                     manifest_dir.display()
-                ))
+                )
+                .into())
             }
         }
     }
@@ -982,7 +994,7 @@ pub(crate) fn manifest_module_source_path(
 
 pub(crate) fn load_trigger_function_signatures(
     path: &Path,
-) -> Result<BTreeMap<String, TriggerFunctionSignature>, String> {
+) -> Result<BTreeMap<String, TriggerFunctionSignature>, PackageError> {
     let source = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let program = harn_parser::parse_source(&source)
@@ -1015,13 +1027,13 @@ pub(crate) async fn resolve_manifest_exports(
     package_name: Option<&str>,
     exports: &HashMap<String, String>,
     module_name: Option<&str>,
-) -> Result<ManifestModuleExports, String> {
+) -> Result<ManifestModuleExports, PackageError> {
     match module_name {
         None => {
             let lib_path = manifest_module_source_path(manifest_dir, package_name, exports, None)?;
             vm.load_module_exports(&lib_path)
                 .await
-                .map_err(|error| error.to_string())
+                .map_err(|error| PackageError::Validation(error.to_string()))
         }
         Some(module_name) if package_name.is_some_and(|name| name == module_name) => {
             let lib_path = manifest_module_source_path(
@@ -1032,7 +1044,7 @@ pub(crate) async fn resolve_manifest_exports(
             )?;
             vm.load_module_exports(&lib_path)
                 .await
-                .map_err(|error| error.to_string())
+                .map_err(|error| PackageError::Validation(error.to_string()))
         }
         Some(module_name) if exports.contains_key(module_name) => {
             let lib_path = manifest_module_source_path(
@@ -1043,12 +1055,12 @@ pub(crate) async fn resolve_manifest_exports(
             )?;
             vm.load_module_exports(&lib_path)
                 .await
-                .map_err(|error| error.to_string())
+                .map_err(|error| PackageError::Validation(error.to_string()))
         }
         Some(module_name) => vm
             .load_module_exports_from_import(module_name)
             .await
-            .map_err(|error| error.to_string()),
+            .map_err(|error| PackageError::Validation(error.to_string())),
     }
 }
 
@@ -1093,13 +1105,13 @@ pub(crate) fn leak_static_string(value: String) -> &'static str {
 
 pub(crate) async fn install_manifest_provider_schemas(
     extensions: &RuntimeExtensions,
-) -> Result<(), String> {
+) -> Result<(), PackageError> {
     let mut schemas: Vec<Arc<dyn harn_vm::ProviderSchema>> = Vec::new();
     for provider in &extensions.provider_connectors {
         match &provider.connector {
             ResolvedProviderConnectorKind::RustBuiltin => continue,
             ResolvedProviderConnectorKind::Invalid(message) => {
-                return Err(message.clone());
+                return Err(PackageError::Validation(message.clone()));
             }
             ResolvedProviderConnectorKind::Harn { module } => {
                 let module_path =
@@ -1119,7 +1131,7 @@ pub(crate) async fn install_manifest_provider_schemas(
                         provider.id.as_str(),
                         module_path.display(),
                         contract.provider_id.as_str()
-                    ));
+                    ).into());
                 }
                 let metadata = harn_vm::ProviderMetadata {
                     provider: contract.provider_id.as_str().to_string(),

@@ -298,7 +298,7 @@ async fn check_manifest() -> Vec<DoctorCheck> {
             Err(error) => checks.push(DoctorCheck {
                 status: DoctorStatus::Fail,
                 label: "triggers".to_string(),
-                detail: error,
+                detail: error.to_string(),
             }),
         }
     }

@@ -1,3 +1,4 @@
+use super::errors::OrchestratorError;
 use crate::cli::OrchestratorDlqArgs;
 use serde::Serialize;
 
@@ -24,7 +25,7 @@ struct DlqDiscardPayload {
     entry: super::common::DlqEntryRecord,
 }
 
-pub(super) async fn run(args: OrchestratorDlqArgs) -> Result<(), String> {
+pub(super) async fn run(args: OrchestratorDlqArgs) -> Result<(), OrchestratorError> {
     let mut ctx = load_local_runtime(&args.local).await?;
     let entries = trigger_inspect_dlq(&mut ctx).await?;
 

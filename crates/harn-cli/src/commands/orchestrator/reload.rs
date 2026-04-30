@@ -1,3 +1,4 @@
+use super::errors::OrchestratorError;
 use std::env;
 use std::fs;
 use std::time::Duration;
@@ -31,7 +32,7 @@ struct ReloadResponse {
     summary: serde_json::Value,
 }
 
-pub(crate) async fn run(args: OrchestratorReloadArgs) -> Result<(), String> {
+pub(crate) async fn run(args: OrchestratorReloadArgs) -> Result<(), OrchestratorError> {
     let base_url = resolve_admin_url(&args)?;
     let url = format!(
         "{}/{}",
@@ -65,7 +66,8 @@ pub(crate) async fn run(args: OrchestratorReloadArgs) -> Result<(), String> {
             "orchestrator reload failed with HTTP {}: {}",
             status.as_u16(),
             text.trim()
-        ));
+        )
+        .into());
     }
     if args.json {
         println!("{text}");
@@ -96,7 +98,7 @@ pub(crate) async fn run(args: OrchestratorReloadArgs) -> Result<(), String> {
     Ok(())
 }
 
-fn resolve_admin_url(args: &OrchestratorReloadArgs) -> Result<String, String> {
+fn resolve_admin_url(args: &OrchestratorReloadArgs) -> Result<String, OrchestratorError> {
     if let Some(url) = &args.admin_url {
         return Ok(url.trim_end_matches('/').to_string());
     }
@@ -115,7 +117,7 @@ fn authorize_request(
     request: reqwest::RequestBuilder,
     url: &str,
     body: &[u8],
-) -> Result<reqwest::RequestBuilder, String> {
+) -> Result<reqwest::RequestBuilder, OrchestratorError> {
     if let Some(api_key) = env::var(API_KEYS_ENV).ok().and_then(|value| {
         value
             .split(',')
@@ -139,9 +141,10 @@ fn authorize_request(
         return Ok(request.header(AUTHORIZATION, authorization));
     }
 
-    Err(format!(
-        "set {API_KEYS_ENV} or {HMAC_SECRET_ENV} so the reload command can authenticate"
-    ))
+    Err(
+        format!("set {API_KEYS_ENV} or {HMAC_SECRET_ENV} so the reload command can authenticate")
+            .into(),
+    )
 }
 
 fn canonical_authorization(

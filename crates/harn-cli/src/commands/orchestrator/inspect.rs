@@ -1,9 +1,10 @@
+use super::errors::OrchestratorError;
 use crate::cli::OrchestratorInspectArgs;
 
 use super::common::{load_local_runtime, print_json};
 use super::inspect_data::collect_orchestrator_inspect_data;
 
-pub(super) async fn run(args: OrchestratorInspectArgs) -> Result<(), String> {
+pub(super) async fn run(args: OrchestratorInspectArgs) -> Result<(), OrchestratorError> {
     let mut ctx = load_local_runtime(&args.local).await?;
     let payload = collect_orchestrator_inspect_data(&mut ctx).await?;
 

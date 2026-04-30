@@ -1,3 +1,4 @@
+use super::errors::PackageError;
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,7 +72,7 @@ pub(crate) fn manifest_has_git_dependencies(manifest: &Manifest) -> bool {
         .any(|dependency| dependency.git_url().is_some())
 }
 
-pub(crate) fn ensure_git_available() -> Result<(), String> {
+pub(crate) fn ensure_git_available() -> Result<(), PackageError> {
     process::Command::new("git")
         .arg("--version")
         .env_remove("GIT_DIR")
@@ -79,10 +80,14 @@ pub(crate) fn ensure_git_available() -> Result<(), String> {
         .env_remove("GIT_INDEX_FILE")
         .output()
         .map(|_| ())
-        .map_err(|_| "git is required for git dependencies but was not found in PATH".to_string())
+        .map_err(|_| {
+            PackageError::Registry(
+                "git is required for git dependencies but was not found in PATH".to_string(),
+            )
+        })
 }
 
-pub(crate) fn cache_root() -> Result<PathBuf, String> {
+pub(crate) fn cache_root() -> Result<PathBuf, PackageError> {
     if let Ok(value) = std::env::var(HARN_CACHE_DIR_ENV) {
         if !value.trim().is_empty() {
             return Ok(PathBuf::from(value));
@@ -116,20 +121,20 @@ pub(crate) fn hex_bytes(bytes: impl AsRef<[u8]>) -> String {
     out
 }
 
-pub(crate) fn git_cache_dir(source: &str, commit: &str) -> Result<PathBuf, String> {
+pub(crate) fn git_cache_dir(source: &str, commit: &str) -> Result<PathBuf, PackageError> {
     Ok(cache_root()?
         .join("git")
         .join(sha256_hex(source))
         .join(commit))
 }
 
-pub(crate) fn git_cache_lock_path(source: &str, commit: &str) -> Result<PathBuf, String> {
+pub(crate) fn git_cache_lock_path(source: &str, commit: &str) -> Result<PathBuf, PackageError> {
     Ok(cache_root()?
         .join("locks")
         .join(format!("{}-{commit}.lock", sha256_hex(source))))
 }
 
-pub(crate) fn acquire_git_cache_lock(source: &str, commit: &str) -> Result<File, String> {
+pub(crate) fn acquire_git_cache_lock(source: &str, commit: &str) -> Result<File, PackageError> {
     let path = git_cache_lock_path(source, commit)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -142,27 +147,30 @@ pub(crate) fn acquire_git_cache_lock(source: &str, commit: &str) -> Result<File,
     Ok(file)
 }
 
-pub(crate) fn read_cached_content_hash(dir: &Path) -> Result<Option<String>, String> {
+pub(crate) fn read_cached_content_hash(dir: &Path) -> Result<Option<String>, PackageError> {
     let path = dir.join(CONTENT_HASH_FILE);
     match fs::read_to_string(&path) {
         Ok(value) => Ok(Some(value.trim().to_string())),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(format!("failed to read {}: {error}", path.display())),
+        Err(error) => Err(format!("failed to read {}: {error}", path.display()).into()),
     }
 }
 
-pub(crate) fn write_cached_content_hash(dir: &Path, hash: &str) -> Result<(), String> {
+pub(crate) fn write_cached_content_hash(dir: &Path, hash: &str) -> Result<(), PackageError> {
     let path = dir.join(CONTENT_HASH_FILE);
-    harn_vm::atomic_io::atomic_write(&path, format!("{hash}\n").as_bytes())
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+    harn_vm::atomic_io::atomic_write(&path, format!("{hash}\n").as_bytes()).map_err(|error| {
+        PackageError::Registry(format!("failed to write {}: {error}", path.display()))
+    })
 }
 
-pub(crate) fn read_cache_metadata(dir: &Path) -> Result<Option<PackageCacheMetadata>, String> {
+pub(crate) fn read_cache_metadata(
+    dir: &Path,
+) -> Result<Option<PackageCacheMetadata>, PackageError> {
     let path = dir.join(CACHE_METADATA_FILE);
     let content = match fs::read_to_string(&path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(format!("failed to read {}: {error}", path.display())),
+        Err(error) => return Err(format!("failed to read {}: {error}", path.display()).into()),
     };
     let metadata = toml::from_str::<PackageCacheMetadata>(&content)
         .map_err(|error| format!("failed to parse {}: {error}", path.display()))?;
@@ -172,7 +180,8 @@ pub(crate) fn read_cache_metadata(dir: &Path) -> Result<Option<PackageCacheMetad
             path.display(),
             metadata.version,
             CACHE_METADATA_VERSION
-        ));
+        )
+        .into());
     }
     Ok(Some(metadata))
 }
@@ -182,7 +191,7 @@ pub(crate) fn write_cache_metadata(
     source: &str,
     commit: &str,
     content_hash: &str,
-) -> Result<(), String> {
+) -> Result<(), PackageError> {
     let cached_at_unix_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("system clock error: {error}"))?
@@ -197,8 +206,9 @@ pub(crate) fn write_cache_metadata(
     let body = toml::to_string_pretty(&metadata)
         .map_err(|error| format!("failed to encode cache metadata: {error}"))?;
     let path = dir.join(CACHE_METADATA_FILE);
-    harn_vm::atomic_io::atomic_write(&path, body.as_bytes())
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+    harn_vm::atomic_io::atomic_write(&path, body.as_bytes()).map_err(|error| {
+        PackageError::Registry(format!("failed to write {}: {error}", path.display()))
+    })
 }
 
 pub(crate) fn normalized_relative_path(path: &Path) -> String {
@@ -212,7 +222,7 @@ pub(crate) fn collect_hashable_files(
     root: &Path,
     cursor: &Path,
     out: &mut Vec<PathBuf>,
-) -> Result<(), String> {
+) -> Result<(), PackageError> {
     for entry in fs::read_dir(cursor)
         .map_err(|error| format!("failed to read {}: {error}", cursor.display()))?
     {
@@ -242,7 +252,7 @@ pub(crate) fn collect_hashable_files(
     Ok(())
 }
 
-pub(crate) fn compute_content_hash(dir: &Path) -> Result<String, String> {
+pub(crate) fn compute_content_hash(dir: &Path) -> Result<String, PackageError> {
     let mut files = Vec::new();
     collect_hashable_files(dir, dir, &mut files)?;
     files.sort();
@@ -259,7 +269,10 @@ pub(crate) fn compute_content_hash(dir: &Path) -> Result<String, String> {
     Ok(format!("sha256:{}", hex_bytes(hasher.finalize())))
 }
 
-pub(crate) fn verify_content_hash_or_compute(dir: &Path, expected: &str) -> Result<(), String> {
+pub(crate) fn verify_content_hash_or_compute(
+    dir: &Path,
+    expected: &str,
+) -> Result<(), PackageError> {
     let actual = compute_content_hash(dir)?;
     if actual != expected {
         return Err(format!(
@@ -267,7 +280,8 @@ pub(crate) fn verify_content_hash_or_compute(dir: &Path, expected: &str) -> Resu
             dir.display(),
             expected,
             actual
-        ));
+        )
+        .into());
     }
     if read_cached_content_hash(dir)?.as_deref() != Some(expected) {
         write_cached_content_hash(dir, expected)?;
@@ -275,7 +289,7 @@ pub(crate) fn verify_content_hash_or_compute(dir: &Path, expected: &str) -> Resu
     Ok(())
 }
 
-pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), PackageError> {
     fs::create_dir_all(dst)
         .map_err(|error| format!("failed to create {}: {error}", dst.display()))?;
     for entry in
@@ -313,7 +327,10 @@ pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn remove_materialized_package(packages_dir: &Path, alias: &str) -> Result<(), String> {
+pub(crate) fn remove_materialized_package(
+    packages_dir: &Path,
+    alias: &str,
+) -> Result<(), PackageError> {
     let dir = packages_dir.join(alias);
     match fs::symlink_metadata(&dir) {
         Ok(metadata) if metadata.file_type().is_symlink() || metadata.is_file() => {
@@ -326,7 +343,7 @@ pub(crate) fn remove_materialized_package(packages_dir: &Path, alias: &str) -> R
         }
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("failed to stat {}: {error}", dir.display())),
+        Err(error) => return Err(format!("failed to stat {}: {error}", dir.display()).into()),
     }
     let file = packages_dir.join(format!("{alias}.harn"));
     match fs::symlink_metadata(&file) {
@@ -340,24 +357,24 @@ pub(crate) fn remove_materialized_package(packages_dir: &Path, alias: &str) -> R
         }
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("failed to stat {}: {error}", file.display())),
+        Err(error) => return Err(format!("failed to stat {}: {error}", file.display()).into()),
     }
     Ok(())
 }
 
 #[cfg(unix)]
-pub(crate) fn symlink_path_dependency(source: &Path, dest: &Path) -> Result<(), String> {
+pub(crate) fn symlink_path_dependency(source: &Path, dest: &Path) -> Result<(), PackageError> {
     std::os::unix::fs::symlink(source, dest).map_err(|error| {
-        format!(
+        PackageError::Registry(format!(
             "failed to symlink {} to {}: {error}",
             source.display(),
             dest.display()
-        )
+        ))
     })
 }
 
 #[cfg(windows)]
-pub(crate) fn symlink_path_dependency(source: &Path, dest: &Path) -> Result<(), String> {
+pub(crate) fn symlink_path_dependency(source: &Path, dest: &Path) -> Result<(), PackageError> {
     if source.is_dir() {
         std::os::windows::fs::symlink_dir(source, dest)
     } else {
@@ -373,15 +390,17 @@ pub(crate) fn symlink_path_dependency(source: &Path, dest: &Path) -> Result<(), 
 }
 
 #[cfg(not(any(unix, windows)))]
-pub(crate) fn symlink_path_dependency(_source: &Path, _dest: &Path) -> Result<(), String> {
-    Err("symlinks are not supported on this platform".to_string())
+pub(crate) fn symlink_path_dependency(_source: &Path, _dest: &Path) -> Result<(), PackageError> {
+    Err("symlinks are not supported on this platform"
+        .to_string()
+        .into())
 }
 
 pub(crate) fn materialize_path_dependency(
     source: &Path,
     dest_root: &Path,
     alias: &str,
-) -> Result<(), String> {
+) -> Result<(), PackageError> {
     remove_materialized_package(dest_root, alias)?;
     if source.is_dir() {
         let dest = dest_root.join(alias);
@@ -418,7 +437,7 @@ pub(crate) fn materialized_hash_matches(dir: &Path, expected: &str) -> bool {
 pub(crate) fn resolve_path_dependency_source(
     manifest_dir: &Path,
     raw: &str,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, PackageError> {
     let source = {
         let candidate = PathBuf::from(raw);
         if candidate.is_absolute() {
@@ -428,59 +447,64 @@ pub(crate) fn resolve_path_dependency_source(
         }
     };
     if source.exists() {
-        return source
-            .canonicalize()
-            .map_err(|error| format!("failed to canonicalize {}: {error}", source.display()));
+        return source.canonicalize().map_err(|error| {
+            PackageError::Registry(format!(
+                "failed to canonicalize {}: {error}",
+                source.display()
+            ))
+        });
     }
     if source.extension().is_none() {
         let with_ext = source.with_extension("harn");
         if with_ext.exists() {
             return with_ext.canonicalize().map_err(|error| {
-                format!("failed to canonicalize {}: {error}", with_ext.display())
+                PackageError::Registry(format!(
+                    "failed to canonicalize {}: {error}",
+                    with_ext.display()
+                ))
             });
         }
     }
-    Err(format!("package source not found: {}", source.display()))
+    Err(format!("package source not found: {}", source.display()).into())
 }
 
-pub(crate) fn path_source_uri(path: &Path) -> Result<String, String> {
+pub(crate) fn path_source_uri(path: &Path) -> Result<String, PackageError> {
     let url = Url::from_file_path(path)
         .map_err(|_| format!("failed to convert {} to file:// URL", path.display()))?;
     Ok(format!("path+{}", url))
 }
 
-pub(crate) fn path_from_source_uri(source: &str) -> Result<PathBuf, String> {
+pub(crate) fn path_from_source_uri(source: &str) -> Result<PathBuf, PackageError> {
     let raw = source
         .strip_prefix("path+")
         .ok_or_else(|| format!("invalid path source: {source}"))?;
     if let Ok(url) = Url::parse(raw) {
         return url
             .to_file_path()
-            .map_err(|_| format!("invalid file:// path source: {source}"));
+            .map_err(|_| PackageError::Registry(format!("invalid file:// path source: {source}")));
     }
     Ok(PathBuf::from(raw))
 }
 
-pub(crate) fn registry_file_url_or_path(raw: &str) -> Result<Option<PathBuf>, String> {
+pub(crate) fn registry_file_url_or_path(raw: &str) -> Result<Option<PathBuf>, PackageError> {
     if let Ok(url) = Url::parse(raw) {
         if url.scheme() == "file" {
-            return url
-                .to_file_path()
-                .map(Some)
-                .map_err(|_| format!("invalid file:// registry URL: {raw}"));
+            return url.to_file_path().map(Some).map_err(|_| {
+                PackageError::Registry(format!("invalid file:// registry URL: {raw}"))
+            });
         }
         return Ok(None);
     }
     Ok(Some(PathBuf::from(raw)))
 }
 
-pub(crate) fn read_registry_source(source: &str) -> Result<String, String> {
+pub(crate) fn read_registry_source(source: &str) -> Result<String, PackageError> {
     if let Some(path) = registry_file_url_or_path(source)? {
         return fs::read_to_string(&path).map_err(|error| {
-            format!(
+            PackageError::Registry(format!(
                 "failed to read package registry {}: {error}",
                 path.display()
-            )
+            ))
         });
     }
 
@@ -488,7 +512,7 @@ pub(crate) fn read_registry_source(source: &str) -> Result<String, String> {
         .map_err(|error| format!("invalid package registry URL {source:?}: {error}"))?;
     match url.scheme() {
         "http" | "https" => {}
-        other => return Err(format!("unsupported package registry URL scheme: {other}")),
+        other => return Err(format!("unsupported package registry URL scheme: {other}").into()),
     }
     let response = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
@@ -499,14 +523,16 @@ pub(crate) fn read_registry_source(source: &str) -> Result<String, String> {
         .map_err(|error| format!("failed to fetch package registry {source}: {error}"))?;
     let status = response.status();
     if !status.is_success() {
-        return Err(format!("GET {source} returned HTTP {status}"));
+        return Err(format!("GET {source} returned HTTP {status}").into());
     }
-    response
-        .text()
-        .map_err(|error| format!("failed to read package registry response: {error}"))
+    response.text().map_err(|error| {
+        PackageError::Registry(format!("failed to read package registry response: {error}"))
+    })
 }
 
-pub(crate) fn resolve_configured_registry_source(explicit: Option<&str>) -> Result<String, String> {
+pub(crate) fn resolve_configured_registry_source(
+    explicit: Option<&str>,
+) -> Result<String, PackageError> {
     if let Some(explicit) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
         return Ok(explicit.to_string());
     }
@@ -593,14 +619,15 @@ pub(crate) fn parse_registry_package_spec(spec: &str) -> Option<(&str, Option<&s
 pub(crate) fn parse_package_registry_index(
     source: &str,
     content: &str,
-) -> Result<PackageRegistryIndex, String> {
+) -> Result<PackageRegistryIndex, PackageError> {
     let mut index = toml::from_str::<PackageRegistryIndex>(content)
         .map_err(|error| format!("failed to parse package registry {source}: {error}"))?;
     if index.version != REGISTRY_INDEX_VERSION {
         return Err(format!(
             "unsupported package registry {source} version {} (expected {})",
             index.version, REGISTRY_INDEX_VERSION
-        ));
+        )
+        .into());
     }
     validate_package_registry_index(source, &mut index)?;
     Ok(index)
@@ -609,20 +636,22 @@ pub(crate) fn parse_package_registry_index(
 pub(crate) fn validate_package_registry_index(
     source: &str,
     index: &mut PackageRegistryIndex,
-) -> Result<(), String> {
+) -> Result<(), PackageError> {
     let mut names = HashSet::new();
     for package in &mut index.packages {
         if !is_valid_registry_package_name(&package.name) {
             return Err(format!(
                 "package registry {source} has invalid package name '{}'",
                 package.name
-            ));
+            )
+            .into());
         }
         if !names.insert(package.name.clone()) {
             return Err(format!(
                 "package registry {source} declares '{}' more than once",
                 package.name
-            ));
+            )
+            .into());
         }
         normalize_git_url(&package.repository).map_err(|error| {
             format!(
@@ -636,19 +665,22 @@ pub(crate) fn validate_package_registry_index(
                 return Err(format!(
                     "package registry {source} has empty version for '{}'",
                     package.name
-                ));
+                )
+                .into());
             }
             if !versions.insert(version.version.clone()) {
                 return Err(format!(
                     "package registry {source} declares '{}@{}' more than once",
                     package.name, version.version
-                ));
+                )
+                .into());
             }
             if version.rev.is_none() && version.branch.is_none() {
                 return Err(format!(
                     "package registry {source} entry '{}@{}' must specify rev or branch",
                     package.name, version.version
-                ));
+                )
+                .into());
             }
             normalize_git_url(&version.git).map_err(|error| {
                 format!(
@@ -666,7 +698,7 @@ pub(crate) fn validate_package_registry_index(
 
 pub(crate) fn load_package_registry(
     explicit: Option<&str>,
-) -> Result<(String, PackageRegistryIndex), String> {
+) -> Result<(String, PackageRegistryIndex), PackageError> {
     let source = resolve_configured_registry_source(explicit)?;
     let content = read_registry_source(&source)?;
     let index = parse_package_registry_index(&source, &content)?;
@@ -704,7 +736,7 @@ pub(crate) fn find_registry_package_version(
     index: &PackageRegistryIndex,
     name: &str,
     version: Option<&str>,
-) -> Result<RegistryPackageInfo, String> {
+) -> Result<RegistryPackageInfo, PackageError> {
     let package = index
         .packages
         .iter()
@@ -730,7 +762,7 @@ pub(crate) fn find_registry_package_version(
 pub(crate) fn search_package_registry_impl(
     query: Option<&str>,
     registry: Option<&str>,
-) -> Result<Vec<RegistryPackage>, String> {
+) -> Result<Vec<RegistryPackage>, PackageError> {
     let (_, index) = load_package_registry(registry)?;
     Ok(index
         .packages
@@ -742,11 +774,12 @@ pub(crate) fn search_package_registry_impl(
 pub(crate) fn package_registry_info_impl(
     spec: &str,
     registry: Option<&str>,
-) -> Result<RegistryPackageInfo, String> {
+) -> Result<RegistryPackageInfo, PackageError> {
     let Some((name, version)) = parse_registry_package_spec(spec) else {
         return Err(format!(
             "invalid registry package name '{spec}'; use names like @burin/notion-sdk or acme-lib"
-        ));
+        )
+        .into());
     };
     let (_, index) = load_package_registry(registry)?;
     find_registry_package_version(&index, name, version)
@@ -756,20 +789,19 @@ pub(crate) fn registry_dependency_from_spec(
     spec: &str,
     alias: Option<&str>,
     registry: Option<&str>,
-) -> Result<(String, Dependency), String> {
+) -> Result<(String, Dependency), PackageError> {
     let Some((name, Some(version))) = parse_registry_package_spec(spec) else {
         return Err(format!(
             "registry dependency '{spec}' must include a version, for example {spec}@1.2.3"
-        ));
+        )
+        .into());
     };
     let info = package_registry_info_impl(&format!("{name}@{version}"), registry)?;
     let selected = info
         .selected_version
         .ok_or_else(|| format!("package registry does not contain {name}@{version}"))?;
     if selected.yanked {
-        return Err(format!(
-            "{name}@{version} is yanked in the package registry"
-        ));
+        return Err(format!("{name}@{version} is yanked in the package registry").into());
     }
     let git = normalize_git_url(&selected.git)?;
     let package_name = selected
@@ -801,10 +833,10 @@ pub(crate) fn is_probable_shorthand_git_url(raw: &str) -> bool {
             .is_some_and(|segment| segment.contains('.'))
 }
 
-pub(crate) fn normalize_git_url(raw: &str) -> Result<String, String> {
+pub(crate) fn normalize_git_url(raw: &str) -> Result<String, PackageError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err("git URL cannot be empty".to_string());
+        return Err("git URL cannot be empty".to_string().into());
     }
 
     let candidate_path = PathBuf::from(trimmed);
@@ -844,7 +876,7 @@ pub(crate) fn normalize_git_url(raw: &str) -> Result<String, String> {
     Ok(normalized)
 }
 
-pub(crate) fn derive_repo_name_from_source(source: &str) -> Result<String, String> {
+pub(crate) fn derive_repo_name_from_source(source: &str) -> Result<String, PackageError> {
     let url = Url::parse(source).map_err(|error| format!("invalid git URL {source}: {error}"))?;
     let segment = url
         .path_segments()
@@ -900,7 +932,7 @@ pub(crate) fn package_manifest_name(path: &Path) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
-pub(crate) fn derive_package_alias_from_path(path: &Path) -> Result<String, String> {
+pub(crate) fn derive_package_alias_from_path(path: &Path) -> Result<String, PackageError> {
     if let Some(name) = package_manifest_name(path) {
         return Ok(name);
     }
@@ -914,14 +946,22 @@ pub(crate) fn derive_package_alias_from_path(path: &Path) -> Result<String, Stri
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .map(str::to_string)
-        .ok_or_else(|| format!("failed to derive package alias from {}", path.display()))
+        .ok_or_else(|| {
+            PackageError::Registry(format!(
+                "failed to derive package alias from {}",
+                path.display()
+            ))
+        })
 }
 
 pub(crate) fn is_full_git_sha(value: &str) -> bool {
     value.len() == 40 && value.as_bytes().iter().all(|byte| byte.is_ascii_hexdigit())
 }
 
-pub(crate) fn git_output<I, S>(args: I, cwd: Option<&Path>) -> Result<std::process::Output, String>
+pub(crate) fn git_output<I, S>(
+    args: I,
+    cwd: Option<&Path>,
+) -> Result<std::process::Output, PackageError>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -936,14 +976,14 @@ where
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
         .output()
-        .map_err(|error| format!("failed to run git: {error}"))
+        .map_err(|error| PackageError::Registry(format!("failed to run git: {error}")))
 }
 
 pub(crate) fn resolve_git_commit(
     url: &str,
     rev: Option<&str>,
     branch: Option<&str>,
-) -> Result<String, String> {
+) -> Result<String, PackageError> {
     let requested = branch.or(rev).unwrap_or("HEAD");
     if branch.is_none() && is_full_git_sha(requested) {
         return Ok(requested.to_string());
@@ -972,7 +1012,8 @@ pub(crate) fn resolve_git_commit(
         return Err(format!(
             "failed to resolve git ref from {url}: {}",
             String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        )
+        .into());
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let commit = stdout
@@ -983,7 +1024,11 @@ pub(crate) fn resolve_git_commit(
     Ok(commit.to_string())
 }
 
-pub(crate) fn clone_git_commit_to(url: &str, commit: &str, dest: &Path) -> Result<(), String> {
+pub(crate) fn clone_git_commit_to(
+    url: &str,
+    commit: &str,
+    dest: &Path,
+) -> Result<(), PackageError> {
     if dest.exists() {
         fs::remove_dir_all(dest)
             .map_err(|error| format!("failed to reset {}: {error}", dest.display()))?;
@@ -997,7 +1042,8 @@ pub(crate) fn clone_git_commit_to(url: &str, commit: &str, dest: &Path) -> Resul
             "failed to initialize git repo in {}: {}",
             dest.display(),
             String::from_utf8_lossy(&init.stderr).trim()
-        ));
+        )
+        .into());
     }
 
     let remote = git_output(["remote", "add", "origin", url], Some(dest))?;
@@ -1005,7 +1051,8 @@ pub(crate) fn clone_git_commit_to(url: &str, commit: &str, dest: &Path) -> Resul
         return Err(format!(
             "failed to add git remote {url}: {}",
             String::from_utf8_lossy(&remote.stderr).trim()
-        ));
+        )
+        .into());
     }
 
     let fetch = git_output(["fetch", "--depth", "1", "origin", commit], Some(dest))?;
@@ -1023,7 +1070,8 @@ pub(crate) fn clone_git_commit_to(url: &str, commit: &str, dest: &Path) -> Resul
             return Err(format!(
                 "failed to fetch {commit} from {url}: {}",
                 String::from_utf8_lossy(&fetch.stderr).trim()
-            ));
+            )
+            .into());
         }
         let checkout = git_output(["checkout", commit], Some(&fallback_dir))?;
         if !checkout.status.success() {
@@ -1031,7 +1079,8 @@ pub(crate) fn clone_git_commit_to(url: &str, commit: &str, dest: &Path) -> Resul
                 "failed to checkout {commit} in {}: {}",
                 fallback_dir.display(),
                 String::from_utf8_lossy(&checkout.stderr).trim()
-            ));
+            )
+            .into());
         }
         fs::remove_dir_all(dest)
             .map_err(|error| format!("failed to remove {}: {error}", dest.display()))?;
@@ -1049,7 +1098,8 @@ pub(crate) fn clone_git_commit_to(url: &str, commit: &str, dest: &Path) -> Resul
                 "failed to checkout FETCH_HEAD in {}: {}",
                 dest.display(),
                 String::from_utf8_lossy(&checkout.stderr).trim()
-            ));
+            )
+            .into());
         }
     }
 
@@ -1061,7 +1111,7 @@ pub(crate) fn clone_git_commit_to(url: &str, commit: &str, dest: &Path) -> Resul
     Ok(())
 }
 
-pub(crate) fn unique_temp_dir(base: &Path, label: &str) -> Result<PathBuf, String> {
+pub(crate) fn unique_temp_dir(base: &Path, label: &str) -> Result<PathBuf, PackageError> {
     for _ in 0..16 {
         let suffix = uuid::Uuid::now_v7();
         let candidate = base.join(format!("{label}-{suffix}"));
@@ -1072,7 +1122,8 @@ pub(crate) fn unique_temp_dir(base: &Path, label: &str) -> Result<PathBuf, Strin
     Err(format!(
         "failed to allocate a unique temporary directory under {}",
         base.display()
-    ))
+    )
+    .into())
 }
 
 pub(crate) fn ensure_git_cache_populated(
@@ -1082,7 +1133,7 @@ pub(crate) fn ensure_git_cache_populated(
     expected_hash: Option<&str>,
     refetch: bool,
     offline: bool,
-) -> Result<String, String> {
+) -> Result<String, PackageError> {
     let cache_dir = git_cache_dir(source, commit)?;
     let _lock = acquire_git_cache_lock(source, commit)?;
     if refetch && cache_dir.exists() {
@@ -1104,7 +1155,8 @@ pub(crate) fn ensure_git_cache_populated(
     if offline {
         return Err(format!(
             "package cache entry for {source} at {commit} is missing; cannot fetch in offline mode"
-        ));
+        )
+        .into());
     }
 
     let parent = cache_dir
@@ -1113,7 +1165,7 @@ pub(crate) fn ensure_git_cache_populated(
     fs::create_dir_all(parent)
         .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
     let temp_dir = unique_temp_dir(parent, "tmp")?;
-    let populated = (|| -> Result<String, String> {
+    let populated = (|| -> Result<String, PackageError> {
         clone_git_commit_to(url, commit, &temp_dir)?;
         let hash = compute_content_hash(&temp_dir)?;
         if let Some(expected) = expected_hash {
@@ -1121,7 +1173,8 @@ pub(crate) fn ensure_git_cache_populated(
                 return Err(format!(
                     "content hash mismatch for {} at {}: expected {}, got {}",
                     source, commit, expected, hash
-                ));
+                )
+                .into());
             }
         }
         write_cached_content_hash(&temp_dir, &hash)?;
@@ -1153,17 +1206,17 @@ pub(crate) struct PackageCacheEntry {
     metadata: Option<PackageCacheMetadata>,
 }
 
-pub(crate) fn git_cache_root() -> Result<PathBuf, String> {
+pub(crate) fn git_cache_root() -> Result<PathBuf, PackageError> {
     Ok(cache_root()?.join("git"))
 }
 
-pub(crate) fn discover_git_cache_entries() -> Result<Vec<PackageCacheEntry>, String> {
+pub(crate) fn discover_git_cache_entries() -> Result<Vec<PackageCacheEntry>, PackageError> {
     let root = git_cache_root()?;
     let mut entries = Vec::new();
     let source_dirs = match fs::read_dir(&root) {
         Ok(source_dirs) => source_dirs,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(entries),
-        Err(error) => return Err(format!("failed to read {}: {error}", root.display())),
+        Err(error) => return Err(format!("failed to read {}: {error}", root.display()).into()),
     };
     for source_dir in source_dirs {
         let source_dir = source_dir
@@ -1211,7 +1264,7 @@ pub(crate) fn discover_git_cache_entries() -> Result<Vec<PackageCacheEntry>, Str
     Ok(entries)
 }
 
-pub(crate) fn locked_git_cache_paths(lock: &LockFile) -> Result<HashSet<PathBuf>, String> {
+pub(crate) fn locked_git_cache_paths(lock: &LockFile) -> Result<HashSet<PathBuf>, PackageError> {
     let mut keep = HashSet::new();
     for entry in &lock.packages {
         validate_package_alias(&entry.name)?;
@@ -1227,7 +1280,7 @@ pub(crate) fn locked_git_cache_paths(lock: &LockFile) -> Result<HashSet<PathBuf>
     Ok(keep)
 }
 
-pub(crate) fn verify_lock_entry_cache(entry: &LockEntry) -> Result<bool, String> {
+pub(crate) fn verify_lock_entry_cache(entry: &LockEntry) -> Result<bool, PackageError> {
     validate_package_alias(&entry.name)?;
     if !entry.source.starts_with("git+") {
         if entry.source.starts_with("path+") {
@@ -1237,7 +1290,8 @@ pub(crate) fn verify_lock_entry_cache(entry: &LockEntry) -> Result<bool, String>
                     "path dependency {} source is missing: {}",
                     entry.name,
                     path.display()
-                ));
+                )
+                .into());
             }
         }
         return Ok(false);
@@ -1256,7 +1310,8 @@ pub(crate) fn verify_lock_entry_cache(entry: &LockEntry) -> Result<bool, String>
             "package cache entry for {} is missing: {}",
             entry.name,
             cache_dir.display()
-        ));
+        )
+        .into());
     }
     verify_content_hash_or_compute(&cache_dir, expected_hash)?;
     match read_cache_metadata(&cache_dir)? {
@@ -1274,7 +1329,8 @@ pub(crate) fn verify_lock_entry_cache(entry: &LockEntry) -> Result<bool, String>
                 metadata.source,
                 metadata.commit,
                 metadata.content_hash
-            ));
+            )
+            .into());
         }
         None => write_cache_metadata(&cache_dir, &entry.source, commit, expected_hash)?,
     }
@@ -1284,7 +1340,7 @@ pub(crate) fn verify_lock_entry_cache(entry: &LockEntry) -> Result<bool, String>
 pub(crate) fn verify_materialized_lock_entry(
     ctx: &ManifestContext,
     entry: &LockEntry,
-) -> Result<bool, String> {
+) -> Result<bool, PackageError> {
     validate_package_alias(&entry.name)?;
     let packages_dir = ctx.packages_dir();
     if entry.source.starts_with("path+") {
@@ -1295,7 +1351,8 @@ pub(crate) fn verify_materialized_lock_entry(
                 "materialized path dependency {} is missing under {}",
                 entry.name,
                 packages_dir.display()
-            ));
+            )
+            .into());
         }
         return Ok(true);
     }
@@ -1312,13 +1369,14 @@ pub(crate) fn verify_materialized_lock_entry(
             "materialized package {} is missing: {}",
             entry.name,
             dest_dir.display()
-        ));
+        )
+        .into());
     }
     verify_content_hash_or_compute(&dest_dir, expected_hash)?;
     Ok(true)
 }
 
-pub(crate) fn verify_package_cache_impl(materialized: bool) -> Result<usize, String> {
+pub(crate) fn verify_package_cache_impl(materialized: bool) -> Result<usize, PackageError> {
     let ctx = load_current_manifest_context()?;
     let lock = LockFile::load(&ctx.lock_path())?
         .ok_or_else(|| format!("{} is missing", ctx.lock_path().display()))?;
@@ -1335,7 +1393,7 @@ pub(crate) fn verify_package_cache_impl(materialized: bool) -> Result<usize, Str
     Ok(verified)
 }
 
-pub(crate) fn clean_package_cache_impl(all: bool) -> Result<usize, String> {
+pub(crate) fn clean_package_cache_impl(all: bool) -> Result<usize, PackageError> {
     let entries = discover_git_cache_entries()?;
     if entries.is_empty() {
         return Ok(0);
@@ -1383,7 +1441,7 @@ pub(crate) fn clean_package_cache_impl(all: bool) -> Result<usize, String> {
 }
 
 pub fn list_package_cache() {
-    let result = (|| -> Result<(PathBuf, Vec<PackageCacheEntry>), String> {
+    let result = (|| -> Result<(PathBuf, Vec<PackageCacheEntry>), PackageError> {
         Ok((cache_root()?, discover_git_cache_entries()?))
     })();
 
@@ -1607,7 +1665,7 @@ mod tests {
             .unwrap();
 
             let error = verify_package_cache_impl(false).unwrap_err();
-            assert!(error.contains("content hash mismatch"));
+            assert!(error.to_string().contains("content hash mismatch"));
         });
     }
 
@@ -1741,7 +1799,7 @@ mod tests {
     rev = "v1.0.0"
     "#;
         let error = parse_package_registry_index("fixture", content).unwrap_err();
-        assert!(error.contains("invalid package name"));
+        assert!(error.to_string().contains("invalid package name"));
 
         let content = r#"
     version = 1
@@ -1761,6 +1819,6 @@ mod tests {
     rev = "v1.0.0"
     "#;
         let error = parse_package_registry_index("fixture", content).unwrap_err();
-        assert!(error.contains("more than once"));
+        assert!(error.to_string().contains("more than once"));
     }
 }
