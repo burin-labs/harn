@@ -416,7 +416,10 @@ async fn dispatch_host_tool_list() -> Result<VmValue, VmError> {
     )))
 }
 
-async fn dispatch_host_tool_call(name: &str, args: &VmValue) -> Result<VmValue, VmError> {
+pub(crate) async fn dispatch_host_tool_call(
+    name: &str,
+    args: &VmValue,
+) -> Result<VmValue, VmError> {
     let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
     if let Some(bridge) = bridge {
         if let Some(value) = bridge.call_tool(name, args)? {

@@ -202,6 +202,7 @@ pub fn reset_stdlib_state() {
     agents::records::reset_eval_metrics();
     agents::records::reset_friction_events();
     tools::clear_current_tool_registry();
+    tools::clear_tool_synthesis_cache();
     vision::reset_vision_state();
     crate::skills::clear_current_skill_registry();
     template::reset_prompt_registry();

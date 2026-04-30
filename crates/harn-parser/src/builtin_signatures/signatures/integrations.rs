@@ -480,6 +480,22 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "tool_synth_invoke",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "tool_synthesis_cache",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "tool_synthesis_clear",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "tool_synthesize",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "transport_mock_calls",
         return_type: Some(BuiltinReturn::Named("list")),
     },
