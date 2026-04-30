@@ -2019,7 +2019,7 @@ The `provider_capabilities_install(toml_src)` and
 `provider_capabilities_clear()` builtins let scripts install and
 revert overrides in-process for cases where editing the manifest is
 awkward (runtime proxy detection, conformance test setup). See
-`docs/src/llm-and-agents.md#capability-matrix--harntoml-overrides`
+`docs/src/llm/providers.md#capability-matrix--harntoml-overrides`
 for the rule schema.
 
 ### skill declarations

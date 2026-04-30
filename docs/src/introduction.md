@@ -44,7 +44,7 @@ guide: install Harn, write a program, and run it in under five minutes.
 - **[Modules and imports](./modules.md)** -- Splitting code across files, standard library
 - **[Concurrency](./concurrency.md)** -- spawn/await, parallel, channels, mutexes, deadlines
 - **[Language specification](./language-spec.md)** -- Formal grammar and runtime semantics
-- **[LLM calls and agent loops](./llm-and-agents.md)** -- Calling models, agent loops, tool use
+- **[LLM and agents](./llm-and-agents.md)** -- Calling models, agent loops, tool use
 - **[Transcript architecture](./transcript-architecture.md)** -- How Harn stores and replays agent conversations
 - **[Workflow runtime](./workflow-runtime.md)** -- Workflow graphs, artifacts, run records, replay, evals
 - **[Cookbook](./cookbook.md)** -- Practical recipes and patterns

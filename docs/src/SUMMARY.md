@@ -21,8 +21,13 @@
 
 # Agent Runtime
 
-- [LLM calls and agent loops](./llm-and-agents.md)
-- [Typed tools for agent loops](./typed-tools.md)
+- [LLM and agents](./llm-and-agents.md)
+  - [LLM calls](./llm/llm_call.md)
+  - [Agent loops](./llm/agent_loop.md)
+  - [Tools, Tool Vault, and MCP](./llm/tools.md)
+  - [Streaming and transcripts](./llm/streaming.md)
+  - [LLM providers](./llm/providers.md)
+  - [Provider capability matrix](./provider-matrix.md)
 - [Tool surface validation](./tool-surface-validation.md)
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Current session builtin](./stdlib/agent_session_current_id.md)
@@ -120,8 +125,6 @@
 - [Postgres](./postgres.md)
 - [Project scanning](./project-scan.md)
 - [Prompt templating](./prompt-templating.md)
-- [Configuring LLM providers](./providers.md)
-- [Provider capability matrix](./provider-matrix.md)
 - [Editor integration](./editor-integration.md)
 - [Testing](./testing.md)
 

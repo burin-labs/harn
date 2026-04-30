@@ -305,7 +305,8 @@ A host may also wake the daemon by sending a queued `user_message`, `session/inp
 
 When a Harn script opts into `tool_search` against a provider that lacks
 native defer-loading support, the runtime switches to a client-executed
-fallback (see the [LLM and agents guide](./llm-and-agents.md)). For the
+fallback (see the [LLM tools guide](./llm/tools.md#client-executed-fallback)).
+For the
 `"bm25"` and `"regex"` strategies everything stays in-VM; the
 `"semantic"` and `"host"` strategies round-trip the query through the
 bridge.
