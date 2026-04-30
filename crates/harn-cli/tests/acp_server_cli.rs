@@ -1,4 +1,6 @@
-#![cfg(unix)]
+// Portable across Unix and Windows: this suite drives `harn serve acp` over
+// piped stdio and shuts the child down by closing stdin (EOF), so it does not
+// rely on POSIX signals or platform-specific tooling.
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};

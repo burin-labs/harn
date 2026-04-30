@@ -113,6 +113,7 @@
 - [Deploy to Fly.io](./deploy/fly.md)
 - [Deploy to Railway](./deploy/railway.md)
 - [Maintainer release workflow](./maintainer-release.md)
+- [Windows test coverage](./dev/windows-test-coverage.md)
 
 # Tutorials and Guides
 
