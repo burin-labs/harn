@@ -24,6 +24,9 @@ use crate::triggers::registry::{
     install_manifest_triggers, resolve_live_trigger_binding, TriggerBindingSource,
     TriggerBindingSpec, TriggerHandlerSpec, TriggerPredicateSpec,
 };
+use crate::triggers::test_util::timing::{
+    FILE_WATCH_FALLBACK_POLL, NETWORK_PROBE_INITIAL, PROCESS_EXIT_GRACE, TEST_DEFAULT_TIMEOUT,
+};
 use crate::triggers::{ProviderId, ProviderPayload, SignatureStatus, TraceId, TriggerEvent};
 use crate::TriggerPredicateBudget;
 use crate::Vm;
@@ -355,7 +358,7 @@ fn test_cancel_requested_at() -> time::OffsetDateTime {
 }
 
 async fn await_test_signal(label: &str, rx: oneshot::Receiver<()>) {
-    tokio::time::timeout(Duration::from_secs(5), rx)
+    tokio::time::timeout(TEST_DEFAULT_TIMEOUT, rx)
         .await
         .unwrap_or_else(|_| panic!("timed out waiting for {label}"))
         .unwrap_or_else(|_| panic!("{label} sender dropped before firing"));
@@ -411,7 +414,7 @@ struct MockA2aRequest {
 
 impl MockA2aServer {
     fn next_request(&self) -> MockA2aRequest {
-        self.request_within(Duration::from_secs(5))
+        self.request_within(TEST_DEFAULT_TIMEOUT)
             .expect("mock A2A request")
     }
 
@@ -472,7 +475,7 @@ fn spawn_mock_a2a_server_with_schemes(
             let (stream, _) = match listener.accept() {
                 Ok(connection) => connection,
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(10));
+                    thread::sleep(FILE_WATCH_FALLBACK_POLL);
                     continue;
                 }
                 Err(error) => panic!("accept mock A2A request: {error}"),
@@ -481,10 +484,10 @@ fn spawn_mock_a2a_server_with_schemes(
                 .set_nonblocking(false)
                 .expect("set mock A2A stream blocking");
             stream
-                .set_read_timeout(Some(Duration::from_secs(5)))
+                .set_read_timeout(Some(TEST_DEFAULT_TIMEOUT))
                 .expect("set read timeout");
             stream
-                .set_write_timeout(Some(Duration::from_secs(5)))
+                .set_write_timeout(Some(TEST_DEFAULT_TIMEOUT))
                 .expect("set write timeout");
             if let Some(tls_config) = &tls_config {
                 let connection = ServerConnection::new(tls_config.clone())
@@ -1492,7 +1495,7 @@ async fn shutdown_cancels_a2a_dispatch_started_after_shutdown() {
                 .as_deref()
                 .is_some_and(|message| message.contains("cancelled")));
             assert!(
-                server.request_within(Duration::from_millis(100)).is_none(),
+                server.request_within(PROCESS_EXIT_GRACE).is_none(),
                 "A2A dispatch should not reach the remote after shutdown"
             );
 
@@ -1532,7 +1535,7 @@ async fn a2a_handler_rejects_cleartext_by_default() {
                 .as_deref()
                 .is_some_and(|message| message.contains("allow_cleartext = true")));
             assert!(
-                server.request_within(Duration::from_millis(100)).is_none(),
+                server.request_within(PROCESS_EXIT_GRACE).is_none(),
                 "cleartext A2A dispatch should not reach the HTTP rpc endpoint without opt-in"
             );
 
@@ -2104,7 +2107,7 @@ pub fn local_fn(event: TriggerEvent) -> string {
                     .expect("dispatcher run exits");
             });
 
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            tokio::time::sleep(NETWORK_PROBE_INITIAL).await;
             let outbox_before = read_topic(log.clone(), "trigger.outbox").await;
             assert!(
                 outbox_before.is_empty(),
@@ -2117,7 +2120,7 @@ pub fn local_fn(event: TriggerEvent) -> string {
                 .await
                 .expect("enqueue live inbox entry");
 
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + TEST_DEFAULT_TIMEOUT;
             while Instant::now() < deadline {
                 let outbox = read_topic(log.clone(), "trigger.outbox").await;
                 if outbox.iter().any(|(_, event)| {
@@ -2126,7 +2129,7 @@ pub fn local_fn(event: TriggerEvent) -> string {
                 }) {
                     break;
                 }
-                tokio::time::sleep(Duration::from_millis(20)).await;
+                tokio::time::sleep(NETWORK_PROBE_INITIAL).await;
             }
 
             dispatcher.shutdown();
@@ -2173,7 +2176,7 @@ pub fn slow_handler(event: TriggerEvent) -> string {
             });
 
             wait_for_dispatcher_in_flight(&dispatcher, 1).await;
-            let drain = dispatcher.drain(Duration::from_secs(1));
+            let drain = dispatcher.drain(TEST_DEFAULT_TIMEOUT);
             tokio::pin!(drain);
             tokio::task::yield_now().await;
             tokio::time::advance(Duration::from_millis(50)).await;
@@ -2228,14 +2231,14 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
                 .await
                 .expect("enqueue succeeds");
 
-            tokio::time::timeout(Duration::from_secs(5), dequeued_rx)
+            tokio::time::timeout(TEST_DEFAULT_TIMEOUT, dequeued_rx)
                 .await
                 .expect("run should dequeue live inbox event")
                 .expect("run dequeued inbox event");
             dispatcher.shutdown();
             run_handle.await.expect("join dispatcher run");
             let drain = dispatcher
-                .drain(Duration::from_secs(1))
+                .drain(TEST_DEFAULT_TIMEOUT)
                 .await
                 .expect("shutdown drain completes");
             assert!(drain.drained, "{drain:?}");
