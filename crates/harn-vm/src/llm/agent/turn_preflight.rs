@@ -43,6 +43,7 @@ pub(super) struct PreflightContext<'a> {
     pub base_system: Option<&'a str>,
     pub tool_contract_prompt: Option<&'a str>,
     pub persistent_system_prompt: Option<&'a str>,
+    pub auto_compact: &'a Option<crate::orchestration::AutoCompactConfig>,
     /// Skill-scoped tool registry for this turn, when skill activation
     /// narrowed `tools_val`. `None` when the full registry is in
     /// effect — the preflight then uses the baked-in `tool_contract_prompt`.
@@ -125,6 +126,75 @@ pub(super) async fn run_turn_preflight(
     );
     let mut call_messages = state.visible_messages.clone();
     let call_system = default_system;
+
+    if let Some(ac) = ctx.auto_compact {
+        let system_tokens = call_system.as_deref().map(|s| s.len() / 4).unwrap_or(0);
+        let estimated_tokens_before =
+            crate::orchestration::estimate_message_tokens(&state.visible_messages) + system_tokens;
+        if estimated_tokens_before >= ac.token_threshold {
+            let mut compact_opts = opts.clone();
+            compact_opts.messages = state.visible_messages.clone();
+            compact_opts.system = call_system.clone();
+            let original_message_count = state.visible_messages.len();
+            if let Some(summary) = crate::orchestration::auto_compact_messages(
+                &mut state.visible_messages,
+                ac,
+                Some(&compact_opts),
+            )
+            .await?
+            {
+                let estimated_tokens_after =
+                    crate::orchestration::estimate_message_tokens(&state.visible_messages)
+                        + system_tokens;
+                let archived_messages = original_message_count
+                    .saturating_sub(state.visible_messages.len())
+                    .saturating_add(1);
+                super::super::trace::emit_agent_event(
+                    super::super::trace::AgentTraceEvent::ContextCompaction {
+                        archived_messages,
+                        new_summary_len: summary.len(),
+                        iteration: ctx.iteration,
+                    },
+                );
+                state.transcript_events.push(transcript_event(
+                    "compaction",
+                    "system",
+                    "internal",
+                    "Transcript compacted before agent LLM call",
+                    Some(serde_json::json!({
+                        "mode": "preflight",
+                        "strategy": ac.policy_strategy.clone(),
+                        "engine_strategy": crate::orchestration::compact_strategy_name(&ac.compact_strategy),
+                        "archived_messages": archived_messages,
+                        "estimated_tokens_before": estimated_tokens_before,
+                        "estimated_tokens_after": estimated_tokens_after,
+                        "keep_first": ac.keep_first,
+                        "keep_last": ac.keep_last,
+                    })),
+                ));
+                super::emit_agent_event(&AgentEvent::TranscriptCompacted {
+                    session_id: ctx.session_id.to_string(),
+                    mode: "preflight".to_string(),
+                    strategy: ac.policy_strategy.clone(),
+                    archived_messages,
+                    estimated_tokens_before,
+                    estimated_tokens_after,
+                    snapshot_asset_id: None,
+                })
+                .await;
+                let merged = match state.transcript_summary.take() {
+                    Some(existing)
+                        if !existing.trim().is_empty() && existing.trim() != summary.trim() =>
+                    {
+                        format!("{existing}\n\n{summary}")
+                    }
+                    Some(_) | None => summary,
+                };
+                state.transcript_summary = Some(merged);
+                call_messages = state.visible_messages.clone();
+            }
+        }
+    }
 
     crate::orchestration::run_lifecycle_hooks(
         crate::orchestration::HookEvent::PreAgentTurn,

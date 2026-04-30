@@ -95,6 +95,10 @@ Same as `llm_call`, plus additional options:
 | `wake_interval_ms` | int | nil | Fixed timer wake interval for daemon loops |
 | `watch_paths` | list/string | nil | Files to poll for mtime changes while idle |
 | `consolidate_on_idle` | bool | `false` | Run transcript auto-compaction before persisting an idle daemon snapshot |
+| `compaction` | string/dict/bool | `{strategy: "hybrid", keep_last_n: 10}` | Agent-loop context-window policy. Use `"none"` or `false` to disable; `"truncate"`, `"summarize_middle"`, `"summarize_all"`, or `"hybrid"` to choose policy |
+| `compact_threshold` | int | model-aware | Estimated input-token threshold for compaction. Harn lowers this from the provider/model context window when known |
+| `compact_keep_first` | int | `0` | Prompt-visible messages to keep verbatim before the compaction summary. The system prompt is always kept separately |
+| `compact_keep_last` | int | strategy default | Prompt-visible messages to keep verbatim after the compaction summary |
 | `idle_watchdog_attempts` | int | nil (disabled) | Max consecutive idle-wait ticks that may return no wake reason before the daemon terminates with `status = "watchdog"`. Guards against a misconfigured daemon (e.g. bridge never signals, no timer, no watch paths) hanging the session silently |
 | `context_callback` | closure | nil | Per-turn hook that can rewrite prompt-visible `messages` and/or the effective `system` prompt before the next LLM call |
 | `context_filter` | closure | nil | Alias for `context_callback` |
@@ -118,6 +122,37 @@ thinking and the Anthropic interleaved-thinking beta header.
 
 Profiles preload the common loop-budget and retry keys below. Pass any
 key explicitly to override the profile's value for that call.
+
+### Agent-loop compaction
+
+`agent_loop` compacts prompt-visible transcript messages before an LLM call
+would exceed the configured or discovered context budget. The default policy is
+`hybrid`: keep the system prompt and the last 10 prompt-visible messages
+verbatim, summarize older messages, and fall back to truncation if the summary
+still exceeds the hard limit.
+
+```harn
+let result = agent_loop(task, system, {
+  provider: "openai",
+  model: "gpt-4o",
+  compaction: {strategy: "hybrid", keep_last_n: 10}
+})
+```
+
+Available strategies:
+
+| Strategy | Behavior |
+|---|---|
+| `"none"` / `false` | Disable automatic agent-loop transcript compaction |
+| `"truncate"` | Replace older messages with a deterministic abbreviated summary |
+| `"summarize_middle"` | Summarize older messages and keep the latest suffix verbatim |
+| `"summarize_all"` | Summarize all compactable prompt-visible messages |
+| `"hybrid"` | Summarize older messages, keep the latest suffix, and use truncate as the hard-limit fallback |
+
+Compaction emits `TranscriptCompacted` live events and transcript
+`compaction` events with `strategy`, `engine_strategy`,
+`estimated_tokens_before`, and `estimated_tokens_after`, so replay tools can
+verify which policy ran.
 
 | Profile | `max_iterations` | `max_nudges` | `tool_retries` | `llm_retries` | `schema_retries` |
 |---|---:|---:|---:|---:|---:|

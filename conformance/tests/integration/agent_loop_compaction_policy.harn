@@ -1,0 +1,33 @@
+fn noisy_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "observe",
+    "Return an observation so the loop keeps going.",
+    {handler: { _args -> "observation " + "x" * 240 }, parameters: {}, returns: {type: "string"}},
+  )
+  return tools
+}
+
+pipeline default() {
+  let result = agent_loop(
+    "Keep observing until the iteration budget is exhausted.",
+    "You are a compacting test agent.",
+    {
+      provider: "mock",
+      model: "gpt-4",
+      tools: noisy_tools(),
+      tool_format: "native",
+      max_iterations: 100,
+      compact_threshold: 1,
+      compaction: {strategy: "hybrid", keep_last_n: 10},
+    },
+  )
+  let events = transcript_events_by_kind(result?.transcript, "compaction")
+  println(result?.llm?.iterations == 100)
+  println(result?.status == "budget_exhausted")
+  println(result?.trace?.compactions > 0)
+  println(len(events) > 0)
+  println(events[0]?.metadata?.strategy == "hybrid")
+  println(events[0]?.metadata?.engine_strategy == "llm")
+}

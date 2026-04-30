@@ -438,61 +438,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 .or_else(crate::agent_sessions::current_session_id)
                 .unwrap_or_else(|| format!("agent_session_{}", uuid::Uuid::now_v7()));
             let daemon = opt_bool(&options, "daemon");
-            let auto_compact = if opt_bool(&options, "auto_compact") {
-                let mut ac = crate::orchestration::AutoCompactConfig::default();
-                let user_specified_threshold = opt_int(&options, "compact_threshold").is_some();
-                if let Some(v) = opt_int(&options, "compact_threshold") {
-                    ac.token_threshold = v as usize;
-                }
-                if let Some(v) = opt_int(&options, "tool_output_max_chars") {
-                    ac.tool_output_max_chars = v as usize;
-                }
-                if let Some(v) = opt_int(&options, "compact_keep_last") {
-                    ac.keep_last = v as usize;
-                }
-                if let Some(strategy) = opt_str(&options, "compact_strategy") {
-                    ac.compact_strategy = crate::orchestration::parse_compact_strategy(&strategy)?;
-                }
-                if let Some(v) = opt_int(&options, "hard_limit_tokens") {
-                    ac.hard_limit_tokens = Some(v as usize);
-                }
-                if let Some(strategy) = opt_str(&options, "hard_limit_strategy") {
-                    ac.hard_limit_strategy =
-                        crate::orchestration::parse_compact_strategy(&strategy)?;
-                }
-                if let Some(callback) = options.as_ref().and_then(|o| o.get("mask_callback")) {
-                    ac.mask_callback = Some(callback.clone());
-                }
-                if let Some(callback) = options.as_ref().and_then(|o| o.get("compact_callback")) {
-                    ac.custom_compactor = Some(callback.clone());
-                    if !options
-                        .as_ref()
-                        .is_some_and(|o| o.contains_key("compact_strategy"))
-                    {
-                        ac.compact_strategy = crate::orchestration::CompactStrategy::Custom;
-                    }
-                }
-                if let Some(callback) = options.as_ref().and_then(|o| o.get("compress_callback")) {
-                    ac.compress_callback = Some(callback.clone());
-                }
-                {
-                    let probe_opts = extract_llm_options(&args)?;
-                    let user_specified_hard_limit =
-                        opt_int(&options, "hard_limit_tokens").is_some();
-                    crate::llm::api::adapt_auto_compact_to_provider(
-                        &mut ac,
-                        user_specified_threshold,
-                        user_specified_hard_limit,
-                        &probe_opts.provider,
-                        &probe_opts.model,
-                        &probe_opts.api_key,
-                    )
-                    .await;
-                }
-                Some(ac)
-            } else {
-                None
-            };
+            let auto_compact = crate::llm::resolve_agent_loop_auto_compact(&args, &options).await?;
             let policy = options.as_ref().and_then(|o| o.get("policy")).map(|v| {
                 let json = crate::llm::helpers::vm_value_to_json(v);
                 serde_json::from_value::<crate::orchestration::CapabilityPolicy>(json)
