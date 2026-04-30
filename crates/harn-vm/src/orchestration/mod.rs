@@ -57,6 +57,9 @@ pub use workflow::*;
 mod records;
 pub use records::*;
 
+mod merge_captain_audit;
+pub use merge_captain_audit::*;
+
 thread_local! {
     static CURRENT_MUTATION_SESSION: RefCell<Option<MutationSessionRecord>> = const { RefCell::new(None) };
     /// Workflow-level skill context, installed by `workflow_execute` so

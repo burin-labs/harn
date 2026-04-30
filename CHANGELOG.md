@@ -86,6 +86,21 @@ granular archaeology.
   `prompts.listChanged` and emits `notifications/prompts/list_changed` on
   prompt/manifest hot reloads for stdio and legacy SSE clients.
 
+- **Merge Captain transcript oracle and audit CLI (#1013).** New
+  `harn merge-captain audit <transcript>` consumes JSONL transcript
+  artifacts from CLI/TUI/IDE/hosted runs and reports oracle findings:
+  extra model calls, invalid structured outputs, repeated reads, bad
+  waits, unsafe attempted actions, skipped verification, missing
+  approvals, and non-minimal tool usage. Supports JSON-formatted
+  golden fixtures with declarable state-machine steps, tool-pattern
+  approvals/forbidden actions, and per-scenario budgets; ships five
+  reference goldens (green PR, failing CI, semantic conflict, merge
+  queue, new-PR arrival) plus a negative `bad_unsafe_merge` fixture
+  under `examples/personas/merge_captain/`. Outputs both a
+  human-readable report and machine-readable JSON suitable for CI
+  gates, with each finding linked to transcript event ids and PR
+  state-machine steps.
+
 ### Changed
 
 - **Canonical LLM error taxonomy enforced in retry (#854/#958).** Retry

@@ -17,8 +17,9 @@ use std::sync::Arc;
 use std::{env, fs, process, thread};
 
 use cli::{
-    Cli, Command, ModelInfoArgs, PackageCacheCommand, PackageCommand, PersonaCommand, RunsCommand,
-    ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
+    Cli, Command, MergeCaptainCommand, ModelInfoArgs, PackageCacheCommand, PackageCommand,
+    PersonaCommand, RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
+    SkillsCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -699,6 +700,14 @@ async fn async_main() {
             args.registry.as_deref(),
             args.json,
         ),
+        Command::MergeCaptain(args) => match args.command {
+            MergeCaptainCommand::Audit(audit) => {
+                let code = commands::merge_captain::run_audit(&audit);
+                if code != 0 {
+                    process::exit(code);
+                }
+            }
+        },
         Command::Persona(args) => match args.command {
             PersonaCommand::Check(check) => {
                 commands::persona::run_check(args.manifest.as_deref(), &check)
