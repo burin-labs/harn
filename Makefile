@@ -1,4 +1,4 @@
-.PHONY: setup install-hooks configure-merge-drivers check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-cargo test-fast conformance protocol-conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-trigger-examples check-docs-snippets sync-language-spec check-language-spec
+.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-cargo test-fast conformance protocol-conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-trigger-examples check-docs-snippets sync-language-spec check-language-spec
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -17,6 +17,16 @@ install-hooks:
 
 configure-merge-drivers:
 	./scripts/configure_merge_drivers.sh
+
+# Build the harn binary. On macOS, ad-hoc signs it so Gatekeeper skips
+# the "Verifying harn..." dialog on first run.
+build:
+	cargo build
+	@if [ "$$(uname -s)" = "Darwin" ]; then codesign -s - -f target/debug/harn 2>/dev/null || true; fi
+
+build-release:
+	cargo build --release
+	@if [ "$$(uname -s)" = "Darwin" ]; then codesign -s - -f target/release/harn 2>/dev/null || true; fi
 
 # Format all code
 fmt:
