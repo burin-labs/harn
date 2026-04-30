@@ -1919,10 +1919,42 @@ tool registry dict.
 |---|---|---|---|
 | `tool_registry()` | — | dict | Create an empty tool registry |
 | `tool_define(registry, name, desc, config)` | registry, name, desc: string, config: dict | dict | Add a tool (config: `{parameters, handler, returns?, annotations?, ...}`) |
+| `tool_synthesize(config)` | config: dict | closure | Synthesize a deterministic callable tool from a natural-language description |
+| `tool_synthesis_cache()` | — | list | Inspect pinned synthesized tool specs for the current run |
+| `tool_synthesis_clear()` | — | nil | Clear the current run's synthesized tool cache |
 | `mcp_tools(registry)` | registry: dict | nil | Register tools for MCP serving |
 | `mcp_resource(config)` | config: dict | nil | Register a static resource (`{uri, name, text, description?, mime_type?}`) |
 | `mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, description?, mime_type?}`) |
 | `mcp_prompt(config)` | config: dict | nil | Register a prompt (`{name, handler, description?, arguments?}`) |
+
+`tool_synthesize(config)` is the guarded natural-language tool bootstrapper. It
+returns a callable closure and pins the synthesis in an in-memory cache keyed by
+a deterministic hash of the normalized description, schemas, capabilities, and
+executor. By default the synthesized tool is `executor: "dry_run"`: calling it
+validates required arguments and returns a structured preview, but does not hit
+external systems.
+
+```harn
+let calendar = tool_synthesize({
+  description: "fetch the user's calendar for a given date range",
+  name: "calendar_fetch",
+  parameters: {
+    start: {type: "string"},
+    end: {type: "string"},
+  },
+  return_type: {type: "object", properties: {events: {type: "array"}}},
+  capabilities: ["http", "oauth:google"],
+})
+
+let preview = calendar({start: "2026-04-29", end: "2026-05-06"})
+```
+
+To dispatch for real, the synthesis must declare an explicit backend:
+`executor: "host_bridge"` with `host_tool`, or `executor: "mcp_server"` with
+`mcp_tool` and a connected `mcp_client`. Host and MCP calls still pass through
+the active execution policy. `tool_synthesize` does not accept arbitrary
+generated Harn handlers; use `tool_define` when the executable body is known and
+reviewed.
 
 Tool annotations (MCP spec `annotations` field) can be passed in the
 `tool_define` config to describe tool behavior:

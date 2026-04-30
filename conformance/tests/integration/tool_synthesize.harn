@@ -1,0 +1,57 @@
+pipeline test(task) {
+  tool_synthesis_clear()
+  let calendar = tool_synthesize(
+    {
+      description: "fetch the user's calendar for a given date range",
+      name: "calendar_fetch",
+      parameters: {start: {type: "string"}, end: {type: "string"}},
+      return_type: {type: "object", properties: {events: {type: "array"}}},
+      capabilities: ["http", "oauth:google"],
+    },
+  )
+  assert(type_of(calendar) == "closure", "tool_synthesize returns a callable closure")
+  let first = calendar({start: "2026-04-29", end: "2026-05-06"})
+  assert(first.status == "dry_run", "synthesized tools default to dry_run")
+  assert(first.name == "calendar_fetch", "dry-run result carries the tool name")
+  assert(first.side_effect_level == "network", "capabilities infer network effects")
+  assert(first.args.start == "2026-04-29", "dry-run result preserves arguments")
+  let cache = tool_synthesis_cache()
+  assert(len(cache) == 1, "synthesis is cached by deterministic id")
+  assert(cache[0].id == first.tool_id, "cache entry and dry-run result share the id")
+  assert(cache[0].executor == "dry_run", "cache records the executor")
+  let again = tool_synthesize(
+    {
+      description: "fetch the user's calendar for a given date range",
+      name: "calendar_fetch",
+      parameters: {start: {type: "string"}, end: {type: "string"}},
+      return_type: {type: "object", properties: {events: {type: "array"}}},
+      capabilities: ["oauth:google", "http"],
+    },
+  )
+  let second = again({start: "2026-04-29", end: "2026-05-06"})
+  assert(second.tool_id == first.tool_id, "capability order does not affect the cache key")
+  assert(len(tool_synthesis_cache()) == 1, "same spec overwrites the same cache entry")
+  var missing_error = ""
+  try {
+    calendar({start: "2026-04-29"})
+  } catch (err) {
+    missing_error = err
+  }
+  assert(contains(missing_error, "missing required argument"), "synthesized tool validates args")
+  tool_synthesis_clear()
+  let host = tool_synthesize(
+    {
+      description: "ask the host for a short answer",
+      name: "ask_host_synth",
+      parameters: {prompt: {type: "string"}},
+      executor: "host_bridge",
+      host_tool: "Ask",
+      capabilities: ["host.tool_call"],
+      side_effect_level: "read_only",
+    },
+  )
+  assert(type_of(host) == "closure", "host_bridge synthesis is callable")
+  assert(tool_synthesis_cache()[0].executor == "host_bridge", "host_bridge executor is cached")
+  assert(tool_synthesis_cache()[0].host_tool == "Ask", "host tool binding is cached")
+  log("tool_synthesize tests passed")
+}

@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use crate::value::{VmError, VmValue};
+use crate::value::{VmClosure, VmEnv, VmError, VmValue};
 use crate::vm::Vm;
 
 use crate::schema::json_to_vm_value;
@@ -14,6 +14,32 @@ thread_local! {
     /// by `tool_ref` / `tool_def` to resolve tool-name references without
     /// threading the registry through every call site.
     static CURRENT_TOOL_REGISTRY: RefCell<Option<VmValue>> = const { RefCell::new(None) };
+    static TOOL_SYNTHESIS_CACHE: RefCell<BTreeMap<String, SynthesizedToolSpec>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+#[derive(Clone)]
+enum SynthesizedToolExecutor {
+    DryRun,
+    HostBridge {
+        host_tool: String,
+    },
+    McpServer {
+        tool_name: String,
+        client: Option<crate::mcp::VmMcpClientHandle>,
+        server_name: Option<String>,
+    },
+}
+
+#[derive(Clone)]
+struct SynthesizedToolSpec {
+    id: String,
+    name: String,
+    description: String,
+    parameters: VmValue,
+    return_type: VmValue,
+    capabilities: Vec<String>,
+    side_effect_level: String,
+    executor: SynthesizedToolExecutor,
 }
 
 /// Install a registry as the current tool registry for this thread.
@@ -31,6 +57,10 @@ pub fn current_tool_registry() -> Option<VmValue> {
 /// tests.
 pub fn clear_current_tool_registry() {
     CURRENT_TOOL_REGISTRY.with(|slot| *slot.borrow_mut() = None);
+}
+
+pub fn clear_tool_synthesis_cache() {
+    TOOL_SYNTHESIS_CACHE.with(|slot| slot.borrow_mut().clear());
 }
 
 fn vm_find_tool_entry<'a>(
@@ -84,6 +114,44 @@ fn vm_current_registry_dict(builtin: &str) -> Result<VmValue, VmError> {
 }
 
 pub(crate) fn register_tool_builtins(vm: &mut Vm) {
+    vm.register_builtin("tool_synthesize", |args, _out| {
+        let spec = synthesize_tool_spec(args.first())?;
+        let closure = compile_synthesized_tool_closure(&spec.id)?;
+        TOOL_SYNTHESIS_CACHE.with(|cache| {
+            cache.borrow_mut().insert(spec.id.clone(), spec);
+        });
+        Ok(closure)
+    });
+
+    vm.register_async_builtin("tool_synth_invoke", |args| async move {
+        let id = match args.first() {
+            Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "tool_synth_invoke: synthesis id is required",
+                ))));
+            }
+        };
+        let call_args = args.get(1).cloned().unwrap_or(VmValue::Nil);
+        invoke_synthesized_tool(&id, call_args).await
+    });
+
+    vm.register_builtin("tool_synthesis_cache", |_args, _out| {
+        let specs = TOOL_SYNTHESIS_CACHE.with(|cache| {
+            cache
+                .borrow()
+                .values()
+                .map(synthesized_tool_spec_value)
+                .collect::<Vec<_>>()
+        });
+        Ok(VmValue::List(Rc::new(specs)))
+    });
+
+    vm.register_builtin("tool_synthesis_clear", |_args, _out| {
+        clear_tool_synthesis_cache();
+        Ok(VmValue::Nil)
+    });
+
     vm.register_builtin("plan_artifact", |args, _out| {
         let input = args.first().cloned().unwrap_or(VmValue::Nil);
         let json = crate::llm::vm_value_to_json(&input);
@@ -851,6 +919,484 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
             "tool_def: unknown tool {name:?}. Registered tools: {listed}"
         )))))
     });
+}
+
+fn synthesize_tool_spec(input: Option<&VmValue>) -> Result<SynthesizedToolSpec, VmError> {
+    let config = match input {
+        Some(VmValue::Dict(map)) => map,
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "tool_synthesize: requires a config dict",
+            ))));
+        }
+    };
+    if config.contains_key("handler") || config.contains_key("body") {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "tool_synthesize: executable handlers must be supplied with tool_define; \
+             synthesized tools are dry-run, host_bridge, or mcp_server only",
+        ))));
+    }
+
+    let description = required_string(config, "tool_synthesize", "description")?;
+    let name = optional_string(config, "name")
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| synthesize_tool_name(&description));
+    validate_tool_name(&name)?;
+
+    let parameters = config
+        .get("parameters")
+        .or_else(|| config.get("params"))
+        .cloned()
+        .unwrap_or_else(|| VmValue::Dict(Rc::new(BTreeMap::new())));
+    let return_type = config
+        .get("return_type")
+        .or_else(|| config.get("returns"))
+        .cloned()
+        .unwrap_or(VmValue::Nil);
+    let capabilities = optional_string_list(config, "capabilities")?;
+    let side_effect_level = optional_string(config, "side_effect_level")
+        .unwrap_or_else(|| infer_side_effect_level(&capabilities));
+
+    let executor_name =
+        optional_string(config, "executor").unwrap_or_else(|| "dry_run".to_string());
+    let executor = match executor_name.as_str() {
+        "dry_run" => SynthesizedToolExecutor::DryRun,
+        "host_bridge" => {
+            let host_tool = optional_string(config, "host_tool").unwrap_or_else(|| name.clone());
+            if host_tool.trim().is_empty() {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "tool_synthesize: host_bridge executor requires a non-empty host_tool",
+                ))));
+            }
+            SynthesizedToolExecutor::HostBridge { host_tool }
+        }
+        "mcp_server" => {
+            let tool_name = optional_string(config, "mcp_tool").unwrap_or_else(|| name.clone());
+            if tool_name.trim().is_empty() {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "tool_synthesize: mcp_server executor requires a non-empty mcp_tool",
+                ))));
+            }
+            let client = match config.get("mcp_client") {
+                Some(VmValue::McpClient(client)) => Some(client.clone()),
+                Some(VmValue::Nil) | None => None,
+                _ => {
+                    return Err(VmError::Thrown(VmValue::String(Rc::from(
+                        "tool_synthesize: mcp_client must be an MCP client handle",
+                    ))));
+                }
+            };
+            SynthesizedToolExecutor::McpServer {
+                tool_name,
+                client,
+                server_name: optional_string(config, "mcp_server"),
+            }
+        }
+        other => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "tool_synthesize: unknown executor {other:?}; expected \
+                 \"dry_run\", \"host_bridge\", or \"mcp_server\""
+            )))));
+        }
+    };
+
+    let mut spec = SynthesizedToolSpec {
+        id: String::new(),
+        name,
+        description,
+        parameters,
+        return_type,
+        capabilities,
+        side_effect_level,
+        executor,
+    };
+    spec.id = synthesized_tool_hash(&spec);
+    Ok(spec)
+}
+
+fn compile_synthesized_tool_closure(id: &str) -> Result<VmValue, VmError> {
+    let source =
+        format!("fn __harn_synthesized_tool(args) {{ return tool_synth_invoke(\"{id}\", args) }}");
+    let program = harn_parser::check_source_strict(&source).map_err(|error| {
+        VmError::Runtime(format!("tool_synthesize: internal compile failed: {error}"))
+    })?;
+    let Some(fn_node) = program.iter().find_map(|node| match &node.node {
+        harn_parser::Node::FnDecl { params, body, .. } => Some((params, body)),
+        _ => None,
+    }) else {
+        return Err(VmError::Runtime(
+            "tool_synthesize: internal closure source had no function".to_string(),
+        ));
+    };
+    let mut compiler = crate::Compiler::new();
+    let func = compiler
+        .compile_fn_body(fn_node.0, fn_node.1, Some("<tool_synthesize>".to_string()))
+        .map_err(|error| VmError::Runtime(format!("tool_synthesize: {error}")))?;
+    Ok(VmValue::Closure(Rc::new(VmClosure {
+        func: Rc::new(func),
+        env: VmEnv::new(),
+        source_dir: None,
+        module_functions: None,
+        module_state: None,
+    })))
+}
+
+async fn invoke_synthesized_tool(id: &str, call_args: VmValue) -> Result<VmValue, VmError> {
+    let spec = TOOL_SYNTHESIS_CACHE.with(|cache| cache.borrow().get(id).cloned());
+    let Some(spec) = spec else {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "tool_synth_invoke: unknown synthesis id {id:?}; synthesize the tool in this run first"
+        )))));
+    };
+
+    validate_synthesized_tool_args(&spec, &call_args)?;
+
+    match &spec.executor {
+        SynthesizedToolExecutor::DryRun => Ok(synthesized_tool_dry_run_result(&spec, call_args)),
+        SynthesizedToolExecutor::HostBridge { host_tool } => {
+            crate::orchestration::enforce_current_policy_for_tool(&spec.name)?;
+            crate::orchestration::enforce_current_policy_for_builtin(
+                "host_tool_call",
+                &[
+                    VmValue::String(Rc::from(host_tool.as_str())),
+                    call_args.clone(),
+                ],
+            )?;
+            crate::stdlib::host::dispatch_host_tool_call(host_tool, &call_args).await
+        }
+        SynthesizedToolExecutor::McpServer {
+            tool_name,
+            client,
+            server_name: _,
+        } => {
+            crate::orchestration::enforce_current_policy_for_tool(&spec.name)?;
+            crate::orchestration::enforce_current_policy_for_builtin(
+                "mcp_call",
+                &[VmValue::Nil, VmValue::String(Rc::from(tool_name.as_str()))],
+            )?;
+            let Some(client) = client else {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "tool_synth_invoke: mcp_server synthesized tools require mcp_client in the synthesis config",
+                ))));
+            };
+            let arguments = match &call_args {
+                VmValue::Dict(map) => serde_json::Value::Object(
+                    map.iter()
+                        .map(|(key, value)| (key.clone(), crate::llm::vm_value_to_json(value)))
+                        .collect(),
+                ),
+                VmValue::Nil => serde_json::json!({}),
+                _ => {
+                    return Err(VmError::Thrown(VmValue::String(Rc::from(
+                        "tool_synth_invoke: mcp_server tool arguments must be a dict",
+                    ))));
+                }
+            };
+            Ok(json_to_vm_value(
+                &crate::mcp::call_mcp_tool(client, tool_name, arguments).await?,
+            ))
+        }
+    }
+}
+
+fn validate_synthesized_tool_args(
+    spec: &SynthesizedToolSpec,
+    call_args: &VmValue,
+) -> Result<(), VmError> {
+    let VmValue::Dict(params) = &spec.parameters else {
+        return Ok(());
+    };
+    if params.is_empty() {
+        return Ok(());
+    }
+    let args = match call_args {
+        VmValue::Dict(map) => map,
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "{}: arguments must be a dict",
+                spec.name
+            )))));
+        }
+    };
+    for (param, schema) in params.iter() {
+        if is_optional_param(schema) {
+            continue;
+        }
+        if !args.contains_key(param) {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "{}: missing required argument {param:?}",
+                spec.name
+            )))));
+        }
+    }
+    Ok(())
+}
+
+fn is_optional_param(schema: &VmValue) -> bool {
+    schema
+        .as_dict()
+        .and_then(|map| map.get("required"))
+        .is_some_and(|value| matches!(value, VmValue::Bool(false)))
+}
+
+fn synthesized_tool_dry_run_result(spec: &SynthesizedToolSpec, call_args: VmValue) -> VmValue {
+    let mut result = BTreeMap::new();
+    result.insert(
+        "_type".to_string(),
+        VmValue::String(Rc::from("synthesized_tool_result")),
+    );
+    result.insert("status".to_string(), VmValue::String(Rc::from("dry_run")));
+    result.insert(
+        "tool_id".to_string(),
+        VmValue::String(Rc::from(spec.id.as_str())),
+    );
+    result.insert(
+        "name".to_string(),
+        VmValue::String(Rc::from(spec.name.as_str())),
+    );
+    result.insert(
+        "description".to_string(),
+        VmValue::String(Rc::from(spec.description.as_str())),
+    );
+    result.insert("args".to_string(), call_args);
+    result.insert(
+        "capabilities".to_string(),
+        VmValue::List(Rc::new(
+            spec.capabilities
+                .iter()
+                .map(|capability| VmValue::String(Rc::from(capability.as_str())))
+                .collect(),
+        )),
+    );
+    result.insert(
+        "side_effect_level".to_string(),
+        VmValue::String(Rc::from(spec.side_effect_level.as_str())),
+    );
+    result.insert(
+        "message".to_string(),
+        VmValue::String(Rc::from(
+            "synthesized tool is pinned and validated, but executor is dry_run; \
+             set executor: \"host_bridge\" or \"mcp_server\" to dispatch",
+        )),
+    );
+    VmValue::Dict(Rc::new(result))
+}
+
+fn synthesized_tool_spec_value(spec: &SynthesizedToolSpec) -> VmValue {
+    let mut value = BTreeMap::new();
+    value.insert(
+        "id".to_string(),
+        VmValue::String(Rc::from(spec.id.as_str())),
+    );
+    value.insert(
+        "name".to_string(),
+        VmValue::String(Rc::from(spec.name.as_str())),
+    );
+    value.insert(
+        "description".to_string(),
+        VmValue::String(Rc::from(spec.description.as_str())),
+    );
+    value.insert("parameters".to_string(), spec.parameters.clone());
+    value.insert("return_type".to_string(), spec.return_type.clone());
+    value.insert(
+        "capabilities".to_string(),
+        VmValue::List(Rc::new(
+            spec.capabilities
+                .iter()
+                .map(|capability| VmValue::String(Rc::from(capability.as_str())))
+                .collect(),
+        )),
+    );
+    value.insert(
+        "side_effect_level".to_string(),
+        VmValue::String(Rc::from(spec.side_effect_level.as_str())),
+    );
+    match &spec.executor {
+        SynthesizedToolExecutor::DryRun => {
+            value.insert("executor".to_string(), VmValue::String(Rc::from("dry_run")));
+        }
+        SynthesizedToolExecutor::HostBridge { host_tool } => {
+            value.insert(
+                "executor".to_string(),
+                VmValue::String(Rc::from("host_bridge")),
+            );
+            value.insert(
+                "host_tool".to_string(),
+                VmValue::String(Rc::from(host_tool.as_str())),
+            );
+        }
+        SynthesizedToolExecutor::McpServer {
+            tool_name,
+            server_name,
+            ..
+        } => {
+            value.insert(
+                "executor".to_string(),
+                VmValue::String(Rc::from("mcp_server")),
+            );
+            value.insert(
+                "mcp_tool".to_string(),
+                VmValue::String(Rc::from(tool_name.as_str())),
+            );
+            if let Some(server_name) = server_name {
+                value.insert(
+                    "mcp_server".to_string(),
+                    VmValue::String(Rc::from(server_name.as_str())),
+                );
+            }
+        }
+    }
+    VmValue::Dict(Rc::new(value))
+}
+
+fn synthesized_tool_hash(spec: &SynthesizedToolSpec) -> String {
+    let json = serde_json::json!({
+        "name": spec.name,
+        "description": spec.description,
+        "parameters": crate::llm::vm_value_to_json(&spec.parameters),
+        "return_type": crate::llm::vm_value_to_json(&spec.return_type),
+        "capabilities": spec.capabilities,
+        "side_effect_level": spec.side_effect_level,
+        "executor": synthesized_executor_hash_value(&spec.executor),
+    });
+    let hash = blake3::hash(json.to_string().as_bytes());
+    format!("tool_synth_{}", &hash.to_hex()[..16])
+}
+
+fn synthesized_executor_hash_value(executor: &SynthesizedToolExecutor) -> serde_json::Value {
+    match executor {
+        SynthesizedToolExecutor::DryRun => serde_json::json!({"kind": "dry_run"}),
+        SynthesizedToolExecutor::HostBridge { host_tool } => {
+            serde_json::json!({"kind": "host_bridge", "host_tool": host_tool})
+        }
+        SynthesizedToolExecutor::McpServer {
+            tool_name,
+            server_name,
+            ..
+        } => {
+            serde_json::json!({
+                "kind": "mcp_server",
+                "tool_name": tool_name,
+                "server_name": server_name,
+            })
+        }
+    }
+}
+
+fn required_string(
+    config: &BTreeMap<String, VmValue>,
+    builtin: &str,
+    key: &str,
+) -> Result<String, VmError> {
+    match config.get(key) {
+        Some(VmValue::String(value)) if !value.trim().is_empty() => Ok(value.to_string()),
+        _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{builtin}: {key} must be a non-empty string"
+        ))))),
+    }
+}
+
+fn optional_string(config: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+    match config.get(key) {
+        Some(VmValue::String(value)) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn optional_string_list(
+    config: &BTreeMap<String, VmValue>,
+    key: &str,
+) -> Result<Vec<String>, VmError> {
+    let Some(value) = config.get(key) else {
+        return Ok(Vec::new());
+    };
+    let VmValue::List(items) = value else {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "tool_synthesize: {key} must be a list of strings"
+        )))));
+    };
+    let mut out = Vec::with_capacity(items.len());
+    for item in items.iter() {
+        match item {
+            VmValue::String(value) if !value.trim().is_empty() => out.push(value.to_string()),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "tool_synthesize: {key} must be a list of non-empty strings"
+                )))));
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    Ok(out)
+}
+
+fn synthesize_tool_name(description: &str) -> String {
+    let mut name = String::from("synth_");
+    let mut prev_underscore = false;
+    for ch in description.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if prev_underscore && !name.ends_with('_') {
+                name.push('_');
+            }
+            name.push(ch.to_ascii_lowercase());
+            prev_underscore = false;
+        } else {
+            prev_underscore = true;
+        }
+        if name.len() >= 64 {
+            break;
+        }
+    }
+    while name.ends_with('_') {
+        name.pop();
+    }
+    if name == "synth" {
+        name.push_str("_tool");
+    }
+    name
+}
+
+fn validate_tool_name(name: &str) -> Result<(), VmError> {
+    let mut chars = name.chars();
+    let valid_start = chars
+        .next()
+        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_');
+    let valid_rest = chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_');
+    if valid_start && valid_rest {
+        return Ok(());
+    }
+    Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+        "tool_synthesize: invalid tool name {name:?}; use ASCII letters, digits, and underscores"
+    )))))
+}
+
+fn infer_side_effect_level(capabilities: &[String]) -> String {
+    if capabilities.iter().any(|capability| {
+        capability.starts_with("http")
+            || capability.starts_with("oauth")
+            || capability.starts_with("network")
+            || capability.starts_with("connector")
+            || capability.starts_with("mcp")
+    }) {
+        "network".to_string()
+    } else if capabilities.iter().any(|capability| {
+        capability.starts_with("process")
+            || capability.starts_with("exec")
+            || capability.starts_with("shell")
+    }) {
+        "process_exec".to_string()
+    } else if capabilities.iter().any(|capability| {
+        capability.starts_with("workspace.write")
+            || capability.starts_with("workspace.apply")
+            || capability.starts_with("workspace.delete")
+    }) {
+        "workspace_write".to_string()
+    } else if capabilities.is_empty() {
+        "none".to_string()
+    } else {
+        "read_only".to_string()
+    }
 }
 
 fn vm_validate_registry(name: &str, dict: &BTreeMap<String, VmValue>) -> Result<(), VmError> {
