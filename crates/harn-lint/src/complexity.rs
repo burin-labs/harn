@@ -26,6 +26,13 @@ pub(crate) fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
                 1 + node_complexity(condition) + body_complexity(body)
             }
             Node::Retry { count, body } => 1 + node_complexity(count) + body_complexity(body),
+            Node::CostRoute { options, body } => {
+                options
+                    .iter()
+                    .map(|(_, value)| node_complexity(value))
+                    .sum::<usize>()
+                    + body_complexity(body)
+            }
             Node::MatchExpr { value, arms } => {
                 1 + node_complexity(value)
                     + arms

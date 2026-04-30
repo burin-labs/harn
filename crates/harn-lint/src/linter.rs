@@ -591,6 +591,7 @@ impl<'a> Linter<'a> {
             Node::ForIn { body, .. }
             | Node::WhileLoop { body, .. }
             | Node::Retry { body, .. }
+            | Node::CostRoute { body, .. }
             | Node::Block(body)
             | Node::SpawnExpr { body }
             | Node::Closure { body, .. } => Self::body_has_long_running_cleanup(body),
@@ -650,6 +651,7 @@ impl<'a> Linter<'a> {
             | Node::ForIn { body, .. }
             | Node::WhileLoop { body, .. }
             | Node::Retry { body, .. }
+            | Node::CostRoute { body, .. }
             | Node::Block(body)
             | Node::SpawnExpr { body }
             | Node::Closure { body, .. } => Self::block_calls_cancel_handle(body),
@@ -834,6 +836,14 @@ impl<'a> Linter<'a> {
             }
             Node::Retry { count, body } => {
                 let state = self.analyze_secret_scan_expr(count, scanned);
+                let _ = self.analyze_secret_scan_block(body, state);
+                state
+            }
+            Node::CostRoute { options, body } => {
+                let mut state = scanned;
+                for (_, value) in options {
+                    state = self.analyze_secret_scan_expr(value, state);
+                }
                 let _ = self.analyze_secret_scan_block(body, state);
                 state
             }

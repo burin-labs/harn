@@ -49,6 +49,7 @@ impl TypeChecker {
             Node::Block(body)
             | Node::SpawnExpr { body }
             | Node::Retry { body, .. }
+            | Node::CostRoute { body, .. }
             | Node::DeferStmt { body }
             | Node::MutexBlock { body }
             | Node::Parallel { body, .. }

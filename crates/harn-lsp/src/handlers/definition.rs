@@ -321,6 +321,11 @@ fn node_children(node: &SNode) -> Vec<&SNode> {
             out.extend(body.iter());
             out
         }
+        Node::CostRoute { options, body } => {
+            let mut out = options.iter().map(|(_, value)| value).collect::<Vec<_>>();
+            out.extend(body.iter());
+            out
+        }
         Node::TryCatch {
             body,
             catch_body,

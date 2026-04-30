@@ -48,6 +48,7 @@ pub(super) fn base_opts(messages: Vec<serde_json::Value>) -> LlmCallOptions {
         api_key: String::new(),
         route_policy: crate::llm::api::LlmRoutePolicy::Manual,
         fallback_chain: Vec::new(),
+        route_fallbacks: Vec::new(),
         routing_decision: None,
         session_id: None,
         messages,

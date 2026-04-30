@@ -234,6 +234,7 @@ module.exports = grammar({
         $.while_statement,
         $.match_statement,
         $.retry_statement,
+        $.cost_route_block,
         $.return_statement,
         $.throw_statement,
         $.fn_declaration,
@@ -385,6 +386,17 @@ module.exports = grammar({
 
     retry_statement: ($) =>
       seq("retry", field("count", $._expression), field("body", $.block)),
+
+    cost_route_block: ($) =>
+      seq(
+        "cost_route",
+        "{",
+        statementSeparated($, choice($.cost_route_option, $._statement)),
+        "}"
+      ),
+
+    cost_route_option: ($) =>
+      seq(field("name", $.identifier), ":", field("value", $._expression)),
 
     return_statement: ($) => prec.right(seq("return", optional($._expression))),
 
@@ -597,6 +609,7 @@ module.exports = grammar({
         $.parallel_settle_expression,
         $.if_statement,
         $.retry_statement,
+        $.cost_route_block,
         $.match_statement,
         $._primary
       ),

@@ -11,6 +11,13 @@ granular archaeology.
 
 ### Added
 
+- **`cost_route` language block (#967/#1025).** New `cost_route` declaration
+  that resolves provider/model selection from declarative cost/latency/quality
+  budgets, with options validated at parse time. Lowers to a runtime cost
+  router with conformance coverage and provider/options helper updates across
+  Anthropic, OpenAI-compatible, Gemini, Ollama, Bedrock, Azure OpenAI, and
+  Vertex shims.
+
 - **Streaming `parallel each` and event-log subscriptions (#970/#1023).**
   New `parallel each as stream` mode lazily yields per-element results as
   `Stream<T>`, plus a `parallel race` builtin that returns the first
