@@ -340,6 +340,39 @@ fn test_generic_return_type_instantiates_from_callsite() {
 }
 
 #[test]
+fn test_explicit_generic_call_type_args_are_checked() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn identity<T>(x: T) -> T { return x }
+  let n: int = identity<int>(42)
+  let words: [string] = identity<[string]>(["a", "b"])
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
+fn test_explicit_generic_call_type_args_must_match_arguments() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn identity<T>(x: T) -> T { return x }
+  let n: int = identity<int>("oops")
+}"#,
+    );
+    assert_eq!(errs.len(), 2, "expected 2 errors, got: {errs:?}");
+    assert!(
+        errs.iter()
+            .any(|err| err.contains("type parameter 'T' was inferred as both int and string")),
+        "missing explicit type binding conflict error: {errs:?}"
+    );
+    assert!(
+        errs.iter()
+            .any(|err| err.contains("expected int, got string")),
+        "missing explicit type-arg mismatch error: {errs:?}"
+    );
+}
+
+#[test]
 fn test_generic_type_param_must_bind_consistently() {
     let errs = errors(
         r#"pipeline t(task) {

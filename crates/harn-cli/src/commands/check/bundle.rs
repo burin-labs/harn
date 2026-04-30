@@ -244,7 +244,7 @@ fn scan_node_bundle(
                 scan_program_bundle(&import_path, &import_program, config, visited, manifest);
             }
         }
-        Node::FunctionCall { name, args } if name == "render" || name == "render_prompt" => {
+        Node::FunctionCall { name, args, .. } if name == "render" || name == "render_prompt" => {
             if let Some(template_path) = args.first().and_then(literal_string) {
                 let candidates = resolve_preflight_target(file_path, &template_path, config);
                 manifest.add_asset(
@@ -258,7 +258,7 @@ fn scan_node_bundle(
             let children = args.iter().collect::<Vec<_>>();
             scan_children_bundle(&children, file_path, config, visited, manifest);
         }
-        Node::FunctionCall { name, args } if name == "host_call" => {
+        Node::FunctionCall { name, args, .. } if name == "host_call" => {
             if let Some((cap, op, params_arg)) = parse_host_call_args(args) {
                 manifest.add_host_capability(&cap, &op);
                 if cap == "template" && op == "render" {
@@ -278,7 +278,7 @@ fn scan_node_bundle(
             let children = args.iter().collect::<Vec<_>>();
             scan_children_bundle(&children, file_path, config, visited, manifest);
         }
-        Node::FunctionCall { name, args } if name == "exec_at" || name == "shell_at" => {
+        Node::FunctionCall { name, args, .. } if name == "exec_at" || name == "shell_at" => {
             if let Some(dir) = args.first().and_then(literal_string) {
                 manifest.execution_dirs.insert(
                     resolve_source_relative(file_path, &dir)
@@ -289,7 +289,7 @@ fn scan_node_bundle(
             let children = args.iter().collect::<Vec<_>>();
             scan_children_bundle(&children, file_path, config, visited, manifest);
         }
-        Node::FunctionCall { name, args } if name == "spawn_agent" => {
+        Node::FunctionCall { name, args, .. } if name == "spawn_agent" => {
             if let Some(config_node) = args.first() {
                 collect_spawn_agent_bundle(config_node, file_path, manifest);
             }

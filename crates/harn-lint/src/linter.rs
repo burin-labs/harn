@@ -604,7 +604,7 @@ impl<'a> Linter<'a> {
 
     fn node_calls_cancel_handle(node: &SNode) -> bool {
         match &node.node {
-            Node::FunctionCall { name, args } => {
+            Node::FunctionCall { name, args, .. } => {
                 name == "cancel_handle"
                     || matches!(
                         (
@@ -714,7 +714,7 @@ impl<'a> Linter<'a> {
 
     fn analyze_secret_scan_expr(&mut self, node: &SNode, scanned: bool) -> bool {
         match &node.node {
-            Node::FunctionCall { name, args } => {
+            Node::FunctionCall { name, args, .. } => {
                 let mut state = scanned;
                 for arg in args {
                     state = self.analyze_secret_scan_expr(arg, state);

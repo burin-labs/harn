@@ -26,6 +26,27 @@ impl Parser {
         Ok(params)
     }
 
+    /// Parse a comma-separated type argument list after the opening `<`.
+    pub(super) fn parse_type_arg_list(&mut self) -> Result<Vec<TypeExpr>, ParserError> {
+        let mut args = Vec::new();
+        self.skip_newlines();
+        if self.check(&TokenKind::Gt) {
+            return Err(self.error("type argument"));
+        }
+        while !self.is_at_end() && !self.check(&TokenKind::Gt) {
+            args.push(self.parse_type_expr()?);
+            self.skip_newlines();
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            } else {
+                break;
+            }
+        }
+        self.consume(&TokenKind::Gt, ">")?;
+        Ok(args)
+    }
+
     /// Consume an optional `in` / `out` variance marker at the start
     /// of a type parameter. `in` is a reserved keyword and so is
     /// always a marker when it appears here. `out` is a contextual
@@ -108,6 +129,12 @@ impl Parser {
         if self.check(&TokenKind::LBrace) {
             return self.parse_shape_type();
         }
+        if self.check(&TokenKind::LBracket) {
+            self.advance();
+            let inner = self.parse_type_expr()?;
+            self.consume(&TokenKind::RBracket, "]")?;
+            return Ok(TypeExpr::List(Box::new(inner)));
+        }
         if let Some(tok) = self.current() {
             match &tok.kind {
                 TokenKind::Nil => {
@@ -167,12 +194,7 @@ impl Parser {
         }
         if self.check(&TokenKind::Lt) {
             self.advance();
-            let mut type_args = vec![self.parse_type_expr()?];
-            while self.check(&TokenKind::Comma) {
-                self.advance();
-                type_args.push(self.parse_type_expr()?);
-            }
-            self.consume(&TokenKind::Gt, ">")?;
+            let mut type_args = self.parse_type_arg_list()?;
             if name == "list" && type_args.len() == 1 {
                 return Ok(TypeExpr::List(Box::new(type_args.remove(0))));
             } else if name == "dict" && type_args.len() == 2 {

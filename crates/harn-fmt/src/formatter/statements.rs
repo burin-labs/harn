@@ -94,6 +94,7 @@ impl Formatter<'_> {
                     let escaped = escape_string(desc);
                     effective_body.push(harn_parser::Spanned::dummy(Node::FunctionCall {
                         name: "description".to_string(),
+                        type_args: Vec::new(),
                         args: vec![harn_parser::Spanned::dummy(Node::StringLiteral(escaped))],
                     }));
                 }

@@ -3351,6 +3351,44 @@
         }
       ]
     },
+    "type_arguments": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "<"
+        },
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "type_annotation"
+            },
+            {
+              "type": "REPEAT",
+              "content": {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": ","
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "type_annotation"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": ">"
+        }
+      ]
+    },
     "where_clause": {
       "type": "SEQ",
       "members": [
@@ -4460,6 +4498,22 @@
                 }
               ]
             }
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "type_arguments",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "type_arguments"
+                }
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
           },
           {
             "type": "STRING",
@@ -7294,6 +7348,23 @@
           "type": "SEQ",
           "members": [
             {
+              "type": "STRING",
+              "value": "["
+            },
+            {
+              "type": "SYMBOL",
+              "name": "type_annotation"
+            },
+            {
+              "type": "STRING",
+              "value": "]"
+            }
+          ]
+        },
+        {
+          "type": "SEQ",
+          "members": [
+            {
               "type": "SYMBOL",
               "name": "identifier"
             },
@@ -7607,6 +7678,10 @@
     ],
     [
       "typed_parameter",
+      "type_annotation"
+    ],
+    [
+      "type_arguments",
       "type_annotation"
     ],
     [

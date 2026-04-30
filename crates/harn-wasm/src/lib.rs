@@ -436,7 +436,7 @@ impl SyncInterpreter {
                 self.env.define(name, closure, false);
                 Ok(Val::Nil)
             }
-            Node::FunctionCall { name, args } => {
+            Node::FunctionCall { name, args, .. } => {
                 if let Some(Val::Closure(params, body, cenv)) = self.env.get(name) {
                     let arg_vals: Result<Vec<_>, _> = args.iter().map(|a| self.eval(a)).collect();
                     return self.invoke_closure(&params, &body, &cenv, &arg_vals?);

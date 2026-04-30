@@ -100,9 +100,26 @@ impl Formatter<'_> {
                     format!("try* {expr}")
                 }
             }
-            Node::FunctionCall { name, args } => {
-                let args_str = self.format_call_args(args, name.len() + 1, indent);
-                format!("{name}({args_str})")
+            Node::FunctionCall {
+                name,
+                type_args,
+                args,
+            } => {
+                let type_args_str = if type_args.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "<{}>",
+                        type_args
+                            .iter()
+                            .map(format_type_expr)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
+                let args_str =
+                    self.format_call_args(args, name.len() + type_args_str.len() + 1, indent);
+                format!("{name}{type_args_str}({args_str})")
             }
             Node::MethodCall {
                 object,
@@ -478,6 +495,7 @@ impl Formatter<'_> {
                     let escaped = escape_string(desc);
                     effective_body.push(harn_parser::Spanned::dummy(Node::FunctionCall {
                         name: "description".to_string(),
+                        type_args: Vec::new(),
                         args: vec![harn_parser::Spanned::dummy(Node::StringLiteral(escaped))],
                     }));
                 }

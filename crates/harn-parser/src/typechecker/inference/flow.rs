@@ -196,7 +196,7 @@ impl TypeChecker {
                 Self::extract_has_refinements(object, args, scope)
             }
 
-            Node::FunctionCall { name, args }
+            Node::FunctionCall { name, args, .. }
                 if (name == "schema_is" || name == "is_type") && args.len() == 2 =>
             {
                 Self::extract_schema_refinements(args, scope)

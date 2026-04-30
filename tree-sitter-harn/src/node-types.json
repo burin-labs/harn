@@ -895,6 +895,16 @@
             "named": true
           }
         ]
+      },
+      "type_arguments": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_arguments",
+            "named": true
+          }
+        ]
       }
     },
     "children": {
@@ -10334,6 +10344,21 @@
           "type": "string_literal",
           "named": true
         },
+        {
+          "type": "type_annotation",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "type_arguments",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
         {
           "type": "type_annotation",
           "named": true

@@ -164,7 +164,7 @@ fn collect_static_tool_surface_from_node(
     tool_search_active: &mut bool,
 ) {
     match &node.node {
-        Node::FunctionCall { name, args } if name == "tool_define" => {
+        Node::FunctionCall { name, args, .. } if name == "tool_define" => {
             if let Some(tool_name) = args.get(1).and_then(literal_string) {
                 let defer_loading = args
                     .get(3)
@@ -184,7 +184,7 @@ fn collect_static_tool_surface_from_node(
                 );
             }
         }
-        Node::FunctionCall { name, args } if name == "render_prompt" => {
+        Node::FunctionCall { name, args, .. } if name == "render_prompt" => {
             if let Some(target) = args.first().and_then(literal_template_path) {
                 prompt_targets.push(target);
             }
@@ -197,7 +197,7 @@ fn collect_static_tool_surface_from_node(
                 );
             }
         }
-        Node::FunctionCall { name, args } if name == "agent_loop" || name == "llm_call" => {
+        Node::FunctionCall { name, args, .. } if name == "agent_loop" || name == "llm_call" => {
             if args
                 .get(2)
                 .and_then(|options| dict_literal_field(options, "tool_search"))
@@ -704,7 +704,7 @@ fn scan_node_preflight(
                 }),
             }
         }
-        Node::FunctionCall { name, args } if name == "render" || name == "render_prompt" => {
+        Node::FunctionCall { name, args, .. } if name == "render" || name == "render_prompt" => {
             if let Some(template_path) = args.first().and_then(literal_template_path) {
                 if let Some(asset_ref) = harn_modules::asset_paths::parse(&template_path) {
                     let anchor = file_path.parent().unwrap_or(Path::new("."));
@@ -763,7 +763,7 @@ fn scan_node_preflight(
                 }
             }
         }
-        Node::FunctionCall { name, args } if name == "exec_at" || name == "shell_at" => {
+        Node::FunctionCall { name, args, .. } if name == "exec_at" || name == "shell_at" => {
             if let Some(dir) = args.first().and_then(literal_string) {
                 let resolved = resolve_source_relative(file_path, &dir);
                 if !resolved.is_dir() {
@@ -785,7 +785,7 @@ fn scan_node_preflight(
                 }
             }
         }
-        Node::FunctionCall { name, args } if name == "spawn_agent" => {
+        Node::FunctionCall { name, args, .. } if name == "spawn_agent" => {
             if let Some(agent_config) = args.first() {
                 scan_spawn_agent_preflight(agent_config, file_path, source, diagnostics);
             }
@@ -799,7 +799,7 @@ fn scan_node_preflight(
                 diagnostics,
             );
         }
-        Node::FunctionCall { name, args } if name == "host_invoke" => {
+        Node::FunctionCall { name, args, .. } if name == "host_invoke" => {
             diagnostics.push(PreflightDiagnostic {
                 path: file_path.display().to_string(),
                 source: source.to_string(),
@@ -821,7 +821,7 @@ fn scan_node_preflight(
                 diagnostics,
             );
         }
-        Node::FunctionCall { name, args } if name == "tool_define" => {
+        Node::FunctionCall { name, args, .. } if name == "tool_define" => {
             // harn#743: when a tool declares `executor: "host_bridge"`,
             // its `host_capability` must point at a real host operation
             // — otherwise the model gets a tool whose dispatch will
@@ -846,7 +846,7 @@ fn scan_node_preflight(
                 diagnostics,
             );
         }
-        Node::FunctionCall { name, args } if name == "host_call" => {
+        Node::FunctionCall { name, args, .. } if name == "host_call" => {
             if let Some((cap, op, params_arg)) = parse_host_call_args(args) {
                 if !is_known_host_operation(host_capabilities, &cap, &op) {
                     diagnostics.push(PreflightDiagnostic {

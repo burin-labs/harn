@@ -200,7 +200,7 @@ impl Compiler {
                 self.compile_node(false_expr)?;
                 self.chunk.patch_jump(end_jump);
             }
-            Node::FunctionCall { name, args } => {
+            Node::FunctionCall { name, args, .. } => {
                 self.compile_function_call(name, args)?;
             }
             Node::MethodCall {

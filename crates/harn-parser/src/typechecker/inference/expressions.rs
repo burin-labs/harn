@@ -191,7 +191,11 @@ impl TypeChecker {
                 None
             }
 
-            Node::FunctionCall { name, args } => {
+            Node::FunctionCall {
+                name,
+                type_args,
+                args,
+            } => {
                 if name == "schema_of" && args.len() == 1 {
                     if let Node::Identifier(alias) = &args[0].node {
                         if let Some(resolved) = scope.resolve_type(alias) {
@@ -243,6 +247,12 @@ impl TypeChecker {
                         let mut bindings = BTreeMap::new();
                         let type_param_set: std::collections::BTreeSet<String> =
                             sig.type_param_names.iter().cloned().collect();
+                        if type_args.len() == sig.type_param_names.len() {
+                            for (param_name, type_arg) in sig.type_param_names.iter().zip(type_args)
+                            {
+                                bindings.insert(param_name.clone(), type_arg.clone());
+                            }
+                        }
                         for (arg, (_param_name, param_type)) in args.iter().zip(sig.params.iter()) {
                             if let Some(param_ty) = param_type {
                                 let _ = self.bind_from_arg_node(
@@ -268,6 +278,11 @@ impl TypeChecker {
                     let type_param_set: std::collections::BTreeSet<String> =
                         sig.type_params.iter().cloned().collect();
                     let mut bindings: BTreeMap<String, TypeExpr> = BTreeMap::new();
+                    if type_args.len() == sig.type_params.len() {
+                        for (param_name, type_arg) in sig.type_params.iter().zip(type_args) {
+                            bindings.insert(param_name.clone(), type_arg.clone());
+                        }
+                    }
                     for (arg, param_ty) in args.iter().zip(sig.params.iter()) {
                         let _ = self.bind_from_arg_node(
                             param_ty,

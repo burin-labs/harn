@@ -262,7 +262,7 @@ fn find_render_string_at_offset(program: &[SNode], offset: usize) -> Option<(Str
 }
 
 fn find_render_string_in_node(node: &SNode, offset: usize) -> Option<(String, Span)> {
-    if let Node::FunctionCall { name, args } = &node.node {
+    if let Node::FunctionCall { name, args, .. } = &node.node {
         if (name == "render" || name == "render_prompt") && !args.is_empty() {
             if let Node::StringLiteral(value) = &args[0].node {
                 let span = args[0].span;

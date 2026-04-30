@@ -295,6 +295,7 @@ pub enum Node {
 
     FunctionCall {
         name: String,
+        type_args: Vec<TypeExpr>,
         args: Vec<SNode>,
     },
     MethodCall {

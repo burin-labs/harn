@@ -76,7 +76,7 @@ let body = if len(content) > 2400 {
 }
 ```
 
-## Streams
+## Stream Operators
 
 `stream.*` accepts lists, ranges, channels, generators, and lazy
 `iter(...)` values. Operators stay lazy until a sink such as
@@ -166,7 +166,7 @@ let results = parallel settle paths with { max_concurrent: 4 } { p ->
 `concurrency.md` for the RPM rate limiter, channels, `select`,
 `deadline`, and `defer`.
 
-## Streams
+## Stream Generators
 
 Use `gen fn` plus `emit` for lazy script-level streams:
 

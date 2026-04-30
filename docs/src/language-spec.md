@@ -436,7 +436,8 @@ select_expr        ::= 'select' '{'
 break_stmt         ::= 'break'
 continue_stmt      ::= 'continue'
 
-generic_params     ::= '<' IDENTIFIER (',' IDENTIFIER)* '>'
+generic_params     ::= '<' generic_param (',' generic_param)* '>'
+generic_param      ::= ['in' | 'out'] IDENTIFIER
 where_clause       ::= 'where' IDENTIFIER ':' IDENTIFIER
                        (',' IDENTIFIER ':' IDENTIFIER)*
 
@@ -444,6 +445,14 @@ fn_param_list      ::= (fn_param (',' fn_param)*)? [',' rest_param]
                      | rest_param
 fn_param           ::= IDENTIFIER [':' type_expr] ['=' expression]
 rest_param         ::= '...' IDENTIFIER
+type_expr          ::= IDENTIFIER
+                     | IDENTIFIER '<' type_expr (',' type_expr)* '>'
+                     | '[' type_expr ']'
+                     | 'fn' '(' [type_expr (',' type_expr)*] ')' '->' type_expr
+                     | '{' shape_field (',' shape_field)* '}'
+                     | type_expr '|' type_expr
+                     | STRING_LITERAL
+                     | INT_LITERAL
 
 A rest parameter (`...name`) must be the last parameter in the list. At call
 time, any arguments beyond the positional parameters are collected into a list
@@ -523,7 +532,9 @@ subscript_access   ::= '[' expression ']'
 optional_subscript_access
                     ::= '?[' expression ']'
 slice_access       ::= '[' [expression] ':' [expression] ']'
-call               ::= '(' arg_list ')'    (* only when postfix base is an identifier *)
+call               ::= [type_args] '(' arg_list ')'
+                       (* only when postfix base is an identifier *)
+type_args          ::= '<' type_expr (',' type_expr)* '>'
 try_unwrap         ::= '?'                 (* expr? on Result *)
 ```
 
@@ -2928,8 +2939,24 @@ into the matching branch.
 
 ```harn
 let numbers: list<int> = [1, 2, 3]
+let also_numbers: [int] = [1, 2, 3]
 let headers: dict<string, string> = {content_type: "json"}
 ```
+
+`[T]` is shorthand for `list<T>` in type positions. User-defined functions,
+structs, enums, interfaces, and type aliases may declare type parameters with
+`<T, U>`. Function calls normally infer those parameters from arguments, but
+callers may pass them explicitly when inference needs help or when the desired
+instantiation should be documented at the call site:
+
+```harn,ignore
+fn map<T, U>(xs: [T], f: fn(T) -> U) -> [U] { ... }
+let labels: [string] = map<int, string>([1, 2, 3], label)
+```
+
+Explicit type arguments are erased at runtime. They are checked statically:
+the number of supplied type arguments must match the function declaration, and
+each explicit binding must remain consistent with the concrete argument types.
 
 ### Structural types (shapes)
 

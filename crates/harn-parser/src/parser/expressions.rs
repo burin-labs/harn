@@ -457,6 +457,34 @@ impl Parser {
                     },
                     dict.span,
                 );
+            } else if self.check(&TokenKind::Lt) && matches!(expr.node, Node::Identifier(_)) {
+                let saved_pos = self.pos;
+                let start = expr.span;
+                self.advance();
+                let parsed_type_args = self.parse_type_arg_list();
+                if let Ok(type_args) = parsed_type_args {
+                    if self.check(&TokenKind::LParen) {
+                        self.advance();
+                        let args = self.parse_arg_list()?;
+                        self.consume(&TokenKind::RParen, ")")?;
+                        if let Node::Identifier(name) = expr.node {
+                            expr = spanned(
+                                Node::FunctionCall {
+                                    name,
+                                    type_args,
+                                    args,
+                                },
+                                Span::merge(start, self.prev_span()),
+                            );
+                        }
+                    } else {
+                        self.pos = saved_pos;
+                        break;
+                    }
+                } else {
+                    self.pos = saved_pos;
+                    break;
+                }
             } else if self.check(&TokenKind::LParen) && matches!(expr.node, Node::Identifier(_)) {
                 let start = expr.span;
                 self.advance();
@@ -464,7 +492,11 @@ impl Parser {
                 self.consume(&TokenKind::RParen, ")")?;
                 if let Node::Identifier(name) = expr.node {
                     expr = spanned(
-                        Node::FunctionCall { name, args },
+                        Node::FunctionCall {
+                            name,
+                            type_args: Vec::new(),
+                            args,
+                        },
                         Span::merge(start, self.prev_span()),
                     );
                 }
