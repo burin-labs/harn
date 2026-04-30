@@ -53,10 +53,8 @@ impl CheckpointState {
             .collect();
         let json = serde_json::to_string_pretty(&serde_json::Value::Object(obj))
             .map_err(|e| format!("checkpoint save error: {e}"))?;
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("checkpoint mkdir error: {e}"))?;
-        }
-        std::fs::write(&self.path, json).map_err(|e| format!("checkpoint write error: {e}"))?;
+        crate::atomic_io::atomic_write(&self.path, json.as_bytes())
+            .map_err(|e| format!("checkpoint write error: {e}"))?;
         Ok(())
     }
 

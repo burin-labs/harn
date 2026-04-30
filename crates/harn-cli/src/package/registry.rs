@@ -152,12 +152,9 @@ pub(crate) fn read_cached_content_hash(dir: &Path) -> Result<Option<String>, Str
 }
 
 pub(crate) fn write_cached_content_hash(dir: &Path, hash: &str) -> Result<(), String> {
-    fs::write(dir.join(CONTENT_HASH_FILE), format!("{hash}\n")).map_err(|error| {
-        format!(
-            "failed to write {}: {error}",
-            dir.join(CONTENT_HASH_FILE).display()
-        )
-    })
+    let path = dir.join(CONTENT_HASH_FILE);
+    harn_vm::atomic_io::atomic_write(&path, format!("{hash}\n").as_bytes())
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
 pub(crate) fn read_cache_metadata(dir: &Path) -> Result<Option<PackageCacheMetadata>, String> {
@@ -199,12 +196,9 @@ pub(crate) fn write_cache_metadata(
     };
     let body = toml::to_string_pretty(&metadata)
         .map_err(|error| format!("failed to encode cache metadata: {error}"))?;
-    fs::write(dir.join(CACHE_METADATA_FILE), body).map_err(|error| {
-        format!(
-            "failed to write {}: {error}",
-            dir.join(CACHE_METADATA_FILE).display()
-        )
-    })
+    let path = dir.join(CACHE_METADATA_FILE);
+    harn_vm::atomic_io::atomic_write(&path, body.as_bytes())
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
 pub(crate) fn normalized_relative_path(path: &Path) -> String {

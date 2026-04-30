@@ -251,18 +251,12 @@ pub(crate) fn pack_package_impl(
             fs::copy(&src, &dst)
                 .map_err(|error| format!("failed to copy {}: {error}", src.display()))?;
         }
-        fs::write(
-            artifact_dir.join(".harn-package-manifest.json"),
-            serde_json::to_string_pretty(&report)
-                .map_err(|error| format!("failed to render package manifest: {error}"))?
-                + "\n",
-        )
-        .map_err(|error| {
-            format!(
-                "failed to write {}: {error}",
-                artifact_dir.join(".harn-package-manifest.json").display()
-            )
-        })?;
+        let manifest_path = artifact_dir.join(".harn-package-manifest.json");
+        let manifest_body = serde_json::to_string_pretty(&report)
+            .map_err(|error| format!("failed to render package manifest: {error}"))?
+            + "\n";
+        harn_vm::atomic_io::atomic_write(&manifest_path, manifest_body.as_bytes())
+            .map_err(|error| format!("failed to write {}: {error}", manifest_path.display()))?;
     }
 
     Ok(PackagePackReport {
@@ -296,11 +290,7 @@ pub(crate) fn generate_package_docs_impl(
         }
         return Ok(output_path);
     }
-    if let Some(parent) = output_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
-    }
-    fs::write(&output_path, rendered)
+    harn_vm::atomic_io::atomic_write(&output_path, rendered.as_bytes())
         .map_err(|error| format!("failed to write {}: {error}", output_path.display()))?;
     Ok(output_path)
 }

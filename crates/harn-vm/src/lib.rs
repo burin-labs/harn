@@ -3,6 +3,7 @@
 pub mod a2a;
 pub mod agent_events;
 pub mod agent_sessions;
+pub mod atomic_io;
 pub mod bridge;
 mod builtin_id;
 pub mod checkpoint;

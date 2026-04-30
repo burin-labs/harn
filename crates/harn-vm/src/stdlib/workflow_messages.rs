@@ -150,21 +150,10 @@ fn load_state(target: &WorkflowTarget) -> Result<WorkflowMailboxState, String> {
 
 fn save_state(target: &WorkflowTarget, state: &WorkflowMailboxState) -> Result<(), String> {
     let path = workflow_state_path(target);
-    let parent = path
-        .parent()
-        .ok_or_else(|| "workflow state path has no parent".to_string())?;
-    std::fs::create_dir_all(parent)
-        .map_err(|error| format!("workflow state mkdir error: {error}"))?;
     let json = serde_json::to_string_pretty(state)
         .map_err(|error| format!("workflow state encode error: {error}"))?;
-    let tmp_path = parent.join(format!(".state.json.{}.tmp", uuid::Uuid::now_v7()));
-    std::fs::write(&tmp_path, &json)
-        .map_err(|error| format!("workflow state write error: {error}"))?;
-    if let Err(error) = std::fs::rename(&tmp_path, &path) {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(format!("workflow state rename error: {error}"));
-    }
-    Ok(())
+    crate::atomic_io::atomic_write(&path, json.as_bytes())
+        .map_err(|error| format!("workflow state write error: {error}"))
 }
 
 fn parse_target_json(
