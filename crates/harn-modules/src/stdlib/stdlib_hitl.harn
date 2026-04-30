@@ -1,7 +1,8 @@
-// std/hitl — typed aliases for human-in-the-loop primitives.
-//
-// Import with: `import "std/hitl"`.
-
+/**
+ * std/hitl — typed aliases for human-in-the-loop primitives.
+ *
+ * Import with: `import "std/hitl"`.
+ */
 type HitlRequestKind = "question" | "approval" | "dual_control" | "escalation"
 
 type HitlPendingFilters = {
@@ -23,24 +24,11 @@ type HitlPendingRequest = {
   metadata: dict,
 }
 
-type AskUserOptions<T> = {
-  schema?: Schema<T>,
-  timeout?: duration,
-  default?: T,
-}
+type AskUserOptions<T> = {schema?: Schema<T>, timeout?: duration, default?: T}
 
-type ApprovalOptions = {
-  detail?: any,
-  quorum?: int,
-  reviewers?: list<string>,
-  deadline?: duration,
-}
+type ApprovalOptions = {detail?: any, quorum?: int, reviewers?: list<string>, deadline?: duration}
 
-type ApprovalSignature = {
-  reviewer: string,
-  signed_at: string,
-  signature: string,
-}
+type ApprovalSignature = {reviewer: string, signed_at: string, signature: string}
 
 type ApprovalRecord = {
   approved: bool,

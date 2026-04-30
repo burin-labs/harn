@@ -790,7 +790,14 @@ mod tests {
 
     #[test]
     fn walk_dir_long_running_returns_handle_and_feedback() {
-        let _guard = LONG_RUNNING_TEST_LOCK.lock().unwrap();
+        // Recover from a poisoned mutex: each test calls
+        // `reset_state()` immediately below, so the previous test's
+        // panic-shaped failure does not contaminate this one. Without
+        // this, a single failing test cascades into PoisonError-driven
+        // failures across every subsequent long-running test.
+        let _guard = LONG_RUNNING_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         crate::stdlib::long_running::reset_state();
         let _ = crate::llm::drain_global_pending_feedback("");
         let dir = tempfile::tempdir().unwrap();
@@ -827,7 +834,14 @@ mod tests {
 
     #[test]
     fn glob_long_running_returns_handle_and_feedback() {
-        let _guard = LONG_RUNNING_TEST_LOCK.lock().unwrap();
+        // Recover from a poisoned mutex: each test calls
+        // `reset_state()` immediately below, so the previous test's
+        // panic-shaped failure does not contaminate this one. Without
+        // this, a single failing test cascades into PoisonError-driven
+        // failures across every subsequent long-running test.
+        let _guard = LONG_RUNNING_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         crate::stdlib::long_running::reset_state();
         let _ = crate::llm::drain_global_pending_feedback("");
         let dir = tempfile::tempdir().unwrap();

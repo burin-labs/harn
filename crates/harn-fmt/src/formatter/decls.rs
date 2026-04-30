@@ -2,7 +2,7 @@ use harn_parser::{Node, ParallelMode, SNode};
 
 use crate::helpers::{
     escape_string, format_attribute, format_catch_param, format_pattern, format_type_ann,
-    format_type_expr, format_type_params,
+    format_type_expr, format_type_expr_wrapped, format_type_params,
 };
 
 use super::Formatter;
@@ -493,7 +493,9 @@ impl Formatter<'_> {
                 type_expr,
             } => {
                 let params = format_type_params(type_params);
-                let te = format_type_expr(type_expr);
+                let prefix =
+                    self.indent * 2 + "type ".len() + name.len() + params.len() + " = ".len();
+                let te = format_type_expr_wrapped(type_expr, self.indent, prefix, self.line_width);
                 self.writeln(&format!("type {name}{params} = {te}"));
             }
             Node::Block(stmts) => {
