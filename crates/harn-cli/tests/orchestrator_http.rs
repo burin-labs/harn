@@ -2341,6 +2341,14 @@ async fn json_log_format_writes_structured_rotating_file_with_trace_ids() {
 // Regression coverage for harn#327 and harn#479: ingest should inject W3C
 // trace-context headers, queue append should preserve the trace, and dispatch
 // should adopt the queue append span as its remote parent.
+//
+// The orchestrator subprocess runs with the simple span processor
+// (`HARN_OTEL_SPAN_PROCESSOR=simple`). That replaces the production batch
+// pipeline with a synchronous "export each span on close" pipeline, so the
+// dispatch span — which closes inside graceful drain — is guaranteed to be on
+// the wire before the orchestrator exits. The test then has only one
+// synchronization point: process exit. No polling, no wall-clock cadence, no
+// dependence on `force_flush`-during-shutdown reliability.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
     let _lock = lock_orchestrator_tests();
@@ -2359,6 +2367,8 @@ async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
             "HARN_OTEL_HEADERS",
             "authorization=Bearer otel-token,x-tenant-id=tenant-abc",
         ),
+        // Synchronous export per span close. See doc comment above this fn.
+        ("HARN_OTEL_SPAN_PROCESSOR", "simple"),
         ("RUST_LOG", "info"),
     ];
     let mut process = spawn_orchestrator(&temp, &[], &envs);
@@ -2381,27 +2391,20 @@ async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
     assert!(status.success(), "status={status} stderr={stderr}");
     assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
 
-    let deadline = Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
-    let spans = loop {
-        let spans = collector.collected_spans();
-        let has_ingest = spans.iter().any(|span| span.name == "ingest");
-        let has_queue_append = spans.iter().any(|span| span.name == "queue_append");
-        let has_dispatch = spans.iter().any(|span| span.name == "dispatch");
-        if has_ingest && has_queue_append && has_dispatch {
-            break spans;
-        }
-        if Instant::now() >= deadline {
-            let requests = collector.requests.lock().unwrap().clone();
-            panic!(
-                "timed out waiting for OTel spans\ncollector_headers={:#?}",
-                requests
-                    .iter()
-                    .map(|request| request.headers.clone())
-                    .collect::<Vec<_>>()
-            );
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    };
+    let spans = collector.collected_spans();
+    let span_names: Vec<&str> = spans.iter().map(|span| span.name.as_str()).collect();
+    assert!(
+        span_names.contains(&"ingest"),
+        "ingest span missing; observed={span_names:?}"
+    );
+    assert!(
+        span_names.contains(&"queue_append"),
+        "queue_append span missing; observed={span_names:?}"
+    );
+    assert!(
+        span_names.contains(&"dispatch"),
+        "dispatch span missing; observed={span_names:?}"
+    );
 
     let ingest = spans.iter().find(|span| span.name == "ingest").unwrap();
     let queue_append = spans
