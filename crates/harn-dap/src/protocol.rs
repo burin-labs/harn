@@ -230,6 +230,12 @@ pub struct Source {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "sourceReference"
+    )]
+    pub source_reference: Option<i64>,
 }
 
 /// DAP StackFrame.

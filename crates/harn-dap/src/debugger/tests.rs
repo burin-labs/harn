@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use harn_vm::VmValue;
+use harn_vm::{Vm, VmValue};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -318,6 +318,81 @@ fn test_evaluate_with_context() {
         let body = responses[0].body.as_ref().unwrap();
         assert_eq!(body["result"], "7");
     }
+}
+
+#[test]
+fn test_source_returns_launch_source_content() {
+    let mut dbg = Debugger::new();
+    dbg.source_path = Some("/tmp/main.harn".to_string());
+    dbg.source_content = Some("let x = 1\n".to_string());
+
+    let responses = dbg.handle_message(make_request(
+        1,
+        "source",
+        Some(json!({"source": {"path": "/tmp/main.harn"}})),
+    ));
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].success, Some(true));
+    let body = responses[0].body.as_ref().unwrap();
+    assert_eq!(body["content"], "let x = 1\n");
+    assert_eq!(body["mimeType"], "text/x-harn");
+}
+
+#[test]
+fn test_source_reads_prompt_template_from_disk() {
+    let (_dir, file) = write_temp_program("sample.harn.prompt", "Hello {{ name }}\n");
+    let responses = Debugger::new().handle_message(make_request(
+        1,
+        "source",
+        Some(json!({"source": {"path": file.to_string_lossy()}})),
+    ));
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].success, Some(true));
+    let body = responses[0].body.as_ref().unwrap();
+    assert_eq!(body["content"], "Hello {{ name }}\n");
+    assert_eq!(body["mimeType"], "text/x-harn-prompt");
+}
+
+#[test]
+fn test_source_reads_stdlib_synthetic_source() {
+    let responses = Debugger::new().handle_message(make_request(
+        1,
+        "source",
+        Some(json!({"source": {"path": "<stdlib>/text.harn"}})),
+    ));
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].success, Some(true));
+    let body = responses[0].body.as_ref().unwrap();
+    assert!(body["content"].as_str().unwrap().contains("pub fn"));
+}
+
+#[test]
+fn test_source_reference_reads_vm_generated_source() {
+    let source = "pub fn generated_answer() {\n  return 42\n}\n";
+    let mut vm = Vm::new();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("runtime");
+    runtime
+        .block_on(vm.load_module_exports_from_source("<generated>/wrapper.harn", source))
+        .expect("load generated module");
+
+    let mut dbg = Debugger::new();
+    dbg.vm = Some(vm);
+    let source_ref = dbg
+        .source_for_path("<generated>/wrapper.harn")
+        .source_reference
+        .expect("generated source gets a sourceReference");
+
+    let responses = dbg.handle_message(make_request(
+        1,
+        "source",
+        Some(json!({"sourceReference": source_ref})),
+    ));
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].success, Some(true));
+    let body = responses[0].body.as_ref().unwrap();
+    assert_eq!(body["content"], source);
 }
 
 #[test]

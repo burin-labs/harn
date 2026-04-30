@@ -38,6 +38,9 @@ impl Debugger {
         }
 
         let mut vm = Vm::new();
+        if let Some(ref path) = self.source_path {
+            vm.set_source_info(path, source);
+        }
         register_vm_stdlib(&mut vm);
         register_http_builtins(&mut vm);
         register_llm_builtins(&mut vm);

@@ -43,6 +43,12 @@ pub struct Debugger {
     pub(crate) seq: i64,
     pub(crate) source_path: Option<String>,
     pub(crate) source_content: Option<String>,
+    /// DAP sourceReference -> source key.
+    pub(crate) source_refs: BTreeMap<i64, String>,
+    /// Source key -> DAP sourceReference for stable stack frame/source requests.
+    pub(crate) source_ref_by_path: BTreeMap<String, i64>,
+    /// Next source reference ID. Starts above variable refs to keep logs readable.
+    pub(crate) next_source_ref: i64,
     pub(crate) breakpoints: Vec<crate::protocol::Breakpoint>,
     pub(crate) next_bp_id: i64,
     pub(crate) vm: Option<Vm>,
@@ -148,6 +154,9 @@ impl Debugger {
             seq: 1,
             source_path: None,
             source_content: None,
+            source_refs: BTreeMap::new(),
+            source_ref_by_path: BTreeMap::new(),
+            next_source_ref: 1000,
             breakpoints: Vec::new(),
             next_bp_id: 1,
             vm: None,

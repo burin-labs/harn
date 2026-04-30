@@ -2242,11 +2242,10 @@ async fn json_log_format_writes_structured_rotating_file_with_trace_ids() {
 //
 // The orchestrator subprocess runs with the simple span processor
 // (`HARN_OTEL_SPAN_PROCESSOR=simple`). That replaces the production batch
-// pipeline with a synchronous "export each span on close" pipeline, so the
-// dispatch span — which closes inside graceful drain — is guaranteed to be on
-// the wire before the orchestrator exits. The test then has only one
-// synchronization point: process exit. No polling, no wall-clock cadence, no
-// dependence on `force_flush`-during-shutdown reliability.
+// pipeline with a synchronous "export each span on close" pipeline. The test
+// waits for the existing pump lifecycle event before shutdown, so it asserts
+// trace propagation after the dispatch span has actually closed instead of
+// racing the ack-first inbox pump.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
     let _lock = lock_orchestrator_tests();
@@ -2282,6 +2281,12 @@ async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
         .unwrap();
     let response = client.execute(request).await.unwrap();
     assert_status(response, StatusCode::OK).await;
+
+    wait_for_topic_event(&temp, "orchestrator.lifecycle", |event| {
+        event.kind == "pump_dispatch_completed"
+            && event.payload["status"] == serde_json::json!("completed")
+    })
+    .await;
 
     send_sigterm(&mut process.child);
     let status = wait_for_exit_async(&mut process.child).await;

@@ -1,5 +1,6 @@
 mod breakpoints;
 mod events;
+mod sources;
 pub(crate) mod state;
 mod stepping;
 mod variables;
@@ -61,6 +62,7 @@ impl Debugger {
             "pause" => self.handle_pause(&msg),
             "threads" => self.handle_threads(&msg),
             "stackTrace" => self.handle_stack_trace(&msg),
+            "source" => self.handle_source(&msg),
             "scopes" => self.handle_scopes(&msg),
             "variables" => self.handle_variables(&msg),
             "evaluate" => self.handle_evaluate(&msg),
@@ -159,21 +161,27 @@ impl Debugger {
     }
 
     fn handle_stack_trace(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
-        let frames: Vec<StackFrame> = if let Some(vm) = &self.vm {
-            vm.debug_stack_frames()
+        let frames: Vec<StackFrame> = if self.vm.is_some() {
+            let vm_frames = self
+                .vm
+                .as_ref()
+                .expect("checked above")
+                .debug_stack_frames_with_sources();
+            let fallback_source_path = self.source_path.clone();
+            vm_frames
                 .into_iter()
                 .enumerate()
-                .map(|(i, (name, line))| StackFrame {
-                    id: (i + 1) as i64,
-                    name,
-                    line: line.max(1) as i64,
-                    column: 1,
-                    source: self.source_path.as_ref().map(|p| Source {
-                        name: std::path::Path::new(p)
-                            .file_name()
-                            .map(|f| f.to_string_lossy().into_owned()),
-                        path: Some(p.clone()),
-                    }),
+                .map(|(i, (name, line, source_path))| {
+                    let frame_source_path = source_path.or_else(|| fallback_source_path.clone());
+                    StackFrame {
+                        id: (i + 1) as i64,
+                        name,
+                        line: line.max(1) as i64,
+                        column: 1,
+                        source: frame_source_path
+                            .as_deref()
+                            .map(|p| self.source_for_path(p)),
+                    }
                 })
                 .collect()
         } else {
@@ -182,12 +190,7 @@ impl Debugger {
                 name: "pipeline".to_string(),
                 line: self.current_line.max(1),
                 column: 1,
-                source: self.source_path.as_ref().map(|p| Source {
-                    name: std::path::Path::new(p)
-                        .file_name()
-                        .map(|f| f.to_string_lossy().into_owned()),
-                    path: Some(p.clone()),
-                }),
+                source: self.source_path.clone().map(|p| self.source_for_path(&p)),
             }]
         };
 

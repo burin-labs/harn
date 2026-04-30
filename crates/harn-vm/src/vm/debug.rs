@@ -271,6 +271,15 @@ impl Vm {
 
     /// Get all stack frames for the debugger.
     pub fn debug_stack_frames(&self) -> Vec<(String, usize)> {
+        self.debug_stack_frames_with_sources()
+            .into_iter()
+            .map(|(name, line, _source)| (name, line))
+            .collect()
+    }
+
+    /// Get all stack frames plus their source keys for debugger clients that
+    /// can retrieve synthetic sources through DAP `source`.
+    pub fn debug_stack_frames_with_sources(&self) -> Vec<(String, usize, Option<String>)> {
         let mut frames = Vec::new();
         for (i, frame) in self.frames.iter().enumerate() {
             let line = if frame.ip > 0 && frame.ip - 1 < frame.chunk.lines.len() {
@@ -287,9 +296,34 @@ impl Vm {
             } else {
                 frame.fn_name.clone()
             };
-            frames.push((name, line));
+            frames.push((name, line, frame.chunk.source_file.clone()));
         }
         frames
+    }
+
+    /// Return cached source text by debugger source key. This covers entry
+    /// programs, real imports that have already been read, and synthetic
+    /// sources such as stdlib modules or generated in-memory modules.
+    pub fn debug_source_for_path(&self, path: &str) -> Option<String> {
+        if self.source_file.as_deref() == Some(path) {
+            if let Some(source) = &self.source_text {
+                return Some(source.clone());
+            }
+        }
+
+        let key = std::path::PathBuf::from(path);
+        if let Some(source) = self.source_cache.get(&key) {
+            return Some(source.clone());
+        }
+
+        if let Some(module) = path
+            .strip_prefix("<stdlib>/")
+            .and_then(|s| s.strip_suffix(".harn"))
+        {
+            return crate::stdlib_modules::get_stdlib_source(module).map(str::to_string);
+        }
+
+        None
     }
 
     /// Get the current source line.
