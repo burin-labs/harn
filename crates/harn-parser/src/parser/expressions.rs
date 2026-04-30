@@ -602,6 +602,11 @@ impl Parser {
                     Span::merge(start, self.prev_span()),
                 ))
             }
+            TokenKind::Identifier(name)
+                if name == "cost_route" && self.peek_kind() == Some(&TokenKind::LBrace) =>
+            {
+                self.parse_cost_route()
+            }
             TokenKind::Identifier(name) => {
                 let name = name.clone();
                 self.advance();

@@ -236,6 +236,41 @@ impl Compiler {
         Ok(())
     }
 
+    pub(super) fn compile_cost_route(
+        &mut self,
+        options: &[(String, SNode)],
+        body: &[SNode],
+    ) -> Result<(), CompileError> {
+        let route_idx = self
+            .chunk
+            .add_constant(Constant::String("__cost_route".to_string()));
+        self.chunk.emit_u16(Op::Constant, route_idx, self.line);
+
+        for (key, value) in options {
+            let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
+            self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+            if matches!(
+                key.as_str(),
+                "fallback_strategy" | "strategy" | "quality" | "min_quality"
+            ) {
+                if let Node::Identifier(identifier) = &value.node {
+                    let value_idx = self
+                        .chunk
+                        .add_constant(Constant::String(identifier.clone()));
+                    self.chunk.emit_u16(Op::Constant, value_idx, self.line);
+                    continue;
+                }
+            }
+            self.compile_node(value)?;
+        }
+        self.chunk
+            .emit_u16(Op::BuildDict, options.len() as u16, self.line);
+
+        self.compile_closure(&[], body)?;
+        self.chunk.emit_u8(Op::Call, 2, self.line);
+        Ok(())
+    }
+
     pub(super) fn compile_break_stmt(&mut self) -> Result<(), CompileError> {
         if self.loop_stack.is_empty() {
             return Err(CompileError {

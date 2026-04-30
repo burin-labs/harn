@@ -46,8 +46,9 @@ pub use ollama::{
 pub(crate) use openai_normalize::{debug_log_message_shapes, normalize_openai_style_messages};
 pub(crate) use options::{
     push_unique_anthropic_beta_feature, DeltaSender, LlmCallOptions, LlmRequestPayload,
-    LlmRouteAlternative, LlmRoutePolicy, LlmRoutingDecision, OutputFormat, ReasoningEffort,
-    ThinkingConfig, ToolSearchConfig, ToolSearchMode, ToolSearchStrategy, ToolSearchVariant,
+    LlmRouteAlternative, LlmRouteFallback, LlmRoutePolicy, LlmRoutingDecision, OutputFormat,
+    ReasoningEffort, ThinkingConfig, ToolSearchConfig, ToolSearchMode, ToolSearchStrategy,
+    ToolSearchVariant,
 };
 pub use readiness::{
     probe_openai_compatible_model, selected_model_for_provider, supports_model_readiness_probe,
@@ -259,6 +260,26 @@ async fn try_fallback_provider(
     request: &LlmRequestPayload,
     primary_message: String,
 ) -> Result<LlmResult, String> {
+    for route in &request.route_fallbacks {
+        if route.provider == request.provider && route.model == request.model {
+            continue;
+        }
+        let Ok(fb_key) = super::helpers::resolve_api_key(&route.provider) else {
+            continue;
+        };
+
+        let mut fb_request = request.clone();
+        fb_request.provider = route.provider.clone();
+        fb_request.model = route.model.clone();
+        fb_request.api_key = fb_key;
+        if super::ensure_real_llm_allowed(&fb_request.provider).is_err() {
+            continue;
+        }
+        if let Ok(result) = vm_call_llm_api(&fb_request, None).await {
+            return Ok(result);
+        }
+    }
+
     let mut fallback_providers = Vec::<String>::new();
     for provider in &request.fallback_chain {
         if provider != &request.provider && !fallback_providers.contains(provider) {

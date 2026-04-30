@@ -1139,6 +1139,21 @@ impl TypeChecker {
                 self.check_block(body, &mut retry_scope);
             }
 
+            Node::CostRoute { options, body } => {
+                for (key, value) in options {
+                    if matches!(
+                        key.as_str(),
+                        "fallback_strategy" | "strategy" | "quality" | "min_quality"
+                    ) && matches!(value.node, Node::Identifier(_))
+                    {
+                        continue;
+                    }
+                    self.check_node(value, scope);
+                }
+                let mut route_scope = scope.child();
+                self.check_block(body, &mut route_scope);
+            }
+
             Node::Closure { params, body, .. } => {
                 let mut closure_scope = scope.child();
                 for p in params {

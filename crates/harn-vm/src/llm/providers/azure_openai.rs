@@ -224,6 +224,7 @@ mod tests {
             model: "gpt-4o-prod".to_string(),
             api_key: String::new(),
             fallback_chain: Vec::new(),
+            route_fallbacks: Vec::new(),
             messages: vec![json!({"role": "user", "content": "hello"})],
             system: None,
             max_tokens: 32,

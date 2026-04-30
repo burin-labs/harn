@@ -108,6 +108,14 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
                 collect_references(s, target_name, refs);
             }
         }
+        Node::CostRoute { options, body } => {
+            for (_, value) in options {
+                collect_references(value, target_name, refs);
+            }
+            for s in body {
+                collect_references(s, target_name, refs);
+            }
+        }
         Node::TryCatch {
             body,
             error_var,

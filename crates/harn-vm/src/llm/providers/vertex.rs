@@ -394,6 +394,7 @@ mod tests {
             model: "gemini-1.5-pro-002".to_string(),
             api_key: String::new(),
             fallback_chain: Vec::new(),
+            route_fallbacks: Vec::new(),
             messages: vec![json!({"role": "user", "content": "hello"})],
             system: Some("be brief".to_string()),
             max_tokens: 32,

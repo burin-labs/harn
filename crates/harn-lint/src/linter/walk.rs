@@ -767,6 +767,15 @@ impl<'a> Linter<'a> {
                 self.pop_scope();
             }
 
+            Node::CostRoute { options, body } => {
+                for (_, value) in options {
+                    self.lint_node(value);
+                }
+                self.push_scope();
+                self.lint_block(body);
+                self.pop_scope();
+            }
+
             Node::ReturnStmt { value } => {
                 if let Some(v) = value {
                     self.lint_node(v);

@@ -258,6 +258,12 @@ pub(crate) enum LlmRoutePolicy {
     /// Pick the lowest-latency available candidate at or above the requested
     /// quality tier.
     FastestOverQuality(String),
+    /// Pick from an explicit ordered candidate list. The strategy is
+    /// `prefer_order`, `cheapest_first`, or `fastest_first`.
+    PreferenceList {
+        targets: Vec<String>,
+        strategy: String,
+    },
 }
 
 impl LlmRoutePolicy {
@@ -267,6 +273,9 @@ impl LlmRoutePolicy {
             Self::Always(target) => format!("always({target})"),
             Self::CheapestOverQuality(target) => format!("cheapest_over_quality({target})"),
             Self::FastestOverQuality(target) => format!("fastest_over_quality({target})"),
+            Self::PreferenceList { targets, strategy } => {
+                format!("preference_list({strategy}: {})", targets.join(","))
+            }
         }
     }
 }
@@ -296,6 +305,12 @@ pub(crate) struct LlmRoutingDecision {
     pub alternatives: Vec<LlmRouteAlternative>,
 }
 
+#[derive(Clone, Debug, serde::Serialize, PartialEq)]
+pub(crate) struct LlmRouteFallback {
+    pub provider: String,
+    pub model: String,
+}
+
 /// All options for an LLM API call, extracted once from user-facing args.
 #[derive(Clone)]
 pub(crate) struct LlmCallOptions {
@@ -305,6 +320,7 @@ pub(crate) struct LlmCallOptions {
     pub api_key: String,
     pub route_policy: LlmRoutePolicy,
     pub fallback_chain: Vec<String>,
+    pub route_fallbacks: Vec<LlmRouteFallback>,
     pub routing_decision: Option<LlmRoutingDecision>,
 
     // --- Observability ---
@@ -447,6 +463,7 @@ pub(crate) struct LlmRequestPayload {
     pub model: String,
     pub api_key: String,
     pub fallback_chain: Vec<String>,
+    pub route_fallbacks: Vec<LlmRouteFallback>,
     pub messages: Vec<serde_json::Value>,
     pub system: Option<String>,
     pub max_tokens: i64,
@@ -490,6 +507,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             model: opts.model.clone(),
             api_key: opts.api_key.clone(),
             fallback_chain: opts.fallback_chain.clone(),
+            route_fallbacks: opts.route_fallbacks.clone(),
             messages: opts.messages.clone(),
             system: opts.system.clone(),
             max_tokens: opts.max_tokens,
@@ -527,6 +545,7 @@ pub(super) fn base_opts(provider: &str) -> LlmCallOptions {
         api_key: String::new(),
         route_policy: LlmRoutePolicy::Manual,
         fallback_chain: Vec::new(),
+        route_fallbacks: Vec::new(),
         routing_decision: None,
         session_id: None,
         messages: vec![serde_json::json!({"role": "user", "content": "hello"})],

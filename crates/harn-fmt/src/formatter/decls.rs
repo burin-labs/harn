@@ -379,6 +379,20 @@ impl Formatter<'_> {
                 self.dedent();
                 self.writeln("}");
             }
+            Node::CostRoute { options, body } => {
+                self.writeln("cost_route {");
+                self.indent();
+                for (key, value) in options {
+                    let value = self.format_expr(value, self.indent);
+                    self.writeln(&format!("{key}: {value}"));
+                }
+                if !options.is_empty() && !body.is_empty() {
+                    self.writeln("");
+                }
+                self.format_body(body, node_line);
+                self.dedent();
+                self.writeln("}");
+            }
             Node::GuardStmt {
                 condition,
                 else_body,

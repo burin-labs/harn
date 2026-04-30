@@ -189,6 +189,14 @@ impl MermaidGraph {
                 self.edge(&retry, &done, Some("done"));
                 (retry, done)
             }
+            Node::CostRoute { body, .. } => {
+                let route = self.node("cost_route");
+                let (body_head, body_tail) = self.emit_branch("route body", body);
+                let done = self.node("cost_route done");
+                self.edge(&route, &body_head, Some("run"));
+                self.edge(&body_tail, &done, None);
+                (route, done)
+            }
             Node::TryCatch {
                 body,
                 error_var,
@@ -464,6 +472,7 @@ fn summarize_node(node: &SNode) -> String {
         Node::MatchExpr { value, .. } => format!("match {}", inline_label(value)),
         Node::WhileLoop { condition, .. } => format!("while {}", inline_label(condition)),
         Node::Retry { count, .. } => format!("retry {}", inline_label(count)),
+        Node::CostRoute { .. } => "cost_route".to_string(),
         Node::TryCatch { .. } => "try/catch".to_string(),
         Node::TryExpr { .. } => "try expr".to_string(),
         Node::SpawnExpr { .. } => "spawn".to_string(),

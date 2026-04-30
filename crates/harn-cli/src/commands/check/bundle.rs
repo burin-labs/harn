@@ -367,6 +367,11 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
             children.extend(body.iter());
             children
         }
+        Node::CostRoute { options, body } => {
+            let mut children = options.iter().map(|(_, value)| value).collect::<Vec<_>>();
+            children.extend(body.iter());
+            children
+        }
         Node::ReturnStmt { value } | Node::YieldExpr { value } => {
             value.iter().map(|value| value.as_ref()).collect()
         }

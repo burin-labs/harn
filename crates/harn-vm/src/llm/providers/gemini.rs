@@ -196,6 +196,7 @@ mod tests {
             model: "gemini-2.5-flash".to_string(),
             api_key: String::new(),
             fallback_chain: Vec::new(),
+            route_fallbacks: Vec::new(),
             messages: vec![serde_json::json!({
                 "role": "user",
                 "content": [
@@ -242,6 +243,7 @@ mod tests {
             model: "gemini-2.5-flash".to_string(),
             api_key: String::new(),
             fallback_chain: Vec::new(),
+            route_fallbacks: Vec::new(),
             messages: vec![serde_json::json!({
                 "role": "user",
                 "content": [

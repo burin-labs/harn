@@ -372,6 +372,23 @@ impl Formatter<'_> {
                 let cnt = self.format_expr(count, indent);
                 self.format_block_expr(&format!("retry {cnt} {{"), body, indent)
             }
+            Node::CostRoute { options, body } => {
+                let inner = indent + 1;
+                let close = "  ".repeat(indent);
+                let mut result = String::from("cost_route {\n");
+                for (key, value) in options {
+                    let value = self.format_expr(value, inner);
+                    result.push_str(&"  ".repeat(inner));
+                    result.push_str(&format!("{key}: {value}\n"));
+                }
+                if !options.is_empty() && !body.is_empty() {
+                    result.push('\n');
+                }
+                result.push_str(&self.format_body_string(body, inner));
+                result.push_str(&close);
+                result.push('}');
+                result
+            }
             Node::TryCatch {
                 body,
                 error_var,

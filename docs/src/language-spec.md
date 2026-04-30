@@ -3014,6 +3014,31 @@ let r = llm_call(prompt, nil, {
 })
 ```
 
+For call sites that want routing policy to be visibly scoped around the work,
+`cost_route` installs an inherited LLM routing context for the dynamic extent
+of its block. Nested `llm_call` invocations inherit the block's routing and
+budget options; an explicit option on the call wins for the same key.
+
+```harn
+let r = cost_route {
+  budget_usd: 0.05
+  prefer: ["anthropic:claude-haiku-4-5", "openai:gpt-5.4-mini"]
+  fallback_strategy: cheapest_first
+
+  llm_call(prompt, nil, {max_tokens: 800})
+}
+```
+
+`budget_usd` is a shorthand for `budget.max_cost_usd`. `prefer` is an ordered
+list of model aliases, model ids, or `provider:model` selectors. The
+`fallback_strategy` value may be `prefer_order`, `cheapest_first`, or
+`fastest_first`; failures on the selected route are retried against the
+remaining preferred routes before provider-level fallbacks are considered.
+Without `prefer`, `fallback_strategy: cheapest_first` and
+`fallback_strategy: fastest_first` lower to the corresponding
+`cheapest_over_quality(quality)` / `fastest_over_quality(quality)` policy,
+using `quality` or `min_quality` when present and `mid` otherwise.
+
 The emitted schema follows canonical JSON-Schema conventions (objects
 with `properties`/`required`, arrays with `items`, literal unions as
 `{type, enum}`) so it is compatible with structured-output validators

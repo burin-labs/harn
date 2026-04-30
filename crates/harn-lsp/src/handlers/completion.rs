@@ -471,6 +471,12 @@ where
             visit_node(condition, visitor);
             visit_nodes(body, visitor);
         }
+        Node::CostRoute { options, body } => {
+            for (_, value) in options {
+                visit_node(value, visitor);
+            }
+            visit_nodes(body, visitor);
+        }
         Node::BinaryOp { left, right, .. } => {
             visit_node(left, visitor);
             visit_node(right, visitor);

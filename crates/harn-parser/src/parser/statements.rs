@@ -37,6 +37,11 @@ impl Parser {
             TokenKind::For => self.parse_for_in(),
             TokenKind::Match => self.parse_match(),
             TokenKind::Retry => self.parse_retry(),
+            TokenKind::Identifier(name)
+                if name == "cost_route" && self.peek_kind() == Some(&TokenKind::LBrace) =>
+            {
+                self.parse_cost_route()
+            }
             TokenKind::While => self.parse_while_loop(),
             TokenKind::Parallel => self.parse_parallel(),
             TokenKind::Return => self.parse_return(),
@@ -306,6 +311,40 @@ impl Parser {
                 count: Box::new(count),
                 body,
             },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    pub(super) fn parse_cost_route(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        match self.current().map(|t| &t.kind) {
+            Some(TokenKind::Identifier(name)) if name == "cost_route" => self.advance(),
+            _ => return Err(self.error("cost_route")),
+        }
+        self.consume(&TokenKind::LBrace, "{")?;
+        self.skip_newlines();
+
+        let mut options = Vec::new();
+        while let Some(TokenKind::Identifier(key)) = self.current().map(|t| &t.kind) {
+            if self.peek_kind() != Some(&TokenKind::Colon) {
+                break;
+            }
+            let key = key.clone();
+            self.advance();
+            self.consume(&TokenKind::Colon, ":")?;
+            let value = self.parse_expression()?;
+            options.push((key, value));
+            self.skip_newlines();
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+
+        let body = self.parse_block()?;
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(spanned(
+            Node::CostRoute { options, body },
             Span::merge(start, self.prev_span()),
         ))
     }

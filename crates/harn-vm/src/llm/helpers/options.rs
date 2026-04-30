@@ -37,7 +37,8 @@ fn route_target_from_short(target: &str) -> Result<(String, String), crate::valu
         ))));
     }
     if let Some((provider, model)) = target.split_once(':') {
-        let provider_known = crate::llm_config::provider_config(provider).is_some()
+        let provider_known = provider == "mock"
+            || crate::llm_config::provider_config(provider).is_some()
             || crate::llm::provider::is_provider_registered(provider);
         if provider_known && !model.trim().is_empty() {
             let (resolved_model, _) = crate::llm_config::resolve_model(model.trim());
@@ -76,11 +77,45 @@ fn parse_route_policy_text(text: &str) -> Result<crate::llm::api::LlmRoutePolicy
     )))))
 }
 
+fn vm_string_list(value: &VmValue) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut push = |text: String| {
+        let text = text.trim().to_string();
+        if !text.is_empty() && !out.iter().any(|existing| existing == &text) {
+            out.push(text);
+        }
+    };
+    match value {
+        VmValue::List(items) => {
+            for item in items.iter() {
+                push(item.display());
+            }
+        }
+        VmValue::String(text) => {
+            for item in text.split(',') {
+                push(item.to_string());
+            }
+        }
+        other => push(other.display()),
+    }
+    out
+}
+
 fn parse_route_policy_option(
     options: Option<&BTreeMap<String, VmValue>>,
 ) -> Result<crate::llm::api::LlmRoutePolicy, VmError> {
     use crate::llm::api::LlmRoutePolicy;
     let Some(raw) = options.and_then(|o| o.get("route_policy")) else {
+        if let Some(prefer) = options.and_then(|o| o.get("prefer")) {
+            let targets = vm_string_list(prefer);
+            if !targets.is_empty() {
+                let strategy = options
+                    .and_then(|o| o.get("fallback_strategy").or_else(|| o.get("strategy")))
+                    .map(|value| value.display())
+                    .unwrap_or_else(|| "prefer_order".to_string());
+                return Ok(LlmRoutePolicy::PreferenceList { targets, strategy });
+            }
+        }
         return Ok(LlmRoutePolicy::Manual);
     };
     match raw {
@@ -103,6 +138,24 @@ fn parse_route_policy_option(
                 "always" => Ok(LlmRoutePolicy::Always(target)),
                 "cheapest_over_quality" => Ok(LlmRoutePolicy::CheapestOverQuality(target)),
                 "fastest_over_quality" => Ok(LlmRoutePolicy::FastestOverQuality(target)),
+                "preference_list" | "prefer" => {
+                    let targets = d
+                        .get("targets")
+                        .or_else(|| d.get("prefer"))
+                        .map(vm_string_list)
+                        .unwrap_or_default();
+                    if targets.is_empty() {
+                        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                            "route_policy.prefer: expected at least one model/provider target",
+                        ))));
+                    }
+                    let strategy = d
+                        .get("strategy")
+                        .or_else(|| d.get("fallback_strategy"))
+                        .map(|value| value.display())
+                        .unwrap_or_else(|| "prefer_order".to_string());
+                    Ok(LlmRoutePolicy::PreferenceList { targets, strategy })
+                }
                 other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
                     format!("route_policy.mode: unsupported value {other:?}"),
                 )))),
@@ -246,6 +299,69 @@ fn resolve_route_policy(
             Ok(Some(LlmRoutingDecision {
                 policy: policy.as_label(),
                 requested_quality: Some(target.clone()),
+                selected_provider: selected.provider,
+                selected_model: selected.model,
+                alternatives,
+            }))
+        }
+        LlmRoutePolicy::PreferenceList { targets, strategy } => {
+            let mut alternatives = Vec::new();
+            for target in targets {
+                let (model, provider) = route_target_from_short(target)?;
+                if alternatives
+                    .iter()
+                    .any(|alt: &crate::llm::api::LlmRouteAlternative| {
+                        alt.provider == provider && alt.model == model
+                    })
+                {
+                    continue;
+                }
+                alternatives.push(route_alternative(
+                    provider,
+                    model,
+                    false,
+                    "candidate".to_string(),
+                ));
+            }
+            if alternatives.is_empty() {
+                alternatives.push(route_alternative(
+                    current_provider.to_string(),
+                    current_model.to_string(),
+                    false,
+                    "fallback_current_route".to_string(),
+                ));
+            }
+            let normalized = strategy.trim().to_ascii_lowercase();
+            let score_cost = |alt: &crate::llm::api::LlmRouteAlternative| -> f64 {
+                alt.cost_per_1k_in.unwrap_or(f64::INFINITY)
+                    + alt.cost_per_1k_out.unwrap_or(f64::INFINITY)
+            };
+            let selected_idx = alternatives
+                .iter()
+                .enumerate()
+                .filter(|(_, alt)| alt.available)
+                .min_by(
+                    |(left_idx, left), (right_idx, right)| match normalized.as_str() {
+                        "cheapest_first" | "cheapest" => score_cost(left)
+                            .partial_cmp(&score_cost(right))
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                            .then_with(|| left_idx.cmp(right_idx)),
+                        "fastest_first" | "fastest" => left
+                            .latency_p50_ms
+                            .unwrap_or(u64::MAX)
+                            .cmp(&right.latency_p50_ms.unwrap_or(u64::MAX))
+                            .then_with(|| left_idx.cmp(right_idx)),
+                        _ => left_idx.cmp(right_idx),
+                    },
+                )
+                .map(|(idx, _)| idx)
+                .unwrap_or(0);
+            alternatives[selected_idx].selected = true;
+            alternatives[selected_idx].reason = "selected".to_string();
+            let selected = alternatives[selected_idx].clone();
+            Ok(Some(LlmRoutingDecision {
+                policy: policy.as_label(),
+                requested_quality: None,
                 selected_provider: selected.provider,
                 selected_model: selected.model,
                 alternatives,
@@ -458,7 +574,8 @@ pub(crate) fn extract_llm_options(
             Some(a.display())
         }
     });
-    let options = args.get(2).and_then(|a| a.as_dict()).cloned();
+    let explicit_options = args.get(2).and_then(|a| a.as_dict()).cloned();
+    let options = crate::llm::cost_route::merge_context_options(explicit_options);
 
     let route_policy = parse_route_policy_option(options.as_ref())?;
     let mut provider = vm_resolve_provider(&options);
@@ -468,6 +585,23 @@ pub(crate) fn extract_llm_options(
         provider = decision.selected_provider.clone();
         model = decision.selected_model.clone();
     }
+    let route_fallbacks = match &route_policy {
+        crate::llm::api::LlmRoutePolicy::PreferenceList { .. } => routing_decision
+            .as_ref()
+            .map(|decision| {
+                decision
+                    .alternatives
+                    .iter()
+                    .filter(|alt| !alt.selected)
+                    .map(|alt| crate::llm::api::LlmRouteFallback {
+                        provider: alt.provider.clone(),
+                        model: alt.model.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
     let fallback_chain = parse_fallback_chain_option(options.as_ref());
     let api_key = resolve_api_key(&provider)?;
 
@@ -806,6 +940,7 @@ pub(crate) fn extract_llm_options(
         api_key,
         route_policy,
         fallback_chain,
+        route_fallbacks,
         routing_decision,
         session_id: None,
         messages,
@@ -1515,6 +1650,43 @@ mod routing_tests {
         let opts = extract_with_policy("fastest_over_quality(mid)");
         assert_eq!(opts.provider, "fast");
         assert_eq!(opts.model, "fast-mid-model");
+        crate::llm_config::clear_user_overrides();
+        super::super::reset_provider_key_cache();
+    }
+
+    #[test]
+    fn preference_list_cheapest_first_sets_route_fallbacks() {
+        install_test_routes();
+        let mut policy = BTreeMap::new();
+        policy.insert(
+            "mode".to_string(),
+            VmValue::String(Rc::from("preference_list".to_string())),
+        );
+        policy.insert(
+            "strategy".to_string(),
+            VmValue::String(Rc::from("cheapest_first".to_string())),
+        );
+        policy.insert(
+            "prefer".to_string(),
+            VmValue::List(Rc::new(vec![
+                VmValue::String(Rc::from("fast-mid")),
+                VmValue::String(Rc::from("cheap-mid")),
+            ])),
+        );
+        let mut options = BTreeMap::new();
+        options.insert("route_policy".to_string(), VmValue::Dict(Rc::new(policy)));
+        let opts = extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ])
+        .expect("options");
+
+        assert_eq!(opts.provider, "cheap");
+        assert_eq!(opts.model, "cheap-mid-model");
+        assert_eq!(opts.route_fallbacks.len(), 1);
+        assert_eq!(opts.route_fallbacks[0].provider, "fast");
+        assert_eq!(opts.route_fallbacks[0].model, "fast-mid-model");
         crate::llm_config::clear_user_overrides();
         super::super::reset_provider_key_cache();
     }

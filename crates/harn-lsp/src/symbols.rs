@@ -685,6 +685,14 @@ fn collect_symbols(
                 recurse!(s, scope_span);
             }
         }
+        Node::CostRoute { options, body } => {
+            for (_, value) in options {
+                recurse!(value, scope_span);
+            }
+            for s in body {
+                recurse!(s, scope_span);
+            }
+        }
         Node::Parallel {
             expr,
             variable,

@@ -22,6 +22,7 @@ mod config_builtins;
 pub(crate) mod content;
 mod conversation;
 pub(crate) mod cost;
+pub(crate) mod cost_route;
 pub(crate) mod daemon;
 pub(crate) mod helpers;
 pub(crate) mod ledger;
@@ -968,6 +969,9 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     rate_limit::init_from_config();
     agent_config::register_agent_subscribe(vm);
     agent_config::register_agent_inject_feedback(vm);
+    vm.register_async_builtin("__cost_route", |args| async move {
+        cost_route::cost_route_impl(args).await
+    });
     vm.register_async_builtin("llm_call", |args| async move { llm_call_impl(args).await });
     // `llm_call_safe` shares the exact same execution path as `llm_call`
     // but replaces the throw-on-failure contract with a normalized
@@ -1537,6 +1541,7 @@ mod tests {
             api_key: String::new(),
             route_policy: super::api::LlmRoutePolicy::Manual,
             fallback_chain: Vec::new(),
+            route_fallbacks: Vec::new(),
             routing_decision: None,
             session_id: None,
             messages: Vec::new(),

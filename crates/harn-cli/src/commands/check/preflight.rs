@@ -312,6 +312,24 @@ fn collect_static_tool_surface_from_node(
                 );
             }
         }
+        Node::CostRoute { options, body } => {
+            for (_, value) in options {
+                collect_static_tool_surface_from_node(
+                    value,
+                    tool_defs,
+                    prompt_targets,
+                    tool_search_active,
+                );
+            }
+            for child in body {
+                collect_static_tool_surface_from_node(
+                    child,
+                    tool_defs,
+                    prompt_targets,
+                    tool_search_active,
+                );
+            }
+        }
         Node::SkillDecl { fields, .. } => {
             for (_, value) in fields {
                 collect_static_tool_surface_from_node(
@@ -996,6 +1014,28 @@ fn scan_node_preflight(
                 visited,
                 diagnostics,
             );
+            scan_children(
+                body,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+        }
+        Node::CostRoute { options, body } => {
+            for (_, value) in options {
+                scan_node_preflight(
+                    value,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
+            }
             scan_children(
                 body,
                 file_path,

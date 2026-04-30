@@ -60,6 +60,7 @@ impl TypeChecker {
                 | Node::TryExpr { body }
                 | Node::SpawnExpr { body }
                 | Node::Retry { body, .. }
+                | Node::CostRoute { body, .. }
                 | Node::WhileLoop { body, .. }
                 | Node::DeferStmt { body }
                 | Node::MutexBlock { body }
@@ -651,6 +652,8 @@ impl TypeChecker {
             // `try* EXPR` evaluates to EXPR's value on success; rethrow on
             // error never returns. Type is therefore EXPR's inferred type.
             Node::TryStar { operand } => self.infer_type(operand, scope),
+
+            Node::CostRoute { body, .. } => self.infer_block_type(body, scope),
 
             Node::StructConstruct {
                 struct_name,

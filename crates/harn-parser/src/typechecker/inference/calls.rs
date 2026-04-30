@@ -387,6 +387,14 @@ impl TypeChecker {
                 }
             }
             Node::AttributedDecl { inner, .. } => self.visit_for_deprecation(inner),
+            Node::CostRoute { options, body } => {
+                for (_, value) in options {
+                    self.visit_for_deprecation(value);
+                }
+                for s in body {
+                    self.visit_for_deprecation(s);
+                }
+            }
             Node::Pipeline { body, .. }
             | Node::OverrideDecl { body, .. }
             | Node::FnDecl { body, .. }

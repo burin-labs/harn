@@ -178,6 +178,15 @@ pub enum Node {
         count: Box<SNode>,
         body: Vec<SNode>,
     },
+    /// Scoped cost-aware LLM routing block:
+    /// `cost_route { key: value ... body }`.
+    ///
+    /// Options are inherited by nested `llm_call` invocations unless a
+    /// call explicitly overrides the same option.
+    CostRoute {
+        options: Vec<(String, SNode)>,
+        body: Vec<SNode>,
+    },
     ReturnStmt {
         value: Option<Box<SNode>>,
     },

@@ -153,6 +153,26 @@ fn collect_mock_host_capabilities_from_node(
                 );
             }
         }
+        Node::CostRoute { options, body } => {
+            for (_, value) in options {
+                collect_mock_host_capabilities_from_node(
+                    value,
+                    file_path,
+                    source,
+                    visited,
+                    capabilities,
+                );
+            }
+            for child in body {
+                collect_mock_host_capabilities_from_node(
+                    child,
+                    file_path,
+                    source,
+                    visited,
+                    capabilities,
+                );
+            }
+        }
         Node::ReturnStmt { value } | Node::YieldExpr { value } => {
             if let Some(value) = value {
                 collect_mock_host_capabilities_from_node(
