@@ -168,8 +168,8 @@ fn builtin_effect_group(builtin: &str) -> Option<BuiltinEffectGroup> {
         | "websocket_send"
         | "websocket_receive"
         | "websocket_server" => Some(BuiltinEffectGroup::Network),
-        "llm_call" | "llm_call_safe" | "llm_completion" | "llm_stream" | "llm_healthcheck"
-        | "agent_loop" => Some(BuiltinEffectGroup::Llm),
+        "llm_call" | "llm_call_safe" | "llm_completion" | "llm_stream" | "llm_stream_call"
+        | "llm_healthcheck" | "agent_loop" => Some(BuiltinEffectGroup::Llm),
         "vision_ocr" => Some(BuiltinEffectGroup::Process),
         "mcp_connect"
         | "mcp_ensure_active"

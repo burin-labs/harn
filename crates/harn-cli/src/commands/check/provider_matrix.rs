@@ -11,6 +11,7 @@ const FEATURES: &[&str] = &[
     "vision",
     "audio",
     "pdf",
+    "streaming",
     "json_schema",
     "tools",
     "cache",
@@ -73,18 +74,19 @@ pub(crate) fn generate_markdown() -> String {
     );
     out.push_str("Regenerate with `make gen-provider-matrix` and verify with `make check-provider-matrix`.\n\n");
     out.push_str(
-        "| Provider | Model pattern | Thinking | Vision | Audio | PDF | JSON schema | Tools | Cache |\n",
+        "| Provider | Model pattern | Thinking | Vision | Audio | PDF | Streaming | JSON schema | Tools | Cache |\n",
     );
-    out.push_str("|---|---|---|---:|---:|---:|---|---:|---:|\n");
+    out.push_str("|---|---|---|---:|---:|---:|---:|---|---:|---:|\n");
     for row in rows {
         out.push_str(&format!(
-            "| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} |\n",
+            "| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} | {} |\n",
             row.provider,
             row.model,
             markdown_cell(&thinking_cell(&row)),
             yes_no(row.vision),
             yes_no(row.audio),
             yes_no(row.pdf),
+            yes_no(row.streaming),
             markdown_cell(&json_schema_cell(&row)),
             yes_no(row.tools),
             yes_no(row.cache),
@@ -121,6 +123,7 @@ fn row_supports_feature(row: &ProviderCapabilityMatrixRow, feature: &str) -> boo
         "vision" => row.vision,
         "audio" => row.audio,
         "pdf" => row.pdf,
+        "streaming" => row.streaming,
         "json_schema" => row.json_schema.is_some(),
         "tools" => row.tools,
         "cache" => row.cache,
@@ -129,7 +132,7 @@ fn row_supports_feature(row: &ProviderCapabilityMatrixRow, feature: &str) -> boo
 }
 
 fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
-    let table_rows: Vec<[String; 8]> = rows
+    let table_rows: Vec<[String; 9]> = rows
         .iter()
         .map(|row| {
             [
@@ -138,6 +141,7 @@ fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
                 yes_no(row.vision).to_string(),
                 yes_no(row.audio).to_string(),
                 yes_no(row.pdf).to_string(),
+                yes_no(row.streaming).to_string(),
                 json_schema_cell(row),
                 yes_no(row.tools).to_string(),
                 yes_no(row.cache).to_string(),
@@ -150,6 +154,7 @@ fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
         "vision".to_string(),
         "audio".to_string(),
         "pdf".to_string(),
+        "streaming".to_string(),
         "json_schema".to_string(),
         "tools".to_string(),
         "cache".to_string(),
@@ -242,6 +247,8 @@ mod tests {
         let markdown = generate_markdown();
         assert!(markdown.contains("Provider Capability Matrix"));
         assert!(markdown.contains("Source of truth"));
-        assert!(markdown.contains("| Provider | Model pattern | Thinking | Vision | Audio | PDF | JSON schema | Tools | Cache |"));
+        assert!(markdown.contains(
+            "| Provider | Model pattern | Thinking | Vision | Audio | PDF | Streaming | JSON schema | Tools | Cache |"
+        ));
     }
 }

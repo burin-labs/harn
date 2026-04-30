@@ -241,6 +241,7 @@ impl super::super::Vm {
                 self.stack.push(VmValue::Stream(VmStream {
                     done: Rc::new(std::cell::Cell::new(false)),
                     receiver: Rc::new(tokio::sync::Mutex::new(rx)),
+                    cancel: None,
                 }));
             }
             _ => self.stack.push(VmValue::Nil),

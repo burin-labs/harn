@@ -1,0 +1,30 @@
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "Visible <think>hidden", stop_reason: "stop"})
+  llm_mock({text: "Visible <think>hidden", stop_reason: "stop"})
+  let chunks = stream
+    .collect(llm_stream_call("stream this", nil, {provider: "mock"}), {max: 4})
+  let direct = llm_call("non-stream this", nil, {provider: "mock"})
+  var raw = ""
+  for chunk in chunks {
+    raw = raw + chunk.delta
+  }
+  let final = chunks[len(chunks) - 1]
+  println(raw == direct.text)
+  println(chunks[0].visible_delta == "Visible")
+  println(chunks[0].partial == "Visible")
+  println(final.finish_reason)
+  println(final.delta == "")
+  llm_mock({text: "early cancel text", stop_reason: "stop"})
+  let first = stream.first(llm_stream_call("cancel early", nil, {provider: "mock"}))
+  println(first.delta == "early cancel text")
+  println(first.finish_reason == nil)
+  llm_mock({text: "break cancel text", stop_reason: "stop"})
+  var broke_before_terminal = false
+  let cancel_stream = llm_stream_call("break early", nil, {provider: "mock"})
+  for chunk in cancel_stream {
+    broke_before_terminal = chunk.finish_reason == nil
+    break
+  }
+  println(broke_before_terminal)
+}

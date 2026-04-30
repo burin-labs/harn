@@ -184,6 +184,7 @@ impl Vm {
             return VmValue::Stream(VmStream {
                 done: Rc::new(std::cell::Cell::new(false)),
                 receiver,
+                cancel: None,
             });
         }
 
