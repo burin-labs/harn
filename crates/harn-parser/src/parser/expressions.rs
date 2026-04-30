@@ -659,6 +659,10 @@ impl Parser {
             TokenKind::Retry => self.parse_retry(),
             TokenKind::If => self.parse_if_else(),
             TokenKind::Spawn => self.parse_spawn_expr(),
+            TokenKind::RequestApproval => self.parse_hitl_expr(HitlKind::RequestApproval),
+            TokenKind::DualControl => self.parse_hitl_expr(HitlKind::DualControl),
+            TokenKind::AskUser => self.parse_hitl_expr(HitlKind::AskUser),
+            TokenKind::EscalateTo => self.parse_hitl_expr(HitlKind::EscalateTo),
             TokenKind::DurationLiteral(ms) => {
                 let ms = *ms;
                 self.advance();
@@ -720,6 +724,77 @@ impl Parser {
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(spanned(
             Node::SpawnExpr { body },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    /// Parse a first-class HITL primitive: one of `request_approval`,
+    /// `dual_control`, `ask_user`, `escalate_to`. The keyword has
+    /// already been peeked at; this method consumes it plus the
+    /// parenthesized argument list.
+    ///
+    /// Each argument is either positional (`expr`) or named
+    /// (`name: expr`). The grammar accepts the existing positional
+    /// invocation form so existing scripts and conformance tests
+    /// (e.g. `request_approval("deploy", {quorum: 2, ...})`) keep
+    /// working unchanged. Argument validation (required names,
+    /// duplicates, ordering) is performed by the typechecker.
+    pub(super) fn parse_hitl_expr(&mut self, kind: HitlKind) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        let kw_token = match kind {
+            HitlKind::RequestApproval => TokenKind::RequestApproval,
+            HitlKind::DualControl => TokenKind::DualControl,
+            HitlKind::AskUser => TokenKind::AskUser,
+            HitlKind::EscalateTo => TokenKind::EscalateTo,
+        };
+        self.consume(&kw_token, kind.as_keyword())?;
+        self.consume(&TokenKind::LParen, "(")?;
+        self.skip_newlines();
+
+        let mut args: Vec<HitlArg> = Vec::new();
+        while !self.is_at_end() && !self.check(&TokenKind::RParen) {
+            let arg_start = self.current_span();
+            // Look ahead two tokens to detect `identifier ":"`. The
+            // identifier itself is parsed as part of the expression so
+            // we keep the dispatch simple: peek for `Identifier` then
+            // a `Colon` to identify a named argument.
+            // `peek_kind_at(0)` is the current token; `peek_kind_at(1)`
+            // is one ahead. A named-arg slot starts with `ident :`.
+            let is_named = matches!(
+                (self.peek_kind_at(0), self.peek_kind_at(1)),
+                (Some(TokenKind::Identifier(_)), Some(TokenKind::Colon))
+            );
+            let (name, value) = if is_named {
+                let Some(TokenKind::Identifier(raw)) = self.peek_kind_at(0).cloned() else {
+                    unreachable!("named arg dispatch already matched Identifier token")
+                };
+                self.advance();
+                self.consume(&TokenKind::Colon, ":")?;
+                self.skip_newlines();
+                let value = self.parse_expression()?;
+                (Some(raw), value)
+            } else {
+                (None, self.parse_expression()?)
+            };
+            let arg_span = Span::merge(arg_start, self.prev_span());
+            args.push(HitlArg {
+                name,
+                value,
+                span: arg_span,
+            });
+            self.skip_newlines();
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            } else {
+                break;
+            }
+        }
+
+        self.skip_newlines();
+        self.consume(&TokenKind::RParen, ")")?;
+        Ok(spanned(
+            Node::HitlExpr { kind, args },
             Span::merge(start, self.prev_span()),
         ))
     }

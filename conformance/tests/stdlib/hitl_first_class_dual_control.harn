@@ -1,0 +1,20 @@
+// First-class HITL syntax: `dual_control` as a reserved keyword. Named
+// args (`n:`, `m:`, `action:`, `approvers:`) lower to the existing
+// dual-control builtin which still requires distinct principals to
+// reach quorum.
+import { clear_host_mocks, mock_host_response } from "std/testing"
+
+fn destructive_step() -> string {
+  return "deleted"
+}
+
+pipeline test(task) {
+  clear_host_mocks()
+  mock_host_response(
+    "hitl",
+    "dual_control",
+    [{approved: true, reviewer: "alice"}, {approved: true, reviewer: "bob"}],
+  )
+  let result = dual_control(n: 2, m: 3, action: destructive_step, approvers: ["alice", "bob", "carol"])
+  println(result)
+}

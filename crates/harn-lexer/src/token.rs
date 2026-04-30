@@ -86,14 +86,17 @@ pub struct FixEdit {
 /// `test_keywords_const_covers_lexer`). External tooling should consume this
 /// rather than duplicate it.
 pub const KEYWORDS: &[&str] = &[
+    "ask_user",
     "break",
     "catch",
     "continue",
     "deadline",
     "defer",
-    "emit",
+    "dual_control",
     "else",
+    "emit",
     "enum",
+    "escalate_to",
     "eval_pack",
     "exclusive",
     "extends",
@@ -116,6 +119,7 @@ pub const KEYWORDS: &[&str] = &[
     "parallel",
     "pipeline",
     "pub",
+    "request_approval",
     "require",
     "retry",
     "return",
@@ -183,6 +187,14 @@ pub enum TokenKind {
     Select,
     Impl,
     Skill,
+    /// First-class HITL primitive: `request_approval(...)`.
+    RequestApproval,
+    /// First-class HITL primitive: `dual_control(...)`.
+    DualControl,
+    /// First-class HITL primitive: `ask_user(...)`.
+    AskUser,
+    /// First-class HITL primitive: `escalate_to(...)`.
+    EscalateTo,
 
     Identifier(String),
     StringLiteral(String),
@@ -297,6 +309,10 @@ impl fmt::Display for TokenKind {
             TokenKind::Select => write!(f, "select"),
             TokenKind::Impl => write!(f, "impl"),
             TokenKind::Skill => write!(f, "skill"),
+            TokenKind::RequestApproval => write!(f, "request_approval"),
+            TokenKind::DualControl => write!(f, "dual_control"),
+            TokenKind::AskUser => write!(f, "ask_user"),
+            TokenKind::EscalateTo => write!(f, "escalate_to"),
             TokenKind::Identifier(s) => write!(f, "id({s})"),
             TokenKind::StringLiteral(s) => write!(f, "str({s})"),
             TokenKind::InterpolatedString(_) => write!(f, "istr(...)"),

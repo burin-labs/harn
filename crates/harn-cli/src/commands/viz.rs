@@ -497,6 +497,7 @@ fn summarize_node(node: &SNode) -> String {
             .map(summarize_node)
             .collect::<Vec<_>>()
             .join(" | "),
+        Node::HitlExpr { kind, .. } => format!("{}(...)", kind.as_keyword()),
     }
 }
 

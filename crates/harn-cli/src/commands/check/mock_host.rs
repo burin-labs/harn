@@ -668,5 +668,16 @@ fn collect_mock_host_capabilities_from_node(
                 );
             }
         }
+        Node::HitlExpr { args, .. } => {
+            for arg in args {
+                collect_mock_host_capabilities_from_node(
+                    &arg.value,
+                    file_path,
+                    source,
+                    visited,
+                    capabilities,
+                );
+            }
+        }
     }
 }

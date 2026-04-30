@@ -1138,12 +1138,20 @@ impl<'a> Linter<'a> {
     }
 
     fn check_discarded_approval_result(&mut self, node: &SNode) {
-        let Node::FunctionCall { name, .. } = &node.node else {
-            return;
+        // The approval primitive is recognized in either form: the
+        // legacy `request_approval(...)` function-call shape (still
+        // valid for back-compat) and the first-class `HitlExpr` form
+        // produced by the reserved-keyword parser.
+        let name = match &node.node {
+            Node::FunctionCall { name, .. } if Self::is_approval_record_builtin(name) => {
+                name.as_str()
+            }
+            Node::HitlExpr {
+                kind: harn_parser::HitlKind::RequestApproval,
+                ..
+            } => "request_approval",
+            _ => return,
         };
-        if !Self::is_approval_record_builtin(name) {
-            return;
-        }
         self.diagnostics.push(LintDiagnostic {
             rule: "unhandled-approval-result",
             message: format!("approval result from `{name}` is discarded"),

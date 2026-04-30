@@ -1,0 +1,5 @@
+// HITL primitives are reserved keywords and cannot be shadowed by
+// user-declared variables. This is the structural moat that prevents
+// approval bypass by composition: no user binding can replace the
+// VM-enforced `request_approval` runtime.
+let request_approval = "fake"

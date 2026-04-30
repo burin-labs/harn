@@ -1,0 +1,19 @@
+// First-class HITL syntax: `escalate_to` as a reserved keyword. Named
+// args (`role:`, `reason:`) and the typed `EscalationHandle` envelope
+// returned by the runtime.
+import "std/hitl"
+import { clear_host_mocks, mock_host_response } from "std/testing"
+
+pipeline test(task) {
+  clear_host_mocks()
+  mock_host_response(
+    "hitl",
+    "escalation",
+    {accepted: true, reviewer: "oncall-primary", reason: "took over"},
+  )
+  let handle = escalate_to(role: "oncall", reason: "deploy failed during maintenance window")
+  println(handle.role)
+  println(handle.reason)
+  println(handle.status)
+  println(handle.reviewer)
+}

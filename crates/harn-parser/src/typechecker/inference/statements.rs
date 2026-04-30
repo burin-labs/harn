@@ -1090,6 +1090,10 @@ impl TypeChecker {
                 self.check_block(body, &mut spawn_scope);
             }
 
+            Node::HitlExpr { kind, args } => {
+                self.check_hitl_expr(*kind, args, scope, span);
+            }
+
             Node::Parallel {
                 mode,
                 expr,

@@ -298,6 +298,22 @@ pub enum Node {
     /// Continue to next loop iteration.
     ContinueStmt,
 
+    /// First-class HITL primitive expression.
+    ///
+    /// Lexed as a reserved keyword (`request_approval`, `dual_control`,
+    /// `ask_user`, `escalate_to`), parsed at primary-expression position
+    /// as `keyword "(" args ")"`. Each arg is either positional
+    /// (`expr`) or named (`name: expr`).
+    ///
+    /// The compiler lowers this to a call to the matching async stdlib
+    /// builtin in `crates/harn-vm/src/stdlib/hitl.rs`, packaging the
+    /// named arguments into the existing options-dict shape. The
+    /// typechecker assigns each kind its canonical envelope return type.
+    HitlExpr {
+        kind: HitlKind,
+        args: Vec<HitlArg>,
+    },
+
     Parallel {
         mode: ParallelMode,
         /// For Count mode: the count expression. For Each/Settle: the list expression.
@@ -433,6 +449,47 @@ pub enum Node {
         /// The formatter preserves this distinction.
         fn_syntax: bool,
     },
+}
+
+/// First-class human-in-the-loop primitive.
+///
+/// Each `HitlKind` is a reserved keyword expression with VM-enforced
+/// semantics: the names cannot be shadowed or rebound by user code,
+/// signatures are produced by the VM, and the audit log is recorded
+/// deterministically by the runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HitlKind {
+    /// `request_approval(action: ..., args: ..., quorum: ..., reviewers: ..., ...)`.
+    RequestApproval,
+    /// `dual_control(n: ..., m: ..., action: <closure>, approvers: ...)`.
+    DualControl,
+    /// `ask_user(prompt: ..., schema: ..., timeout: ..., default: ...)`.
+    AskUser,
+    /// `escalate_to(role: ..., reason: ...)`.
+    EscalateTo,
+}
+
+impl HitlKind {
+    /// Keyword surface form (matches the reserved keyword in the lexer
+    /// and the corresponding async builtin name in the VM).
+    pub fn as_keyword(self) -> &'static str {
+        match self {
+            HitlKind::RequestApproval => "request_approval",
+            HitlKind::DualControl => "dual_control",
+            HitlKind::AskUser => "ask_user",
+            HitlKind::EscalateTo => "escalate_to",
+        }
+    }
+}
+
+/// A single argument in a [`Node::HitlExpr`] call. `name` is `Some` when
+/// the caller used named-arg syntax (e.g. `quorum: 2`); positional
+/// arguments leave it as `None` and rely on the kind's parameter order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HitlArg {
+    pub name: Option<String>,
+    pub value: SNode,
+    pub span: Span,
 }
 
 /// Parallel execution mode.
