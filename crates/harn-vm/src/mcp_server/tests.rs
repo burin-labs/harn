@@ -4,6 +4,7 @@ use std::rc::Rc;
 use crate::value::VmValue;
 
 use super::convert::{annotations_to_json, prompt_value_to_messages};
+use super::defs::McpResourceDef;
 use super::tool_registry_to_mcp_tools;
 use super::tools_schema::params_to_json_schema;
 use super::uri::match_uri_template;
@@ -183,6 +184,42 @@ async fn server_latest_spec_gap_methods_return_explicit_json_rpc_errors() {
             serde_json::json!("unsupported")
         );
     }
+}
+
+#[tokio::test]
+async fn server_advertises_resource_list_changed_capability() {
+    let server = McpServer::new(
+        "test".to_string(),
+        Vec::new(),
+        vec![McpResourceDef {
+            uri: "docs://readme".to_string(),
+            name: "README".to_string(),
+            title: None,
+            description: None,
+            mime_type: Some("text/plain".to_string()),
+            text: "hello".to_string(),
+        }],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut vm = crate::Vm::new();
+
+    let response = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                1,
+                "initialize",
+                serde_json::json!({"protocolVersion": super::PROTOCOL_VERSION}),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(
+        response["result"]["capabilities"]["resources"]["listChanged"],
+        serde_json::json!(true)
+    );
 }
 
 #[tokio::test]

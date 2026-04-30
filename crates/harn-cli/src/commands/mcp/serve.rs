@@ -52,11 +52,11 @@ const DEFAULT_RESOURCE_LIMIT: usize = 200;
 pub(crate) struct McpOrchestratorService {
     config_path: PathBuf,
     state_dir: PathBuf,
-    manifest_source: Arc<String>,
+    manifest_source: Arc<Mutex<String>>,
     auth: ListenerAuth,
     prompt_catalog: Arc<Mutex<FilePromptCatalog>>,
-    prompt_notify_tx: broadcast::Sender<JsonValue>,
-    _prompt_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
+    list_notify_tx: broadcast::Sender<JsonValue>,
+    _list_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -111,6 +111,30 @@ struct HttpState {
     mcp_path: String,
     sse_path: String,
     messages_path: String,
+}
+
+#[derive(Clone, Copy)]
+enum McpListChangeKind {
+    Tools,
+    Resources,
+    Prompts,
+}
+
+impl McpListChangeKind {
+    fn method(self) -> &'static str {
+        match self {
+            Self::Tools => "notifications/tools/list_changed",
+            Self::Resources => "notifications/resources/list_changed",
+            Self::Prompts => "notifications/prompts/list_changed",
+        }
+    }
+
+    fn notification(self) -> JsonValue {
+        json!({
+            "jsonrpc": "2.0",
+            "method": self.method(),
+        })
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -238,21 +262,23 @@ impl McpOrchestratorService {
             &project_root,
             &manifest_source,
         )));
-        let (prompt_notify_tx, _) = broadcast::channel(32);
-        let prompt_watcher = start_prompt_watcher(
+        let manifest_source = Arc::new(Mutex::new(manifest_source));
+        let (list_notify_tx, _) = broadcast::channel(64);
+        let list_watcher = start_list_change_watcher(
             project_root,
             local.config.clone(),
+            manifest_source.clone(),
             prompt_catalog.clone(),
-            prompt_notify_tx.clone(),
+            list_notify_tx.clone(),
         );
         Ok(Self {
             config_path: local.config,
             state_dir: local.state_dir,
-            manifest_source: Arc::new(manifest_source),
+            manifest_source,
             auth,
             prompt_catalog,
-            prompt_notify_tx,
-            _prompt_watcher: Arc::new(Mutex::new(prompt_watcher)),
+            list_notify_tx,
+            _list_watcher: Arc::new(Mutex::new(list_watcher)),
         })
     }
 
@@ -263,8 +289,39 @@ impl McpOrchestratorService {
         }
     }
 
-    fn subscribe_prompt_notifications(&self) -> broadcast::Receiver<JsonValue> {
-        self.prompt_notify_tx.subscribe()
+    pub(crate) fn notify_manifest_reloaded(&self) {
+        if let Ok(manifest_source) = std::fs::read_to_string(&self.config_path) {
+            self.refresh_manifest_derived_state(manifest_source);
+        }
+        self.notify_list_changed(&[
+            McpListChangeKind::Tools,
+            McpListChangeKind::Resources,
+            McpListChangeKind::Prompts,
+        ]);
+    }
+
+    fn refresh_manifest_derived_state(&self, manifest_source: String) {
+        *self
+            .manifest_source
+            .lock()
+            .expect("manifest source poisoned") = manifest_source.clone();
+        let project_root = self
+            .config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+        let updated = FilePromptCatalog::discover(&project_root, &manifest_source);
+        *self.prompt_catalog.lock().expect("prompt catalog poisoned") = updated;
+    }
+
+    fn notify_list_changed(&self, kinds: &[McpListChangeKind]) {
+        for kind in kinds {
+            let _ = self.list_notify_tx.send(kind.notification());
+        }
+    }
+
+    fn subscribe_list_notifications(&self) -> broadcast::Receiver<JsonValue> {
+        self.list_notify_tx.subscribe()
     }
 
     async fn handle_request(&self, session: &mut ConnectionState, request: JsonValue) -> JsonValue {
@@ -347,8 +404,8 @@ impl McpOrchestratorService {
             json!({
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": {
-                    "tools": { "listChanged": false },
-                    "resources": { "listChanged": false },
+                    "tools": { "listChanged": true },
+                    "resources": { "listChanged": true },
                     "prompts": { "listChanged": true },
                     "logging": {},
                 },
@@ -609,6 +666,9 @@ impl McpOrchestratorService {
         let _ = self
             .record_tool_call(name, &trace_id, &session.client_identity, &result)
             .await;
+        if result.is_ok() && tool_call_changes_resources(name) {
+            self.notify_list_changed(&[McpListChangeKind::Resources]);
+        }
 
         match result {
             Ok(value) => harn_vm::jsonrpc::response(
@@ -897,7 +957,13 @@ impl McpOrchestratorService {
 
     async fn read_resource(&self, uri: &str) -> Result<(String, &'static str), String> {
         if uri == "harn://manifest" {
-            return Ok(((*self.manifest_source).clone(), "application/toml"));
+            return Ok((
+                self.manifest_source
+                    .lock()
+                    .expect("manifest source poisoned")
+                    .clone(),
+                "application/toml",
+            ));
         }
         if let Some(event_id) = uri.strip_prefix("harn://event/") {
             let detail = self.event_resource(event_id).await?;
@@ -1059,7 +1125,7 @@ async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
     let mut stdout = tokio::io::stdout();
     let mut lines = stdin.lines();
     let mut session = ConnectionState::default();
-    let mut prompt_notifications = service.subscribe_prompt_notifications();
+    let mut list_notifications = service.subscribe_list_notifications();
 
     eprintln!("[harn] MCP stdio server ready");
 
@@ -1082,7 +1148,7 @@ async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
                     write_stdio_json(&mut stdout, &response).await?;
                 }
             }
-            notification = prompt_notifications.recv() => {
+            notification = list_notifications.recv() => {
                 match notification {
                     Ok(notification) => write_stdio_json(&mut stdout, &notification).await?,
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -1119,31 +1185,55 @@ async fn run_http(service: Arc<McpOrchestratorService>, args: &McpServeArgs) -> 
     serve_http_router(router, args.bind, &args.path).await
 }
 
-fn start_prompt_watcher(
+fn start_list_change_watcher(
     project_root: PathBuf,
     config_path: PathBuf,
+    manifest_source_cache: Arc<Mutex<String>>,
     prompt_catalog: Arc<Mutex<FilePromptCatalog>>,
-    prompt_notify_tx: broadcast::Sender<JsonValue>,
+    list_notify_tx: broadcast::Sender<JsonValue>,
 ) -> Option<notify::RecommendedWatcher> {
     let project_root_for_callback = project_root.clone();
     let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
         let Ok(event) = result else {
             return;
         };
-        if !event
+        let prompt_changed = event
             .paths
             .iter()
-            .any(|path| is_prompt_reload_path(path.as_path()))
-        {
+            .any(|path| is_prompt_reload_path(path.as_path()));
+        let manifest_changed = event
+            .paths
+            .iter()
+            .any(|path| is_manifest_reload_path(path.as_path()));
+        let package_changed = event
+            .paths
+            .iter()
+            .any(|path| is_package_reload_path(path.as_path(), &project_root_for_callback));
+
+        if !prompt_changed && !manifest_changed && !package_changed {
             return;
         }
-        let manifest_source = std::fs::read_to_string(&config_path).unwrap_or_default();
-        let updated = FilePromptCatalog::discover(&project_root_for_callback, &manifest_source);
-        *prompt_catalog.lock().expect("prompt catalog poisoned") = updated;
-        let _ = prompt_notify_tx.send(json!({
-            "jsonrpc": "2.0",
-            "method": "notifications/prompts/list_changed",
-        }));
+
+        if prompt_changed || manifest_changed || package_changed {
+            let manifest_source = std::fs::read_to_string(&config_path).unwrap_or_default();
+            *manifest_source_cache
+                .lock()
+                .expect("manifest source poisoned") = manifest_source.clone();
+            let updated = FilePromptCatalog::discover(&project_root_for_callback, &manifest_source);
+            *prompt_catalog.lock().expect("prompt catalog poisoned") = updated;
+        }
+
+        let mut kinds = Vec::new();
+        if manifest_changed || package_changed {
+            kinds.push(McpListChangeKind::Tools);
+            kinds.push(McpListChangeKind::Resources);
+        }
+        if prompt_changed || manifest_changed || package_changed {
+            kinds.push(McpListChangeKind::Prompts);
+        }
+        for kind in kinds {
+            let _ = list_notify_tx.send(kind.notification());
+        }
     })
     .ok()?;
     watcher
@@ -1158,6 +1248,32 @@ fn is_prompt_reload_path(path: &Path) -> bool {
         .is_some_and(|name| name == "harn.toml" || name.ends_with(".harn.prompt"))
 }
 
+fn is_manifest_reload_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "harn.toml")
+}
+
+fn is_package_reload_path(path: &Path, project_root: &Path) -> bool {
+    if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "harn.lock")
+    {
+        return true;
+    }
+
+    let relative = path.strip_prefix(project_root).unwrap_or(path);
+    let mut components = relative
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => value.to_str(),
+            _ => None,
+        });
+    matches!(components.next(), Some(".harn")) && matches!(components.next(), Some("packages"))
+}
+
+#[cfg(test)]
 pub(crate) fn http_router_for_local(
     local: OrchestratorLocalArgs,
     path: String,
@@ -1165,7 +1281,21 @@ pub(crate) fn http_router_for_local(
     messages_path: String,
 ) -> Result<Router, String> {
     let service = Arc::new(McpOrchestratorService::new_local(local)?);
-    Ok(http_router(service, path, sse_path, messages_path))
+    Ok(http_router_for_service(
+        service,
+        path,
+        sse_path,
+        messages_path,
+    ))
+}
+
+pub(crate) fn http_router_for_service(
+    service: Arc<McpOrchestratorService>,
+    path: String,
+    sse_path: String,
+    messages_path: String,
+) -> Router {
+    http_router(service, path, sse_path, messages_path)
 }
 
 fn http_router(
@@ -1339,6 +1469,15 @@ async fn http_get_stream(State(state): State<HttpState>, headers: HeaderMap) -> 
     };
     let (tx, rx) = unbounded::<JsonValue>();
     *session.sse_tx.lock().expect("SSE sender poisoned") = Some(tx);
+    if let Some(sender) = session
+        .sse_tx
+        .lock()
+        .expect("SSE sender poisoned")
+        .as_ref()
+        .cloned()
+    {
+        spawn_list_notification_forwarder(state.service.clone(), sender);
+    }
     let mut response = sse_response(rx).into_response();
     attach_streamable_headers(&mut response, None, MCP_PROTOCOL_VERSION);
     response
@@ -1430,27 +1569,14 @@ async fn legacy_sse_stream(State(state): State<HttpState>, headers: HeaderMap) -
     let session = Arc::new(HttpSession::default());
     let (tx, rx) = unbounded::<JsonValue>();
     *session.sse_tx.lock().expect("SSE sender poisoned") = Some(tx);
-    let mut prompt_notifications = state.service.subscribe_prompt_notifications();
-    let prompt_tx = session
+    let list_tx = session
         .sse_tx
         .lock()
         .expect("SSE sender poisoned")
         .as_ref()
         .cloned();
-    if let Some(prompt_tx) = prompt_tx {
-        tokio::spawn(async move {
-            loop {
-                match prompt_notifications.recv().await {
-                    Ok(message) => {
-                        if prompt_tx.unbounded_send(message).is_err() {
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        });
+    if let Some(list_tx) = list_tx {
+        spawn_list_notification_forwarder(state.service.clone(), list_tx);
     }
     state
         .sessions
@@ -1644,6 +1770,26 @@ fn sse_response(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
+fn spawn_list_notification_forwarder(
+    service: Arc<McpOrchestratorService>,
+    sender: UnboundedSender<JsonValue>,
+) {
+    let mut notifications = service.subscribe_list_notifications();
+    tokio::spawn(async move {
+        loop {
+            match notifications.recv().await {
+                Ok(message) => {
+                    if sender.unbounded_send(message).is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
 fn attach_streamable_headers(response: &mut Response, session_id: Option<&str>, protocol: &str) {
     if let Some(session_id) = session_id {
         if let Ok(value) = HeaderValue::from_str(session_id) {
@@ -1743,6 +1889,13 @@ fn tool_def(
         value["outputSchema"] = output_schema;
     }
     value
+}
+
+fn tool_call_changes_resources(name: &str) -> bool {
+    matches!(
+        name,
+        "harn.trigger.fire" | "harn.trigger.replay" | "harn.orchestrator.dlq.retry"
+    )
 }
 
 fn handler_json(handler: &CollectedTriggerHandler) -> JsonValue {
@@ -1982,6 +2135,14 @@ pub fn on_fail(event: TriggerEvent) -> any {
             .await;
         assert_eq!(response["result"]["protocolVersion"], MCP_PROTOCOL_VERSION);
         assert_eq!(
+            response["result"]["capabilities"]["tools"]["listChanged"],
+            json!(true)
+        );
+        assert_eq!(
+            response["result"]["capabilities"]["resources"]["listChanged"],
+            json!(true)
+        );
+        assert_eq!(
             response["result"]["capabilities"]["prompts"]["listChanged"],
             json!(true)
         );
@@ -2032,6 +2193,33 @@ pub fn on_fail(event: TriggerEvent) -> any {
             .as_str()
             .expect("resource text");
         serde_json::from_str(text).unwrap_or_else(|_| json!(text))
+    }
+
+    async fn collect_notification_methods(
+        notifications: &mut broadcast::Receiver<JsonValue>,
+        expected: &[&str],
+    ) -> std::collections::BTreeSet<String> {
+        let expected = expected
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut seen = std::collections::BTreeSet::new();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !expected.iter().all(|method| seen.contains(*method)) {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "timed out waiting for notifications; seen={seen:?}"
+            );
+            let notification = tokio::time::timeout(remaining, notifications.recv())
+                .await
+                .expect("timed out waiting for list_changed notification")
+                .expect("notification channel closed");
+            if let Some(method) = notification.get("method").and_then(JsonValue::as_str) {
+                seen.insert(method.to_string());
+            }
+        }
+        seen
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2114,7 +2302,7 @@ Review this: {{ code }}
         );
         let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
         let mut session = init_session(&service).await;
-        let mut notifications = service.subscribe_prompt_notifications();
+        let mut notifications = service.subscribe_list_notifications();
 
         let prompts = service
             .handle_request(
@@ -2180,6 +2368,38 @@ Updated: {{ code }}
             notification["method"],
             json!("notifications/prompts/list_changed")
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn package_metadata_changes_notify_tools_resources_and_prompts() {
+        let _guard = lock_harn_state();
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+        let mut notifications = service.subscribe_list_notifications();
+
+        write_file(
+            temp.path(),
+            "harn.lock",
+            r#"
+[[package]]
+name = "prompt-pack"
+version = "0.1.0"
+"#,
+        );
+
+        let seen = collect_notification_methods(
+            &mut notifications,
+            &[
+                "notifications/tools/list_changed",
+                "notifications/resources/list_changed",
+                "notifications/prompts/list_changed",
+            ],
+        )
+        .await;
+        assert!(seen.contains("notifications/tools/list_changed"));
+        assert!(seen.contains("notifications/resources/list_changed"));
+        assert!(seen.contains("notifications/prompts/list_changed"));
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2475,13 +2695,13 @@ Updated: {{ code }}
         let temp = TempDir::new().unwrap();
         write_fixture(&temp);
         let args = fixture_args(&temp);
-        let router = http_router_for_local(
-            args.local.clone(),
+        let service = Arc::new(McpOrchestratorService::new_local(args.local.clone()).unwrap());
+        let router = http_router_for_service(
+            service.clone(),
             "/mcp".to_string(),
             "/sse".to_string(),
             "/messages".to_string(),
-        )
-        .unwrap();
+        );
 
         let init = router
             .clone()
@@ -2568,7 +2788,30 @@ Updated: {{ code }}
             .get("content-type")
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| value.starts_with("text/event-stream")));
-        drop(get);
+        let mut stream = get.into_body().into_data_stream();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
+            .await
+            .expect("timed out waiting for SSE prime event")
+            .expect("SSE stream ended")
+            .expect("SSE body error");
+        service.notify_manifest_reloaded();
+        let mut streamed = String::new();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !streamed.contains("notifications/tools/list_changed")
+            || !streamed.contains("notifications/resources/list_changed")
+        {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "timed out waiting for list_changed SSE notifications; body={streamed}"
+            );
+            let chunk = tokio::time::timeout(remaining, stream.next())
+                .await
+                .expect("timed out waiting for SSE notification")
+                .expect("SSE stream ended")
+                .expect("SSE body error");
+            streamed.push_str(std::str::from_utf8(&chunk).unwrap());
+        }
 
         let delete = router
             .clone()

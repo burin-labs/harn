@@ -245,9 +245,9 @@ Review this:
 ```
 
 `prompts/get` renders the template with the supplied `arguments` object.
-The server advertises `prompts.listChanged = true` and emits
-`notifications/prompts/list_changed` when watched `.harn.prompt` files or
-package metadata changes.
+The server advertises `tools.listChanged`, `resources.listChanged`, and
+`prompts.listChanged`. It emits the corresponding `notifications/*/list_changed`
+messages when watched manifest, prompt, lockfile, or package metadata changes.
 
 ## Protocol Support
 

@@ -211,7 +211,7 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         "[harn] activated connectors: {}",
         format_activation_summary(&connector_runtime.activations)
     );
-    let mcp_router = if args.mcp {
+    let (mcp_router, mcp_service) = if args.mcp {
         validate_mcp_paths(&args.mcp_path, &args.mcp_sse_path, &args.mcp_messages_path)?;
         if !has_orchestrator_api_keys_configured() {
             return Err(
@@ -219,22 +219,27 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
                     .to_string(),
             );
         }
-        let router = crate::commands::mcp::serve::http_router_for_local(
-            OrchestratorLocalArgs {
-                config: config_path.clone(),
-                state_dir: state_dir.clone(),
-            },
+        let service = Arc::new(
+            crate::commands::mcp::serve::McpOrchestratorService::new_local(
+                OrchestratorLocalArgs {
+                    config: config_path.clone(),
+                    state_dir: state_dir.clone(),
+                },
+            )?,
+        );
+        let router = crate::commands::mcp::serve::http_router_for_service(
+            service.clone(),
             args.mcp_path.clone(),
             args.mcp_sse_path.clone(),
             args.mcp_messages_path.clone(),
-        )?;
+        );
         eprintln!(
             "[harn] embedded MCP server mounted at {} (legacy SSE {}, messages {})",
             args.mcp_path, args.mcp_sse_path, args.mcp_messages_path
         );
-        Some(router)
+        (Some(router), Some(service))
     } else {
-        None
+        (None, None)
     };
 
     let dispatcher = harn_vm::Dispatcher::with_event_log_and_metrics(
@@ -450,6 +455,7 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
             live_triggers: &mut live_triggers,
             secret_provider: &secret_provider,
             metrics_registry: &metrics_registry,
+            mcp_service: mcp_service.as_ref(),
             reload_rx: &mut reload_rx,
         },
         #[cfg(unix)]
@@ -2142,6 +2148,7 @@ struct RuntimeSignalCtx<'a> {
     live_triggers: &'a mut Vec<CollectedManifestTrigger>,
     secret_provider: &'a Arc<dyn harn_vm::secrets::SecretProvider>,
     metrics_registry: &'a Arc<harn_vm::MetricsRegistry>,
+    mcp_service: Option<&'a Arc<crate::commands::mcp::serve::McpOrchestratorService>>,
     // Only consumed by the Unix signal-loop branch; on Windows the orchestrator
     // currently waits on Ctrl+C only and never drains the admin reload channel.
     #[cfg_attr(not(unix), allow(dead_code))]
@@ -2213,6 +2220,9 @@ async fn handle_reload_request(
     let source = request.source.clone();
     match reload_manifest(ctx).await {
         Ok(summary) => {
+            if let Some(mcp_service) = ctx.mcp_service {
+                mcp_service.notify_manifest_reloaded();
+            }
             write_running_state_snapshot(ctx)?;
             append_manifest_event(
                 ctx.event_log,
