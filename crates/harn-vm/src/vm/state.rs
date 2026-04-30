@@ -194,6 +194,8 @@ pub struct Vm {
     pub(crate) imported_paths: Vec<std::path::PathBuf>,
     /// Loaded module cache keyed by canonical or synthetic module path.
     pub(crate) module_cache: BTreeMap<std::path::PathBuf, LoadedModule>,
+    /// Source text keyed by canonical or synthetic module path for debugger retrieval.
+    pub(crate) source_cache: BTreeMap<std::path::PathBuf, String>,
     /// Source file path for error reporting.
     pub(crate) source_file: Option<String>,
     /// Source text for error reporting.
@@ -409,6 +411,7 @@ impl Vm {
             source_dir: None,
             imported_paths: Vec::new(),
             module_cache: BTreeMap::new(),
+            source_cache: BTreeMap::new(),
             source_file: None,
             source_text: None,
             bridge: None,
@@ -438,6 +441,8 @@ impl Vm {
     pub fn set_source_info(&mut self, file: &str, text: &str) {
         self.source_file = Some(file.to_string());
         self.source_text = Some(text.to_string());
+        self.source_cache
+            .insert(std::path::PathBuf::from(file), text.to_string());
     }
 
     /// Initialize execution (push the initial frame).
@@ -498,6 +503,7 @@ impl Vm {
             source_dir: self.source_dir.clone(),
             imported_paths: Vec::new(),
             module_cache: self.module_cache.clone(),
+            source_cache: self.source_cache.clone(),
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
             bridge: self.bridge.clone(),

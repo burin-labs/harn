@@ -313,6 +313,31 @@ fn test_function_breakpoint_stops_on_entry() {
 }
 
 #[test]
+fn test_generated_module_source_is_cached_and_tagged_for_debugger() {
+    let source = "pub fn generated_answer() {\n  return 42\n}\n";
+    let mut vm = Vm::new();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let exports = rt
+        .block_on(vm.load_module_exports_from_source("<generated>/wrapper.harn", source))
+        .expect("generated module loads");
+
+    assert_eq!(
+        vm.debug_source_for_path("<generated>/wrapper.harn")
+            .as_deref(),
+        Some(source)
+    );
+    let closure = exports
+        .get("generated_answer")
+        .expect("exported generated function");
+    assert_eq!(
+        closure.func.chunk.source_file.as_deref(),
+        Some("<generated>/wrapper.harn")
+    );
+}
+
+#[test]
 fn test_function_breakpoint_unknown_name_does_not_fire() {
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);

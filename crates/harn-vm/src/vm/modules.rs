@@ -39,6 +39,8 @@ impl Vm {
         if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
             return Ok(loaded);
         }
+        self.source_cache
+            .insert(synthetic.clone(), source.to_string());
 
         let mut lexer = harn_lexer::Lexer::new(source);
         let tokens = lexer.tokenize().map_err(|e| {
@@ -53,7 +55,9 @@ impl Vm {
         })?;
 
         self.imported_paths.push(synthetic.clone());
-        let loaded = self.import_declarations(&program, None).await?;
+        let loaded = self
+            .import_declarations(&program, None, Some(&synthetic))
+            .await?;
         self.imported_paths.pop();
         self.module_cache.insert(synthetic, loaded.clone());
         Ok(loaded)
@@ -141,6 +145,8 @@ impl Vm {
                     file_path.display()
                 ))
             })?;
+            self.source_cache.insert(canonical.clone(), source.clone());
+            self.source_cache.insert(file_path.clone(), source.clone());
 
             let mut lexer = harn_lexer::Lexer::new(&source);
             let tokens = lexer
@@ -151,7 +157,9 @@ impl Vm {
                 .parse()
                 .map_err(|e| VmError::Runtime(format!("Import parse error: {e}")))?;
 
-            let loaded = self.import_declarations(&program, Some(&file_path)).await?;
+            let loaded = self
+                .import_declarations(&program, Some(&file_path), Some(&file_path))
+                .await?;
             self.imported_paths.pop();
             self.module_cache.insert(canonical.clone(), loaded.clone());
             self.export_loaded_module(&canonical, &loaded, selected_names)?;
@@ -165,6 +173,7 @@ impl Vm {
         &'a mut self,
         program: &'a [harn_parser::SNode],
         file_path: Option<&'a Path>,
+        debug_source_file: Option<&'a Path>,
     ) -> Pin<Box<dyn Future<Output = Result<LoadedModule, VmError>> + 'a>> {
         Box::pin(async move {
             let caller_env = self.env.clone();
@@ -259,7 +268,7 @@ impl Vm {
                 };
 
                 let mut compiler = crate::Compiler::new();
-                let module_source_file = file_path.map(|p| p.display().to_string());
+                let module_source_file = debug_source_file.map(|p| p.display().to_string());
                 let func_chunk = compiler
                     .compile_fn_body(params, body, module_source_file)
                     .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;

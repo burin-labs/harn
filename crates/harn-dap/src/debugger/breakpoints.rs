@@ -61,6 +61,7 @@ impl Debugger {
                             source: request_path.clone().map(|p| Source {
                                 name: None,
                                 path: Some(p),
+                                source_reference: None,
                             }),
                             condition,
                             hit_condition,
