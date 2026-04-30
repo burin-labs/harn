@@ -54,7 +54,7 @@ pub(super) fn narrow_to_single(members: &[TypeExpr], target: &str) -> InferredTy
 
 /// Extract the variable name from a `type_of(x)` call.
 pub(super) fn extract_type_of_var(node: &SNode) -> Option<String> {
-    if let Node::FunctionCall { name, args } = &node.node {
+    if let Node::FunctionCall { name, args, .. } = &node.node {
         if name == "type_of" && args.len() == 1 {
             if let Node::Identifier(var) = &args[0].node {
                 return Some(var.clone());

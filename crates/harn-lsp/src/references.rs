@@ -17,7 +17,7 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
         Node::Identifier(name) if name == target_name => {
             refs.push(snode.span);
         }
-        Node::FunctionCall { name, args } => {
+        Node::FunctionCall { name, args, .. } => {
             if name == target_name {
                 refs.push(snode.span);
             }

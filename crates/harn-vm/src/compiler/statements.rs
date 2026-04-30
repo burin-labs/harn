@@ -208,7 +208,7 @@ impl Compiler {
         } else {
             // No pending finally — use tail-call optimization when possible.
             if let Some(val) = value {
-                if let Node::FunctionCall { name, args } = &val.node {
+                if let Node::FunctionCall { name, args, .. } = &val.node {
                     let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
                     self.chunk.emit_u16(Op::Constant, name_idx, self.line);
                     for arg in args {

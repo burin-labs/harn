@@ -348,7 +348,7 @@ fn collect_mock_host_capabilities_from_node(
                 }
             }
         }
-        Node::FunctionCall { name, args } => {
+        Node::FunctionCall { name, args, .. } => {
             if name == "host_mock" {
                 if let (Some(Node::StringLiteral(cap)), Some(Node::StringLiteral(op))) = (
                     args.first().map(|arg| &arg.node),

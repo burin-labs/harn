@@ -322,8 +322,12 @@ impl TypeChecker {
                 scope.clear_nil_widenable(name);
             }
 
-            Node::FunctionCall { name, args } => {
-                self.check_call(name, args, scope, span);
+            Node::FunctionCall {
+                name,
+                type_args,
+                args,
+            } => {
+                self.check_call(name, type_args, args, scope, span);
                 // Strict types: schema_expect clears untyped source status
                 if self.strict_types && name == "schema_expect" && args.len() >= 2 {
                     if let Node::Identifier(var_name) = &args[0].node {
@@ -348,7 +352,7 @@ impl TypeChecker {
                 // Strict types: schema_is/is_type in condition clears
                 // untyped source in then-branch
                 if self.strict_types {
-                    if let Node::FunctionCall { name, args } = &condition.node {
+                    if let Node::FunctionCall { name, args, .. } = &condition.node {
                         if (name == "schema_is" || name == "is_type") && args.len() == 2 {
                             if let Node::Identifier(var_name) = &args[0].node {
                                 then_scope.clear_untyped_source(var_name);
@@ -932,7 +936,7 @@ impl TypeChecker {
             Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
                 if self.strict_types {
                     // Direct property access on boundary function result
-                    if let Node::FunctionCall { name, args } = &object.node {
+                    if let Node::FunctionCall { name, args, .. } = &object.node {
                         if builtin_signatures::is_untyped_boundary_source(name) {
                             let has_schema = (name == "llm_call" || name == "llm_completion")
                                 && Self::llm_call_has_typed_schema_option(args, scope);
@@ -967,7 +971,7 @@ impl TypeChecker {
             Node::SubscriptAccess { object, index }
             | Node::OptionalSubscriptAccess { object, index } => {
                 if self.strict_types {
-                    if let Node::FunctionCall { name, args } = &object.node {
+                    if let Node::FunctionCall { name, args, .. } = &object.node {
                         if builtin_signatures::is_untyped_boundary_source(name) {
                             let has_schema = (name == "llm_call" || name == "llm_completion")
                                 && Self::llm_call_has_typed_schema_option(args, scope);

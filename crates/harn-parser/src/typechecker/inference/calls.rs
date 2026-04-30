@@ -29,7 +29,14 @@ impl TypeChecker {
         concrete: &TypeExpr,
         bindings: &mut BTreeMap<String, TypeExpr>,
     ) -> Result<(), String> {
+        if Self::is_wildcard_type(concrete) {
+            return Ok(());
+        }
         if let Some(existing) = bindings.get(param_name) {
+            if Self::is_wildcard_type(existing) {
+                bindings.insert(param_name.to_string(), concrete.clone());
+                return Ok(());
+            }
             if existing != concrete {
                 return Err(format!(
                     "type parameter '{}' was inferred as both {} and {}",
@@ -362,7 +369,7 @@ impl TypeChecker {
     /// positions where `check_node` only triggers `infer_type`.
     pub(in crate::typechecker) fn visit_for_deprecation(&mut self, node: &SNode) {
         match &node.node {
-            Node::FunctionCall { name, args } => {
+            Node::FunctionCall { name, args, .. } => {
                 if let Some((since, use_hint)) = self.deprecated_fns.get(name).cloned() {
                     let mut msg = format!("`{name}` is deprecated");
                     if let Some(s) = since {
@@ -584,6 +591,7 @@ impl TypeChecker {
     pub(in crate::typechecker) fn check_call(
         &mut self,
         name: &str,
+        type_args: &[TypeExpr],
         args: &[SNode],
         scope: &mut TypeScope,
         span: Span,
@@ -704,6 +712,24 @@ impl TypeChecker {
         // Check against known function signatures
         let has_spread = args.iter().any(|a| matches!(&a.node, Node::Spread(_)));
         if let Some(sig) = scope.get_fn(name).cloned() {
+            if !type_args.is_empty() {
+                if sig.type_param_names.is_empty() {
+                    self.error_at(
+                        format!("Function '{}' does not declare type parameters", name),
+                        span,
+                    );
+                } else if type_args.len() != sig.type_param_names.len() {
+                    self.error_at(
+                        format!(
+                            "Function '{}' expects {} type arguments, got {}",
+                            name,
+                            sig.type_param_names.len(),
+                            type_args.len()
+                        ),
+                        span,
+                    );
+                }
+            }
             if !has_spread
                 && !is_builtin(name)
                 && !sig.has_rest
@@ -738,6 +764,11 @@ impl TypeChecker {
             let mut type_bindings: BTreeMap<String, TypeExpr> = BTreeMap::new();
             let type_param_set: std::collections::BTreeSet<String> =
                 sig.type_param_names.iter().cloned().collect();
+            if type_args.len() == sig.type_param_names.len() {
+                for (param_name, type_arg) in sig.type_param_names.iter().zip(type_args.iter()) {
+                    type_bindings.insert(param_name.clone(), type_arg.clone());
+                }
+            }
             for (arg, (_param_name, param_type)) in args.iter().zip(sig.params.iter()) {
                 if let Some(param_ty) = param_type {
                     if let Err(message) = self.bind_from_arg_node(
@@ -804,6 +835,28 @@ impl TypeChecker {
                         }
                     }
                 }
+            }
+        } else if !type_args.is_empty() && is_builtin(name) {
+            if let Some(sig) = builtin_signatures::lookup_generic_builtin_sig(name) {
+                if type_args.len() != sig.type_params.len() {
+                    self.error_at(
+                        format!(
+                            "Builtin function '{}' expects {} type arguments, got {}",
+                            name,
+                            sig.type_params.len(),
+                            type_args.len()
+                        ),
+                        span,
+                    );
+                }
+            } else {
+                self.error_at(
+                    format!(
+                        "Builtin function '{}' does not declare type parameters",
+                        name
+                    ),
+                    span,
+                );
             }
         }
         // Check args recursively

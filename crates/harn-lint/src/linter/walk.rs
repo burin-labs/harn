@@ -234,7 +234,7 @@ impl<'a> Linter<'a> {
                 self.function_references.insert(name.clone());
             }
 
-            Node::FunctionCall { name, args } => {
+            Node::FunctionCall { name, args, .. } => {
                 self.references.insert(name.clone());
                 self.function_references.insert(name.clone());
                 self.function_calls.push((name.clone(), snode.span));
@@ -1144,6 +1144,7 @@ fn expr_has_known_type(node: &Node, cast: &str) -> bool {
     if let Node::FunctionCall {
         name: inner_name,
         args: inner_args,
+        ..
     } = node
     {
         if inner_name == cast && inner_args.len() == 1 {

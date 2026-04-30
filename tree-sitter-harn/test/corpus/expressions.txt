@@ -1,4 +1,38 @@
 ==================
+Generic Call Type Arguments
+==================
+
+pipeline test(task) {
+  let mapped: [int] = map<int, string>([1], label)
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        type: (type_annotation
+          (type_annotation
+            (identifier)))
+        value: (call_expression
+          function: (identifier)
+          type_arguments: (type_arguments
+            (type_annotation
+              (identifier))
+            (type_annotation
+              (identifier)))
+          (argument_list
+            (list_literal
+              (integer_literal))
+            (identifier)))))))
+
+==================
 Exponentiation Precedence
 ==================
 

@@ -203,7 +203,7 @@ impl TypeChecker {
         scope: &TypeScope,
     ) -> Option<String> {
         match &value.node {
-            Node::FunctionCall { name, args } => {
+            Node::FunctionCall { name, args, .. } => {
                 if !builtin_signatures::is_untyped_boundary_source(name) {
                     return None;
                 }

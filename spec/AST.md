@@ -445,13 +445,16 @@ Yields control to the host, optionally with a value.
 ### `FunctionCall`
 
 ```rust
-FunctionCall { name: String, args: Vec<SNode> }
+FunctionCall { name: String, type_args: Vec<TypeExpr>, args: Vec<SNode> }
 ```
 
-Calls a function or builtin by name. Arguments may include `Spread` nodes.
+Calls a function or builtin by name. `type_args` stores explicit generic
+instantiations such as `identity<int>(value)` and is empty for inferred calls.
+Arguments may include `Spread` nodes.
 
 ```harn
 read_file("config.json")
+identity<int>(42)
 add(...args)
 ```
 

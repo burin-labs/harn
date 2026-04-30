@@ -29,6 +29,13 @@ fn test_roundtrip_fn_decl() {
 }
 
 #[test]
+fn test_roundtrip_explicit_generic_call_type_args() {
+    assert_roundtrip(
+        "pipeline default(task) { fn id<T>(x: T) -> T { return x }\nlet x = id<int>(1) }",
+    );
+}
+
+#[test]
 fn test_roundtrip_closure() {
     assert_roundtrip("pipeline default(task) { let f = { x -> x * 2 }\nlog(f(3)) }");
 }

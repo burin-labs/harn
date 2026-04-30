@@ -1,0 +1,65 @@
+pipeline default() {
+  fn map<T, U>(xs: list<T>, f: fn(T) -> U) -> list<U> {
+    var out: list<U> = []
+    for x in xs {
+      out = out.push(f(x))
+    }
+    return out
+  }
+  fn filter<T>(xs: list<T>, pred: fn(T) -> bool) -> list<T> {
+    var out: list<T> = []
+    for x in xs {
+      if pred(x) {
+        out = out.push(x)
+      }
+    }
+    return out
+  }
+  fn fold<T, U>(xs: list<T>, init: U, step: fn(U, T) -> U) -> U {
+    var acc: U = init
+    for x in xs {
+      acc = step(acc, x)
+    }
+    return acc
+  }
+  fn result_map<T, U, E>(result: Result<T, E>, f: fn(T) -> U) -> Result<U, E> {
+    match result {
+      Result.Ok(value) -> { return Result.Ok(f(value)) }
+      Result.Err(error) -> { return Result.Err(error) }
+    }
+  }
+  fn result_unwrap_or<T, E>(result: Result<T, E>, fallback: T) -> T {
+    match result {
+      Result.Ok(value) -> { return value }
+      Result.Err(_) -> { return fallback }
+    }
+  }
+  struct Pair<A, B> {
+    first: A
+    second: B
+  }
+  fn double(x: int) -> int {
+    return x * 2
+  }
+  fn keep_even(x: int) -> bool {
+    return x % 2 == 0
+  }
+  fn add(acc: int, x: int) -> int {
+    return acc + x
+  }
+  fn label(x: int) -> string {
+    return "value=${x}"
+  }
+  let mapped: list<int> = map<int, int>([1, 2, 3], double)
+  let filtered: list<int> = filter<int>(mapped, keep_even)
+  let total: int = fold<int, int>(filtered, 0, add)
+  let labeled: Result<string, string> = result_map<int, string, string>(Result.Ok(total), label)
+  let fallback: string = result_unwrap_or<string, string>(Result.Err("missing"), "fallback")
+  let pair: Pair<int, string> = Pair {first: total, second: result_unwrap_or(labeled, "none")}
+  println(mapped[2])
+  println(filtered[1])
+  println(total)
+  println(fallback)
+  println(pair.first)
+  println(pair.second)
+}

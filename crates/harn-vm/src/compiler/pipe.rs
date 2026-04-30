@@ -25,8 +25,13 @@ pub(super) fn contains_pipe_placeholder(node: &SNode) -> bool {
 pub(super) fn replace_pipe_placeholder(node: &SNode) -> SNode {
     let new_node = match &node.node {
         Node::Identifier(name) if name == "_" => Node::Identifier("__pipe".into()),
-        Node::FunctionCall { name, args } => Node::FunctionCall {
+        Node::FunctionCall {
+            name,
+            type_args,
+            args,
+        } => Node::FunctionCall {
             name: name.clone(),
+            type_args: type_args.clone(),
             args: args.iter().map(replace_pipe_placeholder).collect(),
         },
         Node::MethodCall {

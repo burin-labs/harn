@@ -17,6 +17,7 @@ module.exports = grammar({
     [$.typed_parameter, $.shape_field],
     [$.parallel_expression],
     [$.typed_parameter, $.type_annotation],
+    [$.type_arguments, $.type_annotation],
     [$.block],
     [$.closure],
     [$.select_block],
@@ -490,6 +491,9 @@ module.exports = grammar({
         $.identifier
       ),
 
+    type_arguments: ($) =>
+      seq("<", commaSep1($.type_annotation), ">"),
+
     where_clause: ($) =>
       seq(
         "where",
@@ -614,6 +618,7 @@ module.exports = grammar({
             $.subscript_expression,
             $.parenthesized_expression
           )),
+          optional(field("type_arguments", $.type_arguments)),
           "(",
           repeat(lineBreak($)),
           optional($.argument_list),
@@ -957,6 +962,7 @@ module.exports = grammar({
     type_annotation: ($) =>
       choice(
         $.fn_type,
+        seq("[", $.type_annotation, "]"),
         seq($.identifier, "<", $.type_annotation, ",", $.type_annotation, ">"),
         seq($.identifier, "<", $.type_annotation, ">"),
         prec.left(1, seq($.type_annotation, "|", $.type_annotation)),

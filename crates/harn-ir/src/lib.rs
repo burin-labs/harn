@@ -1032,7 +1032,7 @@ impl<'a> HandlerIrBuilder<'a> {
 
     fn build_expr(&mut self, node: &SNode, incoming: Vec<NodeId>) -> Vec<NodeId> {
         match &node.node {
-            Node::FunctionCall { name, args } => {
+            Node::FunctionCall { name, args, .. } => {
                 self.build_function_call(node, name, args, incoming)
             }
             Node::MethodCall { object, args, .. }

@@ -193,6 +193,56 @@ enum Option<T> {
     }
 
     #[test]
+    fn parses_explicit_generic_call_type_args() {
+        let source = r#"
+pipeline test(task) {
+  let n = identity<int>(42)
+  let words = identity<[string]>(["a"])
+}
+"#;
+
+        let program = parse_source(source).expect("should parse");
+        let pipeline = program
+            .iter()
+            .find(|node| matches!(node.node, Node::Pipeline { .. }))
+            .expect("pipeline node");
+        let body = match &pipeline.node {
+            Node::Pipeline { body, .. } => body,
+            _ => unreachable!(),
+        };
+        assert!(matches!(
+            &body[0].node,
+            Node::LetBinding { value, .. }
+                if matches!(
+                    &value.node,
+                    Node::FunctionCall { name, type_args, .. }
+                        if name == "identity" && type_args == &vec![TypeExpr::Named("int".into())]
+                )
+        ));
+        assert!(matches!(
+            &body[1].node,
+            Node::LetBinding { value, .. }
+                if matches!(
+                    &value.node,
+                    Node::FunctionCall { name, type_args, .. }
+                        if name == "identity"
+                            && type_args == &vec![TypeExpr::List(Box::new(TypeExpr::Named("string".into())))]
+                )
+        ));
+    }
+
+    #[test]
+    fn rejects_empty_generic_call_type_args() {
+        let source = r#"
+pipeline test(task) {
+  let n = identity<>(42)
+}
+"#;
+
+        assert!(parse_source(source).is_err());
+    }
+
+    #[test]
     fn parses_struct_literal_syntax_for_known_structs() {
         let source = r#"
 struct Point {

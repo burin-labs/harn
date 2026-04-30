@@ -32,7 +32,7 @@ pub(super) fn schema_type_expr_from_node(node: &SNode, scope: &TypeScope) -> Opt
         // dict for a type alias. When its result is passed into a position
         // typed `Schema<T>`, we resolve the underlying alias to its
         // TypeExpr so the generic binding can extract `T`.
-        Node::FunctionCall { name, args } if name == "schema_of" && args.len() == 1 => {
+        Node::FunctionCall { name, args, .. } if name == "schema_of" && args.len() == 1 => {
             if let Node::Identifier(alias) = &args[0].node {
                 return scope.resolve_type(alias).cloned();
             }
