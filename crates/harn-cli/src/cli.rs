@@ -135,6 +135,9 @@ SCRIPTING
     Publish(PublishArgs),
     /// List and inspect durable agent persona manifests.
     Persona(PersonaArgs),
+    /// Merge Captain transcript oracle and audit (#1013).
+    #[command(name = "merge-captain")]
+    MergeCaptain(MergeCaptainArgs),
     /// Print resolved metadata for a model alias or model id as JSON.
     ModelInfo(ModelInfoArgs),
     /// Print the provider/model catalog Harn loaded as JSON.
@@ -2323,6 +2326,46 @@ pub(crate) struct PersonaSpendArgs {
     /// Emit stable JSON.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct MergeCaptainArgs {
+    #[command(subcommand)]
+    pub command: MergeCaptainCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum MergeCaptainCommand {
+    /// Audit a JSONL transcript against the Merge Captain oracle.
+    Audit(MergeCaptainAuditArgs),
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum MergeCaptainAuditFormat {
+    /// Human-readable summary suitable for terminals.
+    Text,
+    /// Pretty-printed JSON suitable for CI gates.
+    Json,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct MergeCaptainAuditArgs {
+    /// Path to a `.harn-runs/<session-id>/event_log.jsonl` (or its
+    /// parent directory containing rotated `event_log*.jsonl`
+    /// files).
+    pub transcript: String,
+    /// Optional Merge Captain golden fixture (JSON) describing the
+    /// scenario's expected state-machine, budgets, and forbidden
+    /// actions. Without one, the auditor uses default heuristics.
+    #[arg(long, value_name = "PATH")]
+    pub golden: Option<String>,
+    /// Output format. Defaults to `text`.
+    #[arg(long, value_enum, default_value_t = MergeCaptainAuditFormat::Text)]
+    pub format: MergeCaptainAuditFormat,
+    /// Treat warnings as errors. Useful in CI gates that want to
+    /// flip on incomplete-transcript / state-out-of-order findings.
+    #[arg(long)]
+    pub strict: bool,
 }
 
 #[derive(Debug, Args)]
