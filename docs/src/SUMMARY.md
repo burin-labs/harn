@@ -5,6 +5,7 @@
 # Getting Started
 
 - [Getting started](./getting-started.md)
+- [Common tasks](./common-tasks.md)
 - [Scripting cheatsheet](./scripting-cheatsheet.md)
 - [LLM quick reference](./docs/llm/harn-quickref.md)
 - [Why Harn?](./why-harn.md)
