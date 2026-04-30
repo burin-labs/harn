@@ -1,0 +1,117 @@
+// Merge receipt builder.
+//
+// One receipt per (sweep, repo, pr). Captures everything an auditor needs
+// to retrace a decision: the classification, the action chosen, the
+// evidence the classifier saw, the approval state under the per-repo
+// autopilot policy, the local commands actually executed, the checks
+// observed, and the final outcome.
+import { autopilot_for, requires_human } from "policy"
+import { action_is_mutating } from "states"
+
+/** Build the per-PR merge receipt. */
+pub fn build_receipt(args) {
+  let policy = args.policy
+  let observation = args.observation
+  let classification = args.classification
+  let prior_state = args.prior_state ?? "discovered"
+  let commands = args.commands_run ?? []
+  let outcome = args.outcome ?? "wait"
+  let dry_run = args.dry_run ?? true
+  let approval = approval_state(policy, classification, dry_run)
+  let evidence = evidence_payload(observation, classification)
+  return {
+    _type: "merge_receipt",
+    version: 1,
+    persona: "merge_captain",
+    sweep_id: args.sweep_id,
+    observed_at: args.observed_at,
+    repo: observation.repo,
+    pr_number: observation.number,
+    pr_title: observation.title,
+    head_sha: observation.head_sha,
+    prior_state: prior_state,
+    classification: {state: classification.state, action: classification.action, reason: classification.reason},
+    evidence: evidence,
+    approval_state: approval,
+    commands_run: commands,
+    checks_observed: observation.checks,
+    final_outcome: outcome,
+    policy_summary: {
+      merge_method: policy.merge_method,
+      merge_queue_enabled: policy.merge_queue_enabled,
+      required_review_count: policy.required_review_count,
+      blocking_labels: policy.blocking_labels,
+      required_checks: policy.required_checks,
+    },
+  }
+}
+
+/** Decide approval state given policy and dry-run posture. */
+pub fn approval_state(policy, classification, dry_run) {
+  if requires_human(policy, classification.state) {
+    return "needs_human"
+  }
+  if !action_is_mutating(classification.action) {
+    return "no_mutation"
+  }
+  if dry_run {
+    return "dry_run"
+  }
+  if autopilot_for(policy, classification.state) {
+    return "autopilot"
+  }
+  return "needs_human"
+}
+
+/** Evidence payload mixed into the receipt. */
+pub fn evidence_payload(observation, classification) {
+  let extras = classification.evidence ?? {}
+  return {
+    classifier: extras,
+    snapshot: {
+      state: observation.state,
+      draft: observation.draft,
+      mergeable: observation.mergeable,
+      mergeable_state: observation.mergeable_state,
+      behind_by: observation.behind_by,
+      approvals: observation.approvals,
+      labels: observation.labels,
+      review_decision: observation.review_decision,
+      in_merge_queue: observation.in_merge_queue,
+      merge_group_active: observation.merge_group_active,
+      failed_required_checks: observation.failed_required_checks,
+      missing_required_checks: observation.missing_required_checks,
+    },
+  }
+}
+
+/** Roll up per-PR receipts into a sweep-level summary. */
+pub fn summarize_sweep(receipts, sweep_id, started_at, finished_at) {
+  var by_state = {}
+  var by_action = {}
+  var by_repo = {}
+  for receipt in receipts {
+    let state = receipt.classification.state
+    let action = receipt.classification.action
+    let repo = receipt.repo
+    let prior_state_count = by_state[state] ?? 0
+    let prior_action_count = by_action[action] ?? 0
+    let prior_repo_count = by_repo[repo] ?? 0
+    by_state[state] = prior_state_count + 1
+    by_action[action] = prior_action_count + 1
+    by_repo[repo] = prior_repo_count + 1
+  }
+  return {
+    _type: "merge_sweep_summary",
+    version: 1,
+    persona: "merge_captain",
+    sweep_id: sweep_id,
+    started_at: started_at,
+    finished_at: finished_at,
+    pr_count: len(receipts),
+    by_state: by_state,
+    by_action: by_action,
+    by_repo: by_repo,
+    receipts: receipts,
+  }
+}

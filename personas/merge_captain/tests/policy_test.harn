@@ -1,0 +1,55 @@
+// Run: harn test personas/merge_captain/tests/policy_test.harn
+import {
+  autopilot_for,
+  defaults,
+  load_policy,
+  requires_human,
+  validate,
+  with_defaults,
+} from "../lib/policy"
+
+pipeline test_defaults_shape(task) {
+  let d = defaults()
+  assert_eq(d.merge_method, "squash")
+  assert_eq(d.merge_queue_enabled, false)
+  assert_eq(d.required_review_count, 1)
+  assert(d.blocking_labels.contains("do-not-merge"))
+}
+
+pipeline test_with_defaults_fills_missing_fields(task) {
+  let raw = {repo: "x/y", merge_queue_enabled: true}
+  let merged = with_defaults(raw)
+  assert_eq(merged.repo, "x/y")
+  assert_eq(merged.merge_queue_enabled, true)
+  assert_eq(merged.merge_method, "squash")
+  assert_eq(merged.default_branch, "main")
+}
+
+pipeline test_validation_rejects_bad_method(task) {
+  let raw = with_defaults({repo: "x/y", merge_method: "weird"})
+  let err = validate(raw)
+  assert(err != nil)
+  assert(err.contains("merge_method"))
+}
+
+pipeline test_load_round_trip(task) {
+  let json = "{\"repo\": \"burin-labs/harn\", \"merge_queue_enabled\": true, \"required_checks\": [\"a\", \"b\"]}"
+  let res = load_policy(json)
+  assert(res.ok)
+  assert_eq(res.policy.repo, "burin-labs/harn")
+  assert_eq(len(res.policy.required_checks), 2)
+}
+
+pipeline test_load_rejects_bad_json(task) {
+  let res = load_policy("{not json")
+  assert(!res.ok)
+  assert(res.error.contains("policy json parse failed"))
+}
+
+pipeline test_autopilot_helpers(task) {
+  let p = with_defaults({repo: "a/b", autopilot_states: ["queued"], require_human_for: ["blocked"]})
+  assert(autopilot_for(p, "queued"))
+  assert(!autopilot_for(p, "blocked"))
+  assert(requires_human(p, "blocked"))
+  assert(!requires_human(p, "queued"))
+}

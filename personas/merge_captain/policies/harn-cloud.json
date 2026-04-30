@@ -1,0 +1,26 @@
+{
+  "repo": "burin-labs/harn-cloud",
+  "default_branch": "main",
+  "merge_method": "squash",
+  "merge_queue_enabled": true,
+  "required_checks": [
+    "ci / build",
+    "ci / test",
+    "ci / migrations"
+  ],
+  "required_review_count": 1,
+  "blocking_labels": [
+    "do-not-merge",
+    "needs-revision",
+    "schema-review-required"
+  ],
+  "ready_label": "ready-to-merge",
+  "max_in_flight": 4,
+  "local_verification": [
+    {"name": "cargo-test", "command": "cargo test --workspace"}
+  ],
+  "downstream": [],
+  "bump_after_merge": null,
+  "autopilot_states": ["queued", "waiting_checks"],
+  "require_human_for": ["blocked", "local_repair", "dirty"]
+}

@@ -1,0 +1,29 @@
+{
+  "repo": "burin-labs/harn",
+  "default_branch": "main",
+  "merge_method": "squash",
+  "merge_queue_enabled": true,
+  "required_checks": [
+    "ci / rust",
+    "ci / portal",
+    "ci / conformance"
+  ],
+  "required_review_count": 1,
+  "blocking_labels": [
+    "do-not-merge",
+    "needs-revision",
+    "release-block"
+  ],
+  "ready_label": null,
+  "max_in_flight": 8,
+  "local_verification": [
+    {"name": "make-test", "command": "make test"},
+    {"name": "make-conformance", "command": "make conformance"}
+  ],
+  "downstream": [
+    {"repo": "burin-labs/burin-code", "action": "fetch_harn_bump"}
+  ],
+  "bump_after_merge": null,
+  "autopilot_states": ["queued", "waiting_checks", "behind"],
+  "require_human_for": ["blocked", "local_repair"]
+}

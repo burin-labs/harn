@@ -1,0 +1,110 @@
+// Per-PR checkpoint persistence backed by std/agent_state.
+//
+// Each tracked PR has a single key whose value is a small JSON envelope
+// that captures the last observed state, the last sweep id, and the
+// last raw observation. Resuming from a crash is a no-op: open the
+// session and `read` returns the envelope.
+import {
+  agent_state_delete,
+  agent_state_init,
+  agent_state_list,
+  agent_state_read,
+  agent_state_resume,
+  agent_state_write,
+} from "std/agent_state"
+
+/** Open or resume the agent_state session used to persist checkpoints. */
+pub fn open_checkpoints(root, session_id, writer_id) {
+  let options = {writer_id: writer_id, session_id: session_id, conflict_policy: "error"}
+  return agent_state_init(root, options)
+}
+
+/** Open in resume mode (errors if the session does not exist). */
+pub fn resume_checkpoints(root, session_id, writer_id) {
+  let options = {writer_id: writer_id, conflict_policy: "error"}
+  return agent_state_resume(root, session_id, options)
+}
+
+fn _key(repo, number) {
+  let safe_repo = repo.replace("/", "__")
+  return "pr/${safe_repo}/${to_string(number)}.json"
+}
+
+/** Save the latest observation + classification for a PR. */
+pub fn save_checkpoint(handle, sweep_id, observation, classification) {
+  let envelope = {
+    _type: "merge_captain_pr_checkpoint",
+    version: 1,
+    repo: observation.repo,
+    number: observation.number,
+    head_sha: observation.head_sha,
+    last_sweep_id: sweep_id,
+    last_state: classification.state,
+    last_action: classification.action,
+    last_observed_at: now_ms(),
+    snapshot: {
+      title: observation.title,
+      base_ref: observation.base_ref,
+      head_ref: observation.head_ref,
+      labels: observation.labels,
+      approvals: observation.approvals,
+      behind_by: observation.behind_by,
+      mergeable_state: observation.mergeable_state,
+      in_merge_queue: observation.in_merge_queue,
+      merge_group_active: observation.merge_group_active,
+    },
+  }
+  agent_state_write(handle, _key(observation.repo, observation.number), json_stringify(envelope))
+  return envelope
+}
+
+/** Load the saved checkpoint for a PR, or nil. */
+pub fn load_checkpoint(handle, repo, number) {
+  let raw = agent_state_read(handle, _key(repo, number))
+  if raw == nil {
+    return nil
+  }
+  let parsed = try {
+    json_parse(raw)
+  }
+  if !is_ok(parsed) {
+    return nil
+  }
+  return unwrap(parsed)
+}
+
+/** List all checkpoints currently held by the session. */
+pub fn list_all_checkpoints(handle) {
+  let keys = agent_state_list(handle)
+  return keys.filter({ k -> k.starts_with("pr/") })
+    .map(
+    { k ->
+      let raw = agent_state_read(handle, k)
+      let parsed = try {
+        json_parse(raw)
+      }
+      if is_ok(parsed) {
+        unwrap(parsed)
+      } else {
+        nil
+      }
+    },
+  )
+    .filter(
+    { env -> env != nil },
+  )
+}
+
+/** Drop a checkpoint (e.g. for a merged or closed PR we no longer track). */
+pub fn forget_checkpoint(handle, repo, number) {
+  agent_state_delete(handle, _key(repo, number))
+}
+
+/** Snapshot the prior state for a PR, defaulting to "discovered". */
+pub fn prior_state_for(handle, repo, number) {
+  let env = load_checkpoint(handle, repo, number)
+  if env == nil {
+    return "discovered"
+  }
+  return env.last_state ?? "discovered"
+}
