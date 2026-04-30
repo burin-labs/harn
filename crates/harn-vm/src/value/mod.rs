@@ -11,7 +11,7 @@ pub use error::{
 };
 pub use handles::{
     VmAtomicHandle, VmChannelHandle, VmGenerator, VmJoinHandle, VmRange, VmRngHandle, VmStream,
-    VmSyncPermitHandle, VmTaskHandle,
+    VmStreamCancel, VmSyncPermitHandle, VmTaskHandle,
 };
 pub use structural::{
     compare_values, value_identity_key, value_structural_hash_key, values_equal, values_identical,

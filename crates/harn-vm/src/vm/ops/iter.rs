@@ -214,7 +214,9 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_pop_iterator(&mut self) {
-        self.iterators.pop();
+        if let Some(super::super::IterState::Stream { stream }) = self.iterators.pop() {
+            stream.cancel();
+        }
     }
 }
 

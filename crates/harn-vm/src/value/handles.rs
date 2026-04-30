@@ -192,4 +192,50 @@ pub struct VmStream {
     pub done: Rc<std::cell::Cell<bool>>,
     /// Receiver end of the stream channel.
     pub receiver: Rc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<Result<VmValue, VmError>>>>,
+    /// Optional cancellation hook for host-backed streams.
+    pub cancel: Option<VmStreamCancel>,
+}
+
+#[derive(Clone)]
+pub struct VmStreamCancel {
+    sender: Arc<tokio::sync::watch::Sender<bool>>,
+}
+
+impl VmStreamCancel {
+    pub fn new() -> Self {
+        let (sender, _receiver) = tokio::sync::watch::channel(false);
+        Self {
+            sender: Arc::new(sender),
+        }
+    }
+
+    pub fn cancel(&self) {
+        let _ = self.sender.send(true);
+    }
+
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.sender.subscribe()
+    }
+}
+
+impl Default for VmStreamCancel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for VmStreamCancel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VmStreamCancel")
+            .field("cancelled", &*self.sender.borrow())
+            .finish()
+    }
+}
+
+impl VmStream {
+    pub(crate) fn cancel(&self) {
+        if let Some(cancel) = &self.cancel {
+            cancel.cancel();
+        }
+    }
 }

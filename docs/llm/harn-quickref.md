@@ -168,7 +168,7 @@ unless the name is a sink such as `collect`, `fold`, or `first`.
 ```harn
 // LLM token feed -> tap to log, then keep a bounded transcript.
 let chunks = stream.collect(
-  stream.tap(llm_stream("Summarize logs", nil, {provider: "mock"}), { chunk -> log(chunk) }),
+  stream.tap(llm_stream_call("Summarize logs", nil, {provider: "mock"}), { chunk -> log(chunk.visible_delta) }),
   {max: 200}
 )
 
@@ -202,6 +202,13 @@ Common operators:
 | `stream.take(s, n)` / `stream.take_until(s, pred)` / `stream.first(s)` | Bounded consumption and head lookup. |
 | `stream.merge(...)` / `stream.interleave(...)` / `stream.zip(a, b)` / `stream.race(...)` / `stream.broadcast(s, n)` | Combine or fan out streams. |
 | `stream.throttle(s, per_sec)` / `stream.debounce(s, window_ms)` | Basic emission pacing and burst coalescing. |
+
+`llm_stream_call(prompt, system?, options?)` returns
+`Stream<{delta, visible_delta, partial, role, finish_reason}>`. It accepts the
+same options as `llm_call`; the `stream` option is still only the provider
+transport toggle. Use `visible_delta` for UI rendering because it hides open
+internal `<think>` blocks. Breaking out of consumption drops the stream and
+cancels the background request.
 
 ## Module scope
 

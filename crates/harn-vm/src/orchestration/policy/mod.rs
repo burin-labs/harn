@@ -350,8 +350,8 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         {
             return reject_policy(format!("builtin '{name}' exceeds network ceiling"));
         }
-        "llm_call" | "llm_call_safe" | "llm_completion" | "llm_stream" | "llm_healthcheck"
-        | "agent_loop"
+        "llm_call" | "llm_call_safe" | "llm_completion" | "llm_stream" | "llm_stream_call"
+        | "llm_healthcheck" | "agent_loop"
             if !policy_allows_capability(&policy, "llm", "call")
                 || !policy_allows_side_effect(&policy, "network") =>
         {

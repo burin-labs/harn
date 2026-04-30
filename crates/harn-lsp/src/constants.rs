@@ -208,6 +208,10 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "llm_stream(prompt, system?, options?) -> string",
     ),
     (
+        "llm_stream_call",
+        "llm_stream_call(prompt, system?, options?) -> Stream<dict>",
+    ),
+    (
         "agent_loop",
         "agent_loop(prompt, system?, options?) -> dict",
     ),

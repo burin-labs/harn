@@ -4672,7 +4672,7 @@ Permission denied: builtin 'read_file' is not allowed in sandbox mode
 ### --allow
 
 ```bash
-harn run --allow llm,llm_stream script.harn
+harn run --allow llm,llm_stream,llm_stream_call script.harn
 ```
 
 Allows only the listed builtins plus the core builtins (see below). All
@@ -4767,7 +4767,7 @@ they are intended for test pipelines and the linter warns on non-test use:
 During `harn test`, the `HARN_LLM_PROVIDER` environment variable is
 automatically set to `"mock"` unless explicitly overridden. The mock
 provider returns deterministic placeholder responses, allowing tests
-that call `llm` or `llm_stream` to run without API keys.
+that call `llm`, `llm_stream`, or `llm_stream_call` to run without API keys.
 
 ### CLI options
 

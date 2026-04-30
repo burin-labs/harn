@@ -64,6 +64,7 @@ pub(crate) fn register_event_log_builtins(vm: &mut Vm) {
         Ok(VmValue::Stream(VmStream {
             done: Rc::new(std::cell::Cell::new(false)),
             receiver: Rc::new(tokio::sync::Mutex::new(rx)),
+            cancel: None,
         }))
     });
 }

@@ -174,7 +174,9 @@ impl Vm {
         let builtin = self.builtins.get(name).cloned()?;
 
         let span_kind = match name {
-            "llm_call" | "llm_stream" | "agent_loop" => Some(crate::tracing::SpanKind::LlmCall),
+            "llm_call" | "llm_stream" | "llm_stream_call" | "agent_loop" => {
+                Some(crate::tracing::SpanKind::LlmCall)
+            }
             "mcp_call" => Some(crate::tracing::SpanKind::ToolCall),
             _ => None,
         };
@@ -239,7 +241,9 @@ impl Vm {
     ) -> Result<VmValue, VmError> {
         // Auto-trace LLM calls and tool calls.
         let span_kind = match name {
-            "llm_call" | "llm_stream" | "agent_loop" => Some(crate::tracing::SpanKind::LlmCall),
+            "llm_call" | "llm_stream" | "llm_stream_call" | "agent_loop" => {
+                Some(crate::tracing::SpanKind::LlmCall)
+            }
             "mcp_call" => Some(crate::tracing::SpanKind::ToolCall),
             _ => None,
         };

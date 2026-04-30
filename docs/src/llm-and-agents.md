@@ -11,7 +11,7 @@ the map; the detailed references now live in focused pages.
 | [`llm_call`](./llm/llm_call.md) | Single model requests, structured JSON output, completions, budgets, and mock responses |
 | [`agent_loop`](./llm/agent_loop.md) | Persistent agents, profiles, daemon loops, skills, and delegated workers |
 | [Tools](./llm/tools.md) | Typed tools, Tool Vault progressive disclosure, and MCP server tools |
-| [Streaming](./llm/streaming.md) | `llm_stream`, partial deltas, transcripts, workflow sessions, and token usage summaries |
+| [Streaming](./llm/streaming.md) | `llm_stream`, `llm_stream_call`, partial deltas, transcripts, workflow sessions, and token usage summaries |
 | [Providers](./llm/providers.md) | Provider setup, API details, local servers, enterprise cloud providers, and capability overrides |
 
 ## Providers
@@ -108,9 +108,11 @@ across turns. See [Agent loops](./llm/agent_loop.md#skills-lifecycle).
 
 ## Streaming responses
 
-`llm_stream` returns a channel of response chunks. It accepts the same provider,
-model, and generation options as `llm_call`; the channel closes when the response
-is complete. See [Streaming and transcripts](./llm/streaming.md).
+`llm_stream` returns a channel of raw response chunks. `llm_stream_call` returns
+a first-class `Stream` of structured chunks `{delta, visible_delta, partial,
+role, finish_reason}` and cancels the background request when the stream is
+dropped. Both accept the same provider, model, and generation options as
+`llm_call`. See [Streaming and transcripts](./llm/streaming.md).
 
 ## Delegated workers
 
