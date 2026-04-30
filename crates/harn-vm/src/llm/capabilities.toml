@@ -31,6 +31,7 @@
 #   prompt_caching  : whether the provider honors cache_control blocks.
 #   vision          : whether Harn can send visual input blocks on this route.
 #   audio           : whether Harn can send audio input blocks on this route.
+#   pdf             : whether Harn can send PDF/document input blocks on this route.
 #   structured_output: structured-output transport: native, tool_use, format_kw, none.
 #   thinking_modes  : supported script-facing modes: enabled, adaptive, effort.
 #   interleaved_thinking_supported:

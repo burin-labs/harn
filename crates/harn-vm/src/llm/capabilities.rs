@@ -74,6 +74,10 @@ pub struct ProviderRule {
     /// through Harn's LLM message path.
     #[serde(default)]
     pub audio: Option<bool>,
+    /// Whether this provider/model route accepts PDF/document input blocks
+    /// through Harn's LLM message path.
+    #[serde(default)]
+    pub pdf: Option<bool>,
     /// Structured-output transport strategy. Known values are:
     /// `native`, `tool_use`, `format_kw`, and `none`.
     #[serde(default)]
@@ -147,6 +151,7 @@ pub struct Capabilities {
     pub prompt_caching: bool,
     pub vision: bool,
     pub audio: bool,
+    pub pdf: bool,
     pub structured_output: Option<String>,
     /// Legacy mirror for CLI display and older callers.
     pub json_schema: Option<String>,
@@ -173,6 +178,7 @@ impl Default for Capabilities {
             prompt_caching: false,
             vision: false,
             audio: false,
+            pdf: false,
             structured_output: None,
             json_schema: None,
             thinking_modes: Vec::new(),
@@ -201,6 +207,7 @@ pub struct ProviderCapabilityMatrixRow {
     pub thinking: Vec<String>,
     pub vision: bool,
     pub audio: bool,
+    pub pdf: bool,
     pub json_schema: Option<String>,
     pub tools: bool,
     pub cache: bool,
@@ -317,6 +324,7 @@ fn rule_to_matrix_row(
         thinking: rule_thinking_modes(rule),
         vision: rule_vision(rule),
         audio: rule.audio.unwrap_or(false),
+        pdf: rule.pdf.unwrap_or(false),
         json_schema: rule_structured_output(rule),
         tools: rule.native_tools.unwrap_or(false),
         cache: rule.prompt_caching.unwrap_or(false),
@@ -417,6 +425,7 @@ fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
         prompt_caching: rule.prompt_caching.unwrap_or(false),
         vision: rule_vision(rule),
         audio: rule.audio.unwrap_or(false),
+        pdf: rule.pdf.unwrap_or(false),
         structured_output: rule_structured_output(rule),
         json_schema: rule_structured_output(rule),
         thinking_modes,

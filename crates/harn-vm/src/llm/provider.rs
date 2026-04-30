@@ -245,6 +245,7 @@ pub(crate) fn provider_tool_search_variants(provider: &str, model: &str) -> Vec<
 }
 
 /// Module-level dispatch for `LlmProvider::supports_thinking`.
+#[allow(dead_code)]
 pub(crate) fn provider_thinking_modes(provider: &str, model: &str) -> Vec<String> {
     super::capabilities::lookup(provider, model).thinking_modes
 }
