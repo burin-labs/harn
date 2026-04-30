@@ -40,7 +40,10 @@ use crate::triggers::{
     SignatureStatus, TenantId, TriggerEvent, TriggerRetryConfig, DEFAULT_INBOX_RETENTION_DAYS,
 };
 
+use self::timing::{FILE_WATCH_FALLBACK_POLL, TEST_DEFAULT_TIMEOUT};
+
 pub mod clock;
+pub mod timing;
 
 pub const TRIGGER_TEST_FIXTURES: &[&str] = &[
     "cost_guard_short_circuits",
@@ -281,7 +284,7 @@ impl TriggerTestHarness {
             .await
             .map_err(|error| error.to_string())?;
         self.clock.advance_std(StdDuration::from_secs(30)).await;
-        let _ = tokio::time::timeout(StdDuration::from_millis(50), sink.wait_for_event()).await;
+        let _ = tokio::time::timeout(TEST_DEFAULT_TIMEOUT, sink.wait_for_event()).await;
         let emitted = self.connector_registry.emitted();
         Ok(TriggerHarnessResult {
             fixture: "cron_fires_on_schedule".to_string(),
@@ -1462,7 +1465,7 @@ impl TriggerTestHarness {
                 .await
                 .map_err(|error| error.to_string())?;
             let received_at = OffsetDateTime::now_utc();
-            std::thread::sleep(StdDuration::from_millis(10));
+            std::thread::sleep(FILE_WATCH_FALLBACK_POLL);
             install_manifest_triggers(vec![manifest_spec("replay.gc.fixture", "v4")])
                 .await
                 .map_err(|error| error.to_string())?;
