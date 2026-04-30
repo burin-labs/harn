@@ -381,11 +381,11 @@ pub(crate) fn symlink_path_dependency(source: &Path, dest: &Path) -> Result<(), 
         std::os::windows::fs::symlink_file(source, dest)
     }
     .map_err(|error| {
-        format!(
+        PackageError::Registry(format!(
             "failed to symlink {} to {}: {error}",
             source.display(),
             dest.display()
-        )
+        ))
     })
 }
 
