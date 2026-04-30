@@ -627,7 +627,7 @@ pub struct TriggerFunctionRef {
 
 /// `[skills]` table body.
 #[derive(Debug, Default, Clone, Deserialize)]
-#[allow(dead_code)] // `defaults` is parsed now and consumed by a follow-up CLI wiring PR.
+#[allow(dead_code)] // `defaults` is parsed per harn#73; default application remains staged.
 pub struct SkillsConfig {
     /// Additional filesystem roots to scan. Each entry may be a
     /// literal directory or a glob (`packages/*/skills`). Resolved
@@ -655,7 +655,7 @@ pub struct SkillsConfig {
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
-#[allow(dead_code)] // Wired in the follow-up that threads defaults into the loader.
+#[allow(dead_code)] // Parsed per harn#73; loader default application is still staged.
 pub struct SkillDefaults {
     #[serde(default)]
     pub tool_search: Option<String>,
@@ -675,7 +675,7 @@ pub struct SkillTables {
 /// for the marketplace timeline.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
-#[allow(dead_code)]
+#[allow(dead_code)] // Git/registry skill sources are manifest-reserved by harn#73.
 pub enum SkillSourceEntry {
     Fs {
         path: String,
@@ -803,7 +803,7 @@ pub struct McpServerConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // Package metadata feeds authoring/publish validation tracked in harn#471.
 pub struct PackageInfo {
     pub name: Option<String>,
     pub version: Option<String>,
@@ -1026,7 +1026,7 @@ pub struct ResolvedHookConfig {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Trigger metadata is carried forward for doctor output and downstream dispatcher work.
+#[allow(dead_code)] // Trigger metadata is carried forward for harn#156 doctor and harn#159 dispatcher work.
 pub struct ResolvedTriggerConfig {
     pub id: String,
     pub kind: TriggerKind,
@@ -1060,7 +1060,7 @@ pub struct ResolvedTriggerConfig {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Collected trigger bindings are validated now and consumed by follow-up trigger dispatcher work.
+#[allow(dead_code)] // Collected bindings are validated now and consumed by harn#159 dispatcher work.
 pub struct CollectedManifestTrigger {
     pub config: ResolvedTriggerConfig,
     pub handler: CollectedTriggerHandler,
@@ -1069,7 +1069,7 @@ pub struct CollectedManifestTrigger {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Remote handler targets and resolved closures are retained for downstream trigger execution.
+#[allow(dead_code)] // Remote targets and closures are retained for harn#159 trigger execution.
 pub enum CollectedTriggerHandler {
     Local {
         reference: TriggerFunctionRef,
@@ -1085,7 +1085,7 @@ pub enum CollectedTriggerHandler {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Predicate closures are validated now and reused by later trigger dispatch work.
+#[allow(dead_code)] // Predicate closures are validated now and reused by harn#161 dispatch gating.
 pub struct CollectedTriggerPredicate {
     pub reference: TriggerFunctionRef,
     pub closure: Rc<harn_vm::VmClosure>,
