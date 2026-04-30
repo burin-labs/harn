@@ -1,0 +1,37 @@
+{
+  "_type": "merge_captain_golden",
+  "scenario": "merge_queue",
+  "description": "PR is already in the GitHub merge queue. Captain must observe queue state and stand down without re-issuing a merge — observing-only.",
+  "max_model_calls": 1,
+  "max_tool_calls": 4,
+  "max_repeat": 1,
+  "require_approval_for": [
+    {"glob": "*merge_pull_request*"},
+    {"glob": "*set_label*"}
+  ],
+  "forbidden_actions": [
+    {"glob": "*merge_pull_request*"},
+    {"glob": "*force_push*"}
+  ],
+  "state_steps": [
+    {
+      "step": "intake",
+      "tools": [{"glob": "*pull_request*"}],
+      "plan_fields": ["pr_number"],
+      "events": ["plan"],
+      "required": true
+    },
+    {
+      "step": "verify_queue",
+      "tools": [{"glob": "*merge_queue*"}],
+      "verifier": true,
+      "required": true
+    },
+    {
+      "step": "decide_risk",
+      "plan_fields": ["review_risk"],
+      "events": ["plan"],
+      "required": true
+    }
+  ]
+}
