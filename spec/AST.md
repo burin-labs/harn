@@ -382,11 +382,13 @@ Unified parallel execution node. The `mode` determines behavior:
 
 - `ParallelMode::Count` — executes `body` concurrently `expr` times. Variable is bound to iteration index (0-based).
 - `ParallelMode::Each` — maps over `expr` list concurrently. Variable is bound to each element.
+- `ParallelMode::EachStream` — maps over `expr` list concurrently and returns a stream that emits in completion order.
 - `ParallelMode::Settle` — like Each, but collects all results (including errors) instead of failing fast.
 
 ```harn
 parallel 3 { i -> compute(i) }
 parallel each items { item -> transform(item) }
+parallel each items { item -> transform(item) } as stream
 parallel settle urls { url -> fetch(url) }
 ```
 

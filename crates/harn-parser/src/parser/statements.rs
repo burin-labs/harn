@@ -317,7 +317,7 @@ impl Parser {
         let start = self.current_span();
         self.consume(&TokenKind::Parallel, "parallel")?;
 
-        let mode = if self.check_identifier("each") {
+        let mut mode = if self.check_identifier("each") {
             self.advance();
             ParallelMode::Each
         } else if self.check_identifier("settle") {
@@ -401,6 +401,32 @@ impl Parser {
 
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
+
+        if self.check_identifier("as") {
+            let as_span = self.current_span();
+            self.advance();
+            if !self.check_identifier("stream") {
+                return Err(ParserError::Unexpected {
+                    got: self
+                        .current()
+                        .map(|t| format!("{:?}", t.kind))
+                        .unwrap_or_else(|| "end of input".to_string()),
+                    expected: "`stream` after `parallel each ... as`".to_string(),
+                    span: self.current_span(),
+                });
+            }
+            self.advance();
+            if mode != ParallelMode::Each {
+                return Err(ParserError::Unexpected {
+                    got: "as stream".to_string(),
+                    expected: "`as stream` is only valid after `parallel each ... { ... }`"
+                        .to_string(),
+                    span: as_span,
+                });
+            }
+            mode = ParallelMode::EachStream;
+        }
+
         Ok(spanned(
             Node::Parallel {
                 mode,

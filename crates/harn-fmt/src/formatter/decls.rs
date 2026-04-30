@@ -380,8 +380,13 @@ impl Formatter<'_> {
                 let e = self.format_expr(expr, self.indent);
                 let mode_word = match mode {
                     ParallelMode::Count => "",
-                    ParallelMode::Each => "each ",
+                    ParallelMode::Each | ParallelMode::EachStream => "each ",
                     ParallelMode::Settle => "settle ",
+                };
+                let stream_suffix = if matches!(mode, ParallelMode::EachStream) {
+                    " as stream"
+                } else {
+                    ""
                 };
                 let options_clause = if options.is_empty() {
                     String::new()
@@ -403,7 +408,7 @@ impl Formatter<'_> {
                 self.indent();
                 self.format_body(body, node_line);
                 self.dedent();
-                self.writeln("}");
+                self.writeln(&format!("}}{stream_suffix}"));
             }
             Node::SpawnExpr { body } => {
                 self.writeln("spawn {");

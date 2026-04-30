@@ -53,6 +53,24 @@ let contents = parallel each files { file ->
 
 Results preserve the original list order.
 
+Use `as stream` when callers need completion-order progress instead of
+an eager list:
+
+```harn
+let results = parallel each [30, 5, 10] with { max_concurrent: 2 } { ms ->
+  sleep(ms)
+  ms
+} as stream
+
+for result in results {
+  println(result)
+}
+```
+
+`parallel_race(items, callable, options?)` returns the first successful
+plain value or `Result.Ok` payload, cancels the remaining tasks, and
+throws an aggregate error if every task throws or returns `Result.Err`.
+
 ## parallel settle
 
 Like `parallel each`, but never throws. Instead, it collects both

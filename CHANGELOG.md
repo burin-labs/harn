@@ -11,6 +11,13 @@ granular archaeology.
 
 ### Added
 
+- **Streaming `parallel each` and event-log subscriptions (#970/#1023).**
+  New `parallel each as stream` mode lazily yields per-element results as
+  `Stream<T>`, plus a `parallel race` builtin that returns the first
+  successful settle. Adds `event_log_subscribe` for tailing the in-process
+  event log as a typed stream. Parser/AST/typechecker/formatter, VM
+  `ParallelMapStream` op, runtime stdlib, conformance, and spec coverage.
+
 - **First-class `eval_pack` declarations (#965/#1022).** New `eval_pack`
   syntax that lowers to normalized eval-pack manifests, with optional
   block/summarize execution in script and block position. Exposes

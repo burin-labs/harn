@@ -80,6 +80,7 @@ impl super::Vm {
             Op::PopHandler => self.execute_pop_handler(),
             Op::Parallel => self.execute_parallel().await?,
             Op::ParallelMap => self.execute_parallel_map().await?,
+            Op::ParallelMapStream => self.execute_parallel_map_stream().await?,
             Op::ParallelSettle => self.execute_parallel_settle().await?,
             Op::Spawn => self.execute_spawn()?,
             Op::SyncMutexEnter => self.execute_sync_mutex_enter().await?,

@@ -1,0 +1,23 @@
+pipeline default() {
+  let finished = atomic(0)
+  fn racer(n: int) {
+    if n == 5 {
+      return Ok("fast")
+    }
+    sleep(n)
+    atomic_set(finished, 1)
+    return Ok("slow")
+  }
+  let winner = parallel_race([50, 5], racer)
+  println(winner)
+  sleep(80)
+  println(atomic_get(finished))
+  fn failer(n: int) {
+    return Err(n)
+  }
+  try {
+    parallel_race([1, 2], failer)
+  } catch (e) {
+    println("all failed")
+  }
+}

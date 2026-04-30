@@ -1,7 +1,7 @@
 //! Iterator and stream builtins.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
@@ -338,5 +338,127 @@ pub(crate) fn register_iter_builtins(vm: &mut Vm) {
             VmError::Runtime("stream.first: builtin requires VM execution context".to_string())
         })?;
         Ok(next_handle(&inner, &mut vm).await?.unwrap_or(VmValue::Nil))
+    });
+
+    vm.register_async_builtin("parallel_race", |args| async move {
+        let items = match require_arg(&args, 0, "parallel_race")? {
+            VmValue::List(items) => items,
+            other => {
+                return Err(type_error(format!(
+                    "parallel_race: first argument must be a list, got {}",
+                    other.type_name()
+                )))
+            }
+        };
+        let callable = require_callable(&args, 1, "parallel_race")?;
+        let cap = parallel_race_cap(args.get(2), items.len())?;
+        let parent_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+            VmError::Runtime("parallel_race: builtin requires VM execution context".to_string())
+        })?;
+        parallel_race_impl(parent_vm, items.iter().cloned().collect(), callable, cap).await
+    });
+}
+
+fn parallel_race_cap(value: Option<&VmValue>, total: usize) -> Result<Option<usize>, VmError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    match value {
+        VmValue::Nil => Ok(None),
+        VmValue::Int(n) if *n <= 0 => Ok(None),
+        VmValue::Int(n) => Ok(Some((*n as usize).min(total.max(1)))),
+        VmValue::Dict(options) => match options.get("max_concurrent") {
+            None | Some(VmValue::Nil) => Ok(None),
+            Some(VmValue::Int(n)) if *n <= 0 => Ok(None),
+            Some(VmValue::Int(n)) => Ok(Some((*n as usize).min(total.max(1)))),
+            Some(other) => Err(type_error(format!(
+                "parallel_race: max_concurrent must be an int, got {}",
+                other.type_name()
+            ))),
+        },
+        other => Err(type_error(format!(
+            "parallel_race: third argument must be max_concurrent int or options dict, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+async fn parallel_race_impl(
+    parent_vm: Vm,
+    items: Vec<VmValue>,
+    callable: VmValue,
+    cap: Option<usize>,
+) -> Result<VmValue, VmError> {
+    let total = items.len();
+    if total == 0 {
+        return Err(VmError::Runtime(
+            "parallel_race: expected at least one item".to_string(),
+        ));
+    }
+
+    let slot = cap.unwrap_or(total).max(1).min(total);
+    let mut pending: VecDeque<VmValue> = items.into_iter().collect();
+    let mut join_set: tokio::task::JoinSet<Result<VmValue, String>> = tokio::task::JoinSet::new();
+    let mut failures = Vec::new();
+
+    while join_set.len() < slot {
+        let Some(item) = pending.pop_front() else {
+            break;
+        };
+        spawn_parallel_race_task(&mut join_set, parent_vm.child_vm(), callable.clone(), item);
+    }
+
+    while let Some(joined) = join_set.join_next().await {
+        match joined {
+            Ok(Ok(value)) => {
+                join_set.abort_all();
+                return Ok(value);
+            }
+            Ok(Err(error)) => failures.push(error),
+            Err(error) => failures.push(format!("task join failed: {error}")),
+        }
+        if let Some(item) = pending.pop_front() {
+            spawn_parallel_race_task(&mut join_set, parent_vm.child_vm(), callable.clone(), item);
+        }
+    }
+
+    Err(VmError::Runtime(format!(
+        "parallel_race: all {} task(s) failed: {}",
+        failures.len(),
+        failures.join("; ")
+    )))
+}
+
+fn spawn_parallel_race_task(
+    join_set: &mut tokio::task::JoinSet<Result<VmValue, String>>,
+    mut vm: Vm,
+    callable: VmValue,
+    item: VmValue,
+) {
+    join_set.spawn_local(async move {
+        match vm.call_callable_value(&callable, &[item]).await {
+            Ok(VmValue::EnumVariant {
+                enum_name,
+                variant,
+                fields,
+            }) if enum_name.as_ref() == "Result" && variant.as_ref() == "Ok" => {
+                Ok(fields.first().cloned().unwrap_or(VmValue::Nil))
+            }
+            Ok(VmValue::EnumVariant {
+                enum_name,
+                variant,
+                fields,
+            }) if enum_name.as_ref() == "Result" && variant.as_ref() == "Err" => {
+                let mut message = String::new();
+                fields
+                    .first()
+                    .cloned()
+                    .unwrap_or(VmValue::Nil)
+                    .write_display(&mut message);
+                Err(message)
+            }
+            Ok(value) => Ok(value),
+            Err(error) => Err(error.to_string()),
+        }
     });
 }

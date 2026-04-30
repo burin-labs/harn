@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::value::{VmError, VmTaskHandle, VmValue};
+use crate::value::{VmError, VmStream, VmTaskHandle, VmValue};
 
 /// Decode the `cap_val` stack operand pushed by `parallel ... with
 /// { max_concurrent: N }`. A value of `0` (emitted when no option was
@@ -70,6 +70,46 @@ where
         .into_iter()
         .map(|slot| slot.expect("run_capped_ordered: missing result slot"))
         .collect())
+}
+
+async fn stream_capped_unordered<F, T>(
+    futures: Vec<F>,
+    cap: Option<usize>,
+    sender: tokio::sync::mpsc::Sender<Result<T, VmError>>,
+    error_label: &'static str,
+) where
+    F: std::future::Future<Output = Result<T, VmError>> + 'static,
+    T: 'static,
+{
+    let total = futures.len();
+    if total == 0 {
+        return;
+    }
+    let slot = cap.unwrap_or(total).max(1).min(total);
+    let mut pending: VecDeque<F> = futures.into_iter().collect();
+    let mut join_set: tokio::task::JoinSet<Result<T, VmError>> = tokio::task::JoinSet::new();
+
+    while join_set.len() < slot {
+        let Some(fut) = pending.pop_front() else {
+            break;
+        };
+        join_set.spawn_local(fut);
+    }
+
+    while let Some(joined) = join_set.join_next().await {
+        let value = match joined {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(error)) => Err(error),
+            Err(error) => Err(VmError::Runtime(format!("{error_label}: {error}"))),
+        };
+        let should_stop = value.is_err();
+        if sender.send(value).await.is_err() || should_stop {
+            return;
+        }
+        if let Some(fut) = pending.pop_front() {
+            join_set.spawn_local(fut);
+        }
+    }
 }
 
 impl super::super::Vm {
@@ -159,6 +199,49 @@ impl super::super::Vm {
                     results.push(val);
                 }
                 self.stack.push(VmValue::List(Rc::new(results)));
+            }
+            _ => self.stack.push(VmValue::Nil),
+        }
+        Ok(())
+    }
+
+    pub(super) async fn execute_parallel_map_stream(&mut self) -> Result<(), VmError> {
+        let closure = self.pop()?;
+        let list_val = self.pop()?;
+        let cap_val = self.pop()?;
+        match (&list_val, &closure) {
+            (VmValue::List(items), VmValue::Closure(closure)) => {
+                let len = items.len();
+                let cap = parallel_cap_from_value(&cap_val, len)?;
+                self.runtime_context_counter += 1;
+                let task_group_id = format!(
+                    "{}:parallel_each_stream:{}",
+                    self.runtime_context.task_id, self.runtime_context_counter
+                );
+                let mut futures = Vec::with_capacity(len);
+                for (i, item) in items.iter().enumerate() {
+                    let mut child = self.child_vm();
+                    child.runtime_context = self.runtime_context.child_task(
+                        format!("{task_group_id}:{i}"),
+                        "parallel each as stream",
+                        Some(task_group_id.clone()),
+                    );
+                    let closure = closure.clone();
+                    let item = item.clone();
+                    futures.push(async move { child.call_closure(&closure, &[item]).await });
+                }
+
+                let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
+                tokio::task::spawn_local(stream_capped_unordered(
+                    futures,
+                    cap,
+                    tx,
+                    "Parallel map stream error",
+                ));
+                self.stack.push(VmValue::Stream(VmStream {
+                    done: Rc::new(std::cell::Cell::new(false)),
+                    receiver: Rc::new(tokio::sync::Mutex::new(rx)),
+                }));
             }
             _ => self.stack.push(VmValue::Nil),
         }

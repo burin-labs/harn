@@ -433,6 +433,8 @@ pub enum ParallelMode {
     Count,
     /// `parallel each list { item -> ... }` — map over list concurrently.
     Each,
+    /// `parallel each list { item -> ... } as stream` — emit as each task completes.
+    EachStream,
     /// `parallel settle list { item -> ... }` — map with error collection.
     Settle,
 }

@@ -47,6 +47,7 @@ pub(crate) struct BuiltinGenericSig {
 pub(crate) const UNION_STRING_NIL: &[&str] = &["string", "nil"];
 pub(crate) const UNION_DICT_NIL: &[&str] = &["dict", "nil"];
 pub(crate) const UNION_BYTES_NIL: &[&str] = &["bytes", "nil"];
+pub(crate) const UNION_INT_NIL: &[&str] = &["int", "nil"];
 pub(crate) const EMPTY_RETURN_TYPES: &[&str] = &[];
 pub(crate) const RETURN_BOOL: &[&str] = &["bool"];
 pub(crate) const RETURN_BYTES: &[&str] = &["bytes"];

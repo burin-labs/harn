@@ -35,7 +35,7 @@ impl Compiler {
                 "<parallel>",
                 vec![variable.clone().unwrap_or_else(|| "__i__".to_string())],
             ),
-            ParallelMode::Each => (
+            ParallelMode::Each | ParallelMode::EachStream => (
                 "<parallel_each>",
                 vec![variable.clone().unwrap_or_else(|| "__item__".to_string())],
             ),
@@ -46,7 +46,9 @@ impl Compiler {
         };
         let param_type = match mode {
             ParallelMode::Count => Some(TypeExpr::Named("int".into())),
-            ParallelMode::Each | ParallelMode::Settle => self.infer_for_item_type(expr),
+            ParallelMode::Each | ParallelMode::EachStream | ParallelMode::Settle => {
+                self.infer_for_item_type(expr)
+            }
         };
         self.compile_node(expr)?;
         let mut fn_compiler = Compiler::for_nested_body();
@@ -77,6 +79,7 @@ impl Compiler {
         let op = match mode {
             ParallelMode::Count => Op::Parallel,
             ParallelMode::Each => Op::ParallelMap,
+            ParallelMode::EachStream => Op::ParallelMapStream,
             ParallelMode::Settle => Op::ParallelSettle,
         };
         self.chunk.emit(op, self.line);

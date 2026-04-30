@@ -1180,8 +1180,8 @@ The stable fields are always present, with unavailable values represented as
 `provider`, `trace_id`, `span_id`, `scheduler_key`, `runner`,
 `capacity_class`, `context_values`, `cancelled`, and `debug`.
 
-`spawn`, `parallel`, `parallel each`, and `parallel settle` create child
-logical tasks. A child task receives a deterministic `task_id`, its
+`spawn`, `parallel`, `parallel each`, `parallel each ... as stream`, and
+`parallel settle` create child logical tasks. A child task receives a deterministic `task_id`, its
 `parent_task_id` is the creating task, and its `root_task_id` is inherited from
 the root task. `parallel` siblings share a `task_group_id`.
 
@@ -1214,6 +1214,30 @@ parallel each list { item ->
 Maps over a list concurrently. Each task gets an isolated interpreter.
 The variable is bound to the current list element.
 Returns a list of results in the original order.
+
+### parallel each as stream
+
+```harn
+let results = parallel each list with { max_concurrent: 4 } { item ->
+  work(item)
+} as stream
+
+for result in results {
+  println(result)
+}
+```
+
+Maps over a list concurrently and returns `Stream<T>` instead of
+materializing a result list. The stream emits each task result as soon as
+that task completes, so output order is completion order rather than
+source order. `with { max_concurrent: N }` is honored the same way as
+eager `parallel each`. If a task throws, the error is raised when the
+consumer pulls that stream item and remaining tasks are cancelled.
+
+`parallel_race(items, callable, options?)` is the first-success helper
+for this pattern. It returns the first plain value or `Result.Ok`
+payload produced by `callable`, cancels remaining tasks, and throws an
+aggregate error if every task throws or returns `Result.Err`.
 
 ### parallel settle
 

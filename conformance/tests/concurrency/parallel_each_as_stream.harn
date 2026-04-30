@@ -1,0 +1,10 @@
+pipeline default() {
+  let results = parallel each [30, 5, 10] with { max_concurrent: 2 } { n ->
+    sleep(n)
+    return n
+  } as stream
+  println(type_of(results))
+  for result in results {
+    println(result)
+  }
+}
