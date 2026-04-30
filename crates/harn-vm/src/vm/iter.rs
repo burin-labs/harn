@@ -13,6 +13,13 @@ use std::rc::Rc;
 
 use crate::value::{VmChannelHandle, VmError, VmGenerator, VmStream, VmValue};
 
+#[derive(Debug)]
+pub struct VmBroadcastState {
+    source: Rc<RefCell<VmIter>>,
+    buffer: Vec<VmValue>,
+    exhausted: bool,
+}
+
 /// Backing enum for `VmValue::Iter`. See module docs.
 #[derive(Debug)]
 pub enum VmIter {
@@ -42,10 +49,21 @@ pub enum VmIter {
         inner: Rc<RefCell<VmIter>>,
         f: VmValue,
     },
+    /// Runs a callback for side effects, then yields the original item.
+    Tap {
+        inner: Rc<RefCell<VmIter>>,
+        f: VmValue,
+    },
     /// Keeps only items for which the predicate is truthy.
     Filter {
         inner: Rc<RefCell<VmIter>>,
         p: VmValue,
+    },
+    /// Running fold that yields each accumulator.
+    Scan {
+        inner: Rc<RefCell<VmIter>>,
+        acc: VmValue,
+        f: VmValue,
     },
     /// Maps each item to an iterable and flattens one level.
     FlatMap {
@@ -71,6 +89,12 @@ pub enum VmIter {
         p: VmValue,
         done: bool,
     },
+    /// Yields items until the predicate is truthy. The matching sentinel item
+    /// is consumed but not yielded.
+    TakeUntil {
+        inner: Rc<RefCell<VmIter>>,
+        p: VmValue,
+    },
     /// Discards items while the predicate is truthy; after the first falsy
     /// item, forwards that item and all subsequent items from `inner`.
     SkipWhile {
@@ -91,6 +115,39 @@ pub enum VmIter {
         a: Rc<RefCell<VmIter>>,
         b: Rc<RefCell<VmIter>>,
         on_a: bool,
+    },
+    /// Drains any non-exhausted source in rotating order.
+    Merge {
+        sources: Vec<Option<Rc<RefCell<VmIter>>>>,
+        cursor: usize,
+    },
+    /// Strict round-robin over non-exhausted sources.
+    Interleave {
+        sources: Vec<Option<Rc<RefCell<VmIter>>>>,
+        cursor: usize,
+    },
+    /// First source to yield wins; subsequent pulls only read that source.
+    Race {
+        sources: Vec<Option<Rc<RefCell<VmIter>>>>,
+        winner: Option<Rc<RefCell<VmIter>>>,
+    },
+    /// One source fanned out into several single-pass branches.
+    Broadcast {
+        shared: Rc<RefCell<VmBroadcastState>>,
+        branch: usize,
+        index: usize,
+    },
+    /// Sleeps between emissions after the first item.
+    Throttle {
+        inner: Rc<RefCell<VmIter>>,
+        interval_ms: u64,
+        next_ready: Option<tokio::time::Instant>,
+    },
+    /// Coalesces immediately available bursts and emits the last item seen
+    /// after the quiet window.
+    Debounce {
+        inner: Rc<RefCell<VmIter>>,
+        window_ms: u64,
     },
     /// Yields `VmValue::List` batches of up to `n` items from `inner`.
     /// The final batch may be shorter; empty input yields no batches.
@@ -233,6 +290,20 @@ impl VmIter {
                     }
                 }
             }
+            VmIter::Tap { inner, f } => {
+                let f = f.clone();
+                let item = next_handle(inner, vm).await?;
+                match item {
+                    None => {
+                        *self = VmIter::Exhausted;
+                        Ok(None)
+                    }
+                    Some(v) => {
+                        vm.call_callable_value(&f, &[v.clone()]).await?;
+                        Ok(Some(v))
+                    }
+                }
+            }
             VmIter::Filter { inner, p } => {
                 let p = p.clone();
                 loop {
@@ -248,6 +319,21 @@ impl VmIter {
                                 return Ok(Some(v));
                             }
                         }
+                    }
+                }
+            }
+            VmIter::Scan { inner, acc, f } => {
+                let f = f.clone();
+                let item = next_handle(inner, vm).await?;
+                match item {
+                    None => {
+                        *self = VmIter::Exhausted;
+                        Ok(None)
+                    }
+                    Some(v) => {
+                        let next_acc = vm.call_callable_value(&f, &[acc.clone(), v]).await?;
+                        *acc = next_acc.clone();
+                        Ok(Some(next_acc))
                     }
                 }
             }
@@ -345,6 +431,25 @@ impl VmIter {
                     }
                 }
             }
+            VmIter::TakeUntil { inner, p } => {
+                let p = p.clone();
+                let item = next_handle(inner, vm).await?;
+                match item {
+                    None => {
+                        *self = VmIter::Exhausted;
+                        Ok(None)
+                    }
+                    Some(v) => {
+                        let stop = vm.call_callable_value(&p, &[v.clone()]).await?;
+                        if stop.is_truthy() {
+                            *self = VmIter::Exhausted;
+                            Ok(None)
+                        } else {
+                            Ok(Some(v))
+                        }
+                    }
+                }
+            }
             VmIter::SkipWhile { inner, p, primed } => {
                 if *primed {
                     let item = next_handle(inner, vm).await?;
@@ -424,13 +529,189 @@ impl VmIter {
                     Some(v) => Ok(Some(v)),
                 }
             }
+            VmIter::Merge { sources, cursor } => loop {
+                if sources.is_empty() || sources.iter().all(Option::is_none) {
+                    *self = VmIter::Exhausted;
+                    return Ok(None);
+                }
+                let len = sources.len();
+                let mut live = 0usize;
+                for offset in 0..len {
+                    let idx = (*cursor + offset) % len;
+                    let Some(handle) = sources[idx].clone() else {
+                        continue;
+                    };
+                    match try_next_ready(&handle, vm).await? {
+                        Some(v) => {
+                            *cursor = (idx + 1) % len;
+                            return Ok(Some(v));
+                        }
+                        None => {
+                            if is_exhausted_handle(&handle) {
+                                sources[idx] = None;
+                            } else {
+                                live += 1;
+                            }
+                        }
+                    }
+                }
+                if live == 0 {
+                    *self = VmIter::Exhausted;
+                    return Ok(None);
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+            },
+            VmIter::Interleave { sources, cursor } => {
+                if sources.is_empty() || sources.iter().all(Option::is_none) {
+                    *self = VmIter::Exhausted;
+                    return Ok(None);
+                }
+                let len = sources.len();
+                for offset in 0..len {
+                    let idx = (*cursor + offset) % len;
+                    let Some(handle) = sources[idx].clone() else {
+                        continue;
+                    };
+                    match next_handle(&handle, vm).await? {
+                        Some(v) => {
+                            *cursor = (idx + 1) % len;
+                            return Ok(Some(v));
+                        }
+                        None => {
+                            sources[idx] = None;
+                        }
+                    }
+                }
+                *self = VmIter::Exhausted;
+                Ok(None)
+            }
+            VmIter::Race { sources, winner } => {
+                if let Some(handle) = winner.clone() {
+                    let item = next_handle(&handle, vm).await?;
+                    return match item {
+                        Some(v) => Ok(Some(v)),
+                        None => {
+                            *self = VmIter::Exhausted;
+                            Ok(None)
+                        }
+                    };
+                }
+                loop {
+                    let mut live = 0usize;
+                    for source in sources.iter_mut() {
+                        let Some(handle) = source.clone() else {
+                            continue;
+                        };
+                        match try_next_ready(&handle, vm).await? {
+                            Some(v) => {
+                                *winner = Some(handle);
+                                sources.clear();
+                                return Ok(Some(v));
+                            }
+                            None => {
+                                if is_exhausted_handle(&handle) {
+                                    *source = None;
+                                } else {
+                                    live += 1;
+                                }
+                            }
+                        }
+                    }
+                    if live == 0 {
+                        *self = VmIter::Exhausted;
+                        return Ok(None);
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+                }
+            }
+            VmIter::Broadcast {
+                shared,
+                branch,
+                index,
+            } => {
+                let _ = branch;
+                loop {
+                    let mut state =
+                        std::mem::replace(&mut *shared.borrow_mut(), empty_broadcast_state());
+                    if *index < state.buffer.len() {
+                        let item = state.buffer[*index].clone();
+                        *index += 1;
+                        *shared.borrow_mut() = state;
+                        return Ok(Some(item));
+                    }
+                    if state.exhausted {
+                        *shared.borrow_mut() = state;
+                        *self = VmIter::Exhausted;
+                        return Ok(None);
+                    }
+                    let next = next_handle(&state.source, vm).await;
+                    match next {
+                        Err(err) => {
+                            *shared.borrow_mut() = state;
+                            return Err(err);
+                        }
+                        Ok(Some(v)) => {
+                            state.buffer.push(v);
+                            *shared.borrow_mut() = state;
+                        }
+                        Ok(None) => {
+                            state.exhausted = true;
+                            *shared.borrow_mut() = state;
+                        }
+                    }
+                }
+            }
+            VmIter::Throttle {
+                inner,
+                interval_ms,
+                next_ready,
+            } => {
+                if let Some(ready_at) = next_ready.take() {
+                    let now = tokio::time::Instant::now();
+                    if ready_at > now {
+                        tokio::time::sleep_until(ready_at).await;
+                    }
+                }
+                let item = next_handle(inner, vm).await?;
+                match item {
+                    None => {
+                        *self = VmIter::Exhausted;
+                        Ok(None)
+                    }
+                    Some(v) => {
+                        *next_ready = Some(
+                            tokio::time::Instant::now()
+                                + tokio::time::Duration::from_millis(*interval_ms),
+                        );
+                        Ok(Some(v))
+                    }
+                }
+            }
+            VmIter::Debounce { inner, window_ms } => {
+                let mut last = match next_handle(inner, vm).await? {
+                    Some(v) => v,
+                    None => {
+                        *self = VmIter::Exhausted;
+                        return Ok(None);
+                    }
+                };
+                if *window_ms > 0 {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(*window_ms)).await;
+                }
+                while let Some(v) = try_next_ready(inner, vm).await? {
+                    last = v;
+                }
+                Ok(Some(last))
+            }
             VmIter::Chunks { inner, n } => {
                 let n = *n;
                 let mut batch: Vec<VmValue> = Vec::with_capacity(n);
                 for _ in 0..n {
                     let item = next_handle(inner, vm).await?;
                     match item {
-                        Some(v) => batch.push(v),
+                        Some(v) => {
+                            batch.push(v);
+                        }
                         None => break,
                     }
                 }
@@ -525,6 +806,329 @@ pub async fn drain(
         }
     }
     Ok(out)
+}
+
+/// Fully consume an iter handle into a Vec, failing before pushing item
+/// `max + 1`.
+pub async fn drain_capped(
+    handle: &Rc<RefCell<VmIter>>,
+    vm: &mut crate::vm::Vm,
+    max: usize,
+) -> Result<Vec<VmValue>, VmError> {
+    let mut out = Vec::new();
+    loop {
+        let v = next_handle(handle, vm).await?;
+        match v {
+            Some(v) => {
+                if out.len() >= max {
+                    return Err(VmError::Runtime(format!(
+                        "stream.collect: max cap {max} exceeded"
+                    )));
+                }
+                out.push(v);
+            }
+            None => break,
+        }
+    }
+    Ok(out)
+}
+
+pub fn iter_handle_from_value(v: VmValue) -> Result<Rc<RefCell<VmIter>>, VmError> {
+    match iter_from_value(v)? {
+        VmValue::Iter(handle) => Ok(handle),
+        _ => unreachable!("iter_from_value returns Iter"),
+    }
+}
+
+pub fn broadcast_branches(source: Rc<RefCell<VmIter>>, n: usize) -> Vec<VmValue> {
+    let shared = Rc::new(RefCell::new(VmBroadcastState {
+        source,
+        buffer: Vec::new(),
+        exhausted: false,
+    }));
+    (0..n)
+        .map(|branch| {
+            VmValue::Iter(Rc::new(RefCell::new(VmIter::Broadcast {
+                shared: Rc::clone(&shared),
+                branch,
+                index: 0,
+            })))
+        })
+        .collect()
+}
+
+fn empty_broadcast_state() -> VmBroadcastState {
+    VmBroadcastState {
+        source: Rc::new(RefCell::new(VmIter::Exhausted)),
+        buffer: Vec::new(),
+        exhausted: true,
+    }
+}
+
+fn try_next_ready<'a>(
+    handle: &'a Rc<RefCell<VmIter>>,
+    vm: &'a mut crate::vm::Vm,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<VmValue>, VmError>> + 'a>> {
+    Box::pin(async move {
+        let mut state = std::mem::replace(&mut *handle.borrow_mut(), VmIter::Exhausted);
+        let result = state.try_next_ready_impl(vm).await;
+        *handle.borrow_mut() = state;
+        result
+    })
+}
+
+fn is_exhausted_handle(handle: &Rc<RefCell<VmIter>>) -> bool {
+    matches!(&*handle.borrow(), VmIter::Exhausted)
+}
+
+impl VmIter {
+    async fn try_next_ready_impl(
+        &mut self,
+        vm: &mut crate::vm::Vm,
+    ) -> Result<Option<VmValue>, VmError> {
+        match self {
+            VmIter::Exhausted => Ok(None),
+            VmIter::Map { inner, f } => {
+                let f = f.clone();
+                match try_next_ready(inner, vm).await? {
+                    Some(v) => Ok(Some(vm.call_callable_value(&f, &[v]).await?)),
+                    None => {
+                        if is_exhausted_handle(inner) {
+                            *self = VmIter::Exhausted;
+                        }
+                        Ok(None)
+                    }
+                }
+            }
+            VmIter::Tap { inner, f } => {
+                let f = f.clone();
+                match try_next_ready(inner, vm).await? {
+                    Some(v) => {
+                        vm.call_callable_value(&f, &[v.clone()]).await?;
+                        Ok(Some(v))
+                    }
+                    None => {
+                        if is_exhausted_handle(inner) {
+                            *self = VmIter::Exhausted;
+                        }
+                        Ok(None)
+                    }
+                }
+            }
+            VmIter::Filter { inner, p } => {
+                let p = p.clone();
+                loop {
+                    match try_next_ready(inner, vm).await? {
+                        Some(v) => {
+                            let keep = vm.call_callable_value(&p, &[v.clone()]).await?;
+                            if keep.is_truthy() {
+                                return Ok(Some(v));
+                            }
+                        }
+                        None => {
+                            if is_exhausted_handle(inner) {
+                                *self = VmIter::Exhausted;
+                            }
+                            return Ok(None);
+                        }
+                    }
+                }
+            }
+            VmIter::Scan { inner, acc, f } => {
+                let f = f.clone();
+                match try_next_ready(inner, vm).await? {
+                    Some(v) => {
+                        let next_acc = vm.call_callable_value(&f, &[acc.clone(), v]).await?;
+                        *acc = next_acc.clone();
+                        Ok(Some(next_acc))
+                    }
+                    None => {
+                        if is_exhausted_handle(inner) {
+                            *self = VmIter::Exhausted;
+                        }
+                        Ok(None)
+                    }
+                }
+            }
+            VmIter::FlatMap { inner, f, cur } => {
+                let f = f.clone();
+                loop {
+                    if let Some(cur_iter) = cur.clone() {
+                        match try_next_ready(&cur_iter, vm).await? {
+                            Some(v) => return Ok(Some(v)),
+                            None => {
+                                if is_exhausted_handle(&cur_iter) {
+                                    *cur = None;
+                                }
+                                return Ok(None);
+                            }
+                        }
+                    }
+                    match try_next_ready(inner, vm).await? {
+                        Some(v) => {
+                            let result = vm.call_callable_value(&f, &[v]).await?;
+                            *cur = Some(iter_handle_from_value(result)?);
+                        }
+                        None => {
+                            if is_exhausted_handle(inner) {
+                                *self = VmIter::Exhausted;
+                            }
+                            return Ok(None);
+                        }
+                    }
+                }
+            }
+            VmIter::Take { inner, remaining } => {
+                if *remaining == 0 {
+                    *self = VmIter::Exhausted;
+                    return Ok(None);
+                }
+                match try_next_ready(inner, vm).await? {
+                    Some(v) => {
+                        *remaining -= 1;
+                        if *remaining == 0 {
+                            *self = VmIter::Exhausted;
+                        }
+                        Ok(Some(v))
+                    }
+                    None => {
+                        if is_exhausted_handle(inner) {
+                            *self = VmIter::Exhausted;
+                        }
+                        Ok(None)
+                    }
+                }
+            }
+            VmIter::TakeUntil { inner, p } => {
+                let p = p.clone();
+                match try_next_ready(inner, vm).await? {
+                    Some(v) => {
+                        let stop = vm.call_callable_value(&p, &[v.clone()]).await?;
+                        if stop.is_truthy() {
+                            *self = VmIter::Exhausted;
+                            Ok(None)
+                        } else {
+                            Ok(Some(v))
+                        }
+                    }
+                    None => {
+                        if is_exhausted_handle(inner) {
+                            *self = VmIter::Exhausted;
+                        }
+                        Ok(None)
+                    }
+                }
+            }
+            VmIter::Throttle {
+                inner,
+                interval_ms,
+                next_ready,
+            } => {
+                if let Some(ready_at) = *next_ready {
+                    if ready_at > tokio::time::Instant::now() {
+                        return Ok(None);
+                    }
+                }
+                match try_next_ready(inner, vm).await? {
+                    Some(v) => {
+                        *next_ready = Some(
+                            tokio::time::Instant::now()
+                                + tokio::time::Duration::from_millis(*interval_ms),
+                        );
+                        Ok(Some(v))
+                    }
+                    None => {
+                        if is_exhausted_handle(inner) {
+                            *self = VmIter::Exhausted;
+                        }
+                        Ok(None)
+                    }
+                }
+            }
+            VmIter::Range { .. }
+            | VmIter::Vec { .. }
+            | VmIter::Dict { .. }
+            | VmIter::Chars { .. }
+            | VmIter::Skip { .. }
+            | VmIter::TakeWhile { .. }
+            | VmIter::SkipWhile { .. }
+            | VmIter::Zip { .. }
+            | VmIter::Enumerate { .. }
+            | VmIter::Chain { .. }
+            | VmIter::Merge { .. }
+            | VmIter::Interleave { .. }
+            | VmIter::Race { .. }
+            | VmIter::Broadcast { .. }
+            | VmIter::Debounce { .. }
+            | VmIter::Chunks { .. }
+            | VmIter::Windows { .. } => self.next(vm).await,
+            VmIter::Gen { gen } => {
+                if gen.done.get() {
+                    *self = VmIter::Exhausted;
+                    return Ok(None);
+                }
+                let rx = gen.receiver.clone();
+                let result = match rx.try_lock() {
+                    Ok(mut guard) => match guard.try_recv() {
+                        Ok(Ok(v)) => Ok(Some(v)),
+                        Ok(Err(error)) => {
+                            gen.done.set(true);
+                            *self = VmIter::Exhausted;
+                            Err(error)
+                        }
+                        Err(tokio::sync::mpsc::error::TryRecvError::Empty) => Ok(None),
+                        Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                            gen.done.set(true);
+                            *self = VmIter::Exhausted;
+                            Ok(None)
+                        }
+                    },
+                    Err(_) => Ok(None),
+                };
+                result
+            }
+            VmIter::Stream { stream } => {
+                if stream.done.get() {
+                    *self = VmIter::Exhausted;
+                    return Ok(None);
+                }
+                let rx = stream.receiver.clone();
+                let result = match rx.try_lock() {
+                    Ok(mut guard) => match guard.try_recv() {
+                        Ok(Ok(v)) => Ok(Some(v)),
+                        Ok(Err(error)) => {
+                            stream.done.set(true);
+                            *self = VmIter::Exhausted;
+                            Err(error)
+                        }
+                        Err(tokio::sync::mpsc::error::TryRecvError::Empty) => Ok(None),
+                        Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                            stream.done.set(true);
+                            *self = VmIter::Exhausted;
+                            Ok(None)
+                        }
+                    },
+                    Err(_) => Ok(None),
+                };
+                result
+            }
+            VmIter::Chan { handle } => {
+                let rx = handle.receiver.clone();
+                let result = match rx.try_lock() {
+                    Ok(mut guard) => match guard.try_recv() {
+                        Ok(v) => Ok(Some(v)),
+                        Err(tokio::sync::mpsc::error::TryRecvError::Empty) => Ok(None),
+                        Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                            *self = VmIter::Exhausted;
+                            Ok(None)
+                        }
+                    },
+                    Err(_) => Ok(None),
+                };
+                result
+            }
+        }
+    }
 }
 
 /// Convenience: wrap a source value into a `VmValue::Iter`. Used by the

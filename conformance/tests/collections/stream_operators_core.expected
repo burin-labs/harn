@@ -1,0 +1,23 @@
+[harn] [10, 20, 30, 40]
+[harn] [2, 4]
+[harn] [1, 2]
+[harn] 30
+[harn] [1, 3, 6]
+[harn] 10
+[harn] []
+[harn] nil
+[harn] 7
+[harn] [1, 2]
+[harn] []
+[harn] [1, 2]
+[harn] [(1, a), (2, b)]
+[harn] [1, 2, 3, 4]
+[harn] [a, b, c, d]
+[harn] [9, 10]
+[harn] [1, 2, 3]
+[harn] [1, 2, 3]
+[harn] [1]
+[harn] [3]
+[harn] cap
+[harn] mid
+[harn] stream_operators_core tests passed

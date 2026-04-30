@@ -1340,6 +1340,74 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "stream",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "stream.broadcast",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "stream.collect",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "stream.debounce",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "stream.filter",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "stream.first",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "stream.fold",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "stream.interleave",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "stream.map",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "stream.merge",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "stream.race",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "stream.scan",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "stream.take",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "stream.take_until",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "stream.tap",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "stream.throttle",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "stream.zip",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "substring",
         return_type: Some(BuiltinReturn::Named("string")),
     },

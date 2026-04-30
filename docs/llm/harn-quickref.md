@@ -161,6 +161,48 @@ gen fn numbers() -> Stream<int> {
 for n in numbers() { println(n) }
 ```
 
+`stream.*` works with any iterable source: lists, ranges, channels,
+generators, and lazy `iter(...)` values. Operators are single-pass and lazy
+unless the name is a sink such as `collect`, `fold`, or `first`.
+
+```harn
+// LLM token feed -> tap to log, then keep a bounded transcript.
+let chunks = stream.collect(
+  stream.tap(llm_stream("Summarize logs", nil, {provider: "mock"}), { chunk -> log(chunk) }),
+  {max: 200}
+)
+
+// Parallel or channel results -> take the first three.
+let first_three = stream.collect(stream.take(results_channel, 3), {max: 3})
+
+// Agent events -> filter by topic.
+let tool_events = stream.collect(
+  stream.filter(agent_events, { ev -> ev?.topic == "tool_call" }),
+  {max: 100}
+)
+
+// Two streams -> race; the first source to emit wins.
+let winner = stream.first(stream.race(primary_stream, fallback_stream))
+
+// Combine streams and fold to a result.
+let total = stream.fold(
+  stream.merge(worker_a, worker_b, worker_c),
+  0,
+  { acc, item -> acc + item.cost }
+)
+```
+
+Common operators:
+
+| Operator | Use |
+|---|---|
+| `stream.map(s, f)` / `stream.filter(s, pred)` / `stream.tap(s, f)` | Per-item transform, selection, side effects. |
+| `stream.scan(s, seed, f)` / `stream.fold(s, seed, f)` | Running accumulator vs final accumulator. |
+| `stream.collect(s, {max: N})` | Materialize with an explicit cap; exceeding it throws loudly. |
+| `stream.take(s, n)` / `stream.take_until(s, pred)` / `stream.first(s)` | Bounded consumption and head lookup. |
+| `stream.merge(...)` / `stream.interleave(...)` / `stream.zip(a, b)` / `stream.race(...)` / `stream.broadcast(s, n)` | Combine or fan out streams. |
+| `stream.throttle(s, per_sec)` / `stream.debounce(s, window_ms)` | Basic emission pacing and burst coalescing. |
+
 ## Module scope
 
 Top-level `let` / `var` and `fn` declarations are visible inside
