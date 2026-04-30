@@ -1,0 +1,66 @@
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({error: {category: "server_error", message: "HTTP 503 Service Unavailable"}})
+  llm_mock({text: "ok after retry"})
+  let recovered = llm_call("retry once", nil, {provider: "mock", llm_retries: 2, llm_backoff_ms: 0})
+  println(recovered.prose)
+  println(len(llm_mock_calls()))
+  llm_mock_clear()
+  llm_mock({error: {category: "server_error", message: "HTTP 503 Service Unavailable"}})
+  llm_mock({error: {category: "server_error", message: "HTTP 503 Service Unavailable again"}})
+  llm_mock({text: "unreachable"})
+  let exhausted = try {
+    llm_call("retry budget exhausted", nil, {provider: "mock", llm_retries: 1, llm_backoff_ms: 0})
+  }
+  println(is_err(exhausted))
+  println(unwrap_err(exhausted)?.kind)
+  println(unwrap_err(exhausted)?.reason)
+  println(len(llm_mock_calls()))
+  llm_mock_clear()
+  llm_mock({error: {category: "server_error", message: "HTTP 503 default fail-fast"}})
+  llm_mock({text: "unreachable without explicit retries"})
+  let default_fail_fast = try {
+    llm_call("default retry budget", nil, {provider: "mock", llm_backoff_ms: 0})
+  }
+  println(is_err(default_fail_fast))
+  println(len(llm_mock_calls()))
+  let schema = {type: "object", required: ["answer"], properties: {answer: {type: "string"}}}
+  llm_mock_clear()
+  llm_mock({text: "{\"wrong\": true}"})
+  let schema_failure = try {
+    llm_call(
+      "schema failure is not a transport retry",
+      nil,
+      {
+        provider: "mock",
+        response_format: "json",
+        output_schema: schema,
+        output_validation: "error",
+        schema_retries: 0,
+        llm_retries: 2,
+        llm_backoff_ms: 0,
+      },
+    )
+  }
+  println(is_err(schema_failure))
+  println(unwrap_err(schema_failure)?.category)
+  println(len(llm_mock_calls()))
+  llm_mock_clear()
+  llm_mock({text: "{\"wrong\": true}"})
+  llm_mock({text: "{\"answer\": \"fixed\"}"})
+  let structured = llm_call(
+    "schema retry",
+    nil,
+    {
+      provider: "mock",
+      response_format: "json",
+      output_schema: schema,
+      output_validation: "error",
+      schema_retries: 1,
+      llm_retries: 2,
+      llm_backoff_ms: 0,
+    },
+  )
+  println(structured.data.answer)
+  println(len(llm_mock_calls()))
+}

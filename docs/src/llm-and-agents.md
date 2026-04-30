@@ -175,6 +175,8 @@ only accepts base64 image data, so `url` image blocks are rejected for
 | `presence_penalty` | float | nil | Presence penalty (OpenAI only) |
 | `response_format` | string | `"text"` | `"text"` or `"json"` |
 | `schema` | dict | nil | JSON Schema, OpenAPI Schema Object, or canonical Harn schema dict for structured output |
+| `llm_retries` | int | `0` | Retries on transient HTTP / provider errors. Raw `llm_call` is fail-fast by default; set to N to allow N retries after the first attempt |
+| `llm_backoff_ms` | int | `250` | Base exponential backoff in ms between LLM retries |
 | `thinking` | bool/dict | nil | Enable typed provider reasoning. `true` and `{budget_tokens: N}` remain shorthand for `{mode: "enabled"}`; use `{mode: "enabled", budget_tokens: N}`, `{mode: "adaptive"}`, or `{mode: "effort", level: "low" \| "medium" \| "high"}`. |
 | `vision` | bool | inferred | Require image-input support. Image content blocks set this implicitly; `vision: true` fails before transport unless the selected provider/model declares `vision_supported`. |
 | `tools` | list | nil | Tool definitions |
@@ -731,7 +733,7 @@ Same as `llm_call`, plus additional options:
 | `max_iterations` | int | `50` | Maximum number of LLM round-trips |
 | `max_nudges` | int | `8` | Max consecutive text-only responses before stopping |
 | `nudge` | string | see below | Custom message to send when nudging the agent |
-| `llm_retries` | int | `2` | Retries on transient HTTP / provider errors. Set to `0` for fail-fast |
+| `llm_retries` | int | `2` | Retries on transient HTTP / provider errors. Explicit option keys override profile defaults |
 | `llm_backoff_ms` | int | `2000` | Base exponential backoff in ms between LLM retries |
 | `tool_retries` | int | `0` | Number of retry attempts for failed tool calls |
 | `tool_backoff_ms` | int | `1000` | Base backoff delay in ms for tool retries (doubles each attempt) |

@@ -213,8 +213,8 @@ Key options:
 | Option | Default | Notes |
 |---|---|---|
 | `provider` | `"auto"` | `"auto"` infers from model prefix (`local:` / `/` / `claude-*` / `gpt-*` / `:`). |
-| `llm_retries` | `2` | Transient error retries (HTTP 5xx, timeout, rate-limit). Set `0` to fail fast. |
-| `llm_backoff_ms` | `2000` | Base exponential backoff. |
+| `llm_retries` | `0` | Transient error retries (HTTP 5xx, timeout, rate-limit). Set to N to allow N retries after the first attempt. |
+| `llm_backoff_ms` | `250` | Base exponential backoff in milliseconds. |
 | `schema_retries` | `1` | Re-prompt on `output_schema` validation failure. Requires `output_validation: "error"` to kick in. |
 | `schema_retry_nudge` | auto | String (verbatim), `true` (auto), or `false` (bare retry). |
 | `output_validation` | `"off"` | `"error"` throws on mismatch; `"warn"` logs. |

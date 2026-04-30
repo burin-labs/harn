@@ -653,6 +653,9 @@ async fn run_detector_loop(
 }
 
 /// Configuration for LLM call retries.
+pub(crate) const DEFAULT_LLM_CALL_RETRIES: usize = 0;
+pub(crate) const DEFAULT_LLM_CALL_BACKOFF_MS: u64 = 250;
+
 pub(crate) struct LlmRetryConfig {
     /// Maximum number of retries for transient errors (429, 5xx, connection).
     pub retries: usize,
@@ -663,8 +666,8 @@ pub(crate) struct LlmRetryConfig {
 impl Default for LlmRetryConfig {
     fn default() -> Self {
         Self {
-            retries: 0,
-            backoff_ms: 2000,
+            retries: DEFAULT_LLM_CALL_RETRIES,
+            backoff_ms: DEFAULT_LLM_CALL_BACKOFF_MS,
         }
     }
 }
@@ -678,7 +681,8 @@ fn llm_retry_backoff_ms(
     if crate::llm::providers::MockProvider::should_intercept(provider) {
         return 0;
     }
-    extract_retry_after_ms(error).unwrap_or(retry_config.backoff_ms * (1 << attempt.min(4)) as u64)
+    extract_retry_after_ms(error)
+        .unwrap_or_else(|| retry_config.backoff_ms.saturating_mul(1 << attempt.min(4)))
 }
 
 // ---------------------------------------------------------------------------
