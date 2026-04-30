@@ -328,6 +328,19 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
             children
         }
         Node::SkillDecl { fields, .. } => fields.iter().map(|(_, v)| v).collect(),
+        Node::EvalPackDecl {
+            fields,
+            body,
+            summarize,
+            ..
+        } => {
+            let mut children = fields.iter().map(|(_, v)| v).collect::<Vec<_>>();
+            children.extend(body.iter());
+            if let Some(summary_body) = summarize {
+                children.extend(summary_body.iter());
+            }
+            children
+        }
         Node::IfElse {
             condition,
             then_body,

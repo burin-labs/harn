@@ -204,6 +204,16 @@ fn test_format_semicolon_separated_skill_fields_to_newlines() {
 }
 
 #[test]
+fn test_format_eval_pack_fields_and_summary_to_newlines() {
+    let source = r#"eval_pack pack "regression-pack" { cases: [{id: "one"}]; for case in cases { println(case.id) }; summarize { println(pack.id) } }"#;
+    let result = format_source(source).unwrap();
+    assert_eq!(
+        result,
+        "eval_pack pack \"regression-pack\" {\n  cases: [{id: \"one\"}]\n  for case in cases {\n    println(case.id)\n  }\n  summarize {\n    println(pack.id)\n  }\n}\n"
+    );
+}
+
+#[test]
 fn test_format_tool_description_semicolon_body_to_newlines() {
     let source = r#"tool read(path: string) { description "Read a file"; log(path) }"#;
     let result = format_source(source).unwrap();

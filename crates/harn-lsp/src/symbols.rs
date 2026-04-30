@@ -398,6 +398,45 @@ fn collect_symbols(
                 recurse!(value, Some(snode.span));
             }
         }
+        Node::EvalPackDecl {
+            binding_name,
+            pack_id,
+            fields,
+            body,
+            summarize,
+            ..
+        } => {
+            let field_names = fields
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sig = format!("eval_pack {binding_name} \"{pack_id}\" {{ {field_names} }}");
+            symbols.push(SymbolInfo {
+                name: binding_name.clone(),
+                kind: HarnSymbolKind::Variable,
+                def_span: snode.span,
+                type_info: None,
+                signature: Some(sig),
+                scope_span,
+                doc_comment: extract_doc_comment(source, &snode.span),
+                impl_type: None,
+                fields: Vec::new(),
+                enum_variants: Vec::new(),
+                attributes: pending_attrs.to_vec(),
+            });
+            for (_k, value) in fields {
+                recurse!(value, Some(snode.span));
+            }
+            for child in body {
+                recurse!(child, Some(snode.span));
+            }
+            if let Some(summary_body) = summarize {
+                for child in summary_body {
+                    recurse!(child, Some(snode.span));
+                }
+            }
+        }
         Node::LetBinding {
             pattern,
             type_ann,

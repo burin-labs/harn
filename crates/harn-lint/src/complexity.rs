@@ -174,6 +174,7 @@ pub(crate) fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
             | Node::FnDecl { .. }
             | Node::ToolDecl { .. }
             | Node::SkillDecl { .. }
+            | Node::EvalPackDecl { .. }
             | Node::TypeDecl { .. }
             | Node::Pipeline { .. }
             | Node::ImplBlock { .. } => 0,

@@ -187,6 +187,39 @@ impl<'a> Linter<'a> {
                 }
             }
 
+            Node::EvalPackDecl {
+                binding_name,
+                fields,
+                body,
+                summarize,
+                is_pub,
+                ..
+            } => {
+                self.known_functions.insert(binding_name.clone());
+                self.fn_declarations.push(FnDeclaration {
+                    name: binding_name.clone(),
+                    span: snode.span,
+                    is_pub: *is_pub,
+                    is_method: false,
+                });
+                for (_k, value) in fields {
+                    self.lint_node(value);
+                }
+                self.push_scope();
+                if let Some(scope) = self.scopes.last_mut() {
+                    scope.insert("id".to_string());
+                    scope.insert("version".to_string());
+                    for (field_name, _) in fields {
+                        scope.insert(field_name.clone());
+                    }
+                }
+                self.lint_block(body);
+                if let Some(summary_body) = summarize {
+                    self.lint_block(summary_body);
+                }
+                self.pop_scope();
+            }
+
             Node::ImplBlock { type_name, methods } => {
                 self.type_references.insert(type_name.clone());
                 let saved = self.in_impl_block;

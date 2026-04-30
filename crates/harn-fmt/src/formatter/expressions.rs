@@ -525,6 +525,7 @@ impl Formatter<'_> {
                 }
                 format!("{pub_prefix}skill {name} {{\n{inner}{close_indent_str}}}")
             }
+            Node::EvalPackDecl { .. } => self.format_expr_or_stmt(node, indent),
             Node::LetBinding {
                 pattern,
                 type_ann,

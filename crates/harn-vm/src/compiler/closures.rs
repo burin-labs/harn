@@ -246,6 +246,94 @@ impl Compiler {
         Ok(())
     }
 
+    pub(super) fn compile_eval_pack_decl(
+        &mut self,
+        binding_name: &str,
+        pack_id: &str,
+        fields: &[(String, SNode)],
+        body: &[SNode],
+        summarize: &Option<Vec<SNode>>,
+        run_body: bool,
+    ) -> Result<(), CompileError> {
+        self.emit_eval_pack_manifest_value(pack_id, fields)?;
+        self.emit_define_binding(binding_name, false);
+
+        if run_body && (!body.is_empty() || summarize.is_some()) {
+            self.begin_scope();
+
+            let mut visible_fields = vec!["id".to_string(), "version".to_string()];
+            for (field_name, _) in fields {
+                if !visible_fields.iter().any(|name| name == field_name) {
+                    visible_fields.push(field_name.clone());
+                }
+            }
+            for field_name in visible_fields {
+                self.emit_get_binding(binding_name);
+                let field_idx = self
+                    .chunk
+                    .add_constant(Constant::String(field_name.clone()));
+                self.chunk.emit_u16(Op::GetProperty, field_idx, self.line);
+                self.emit_define_binding(&field_name, false);
+            }
+
+            for sn in body {
+                self.compile_node(sn)?;
+                if Self::produces_value(&sn.node) {
+                    self.chunk.emit(Op::Pop, self.line);
+                }
+            }
+            if let Some(summary_body) = summarize {
+                for sn in summary_body {
+                    self.compile_node(sn)?;
+                    if Self::produces_value(&sn.node) {
+                        self.chunk.emit(Op::Pop, self.line);
+                    }
+                }
+            }
+            self.end_scope();
+        }
+        Ok(())
+    }
+
+    fn emit_eval_pack_manifest_value(
+        &mut self,
+        pack_id: &str,
+        fields: &[(String, SNode)],
+    ) -> Result<(), CompileError> {
+        let manifest_idx = self
+            .chunk
+            .add_constant(Constant::String("eval_pack_manifest".into()));
+        self.chunk.emit_u16(Op::Constant, manifest_idx, self.line);
+
+        let has_id = fields.iter().any(|(key, _)| key == "id");
+        let has_version = fields.iter().any(|(key, _)| key == "version");
+        let mut entry_count = fields.len() as u16;
+        if !has_version {
+            let key_idx = self.chunk.add_constant(Constant::String("version".into()));
+            self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+            let value_idx = self.chunk.add_constant(Constant::Int(1));
+            self.chunk.emit_u16(Op::Constant, value_idx, self.line);
+            entry_count += 1;
+        }
+        if !has_id {
+            let key_idx = self.chunk.add_constant(Constant::String("id".into()));
+            self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+            let value_idx = self
+                .chunk
+                .add_constant(Constant::String(pack_id.to_string()));
+            self.chunk.emit_u16(Op::Constant, value_idx, self.line);
+            entry_count += 1;
+        }
+        for (key, value) in fields {
+            let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
+            self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+            self.compile_node(value)?;
+        }
+        self.chunk.emit_u16(Op::BuildDict, entry_count, self.line);
+        self.chunk.emit_u8(Op::Call, 1, self.line);
+        Ok(())
+    }
+
     pub(super) fn compile_closure(
         &mut self,
         params: &[TypedParam],

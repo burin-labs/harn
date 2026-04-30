@@ -11,6 +11,14 @@ granular archaeology.
 
 ### Added
 
+- **First-class `eval_pack` declarations (#965/#1022).** New `eval_pack`
+  syntax that lowers to normalized eval-pack manifests, with optional
+  block/summarize execution in script and block position. Exposes
+  `eval_pack_manifest` / `eval_pack_run` builtins and manifest-level
+  default baselines. Formatter, linter, LSP, tree-sitter, docs, generated
+  keywords, and conformance coverage updated; per-case `compare_to`
+  overrides manifest-level `baseline`.
+
 - **Enterprise LLM providers (#870/#976).** First-class shims for Bedrock
   Runtime (Converse API with hand-rolled AWS SigV4 signing and
   env/profile/container/instance credential resolution), Azure OpenAI

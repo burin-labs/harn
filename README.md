@@ -213,7 +213,8 @@ enforcement.
   and `llm_mock_clear()` — queue specific text, tool calls, or mixed
   responses for the mock provider. Supports FIFO queuing and glob-pattern
   matching against prompts.
-- Eval suite manifests and portable eval packs via `eval_suite_manifest(...)`,
+- Eval suite manifests and portable eval packs via `eval_pack { ... }`,
+  `eval_pack_manifest(...)`, `eval_pack_run(...)`, `eval_suite_manifest(...)`,
   `eval_suite_run(...)`, `harn eval <manifest.json|harn.eval.toml>`, and
   `harn test package --evals`, so grouped replay, rubric, threshold, and
   package-shipped connector evals are first-class runtime data instead of

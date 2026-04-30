@@ -80,6 +80,7 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::To
         | TokenKind::Tool
         | TokenKind::Skill
+        | TokenKind::EvalPack
         | TokenKind::Exclusive
         | TokenKind::Guard
         | TokenKind::Require

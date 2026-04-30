@@ -4,6 +4,34 @@ use harn_lexer::{Span, TokenKind};
 use super::error::ParserError;
 use super::state::Parser;
 
+fn sanitize_eval_pack_binding(id: &str) -> String {
+    let mut out = String::new();
+    let mut last_was_underscore = false;
+    for ch in id.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            out.push(ch.to_ascii_lowercase());
+            last_was_underscore = false;
+        } else if !last_was_underscore {
+            out.push('_');
+            last_was_underscore = true;
+        }
+    }
+    let trimmed = out.trim_matches('_').to_string();
+    if trimmed.is_empty() {
+        return "eval_pack_".to_string();
+    }
+    if !harn_lexer::KEYWORDS.contains(&trimmed.as_str())
+        && trimmed
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+    {
+        trimmed
+    } else {
+        format!("eval_pack_{trimmed}")
+    }
+}
+
 impl Parser {
     pub(super) fn parse_pipeline_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
@@ -126,6 +154,7 @@ impl Parser {
             Node::FnDecl { .. }
             | Node::ToolDecl { .. }
             | Node::SkillDecl { .. }
+            | Node::EvalPackDecl { .. }
             | Node::Pipeline { .. }
             | Node::StructDecl { .. }
             | Node::EnumDecl { .. }
@@ -136,7 +165,7 @@ impl Parser {
                 return Err(ParserError::Unexpected {
                     got: "non-declaration statement".into(),
                     expected:
-                        "fn/tool/skill/pipeline/struct/enum/type/interface/impl declaration after `@attr`"
+                        "fn/tool/skill/eval_pack/pipeline/struct/enum/type/interface/impl declaration after `@attr`"
                             .into(),
                     span: inner.span,
                 });
@@ -419,6 +448,115 @@ impl Parser {
             Node::SkillDecl {
                 name,
                 fields,
+                is_pub,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    /// Parse a first-class eval pack declaration.
+    ///
+    /// Supported headers:
+    /// - `eval_pack my_pack { ... }`
+    /// - `eval_pack my_pack "pack-id" { ... }`
+    /// - `eval_pack "pack-id" { ... }` (binds a sanitized identifier)
+    ///
+    /// Body entries are either `field: expr` manifest fields, ordinary
+    /// statements that make up the executable eval body, or one trailing
+    /// `summarize { ... }` block.
+    pub(super) fn parse_eval_pack_decl(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::EvalPack, "eval_pack")?;
+
+        let (binding_name, pack_id) = match self.current_kind().cloned() {
+            Some(TokenKind::Identifier(name)) => {
+                self.advance();
+                let pack_id =
+                    if let Some(TokenKind::StringLiteral(id)) = self.current_kind().cloned() {
+                        self.advance();
+                        id
+                    } else {
+                        name.clone()
+                    };
+                (name, pack_id)
+            }
+            Some(TokenKind::StringLiteral(id)) => {
+                self.advance();
+                (sanitize_eval_pack_binding(&id), id)
+            }
+            _ => return Err(self.error("eval_pack name or string id")),
+        };
+
+        self.consume(&TokenKind::LBrace, "{")?;
+        let mut fields = Vec::new();
+        let mut body = Vec::new();
+        let mut summarize = None;
+
+        loop {
+            self.skip_newlines();
+            if self.check(&TokenKind::RBrace) {
+                break;
+            }
+
+            let is_summarize = matches!(
+                (self.peek_kind_at(0), self.peek_kind_at(1)),
+                (Some(TokenKind::Identifier(name)), Some(TokenKind::LBrace)) if name == "summarize"
+            );
+            if is_summarize {
+                let summarize_start = self.current_span();
+                self.advance();
+                self.consume(&TokenKind::LBrace, "{")?;
+                let block = self.parse_block()?;
+                self.consume(&TokenKind::RBrace, "}")?;
+                if summarize.replace(block).is_some() {
+                    return Err(ParserError::Unexpected {
+                        got: "duplicate summarize block".into(),
+                        expected: "one summarize block".into(),
+                        span: summarize_start,
+                    });
+                }
+                let consumed_sep = self.consume_statement_separator();
+                if !consumed_sep && !self.check(&TokenKind::RBrace) {
+                    self.require_statement_separator(self.prev_span().end_line, "eval_pack item")?;
+                }
+                continue;
+            }
+
+            let is_field = matches!(
+                (self.peek_kind_at(0), self.peek_kind_at(1)),
+                (Some(TokenKind::Identifier(_)), Some(TokenKind::Colon))
+            );
+            if is_field {
+                let field_name = self.consume_identifier("eval_pack field name")?;
+                self.consume(&TokenKind::Colon, ":")?;
+                self.skip_newlines();
+                let value = self.parse_expression()?;
+                let value_end_line = value.span.end_line;
+                fields.push((field_name, value));
+                let consumed_sep = self.consume_statement_separator();
+                if !consumed_sep && !self.check(&TokenKind::RBrace) {
+                    self.require_statement_separator(value_end_line, "eval_pack field")?;
+                }
+                continue;
+            }
+
+            let stmt = self.parse_statement()?;
+            let end_line = stmt.span.end_line;
+            body.push(stmt);
+            let consumed_sep = self.consume_statement_separator();
+            if !consumed_sep && !self.check(&TokenKind::RBrace) {
+                self.require_statement_separator(end_line, "eval_pack body statement")?;
+            }
+        }
+        self.consume(&TokenKind::RBrace, "}")?;
+
+        Ok(spanned(
+            Node::EvalPackDecl {
+                binding_name,
+                pack_id,
+                fields,
+                body,
+                summarize,
                 is_pub,
             },
             Span::merge(start, self.prev_span()),

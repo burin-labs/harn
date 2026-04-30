@@ -148,6 +148,24 @@ pub(crate) fn check_legacy_doc_comments(
                     visit(v, comments, by_line, source, diagnostics, false);
                 }
             }
+            Node::EvalPackDecl {
+                fields,
+                body,
+                summarize,
+                ..
+            } => {
+                for (_k, v) in fields {
+                    visit(v, comments, by_line, source, diagnostics, false);
+                }
+                for child in body {
+                    visit(child, comments, by_line, source, diagnostics, false);
+                }
+                if let Some(summary_body) = summarize {
+                    for child in summary_body {
+                        visit(child, comments, by_line, source, diagnostics, false);
+                    }
+                }
+            }
             Node::ImplBlock { methods, .. } => {
                 for m in methods {
                     visit(m, comments, by_line, source, diagnostics, false);

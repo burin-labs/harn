@@ -5,15 +5,15 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::orchestration::{
-    diff_run_records, evaluate_context_pack_suggestion_expectations, evaluate_run_against_fixture,
-    evaluate_run_suite, evaluate_run_suite_manifest, extract_handoff_from_artifact,
-    generate_context_pack_suggestions, handoff_context_text, handoff_from_json_value,
-    normalize_artifact, normalize_context_pack_manifest, normalize_eval_suite_manifest,
-    normalize_friction_event, normalize_handoff_artifact_json, normalize_run_record,
-    parse_context_pack_manifest_src, parse_friction_events_value, render_artifacts_context,
-    render_unified_diff, replay_fixture_from_run, save_run_record, select_artifacts,
-    ArtifactRecord, ContextPackSuggestionExpectation, ContextPackSuggestionOptions, ContextPolicy,
-    ReplayFixture,
+    diff_run_records, evaluate_context_pack_suggestion_expectations, evaluate_eval_pack_manifest,
+    evaluate_run_against_fixture, evaluate_run_suite, evaluate_run_suite_manifest,
+    extract_handoff_from_artifact, generate_context_pack_suggestions, handoff_context_text,
+    handoff_from_json_value, normalize_artifact, normalize_context_pack_manifest,
+    normalize_eval_pack_manifest_value, normalize_eval_suite_manifest, normalize_friction_event,
+    normalize_handoff_artifact_json, normalize_run_record, parse_context_pack_manifest_src,
+    parse_friction_events_value, render_artifacts_context, render_unified_diff,
+    replay_fixture_from_run, save_run_record, select_artifacts, ArtifactRecord,
+    ContextPackSuggestionExpectation, ContextPackSuggestionOptions, ContextPolicy, ReplayFixture,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -733,6 +733,20 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
             VmError::Runtime("eval_suite_run: missing manifest payload".to_string())
         })?)?;
         to_vm(&evaluate_run_suite_manifest(&manifest)?)
+    });
+
+    vm.register_builtin("eval_pack_manifest", |args, _out| {
+        let manifest = normalize_eval_pack_manifest_value(args.first().ok_or_else(|| {
+            VmError::Runtime("eval_pack_manifest: missing manifest payload".to_string())
+        })?)?;
+        to_vm(&manifest)
+    });
+
+    vm.register_builtin("eval_pack_run", |args, _out| {
+        let manifest = normalize_eval_pack_manifest_value(args.first().ok_or_else(|| {
+            VmError::Runtime("eval_pack_run: missing manifest payload".to_string())
+        })?)?;
+        to_vm(&evaluate_eval_pack_manifest(&manifest)?)
     });
 
     vm.register_builtin("friction_event", |args, _out| {

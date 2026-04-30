@@ -322,6 +322,37 @@ impl TypeChecker {
                 scope.clear_nil_widenable(name);
             }
 
+            Node::EvalPackDecl {
+                binding_name,
+                fields,
+                body,
+                summarize,
+                ..
+            } => {
+                for (_key, value) in fields {
+                    self.check_node(value, scope);
+                }
+                scope.define_var(binding_name, Some(TypeExpr::Named("dict".into())));
+                scope.clear_nil_widenable(binding_name);
+
+                if !body.is_empty() || summarize.is_some() {
+                    let mut eval_scope = scope.child();
+                    eval_scope.define_var("id", Some(TypeExpr::Named("string".into())));
+                    eval_scope.clear_nil_widenable("id");
+                    eval_scope.define_var("version", Some(TypeExpr::Named("int".into())));
+                    eval_scope.clear_nil_widenable("version");
+                    for (field_name, value) in fields {
+                        let field_type = self.infer_type(value, scope);
+                        eval_scope.define_var(field_name, field_type);
+                        eval_scope.clear_nil_widenable(field_name);
+                    }
+                    self.check_block(body, &mut eval_scope);
+                    if let Some(summary_body) = summarize {
+                        self.check_block(summary_body, &mut eval_scope);
+                    }
+                }
+            }
+
             Node::FunctionCall {
                 name,
                 type_args,

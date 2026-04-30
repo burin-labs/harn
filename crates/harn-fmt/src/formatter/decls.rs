@@ -132,6 +132,39 @@ impl Formatter<'_> {
                 self.dedent();
                 self.writeln("}");
             }
+            Node::EvalPackDecl {
+                binding_name,
+                pack_id,
+                fields,
+                body,
+                summarize,
+                is_pub,
+            } => {
+                let pub_prefix = if *is_pub { "pub " } else { "" };
+                if binding_name == pack_id {
+                    self.writeln(&format!("{pub_prefix}eval_pack {binding_name} {{"));
+                } else {
+                    let escaped = escape_string(pack_id);
+                    self.writeln(&format!(
+                        "{pub_prefix}eval_pack {binding_name} \"{escaped}\" {{"
+                    ));
+                }
+                self.indent();
+                for (field_name, field_expr) in fields {
+                    let expr_str = self.format_expr(field_expr, self.indent);
+                    self.writeln(&format!("{field_name}: {expr_str}"));
+                }
+                self.format_body(body, node_line);
+                if let Some(summary_body) = summarize {
+                    self.writeln("summarize {");
+                    self.indent();
+                    self.format_body(summary_body, node_line);
+                    self.dedent();
+                    self.writeln("}");
+                }
+                self.dedent();
+                self.writeln("}");
+            }
             Node::IfElse {
                 condition,
                 then_body,

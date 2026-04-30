@@ -1,0 +1,44 @@
+pipeline main() {
+  let dir = path_join(temp_dir(), "harn_eval_pack_declaration")
+  mkdir(dir)
+  let run = run_record(
+    {
+      _type: "run_record",
+      id: "candidate",
+      workflow_id: "wf",
+      workflow_name: "demo",
+      task: "demo",
+      status: "completed",
+      started_at: "1",
+      stages: [
+        {
+          id: "stage_1",
+          node_id: "act",
+          kind: "stage",
+          status: "completed",
+          outcome: "success",
+          started_at: "1",
+        },
+      ],
+    },
+  )
+  run_record_save(run, path_join(dir, "candidate.json"))
+  eval_pack pack "regression-pack" {
+    base_dir: dir
+    baseline: "candidate.json"
+    fixtures: [{id: "candidate-run", kind: "run-record", path: "candidate.json"}]
+    rubrics: [{id: "status", kind: "deterministic", assertions: [{kind: "run-status", expected: "completed"}]}]
+    cases: [{id: "case_1", run: "candidate-run", rubrics: ["status"]}]
+    for case in cases {
+      println(case.id)
+    }
+    summarize {
+      let report = eval_pack_run(pack)
+      println(report.pass)
+      println(report.total)
+      println(report.cases[0].comparison.identical)
+    }
+  }
+  println(pack.id)
+  println(pack.version)
+}

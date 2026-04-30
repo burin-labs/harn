@@ -223,6 +223,21 @@ pub enum Node {
         fields: Vec<(String, SNode)>,
         is_pub: bool,
     },
+    /// Top-level `eval_pack NAME_OR_STRING { ... }` declaration.
+    ///
+    /// The compiler lowers fields into `eval_pack_manifest({ ... })` and
+    /// binds the normalized manifest to `binding_name`. Optional executable
+    /// body statements are only run when the declaration itself is executed
+    /// in script/block position; top-level pipeline preloading registers the
+    /// manifest data without running the body.
+    EvalPackDecl {
+        binding_name: String,
+        pack_id: String,
+        fields: Vec<(String, SNode)>,
+        body: Vec<SNode>,
+        summarize: Option<Vec<SNode>>,
+        is_pub: bool,
+    },
     TypeDecl {
         name: String,
         type_params: Vec<TypeParam>,
