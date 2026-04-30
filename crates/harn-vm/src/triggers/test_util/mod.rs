@@ -40,7 +40,7 @@ use crate::triggers::{
     SignatureStatus, TenantId, TriggerEvent, TriggerRetryConfig, DEFAULT_INBOX_RETENTION_DAYS,
 };
 
-use self::timing::{FILE_WATCH_FALLBACK_POLL, TEST_DEFAULT_TIMEOUT};
+use self::timing::TEST_DEFAULT_TIMEOUT;
 
 pub mod clock;
 pub mod timing;
@@ -1465,7 +1465,7 @@ impl TriggerTestHarness {
                 .await
                 .map_err(|error| error.to_string())?;
             let received_at = OffsetDateTime::now_utc();
-            std::thread::sleep(FILE_WATCH_FALLBACK_POLL);
+            wait_until_wall_clock_after(received_at);
             install_manifest_triggers(vec![manifest_spec("replay.gc.fixture", "v4")])
                 .await
                 .map_err(|error| error.to_string())?;
@@ -2119,6 +2119,14 @@ fn format_rfc3339(value: OffsetDateTime) -> String {
     value
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_default()
+}
+
+fn wait_until_wall_clock_after(timestamp: OffsetDateTime) {
+    let timestamp_ms = timestamp.unix_timestamp_nanos() / 1_000_000;
+    while OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000 <= timestamp_ms {
+        std::hint::spin_loop();
+        std::thread::yield_now();
+    }
 }
 
 fn signature_state_label(value: &SignatureStatus) -> &'static str {

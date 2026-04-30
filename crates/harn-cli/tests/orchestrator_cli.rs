@@ -1,12 +1,13 @@
 #![cfg(unix)]
 
 mod support;
+mod test_util;
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::thread;
@@ -17,19 +18,13 @@ use harn_vm::event_log::{
 };
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use tempfile::TempDir;
+use test_util::timing::{
+    self, ChildExitWatcher, EVENT_FAIL_FAST_TIMEOUT, LOG_RECV_POLL_INTERVAL,
+    PROCESS_FAIL_FAST_TIMEOUT,
+};
 
 const STARTUP_NEEDLE: &str = "HTTP listener ready on";
 const SHUTDOWN_NEEDLE: &str = "graceful shutdown complete";
-// Process-level deadline mirrors `orchestrator_http`'s 60s budget. Tests in
-// this file no longer serialize through a process-wide lock (see
-// `tests/support/process.rs` for the architectural rationale), so cold
-// subprocess starts may now overlap with sibling tests under nextest. The
-// happy-path subprocess startup is well under 1s; the generous upper bound
-// only affects the panic-message path, where it absorbs macOS dyld + amfi
-// cold-cache spikes for the unsigned debug-build `harn` binary under load.
-const PROCESS_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(60);
-const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(10);
-
 fn write_file(dir: &Path, relative: &str, contents: &str) {
     let path = dir.join(relative);
     if let Some(parent) = path.parent() {
@@ -54,7 +49,13 @@ pub fn on_task(event: TriggerEvent) -> string {{
     )
 }
 
-fn spawn_orchestrator(temp: &TempDir) -> (Child, Receiver<String>, thread::JoinHandle<String>) {
+fn spawn_orchestrator(
+    temp: &TempDir,
+) -> (
+    ChildExitWatcher,
+    Receiver<String>,
+    thread::JoinHandle<String>,
+) {
     spawn_orchestrator_with(temp, &[], &[])
 }
 
@@ -62,7 +63,11 @@ fn spawn_orchestrator_with(
     temp: &TempDir,
     extra_args: &[&str],
     envs: &[(&str, &str)],
-) -> (Child, Receiver<String>, thread::JoinHandle<String>) {
+) -> (
+    ChildExitWatcher,
+    Receiver<String>,
+    thread::JoinHandle<String>,
+) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_harn"));
     child
         .current_dir(temp.path())
@@ -99,17 +104,17 @@ fn spawn_orchestrator_with(
         collected
     });
 
-    (child, rx, handle)
+    (ChildExitWatcher::new(child), rx, handle)
 }
 
-fn wait_for_log_line(child: &mut Child, rx: &Receiver<String>, needle: &str) {
+fn wait_for_log_line(child: &mut ChildExitWatcher, rx: &Receiver<String>, needle: &str) {
     let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
-        match rx.recv_timeout(Duration::from_millis(25)) {
+        match rx.recv_timeout(LOG_RECV_POLL_INTERVAL) {
             Ok(line) if line.contains(needle) => return,
             Ok(_) => continue,
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if let Some(status) = child.try_wait().unwrap() {
+                if let Some(status) = child.try_status().unwrap() {
                     panic!("process exited before '{needle}' appeared: {status}");
                 }
             }
@@ -121,10 +126,10 @@ fn wait_for_log_line(child: &mut Child, rx: &Receiver<String>, needle: &str) {
     panic!("timed out waiting for '{needle}'");
 }
 
-fn wait_for_listener_url(child: &mut Child, rx: &Receiver<String>) -> String {
+fn wait_for_listener_url(child: &mut ChildExitWatcher, rx: &Receiver<String>) -> String {
     let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
-        match rx.recv_timeout(Duration::from_millis(25)) {
+        match rx.recv_timeout(LOG_RECV_POLL_INTERVAL) {
             Ok(line) if line.contains(STARTUP_NEEDLE) => {
                 let url = line
                     .split(STARTUP_NEEDLE)
@@ -138,7 +143,7 @@ fn wait_for_listener_url(child: &mut Child, rx: &Receiver<String>) -> String {
             }
             Ok(_) => continue,
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if let Some(status) = child.try_wait().unwrap() {
+                if let Some(status) = child.try_status().unwrap() {
                     panic!("process exited before listener became ready: {status}");
                 }
             }
@@ -147,68 +152,30 @@ fn wait_for_listener_url(child: &mut Child, rx: &Receiver<String>) -> String {
             }
         }
     }
-    let _ = child.kill();
-    let _ = child.wait();
+    child.kill();
     panic!("timed out waiting for listener URL");
 }
 
-fn send_sigterm(child: &Child) {
-    let status = Command::new("kill")
-        .arg("-TERM")
-        .arg(child.id().to_string())
-        .status()
-        .unwrap();
-    assert!(status.success(), "kill exited with {status}");
+fn send_sigterm(child: &mut ChildExitWatcher) {
+    child.terminate();
 }
 
-fn wait_for_exit_code(child: &mut Child, expected: i32) {
-    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
-    while Instant::now() < deadline {
-        if let Some(status) = child.try_wait().unwrap() {
-            assert_eq!(
-                status.code(),
-                Some(expected),
-                "unexpected exit status: {status}"
-            );
-            return;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    panic!("timed out waiting for orchestrator exit");
+fn wait_for_exit_code(child: &mut ChildExitWatcher, expected: i32) {
+    child.wait_for_code(PROCESS_FAIL_FAST_TIMEOUT, expected);
 }
 
-fn wait_for_exit(child: &mut Child) {
-    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
-    while Instant::now() < deadline {
-        if let Some(status) = child.try_wait().unwrap() {
-            assert!(status.success(), "child exited unsuccessfully: {status}");
-            return;
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-    panic!("timed out waiting for orchestrator exit");
+fn wait_for_exit(child: &mut ChildExitWatcher) {
+    child.wait_for_success(PROCESS_FAIL_FAST_TIMEOUT);
 }
 
-fn wait_for_any_exit(child: &mut Child) {
-    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
-    while Instant::now() < deadline {
-        if child.try_wait().unwrap().is_some() {
-            return;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    panic!("timed out waiting for orchestrator exit");
+fn wait_for_any_exit(child: &mut ChildExitWatcher) {
+    child
+        .wait_timeout(PROCESS_FAIL_FAST_TIMEOUT)
+        .unwrap_or_else(|error| panic!("{error}"));
 }
 
-fn wait_for_path(path: &Path, timeout: Duration) {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if path.exists() {
-            return;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    panic!("timed out waiting for {}", path.display());
+fn wait_for_path(path: &Path, timeout: std::time::Duration) {
+    timing::wait_for_existing_path(path, timeout);
 }
 
 fn json_headers() -> HeaderMap {
@@ -242,7 +209,7 @@ async fn wait_for_metrics_contains(
         if needles.iter().all(|needle| last.contains(needle)) {
             return last;
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        timing::sleep_async(timing::RETRY_POLL_INTERVAL).await;
     }
     panic!("timed out waiting for metrics samples {needles:?}; last={last}");
 }
@@ -308,7 +275,7 @@ async fn wait_for_consumer_cursor(
         if cursor >= at_least {
             return;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        timing::sleep_async(timing::RETRY_POLL_INTERVAL).await;
     }
     panic!("timed out waiting for consumer cursor {consumer} on {topic_name} to reach {at_least}");
 }
@@ -381,7 +348,7 @@ fn wait_for_topic_kind(state_dir: &Path, topic_name: &str, kind: &str) {
         {
             return;
         }
-        thread::sleep(Duration::from_millis(25));
+        timing::sleep_blocking(timing::RETRY_POLL_INTERVAL);
     }
     panic!("timed out waiting for {topic_name}/{kind}");
 }
@@ -395,7 +362,7 @@ fn wait_for_topic_event(state_dir: &Path, topic_name: &str, predicate: impl Fn(&
         {
             return;
         }
-        thread::sleep(Duration::from_millis(25));
+        timing::sleep_blocking(timing::RETRY_POLL_INTERVAL);
     }
     panic!("timed out waiting for matching {topic_name} event");
 }
@@ -410,7 +377,7 @@ fn wait_for_topic_event_count(state_dir: &Path, topic_name: &str, kind: &str, ex
         if count >= expected {
             return;
         }
-        thread::sleep(Duration::from_millis(25));
+        timing::sleep_blocking(timing::RETRY_POLL_INTERVAL);
     }
     panic!("timed out waiting for {topic_name}/{kind} count {expected}");
 }
@@ -455,7 +422,7 @@ fn wait_for_sqlite_event_count(state_dir: &Path, topic_name: &str, kind: &str, e
         if sqlite_event_count(state_dir, topic_name, kind) >= expected {
             return;
         }
-        thread::sleep(Duration::from_millis(25));
+        timing::sleep_blocking(timing::RETRY_POLL_INTERVAL);
     }
     panic!("timed out waiting for {topic_name}/{kind} count {expected}");
 }
@@ -497,7 +464,7 @@ pub fn on_issue(event: TriggerEvent) {
 
     let (mut child, rx, handle) = spawn_orchestrator(&temp);
     wait_for_log_line(&mut child, &rx, STARTUP_NEEDLE);
-    send_sigterm(&child);
+    send_sigterm(&mut child);
     wait_for_exit(&mut child);
     let stderr = handle.join().expect("stderr collector thread");
 
@@ -572,7 +539,7 @@ handler = "handlers::on_task"
     assert_eq!(response.status(), reqwest::StatusCode::OK);
 
     wait_for_topic_kind(&state_dir, "triggers.lifecycle", "DispatchStarted");
-    send_sigterm(&child);
+    send_sigterm(&mut child);
     fs::write(&handler_release_path, b"release").unwrap();
     wait_for_exit(&mut child);
     let stderr = handle.join().expect("stderr collector thread");
@@ -665,7 +632,7 @@ pub fn on_task(event: TriggerEvent) -> string {
         .unwrap();
     assert_eq!(response.status(), reqwest::StatusCode::OK);
 
-    send_sigterm(&child);
+    send_sigterm(&mut child);
     wait_for_exit(&mut child);
     let stderr = handle.join().expect("stderr collector thread");
 
@@ -754,7 +721,7 @@ pub fn on_task(event: TriggerEvent) -> string {
         event.kind == "pump_acked" && event.payload["event_log_id"] == serde_json::json!(1)
     });
 
-    send_sigterm(&child);
+    send_sigterm(&mut child);
     fs::write(&inbox_release_file, b"release").unwrap();
     wait_for_exit(&mut child);
     let stderr = handle.join().expect("stderr collector thread");
@@ -896,7 +863,7 @@ pub fn on_task(event: TriggerEvent) -> string {
     )
     .await;
 
-    send_sigterm(&child);
+    send_sigterm(&mut child);
     fs::write(&inbox_release_file, b"release").unwrap();
     wait_for_exit(&mut child);
     let stderr = handle.join().expect("stderr collector thread");
@@ -968,7 +935,7 @@ pub fn on_event(event: TriggerEvent) {
 
     let (mut child, rx, handle) = spawn_orchestrator(&temp);
     wait_for_log_line(&mut child, &rx, STARTUP_NEEDLE);
-    child.kill().unwrap();
+    child.kill();
     wait_for_any_exit(&mut child);
     let _stderr = handle.join().expect("stderr collector thread");
     let legacy_after = read_topic_events(&state_dir, harn_vm::TRIGGER_INBOX_LEGACY_TOPIC);
@@ -1093,7 +1060,7 @@ pub fn on_task(event: TriggerEvent) -> string {
     }
 
     wait_for_path(&pump_waiting_file, EVENT_FAIL_FAST_TIMEOUT);
-    send_sigterm(&child);
+    send_sigterm(&mut child);
     wait_for_path(&pump_draining_file, EVENT_FAIL_FAST_TIMEOUT);
     fs::write(&pump_release_file, b"release").unwrap();
     wait_for_exit(&mut child);
@@ -1116,7 +1083,7 @@ pub fn on_task(event: TriggerEvent) -> string {
         "dispatch_succeeded",
         TOTAL_EVENTS,
     );
-    send_sigterm(&restart_child);
+    send_sigterm(&mut restart_child);
     wait_for_exit(&mut restart_child);
     let restart_stderr = restart_handle.join().expect("stderr collector thread");
     assert!(
@@ -1325,7 +1292,7 @@ pub fn on_task(event: TriggerEvent) -> string {
     );
     assert!(stdout(&queue_after).contains("stranded_envelopes=0"));
 
-    send_sigterm(&restarted_child);
+    send_sigterm(&mut restarted_child);
     wait_for_exit(&mut restarted_child);
     let restarted_stderr = restarted_handle.join().expect("stderr collector thread");
     assert!(

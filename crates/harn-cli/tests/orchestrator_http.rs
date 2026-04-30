@@ -5,15 +5,16 @@
 #![allow(clippy::await_holding_lock)]
 
 mod support;
+mod test_util;
 
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use axum::body::Bytes;
 use axum::extract::State;
@@ -28,6 +29,10 @@ use reqwest::StatusCode;
 use serde_json::Value as JsonValue;
 use sha2::Sha256;
 use tempfile::TempDir;
+use test_util::timing::{
+    self, ChildExitWatcher, EVENT_FAIL_FAST_TIMEOUT, LOG_RECV_POLL_INTERVAL,
+    PROCESS_FAIL_FAST_TIMEOUT,
+};
 use time::OffsetDateTime;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -35,17 +40,6 @@ use tokio::sync::oneshot;
 const STARTUP_PREFIX: &str = "[harn] HTTP listener ready on ";
 const STARTUP_NEEDLE: &str = "HTTP listener ready";
 const SHUTDOWN_NEEDLE: &str = "graceful shutdown complete";
-// Process-level deadline for spawning the orchestrator subprocess and
-// waiting for it to bind its listener / shut down. Tests serialize
-// through a cross-process file lock, so a generous deadline here only
-// affects the failure path — happy-path tests still complete in well
-// under a second of post-spawn wall time. A previous 15s ceiling
-// produced spurious "timed out waiting for listener startup" failures
-// on macOS when dyld + amfi cold-cache lookups for the unsigned
-// debug-build binary exceeded the budget under nextest load.
-const PROCESS_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(60);
-const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(10);
-
 type HmacSha256 = Hmac<Sha256>;
 
 fn lock_orchestrator_tests() -> support::OrchestratorProcessTestLock {
@@ -524,14 +518,14 @@ fn spawn_orchestrator(
     });
 
     OrchestratorProcess {
-        child,
+        child: ChildExitWatcher::new(child),
         rx,
         handle: Some(handle),
     }
 }
 
 struct OrchestratorProcess {
-    child: Child,
+    child: ChildExitWatcher,
     rx: Receiver<String>,
     handle: Option<thread::JoinHandle<String>>,
 }
@@ -539,13 +533,8 @@ struct OrchestratorProcess {
 impl OrchestratorProcess {
     fn wait_for_listener_url(&mut self) -> String {
         let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
-        // Block on the stderr line stream with a coarse poll cadence. The
-        // recv_timeout only exists so we can periodically check whether the
-        // child died without printing the listener line — we don't need
-        // 25ms granularity for that.
-        let liveness_poll = Duration::from_millis(250);
         while Instant::now() < deadline {
-            match self.rx.recv_timeout(liveness_poll) {
+            match self.rx.recv_timeout(LOG_RECV_POLL_INTERVAL) {
                 Ok(line) if line.contains(STARTUP_NEEDLE) => {
                     if let Some(url) = listener_url_from_line(&line) {
                         support::wait_for_readyz(&mut self.child, &url, PROCESS_FAIL_FAST_TIMEOUT)
@@ -558,7 +547,7 @@ impl OrchestratorProcess {
                 }
                 Ok(_) => continue,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if let Some(status) = self.child.try_wait().unwrap() {
+                    if let Some(status) = self.child.try_status().unwrap() {
                         let stderr = self.join_stderr();
                         panic!(
                             "process exited before listener became ready: {status}\nstderr={stderr}"
@@ -576,8 +565,8 @@ impl OrchestratorProcess {
     }
 
     fn shutdown_and_join_stderr(&mut self) -> String {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.child.kill();
+        let _ = self.child.wait_timeout(PROCESS_FAIL_FAST_TIMEOUT);
         self.join_stderr()
     }
 
@@ -609,36 +598,18 @@ fn listener_url_from_line(line: &str) -> Option<String> {
     Some(url.to_string())
 }
 
-fn send_sigterm(child: &Child) {
-    let status = Command::new("kill")
-        .arg("-TERM")
-        .arg(child.id().to_string())
-        .status()
-        .unwrap();
-    assert!(status.success(), "kill exited with {status}");
+fn send_sigterm(child: &mut ChildExitWatcher) {
+    child.terminate();
 }
 
-fn wait_for_exit(child: &mut Child) {
-    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
-    while Instant::now() < deadline {
-        if let Some(status) = child.try_wait().unwrap() {
-            assert!(status.success(), "child exited unsuccessfully: {status}");
-            return;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    panic!("timed out waiting for orchestrator exit");
+fn wait_for_exit(child: &mut ChildExitWatcher) {
+    child.wait_for_success(PROCESS_FAIL_FAST_TIMEOUT);
 }
 
-async fn wait_for_exit_async(child: &mut Child) -> std::process::ExitStatus {
-    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
-    while Instant::now() < deadline {
-        if let Some(status) = child.try_wait().unwrap() {
-            return status;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    panic!("timed out waiting for orchestrator exit");
+async fn wait_for_exit_async(child: &mut ChildExitWatcher) -> std::process::ExitStatus {
+    child
+        .wait_timeout(PROCESS_FAIL_FAST_TIMEOUT)
+        .unwrap_or_else(|error| panic!("{error}"))
 }
 
 fn github_signature(secret: &str, body: &[u8]) -> String {
@@ -733,7 +704,7 @@ async fn wait_for_topic_event(
         {
             return;
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        timing::sleep_async(timing::RETRY_POLL_INTERVAL).await;
     }
     let events = read_topic_events(temp, topic).await;
     panic!("timed out waiting for matching {topic} event; events={events:?}");
@@ -751,85 +722,11 @@ fn json_headers() -> HeaderMap {
     headers
 }
 
-fn wait_for_path(path: &Path, timeout: Duration) {
-    use notify::event::EventKind;
-    use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
-
-    if path_has_content(path) {
-        return;
-    }
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    if !parent.exists() {
-        panic!("watch parent directory missing: {}", parent.display());
-    }
-    let target_name = path
-        .file_name()
-        .unwrap_or_else(|| panic!("wait_for_path requires a file name: {}", path.display()))
-        .to_owned();
-
-    let (tx, rx) = std::sync::mpsc::channel::<()>();
-    let target_for_handler = target_name.clone();
-    let mut watcher: RecommendedWatcher =
-        notify::recommended_watcher(move |event: Result<Event, notify::Error>| {
-            let Ok(event) = event else { return };
-            // We only need a hint that *something* under the parent directory
-            // changed; the outer loop re-checks `path.exists()` so false
-            // positives just trigger an extra cheap stat call.
-            let interesting = matches!(
-                event.kind,
-                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Any
-            );
-            if !interesting {
-                return;
-            }
-            if event
-                .paths
-                .iter()
-                .any(|candidate| candidate.file_name() == Some(target_for_handler.as_os_str()))
-            {
-                let _ = tx.send(());
-            }
-        })
-        .unwrap_or_else(|error| panic!("failed to install notify watcher: {error}"));
-    watcher
-        .watch(parent, RecursiveMode::NonRecursive)
-        .unwrap_or_else(|error| {
-            panic!("failed to watch {}: {error}", parent.display());
-        });
-
-    // Race: the file may have been created between the content check above
-    // and the watcher being armed. Re-check, then block on either an event
-    // notification or the deadline. Notify events are advisory — fall back
-    // to a 250ms wakeup so platforms with eventual-consistency semantics
-    // (e.g. FSEvents coalescing) still complete promptly.
-    let deadline = Instant::now() + timeout;
-    loop {
-        if path_has_content(path) {
-            return;
-        }
-        let remaining = match deadline.checked_duration_since(Instant::now()) {
-            Some(remaining) => remaining,
-            None => break,
-        };
-        match rx.recv_timeout(remaining.min(Duration::from_millis(250))) {
-            Ok(()) => continue,
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-        }
-    }
-    panic!("timed out waiting for {}", path.display());
+fn wait_for_path(path: &Path, timeout: std::time::Duration) {
+    timing::wait_for_nonempty_file(path, timeout);
 }
 
-fn path_has_content(path: &Path) -> bool {
-    fs::metadata(path)
-        .map(|metadata| metadata.is_file() && metadata.len() > 0)
-        .unwrap_or(false)
-}
-
-fn wait_for_json_file(path: &Path, timeout: Duration) -> JsonValue {
+fn wait_for_json_file(path: &Path, timeout: std::time::Duration) -> JsonValue {
     let deadline = Instant::now() + timeout;
     loop {
         if let Ok(contents) = fs::read_to_string(path) {
@@ -850,7 +747,7 @@ fn wait_for_json_file(path: &Path, timeout: Duration) -> JsonValue {
             Some(remaining) => remaining,
             None => break,
         };
-        thread::sleep(remaining.min(Duration::from_millis(25)));
+        timing::sleep_blocking(remaining.min(timing::RETRY_POLL_INTERVAL));
     }
     panic!("timed out waiting for valid JSON in {}", path.display());
 }
@@ -1078,7 +975,7 @@ async fn github_webhook_delivery_is_accepted_and_persisted() {
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     let status = wait_for_exit_async(&mut process.child).await;
     let stderr = process.join_stderr();
     assert!(status.success(), "status={status} stderr={stderr}");
@@ -1144,7 +1041,7 @@ async fn github_provider_prefers_configured_harn_connector_over_deprecated_rust_
     let marker = fs::read_to_string(&marker_path).unwrap();
     assert_eq!(marker, "issues");
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     let status = wait_for_exit_async(&mut process.child).await;
     let stderr = process.join_stderr();
     assert!(status.success(), "status={status} stderr={stderr}");
@@ -1202,20 +1099,18 @@ async fn slack_webhook_acknowledges_before_handler_finishes() {
     }))
     .unwrap();
 
-    let started = Instant::now();
-    let response = reqwest::Client::new()
-        .post(format!("{base_url}/triggers/slack-mentions"))
-        .headers(slack_headers(secret, timestamp, &body))
-        .body(body)
-        .send()
-        .await
-        .unwrap();
+    let response = tokio::time::timeout(
+        timing::SLACK_ACK_TIMEOUT,
+        reqwest::Client::new()
+            .post(format!("{base_url}/triggers/slack-mentions"))
+            .headers(slack_headers(secret, timestamp, &body))
+            .body(body)
+            .send(),
+    )
+    .await
+    .unwrap_or_else(|_| panic!("slack ack path exceeded {:?}", timing::SLACK_ACK_TIMEOUT))
+    .unwrap();
     assert_status(response, StatusCode::OK).await;
-    assert!(
-        started.elapsed() < Duration::from_secs(2),
-        "slack ack path took too long: {:?}",
-        started.elapsed()
-    );
     assert!(
         !marker_path.exists(),
         "dispatch should not have completed before the HTTP ack"
@@ -1242,7 +1137,7 @@ async fn slack_webhook_acknowledges_before_handler_finishes() {
     let marker = fs::read_to_string(&marker_path).unwrap();
     assert_eq!(marker, "app_mention");
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     wait_for_exit(&mut process.child);
 }
 
@@ -1286,7 +1181,7 @@ async fn slack_url_verification_returns_plaintext_challenge() {
         "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P"
     );
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     wait_for_exit(&mut process.child);
 }
 
@@ -1396,7 +1291,7 @@ async fn slack_bad_requests_set_no_retry_header_and_export_delivery_metrics() {
         "metrics={metrics}"
     );
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     wait_for_exit(&mut process.child);
 }
 
@@ -1439,7 +1334,7 @@ async fn notion_webhook_handshake_is_captured_and_reported_by_doctor() {
         Some("secret_notion_test_token")
     );
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     let status = wait_for_exit_async(&mut process.child).await;
     let stderr = process.join_stderr();
     assert!(status.success(), "status={status} stderr={stderr}");
@@ -1516,7 +1411,7 @@ async fn notion_webhook_signed_delivery_is_dispatched() {
     let marker = fs::read_to_string(&marker_path).unwrap();
     assert_eq!(marker, "page.content_updated");
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     let status = wait_for_exit_async(&mut process.child).await;
     let stderr = process.join_stderr();
     assert!(status.success(), "status={status} stderr={stderr}");
@@ -1603,7 +1498,7 @@ async fn harn_connector_module_round_trips_inbound_and_client_calls() {
         "metrics={metrics}"
     );
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     let status = wait_for_exit_async(&mut process.child).await;
     let stderr = process.join_stderr();
     assert!(status.success(), "status={status} stderr={stderr}");
@@ -1705,7 +1600,7 @@ async fn stream_trigger_route_uses_generic_stream_connector() {
     );
     assert_eq!(marker.get("amount").and_then(JsonValue::as_i64), Some(10));
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     let status = wait_for_exit_async(&mut process.child).await;
     let stderr = process.join_stderr();
     assert!(status.success(), "status={status} stderr={stderr}");
@@ -1771,7 +1666,7 @@ async fn a2a_push_route_requires_bearer_or_valid_hmac() {
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     let status = wait_for_exit_async(&mut process.child).await;
     let stderr = process.join_stderr();
     assert!(status.success(), "status={status} stderr={stderr}");
@@ -1860,7 +1755,7 @@ async fn embedded_mcp_endpoint_serves_orchestrator_tools_on_listener() {
         "tools={tools_body}"
     );
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     let status = wait_for_exit_async(&mut process.child).await;
     let stderr = process.join_stderr();
     assert!(status.success(), "status={status} stderr={stderr}");
@@ -1939,7 +1834,7 @@ async fn admin_reload_endpoint_applies_manifest_changes() {
         .unwrap();
     assert_status(retired, StatusCode::NOT_FOUND).await;
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     wait_for_exit(&mut process.child);
     let snapshot = state_snapshot(&temp);
     assert!(snapshot.contains("\"listener_url\""), "snapshot={snapshot}");
@@ -1991,7 +1886,7 @@ async fn admin_reload_invalid_manifest_keeps_existing_routes_live() {
         .unwrap();
     assert_status(still_live, StatusCode::OK).await;
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     wait_for_exit(&mut process.child);
 }
 
@@ -2034,7 +1929,7 @@ async fn watch_mode_reloads_manifest_changes() {
         }
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         assert!(Instant::now() < deadline, "watch reload never applied");
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        timing::sleep_async(timing::RETRY_POLL_INTERVAL).await;
     }
 
     let retired = client
@@ -2046,7 +1941,7 @@ async fn watch_mode_reloads_manifest_changes() {
         .unwrap();
     assert_status(retired, StatusCode::NOT_FOUND).await;
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     wait_for_exit(&mut process.child);
 }
 
@@ -2107,7 +2002,7 @@ async fn reload_cli_uses_admin_endpoint() {
         .unwrap();
     assert_status(updated, StatusCode::OK).await;
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     wait_for_exit(&mut process.child);
 }
 
@@ -2149,8 +2044,11 @@ async fn tls_listener_serves_https_with_supplied_cert_and_key() {
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    send_sigterm(&process.child);
-    let status = process.child.wait().unwrap();
+    send_sigterm(&mut process.child);
+    let status = process
+        .child
+        .wait_timeout(PROCESS_FAIL_FAST_TIMEOUT)
+        .unwrap_or_else(|error| panic!("{error}"));
     let stderr = process.join_stderr();
     assert!(status.success(), "status={status} stderr={stderr}");
     assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
@@ -2192,7 +2090,7 @@ allowed_origins = ["https://allowed.example"]"#,
         .unwrap();
     assert_status(response, StatusCode::FORBIDDEN).await;
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     wait_for_exit(&mut process.child);
     let stderr = process.join_stderr();
     assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
@@ -2223,7 +2121,7 @@ async fn oversized_request_body_is_rejected() {
         .unwrap();
     assert_status(response, StatusCode::PAYLOAD_TOO_LARGE).await;
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     wait_for_exit(&mut process.child);
     let stderr = process.join_stderr();
     assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
@@ -2265,7 +2163,7 @@ async fn graceful_shutdown_waits_for_in_flight_request() {
     });
 
     wait_for_path(&request_entered_path, EVENT_FAIL_FAST_TIMEOUT);
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     fs::write(&request_release_path, b"release").unwrap();
     let response = request.await.unwrap().unwrap();
     assert_status(response, StatusCode::OK).await;
@@ -2308,7 +2206,7 @@ async fn json_log_format_writes_structured_rotating_file_with_trace_ids() {
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     let status = wait_for_exit_async(&mut process.child).await;
     let stderr = process.join_stderr();
     assert!(status.success(), "status={status} stderr={stderr}");
@@ -2385,26 +2283,33 @@ async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
     let response = client.execute(request).await.unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    send_sigterm(&process.child);
+    send_sigterm(&mut process.child);
     let status = wait_for_exit_async(&mut process.child).await;
     let stderr = process.join_stderr();
     assert!(status.success(), "status={status} stderr={stderr}");
     assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
 
-    let spans = collector.collected_spans();
-    let span_names: Vec<&str> = spans.iter().map(|span| span.name.as_str()).collect();
-    assert!(
-        span_names.contains(&"ingest"),
-        "ingest span missing; observed={span_names:?}"
-    );
-    assert!(
-        span_names.contains(&"queue_append"),
-        "queue_append span missing; observed={span_names:?}"
-    );
-    assert!(
-        span_names.contains(&"dispatch"),
-        "dispatch span missing; observed={span_names:?}"
-    );
+    let deadline = Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
+    let spans = loop {
+        let spans = collector.collected_spans();
+        let has_ingest = spans.iter().any(|span| span.name == "ingest");
+        let has_queue_append = spans.iter().any(|span| span.name == "queue_append");
+        let has_dispatch = spans.iter().any(|span| span.name == "dispatch");
+        if has_ingest && has_queue_append && has_dispatch {
+            break spans;
+        }
+        if Instant::now() >= deadline {
+            let requests = collector.requests.lock().unwrap().clone();
+            panic!(
+                "timed out waiting for OTel spans\ncollector_headers={:#?}",
+                requests
+                    .iter()
+                    .map(|request| request.headers.clone())
+                    .collect::<Vec<_>>()
+            );
+        }
+        timing::sleep_async(timing::RETRY_POLL_INTERVAL).await;
+    };
 
     let ingest = spans.iter().find(|span| span.name == "ingest").unwrap();
     let queue_append = spans

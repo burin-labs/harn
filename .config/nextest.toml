@@ -11,13 +11,13 @@
 # the 60s hard cap three times it is terminated so the suite keeps moving.
 slow-timeout = { period = "15s", terminate-after = 4, grace-period = "5s" }
 # Nextest's upstream default FD-leak grace period is 200ms. Under full
-# workspace fan-out, fast Rust tests in the largest binaries can take a
-# little longer than that to close captured stdout/stderr after libtest
-# reports success, which creates noisy "passed (leaky)" results attributed
-# to whichever fast test happened to finish at the wrong moment. Keep this
-# short enough to catch real leaked subprocesses, but make leaks fail so
-# they are fixed instead of silently accepted.
-leak-timeout = { period = "1s", result = "fail" }
+# workspace fan-out, fast Rust tests in the largest binaries can take longer
+# than that to close captured stdout/stderr after libtest reports success,
+# which creates noisy "passed (leaky)" results attributed to whichever fast
+# test happened to finish at the wrong moment. Keep this short enough to catch
+# real leaked subprocesses, but make leaks fail so they are fixed instead of
+# silently accepted.
+leak-timeout = { period = "2s", result = "fail" }
 # Terminate runaway tests after 60 seconds by default. Tests that legitimately
 # need more time must opt in via an override below.
 fail-fast = false
@@ -25,7 +25,7 @@ fail-fast = false
 # CI profile is stricter: one warning at 30s, hard kill at 120s.
 [profile.ci]
 slow-timeout = { period = "30s", terminate-after = 4, grace-period = "10s" }
-leak-timeout = { period = "1s", result = "fail" }
+leak-timeout = { period = "2s", result = "fail" }
 fail-fast = false
 failure-output = "immediate-final"
 success-output = "never"

@@ -2,9 +2,9 @@ mod process;
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::process::Child;
-use std::thread;
 use std::time::{Duration, Instant};
+
+use crate::test_util::timing::{self, ChildExitWatcher};
 
 /// Sentinel "lock" returned by [`lock_orchestrator_process_tests`].
 ///
@@ -31,7 +31,11 @@ pub fn lock_orchestrator_process_tests() -> OrchestratorProcessTestLock {
     process::HarnProcessTestNoLock
 }
 
-pub fn wait_for_readyz(child: &mut Child, base_url: &str, timeout: Duration) -> Result<(), String> {
+pub fn wait_for_readyz(
+    child: &mut ChildExitWatcher,
+    base_url: &str,
+    timeout: Duration,
+) -> Result<(), String> {
     let Some(target) = ReadyzTarget::parse(base_url)? else {
         return Ok(());
     };
@@ -39,10 +43,7 @@ pub fn wait_for_readyz(child: &mut Child, base_url: &str, timeout: Duration) -> 
     let mut last_error = None;
 
     while Instant::now() < deadline {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| format!("failed to inspect orchestrator process: {error}"))?
-        {
+        if let Some(status) = child.try_status()? {
             return Err(format!(
                 "orchestrator exited before readiness probe succeeded: {status}"
             ));
@@ -52,7 +53,7 @@ pub fn wait_for_readyz(child: &mut Child, base_url: &str, timeout: Duration) -> 
             Ok(()) => return Ok(()),
             Err(error) => last_error = Some(error),
         }
-        thread::sleep(Duration::from_millis(25));
+        timing::sleep_blocking(timing::RETRY_POLL_INTERVAL);
     }
 
     Err(format!(
@@ -93,14 +94,14 @@ fn probe_readyz(target: &ReadyzTarget) -> Result<(), String> {
         &addr
             .parse()
             .map_err(|error| format!("invalid readiness address `{addr}`: {error}"))?,
-        Duration::from_millis(250),
+        timing::READY_PROBE_IO_TIMEOUT,
     )
     .map_err(|error| format!("readiness connect failed: {error}"))?;
     stream
-        .set_read_timeout(Some(Duration::from_millis(250)))
+        .set_read_timeout(Some(timing::READY_PROBE_IO_TIMEOUT))
         .map_err(|error| format!("failed to set readiness read timeout: {error}"))?;
     stream
-        .set_write_timeout(Some(Duration::from_millis(250)))
+        .set_write_timeout(Some(timing::READY_PROBE_IO_TIMEOUT))
         .map_err(|error| format!("failed to set readiness write timeout: {error}"))?;
     write!(
         stream,

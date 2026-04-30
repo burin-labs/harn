@@ -1,5 +1,7 @@
 #[path = "process.rs"]
 mod process;
+#[path = "../test_util/timing.rs"]
+mod timing;
 
 use std::io::{BufRead, BufReader, Read};
 use std::process::Child;
@@ -46,7 +48,7 @@ pub fn wait_for_child_log_suffix(
     let deadline = Instant::now() + timeout;
     let mut observed = Vec::new();
     while Instant::now() < deadline {
-        match rx.recv_timeout(Duration::from_millis(25)) {
+        match rx.recv_timeout(timing::LOG_RECV_POLL_INTERVAL) {
             Ok(line) if line.contains(needle) => {
                 return line
                     .split(needle)
@@ -56,14 +58,7 @@ pub fn wait_for_child_log_suffix(
                     .to_string();
             }
             Ok(line) => observed.push(line),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                if let Some(status) = child.try_wait().unwrap() {
-                    panic!(
-                        "{label} process exited before readiness log `{needle}` appeared: {status}\nstderr={}",
-                        observed.join("\n")
-                    );
-                }
-            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 panic!(
                     "{label} stderr stream closed before readiness log `{needle}` appeared\nstderr={}",
