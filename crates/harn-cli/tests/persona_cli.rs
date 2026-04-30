@@ -1,7 +1,9 @@
+mod test_util;
+
 use std::fs;
-use std::process::Command;
 
 use tempfile::TempDir;
+use test_util::process::harn_command;
 
 fn write_manifest(body: &str) -> TempDir {
     let temp = TempDir::new().unwrap();
@@ -52,7 +54,7 @@ receipt_policy = "required"
 fn persona_list_and_inspect_emit_stable_json() {
     let temp = write_manifest(valid_manifest());
 
-    let list = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let list = harn_command()
         .current_dir(temp.path())
         .args(["persona", "list", "--json"])
         .output()
@@ -66,7 +68,7 @@ fn persona_list_and_inspect_emit_stable_json() {
     let personas: serde_json::Value = serde_json::from_slice(&list.stdout).unwrap();
     assert_eq!(personas.as_array().unwrap().len(), 3);
 
-    let inspect = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let inspect = harn_command()
         .current_dir(temp.path())
         .args(["persona", "inspect", "merge_captain", "--json"])
         .output()
@@ -148,7 +150,7 @@ handoffs = ["review_captain"]
         ),
     ] {
         let temp = write_manifest(body);
-        let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+        let output = harn_command()
             .current_dir(temp.path())
             .args(["persona", "list"])
             .output()
@@ -169,7 +171,7 @@ handoffs = ["review_captain"]
 
 #[test]
 fn persona_manifest_flag_loads_example_personas() {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let output = harn_command()
         .args([
             "persona",
             "--manifest",
@@ -196,7 +198,7 @@ fn persona_manifest_flag_loads_example_personas() {
 
 #[test]
 fn persona_manifest_flag_loads_fixer_persona() {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let output = harn_command()
         .args([
             "persona",
             "--manifest",
@@ -225,7 +227,7 @@ fn persona_manifest_flag_loads_fixer_persona() {
 
 #[test]
 fn persona_manifest_flag_loads_ship_captain_persona() {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let output = harn_command()
         .args([
             "persona",
             "--manifest",
@@ -258,7 +260,7 @@ fn persona_runtime_status_tick_and_budget_are_persisted() {
     let temp = write_manifest(valid_manifest());
     let state_dir = temp.path().join(".harn-personas-test");
 
-    let status = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let status = harn_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -281,7 +283,7 @@ fn persona_runtime_status_tick_and_budget_are_persisted() {
     assert_eq!(status_json["queued_events"], 0);
     assert_eq!(status_json["budget"]["daily_usd"], 20.0);
 
-    let tick = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let tick = harn_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -316,7 +318,7 @@ fn persona_runtime_status_tick_and_budget_are_persisted() {
     // --at, the budget window is computed from real wall-clock time, so the
     // assertion silently breaks the moment the test runs after the tick's
     // UTC midnight (i.e. roughly any time of day in PT/CT/ET).
-    let status = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let status = harn_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -343,7 +345,7 @@ fn persona_pause_resume_disable_trigger_controls_are_durable() {
     let temp = write_manifest(valid_manifest());
     let state_dir = temp.path().join(".harn-personas-test");
 
-    let pause = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let pause = harn_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -357,7 +359,7 @@ fn persona_pause_resume_disable_trigger_controls_are_durable() {
         .unwrap();
     assert!(pause.status.success());
 
-    let trigger = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let trigger = harn_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -387,7 +389,7 @@ fn persona_pause_resume_disable_trigger_controls_are_durable() {
     assert_eq!(receipt["status"], "queued");
     assert_eq!(receipt["work_key"], "github:burin-labs/harn:pr:462");
 
-    let resume = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let resume = harn_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -404,7 +406,7 @@ fn persona_pause_resume_disable_trigger_controls_are_durable() {
     assert_eq!(status_json["state"], "idle");
     assert_eq!(status_json["queued_events"], 0);
 
-    let disable = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let disable = harn_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -418,7 +420,7 @@ fn persona_pause_resume_disable_trigger_controls_are_durable() {
         .unwrap();
     assert!(disable.status.success());
 
-    let trigger = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let trigger = harn_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -460,7 +462,7 @@ budget = { daily_usd = 0.01, run_usd = 0.01, max_tokens = 10 }
 "#,
     );
     let state_dir = temp.path().join(".harn-personas-test");
-    let trigger = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let trigger = harn_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -489,7 +491,7 @@ budget = { daily_usd = 0.01, run_usd = 0.01, max_tokens = 10 }
     assert_eq!(receipt["status"], "budget_exhausted");
     assert!(receipt["error"].as_str().unwrap().contains("run_usd"));
 
-    let status = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let status = harn_command()
         .current_dir(temp.path())
         .args([
             "persona",

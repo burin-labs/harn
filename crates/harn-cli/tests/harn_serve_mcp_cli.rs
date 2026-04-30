@@ -7,16 +7,18 @@
 
 #[path = "support/mcp.rs"]
 mod mcp_support;
+mod test_util;
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
+use test_util::process::harn_command;
 use tokio::sync::oneshot;
 
 // Two-tier timeout convention shared with the orchestrator integration tests:
@@ -206,7 +208,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let mut child = harn_command()
         .current_dir(temp.path())
         .arg("serve")
         .arg("mcp")
@@ -358,7 +360,7 @@ fn serve_mcp_stdio_exposes_script_registered_surface() {
     let temp = TempDir::new().unwrap();
     write_script_surface_fixture(&temp);
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let mut child = harn_command()
         .current_dir(temp.path())
         .arg("serve")
         .arg("mcp")
@@ -462,7 +464,7 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let mut child = harn_command()
         .current_dir(temp.path())
         .arg("serve")
         .arg("mcp")
@@ -642,7 +644,7 @@ async fn serve_mcp_http_exposes_script_registered_surface() {
     let temp = TempDir::new().unwrap();
     write_script_surface_fixture(&temp);
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let mut child = harn_command()
         .current_dir(temp.path())
         .arg("serve")
         .arg("mcp")

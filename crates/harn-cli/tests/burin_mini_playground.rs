@@ -1,8 +1,11 @@
+mod test_util;
+
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use tempfile::TempDir;
+use test_util::process::harn_command;
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -40,7 +43,7 @@ fn run_harn(current_dir: &Path, args: &[String]) -> Output {
 }
 
 fn run_harn_with_env(current_dir: &Path, args: &[String], envs: &[(&str, &str)]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_harn"))
+    harn_command()
         .current_dir(current_dir)
         .envs(envs.iter().copied())
         .args(args)

@@ -54,3 +54,5 @@ meta_scratch/
 experiments/burin-mini/.qmode/
 # qmode test runs may write synthetic preferences to project-scoped profiles.
 experiments/burin-mini/workspace/.harn/
+# Per-iteration logs from scripts/stress_subprocess_tests.sh.
+.stress-logs/

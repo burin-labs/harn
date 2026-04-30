@@ -2,10 +2,11 @@ mod test_util;
 
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 use std::time::Duration;
 
 use tempfile::TempDir;
+use test_util::process::harn_command;
 use test_util::timing;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -77,7 +78,7 @@ pipeline default() {{
 }
 
 fn run_harn(temp: &TempDir, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_harn"))
+    harn_command()
         .current_dir(temp.path())
         .args(args)
         .output()

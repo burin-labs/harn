@@ -8,16 +8,18 @@
 //! - implicit           → exits 0
 //! - `exit(code)`       → exits code (existing builtin, still honored)
 
+mod test_util;
+
 use std::fs;
-use std::process::Command;
 
 use tempfile::TempDir;
+use test_util::process::harn_command;
 
 fn run_script(body: &str) -> std::process::Output {
     let temp = TempDir::new().unwrap();
     let script = temp.path().join("main.harn");
     fs::write(&script, body).unwrap();
-    Command::new(env!("CARGO_BIN_EXE_harn"))
+    harn_command()
         .current_dir(temp.path())
         .args(["run", script.to_str().unwrap()])
         .output()
