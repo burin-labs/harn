@@ -784,7 +784,7 @@ fn derive_run_observability_adds_replay_chain_for_replayed_trigger_runs() {
     }));
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn save_run_record_publishes_action_graph_updates_to_event_log() {
     crate::reset_thread_local_state();
     let temp_dir = tempfile::tempdir().unwrap();
@@ -833,6 +833,9 @@ async fn save_run_record_publishes_action_graph_updates_to_event_log() {
     save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
     run.status = "completed".to_string();
     save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
+    // Yield to the spawned event-log writer. With paused virtual time the
+    // sleep auto-advances so the runtime can poll the spawned task to
+    // completion without burning wall-clock.
     tokio::time::sleep(std::time::Duration::from_millis(25)).await;
 
     let topic = crate::event_log::Topic::new("observability.action_graph").unwrap();
