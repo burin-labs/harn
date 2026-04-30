@@ -97,6 +97,8 @@ SCRIPTING
     /// Alias for `harn trust`. Query and verify trust-graph autonomy state.
     #[command(name = "trust-graph")]
     TrustGraph(TrustArgs),
+    /// Verify a signed Harn provenance receipt.
+    Verify(VerifyArgs),
     /// Start the orchestrator process that hosts triggers and connector dispatch.
     Orchestrator(OrchestratorArgs),
     /// Run a pipeline against a Harn-native host module for fast iteration.
@@ -203,6 +205,15 @@ pub(crate) struct RunArgs {
         conflicts_with = "llm_mock"
     )]
     pub llm_mock_record: Option<String>,
+    /// Emit a signed provenance receipt after the run.
+    #[arg(long)]
+    pub attest: bool,
+    /// Write the signed provenance receipt to this path instead of `.harn/receipts/`.
+    #[arg(long = "receipt-out", value_name = "PATH", requires = "attest")]
+    pub receipt_out: Option<String>,
+    /// Agent id used to look up or generate the receipt signing key.
+    #[arg(long = "attest-agent", value_name = "ID", requires = "attest")]
+    pub attest_agent: Option<String>,
     /// Path to the .harn file to execute.
     pub file: Option<String>,
     /// Positional arguments passed to the pipeline as the global `argv`
@@ -1221,6 +1232,15 @@ pub(crate) struct TrustDemoteArgs {
     /// Reason for the demotion.
     #[arg(long)]
     pub reason: String,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct VerifyArgs {
+    /// Path to the signed provenance receipt JSON file.
+    pub receipt: String,
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -2629,6 +2649,38 @@ mod tests {
         };
         assert_eq!(args.llm_mock_record.as_deref(), Some("out.jsonl"));
         assert_eq!(args.llm_mock, None);
+    }
+
+    #[test]
+    fn test_parses_run_attestation_flags() {
+        let cli = Cli::parse_from([
+            "harn",
+            "run",
+            "--attest",
+            "--receipt-out",
+            "receipt.json",
+            "--attest-agent",
+            "agent-1",
+            "main.harn",
+        ]);
+
+        let Command::Run(args) = cli.command.unwrap() else {
+            panic!("expected run command");
+        };
+        assert!(args.attest);
+        assert_eq!(args.receipt_out.as_deref(), Some("receipt.json"));
+        assert_eq!(args.attest_agent.as_deref(), Some("agent-1"));
+    }
+
+    #[test]
+    fn test_parses_verify_receipt() {
+        let cli = Cli::parse_from(["harn", "verify", "receipt.json", "--json"]);
+
+        let Command::Verify(args) = cli.command.unwrap() else {
+            panic!("expected verify command");
+        };
+        assert_eq!(args.receipt, "receipt.json");
+        assert!(args.json);
     }
 
     #[test]

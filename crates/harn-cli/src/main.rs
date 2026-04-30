@@ -58,6 +58,7 @@ async fn async_main() {
             std::collections::HashSet::new(),
             Vec::new(),
             commands::run::CliLlmMockMode::Off,
+            None,
         )
         .await;
         return;
@@ -103,6 +104,10 @@ async fn async_main() {
             } else {
                 commands::run::CliLlmMockMode::Off
             };
+            let attestation = args.attest.then(|| commands::run::RunAttestationOptions {
+                receipt_out: args.receipt_out.as_ref().map(PathBuf::from),
+                agent_id: args.attest_agent.clone(),
+            });
 
             match (args.eval.as_deref(), args.file.as_deref()) {
                 (Some(code), None) => {
@@ -130,6 +135,7 @@ async fn async_main() {
                         args.argv.clone(),
                         args.skill_dir.clone(),
                         llm_mock_mode.clone(),
+                        attestation.clone(),
                     )
                     .await;
                     drop(tmp);
@@ -142,6 +148,7 @@ async fn async_main() {
                         args.argv.clone(),
                         args.skill_dir.clone(),
                         llm_mock_mode,
+                        attestation,
                     )
                     .await
                 }
@@ -575,6 +582,12 @@ async fn async_main() {
         }
         Command::Trust(args) | Command::TrustGraph(args) => {
             if let Err(error) = commands::trust::handle(args).await {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        }
+        Command::Verify(args) => {
+            if let Err(error) = verify_provenance_receipt(&args.receipt, args.json) {
                 eprintln!("error: {error}");
                 process::exit(1);
             }
@@ -1039,6 +1052,39 @@ fn command_error(message: &str) -> ! {
     Cli::command()
         .error(ErrorKind::ValueValidation, message)
         .exit()
+}
+
+fn verify_provenance_receipt(path: &str, json: bool) -> Result<(), String> {
+    let raw =
+        fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"))?;
+    let receipt: harn_vm::ProvenanceReceipt = serde_json::from_str(&raw)
+        .map_err(|error| format!("failed to parse provenance receipt {path}: {error}"))?;
+    let report = harn_vm::verify_receipt(&receipt);
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+        );
+    } else if report.verified {
+        println!(
+            "verified receipt={} events={} receipt_hash={} event_root_hash={}",
+            report.receipt_id.unwrap_or_else(|| "-".to_string()),
+            report.event_count,
+            report.receipt_hash.unwrap_or_else(|| "-".to_string()),
+            report.event_root_hash.unwrap_or_else(|| "-".to_string())
+        );
+    } else {
+        println!(
+            "failed receipt={} events={}",
+            report.receipt_id.unwrap_or_else(|| "-".to_string()),
+            report.event_count
+        );
+        for error in &report.errors {
+            println!("  {error}");
+        }
+        return Err("provenance receipt verification failed".to_string());
+    }
+    Ok(())
 }
 
 fn load_run_record_or_exit(path: &Path) -> harn_vm::orchestration::RunRecord {
