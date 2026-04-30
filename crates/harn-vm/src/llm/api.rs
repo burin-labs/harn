@@ -46,8 +46,8 @@ pub use ollama::{
 pub(crate) use openai_normalize::{debug_log_message_shapes, normalize_openai_style_messages};
 pub(crate) use options::{
     push_unique_anthropic_beta_feature, DeltaSender, LlmCallOptions, LlmRequestPayload,
-    LlmRouteAlternative, LlmRoutePolicy, LlmRoutingDecision, ReasoningEffort, ThinkingConfig,
-    ToolSearchConfig, ToolSearchMode, ToolSearchStrategy, ToolSearchVariant,
+    LlmRouteAlternative, LlmRoutePolicy, LlmRoutingDecision, OutputFormat, ReasoningEffort,
+    ThinkingConfig, ToolSearchConfig, ToolSearchMode, ToolSearchStrategy, ToolSearchVariant,
 };
 pub use readiness::{
     probe_openai_compatible_model, selected_model_for_provider, supports_model_readiness_probe,
@@ -971,6 +971,7 @@ mod tests {
                     let mut opts = base_opts("ollama");
                     opts.model = "qwen3.5:35b-a3b-coding-nvfp4".to_string();
                     opts.native_tools = None;
+                    opts.output_format = crate::llm::api::OutputFormat::Text;
                     opts.response_format = None;
                     opts.json_schema = None;
                     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1103,6 +1104,7 @@ mod tests {
                     opts.tools = None;
                     opts.native_tools = None;
                     opts.tool_choice = None;
+                    opts.output_format = crate::llm::api::OutputFormat::Text;
                     opts.response_format = None;
                     opts.json_schema = None;
                     opts.output_schema = None;

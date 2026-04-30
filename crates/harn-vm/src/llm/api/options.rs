@@ -50,6 +50,33 @@ impl ThinkingConfig {
     }
 }
 
+/// Provider-agnostic structured-output request shape parsed at the script
+/// boundary. Providers translate this into their native wire format.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum OutputFormat {
+    #[default]
+    Text,
+    JsonObject,
+    JsonSchema {
+        schema: serde_json::Value,
+        strict: bool,
+    },
+}
+
+impl OutputFormat {
+    pub(crate) fn is_structured(&self) -> bool {
+        !matches!(self, Self::Text)
+    }
+
+    pub(crate) fn schema(&self) -> Option<&serde_json::Value> {
+        match self {
+            Self::JsonSchema { schema, .. } => Some(schema),
+            _ => None,
+        }
+    }
+}
+
 /// Which tool-search variant to use. Two shapes today, matching the two
 /// Anthropic variants (also reused as the mental model for the OpenAI path
 /// landing in harn#71). Scripts write the lower-case short name.
@@ -308,7 +335,10 @@ pub(crate) struct LlmCallOptions {
     pub presence_penalty: Option<f64>,
 
     // --- Structured output ---
+    pub output_format: OutputFormat,
+    /// Legacy compatibility mirror for older internals and replay hashes.
     pub response_format: Option<String>,
+    /// Legacy compatibility mirror for older internals and replay hashes.
     pub json_schema: Option<serde_json::Value>,
     pub output_schema: Option<serde_json::Value>,
     pub output_validation: Option<String>,
@@ -427,6 +457,7 @@ pub(crate) struct LlmRequestPayload {
     pub seed: Option<i64>,
     pub frequency_penalty: Option<f64>,
     pub presence_penalty: Option<f64>,
+    pub output_format: OutputFormat,
     pub response_format: Option<String>,
     pub json_schema: Option<serde_json::Value>,
     pub thinking: ThinkingConfig,
@@ -469,6 +500,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             seed: opts.seed,
             frequency_penalty: opts.frequency_penalty,
             presence_penalty: opts.presence_penalty,
+            output_format: opts.output_format.clone(),
             response_format: opts.response_format.clone(),
             json_schema: opts.json_schema.clone(),
             thinking: opts.thinking.clone(),
@@ -508,6 +540,10 @@ pub(super) fn base_opts(provider: &str) -> LlmCallOptions {
         seed: Some(7),
         frequency_penalty: Some(0.1),
         presence_penalty: Some(0.2),
+        output_format: OutputFormat::JsonSchema {
+            schema: serde_json::json!({"type": "object"}),
+            strict: true,
+        },
         response_format: Some("json".to_string()),
         json_schema: Some(serde_json::json!({"type": "object"})),
         output_schema: Some(serde_json::json!({"type": "object"})),

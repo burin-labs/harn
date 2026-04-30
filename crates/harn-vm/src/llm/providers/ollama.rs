@@ -92,13 +92,17 @@ impl OllamaProvider {
             body["tool_choice"] = tc.clone();
         }
 
-        if opts.response_format.as_deref() == Some("json") {
-            body.as_object_mut()
-                .map(|obj| obj.remove("response_format"));
-            if let Some(schema) = opts.json_schema.clone() {
-                body["format"] = schema;
-            } else {
+        match &opts.output_format {
+            crate::llm::api::OutputFormat::Text => {}
+            crate::llm::api::OutputFormat::JsonObject => {
+                body.as_object_mut()
+                    .map(|obj| obj.remove("response_format"));
                 body["format"] = serde_json::json!("json");
+            }
+            crate::llm::api::OutputFormat::JsonSchema { schema, .. } => {
+                body.as_object_mut()
+                    .map(|obj| obj.remove("response_format"));
+                body["format"] = schema.clone();
             }
         }
 
@@ -163,11 +167,13 @@ impl OllamaProvider {
             "raw": true,
             "options": options,
         });
-        if opts.response_format.as_deref() == Some("json") {
-            if let Some(schema) = opts.json_schema.clone() {
-                body["format"] = schema;
-            } else {
+        match &opts.output_format {
+            crate::llm::api::OutputFormat::Text => {}
+            crate::llm::api::OutputFormat::JsonObject => {
                 body["format"] = serde_json::json!("json");
+            }
+            crate::llm::api::OutputFormat::JsonSchema { schema, .. } => {
+                body["format"] = schema.clone();
             }
         }
         crate::llm::api::apply_ollama_runtime_settings(&mut body, opts.provider_overrides.as_ref());
@@ -561,6 +567,10 @@ mod tests {
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            output_format: crate::llm::api::OutputFormat::JsonSchema {
+                schema: serde_json::json!({"type": "object"}),
+                strict: true,
+            },
             response_format: Some("json".to_string()),
             json_schema: Some(serde_json::json!({"type": "object"})),
             thinking: ThinkingConfig::Disabled,
@@ -584,8 +594,22 @@ mod tests {
     }
 
     #[test]
+    fn output_format_json_object_maps_to_ollama_json_format() {
+        let mut payload = base_payload();
+        payload.output_format = crate::llm::api::OutputFormat::JsonObject;
+        payload.response_format = None;
+        payload.json_schema = None;
+
+        let body = OllamaProvider::build_request_body(&payload);
+
+        assert_eq!(body["format"], serde_json::json!("json"));
+        assert!(body.get("response_format").is_none());
+    }
+
+    #[test]
     fn plain_requests_do_not_emit_format_field() {
         let mut payload = base_payload();
+        payload.output_format = crate::llm::api::OutputFormat::Text;
         payload.response_format = None;
         payload.json_schema = None;
         let body = OllamaProvider::build_request_body(&payload);
@@ -596,6 +620,7 @@ mod tests {
     fn image_content_maps_to_ollama_images_array() {
         let mut payload = base_payload();
         payload.model = "llava:latest".to_string();
+        payload.output_format = crate::llm::api::OutputFormat::Text;
         payload.response_format = None;
         payload.json_schema = None;
         payload.messages = vec![serde_json::json!({
@@ -625,6 +650,7 @@ mod tests {
             ScopedEnvVar::remove("OLLAMA_KEEP_ALIVE"),
         ];
         let mut payload = base_payload();
+        payload.output_format = crate::llm::api::OutputFormat::Text;
         payload.response_format = None;
         payload.json_schema = None;
         let body = OllamaProvider::build_request_body(&payload);
@@ -652,6 +678,7 @@ mod tests {
     #[test]
     fn qwen_text_tool_route_uses_raw_generate_bypass() {
         let mut payload = base_payload();
+        payload.output_format = crate::llm::api::OutputFormat::Text;
         payload.response_format = None;
         payload.json_schema = None;
         payload.native_tools = None;
@@ -672,6 +699,7 @@ mod tests {
     #[test]
     fn qwen_native_tool_route_stays_on_ollama_chat() {
         let mut payload = base_payload();
+        payload.output_format = crate::llm::api::OutputFormat::Text;
         payload.response_format = None;
         payload.json_schema = None;
         payload.native_tools = Some(vec![serde_json::json!({
@@ -707,6 +735,7 @@ mod tests {
     #[test]
     fn raw_generate_prompt_continues_prefill_without_end_token() {
         let mut payload = base_payload();
+        payload.output_format = crate::llm::api::OutputFormat::Text;
         payload.response_format = None;
         payload.json_schema = None;
         payload.prefill = Some("<tool_call>\nedit(".to_string());

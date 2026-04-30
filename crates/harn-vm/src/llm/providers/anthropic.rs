@@ -293,19 +293,19 @@ impl AnthropicProvider {
         if let Some(ref tc) = opts.tool_choice {
             body["tool_choice"] = tc.clone();
         }
-        // Anthropic structured output uses a tool-use constraint.
-        if opts.response_format.as_deref() == Some("json") {
-            if let Some(ref schema) = opts.json_schema {
-                body["tools"] = {
-                    let mut tools = body["tools"].as_array().cloned().unwrap_or_default();
-                    tools.push(serde_json::json!({
-                        "name": "json_response",
-                        "description": "Return a structured JSON response matching the schema.",
-                        "input_schema": schema,
-                    }));
-                    serde_json::json!(tools)
-                };
-                body["tool_choice"] = serde_json::json!({"type": "tool", "name": "json_response"});
+        match &opts.output_format {
+            crate::llm::api::OutputFormat::Text => {}
+            crate::llm::api::OutputFormat::JsonObject => {
+                force_json_via_tool_use(
+                    &mut body,
+                    &serde_json::json!({
+                        "type": "object",
+                        "additionalProperties": true
+                    }),
+                );
+            }
+            crate::llm::api::OutputFormat::JsonSchema { schema, .. } => {
+                force_json_via_tool_use(&mut body, schema);
             }
         }
         match &opts.thinking {
@@ -353,6 +353,19 @@ impl AnthropicProvider {
     }
 }
 
+fn force_json_via_tool_use(body: &mut serde_json::Value, schema: &serde_json::Value) {
+    body["tools"] = {
+        let mut tools = body["tools"].as_array().cloned().unwrap_or_default();
+        tools.push(serde_json::json!({
+            "name": "json_response",
+            "description": "Return a structured JSON response matching the schema.",
+            "input_schema": schema,
+        }));
+        serde_json::json!(tools)
+    };
+    body["tool_choice"] = serde_json::json!({"type": "tool", "name": "json_response"});
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,6 +389,7 @@ mod tests {
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            output_format: crate::llm::api::OutputFormat::Text,
             response_format: None,
             json_schema: None,
             thinking: ThinkingConfig::Disabled,
@@ -454,6 +468,35 @@ mod tests {
         let provider = AnthropicProvider;
         assert!(provider.supports_defer_loading("claude-opus-4-7"));
         assert!(!provider.supports_defer_loading("claude-opus-3-5"));
+    }
+
+    #[test]
+    fn output_format_json_schema_forces_anthropic_tool_use() {
+        let mut payload = base_payload();
+        payload.output_format = crate::llm::api::OutputFormat::JsonSchema {
+            schema: serde_json::json!({
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+            }),
+            strict: true,
+        };
+
+        let body = AnthropicProvider::build_request_body(&payload);
+
+        assert_eq!(
+            body["tool_choice"],
+            serde_json::json!({"type": "tool", "name": "json_response"})
+        );
+        let tools = body["tools"].as_array().expect("tools array");
+        let json_tool = tools
+            .iter()
+            .find(|tool| tool.get("name").and_then(|value| value.as_str()) == Some("json_response"))
+            .expect("json_response tool");
+        assert_eq!(
+            json_tool["input_schema"]["properties"]["answer"]["type"],
+            "string"
+        );
     }
 
     #[test]

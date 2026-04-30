@@ -234,6 +234,7 @@ mod tests {
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            output_format: crate::llm::api::OutputFormat::Text,
             response_format: None,
             json_schema: None,
             thinking: ThinkingConfig::Disabled,

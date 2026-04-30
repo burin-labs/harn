@@ -193,18 +193,20 @@ impl OpenAiCompatibleProvider {
                 body["reasoning_effort"] = serde_json::json!(level.as_str());
             }
         }
-        if opts.response_format.as_deref() == Some("json") {
-            if let Some(ref schema) = opts.json_schema {
+        match &opts.output_format {
+            crate::llm::api::OutputFormat::Text => {}
+            crate::llm::api::OutputFormat::JsonObject => {
+                body["response_format"] = serde_json::json!({"type": "json_object"});
+            }
+            crate::llm::api::OutputFormat::JsonSchema { schema, strict } => {
                 body["response_format"] = serde_json::json!({
                     "type": "json_schema",
                     "json_schema": {
                         "name": "response",
                         "schema": schema,
-                        "strict": true,
+                        "strict": strict,
                     }
                 });
-            } else {
-                body["response_format"] = serde_json::json!({"type": "json_object"});
             }
         }
         if let Some(ref tools) = opts.native_tools {
@@ -540,6 +542,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn output_format_json_schema_maps_to_openai_response_format() {
+        let mut payload = base_request_payload();
+        payload.output_format = crate::llm::api::OutputFormat::JsonSchema {
+            schema: serde_json::json!({
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+            }),
+            strict: false,
+        };
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["response_format"]["type"], "json_schema");
+        assert_eq!(
+            body["response_format"]["json_schema"]["schema"]["properties"]["answer"]["type"],
+            "string"
+        );
+        assert_eq!(
+            body["response_format"]["json_schema"]["strict"],
+            serde_json::json!(false)
+        );
+    }
+
     fn base_request_payload() -> LlmRequestPayload {
         LlmRequestPayload {
             provider: "openrouter".to_string(),
@@ -557,6 +584,7 @@ mod tests {
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            output_format: crate::llm::api::OutputFormat::Text,
             response_format: None,
             json_schema: None,
             thinking: ThinkingConfig::Disabled,

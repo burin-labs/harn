@@ -81,6 +81,7 @@ pub(crate) fn request_hash(request: &LlmRequestPayload) -> String {
         "seed": request.seed,
         "frequency_penalty": request.frequency_penalty,
         "presence_penalty": request.presence_penalty,
+        "output_format": request.output_format,
         "response_format": request.response_format,
         "json_schema": request.json_schema,
         "thinking": request.thinking,

@@ -529,7 +529,8 @@ fn option_requests_structured_output(options: &BTreeMap<String, VmValue>) -> boo
     matches!(
         options.get("response_format"),
         Some(VmValue::String(value)) if value.as_ref() == "json"
-    ) || options.contains_key("json_schema")
+    ) || options.contains_key("output_format")
+        || options.contains_key("json_schema")
         || options.contains_key("output_schema")
 }
 

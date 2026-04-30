@@ -61,6 +61,7 @@ pub(super) fn base_opts(messages: Vec<serde_json::Value>) -> LlmCallOptions {
         seed: None,
         frequency_penalty: None,
         presence_penalty: None,
+        output_format: crate::llm::api::OutputFormat::Text,
         response_format: None,
         json_schema: None,
         output_schema: None,
