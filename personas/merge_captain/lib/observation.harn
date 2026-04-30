@@ -1,0 +1,102 @@
+// PR observation shape.
+//
+// Observations are plain dicts produced by an adapter (live GitHub or
+// fixture). Keeping them in their own module lets the classifier and the
+// receipt builder agree on field names without depending on either I/O
+// path.
+/** Build a normalized observation from raw GitHub PR + checks data. */
+pub fn from_github(pr, checks, required_checks) {
+  let observed_checks = (checks ?? [])
+    .map(
+    { check -> {
+      name: check.name ?? check.context ?? "",
+      status: check.status ?? "unknown",
+      conclusion: check.conclusion ?? nil,
+    } },
+  )
+  let conclusion_for = { name ->
+    var found = nil
+    for c in observed_checks {
+      if c.name == name {
+        found = c
+      }
+    }
+    found
+  }
+  let missing_required = (required_checks ?? [])
+    .filter(
+    { name ->
+      let c = conclusion_for(name)
+      c == nil || c.status != "completed"
+    },
+  )
+  let failed_required = (required_checks ?? [])
+    .filter(
+    { name ->
+      let c = conclusion_for(name)
+      c != nil && c.status == "completed" && c.conclusion != "success" && c.conclusion != "neutral"
+    },
+  )
+  return {
+    repo: pr.repo,
+    number: pr.number,
+    title: pr.title ?? "",
+    head_sha: pr.head_sha ?? "",
+    base_ref: pr.base_ref ?? "main",
+    head_ref: pr.head_ref ?? "",
+    state: pr.state ?? "open",
+    draft: pr.draft ?? false,
+    merged: pr.merged ?? false,
+    mergeable: pr.mergeable,
+    mergeable_state: pr.mergeable_state ?? "unknown",
+    behind_by: pr.behind_by ?? 0,
+    labels: pr.labels ?? [],
+    review_decision: pr.review_decision ?? "REVIEW_REQUIRED",
+    approvals: pr.approvals ?? 0,
+    in_merge_queue: pr.in_merge_queue ?? false,
+    merge_group_active: pr.merge_group_active ?? false,
+    checks: observed_checks,
+    missing_required_checks: missing_required,
+    failed_required_checks: failed_required,
+  }
+}
+
+/** Quick predicate helpers used by the classifier and tests. */
+pub fn is_merged(obs) {
+  return obs.merged
+}
+
+/** True when the PR is closed without being merged. */
+pub fn is_closed(obs) {
+  return obs.state == "closed" && !is_merged(obs)
+}
+
+/** True when the PR has merge conflicts. */
+pub fn is_dirty(obs) {
+  return obs.mergeable_state == "dirty" || !obs.mergeable
+}
+
+/** True when the branch is behind the base. */
+pub fn is_behind(obs) {
+  return obs.behind_by > 0 || obs.mergeable_state == "behind"
+}
+
+/** True when any of the policy's blocking labels are on the PR. */
+pub fn is_blocked_by_label(obs, blocking_labels) {
+  for label in obs.labels {
+    if blocking_labels.contains(label) {
+      return true
+    }
+  }
+  return false
+}
+
+/** True when the PR has at least the required review count. */
+pub fn has_required_approvals(obs, required) {
+  return obs.approvals >= required
+}
+
+/** True when no required check is missing or failing. */
+pub fn checks_pass(obs) {
+  return len(obs.missing_required_checks) == 0 && len(obs.failed_required_checks) == 0
+}

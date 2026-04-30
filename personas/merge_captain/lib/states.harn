@@ -1,0 +1,117 @@
+// Merge Captain state machine.
+//
+// Owns the canonical list of PR states and the legality of transitions
+// between them. Keep this module pure: no I/O, no time, no network.
+/** All states a tracked PR can occupy. */
+pub fn all_states() {
+  return [
+    "discovered",
+    "draft",
+    "waiting_checks",
+    "behind",
+    "dirty",
+    "queued",
+    "merge_group_running",
+    "failing_ci",
+    "local_repair",
+    "blocked",
+    "merged",
+    "closed",
+  ]
+}
+
+/** True when state is one of the canonical states. */
+pub fn is_state(state) {
+  return all_states().contains(state)
+}
+
+/** Terminal states do not transition further within a sweep. */
+pub fn is_terminal(state) {
+  return state == "merged" || state == "closed"
+}
+
+/** Active states still consume scheduler attention. */
+pub fn is_active(state) {
+  return !is_terminal(state)
+}
+
+/** Synthetic "no prior" sentinel returned for first-observation PRs. */
+pub fn unknown_state() {
+  return "discovered"
+}
+
+/** Allowed actions, ranked from least to most invasive. */
+pub fn all_actions() {
+  return [
+    "noop",
+    "wait",
+    "request_review",
+    "comment",
+    "add_label",
+    "update_branch",
+    "run_local_verification",
+    "enqueue_merge_queue",
+    "mark_merged",
+    "archive",
+    "escalate_human",
+  ]
+}
+
+/** True when the action mutates remote state. */
+pub fn action_is_mutating(action) {
+  let read_only = ["noop", "wait", "comment"]
+  return !read_only.contains(action)
+}
+
+/**
+ * Legal forward edges, expressed as a directed graph. Used by tests and
+ * the receipt validator to surface accidental skips (e.g. discovered ->
+ * merged with no observed evidence).
+ */
+fn _transitions() {
+  return {
+    discovered: [
+      "draft",
+      "waiting_checks",
+      "behind",
+      "dirty",
+      "blocked",
+      "failing_ci",
+      "local_repair",
+      "queued",
+      "merge_group_running",
+      "merged",
+      "closed",
+    ],
+    draft: ["discovered", "waiting_checks", "blocked", "closed"],
+    waiting_checks: ["queued", "failing_ci", "behind", "dirty", "blocked", "merged", "closed"],
+    behind: ["waiting_checks", "dirty", "blocked", "closed"],
+    dirty: ["local_repair", "blocked", "closed"],
+    queued: ["merge_group_running", "failing_ci", "blocked", "merged", "closed"],
+    merge_group_running: ["merged", "failing_ci", "blocked", "closed"],
+    failing_ci: ["local_repair", "blocked", "waiting_checks", "closed"],
+    local_repair: ["waiting_checks", "blocked", "closed"],
+    blocked: ["waiting_checks", "behind", "dirty", "queued", "closed", "merged"],
+    merged: [],
+    closed: [],
+  }
+}
+
+/** Returns true when prior -> next is a permitted edge. */
+pub fn is_valid_transition(prior, next) {
+  if prior == next {
+    return true
+  }
+  let table = _transitions()
+  let allowed = table[prior]
+  if allowed == nil {
+    return false
+  }
+  return allowed.contains(next)
+}
+
+/** Returns the allowed next-states from prior. */
+pub fn allowed_next(prior) {
+  let table = _transitions()
+  return table[prior] ?? []
+}

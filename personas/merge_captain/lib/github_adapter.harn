@@ -1,0 +1,140 @@
+/**
+ * Typed GitHub adapter for Merge Captain. All GitHub I/O routes through
+ * this module. In live mode it dispatches directly to the registered
+ * `github` connector via `connector_call`; in fixture mode it serves a
+ * pre-recorded snapshot. Tests and evals run entirely on fixtures, so
+ * the state machine never reaches for `process.exec` or shells out to
+ * `gh`.
+ */
+fn _gh(method, params) {
+  return connector_call("github", method, params)
+}
+
+/** Construct a live adapter that dispatches to the github connector. */
+pub fn live_adapter() {
+  return {mode: "live", snapshot: nil}
+}
+
+/** Construct a fixture adapter from an in-memory snapshot dict. */
+pub fn fixture_adapter(snapshot) {
+  return {mode: "fixture", snapshot: snapshot}
+}
+
+/** List open PRs in a repository. */
+pub fn list_open_prs(adapter, repo) {
+  if adapter.mode == "fixture" {
+    let bucket = adapter.snapshot[repo]
+    if bucket == nil {
+      return []
+    }
+    return (bucket.pulls ?? []).filter({ pr -> pr.state == "open" })
+  }
+  let parts = repo.split("/")
+  let path = "/repos/${parts[0]}/${parts[1]}/pulls?state=open&per_page=100"
+  let result = _gh("api_call", {path: path, method: "GET"})
+  return result ?? []
+}
+
+/** Fetch detailed PR + checks data. */
+pub fn get_pr_details(adapter, repo, number) {
+  if adapter.mode == "fixture" {
+    let bucket = adapter.snapshot[repo]
+    if bucket == nil {
+      return nil
+    }
+    var found = nil
+    for pr in bucket.pulls ?? [] {
+      if pr.number == number {
+        found = pr
+      }
+    }
+    if found == nil {
+      return nil
+    }
+    let checks_for = (bucket.checks ?? {})[to_string(number)] ?? []
+    return {pr: found, checks: checks_for}
+  }
+  let parts = repo.split("/")
+  let pr = _gh("api_call", {path: "/repos/${parts[0]}/${parts[1]}/pulls/${to_string(number)}", method: "GET"})
+  let checks_envelope = _gh(
+    "api_call",
+    {path: "/repos/${parts[0]}/${parts[1]}/commits/${pr.head.sha}/check-runs", method: "GET"},
+  )
+  let runs = checks_envelope?.check_runs ?? []
+  return {pr: normalize_pr(pr), checks: runs}
+}
+
+/** Normalize a raw GitHub PR API payload into our minimal shape. */
+pub fn normalize_pr(api_pr) {
+  let labels = (api_pr.labels ?? []).map({ l -> l.name })
+  return {
+    repo: api_pr.base?.repo?.full_name ?? "",
+    number: api_pr.number,
+    title: api_pr.title ?? "",
+    head_sha: api_pr.head?.sha ?? "",
+    head_ref: api_pr.head?.ref ?? "",
+    base_ref: api_pr.base?.ref ?? "main",
+    state: api_pr.state ?? "open",
+    draft: api_pr.draft ?? false,
+    merged: api_pr.merged ?? false,
+    mergeable: api_pr.mergeable,
+    mergeable_state: api_pr.mergeable_state ?? "unknown",
+    behind_by: api_pr.behind_by ?? 0,
+    labels: labels,
+    review_decision: api_pr.review_decision ?? "REVIEW_REQUIRED",
+    approvals: api_pr.approvals ?? 0,
+    in_merge_queue: api_pr.auto_merge != nil,
+    merge_group_active: api_pr.merge_group_active ?? false,
+  }
+}
+
+/** Update a PR branch (rebase/merge from base). */
+pub fn update_branch(adapter, repo, number, dry_run) {
+  if dry_run || adapter.mode == "fixture" {
+    return {ok: true, dry_run: true, mode: adapter.mode}
+  }
+  let parts = repo.split("/")
+  let path = "/repos/${parts[0]}/${parts[1]}/pulls/${to_string(number)}/update-branch"
+  let response = _gh("api_call", {path: path, method: "PUT", body: {}})
+  return {ok: true, response: response}
+}
+
+/** Enqueue a PR onto the merge queue. */
+pub fn enqueue_merge_queue(adapter, repo, number, merge_method, dry_run) {
+  if dry_run || adapter.mode == "fixture" {
+    return {ok: true, dry_run: true, mode: adapter.mode}
+  }
+  let pr_url = "https://github.com/${repo}/pull/${to_string(number)}"
+  let response = _gh("merge_pr", {pr_url: pr_url, merge_method: merge_method, queue: true})
+  return {ok: true, response: response}
+}
+
+/** Add a label to a PR. */
+pub fn add_label(adapter, repo, number, label, dry_run) {
+  if dry_run || adapter.mode == "fixture" {
+    return {ok: true, dry_run: true, mode: adapter.mode}
+  }
+  let issue_url = "https://github.com/${repo}/issues/${to_string(number)}"
+  let response = _gh("add_labels", {issue_url: issue_url, labels: [label]})
+  return {ok: true, response: response}
+}
+
+/** Comment on a PR. */
+pub fn comment(adapter, repo, number, body, dry_run) {
+  if dry_run || adapter.mode == "fixture" {
+    return {ok: true, dry_run: true, mode: adapter.mode}
+  }
+  let issue_url = "https://github.com/${repo}/issues/${to_string(number)}"
+  let response = _gh("comment", {issue_url: issue_url, body: body})
+  return {ok: true, response: response}
+}
+
+/** Request reviews on a PR. */
+pub fn request_review(adapter, repo, number, reviewers, dry_run) {
+  if dry_run || adapter.mode == "fixture" {
+    return {ok: true, dry_run: true, mode: adapter.mode}
+  }
+  let pr_url = "https://github.com/${repo}/pull/${to_string(number)}"
+  let response = _gh("request_review", {pr_url: pr_url, reviewers: reviewers})
+  return {ok: true, response: response}
+}
