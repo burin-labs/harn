@@ -1,0 +1,22 @@
+/**
+ * `&` binds tighter than `|`, so `A & B | C` parses as `(A & B) | C`.
+ * The first branch — an intersection of two layered shapes — accepts
+ * values that satisfy both component shapes; the second branch is a
+ * plain shape with a single field.
+ */
+type WithId = {id: string}
+
+type WithKind = {kind: string}
+
+type Tagged = WithId & WithKind | {label: string}
+
+fn label(rec: Tagged) -> string {
+  return type_of(rec)
+}
+
+pipeline test(task) {
+  // Intersection branch: this dict has both id and kind.
+  println(label({id: "a", kind: "node"}))
+  // Plain shape branch: just the label field.
+  println(label({label: "fallback"}))
+}

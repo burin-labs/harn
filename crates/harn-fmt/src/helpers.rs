@@ -223,6 +223,15 @@ pub(crate) fn format_type_expr(te: &TypeExpr) -> String {
             .map(format_type_expr)
             .collect::<Vec<_>>()
             .join(" | "),
+        TypeExpr::Intersection(types) => types
+            .iter()
+            .map(|t| match t {
+                // Parenthesise nested unions so `(A | B) & C` reads back unambiguously.
+                TypeExpr::Union(_) => format!("({})", format_type_expr(t)),
+                _ => format_type_expr(t),
+            })
+            .collect::<Vec<_>>()
+            .join(" & "),
         TypeExpr::Shape(fields) => format_shape_inline(fields),
         TypeExpr::List(inner) => {
             format!("list<{}>", format_type_expr(inner))

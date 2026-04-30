@@ -71,6 +71,9 @@ impl Compiler {
             TypeExpr::Union(types) => {
                 TypeExpr::Union(types.iter().map(|t| self.expand_alias(t)).collect())
             }
+            TypeExpr::Intersection(types) => {
+                TypeExpr::Intersection(types.iter().map(|t| self.expand_alias(t)).collect())
+            }
             TypeExpr::Shape(fields) => TypeExpr::Shape(
                 fields
                     .iter()
@@ -451,6 +454,23 @@ impl Compiler {
                 } else {
                     Some(VmValue::Dict(Rc::new(BTreeMap::from([(
                         "union".to_string(),
+                        VmValue::List(Rc::new(branches)),
+                    )]))))
+                }
+            }
+            harn_parser::TypeExpr::Intersection(members) => {
+                // Encode `A & B` as JSON-Schema `allOf` (the runtime
+                // accepts the snake_case `all_of` key directly). The
+                // value must validate against every branch.
+                let branches = members
+                    .iter()
+                    .filter_map(Self::type_expr_to_schema_value)
+                    .collect::<Vec<_>>();
+                if branches.is_empty() {
+                    None
+                } else {
+                    Some(VmValue::Dict(Rc::new(BTreeMap::from([(
+                        "all_of".to_string(),
                         VmValue::List(Rc::new(branches)),
                     )]))))
                 }

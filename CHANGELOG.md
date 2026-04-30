@@ -79,6 +79,16 @@ granular archaeology.
   signature schemes. New `triggers/webhook-intake.md` doc and conformance
   coverage for happy path, signature rejection, replay dedupe, and
   multi-path isolation.
+- **Intersection types `A & B` (#914).** New type-expression form for
+  composing structural shapes — `fn use(ctx: BaseCtx & AuthCtx)` accepts
+  values that satisfy every component, and the typechecker resolves field
+  access against any participating shape. `&` binds tighter than `|`
+  (`A & B | C` parses as `(A & B) | C`). At runtime the annotation lowers
+  to a JSON-Schema `allOf` guard, so the parameter-runtime check rejects
+  values missing fields from any component. AST, lexer (`Amp` token),
+  parser, subtyper, formatter, linter, LSP semantic tokens, VM schema
+  lowering, tree-sitter grammar/tests, spec, quickref, and conformance
+  coverage updated.
 
 - **Enterprise LLM providers (#870/#976).** First-class shims for Bedrock
   Runtime (Converse API with hand-rolled AWS SigV4 signing and

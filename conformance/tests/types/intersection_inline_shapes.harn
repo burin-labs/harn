@@ -1,0 +1,13 @@
+/**
+ * Intersection types compose inline shape annotations directly,
+ * without needing a `type` alias for each component. Field access
+ * resolves against any component that declares the field.
+ */
+fn merge_label(env: {region: string} & {tier: string}) -> string {
+  return env.region + "-" + env.tier
+}
+
+pipeline test(task) {
+  let env = {region: "us-east", tier: "prod"}
+  println(merge_label(env))
+}

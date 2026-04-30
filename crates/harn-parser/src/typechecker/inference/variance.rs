@@ -221,7 +221,7 @@ impl TypeChecker {
                     self.walk_variance(decl_kind, &f.type_expr, polarity, declared, span);
                 }
             }
-            TypeExpr::Union(members) => {
+            TypeExpr::Union(members) | TypeExpr::Intersection(members) => {
                 for m in members {
                     self.walk_variance(decl_kind, m, polarity, declared, span);
                 }

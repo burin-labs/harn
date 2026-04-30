@@ -1,0 +1,17 @@
+/**
+ * Intersection types: `A & B` requires the value to satisfy every
+ * component. Layered shape contexts let a function require multiple
+ * fields without fabricating an intermediate type alias.
+ */
+type BaseCtx = {request_id: string}
+
+type AuthCtx = {user_id: string}
+
+fn use_ctx(ctx: BaseCtx & AuthCtx) -> string {
+  return ctx.request_id + "/" + ctx.user_id
+}
+
+pipeline test(task) {
+  let ctx = {request_id: "req-42", user_id: "u-7"}
+  println(use_ctx(ctx))
+}

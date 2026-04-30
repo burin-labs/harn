@@ -54,3 +54,48 @@ type Verdict = "pass" | "fail" | "unclear"
           (string_literal)))
       (type_annotation
         (string_literal)))))
+
+==================
+Intersection Type
+==================
+
+type Combined = {x: int} & {y: int}
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (type_annotation
+        (shape_type
+          (shape_field
+            name: (identifier)
+            type: (type_annotation
+              (identifier)))))
+      (type_annotation
+        (shape_type
+          (shape_field
+            name: (identifier)
+            type: (type_annotation
+              (identifier))))))))
+
+==================
+Intersection Binds Tighter Than Union
+==================
+
+type Tagged = A & B | C
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (type_annotation
+        (type_annotation
+          (identifier))
+        (type_annotation
+          (identifier)))
+      (type_annotation
+        (identifier)))))

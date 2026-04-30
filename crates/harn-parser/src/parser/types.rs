@@ -106,21 +106,39 @@ impl Parser {
         Ok(Some(self.parse_type_expr()?))
     }
 
-    /// Parse a type expression: `int`, `string | nil`, `{name: string, age?: int}`.
+    /// Parse a type expression: `int`, `string | nil`, `A & B`,
+    /// `{name: string, age?: int}`. `&` binds tighter than `|`, so
+    /// `A & B | C` parses as `(A & B) | C`.
     pub(super) fn parse_type_expr(&mut self) -> Result<TypeExpr, ParserError> {
         self.skip_newlines();
-        let first = self.parse_type_primary()?;
+        let first = self.parse_type_intersection()?;
 
         if self.check(&TokenKind::Bar) {
             let mut types = vec![first];
             while self.check(&TokenKind::Bar) {
                 self.advance();
-                types.push(self.parse_type_primary()?);
+                types.push(self.parse_type_intersection()?);
             }
             return Ok(TypeExpr::Union(types));
         }
 
         Ok(first)
+    }
+
+    /// Parse `A & B & C`. Each component is a `parse_type_primary`
+    /// (no nested `|` without parentheses), preserving the precedence
+    /// `&` > `|`.
+    fn parse_type_intersection(&mut self) -> Result<TypeExpr, ParserError> {
+        let first = self.parse_type_primary()?;
+        if !self.check(&TokenKind::Amp) {
+            return Ok(first);
+        }
+        let mut types = vec![first];
+        while self.check(&TokenKind::Amp) {
+            self.advance();
+            types.push(self.parse_type_primary()?);
+        }
+        Ok(TypeExpr::Intersection(types))
     }
 
     /// Accepts identifiers and the `nil`/`true`/`false` keywords as type names.

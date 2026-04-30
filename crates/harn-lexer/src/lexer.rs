@@ -780,6 +780,7 @@ impl Lexer {
             '>' => Some(TokenKind::Gt),
             '?' => Some(TokenKind::Question),
             '|' => Some(TokenKind::Bar),
+            '&' => Some(TokenKind::Amp),
             '@' => Some(TokenKind::At),
             _ => None,
         }

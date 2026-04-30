@@ -387,6 +387,18 @@ impl TypeChecker {
                         return Some(field.type_expr.clone());
                     }
                 }
+                // Intersection field access: an `A & B` value has every
+                // field that A or B has. Look up the property in each
+                // component and return the first match.
+                if let Some(TypeExpr::Intersection(members)) = &obj_type {
+                    for member in members {
+                        if let TypeExpr::Shape(fields) = member {
+                            if let Some(field) = fields.iter().find(|f| f.name == *property) {
+                                return Some(field.type_expr.clone());
+                            }
+                        }
+                    }
+                }
                 None
             }
 

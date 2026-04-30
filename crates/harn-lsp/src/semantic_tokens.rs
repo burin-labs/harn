@@ -134,7 +134,8 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Lt
         | TokenKind::Gt
         | TokenKind::Question
-        | TokenKind::Bar => Some(sem::OPERATOR),
+        | TokenKind::Bar
+        | TokenKind::Amp => Some(sem::OPERATOR),
 
         // Comments
         TokenKind::LineComment { .. } | TokenKind::BlockComment { .. } => Some(sem::COMMENT),
