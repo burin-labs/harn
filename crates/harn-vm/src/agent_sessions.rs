@@ -988,7 +988,7 @@ mod tests {
         assert_eq!(prompt.messages[1]["role"].as_str(), Some("assistant"));
     }
 
-    #[tokio::test(flavor = "current_thread")]
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
     async fn open_or_create_registers_event_log_sink_when_active_log_is_installed() {
         reset_all_sinks();
         crate::event_log::reset_active_event_log();
