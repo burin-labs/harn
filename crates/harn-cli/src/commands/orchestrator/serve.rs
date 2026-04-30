@@ -932,6 +932,7 @@ fn handler_kind(handler: &CollectedTriggerHandler) -> &'static str {
         CollectedTriggerHandler::Local { .. } => "local",
         CollectedTriggerHandler::A2a { .. } => "a2a",
         CollectedTriggerHandler::Worker { .. } => "worker",
+        CollectedTriggerHandler::Persona { .. } => "persona",
     }
 }
 

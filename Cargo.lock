@@ -1842,6 +1842,7 @@ dependencies = [
 name = "harn-modules"
 version = "0.7.50"
 dependencies = [
+ "croner",
  "harn-lexer",
  "harn-parser",
  "serde",

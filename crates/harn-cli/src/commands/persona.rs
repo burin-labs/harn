@@ -6,10 +6,10 @@ use std::sync::Arc;
 use harn_vm::event_log::{AnyEventLog, EventLog};
 
 use crate::cli::{
-    PersonaControlArgs, PersonaInspectArgs, PersonaListArgs, PersonaSpendArgs, PersonaStatusArgs,
-    PersonaTickArgs, PersonaTriggerArgs,
+    PersonaCheckArgs, PersonaControlArgs, PersonaInspectArgs, PersonaListArgs, PersonaSpendArgs,
+    PersonaStatusArgs, PersonaTickArgs, PersonaTriggerArgs,
 };
-use crate::package::{self, PersonaManifestEntry, ResolvedPersonaManifest};
+use crate::package::{self, PersonaManifestEntry, PersonaValidationError, ResolvedPersonaManifest};
 
 pub(crate) fn run_list(manifest: Option<&Path>, args: &PersonaListArgs) {
     let catalog = load_catalog_or_exit(manifest);
@@ -57,6 +57,53 @@ pub(crate) fn run_list(manifest: Option<&Path>, args: &PersonaListArgs) {
         println!(
             "  {name:<name_width$}  tier={tier:<17} receipts={receipts:<8} entry={entry}",
             name_width = name_width
+        );
+    }
+}
+
+pub(crate) fn run_check(manifest: Option<&Path>, args: &PersonaCheckArgs) {
+    let selected = args.path.as_deref().or(manifest);
+    let catalog = match load_catalog_validation(selected) {
+        Ok(catalog) => catalog,
+        Err(errors) if args.json => {
+            print_validation_errors_json(&errors);
+            process::exit(1);
+        }
+        Err(errors) => fatal(
+            &errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ),
+    };
+    if args.json {
+        let payload = serde_json::json!({
+            "ok": true,
+            "manifest_path": catalog.manifest_path,
+            "personas": catalog.personas.iter().map(|persona| {
+                serde_json::json!({
+                    "name": persona.name.as_deref().unwrap_or_default(),
+                    "triggers": &persona.triggers,
+                    "tools": &persona.tools,
+                    "autonomy": persona.autonomy_tier.map(|tier| tier.as_str()).unwrap_or_default(),
+                    "receipts": persona.receipt_policy.map(|policy| policy.as_str()).unwrap_or_default(),
+                })
+            }).collect::<Vec<_>>(),
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&payload).unwrap_or_else(|error| {
+                fatal(&format!(
+                    "failed to serialize persona check output: {error}"
+                ))
+            })
+        );
+    } else {
+        println!(
+            "ok: {} persona manifest validates ({} personas)",
+            catalog.manifest_path.display(),
+            catalog.personas.len()
         );
     }
 }
@@ -281,6 +328,18 @@ fn load_catalog_or_exit(manifest: Option<&Path>) -> ResolvedPersonaManifest {
 }
 
 fn load_catalog_result(manifest: Option<&Path>) -> Result<ResolvedPersonaManifest, String> {
+    load_catalog_validation(manifest).map_err(|errors| {
+        errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
+}
+
+fn load_catalog_validation(
+    manifest: Option<&Path>,
+) -> Result<ResolvedPersonaManifest, Vec<PersonaValidationError>> {
     let result = if let Some(path) = manifest {
         package::load_personas_from_manifest_path(path).map(Some)
     } else {
@@ -288,14 +347,13 @@ fn load_catalog_result(manifest: Option<&Path>) -> Result<ResolvedPersonaManifes
     };
     match result {
         Ok(Some(catalog)) => Ok(catalog),
-        Ok(None) => Err(
-            "no harn.toml found; pass --manifest <path> or run inside a Harn project".to_string(),
-        ),
-        Err(errors) => Err(errors
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n")),
+        Ok(None) => Err(vec![PersonaValidationError {
+            manifest_path: PathBuf::from("harn.toml"),
+            field_path: "harn.toml".to_string(),
+            message: "no harn.toml found; pass --manifest <path> or run inside a Harn project"
+                .to_string(),
+        }]),
+        Err(errors) => Err(errors),
     }
 }
 
@@ -448,6 +506,27 @@ fn print_receipt(receipt: &harn_vm::PersonaRunReceipt, json: bool) {
             println!("error={error}");
         }
     }
+}
+
+fn print_validation_errors_json(errors: &[PersonaValidationError]) {
+    let payload = serde_json::json!({
+        "ok": false,
+        "errors": errors.iter().map(|error| {
+            serde_json::json!({
+                "manifest_path": &error.manifest_path,
+                "field_path": &error.field_path,
+                "message": &error.message,
+            })
+        }).collect::<Vec<_>>(),
+    });
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&payload).unwrap_or_else(|error| {
+            fatal(&format!(
+                "failed to serialize persona validation errors: {error}"
+            ))
+        })
+    );
 }
 
 fn persona_to_json(

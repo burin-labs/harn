@@ -779,6 +779,73 @@ secrets = { signing_secret = "github/webhook-secret" }
     ));
 }
 
+#[test]
+fn persona_triggers_install_as_manifest_bindings() {
+    let tmp = tempfile::tempdir().unwrap();
+    let harn_file = write_trigger_project(
+        tmp.path(),
+        r#"
+[[personas]]
+name = "merge_captain"
+description = "Owns PR readiness."
+entry_workflow = "workflows/merge_captain.harn#run"
+tools = ["github"]
+autonomy = "suggest"
+receipts = "required"
+triggers = ["github.pr_opened"]
+budget = { daily_usd = 2.0 }
+"#,
+        None,
+    );
+    let extensions = load_runtime_extensions(&harn_file);
+    let bindings =
+        collect_persona_trigger_binding_specs(&extensions).expect("persona bindings collect");
+
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].id, "persona.merge_captain.github.pr_opened");
+    assert_eq!(bindings[0].provider.as_str(), "github");
+    assert_eq!(bindings[0].kind, "pr_opened");
+    assert_eq!(bindings[0].handler.kind(), "persona");
+    assert_eq!(bindings[0].daily_cost_usd, Some(2.0));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn collect_manifest_triggers_accepts_persona_handler_uri() {
+    let tmp = tempfile::tempdir().unwrap();
+    let harn_file = write_trigger_project(
+        tmp.path(),
+        r#"
+[[personas]]
+name = "merge_captain"
+description = "Owns PR readiness."
+entry_workflow = "workflows/merge_captain.harn#run"
+tools = ["github"]
+autonomy = "suggest"
+receipts = "required"
+
+[[triggers]]
+id = "merge-captain-pr-opened"
+kind = "webhook"
+provider = "github"
+match = { events = ["pr_opened"] }
+handler = "persona://merge_captain"
+secrets = { signing_secret = "github/webhook-secret" }
+"#,
+        None,
+    );
+    let mut vm = test_vm();
+    let collected = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+        .await
+        .expect("trigger collection succeeds");
+
+    assert_eq!(collected.len(), 1);
+    assert!(matches!(
+        &collected[0].handler,
+        CollectedTriggerHandler::Persona { binding } if binding.name == "merge_captain"
+            && binding.entry_workflow == "workflows/merge_captain.harn#run"
+    ));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn collect_manifest_triggers_accepts_harn_provider_override() {
     let tmp = tempfile::tempdir().unwrap();

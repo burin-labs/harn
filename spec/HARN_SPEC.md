@@ -4193,11 +4193,13 @@ directory when none is supplied).
 ### `[[personas]]` — durable agent role manifests
 
 `[[personas]]` entries define durable agent roles in the package/workspace
-manifest. Tooling parses, validates, lists, and inspects the contract. The
-continuous runtime records lifecycle controls, schedule and trigger wake
-receipts, single-writer leases, budget receipts, and status snapshots in the
-`persona.runtime.events` EventLog topic; long-lived hosted wake loops and typed
-handoff dispatch remain host/orchestrator work.
+manifest. The canonical typed schema and validator live in `harn-modules` so
+CLI, host, cloud, and editor consumers share the same contract. Tooling parses,
+validates, lists, and inspects the contract. The continuous runtime records
+lifecycle controls, schedule and trigger wake receipts, single-writer leases,
+budget receipts, and status snapshots in the `persona.runtime.events` EventLog
+topic; long-lived hosted wake loops and typed handoff dispatch remain
+host/orchestrator work.
 
 Required fields are `name`, `description`, `entry_workflow`, either `tools` or
 `capabilities`, `autonomy_tier`, and `receipt_policy`. Optional fields include
@@ -4227,6 +4229,10 @@ Validation rejects missing required fields, malformed or unknown
 unknown budget/model/source/rollout fields, negative budget amounts, and invalid
 rollout percentages. `harn persona list` and `harn persona inspect <name>
 --json` expose the resolved schema for hosts such as IDEs and cloud runners.
+`harn persona check <path>` validates a package or standalone persona manifest
+through the same canonical validator. Persona `triggers` install manifest
+trigger bindings whose handler kind is `persona`; explicit `[[triggers]]`
+entries may also use `handler = "persona://<name>"`.
 `harn persona status <name> --json` exposes stable runtime state including
 lifecycle state, active lease, last run, next scheduled run, budget status, and
 last error. `pause` queues later events, `resume` drains queued events under

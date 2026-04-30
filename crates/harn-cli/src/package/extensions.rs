@@ -36,6 +36,8 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, S
         resolved_provider_connectors_from_manifest(&root_manifest, &manifest_dir);
 
     Ok(RuntimeExtensions {
+        root_manifest_path: Some(manifest_dir.join(MANIFEST)),
+        root_manifest_dir: Some(manifest_dir),
         root_manifest: Some(root_manifest),
         llm: (!llm.is_empty()).then_some(llm),
         capabilities: (!is_empty_capabilities(&capabilities)).then_some(capabilities),
@@ -181,6 +183,10 @@ pub async fn collect_manifest_triggers(
                 allow_cleartext,
             },
             TriggerHandlerUri::Worker { queue } => CollectedTriggerHandler::Worker { queue },
+            TriggerHandlerUri::Persona { name } => {
+                let binding = persona_runtime_binding_for_handler(extensions, trigger, &name)?;
+                CollectedTriggerHandler::Persona { binding }
+            }
         };
 
         let collected_when = if let Some(when_raw) = &trigger.when {
@@ -388,6 +394,42 @@ pub(crate) async fn collect_trigger_flow_control(
     Ok(flow)
 }
 
+fn persona_runtime_binding_for_handler(
+    extensions: &RuntimeExtensions,
+    trigger: &ResolvedTriggerConfig,
+    name: &str,
+) -> Result<harn_vm::PersonaRuntimeBinding, String> {
+    let Some(manifest) = extensions.root_manifest.as_ref() else {
+        return Err(trigger_error(
+            trigger,
+            format!("handler persona://{name} requires a root manifest"),
+        ));
+    };
+    let Some(persona) = manifest
+        .personas
+        .iter()
+        .find(|persona| persona.name.as_deref() == Some(name))
+    else {
+        return Err(trigger_error(
+            trigger,
+            format!("handler persona://{name} does not match a declared persona"),
+        ));
+    };
+    Ok(harn_vm::PersonaRuntimeBinding {
+        name: name.to_string(),
+        template_ref: persona_template_ref(persona),
+        entry_workflow: persona.entry_workflow.clone().unwrap_or_default(),
+        schedules: persona.schedules.clone(),
+        triggers: persona.triggers.clone(),
+        budget: harn_vm::PersonaBudgetPolicy {
+            daily_usd: persona.budget.daily_usd,
+            hourly_usd: persona.budget.hourly_usd,
+            run_usd: persona.budget.run_usd,
+            max_tokens: persona.budget.max_tokens,
+        },
+    })
+}
+
 pub(crate) async fn compile_optional_trigger_expression(
     vm: &mut harn_vm::Vm,
     trigger: &ResolvedTriggerConfig,
@@ -496,6 +538,16 @@ pub fn manifest_trigger_binding_spec(
             serde_json::json!({
                 "kind": "worker",
                 "queue": queue,
+            }),
+        ),
+        CollectedTriggerHandler::Persona { binding } => (
+            harn_vm::TriggerHandlerSpec::Persona {
+                binding: binding.clone(),
+            },
+            serde_json::json!({
+                "kind": "persona",
+                "name": binding.name,
+                "entry_workflow": binding.entry_workflow,
             }),
         ),
     };
@@ -622,7 +674,15 @@ pub async fn install_manifest_triggers(
 ) -> Result<(), String> {
     install_orchestrator_budget(extensions);
     let collected = collect_manifest_triggers(vm, extensions).await?;
-    install_collected_manifest_triggers(&collected).await
+    let mut bindings: Vec<_> = collected
+        .iter()
+        .cloned()
+        .map(manifest_trigger_binding_spec)
+        .collect();
+    bindings.extend(collect_persona_trigger_binding_specs(extensions)?);
+    harn_vm::install_manifest_triggers(bindings)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 pub async fn install_collected_manifest_triggers(
@@ -638,6 +698,150 @@ pub async fn install_collected_manifest_triggers(
         .map_err(|error| error.to_string())
 }
 
+pub fn collect_persona_trigger_binding_specs(
+    extensions: &RuntimeExtensions,
+) -> Result<Vec<harn_vm::TriggerBindingSpec>, String> {
+    let Some(manifest) = extensions.root_manifest.clone() else {
+        return Ok(Vec::new());
+    };
+    let manifest_path = extensions
+        .root_manifest_path
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(MANIFEST));
+    let manifest_dir = extensions
+        .root_manifest_dir
+        .clone()
+        .or_else(|| manifest_path.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("."));
+    let resolved = validate_and_resolve_personas(manifest, manifest_path.clone(), manifest_dir)
+        .map_err(|errors| {
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        })?;
+    let mut bindings = Vec::new();
+    for persona in resolved.personas {
+        let Some(name) = persona.name.clone() else {
+            continue;
+        };
+        for trigger in &persona.triggers {
+            let Some((provider, kind)) = trigger.split_once('.') else {
+                continue;
+            };
+            let provider = provider.trim();
+            let kind = kind.trim();
+            if provider.is_empty() || kind.is_empty() {
+                continue;
+            }
+            bindings.push(persona_trigger_binding_spec(
+                &resolved.manifest_path,
+                &name,
+                provider,
+                kind,
+                &persona,
+            ));
+        }
+    }
+    Ok(bindings)
+}
+
+fn persona_trigger_binding_spec(
+    manifest_path: &Path,
+    name: &str,
+    provider: &str,
+    kind: &str,
+    persona: &PersonaManifestEntry,
+) -> harn_vm::TriggerBindingSpec {
+    let runtime_binding = harn_vm::PersonaRuntimeBinding {
+        name: name.to_string(),
+        template_ref: persona_template_ref(persona),
+        entry_workflow: persona.entry_workflow.clone().unwrap_or_default(),
+        schedules: persona.schedules.clone(),
+        triggers: persona.triggers.clone(),
+        budget: harn_vm::PersonaBudgetPolicy {
+            daily_usd: persona.budget.daily_usd,
+            hourly_usd: persona.budget.hourly_usd,
+            run_usd: persona.budget.run_usd,
+            max_tokens: persona.budget.max_tokens,
+        },
+    };
+    let id = format!("persona.{name}.{provider}.{kind}");
+    let handler = harn_vm::TriggerHandlerSpec::Persona {
+        binding: runtime_binding.clone(),
+    };
+    let fingerprint = serde_json::to_string(&serde_json::json!({
+        "id": &id,
+        "kind": kind,
+        "provider": provider,
+        "handler": {
+            "kind": "persona",
+            "name": name,
+            "entry_workflow": runtime_binding.entry_workflow,
+        },
+        "budget": runtime_binding.budget,
+        "manifest_path": manifest_path,
+    }))
+    .unwrap_or_else(|_| format!("{id}:{provider}:{kind}:{name}"));
+
+    harn_vm::TriggerBindingSpec {
+        id,
+        source: harn_vm::TriggerBindingSource::Manifest,
+        kind: kind.to_string(),
+        provider: harn_vm::ProviderId::from(provider.to_string()),
+        autonomy_tier: persona
+            .autonomy_tier
+            .map(persona_autonomy_to_vm)
+            .unwrap_or(harn_vm::AutonomyTier::Suggest),
+        handler,
+        dispatch_priority: harn_vm::WorkerQueuePriority::Normal,
+        when: None,
+        when_budget: None,
+        retry: harn_vm::TriggerRetryConfig::default(),
+        match_events: vec![kind.to_string()],
+        dedupe_key: None,
+        filter: None,
+        dedupe_retention_days: 7,
+        daily_cost_usd: persona.budget.daily_usd,
+        hourly_cost_usd: persona.budget.hourly_usd,
+        max_autonomous_decisions_per_hour: None,
+        max_autonomous_decisions_per_day: None,
+        on_budget_exhausted: harn_vm::TriggerBudgetExhaustionStrategy::RetryLater,
+        max_concurrent: None,
+        flow_control: harn_vm::TriggerFlowControlConfig::default(),
+        manifest_path: Some(manifest_path.to_path_buf()),
+        package_name: None,
+        definition_fingerprint: fingerprint,
+    }
+}
+
+fn persona_autonomy_to_vm(value: PersonaAutonomyTier) -> harn_vm::AutonomyTier {
+    match value {
+        PersonaAutonomyTier::Shadow => harn_vm::AutonomyTier::Shadow,
+        PersonaAutonomyTier::Suggest => harn_vm::AutonomyTier::Suggest,
+        PersonaAutonomyTier::ActWithApproval => harn_vm::AutonomyTier::ActWithApproval,
+        PersonaAutonomyTier::ActAuto => harn_vm::AutonomyTier::ActAuto,
+    }
+}
+
+fn persona_template_ref(persona: &PersonaManifestEntry) -> Option<String> {
+    persona
+        .package_source
+        .package
+        .as_ref()
+        .zip(persona.version.as_ref())
+        .map(|(package, version)| format!("{package}@{version}"))
+        .or_else(|| persona.package_source.package.clone())
+        .or_else(|| {
+            persona
+                .name
+                .as_ref()
+                .zip(persona.version.as_ref())
+                .map(|(name, version)| format!("{name}@{version}"))
+        })
+}
+
 pub fn load_personas_from_manifest_path(
     manifest_path: &Path,
 ) -> Result<ResolvedPersonaManifest, Vec<PersonaValidationError>> {
@@ -650,14 +854,63 @@ pub fn load_personas_from_manifest_path(
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let manifest = read_manifest_from_path(&manifest_path).map_err(|message| {
-        vec![PersonaValidationError {
-            manifest_path: manifest_path.clone(),
-            field_path: "harn.toml".to_string(),
-            message,
-        }]
-    })?;
+    let manifest = match read_manifest_from_path(&manifest_path) {
+        Ok(manifest) => manifest,
+        Err(message) => {
+            if let Ok(document) =
+                harn_modules::personas::parse_persona_manifest_file(&manifest_path)
+            {
+                if !document.personas.is_empty() {
+                    return validate_and_resolve_standalone_personas(
+                        document.personas,
+                        manifest_path,
+                        manifest_dir,
+                    );
+                }
+            }
+            return Err(vec![PersonaValidationError {
+                manifest_path: manifest_path.clone(),
+                field_path: "harn.toml".to_string(),
+                message,
+            }]);
+        }
+    };
+    if manifest.personas.is_empty() {
+        if let Ok(document) = harn_modules::personas::parse_persona_manifest_file(&manifest_path) {
+            if !document.personas.is_empty() {
+                return validate_and_resolve_standalone_personas(
+                    document.personas,
+                    manifest_path,
+                    manifest_dir,
+                );
+            }
+        }
+    }
     validate_and_resolve_personas(manifest, manifest_path, manifest_dir)
+}
+
+fn validate_and_resolve_standalone_personas(
+    personas: Vec<PersonaManifestEntry>,
+    manifest_path: PathBuf,
+    manifest_dir: PathBuf,
+) -> Result<ResolvedPersonaManifest, Vec<PersonaValidationError>> {
+    let known_names = personas
+        .iter()
+        .filter_map(|persona| persona.name.as_ref())
+        .filter(|name| !name.trim().is_empty())
+        .cloned()
+        .collect();
+    let context = harn_modules::personas::PersonaValidationContext {
+        known_capabilities: harn_modules::personas::default_persona_capabilities(),
+        known_tools: BTreeSet::new(),
+        known_names,
+    };
+    harn_modules::personas::validate_persona_manifests(&manifest_path, &personas, &context)?;
+    Ok(ResolvedPersonaManifest {
+        manifest_path,
+        manifest_dir,
+        personas,
+    })
 }
 
 pub fn load_personas_config(
@@ -687,324 +940,24 @@ pub(crate) fn validate_and_resolve_personas(
         .filter(|name| !name.trim().is_empty())
         .cloned()
         .collect();
-    let mut errors = Vec::new();
-    for (index, persona) in manifest.personas.iter().enumerate() {
-        validate_persona(
-            persona,
-            index,
-            &manifest_path,
-            &known_capabilities,
-            &known_tools,
-            &known_names,
-            &mut errors,
-        );
-    }
-    if errors.is_empty() {
+    let context = harn_modules::personas::PersonaValidationContext {
+        known_capabilities,
+        known_tools,
+        known_names,
+    };
+    if let Err(errors) = harn_modules::personas::validate_persona_manifests(
+        &manifest_path,
+        &manifest.personas,
+        &context,
+    ) {
+        Err(errors)
+    } else {
         Ok(ResolvedPersonaManifest {
             manifest_path,
             manifest_dir,
             personas: manifest.personas,
         })
-    } else {
-        Err(errors)
     }
-}
-
-pub(crate) fn validate_persona(
-    persona: &PersonaManifestEntry,
-    index: usize,
-    manifest_path: &Path,
-    known_capabilities: &BTreeSet<String>,
-    known_tools: &BTreeSet<String>,
-    known_names: &BTreeSet<String>,
-    errors: &mut Vec<PersonaValidationError>,
-) {
-    let root = format!("[[personas]][{index}]");
-    for field in persona.extra.keys() {
-        persona_error(
-            manifest_path,
-            format!("{root}.{field}"),
-            "unknown persona field",
-            errors,
-        );
-    }
-    let name = validate_required_string(
-        manifest_path,
-        &root,
-        "name",
-        persona.name.as_deref(),
-        errors,
-    );
-    if let Some(name) = name {
-        validate_tokenish(manifest_path, &root, "name", name, errors);
-    }
-    validate_required_string(
-        manifest_path,
-        &root,
-        "description",
-        persona.description.as_deref(),
-        errors,
-    );
-    validate_required_string(
-        manifest_path,
-        &root,
-        "entry_workflow",
-        persona.entry_workflow.as_deref(),
-        errors,
-    );
-    if persona.tools.is_empty() && persona.capabilities.is_empty() {
-        persona_error(
-            manifest_path,
-            format!("{root}.tools"),
-            "persona requires at least one tool or capability",
-            errors,
-        );
-    }
-    if persona.autonomy_tier.is_none() {
-        persona_error(
-            manifest_path,
-            format!("{root}.autonomy_tier"),
-            "missing required autonomy tier",
-            errors,
-        );
-    }
-    if persona.receipt_policy.is_none() {
-        persona_error(
-            manifest_path,
-            format!("{root}.receipt_policy"),
-            "missing required receipt policy",
-            errors,
-        );
-    }
-    validate_string_list(manifest_path, &root, "tools", &persona.tools, errors);
-    for tool in &persona.tools {
-        if !known_tools.contains(tool) {
-            persona_error(
-                manifest_path,
-                format!("{root}.tools"),
-                format!("unknown tool '{tool}'"),
-                errors,
-            );
-        }
-    }
-    for capability in &persona.capabilities {
-        let Some((cap, op)) = capability.split_once('.') else {
-            persona_error(
-                manifest_path,
-                format!("{root}.capabilities"),
-                format!("capability '{capability}' must use capability.operation syntax"),
-                errors,
-            );
-            continue;
-        };
-        if cap.trim().is_empty() || op.trim().is_empty() {
-            persona_error(
-                manifest_path,
-                format!("{root}.capabilities"),
-                format!("capability '{capability}' must use capability.operation syntax"),
-                errors,
-            );
-        } else if !known_capabilities.contains(capability) {
-            persona_error(
-                manifest_path,
-                format!("{root}.capabilities"),
-                format!("unknown capability '{capability}'"),
-                errors,
-            );
-        }
-    }
-    validate_string_list(
-        manifest_path,
-        &root,
-        "context_packs",
-        &persona.context_packs,
-        errors,
-    );
-    validate_string_list(manifest_path, &root, "evals", &persona.evals, errors);
-    for schedule in &persona.schedules {
-        if schedule.trim().is_empty() {
-            persona_error(
-                manifest_path,
-                format!("{root}.schedules"),
-                "schedule entries must not be empty",
-                errors,
-            );
-        } else if let Err(error) = croner::Cron::from_str(schedule) {
-            persona_error(
-                manifest_path,
-                format!("{root}.schedules"),
-                format!("invalid cron schedule '{schedule}': {error}"),
-                errors,
-            );
-        }
-    }
-    for trigger in &persona.triggers {
-        if !trigger.contains('.') {
-            persona_error(
-                manifest_path,
-                format!("{root}.triggers"),
-                format!("trigger '{trigger}' must use provider.event syntax"),
-                errors,
-            );
-        }
-    }
-    for handoff in &persona.handoffs {
-        if !known_names.contains(handoff) {
-            persona_error(
-                manifest_path,
-                format!("{root}.handoffs"),
-                format!("unknown handoff target '{handoff}'"),
-                errors,
-            );
-        }
-    }
-    validate_persona_budget(manifest_path, &root, &persona.budget, errors);
-    validate_persona_nested_extra(
-        manifest_path,
-        &root,
-        "model_policy",
-        &persona.model_policy.extra,
-        errors,
-    );
-    validate_persona_nested_extra(
-        manifest_path,
-        &root,
-        "package_source",
-        &persona.package_source.extra,
-        errors,
-    );
-    validate_persona_nested_extra(
-        manifest_path,
-        &root,
-        "rollout_policy",
-        &persona.rollout_policy.extra,
-        errors,
-    );
-    if let Some(percentage) = persona.rollout_policy.percentage {
-        if percentage > 100 {
-            persona_error(
-                manifest_path,
-                format!("{root}.rollout_policy.percentage"),
-                "rollout percentage must be between 0 and 100",
-                errors,
-            );
-        }
-    }
-}
-
-pub(crate) fn validate_required_string<'a>(
-    manifest_path: &Path,
-    root: &str,
-    field: &str,
-    value: Option<&'a str>,
-    errors: &mut Vec<PersonaValidationError>,
-) -> Option<&'a str> {
-    match value.map(str::trim) {
-        Some(value) if !value.is_empty() => Some(value),
-        _ => {
-            persona_error(
-                manifest_path,
-                format!("{root}.{field}"),
-                format!("missing required {field}"),
-                errors,
-            );
-            None
-        }
-    }
-}
-
-pub(crate) fn validate_string_list(
-    manifest_path: &Path,
-    root: &str,
-    field: &str,
-    values: &[String],
-    errors: &mut Vec<PersonaValidationError>,
-) {
-    for value in values {
-        if value.trim().is_empty() {
-            persona_error(
-                manifest_path,
-                format!("{root}.{field}"),
-                format!("{field} entries must not be empty"),
-                errors,
-            );
-        } else {
-            validate_tokenish(manifest_path, root, field, value, errors);
-        }
-    }
-}
-
-pub(crate) fn validate_tokenish(
-    manifest_path: &Path,
-    root: &str,
-    field: &str,
-    value: &str,
-    errors: &mut Vec<PersonaValidationError>,
-) {
-    if !value
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/'))
-    {
-        persona_error(
-            manifest_path,
-            format!("{root}.{field}"),
-            format!("'{value}' must contain only letters, numbers, '.', '-', '_', or '/'"),
-            errors,
-        );
-    }
-}
-
-pub(crate) fn validate_persona_budget(
-    manifest_path: &Path,
-    root: &str,
-    budget: &PersonaBudget,
-    errors: &mut Vec<PersonaValidationError>,
-) {
-    validate_persona_nested_extra(manifest_path, root, "budget", &budget.extra, errors);
-    for (field, value) in [
-        ("daily_usd", budget.daily_usd),
-        ("hourly_usd", budget.hourly_usd),
-        ("run_usd", budget.run_usd),
-    ] {
-        if value.is_some_and(|number| !number.is_finite() || number < 0.0) {
-            persona_error(
-                manifest_path,
-                format!("{root}.budget.{field}"),
-                "budget amounts must be finite non-negative numbers",
-                errors,
-            );
-        }
-    }
-}
-
-pub(crate) fn validate_persona_nested_extra(
-    manifest_path: &Path,
-    root: &str,
-    field: &str,
-    extra: &BTreeMap<String, toml::Value>,
-    errors: &mut Vec<PersonaValidationError>,
-) {
-    for key in extra.keys() {
-        persona_error(
-            manifest_path,
-            format!("{root}.{field}.{key}"),
-            format!("unknown {field} field"),
-            errors,
-        );
-    }
-}
-
-pub(crate) fn persona_error(
-    manifest_path: &Path,
-    field_path: String,
-    message: impl Into<String>,
-    errors: &mut Vec<PersonaValidationError>,
-) {
-    errors.push(PersonaValidationError {
-        manifest_path: manifest_path.to_path_buf(),
-        field_path,
-        message: message.into(),
-    });
 }
 
 pub(crate) fn known_persona_capabilities(
@@ -1080,71 +1033,7 @@ pub(crate) fn collect_persona_capabilities_from_json(
 }
 
 pub(crate) fn default_persona_capability_map() -> BTreeMap<&'static str, Vec<&'static str>> {
-    BTreeMap::from([
-        (
-            "workspace",
-            vec![
-                "read_text",
-                "write_text",
-                "apply_edit",
-                "delete",
-                "exists",
-                "file_exists",
-                "list",
-                "project_root",
-                "roots",
-            ],
-        ),
-        ("process", vec!["exec"]),
-        ("template", vec!["render"]),
-        ("interaction", vec!["ask"]),
-        (
-            "runtime",
-            vec![
-                "approved_plan",
-                "dry_run",
-                "pipeline_input",
-                "record_run",
-                "set_result",
-                "task",
-            ],
-        ),
-        (
-            "project",
-            vec![
-                "agent_instructions",
-                "code_patterns",
-                "compute_content_hash",
-                "ide_context",
-                "lessons",
-                "mcp_config",
-                "metadata_get",
-                "metadata_refresh_hashes",
-                "metadata_save",
-                "metadata_set",
-                "metadata_stale",
-                "scan",
-                "scope_test_command",
-                "test_commands",
-            ],
-        ),
-        (
-            "session",
-            vec![
-                "active_roots",
-                "changed_paths",
-                "preread_get",
-                "preread_read_many",
-            ],
-        ),
-        (
-            "editor",
-            vec!["get_active_file", "get_selection", "get_visible_files"],
-        ),
-        ("diagnostics", vec!["get_causal_traces", "get_errors"]),
-        ("git", vec!["get_branch", "get_diff"]),
-        ("learning", vec!["get_learned_rules", "report_correction"]),
-    ])
+    harn_modules::personas::default_persona_capability_map()
 }
 
 pub(crate) fn known_persona_tools(manifest: &Manifest) -> BTreeSet<String> {

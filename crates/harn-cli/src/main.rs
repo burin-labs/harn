@@ -687,6 +687,9 @@ async fn async_main() {
             args.json,
         ),
         Command::Persona(args) => match args.command {
+            PersonaCommand::Check(check) => {
+                commands::persona::run_check(args.manifest.as_deref(), &check)
+            }
             PersonaCommand::List(list) => {
                 commands::persona::run_list(args.manifest.as_deref(), &list)
             }

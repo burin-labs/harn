@@ -11,8 +11,12 @@ not just natural-language behavior.
 
 ## Manifest Shape
 
-Persona v1 lives in `harn.toml` as `[[personas]]` entries. This keeps personas
-compatible with package manifests and the existing manifest discovery model.
+Persona v1 is a typed manifest schema owned by `harn-modules`, so hosts such as
+`harn-cli`, Harn Cloud, and Burin Code can parse and validate the same contract.
+The usual form lives in `harn.toml` as `[[personas]]` entries, which keeps
+personas compatible with package manifests and the existing manifest discovery
+model. Standalone persona TOML files can use the same fields at the top level.
+
 The continuous runtime is intentionally small and event-sourced: it records
 schedule and trigger wakes, leases, lifecycle controls, budget receipts, and
 status snapshots without inventing a hidden hosted scheduler.
@@ -38,6 +42,10 @@ model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4" }
 rollout_policy = { mode = "approval_only", percentage = 25 }
 package_source = { package = "ops-personas", path = "personas/merge" }
 ```
+
+`autonomy` is accepted as an alias for `autonomy_tier`, and `receipts` is
+accepted as an alias for `receipt_policy` for hosts that present the shorter
+service-contract vocabulary.
 
 Required fields:
 
@@ -68,8 +76,8 @@ Optional fields:
 
 ## Validation
 
-`harn persona list` and `harn persona inspect` validate the resolved manifest
-before printing output. Validation currently checks:
+`harn persona check`, `harn persona list`, and `harn persona inspect` validate
+the resolved manifest before printing output. Validation currently checks:
 
 - missing required fields, including `entry_workflow`
 - malformed or unknown `capability.operation` entries
@@ -88,6 +96,8 @@ extra operations declared in `[check.host_capabilities]` or
 ```bash
 harn persona list
 harn persona list --json
+harn persona check personas/ship_captain/harn.toml
+harn persona check personas/ship_captain/harn.toml --json
 harn persona inspect merge_captain
 harn persona inspect merge_captain --json
 harn persona --manifest examples/personas/harn.toml inspect merge_captain --json
@@ -110,6 +120,25 @@ The JSON output is stable enough for hosts such as IDEs and cloud runners to
 consume. It includes name, version, tools, capabilities, autonomy tier, model
 policy, budget, triggers, handoffs, context packs, evals, receipt policy, and
 manifest source.
+
+## Trigger Handlers
+
+Persona trigger names are first-class trigger registrations. A persona with
+`triggers = ["github.pr_opened"]` installs a manifest trigger binding for
+provider `github`, event kind `pr_opened`, and handler kind `persona`. Dispatch
+records a `persona.trigger.received` event plus the normal persona run receipt
+in `persona.runtime.events`.
+
+Explicit trigger manifests can also target a persona:
+
+```toml
+[[triggers]]
+id = "merge-captain-pr-opened"
+kind = "webhook"
+provider = "github"
+match = { events = ["pr_opened"] }
+handler = "persona://merge_captain"
+```
 
 ## Continuous runtime
 

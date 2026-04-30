@@ -2169,6 +2169,8 @@ pub(crate) struct FlowArchivistScanArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum PersonaCommand {
+    /// Validate a persona manifest with the canonical harn-modules schema.
+    Check(PersonaCheckArgs),
     /// List personas declared in the resolved harn.toml.
     List(PersonaListArgs),
     /// Inspect one persona from the resolved harn.toml.
@@ -2187,6 +2189,16 @@ pub(crate) enum PersonaCommand {
     Trigger(PersonaTriggerArgs),
     /// Record an expensive-work budget receipt for a persona.
     Spend(PersonaSpendArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PersonaCheckArgs {
+    /// Persona manifest, harn.toml path, or directory containing harn.toml.
+    #[arg(value_name = "PATH")]
+    pub path: Option<PathBuf>,
+    /// Emit typed validation errors as JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -2532,9 +2544,9 @@ mod tests {
         CheckOutputFormat, Cli, Command, ConnectCommand, ConnectorCommand, CrystallizeCommand,
         FlowArchivistCommand, FlowCommand, McpCommand, OrchestratorCommand,
         OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
-        OrchestratorTenantCommand, PackageCacheCommand, PackageCommand, ProjectTemplate,
-        RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TraceCommand,
-        TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+        OrchestratorTenantCommand, PackageCacheCommand, PackageCommand, PersonaCommand,
+        ProjectTemplate, RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
+        SkillsCommand, TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
     };
     use clap::Parser;
 
@@ -3057,6 +3069,35 @@ mod tests {
             Some(PathBuf::from(".harn/archivist/proposals.json"))
         );
         assert!(scan.json);
+    }
+
+    #[test]
+    fn test_parses_persona_check_flags() {
+        let cli = Cli::parse_from([
+            "harn",
+            "persona",
+            "--manifest",
+            "examples/personas/harn.toml",
+            "check",
+            "personas/ship_captain/harn.toml",
+            "--json",
+        ]);
+
+        let Command::Persona(args) = cli.command.unwrap() else {
+            panic!("expected persona command");
+        };
+        assert_eq!(
+            args.manifest,
+            Some(PathBuf::from("examples/personas/harn.toml"))
+        );
+        let PersonaCommand::Check(check) = args.command else {
+            panic!("expected persona check command");
+        };
+        assert_eq!(
+            check.path,
+            Some(PathBuf::from("personas/ship_captain/harn.toml"))
+        );
+        assert!(check.json);
     }
 
     #[test]

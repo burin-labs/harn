@@ -383,6 +383,17 @@ pub(crate) fn parse_trigger_handler_uri(
             queue: queue.to_string(),
         });
     }
+    if let Some(name) = raw.strip_prefix("persona://") {
+        if name.is_empty() {
+            return Err(trigger_error(
+                trigger,
+                "handler persona:// name cannot be empty",
+            ));
+        }
+        return Ok(TriggerHandlerUri::Persona {
+            name: name.to_string(),
+        });
+    }
     if raw.contains("://") {
         return Err(trigger_error(
             trigger,

@@ -2434,6 +2434,30 @@ impl Dispatcher {
                 Ok(serde_json::to_value(receipt)
                     .map_err(|error| DispatchError::Serde(error.to_string()))?)
             }
+            DispatchUri::Persona { .. } => {
+                let TriggerHandlerSpec::Persona {
+                    binding: persona_binding,
+                } = &binding.handler
+                else {
+                    return Err(DispatchError::Local(format!(
+                        "trigger '{}' resolved to a persona dispatch URI but does not carry a persona binding",
+                        binding.id.as_str()
+                    )));
+                };
+                let receipt = crate::fire_persona_trigger(
+                    &self.event_log,
+                    persona_binding,
+                    event.provider.as_str(),
+                    &event.kind,
+                    trigger_event_persona_metadata(event),
+                    crate::PersonaRunCost::default(),
+                    crate::persona_now_ms(),
+                )
+                .await
+                .map_err(DispatchError::Local)?;
+                Ok(serde_json::to_value(receipt)
+                    .map_err(|error| DispatchError::Serde(error.to_string()))?)
+            }
         }
     }
 
@@ -3465,6 +3489,7 @@ fn dispatch_error_label(error: &DispatchError) -> &'static str {
 fn dispatch_success_outcome(route: &DispatchUri, result: &serde_json::Value) -> &'static str {
     match route {
         DispatchUri::Worker { .. } => "enqueued",
+        DispatchUri::Persona { .. } => "recorded",
         DispatchUri::A2a { .. }
             if result.get("kind").and_then(|value| value.as_str()) == Some("a2a_task_handle") =>
         {
@@ -3544,6 +3569,59 @@ fn trigger_node_metadata(event: &TriggerEvent) -> BTreeMap<String, serde_json::V
     metadata
 }
 
+fn trigger_event_persona_metadata(event: &TriggerEvent) -> BTreeMap<String, String> {
+    let mut metadata = BTreeMap::new();
+    metadata.insert("trigger_event_id".to_string(), event.id.0.clone());
+    metadata.insert("event_id".to_string(), event.id.0.clone());
+    metadata.insert("dedupe_key".to_string(), event.dedupe_key.clone());
+    metadata.insert("trace_id".to_string(), event.trace_id.0.clone());
+    if let Some(tenant_id) = &event.tenant_id {
+        metadata.insert("tenant_id".to_string(), tenant_id.0.clone());
+    }
+    for (key, value) in &event.headers {
+        metadata.insert(format!("header.{key}"), value.clone());
+    }
+    if let Ok(payload) = serde_json::to_value(&event.provider_payload) {
+        collect_persona_payload_metadata("", &payload, &mut metadata);
+        if let Some(raw) = payload.get("raw") {
+            collect_persona_payload_metadata("", raw, &mut metadata);
+        }
+    }
+    metadata
+}
+
+fn collect_persona_payload_metadata(
+    prefix: &str,
+    value: &serde_json::Value,
+    metadata: &mut BTreeMap<String, String>,
+) {
+    let serde_json::Value::Object(object) = value else {
+        return;
+    };
+    for (key, value) in object {
+        let path = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        match value {
+            serde_json::Value::String(text) => {
+                metadata.insert(path, text.clone());
+            }
+            serde_json::Value::Number(number) => {
+                metadata.insert(path, number.to_string());
+            }
+            serde_json::Value::Bool(flag) => {
+                metadata.insert(path, flag.to_string());
+            }
+            serde_json::Value::Object(_) if prefix.is_empty() => {
+                collect_persona_payload_metadata(&path, value, metadata);
+            }
+            _ => {}
+        }
+    }
+}
+
 fn dispatch_node_metadata(
     route: &DispatchUri,
     binding: &TriggerBinding,
@@ -3567,6 +3645,9 @@ fn dispatch_node_metadata(
     }
     if let DispatchUri::Worker { queue } = route {
         metadata.insert("queue_name".to_string(), serde_json::json!(queue));
+    }
+    if let DispatchUri::Persona { name } = route {
+        metadata.insert("persona".to_string(), serde_json::json!(name));
     }
     metadata
 }
@@ -3605,6 +3686,14 @@ fn dispatch_success_metadata(
                     "response_topic".to_string(),
                     serde_json::json!(response_topic),
                 );
+            }
+        }
+        DispatchUri::Persona { .. } => {
+            if let Some(receipt_id) = result.get("receipt_id").and_then(|value| value.as_str()) {
+                metadata.insert("receipt_id".to_string(), serde_json::json!(receipt_id));
+            }
+            if let Some(status) = result.get("status").and_then(|value| value.as_str()) {
+                metadata.insert("status".to_string(), serde_json::json!(status));
             }
         }
         DispatchUri::Local { .. } => {}

@@ -33,6 +33,9 @@ pub enum DispatchUri {
     Worker {
         queue: String,
     },
+    Persona {
+        name: String,
+    },
 }
 
 impl DispatchUri {
@@ -62,6 +65,16 @@ impl DispatchUri {
                 queue: queue.to_string(),
             });
         }
+        if let Some(name) = raw.strip_prefix("persona://") {
+            if name.is_empty() {
+                return Err(DispatchUriError::MissingTarget {
+                    scheme: "persona".to_string(),
+                });
+            }
+            return Ok(Self::Persona {
+                name: name.to_string(),
+            });
+        }
         if let Some((scheme, _)) = raw.split_once("://") {
             return Err(DispatchUriError::UnknownScheme(scheme.to_string()));
         }
@@ -75,6 +88,7 @@ impl DispatchUri {
             Self::Local { .. } => "local",
             Self::A2a { .. } => "a2a",
             Self::Worker { .. } => "worker",
+            Self::Persona { .. } => "persona",
         }
     }
 
@@ -83,6 +97,7 @@ impl DispatchUri {
             Self::Local { raw } => raw.clone(),
             Self::A2a { target, .. } => format!("a2a://{target}"),
             Self::Worker { queue } => format!("worker://{queue}"),
+            Self::Persona { name } => format!("persona://{name}"),
         }
     }
 }
@@ -100,6 +115,9 @@ impl From<&TriggerHandlerSpec> for DispatchUri {
             },
             TriggerHandlerSpec::Worker { queue } => Self::Worker {
                 queue: queue.clone(),
+            },
+            TriggerHandlerSpec::Persona { binding } => Self::Persona {
+                name: binding.name.clone(),
             },
         }
     }
