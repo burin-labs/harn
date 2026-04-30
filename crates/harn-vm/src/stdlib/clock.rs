@@ -95,6 +95,57 @@ pub(crate) fn reset_clock_state() {
     clear_mock();
 }
 
+/// RAII guard that installs the stdlib clock mock for the lifetime of the
+/// guard and restores the previous state on drop. Use from Rust-side tests
+/// that exercise builtins (`elapsed`, `now_ms`, `timestamp`, `sleep_ms`)
+/// without needing to drive a `tokio::time::pause()` runtime.
+///
+/// Pairs with `tokio::time::pause()` for tests that span both worlds —
+/// the tokio virtual clock pauses await-driven sleeps, while this guard
+/// pauses the synchronous wall/monotonic clocks observed by stdlib code
+/// and Harn scripts.
+#[allow(dead_code)]
+pub struct MockClockGuard {
+    previous: Option<ClockMock>,
+}
+
+#[allow(dead_code)]
+impl MockClockGuard {
+    /// Install a mock pinned to `wall_ms`. Monotonic counter starts at 0.
+    pub fn install(wall_ms: i64) -> Self {
+        let previous = CLOCK_MOCK.with(|m| {
+            m.borrow_mut().replace(ClockMock {
+                wall_ms,
+                monotonic_ms: 0,
+            })
+        });
+        Self { previous }
+    }
+
+    /// Advance the mocked clock by `ms` milliseconds.
+    pub fn advance(&self, ms: i64) {
+        advance(ms);
+    }
+
+    /// Current mocked wall-clock millis.
+    pub fn now_wall_ms(&self) -> i64 {
+        now_wall_ms()
+    }
+
+    /// Current mocked monotonic millis.
+    pub fn now_monotonic_ms(&self) -> i64 {
+        now_monotonic_ms()
+    }
+}
+
+impl Drop for MockClockGuard {
+    fn drop(&mut self) {
+        CLOCK_MOCK.with(|m| {
+            *m.borrow_mut() = self.previous.take();
+        });
+    }
+}
+
 pub(crate) fn register_clock_builtins(vm: &mut Vm) {
     // Replace the existing `timestamp` registration in process.rs so it
     // honors the mock. Process.rs registers it first; we override here.
@@ -177,5 +228,36 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2));
         let b = now_wall_ms();
         assert!(b >= a, "wall clock should not go backwards");
+    }
+
+    #[test]
+    fn mock_clock_guard_restores_previous_state_on_drop() {
+        clear_mock();
+        assert!(!is_mocked());
+        {
+            let guard = MockClockGuard::install(2_000_000);
+            assert!(is_mocked());
+            assert_eq!(guard.now_wall_ms(), 2_000_000);
+            guard.advance(100);
+            assert_eq!(now_wall_ms(), 2_000_100);
+            assert_eq!(now_monotonic_ms(), 100);
+        }
+        assert!(!is_mocked(), "guard should clear mock on drop");
+    }
+
+    #[test]
+    fn mock_clock_guard_nests_and_restores_outer() {
+        clear_mock();
+        let outer = MockClockGuard::install(1_000);
+        outer.advance(50);
+        assert_eq!(now_wall_ms(), 1_050);
+        {
+            let inner = MockClockGuard::install(9_000);
+            inner.advance(5);
+            assert_eq!(now_wall_ms(), 9_005);
+        }
+        assert_eq!(now_wall_ms(), 1_050, "outer mock restored after inner drop");
+        drop(outer);
+        assert!(!is_mocked());
     }
 }
