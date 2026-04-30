@@ -12,7 +12,7 @@ use harn_parser::{BindingPattern, Node, SNode, TypeExpr, TypedParam};
 use crate::complexity::cyclomatic_complexity;
 use crate::decls::{Declaration, FnDeclaration, ImportInfo, ParamDeclaration, TypeDeclaration};
 use crate::diagnostic::{LintDiagnostic, LintSeverity, DEFAULT_COMPLEXITY_THRESHOLD};
-use crate::fixes::{append_sink_fix, simple_ident_rename_fix};
+use crate::fixes::{append_sink_fix, remove_method_call_wrapper_fix, simple_ident_rename_fix};
 use crate::harndoc::check_legacy_doc_comments;
 use crate::naming::{is_pascal_case, is_snake_case, to_pascal_case, to_snake_case};
 use crate::rules::blank_lines::check_blank_line_between_items;
@@ -338,6 +338,46 @@ impl<'a> Linter<'a> {
             suggestion: Some(format!("append `.{sink}()` to materialize the iterator")),
             fix: Some(fix),
         });
+    }
+
+    pub(super) fn clone_call_receiver(node: &SNode) -> Option<&SNode> {
+        match &node.node {
+            Node::MethodCall {
+                object,
+                method,
+                args,
+            } if method == "clone" && args.is_empty() => Some(object),
+            _ => None,
+        }
+    }
+
+    pub(super) fn check_redundant_clone_args(&mut self, callee: &str, args: &[SNode]) {
+        for arg in args {
+            let Some(receiver) = Self::clone_call_receiver(arg) else {
+                continue;
+            };
+            let is_drop = callee == "drop";
+            let message = if is_drop {
+                "cloned value is immediately dropped".to_string()
+            } else {
+                "cloned value is immediately passed by value".to_string()
+            };
+            let suggestion = if is_drop {
+                "drop the original value directly".to_string()
+            } else {
+                "pass the original value directly unless a distinct snapshot is required"
+                    .to_string()
+            };
+            let fix = remove_method_call_wrapper_fix(self.source, arg.span, receiver.span);
+            self.diagnostics.push(LintDiagnostic {
+                rule: "redundant-clone",
+                message,
+                span: arg.span,
+                severity: LintSeverity::Warning,
+                suggestion: Some(suggestion),
+                fix,
+            });
+        }
     }
 
     pub(super) fn record_param_type_references(&mut self, params: &[TypedParam]) {
@@ -784,8 +824,8 @@ impl<'a> Linter<'a> {
         for (idx, node) in nodes.iter().enumerate() {
             if found_terminator {
                 self.diagnostics.push(LintDiagnostic {
-                    rule: "unreachable-code",
-                    message: "unreachable code after return or throw".to_string(),
+                    rule: "dead-code-after-return",
+                    message: "unreachable code after a terminating statement".to_string(),
                     span: node.span,
                     severity: LintSeverity::Warning,
                     suggestion: Some("remove the unreachable code".to_string()),
@@ -800,12 +840,67 @@ impl<'a> Linter<'a> {
                 self.check_discarded_approval_result(node);
             }
 
+            if let Some(next) = nodes.get(idx + 1) {
+                self.check_let_then_return(node, next);
+            }
+
             self.lint_node(node);
 
             if stmt_definitely_exits(node) {
                 found_terminator = true;
             }
         }
+    }
+
+    fn check_let_then_return(&mut self, node: &SNode, next: &SNode) {
+        let Node::LetBinding {
+            pattern: BindingPattern::Identifier(name),
+            type_ann: None,
+            value,
+        } = &node.node
+        else {
+            return;
+        };
+        let Node::ReturnStmt {
+            value: Some(returned),
+        } = &next.node
+        else {
+            return;
+        };
+        let Node::Identifier(returned_name) = &returned.node else {
+            return;
+        };
+        if returned_name != name {
+            return;
+        }
+
+        let fix = self.source.and_then(|src| {
+            let value_text = src.get(value.span.start..value.span.end)?;
+            Some(vec![FixEdit {
+                span: Span::with_offsets(
+                    node.span.start,
+                    next.span.end,
+                    node.span.line,
+                    node.span.column,
+                ),
+                replacement: format!("return {value_text}"),
+            }])
+        });
+        self.diagnostics.push(LintDiagnostic {
+            rule: "let-then-return",
+            message: format!("binding `{name}` is immediately returned"),
+            span: Span::with_offsets(
+                node.span.start,
+                next.span.end,
+                node.span.line,
+                node.span.column,
+            ),
+            severity: LintSeverity::Warning,
+            suggestion: Some(format!(
+                "return the expression assigned to `{name}` directly"
+            )),
+            fix,
+        });
     }
 
     fn check_discarded_approval_result(&mut self, node: &SNode) {
@@ -835,17 +930,28 @@ impl<'a> Linter<'a> {
                 continue;
             }
             if !self.references.contains(&decl.name) {
-                let fix = if decl.is_simple_ident {
-                    simple_ident_rename_fix(self.source, decl.span, &decl.name)
+                let (rule, message, suggestion, fix) = if decl.is_simple_ident {
+                    (
+                        "unused-variable",
+                        format!("variable `{}` is declared but never used", decl.name),
+                        format!("prefix with underscore: `_{}`", decl.name),
+                        simple_ident_rename_fix(self.source, decl.span, &decl.name),
+                    )
                 } else {
-                    None
+                    (
+                        "unused-pattern-binding",
+                        format!("pattern binding `{}` is never used", decl.name),
+                        "rename the binding with an underscore prefix or remove it from the pattern"
+                            .to_string(),
+                        None,
+                    )
                 };
                 self.diagnostics.push(LintDiagnostic {
-                    rule: "unused-variable",
-                    message: format!("variable `{}` is declared but never used", decl.name),
+                    rule,
+                    message,
                     span: decl.span,
                     severity: LintSeverity::Warning,
-                    suggestion: Some(format!("prefix with underscore: `_{}`", decl.name)),
+                    suggestion: Some(suggestion),
                     fix,
                 });
             }

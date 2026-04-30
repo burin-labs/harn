@@ -132,13 +132,15 @@ harn lint file.harn
 harn lint --fix file.harn   # automatically apply safe fixes
 ```
 
-The linter checks for: shadow variables, unused variables, unused types,
-undefined functions, unreachable code, missing harndoc comments, naming
-convention drift, branch-heavy functions, prompt-injection risks such as
+The linter checks for: shadow variables, unused variables, unused pattern
+bindings, unused types, undefined functions, dead code after terminating
+statements, pointless comparisons, redundant clones, missing harndoc comments,
+naming convention drift, branch-heavy functions, prompt-injection risks such as
 interpolated `llm_call` system prompts, and unnecessary conversion calls
 (`to_string("hi")`, `to_int(42)`, etc.). With `--fix`, the linter
 automatically rewrites fixable issues (e.g., `var` → `let`, boolean
-comparison simplification, unused import removal, unnecessary-cast
-removal). The same fixes are surfaced through the LSP as both
+comparison simplification, `let`-then-`return` simplification, redundant
+clone removal, unused import removal, unnecessary-cast removal). The same fixes
+are surfaced through the LSP as both
 per-diagnostic quick-fixes and a bulk `source.fixAll.harn` code action
 suitable for `editor.codeActionsOnSave`.

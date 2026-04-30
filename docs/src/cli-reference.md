@@ -242,8 +242,9 @@ contexts, but they are not preserved in formatter output.
 ## harn lint
 
 Lint one or more `.harn` files or directories for common issues (unused
-variables, unused functions, unreachable code, empty blocks, missing
-`/** */` HarnDoc on public functions, etc.).
+variables, unused functions, dead code after terminating statements,
+pointless comparisons, redundant clones, empty blocks, missing `/** */`
+HarnDoc on public functions, etc.).
 
 ```bash
 harn lint main.harn
@@ -252,8 +253,9 @@ harn lint src/ tests/
 
 Pass `--fix` to automatically apply safe fixes (e.g., `var` → `let` for
 never-reassigned bindings, boolean comparison simplification, unused import
-removal, string interpolation conversion, and removing redundant
-`to_string(...)`/`to_int(...)`/`to_list(...)` casts):
+removal, string interpolation conversion, `let`-then-`return` simplification,
+and removing redundant `clone()`/`to_string(...)`/`to_int(...)`/`to_list(...)`
+wrappers):
 
 ```bash
 harn lint --fix main.harn

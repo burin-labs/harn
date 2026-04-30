@@ -152,9 +152,17 @@ fn lint_full(
         linter
             .diagnostics
             .into_iter()
-            .filter(|d| !disabled_rules.iter().any(|r| r == d.rule))
+            .filter(|d| {
+                !disabled_rules
+                    .iter()
+                    .any(|r| rule_matches_disabled(d.rule, r))
+            })
             .collect()
     }
+}
+
+fn rule_matches_disabled(rule: &str, disabled: &str) -> bool {
+    rule == disabled || (rule == "dead-code-after-return" && disabled == "unreachable-code")
 }
 
 /// Extract all function names that appear in selective import statements

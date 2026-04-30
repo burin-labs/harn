@@ -3,7 +3,7 @@
 //! state-tracking plumbing.
 
 use harn_lexer::{FixEdit, Span, StringSegment};
-use harn_parser::{Node, SNode};
+use harn_parser::{BindingPattern, Node, SNode};
 
 use super::Linter;
 use crate::decls::{FnDeclaration, ImportInfo, TypeDeclaration};
@@ -279,6 +279,7 @@ impl<'a> Linter<'a> {
                         });
                     }
                 }
+                self.check_redundant_clone_args(name, args);
                 if let Some(target) = unnecessary_cast_target(name, args) {
                     let inner = &args[0];
                     let fix = unnecessary_cast_fix(self.source, snode.span, inner.span);
@@ -299,8 +300,17 @@ impl<'a> Linter<'a> {
                 }
             }
 
-            Node::MethodCall { object, args, .. }
-            | Node::OptionalMethodCall { object, args, .. } => {
+            Node::MethodCall {
+                object,
+                method,
+                args,
+            }
+            | Node::OptionalMethodCall {
+                object,
+                method,
+                args,
+            } => {
+                self.check_redundant_clone_args(method, args);
                 self.lint_node(object);
                 for arg in args {
                     self.lint_node(arg);
@@ -364,7 +374,24 @@ impl<'a> Linter<'a> {
             }
 
             Node::BinaryOp { op, left, right } => {
-                if op == "==" || op == "!=" {
+                let is_pointless_self_comparison = (op == "==" || op == "!=")
+                    && left.node == right.node
+                    && is_pure_expression(&left.node);
+                if is_pointless_self_comparison {
+                    let replacement = if op == "==" { "true" } else { "false" };
+                    self.diagnostics.push(LintDiagnostic {
+                        rule: "pointless-comparison",
+                        message: format!("expression is compared to itself with `{op}`"),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(format!("replace this comparison with `{replacement}`")),
+                        fix: Some(vec![FixEdit {
+                            span: snode.span,
+                            replacement: replacement.to_string(),
+                        }]),
+                    });
+                }
+                if (op == "==" || op == "!=") && !is_pointless_self_comparison {
                     let is_bool_left = matches!(left.node, Node::BoolLiteral(_));
                     let is_bool_right = matches!(right.node, Node::BoolLiteral(_));
                     if is_bool_left || is_bool_right {
@@ -509,6 +536,19 @@ impl<'a> Linter<'a> {
                 else_body,
             } => {
                 self.lint_node(condition);
+                if let Node::BoolLiteral(value) = &condition.node {
+                    self.diagnostics.push(LintDiagnostic {
+                        rule: "pointless-comparison",
+                        message: format!("if condition is always `{value}`"),
+                        span: condition.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(
+                            "remove the constant condition or replace it with real branching"
+                                .to_string(),
+                        ),
+                        fix: None,
+                    });
+                }
                 if then_body.is_empty() {
                     // Skip autofix when an `else` branch exists (dropping the
                     // whole if-else would silently drop the else body) or when
@@ -607,11 +647,14 @@ impl<'a> Linter<'a> {
                     });
                 }
                 self.push_scope();
-                for name in Self::pattern_names(pattern) {
-                    if let Some(scope) = self.scopes.last_mut() {
-                        scope.insert(name.clone());
+                match pattern {
+                    BindingPattern::Identifier(name) => {
+                        if let Some(scope) = self.scopes.last_mut() {
+                            scope.insert(name.clone());
+                        }
+                        self.references.insert(name.clone());
                     }
-                    self.references.insert(name);
+                    _ => self.declare_pattern_variables(pattern, snode.span, false),
                 }
                 self.loop_depth += 1;
                 self.lint_block(body);
