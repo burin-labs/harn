@@ -18,8 +18,8 @@ fn test_correct_typed_let() {
 fn test_type_mismatch_let() {
     let errs = errors(r#"pipeline t(task) { let x: int = "hello" }"#);
     assert_eq!(errs.len(), 1);
-    assert!(errs[0].contains("declared as int"));
-    assert!(errs[0].contains("assigned string"));
+    assert!(errs[0].contains("expected int"));
+    assert!(errs[0].contains("found string"));
 }
 
 #[test]
@@ -302,7 +302,7 @@ fn test_fn_arg_type_mismatch() {
 add("hello", 2) }"#,
     );
     assert_eq!(errs.len(), 1);
-    assert!(errs[0].contains("Argument 1"));
+    assert!(errs[0].contains("argument 1 `a`"));
     assert!(errs[0].contains("expected int"));
 }
 
@@ -310,7 +310,7 @@ add("hello", 2) }"#,
 fn test_return_type_mismatch() {
     let errs = errors(r#"pipeline t(task) { fn get() -> int { return "hello" } }"#);
     assert_eq!(errs.len(), 1);
-    assert!(errs[0].contains("return type doesn't match"));
+    assert!(errs[0].contains("return value: expected int, found string"));
 }
 
 #[test]
@@ -323,7 +323,8 @@ fn test_union_type_compatible() {
 fn test_union_type_mismatch() {
     let errs = errors(r#"pipeline t(task) { let x: string | nil = 42 }"#);
     assert_eq!(errs.len(), 1);
-    assert!(errs[0].contains("declared as"));
+    assert!(errs[0].contains("expected string | nil"));
+    assert!(errs[0].contains("found int"));
 }
 
 #[test]
@@ -373,7 +374,7 @@ fn test_explicit_nil_var_does_not_widen() {
 }"#,
     );
     assert_eq!(errs.len(), 1, "expected 1 error, got: {errs:?}");
-    assert!(errs[0].contains("declared as nil"), "got: {}", errs[0]);
+    assert!(errs[0].contains("expected nil"), "got: {}", errs[0]);
 }
 
 #[test]
@@ -385,7 +386,8 @@ fn test_type_inference_propagation() {
 }"#,
     );
     assert_eq!(errs.len(), 1);
-    assert!(errs[0].contains("declared as"));
+    assert!(errs[0].contains("expected string"));
+    assert!(errs[0].contains("found int"));
     assert!(errs[0].contains("string"));
     assert!(errs[0].contains("int"));
 }
@@ -431,7 +433,7 @@ fn test_explicit_generic_call_type_args_must_match_arguments() {
     );
     assert!(
         errs.iter()
-            .any(|err| err.contains("expected int, got string")),
+            .any(|err| err.contains("expected int, found string")),
         "missing explicit type-arg mismatch error: {errs:?}"
     );
 }
@@ -453,7 +455,7 @@ fn test_generic_type_param_must_bind_consistently() {
     );
     assert!(
         errs.iter()
-            .any(|err| err.contains("Argument 2 ('b'): expected int, got string")),
+            .any(|err| err.contains("argument 2 `b`: expected int, found string")),
         "missing instantiated argument mismatch error: {:?}",
         errs
     );
@@ -468,7 +470,7 @@ fn test_generic_list_binding_propagates_element_type() {
 }"#,
     );
     assert_eq!(errs.len(), 1, "expected 1 error, got: {:?}", errs);
-    assert!(errs[0].contains("declared as string, but assigned int"));
+    assert!(errs[0].contains("expected string, found int"));
 }
 
 #[test]
@@ -705,7 +707,61 @@ fn test_assignment_type_check() {
 }"#,
     );
     assert_eq!(errs.len(), 1);
-    assert!(errs[0].contains("can't assign string"));
+    assert!(errs[0].contains("expected int, found string"));
+}
+
+#[test]
+fn test_type_mismatch_render_snapshot_with_coercion_help() {
+    std::env::set_var("NO_COLOR", "1");
+    let source = r#"pipeline t(task) {
+  let label: string = 42
+}"#;
+    let diags = check_source_with_source(source);
+    let rendered = crate::diagnostic::render_type_diagnostic(source, "test.harn", &diags[0]);
+    assert_eq!(
+        rendered,
+        r#"error: let binding `label`: expected string, found int
+  --> test.harn:2:23
+   |
+ 2 |   let label: string = 42
+   |                       ^^ found this type
+   = help: did you mean `to_string(42)`?
+   = note: expected type declared here
+  --> test.harn:2:3
+   |
+ 2 |   let label: string = 42
+   |   ^^^^^^^^^^^^^^^^^^^^^^ expected type declared here
+"#
+    );
+}
+
+#[test]
+fn test_type_mismatch_render_snapshot_with_nested_note() {
+    std::env::set_var("NO_COLOR", "1");
+    let source = r#"pipeline t(task) {
+  let item: {name: string, count: int} = {name: 1, count: 2}
+}"#;
+    let diags = check_source_with_source(source);
+    let rendered = crate::diagnostic::render_type_diagnostic(source, "test.harn", &diags[0]);
+    assert_eq!(
+        rendered,
+        r#"error: let binding `item`: expected {name: string, count: int}, found {name: int, count: int} (field 'name' has type int, expected string)
+  --> test.harn:2:42
+   |
+ 2 |   let item: {name: string, count: int} = {name: 1, count: 2}
+   |                                          ^^^^^^^^^^^^^^^^^^^ found this type
+   = note: expected type declared here
+  --> test.harn:2:3
+   |
+ 2 |   let item: {name: string, count: int} = {name: 1, count: 2}
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected type declared here
+   = note: nested mismatch: field `name` expected string, found int
+  --> test.harn:2:42
+   |
+ 2 |   let item: {name: string, count: int} = {name: 1, count: 2}
+   |                                          ^^^^^^^^^^^^^^^^^^^ nested mismatch: field `name` expected string, found int
+"#
+    );
 }
 
 #[test]

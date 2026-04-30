@@ -283,26 +283,14 @@ fn typecheck_program(
     let mut rendered = String::new();
     let mut had_error = false;
     for diagnostic in &diagnostics {
-        let severity = match diagnostic.severity {
-            DiagnosticSeverity::Error => {
-                had_error = true;
-                "error"
-            }
-            DiagnosticSeverity::Warning => "warning",
-        };
-        if let Some(span) = &diagnostic.span {
-            rendered.push_str(&harn_parser::diagnostic::render_diagnostic(
-                source,
-                &path.to_string_lossy(),
-                span,
-                severity,
-                &diagnostic.message,
-                None,
-                diagnostic.help.as_deref(),
-            ));
-        } else {
-            rendered.push_str(&format!("{severity}: {}\n", diagnostic.message));
+        if diagnostic.severity == DiagnosticSeverity::Error {
+            had_error = true;
         }
+        rendered.push_str(&harn_parser::diagnostic::render_type_diagnostic(
+            source,
+            &path.to_string_lossy(),
+            diagnostic,
+        ));
     }
 
     if had_error {

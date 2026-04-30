@@ -91,7 +91,7 @@ pub fn parse_source(source: &str) -> Result<Vec<SNode>, PipelineError> {
 /// diagnostics (which may include warnings even on success).
 pub fn check_source(source: &str) -> Result<(Vec<SNode>, Vec<TypeDiagnostic>), PipelineError> {
     let program = parse_source(source)?;
-    let diagnostics = TypeChecker::new().check(&program);
+    let diagnostics = TypeChecker::new().check_with_source(&program, source);
     Ok((program, diagnostics))
 }
 

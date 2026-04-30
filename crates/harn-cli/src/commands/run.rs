@@ -93,6 +93,7 @@ pub(crate) fn build_denied_builtins(
 fn typecheck_with_imports(
     program: &[harn_parser::SNode],
     path: &Path,
+    source: &str,
 ) -> Vec<harn_parser::TypeDiagnostic> {
     if let Err(error) = package::ensure_dependencies_materialized(path) {
         eprintln!("error: {error}");
@@ -106,7 +107,7 @@ fn typecheck_with_imports(
     if let Some(imported) = graph.imported_type_declarations_for_file(path) {
         checker = checker.with_imported_type_decls(imported);
     }
-    checker.check(program)
+    checker.check_with_source(program, source)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -481,41 +482,17 @@ pub(crate) async fn run_file_with_skill_dirs(
     let (source, program) = parse_source_file(path);
 
     let mut had_type_error = false;
-    let type_diagnostics = typecheck_with_imports(&program, Path::new(path));
+    let type_diagnostics = typecheck_with_imports(&program, Path::new(path), &source);
     for diag in &type_diagnostics {
         match diag.severity {
             DiagnosticSeverity::Error => {
                 had_type_error = true;
-                if let Some(span) = &diag.span {
-                    let rendered = harn_parser::diagnostic::render_diagnostic(
-                        &source,
-                        path,
-                        span,
-                        "error",
-                        &diag.message,
-                        None,
-                        diag.help.as_deref(),
-                    );
-                    eprint!("{rendered}");
-                } else {
-                    eprintln!("error: {}", diag.message);
-                }
+                let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
+                eprint!("{rendered}");
             }
             DiagnosticSeverity::Warning => {
-                if let Some(span) = &diag.span {
-                    let rendered = harn_parser::diagnostic::render_diagnostic(
-                        &source,
-                        path,
-                        span,
-                        "warning",
-                        &diag.message,
-                        None,
-                        diag.help.as_deref(),
-                    );
-                    eprint!("{rendered}");
-                } else {
-                    eprintln!("warning: {}", diag.message);
-                }
+                let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
+                eprint!("{rendered}");
             }
         }
     }
@@ -994,19 +971,17 @@ pub(crate) async fn run_file_mcp_serve(
 ) {
     let (source, program) = crate::parse_source_file(path);
 
-    let type_diagnostics = typecheck_with_imports(&program, Path::new(path));
+    let type_diagnostics = typecheck_with_imports(&program, Path::new(path), &source);
     for diag in &type_diagnostics {
         match diag.severity {
             DiagnosticSeverity::Error => {
-                eprintln!("error: {}", diag.message);
+                let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
+                eprint!("{rendered}");
                 process::exit(1);
             }
             DiagnosticSeverity::Warning => {
-                if let Some(span) = &diag.span {
-                    eprintln!("warning: {} (line {})", diag.message, span.line);
-                } else {
-                    eprintln!("warning: {}", diag.message);
-                }
+                let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
+                eprint!("{rendered}");
             }
         }
     }

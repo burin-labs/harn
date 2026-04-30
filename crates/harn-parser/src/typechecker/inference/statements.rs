@@ -18,7 +18,7 @@ use crate::builtin_signatures;
 
 use super::super::binary_ops::infer_binary_op_type;
 use super::super::exits::stmt_definitely_exits;
-use super::super::format::{format_type, is_obvious_type, shape_mismatch_detail};
+use super::super::format::{format_type, is_obvious_type};
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{
     EnumDeclInfo, FnSignature, ImplMethodSig, InterfaceDeclInfo, StructDeclInfo, TypeAliasInfo,
@@ -137,16 +137,15 @@ impl TypeChecker {
                     if let Some(expected) = type_ann {
                         if let Some(actual) = &inferred {
                             if !self.types_compatible(expected, actual, scope) {
-                                let mut msg = format!(
-                                    "'{}' declared as {}, but assigned {}",
-                                    name,
-                                    format_type(expected),
-                                    format_type(actual)
+                                self.type_mismatch_at(
+                                    format!("let binding `{name}`"),
+                                    expected,
+                                    actual,
+                                    value.span,
+                                    Some((span, "expected type declared here".to_string())),
+                                    Some(value.span),
+                                    scope,
                                 );
-                                if let Some(detail) = shape_mismatch_detail(expected, actual) {
-                                    msg.push_str(&format!(" ({})", detail));
-                                }
-                                self.error_at(msg, span);
                             }
                         }
                     }
@@ -193,16 +192,15 @@ impl TypeChecker {
                     if let Some(expected) = type_ann {
                         if let Some(actual) = &inferred {
                             if !self.types_compatible(expected, actual, scope) {
-                                let mut msg = format!(
-                                    "'{}' declared as {}, but assigned {}",
-                                    name,
-                                    format_type(expected),
-                                    format_type(actual)
+                                self.type_mismatch_at(
+                                    format!("var binding `{name}`"),
+                                    expected,
+                                    actual,
+                                    value.span,
+                                    Some((span, "expected type declared here".to_string())),
+                                    Some(value.span),
+                                    scope,
                                 );
-                                if let Some(detail) = shape_mismatch_detail(expected, actual) {
-                                    msg.push_str(&format!(" ({})", detail));
-                                }
-                                self.error_at(msg, span);
                             }
                         }
                     }
@@ -262,6 +260,7 @@ impl TypeChecker {
                         .map(|p| (p.name.clone(), p.type_expr.clone()))
                         .collect(),
                     return_type: callable_return_type,
+                    definition_span: Some(span),
                     type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
                     required_params,
                     where_clauses: where_clauses
@@ -281,6 +280,7 @@ impl TypeChecker {
                     body,
                     where_clauses,
                     *is_stream,
+                    span,
                 );
             }
 
@@ -299,6 +299,7 @@ impl TypeChecker {
                         .map(|p| (p.name.clone(), p.type_expr.clone()))
                         .collect(),
                     return_type: return_type.clone(),
+                    definition_span: Some(span),
                     type_param_names: Vec::new(),
                     required_params,
                     where_clauses: Vec::new(),
@@ -307,7 +308,7 @@ impl TypeChecker {
                 scope.define_fn(name, sig);
                 scope.define_var(name, None);
                 scope.clear_nil_widenable(name);
-                self.check_fn_body(&[], params, return_type, body, &[], false);
+                self.check_fn_body(&[], params, return_type, body, &[], false, span);
             }
 
             Node::SkillDecl { name, fields, .. } => {
@@ -589,14 +590,17 @@ impl TypeChecker {
                                 {
                                     widened_slot_type = Some(Self::union_with_nil(actual));
                                 } else {
-                                    self.error_at(
-                                        format!(
-                                            "can't assign {} to '{}' (declared as {})",
-                                            format_type(actual),
-                                            name,
-                                            format_type(check_type)
-                                        ),
-                                        span,
+                                    self.type_mismatch_at(
+                                        format!("assignment to `{name}`"),
+                                        check_type,
+                                        actual,
+                                        value.span,
+                                        Some((
+                                            target.span,
+                                            format!("`{name}` has this expected type"),
+                                        )),
+                                        Some(value.span),
+                                        scope,
                                     );
                                 }
                             }
@@ -1256,16 +1260,17 @@ impl TypeChecker {
                         "`emit` can only be used inside a `gen fn`".to_string(),
                         span,
                     );
-                } else if let Some(Some(expected)) = self.stream_emit_types.last() {
+                } else if let Some(Some(expected)) = self.stream_emit_types.last().cloned() {
                     if let Some(actual) = self.infer_type(value, scope) {
-                        if !self.types_compatible(expected, &actual, scope) {
-                            self.error_at(
-                                format!(
-                                    "emit type doesn't match: expected {}, got {}",
-                                    format_type(expected),
-                                    format_type(&actual)
-                                ),
+                        if !self.types_compatible(&expected, &actual, scope) {
+                            self.type_mismatch_at(
+                                "`emit` value",
+                                &expected,
+                                &actual,
                                 span,
+                                Some((span, "stream emit type expected here".to_string())),
+                                Some(value.span),
+                                scope,
                             );
                         }
                     }
@@ -1326,15 +1331,14 @@ impl TypeChecker {
                         };
                         let expected = Self::apply_type_bindings(expected_type, &type_bindings);
                         if !self.types_compatible(&expected, &actual_type, scope) {
-                            self.error_at(
-                                format!(
-                                    "Field '{}' in struct '{}' expects {}, got {}",
-                                    field.name,
-                                    struct_name,
-                                    format_type(&expected),
-                                    format_type(&actual_type)
-                                ),
+                            self.type_mismatch_at(
+                                format!("field `{}` in struct `{struct_name}`", field.name),
+                                &expected,
+                                &actual_type,
                                 entry.value.span,
+                                Some((span, format!("struct `{struct_name}` expected here"))),
+                                Some(entry.value.span),
+                                scope,
                             );
                         }
                     }
@@ -1431,16 +1435,17 @@ impl TypeChecker {
                         };
                         let expected = Self::apply_type_bindings(expected_type, &type_bindings);
                         if !self.types_compatible(&expected, &actual_type, scope) {
-                            self.error_at(
-                                format!(
-                                    "{}.{} expects {}: {}, got {}",
-                                    enum_name,
-                                    variant,
-                                    field.name,
-                                    format_type(&expected),
-                                    format_type(&actual_type)
-                                ),
+                            self.type_mismatch_at(
+                                format!("{}.{} argument `{}`", enum_name, variant, field.name),
+                                &expected,
+                                &actual_type,
                                 arg.span,
+                                Some((
+                                    span,
+                                    format!("enum variant `{enum_name}.{variant}` expected here"),
+                                )),
+                                Some(arg.span),
+                                scope,
                             );
                         }
                     }

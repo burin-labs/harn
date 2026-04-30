@@ -38,42 +38,18 @@ pub(crate) async fn run_bench(path: &str, iterations: usize) {
     if let Some(imported) = graph.imported_type_declarations_for_file(file_path) {
         checker = checker.with_imported_type_decls(imported);
     }
-    let type_diagnostics = checker.check(&program);
+    let type_diagnostics = checker.check_with_source(&program, &source);
     let mut had_type_error = false;
     for diag in &type_diagnostics {
         match diag.severity {
             DiagnosticSeverity::Error => {
                 had_type_error = true;
-                if let Some(span) = &diag.span {
-                    let rendered = harn_parser::diagnostic::render_diagnostic(
-                        &source,
-                        path,
-                        span,
-                        "error",
-                        &diag.message,
-                        None,
-                        diag.help.as_deref(),
-                    );
-                    eprint!("{rendered}");
-                } else {
-                    eprintln!("error: {}", diag.message);
-                }
+                let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
+                eprint!("{rendered}");
             }
             DiagnosticSeverity::Warning => {
-                if let Some(span) = &diag.span {
-                    let rendered = harn_parser::diagnostic::render_diagnostic(
-                        &source,
-                        path,
-                        span,
-                        "warning",
-                        &diag.message,
-                        None,
-                        diag.help.as_deref(),
-                    );
-                    eprint!("{rendered}");
-                } else {
-                    eprintln!("warning: {}", diag.message);
-                }
+                let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
+                eprint!("{rendered}");
             }
         }
     }

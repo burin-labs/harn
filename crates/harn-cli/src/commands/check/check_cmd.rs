@@ -30,33 +30,15 @@ pub(crate) fn check_file_inner(
     if let Some(imported) = module_graph.imported_type_declarations_for_file(path) {
         checker = checker.with_imported_type_decls(imported);
     }
-    let type_diagnostics = checker.check(&program);
+    let type_diagnostics = checker.check_with_source(&program, &source);
     for diag in &type_diagnostics {
-        let severity = match diag.severity {
-            DiagnosticSeverity::Error => {
-                has_error = true;
-                "error"
-            }
-            DiagnosticSeverity::Warning => {
-                has_warning = true;
-                "warning"
-            }
-        };
-        diagnostic_count += 1;
-        if let Some(span) = &diag.span {
-            let rendered = harn_parser::diagnostic::render_diagnostic(
-                &source,
-                &path_str,
-                span,
-                severity,
-                &diag.message,
-                None,
-                diag.help.as_deref(),
-            );
-            eprint!("{rendered}");
-        } else {
-            eprintln!("{severity}: {}", diag.message);
+        match diag.severity {
+            DiagnosticSeverity::Error => has_error = true,
+            DiagnosticSeverity::Warning => has_warning = true,
         }
+        diagnostic_count += 1;
+        let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, &path_str, diag);
+        eprint!("{rendered}");
     }
 
     let lint_diagnostics = harn_lint::lint_with_module_graph(

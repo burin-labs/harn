@@ -5,6 +5,11 @@ use yansi::{Color, Paint};
 
 use crate::ParserError;
 
+pub struct RelatedSpanLabel<'a> {
+    pub span: &'a Span,
+    pub label: &'a str,
+}
+
 /// Compute the Levenshtein edit distance between two strings.
 pub fn edit_distance(a: &str, b: &str) -> usize {
     let a_chars: Vec<char> = a.chars().collect();
@@ -53,6 +58,19 @@ pub fn render_diagnostic(
     message: &str,
     label: Option<&str>,
     help: Option<&str>,
+) -> String {
+    render_diagnostic_with_related(source, filename, span, severity, message, label, help, &[])
+}
+
+pub fn render_diagnostic_with_related(
+    source: &str,
+    filename: &str,
+    span: &Span,
+    severity: &str,
+    message: &str,
+    label: Option<&str>,
+    help: Option<&str>,
+    related: &[RelatedSpanLabel<'_>],
 ) -> String {
     let mut out = String::new();
     let severity_color = severity_color(severity);
@@ -118,6 +136,23 @@ pub fn render_diagnostic(
         ));
     }
 
+    for item in related {
+        out.push_str(&format!(
+            "{:>width$} = {note_prefix}: {}\n",
+            " ",
+            item.label,
+            width = gutter_width + 1,
+        ));
+        render_related_span(
+            &mut out,
+            source,
+            filename,
+            item.span,
+            item.label,
+            gutter_width,
+        );
+    }
+
     if let Some(note_text) = fun_note(severity) {
         out.push_str(&format!(
             "{:>width$} = {note_prefix}: {note_text}\n",
@@ -127,6 +162,100 @@ pub fn render_diagnostic(
     }
 
     out
+}
+
+pub fn render_type_diagnostic(
+    source: &str,
+    filename: &str,
+    diag: &crate::typechecker::TypeDiagnostic,
+) -> String {
+    let severity = match diag.severity {
+        crate::typechecker::DiagnosticSeverity::Error => "error",
+        crate::typechecker::DiagnosticSeverity::Warning => "warning",
+    };
+    let related = diag
+        .related
+        .iter()
+        .map(|related| RelatedSpanLabel {
+            span: &related.span,
+            label: &related.message,
+        })
+        .collect::<Vec<_>>();
+    match &diag.span {
+        Some(span) => render_diagnostic_with_related(
+            source,
+            filename,
+            span,
+            severity,
+            &diag.message,
+            type_diagnostic_primary_label(diag),
+            diag.help.as_deref(),
+            &related,
+        ),
+        None => format!("{severity}: {}\n", diag.message),
+    }
+}
+
+fn type_diagnostic_primary_label(
+    diag: &crate::typechecker::TypeDiagnostic,
+) -> Option<&'static str> {
+    if diag.message.contains("expected ") && diag.message.contains("found ") {
+        Some("found this type")
+    } else {
+        None
+    }
+}
+
+fn render_related_span(
+    out: &mut String,
+    source: &str,
+    filename: &str,
+    span: &Span,
+    label: &str,
+    primary_gutter_width: usize,
+) {
+    let severity_color = Color::Magenta;
+    let gutter = style_fragment("|", Color::Blue, false);
+    let arrow = style_fragment("-->", Color::Blue, true);
+    let line_num = span.line;
+    let col_num = span.column;
+    let gutter_width = primary_gutter_width.max(line_num.to_string().len());
+
+    out.push_str(&format!(
+        "{:>width$}{arrow} {filename}:{line_num}:{col_num}\n",
+        " ",
+        width = gutter_width + 1,
+    ));
+    out.push_str(&format!(
+        "{:>width$} {gutter}\n",
+        " ",
+        width = gutter_width + 1,
+    ));
+
+    if let Some(source_line) = source
+        .lines()
+        .nth(line_num.wrapping_sub(1))
+        .filter(|_| line_num > 0)
+    {
+        out.push_str(&format!(
+            "{:>width$} {gutter} {source_line}\n",
+            line_num,
+            width = gutter_width + 1,
+        ));
+        let span_len = if span.end > span.start && span.start <= source.len() {
+            let span_text = &source[span.start.min(source.len())..span.end.min(source.len())];
+            span_text.chars().count().max(1)
+        } else {
+            1
+        };
+        let padding = " ".repeat(col_num.max(1) - 1);
+        let carets = style_fragment(&"^".repeat(span_len), severity_color, true);
+        out.push_str(&format!(
+            "{:>width$} {gutter} {padding}{carets} {label}\n",
+            " ",
+            width = gutter_width + 1,
+        ));
+    }
 }
 
 fn severity_color(severity: &str) -> Color {
