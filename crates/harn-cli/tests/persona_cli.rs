@@ -1,6 +1,6 @@
 mod test_util;
 
-use std::{fs, process::Command};
+use std::fs;
 
 use tempfile::TempDir;
 use test_util::process::harn_command;
