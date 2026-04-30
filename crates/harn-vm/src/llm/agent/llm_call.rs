@@ -353,12 +353,13 @@ pub(super) async fn run_llm_call(
                     .cloned()
                     .collect::<Vec<_>>()
                     .join("; ");
+                let error_preview: String = error_summary.chars().take(200).collect();
                 crate::events::log_warn(
                     "llm.tool",
                     &format!(
                         "{} tool-call parse error(s): {} (parsed_calls={})",
                         tool_parse_errors.len(),
-                        &error_summary[..error_summary.len().min(200)],
+                        error_preview,
                         calls.len(),
                     ),
                 );
@@ -421,7 +422,27 @@ pub(super) async fn run_llm_call(
 
     // Teach the model to fix grammar violations. Done before tool-call
     // dispatch so protocol errors surface even in mixed turns.
-    if !protocol_violations.is_empty() && ctx.has_tools && ctx.tool_format != "native" {
+    let should_inject_protocol_feedback = should_inject_protocol_feedback(
+        &protocol_violations,
+        ctx.has_tools,
+        ctx.tool_format,
+        tool_calls.len(),
+    );
+    if !protocol_violations.is_empty()
+        && ctx.has_tools
+        && ctx.tool_format != "native"
+        && !tool_calls.is_empty()
+    {
+        crate::events::log_info(
+            "llm.tool",
+            &format!(
+                "suppressed protocol feedback for {} violation(s) because {} tool call(s) parsed",
+                protocol_violations.len(),
+                tool_calls.len()
+            ),
+        );
+    }
+    if should_inject_protocol_feedback {
         let feedback = format!(
             "Your response violated the tagged response protocol. Each issue:\n- {}\n\n\
              Re-emit using only these top-level tags, separated by whitespace:\n\n\
@@ -594,6 +615,18 @@ pub(super) async fn run_llm_call(
     })
 }
 
+fn should_inject_protocol_feedback(
+    protocol_violations: &[String],
+    has_tools: bool,
+    tool_format: &str,
+    parsed_tool_call_count: usize,
+) -> bool {
+    !protocol_violations.is_empty()
+        && has_tools
+        && tool_format != "native"
+        && parsed_tool_call_count == 0
+}
+
 /// Per-block translation of provider-native `tool_search_*` content into
 /// transcript + agent events. Pure: no global state, no I/O — the
 /// caller dispatches the produced events. Pulled out so harn#691 can
@@ -751,6 +784,42 @@ mod tests {
     //! result blocks (currently `tool_search_result`).
 
     use super::*;
+
+    #[test]
+    fn protocol_feedback_is_suppressed_when_tool_calls_recovered() {
+        let violations = vec!["stray text outside response tags".to_string()];
+
+        assert!(!should_inject_protocol_feedback(
+            &violations,
+            true,
+            "text",
+            1
+        ));
+        assert!(should_inject_protocol_feedback(
+            &violations,
+            true,
+            "text",
+            0
+        ));
+    }
+
+    #[test]
+    fn protocol_feedback_is_not_injected_without_text_tools() {
+        let violations = vec!["stray text outside response tags".to_string()];
+
+        assert!(!should_inject_protocol_feedback(
+            &violations,
+            false,
+            "text",
+            0
+        ));
+        assert!(!should_inject_protocol_feedback(
+            &violations,
+            true,
+            "native",
+            0
+        ));
+    }
 
     #[test]
     fn tool_search_result_block_emits_provider_native_tool_call_update() {
