@@ -1,9 +1,11 @@
+mod test_util;
+
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
+use test_util::process::harn_command;
 
 #[test]
 fn check_reports_unknown_struct_type_in_stderr() {
@@ -11,7 +13,7 @@ fn check_reports_unknown_struct_type_in_stderr() {
     let script = temp.path().join("main.harn");
     fs::write(&script, "let p = Point { x: 3, y: 4 }\n").unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let output = harn_command()
         .current_dir(temp.path())
         .args(["check", script.to_str().unwrap()])
         .output()
@@ -72,7 +74,7 @@ fn lint_and_check_complete_on_large_cross_directory_cycle_workspace() {
     let budget = Duration::from_secs(60);
 
     let lint_started = Instant::now();
-    let lint_output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let lint_output = harn_command()
         .current_dir(root)
         .args(["lint", pipelines.to_str().unwrap()])
         .output()
@@ -91,7 +93,7 @@ fn lint_and_check_complete_on_large_cross_directory_cycle_workspace() {
     );
 
     let check_started = Instant::now();
-    let check_output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let check_output = harn_command()
         .current_dir(root)
         .args(["check", "--workspace"])
         .output()

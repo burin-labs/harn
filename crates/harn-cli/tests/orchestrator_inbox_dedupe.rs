@@ -8,13 +8,14 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Instant;
 
 use harn_vm::event_log::{EventLog, SqliteEventLog, Topic};
 use tempfile::TempDir;
+use test_util::process::harn_command;
 use test_util::timing::{
     self, ChildExitWatcher, EVENT_FAIL_FAST_TIMEOUT, LOG_RECV_POLL_INTERVAL,
     PROCESS_FAIL_FAST_TIMEOUT,
@@ -59,7 +60,7 @@ fn spawn_orchestrator(
     Receiver<String>,
     thread::JoinHandle<String>,
 ) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut command = harn_command();
     command
         .current_dir(temp.path())
         .arg("orchestrator")

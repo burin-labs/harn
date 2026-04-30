@@ -1,13 +1,16 @@
 #![cfg(unix)]
 
+mod test_util;
+
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
+use test_util::process::harn_command;
 
 static ACP_CLI_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -120,7 +123,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let mut child = harn_command()
         .current_dir(temp.path())
         .arg("serve")
         .arg("acp")
@@ -319,7 +322,7 @@ fn serve_acp_stdio_runs_packaged_adapter() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let mut child = harn_command()
         .current_dir(temp.path())
         .arg("serve")
         .arg("acp")

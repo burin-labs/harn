@@ -114,6 +114,22 @@ granular archaeology.
   `triggers/dispatcher/mod.rs` from 4633 to 3827 LOC with no behavior change
   (#940/#973).
 
+### Tests
+
+- **Subprocess test harness pre-warm (#949).** Every harn-cli integration
+  test that spawns the `harn` debug binary now goes through
+  `test_util::process::harn_command()`, which performs a one-shot
+  `harn --version` synchronously on first call within each test-binary
+  process. That single invocation page-ins the binary's `__TEXT` segment
+  and shared libraries into the macOS unified buffer cache and drives
+  AMFI signature validation once, so subsequent parallel cohorts no
+  longer contend on dyld/AMFI cold-cache resources. With the
+  architectural fix in place, the `harn-subprocess` and `harn-cli-bin`
+  nextest test groups in `.config/nextest.toml` relax `max-threads` from
+  4 to 8 (PR #837 documented the previous cap as a workaround). New
+  `scripts/stress_subprocess_tests.sh` reproducibly stress-tests the
+  suite at the new cap.
+
 ## v0.7.49
 
 ### Added

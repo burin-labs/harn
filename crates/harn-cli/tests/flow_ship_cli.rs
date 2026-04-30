@@ -1,9 +1,11 @@
+mod test_util;
+
 use std::fs;
-use std::process::Command;
 
 use ed25519_dalek::SigningKey;
 use harn_vm::flow::{Atom, AtomId, Provenance, SqliteFlowStore, TextOp, VcsBackend};
 use tempfile::TempDir;
+use test_util::process::harn_command;
 use time::OffsetDateTime;
 
 fn key(seed: u8) -> SigningKey {
@@ -77,7 +79,7 @@ fn flow_ship_watch_injects_atoms_and_opens_mock_pr() {
     drop(store);
 
     let mock_pr_path = repo.path().join(".harn/flow/mock-pr.json");
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let output = harn_command()
         .current_dir(repo.path())
         .args([
             "flow",
@@ -195,7 +197,7 @@ fn _bootstrap_marker() {
     drop(store);
 
     let mock_pr_path = repo.path().join(".harn/flow/mock-pr.json");
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let output = harn_command()
         .current_dir(repo.path())
         .args([
             "flow",
@@ -237,7 +239,7 @@ fn flow_ship_watch_marks_bootstrap_policy_absent_when_missing() {
     store.emit_atom(&atom(0, Vec::new())).unwrap();
     drop(store);
 
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let output = harn_command()
         .current_dir(repo.path())
         .args([
             "flow",
@@ -283,7 +285,7 @@ fn flow_ship_watch_blocks_when_predicate_union_explodes() {
     drop(store);
 
     let mock_pr_path = repo.join(".harn/flow/mock-pr.json");
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let output = harn_command()
         .current_dir(repo)
         .args([
             "flow",

@@ -10,7 +10,7 @@ mod test_util;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -29,6 +29,7 @@ use reqwest::StatusCode;
 use serde_json::Value as JsonValue;
 use sha2::Sha256;
 use tempfile::TempDir;
+use test_util::process::harn_command;
 use test_util::timing::{
     self, ChildExitWatcher, EVENT_FAIL_FAST_TIMEOUT, LOG_RECV_POLL_INTERVAL,
     PROCESS_FAIL_FAST_TIMEOUT,
@@ -476,7 +477,7 @@ fn spawn_orchestrator(
     extra_args: &[&str],
     envs: &[(&str, &str)],
 ) -> OrchestratorProcess {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut command = harn_command();
     command
         .current_dir(temp.path())
         .arg("orchestrator")
@@ -1339,7 +1340,7 @@ async fn notion_webhook_handshake_is_captured_and_reported_by_doctor() {
     let stderr = process.join_stderr();
     assert!(status.success(), "status={status} stderr={stderr}");
 
-    let doctor = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let doctor = harn_command()
         .current_dir(temp.path())
         .arg("doctor")
         .arg("--no-network")
@@ -1966,7 +1967,7 @@ async fn reload_cli_uses_admin_endpoint() {
         &a2a_manifest(None).replace("/a2a/review", "/a2a/review-cli"),
     );
 
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let output = harn_command()
         .current_dir(temp.path())
         .arg("orchestrator")
         .arg("reload")

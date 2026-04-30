@@ -28,6 +28,16 @@
 //! fraction of its previous wall-clock time and no individual test
 //! starves on lock acquisition.
 //!
+//! The companion fix that lets the parallel cohort stay healthy at
+//! higher fan-out is the dyld/AMFI pre-warm in
+//! `crates/harn-cli/tests/test_util/process.rs::harn_command()`. Every
+//! subprocess test spawns through that helper, so the first call within
+//! each test-binary process warms the binary's page cache and signature
+//! state synchronously before any parallel cohort starts. With both
+//! pieces in place, the workspace nextest config (`.config/nextest.toml`)
+//! relaxes the `harn-subprocess` / `harn-cli-bin` group cap from 4 to 8
+//! (harn#949).
+//!
 //! [`HarnProcessTestNoLock`] preserves the call-site shape
 //! (`let _lock = lock_harn_process_tests();`) so the migration is local
 //! to this support module rather than 30+ test sites.

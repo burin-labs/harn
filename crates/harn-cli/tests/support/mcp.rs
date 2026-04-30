@@ -1,7 +1,5 @@
 #[path = "process.rs"]
 mod process;
-#[path = "../test_util/timing.rs"]
-mod timing;
 
 use std::io::{BufRead, BufReader, Read};
 use std::process::Child;
@@ -9,6 +7,15 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+
+// MCP support is loaded via `#[path = "support/mcp.rs"] mod mcp_support;`
+// so its parent namespace is the test binary's crate root. Test
+// binaries that include `mcp_support` also declare `mod test_util;`, so
+// reach the timing constants through that sibling rather than loading
+// `timing.rs` a second time (clippy::duplicate_mod). Keeping the
+// `super::` path inside the support module makes the dependency
+// explicit at compile time.
+use super::test_util::timing;
 
 pub use process::HarnProcessTestNoLock;
 

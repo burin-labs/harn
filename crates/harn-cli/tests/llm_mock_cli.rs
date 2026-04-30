@@ -1,8 +1,11 @@
+mod test_util;
+
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 use tempfile::TempDir;
+use test_util::process::harn_command;
 
 fn write_file(dir: &Path, relative: &str, contents: &str) -> String {
     let path = dir.join(relative);
@@ -14,7 +17,7 @@ fn write_file(dir: &Path, relative: &str, contents: &str) -> String {
 }
 
 fn run_harn(temp: &TempDir, args: &[&str], envs: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut command = harn_command();
     command.current_dir(temp.path());
     command.args(args);
     for (key, value) in envs {
