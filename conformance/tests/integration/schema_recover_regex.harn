@@ -1,0 +1,21 @@
+/**
+ * `schema_recover` regex-scrapes top-level `key: value` lines when
+ * the model produced YAML-ish output instead of JSON. Stage="regex",
+ * attempts=3 (parsed fails, no fenced block to extract, regex
+ * succeeds). Booleans accept "yes"/"no" tokens.
+ */
+pipeline default() {
+  let schema = {
+    type: "object",
+    required: ["name", "age", "active"],
+    properties: {name: {type: "string"}, age: {type: "integer"}, active: {type: "boolean"}},
+  }
+  let raw = "name: \"Grace Hopper\", age: 85, active: yes"
+  let r = schema_recover(raw, schema, {llm_repair: false})
+  println(r.ok)
+  println(r.stage)
+  println(r.data.name)
+  println(r.data.age)
+  println(r.data.active)
+  println(r.repaired)
+}

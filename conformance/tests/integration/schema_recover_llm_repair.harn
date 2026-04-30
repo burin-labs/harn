@@ -1,0 +1,16 @@
+/**
+ * `schema_recover` falls through to the LLM repair stage when the
+ * three deterministic stages can't recover the value, and the mock
+ * provider returns valid JSON. Stage="llm_repair", repaired=true,
+ * attempts=4 (parsed → regex → llm_repair; the extracted stage is
+ * skipped when extract_json_from_text doesn't change the input).
+ */
+pipeline default() {
+  let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  llm_mock({text: "{\"verdict\": \"pass\"}"})
+  let r = schema_recover("model said pass but failed to format it", schema, {provider: "mock"})
+  println(r.ok)
+  println(r.stage)
+  println(r.data.verdict)
+  println(r.repaired)
+}

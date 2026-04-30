@@ -3135,6 +3135,21 @@ wrappers pick up the same narrowing.
 - `schema_parse<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
 - `schema_check<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
 - `schema_expect<T>(value: unknown, schema: Schema<T>) -> T`
+- `schema_recover<T>(text: string, schema: Schema<T>, options?:
+  {llm_repair?: bool | dict, apply_defaults?: bool,
+  ...llm_call_overrides}) -> {ok: bool, data: T | nil, raw_text:
+  string, error: string, error_category: string | nil, attempts: int,
+  stage: string, repaired: bool}`. Best-effort recovery of malformed
+  LLM output against a target schema. Three deterministic stages
+  followed by an optional one-shot LLM repair: `parsed` (direct
+  `serde_json` parse) → `extracted` (lift JSON from prose / code
+  fences) → `regex` (scrape top-level `key: value` lines for scalar
+  fields) → `llm_repair` (single-shot `llm_call` with `schema_retries:
+  0`). `stage` reports which stage produced the result; `failed` means
+  every stage exhausted. Set `{llm_repair: false}` for a fully
+  deterministic recovery pass with no LLM calls. The LLM repair stage
+  accepts the same overrides as `llm_call_structured_result`'s
+  `repair`.
 
 `Schema<T>` denotes a runtime schema value whose static shape is `T`.
 In a parameter position, matching a `Schema<T>` against an argument

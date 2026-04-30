@@ -17,6 +17,7 @@ pub(crate) fn lookup_generic_builtin_sig(name: &str) -> Option<BuiltinGenericSig
         "request_approval" => Some(request_approval_builtin_sig()),
         "schema_parse" | "schema_check" => Some(schema_parse_generic_sig()),
         "schema_expect" => Some(schema_expect_generic_sig()),
+        "schema_recover" => Some(schema_recover_generic_sig()),
         "handler_context" => Some(handler_context_builtin_sig()),
         "trust_graph_policy_for" => Some(trust_graph_policy_for_builtin_sig()),
         "trust_graph_query" => Some(trust_graph_query_builtin_sig()),
@@ -288,6 +289,74 @@ fn schema_expect_generic_sig() -> BuiltinGenericSig {
         type_params: vec!["T".into()],
         params: vec![TypeExpr::Named("unknown".into()), schema_of_t()],
         return_type: TypeExpr::Named("T".into()),
+    }
+}
+
+fn schema_recover_generic_sig() -> BuiltinGenericSig {
+    // `schema_recover(text, schema, options?)` returns a diagnostic
+    // envelope. When `schema: Schema<T>`, the envelope's `data`
+    // narrows to `T | nil` (nil on failure). The other envelope
+    // fields (`stage`, `repaired`, etc.) are stably-typed regardless
+    // of T. See harn#906.
+    let envelope_shape = TypeExpr::Shape(vec![
+        ShapeField {
+            name: "ok".into(),
+            type_expr: TypeExpr::Named("bool".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "data".into(),
+            type_expr: TypeExpr::Union(vec![
+                TypeExpr::Named("T".into()),
+                TypeExpr::Named("nil".into()),
+            ]),
+            optional: false,
+        },
+        ShapeField {
+            name: "raw_text".into(),
+            type_expr: TypeExpr::Named("string".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "error".into(),
+            type_expr: TypeExpr::Named("string".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "error_category".into(),
+            type_expr: TypeExpr::Union(vec![
+                TypeExpr::Named("string".into()),
+                TypeExpr::Named("nil".into()),
+            ]),
+            optional: false,
+        },
+        ShapeField {
+            name: "attempts".into(),
+            type_expr: TypeExpr::Named("int".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "stage".into(),
+            type_expr: TypeExpr::Named("string".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "repaired".into(),
+            type_expr: TypeExpr::Named("bool".into()),
+            optional: false,
+        },
+    ]);
+    BuiltinGenericSig {
+        type_params: vec!["T".into()],
+        params: vec![
+            TypeExpr::Named("string".into()),
+            schema_of_t(),
+            TypeExpr::Union(vec![
+                TypeExpr::Named("dict".into()),
+                TypeExpr::Named("nil".into()),
+            ]),
+        ],
+        return_type: envelope_shape,
     }
 }
 

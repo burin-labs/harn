@@ -1,0 +1,14 @@
+/**
+ * `schema_recover` reports stage="failed" / ok=false /
+ * error_category="schema_validation" when no deterministic stage
+ * recovers and the LLM repair pass is disabled. Verifies the
+ * `{llm_repair: false}` knob keeps recovery fully deterministic.
+ */
+pipeline default() {
+  let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  let r = schema_recover("nothing useful here at all", schema, {llm_repair: false})
+  println(r.ok)
+  println(r.stage)
+  println(r.error_category)
+  println(r.data == nil)
+}

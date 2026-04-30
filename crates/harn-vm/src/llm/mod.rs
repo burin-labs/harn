@@ -30,6 +30,7 @@ pub(crate) mod mock;
 pub(crate) mod permissions;
 pub mod plan;
 pub mod readiness;
+pub(crate) mod schema_recover;
 pub(crate) mod structural_experiments;
 pub(crate) mod structured_envelope;
 pub(crate) mod tool_search;
@@ -1022,6 +1023,18 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     // dispatches branch on the failure mode. See harn#744.
     vm.register_async_builtin("llm_call_structured_result", |args| async move {
         structured_envelope::llm_call_structured_result_impl(args, None).await
+    });
+
+    // `schema_recover(text, schema, opts?)` — three-tier malformed-JSON
+    // repair: direct parse → extract-from-prose → regex field scrape →
+    // optional one-shot LLM repair pass. Returns a diagnostic envelope
+    // dict `{ok, data, raw_text, error, error_category, attempts,
+    // stage, repaired}` so callers dispatch on `ok` / `stage` instead
+    // of hand-rolling normalize_*() chains. Disabled-LLM-repair mode
+    // (`{llm_repair: false}`) keeps it fully deterministic. See
+    // harn#906.
+    vm.register_async_builtin("schema_recover", |args| async move {
+        schema_recover::schema_recover_impl(args, None).await
     });
 
     // `with_rate_limit(provider, fn() -> T, opts?) -> T` — acquires a

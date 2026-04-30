@@ -1,0 +1,19 @@
+/**
+ * `schema_recover` happy path: clean JSON parses on the first stage
+ * with attempts=1 and stage="parsed".
+ */
+pipeline default() {
+  let schema = {
+    type: "object",
+    required: ["name", "age"],
+    properties: {name: {type: "string"}, age: {type: "integer"}},
+  }
+  let r = schema_recover("{\"name\": \"Ada\", \"age\": 36}", schema)
+  println(r.ok)
+  println(r.data.name)
+  println(r.data.age)
+  println(r.stage)
+  println(r.attempts)
+  println(r.repaired)
+  println(r.error_category == nil)
+}

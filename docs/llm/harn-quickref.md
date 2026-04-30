@@ -1007,6 +1007,53 @@ Options: everything `llm_call` accepts flows through, plus
 through unchanged. The `repair` block is recognized only by
 `llm_call_structured_result`.
 
+After-the-fact recovery — `schema_recover(text, schema, opts?)`
+turns malformed output that's already in your hand into a validated
+payload. Three deterministic stages followed by an optional one-shot
+LLM repair, returning the same `{ok, data, raw_text, error,
+error_category, attempts, stage, repaired}` envelope shape:
+
+| Stage | When | Notes |
+|---|---|---|
+| `parsed` | Raw text is valid JSON that schema-validates. | Cheapest path; always tried first. |
+| `extracted` | JSON is wrapped in markdown fences or surrounded by prose. | Uses the same balanced-brace lifter as `json_extract`. |
+| `regex` | Model produced YAML-ish / unquoted `key: value` lines. | Only top-level scalar fields (string/int/number/boolean) are recovered — nested objects fall through. |
+| `llm_repair` | Earlier stages failed and `llm_repair` is enabled (default). | Single shot, `schema_retries: 0`. Set `{llm_repair: false}` for fully deterministic recovery. |
+
+```harn
+let raw = llm_call(prompt, sys, {provider: "auto"}).text
+let r = schema_recover(raw, schema)
+if r.ok {
+  process(r.data)                  // narrowed-shape dict
+} else {
+  log("recovery failed:", r.stage, r.error_category, r.error)
+}
+```
+
+Use it as a drop-in replacement for hand-rolled `normalize_*()`
+chains downstream of `llm_call(...)` / Ollama prose responses, or
+when you want a deterministic local recovery pass before paying for
+a structured re-call. The `llm_repair` block accepts the same
+overrides as `llm_call_structured_result`'s `repair`:
+
+```harn
+let r = schema_recover(raw, schema, {
+  apply_defaults: true,            // schema defaults during validation
+  llm_repair: {
+    enabled: true,
+    model: "cheapest_over_quality(low)",
+    max_tokens: 600,
+  },
+})
+```
+
+Stages report via `r.stage` ∈ `"parsed" | "extracted" | "regex" |
+"llm_repair" | "failed"`; `r.attempts` counts how many stages ran
+(1 = clean parse, 4 = ran every stage including the LLM repair).
+On failure, `r.error_category` is `"schema_validation"` (no stage
+recovered) or `"repair_failed"` / `"transport"` (LLM repair was
+attempted and failed).
+
 If you need the raw response (token counts, transcript, thinking
 trace) alongside the parsed data, call `llm_call` directly:
 
