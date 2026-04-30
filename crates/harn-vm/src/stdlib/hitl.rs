@@ -140,6 +140,64 @@ struct HitlTimeoutRecord {
     timed_out_at: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ApprovalRequest {
+    pub id: String,
+    pub action: String,
+    #[serde(default)]
+    pub args: JsonValue,
+    pub principal: String,
+    pub requested_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deadline: Option<String>,
+    pub approvers_required: u32,
+    #[serde(default)]
+    pub evidence_refs: Vec<JsonValue>,
+    #[serde(default)]
+    pub undo_metadata: JsonValue,
+    #[serde(default)]
+    pub capabilities_requested: Vec<String>,
+}
+
+impl ApprovalRequest {
+    pub fn new(
+        id: impl Into<String>,
+        action: impl Into<String>,
+        args: JsonValue,
+        principal: impl Into<String>,
+        requested_at: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            action: action.into(),
+            args,
+            principal: principal.into(),
+            requested_at: requested_at.into(),
+            deadline: None,
+            approvers_required: 1,
+            evidence_refs: Vec::new(),
+            undo_metadata: JsonValue::Null,
+            capabilities_requested: Vec::new(),
+        }
+    }
+}
+
+pub(crate) fn approval_request_for_host_permission(
+    id: impl Into<String>,
+    action: impl Into<String>,
+    args: JsonValue,
+    principal: impl Into<String>,
+    evidence_refs: Vec<JsonValue>,
+    undo_metadata: JsonValue,
+    capabilities_requested: Vec<String>,
+) -> ApprovalRequest {
+    let mut request = ApprovalRequest::new(id, action, args, principal, now_rfc3339());
+    request.evidence_refs = evidence_refs;
+    request.undo_metadata = undo_metadata;
+    request.capabilities_requested = capabilities_requested;
+    request
+}
+
 #[derive(Clone, Debug)]
 struct DispatchKeys {
     instance_key: String,
@@ -158,9 +216,14 @@ struct AskUserOptions {
 #[derive(Clone, Debug)]
 struct ApprovalOptions {
     detail: Option<VmValue>,
+    args: Option<VmValue>,
     quorum: u32,
     reviewers: Vec<String>,
     deadline: StdDuration,
+    principal: Option<String>,
+    evidence_refs: Vec<JsonValue>,
+    undo_metadata: Option<JsonValue>,
+    capabilities_requested: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -270,15 +333,42 @@ pub async fn append_approval_request_on(
 ) -> Result<String, VmError> {
     let request_id = next_request_id(HitlRequestKind::Approval, current_dispatch_keys().as_ref());
     let trace_id = trace_id.into();
+    let agent = agent.into();
+    let requested_at_time = OffsetDateTime::now_utc();
+    let requested_at = format_rfc3339(requested_at_time);
+    let mut approval_request = ApprovalRequest::new(
+        request_id.clone(),
+        action.into(),
+        detail.clone(),
+        agent.clone(),
+        requested_at.clone(),
+    );
+    approval_request.deadline = deadline_after(
+        requested_at_time,
+        StdDuration::from_millis(HITL_APPROVAL_TIMEOUT_MS),
+    );
+    approval_request.approvers_required = 1;
+    let approval_request_json = serde_json::to_value(&approval_request)
+        .map_err(|error| VmError::Runtime(error.to_string()))?;
     let request = HitlRequestEnvelope {
         request_id: request_id.clone(),
         kind: HitlRequestKind::Approval,
-        agent: agent.into(),
+        agent,
         trace_id: trace_id.clone(),
         run_id: None,
-        requested_at: now_rfc3339(),
+        requested_at: requested_at.clone(),
         payload: json!({
-            "action": action.into(),
+            "approval_request": approval_request_json,
+            "id": approval_request.id,
+            "action": approval_request.action,
+            "args": approval_request.args,
+            "principal": approval_request.principal,
+            "requested_at": requested_at,
+            "deadline": approval_request.deadline,
+            "approvers_required": approval_request.approvers_required,
+            "evidence_refs": approval_request.evidence_refs,
+            "undo_metadata": approval_request.undo_metadata,
+            "capabilities_requested": approval_request.capabilities_requested,
             "detail": detail,
             "quorum": 1,
             "reviewers": reviewers,
@@ -368,19 +458,60 @@ async fn request_approval_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
         .as_ref()
         .map(|keys| keys.trace_id.clone())
         .unwrap_or_else(new_trace_id);
+    let agent = keys
+        .as_ref()
+        .map(|keys| keys.agent.clone())
+        .unwrap_or_default();
+    let requested_at_time = OffsetDateTime::now_utc();
+    let requested_at = format_rfc3339(requested_at_time);
+    let principal = options.principal.clone().unwrap_or_else(|| agent.clone());
+    let approval_args = options
+        .args
+        .as_ref()
+        .or(options.detail.as_ref())
+        .map(crate::llm::vm_value_to_json)
+        .unwrap_or(JsonValue::Null);
+    let mut approval_request = ApprovalRequest::new(
+        request_id.clone(),
+        action.clone(),
+        approval_args,
+        principal,
+        requested_at.clone(),
+    );
+    approval_request.deadline = deadline_after(requested_at_time, options.deadline);
+    approval_request.approvers_required = options.quorum;
+    approval_request.evidence_refs = options.evidence_refs.clone();
+    approval_request.undo_metadata = options
+        .undo_metadata
+        .clone()
+        .or_else(|| {
+            crate::orchestration::current_mutation_session()
+                .and_then(|session| serde_json::to_value(session).ok())
+        })
+        .unwrap_or(JsonValue::Null);
+    approval_request.capabilities_requested = options.capabilities_requested.clone();
+    let approval_request_json = serde_json::to_value(&approval_request)
+        .map_err(|error| VmError::Runtime(error.to_string()))?;
     let log = ensure_hitl_event_log();
     let request = HitlRequestEnvelope {
         request_id: request_id.clone(),
         kind: HitlRequestKind::Approval,
-        agent: keys
-            .as_ref()
-            .map(|keys| keys.agent.clone())
-            .unwrap_or_default(),
+        agent,
         trace_id: trace_id.clone(),
         run_id: crate::orchestration::current_mutation_session().and_then(|session| session.run_id),
-        requested_at: now_rfc3339(),
+        requested_at: requested_at.clone(),
         payload: json!({
+            "approval_request": approval_request_json,
+            "id": approval_request.id,
             "action": action,
+            "args": approval_request.args,
+            "principal": approval_request.principal,
+            "requested_at": requested_at,
+            "deadline": approval_request.deadline,
+            "approvers_required": approval_request.approvers_required,
+            "evidence_refs": approval_request.evidence_refs,
+            "undo_metadata": approval_request.undo_metadata,
+            "capabilities_requested": approval_request.capabilities_requested,
             "detail": options.detail.as_ref().map(crate::llm::vm_value_to_json),
             "quorum": options.quorum,
             "reviewers": options.reviewers,
@@ -440,18 +571,52 @@ async fn dual_control_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     } else {
         action.func.name.clone()
     };
+    let agent = keys
+        .as_ref()
+        .map(|keys| keys.agent.clone())
+        .unwrap_or_default();
+    let requested_at_time = OffsetDateTime::now_utc();
+    let requested_at = format_rfc3339(requested_at_time);
+    let mut approval_request = ApprovalRequest::new(
+        request_id.clone(),
+        action_name.clone(),
+        json!({
+            "n": n,
+            "m": m,
+            "approvers": approvers.clone(),
+        }),
+        agent.clone(),
+        requested_at.clone(),
+    );
+    approval_request.deadline = deadline_after(
+        requested_at_time,
+        StdDuration::from_millis(HITL_APPROVAL_TIMEOUT_MS),
+    );
+    approval_request.approvers_required = n as u32;
+    approval_request.undo_metadata = crate::orchestration::current_mutation_session()
+        .and_then(|session| serde_json::to_value(session).ok())
+        .unwrap_or(JsonValue::Null);
+    let approval_request_json = serde_json::to_value(&approval_request)
+        .map_err(|error| VmError::Runtime(error.to_string()))?;
     let log = ensure_hitl_event_log();
     let request = HitlRequestEnvelope {
         request_id: request_id.clone(),
         kind: HitlRequestKind::DualControl,
-        agent: keys
-            .as_ref()
-            .map(|keys| keys.agent.clone())
-            .unwrap_or_default(),
+        agent,
         trace_id: trace_id.clone(),
         run_id: crate::orchestration::current_mutation_session().and_then(|session| session.run_id),
-        requested_at: now_rfc3339(),
+        requested_at: requested_at.clone(),
         payload: json!({
+            "approval_request": approval_request_json,
+            "id": approval_request.id,
+            "args": approval_request.args,
+            "principal": approval_request.principal,
+            "requested_at": requested_at,
+            "deadline": approval_request.deadline,
+            "approvers_required": approval_request.approvers_required,
+            "evidence_refs": approval_request.evidence_refs,
+            "undo_metadata": approval_request.undo_metadata,
+            "capabilities_requested": approval_request.capabilities_requested,
             "n": n,
             "m": m,
             "action": action_name,
@@ -871,6 +1036,13 @@ fn approval_quorum_from_request(
     let quorum = request
         .payload
         .get(key)
+        .or_else(|| request.payload.get("approvers_required"))
+        .or_else(|| {
+            request
+                .payload
+                .get("approval_request")
+                .and_then(|approval| approval.get("approvers_required"))
+        })
         .and_then(JsonValue::as_u64)
         .unwrap_or(1);
     u32::try_from(quorum).map_err(|_| {
@@ -892,6 +1064,12 @@ fn approval_reviewers_from_request(
     request
         .payload
         .get(key)
+        .or_else(|| {
+            request
+                .payload
+                .get("approval_request")
+                .and_then(|approval| approval.get("reviewers"))
+        })
         .and_then(JsonValue::as_array)
         .map(|values| {
             values
@@ -1216,6 +1394,23 @@ fn parse_approval_options(
         )));
     }
     let reviewers = optional_string_list(dict.and_then(|dict| dict.get("reviewers")), builtin)?;
+    let capabilities_requested = optional_string_list(
+        dict.and_then(|dict| dict.get("capabilities_requested")),
+        builtin,
+    )?;
+    let evidence_refs = dict
+        .and_then(|dict| dict.get("evidence_refs"))
+        .map(|value| match value {
+            VmValue::List(items) => Ok(items
+                .iter()
+                .map(crate::llm::vm_value_to_json)
+                .collect::<Vec<_>>()),
+            _ => Err(VmError::Runtime(format!(
+                "{builtin}: evidence_refs must be a list"
+            ))),
+        })
+        .transpose()?
+        .unwrap_or_default();
     let deadline = dict
         .and_then(|dict| dict.get("deadline"))
         .map(parse_duration_value)
@@ -1223,9 +1418,19 @@ fn parse_approval_options(
         .unwrap_or_else(|| StdDuration::from_millis(HITL_APPROVAL_TIMEOUT_MS));
     Ok(ApprovalOptions {
         detail: dict.and_then(|dict| dict.get("detail")).cloned(),
+        args: dict.and_then(|dict| dict.get("args")).cloned(),
         quorum: quorum as u32,
         reviewers,
         deadline,
+        principal: dict
+            .and_then(|dict| dict.get("principal"))
+            .map(VmValue::display)
+            .filter(|value| !value.is_empty()),
+        evidence_refs,
+        undo_metadata: dict
+            .and_then(|dict| dict.get("undo_metadata"))
+            .map(crate::llm::vm_value_to_json),
+        capabilities_requested,
     })
 }
 
@@ -1453,9 +1658,19 @@ fn log_error(error: impl std::fmt::Display) -> VmError {
 }
 
 fn now_rfc3339() -> String {
-    OffsetDateTime::now_utc()
+    format_rfc3339(OffsetDateTime::now_utc())
+}
+
+fn format_rfc3339(timestamp: OffsetDateTime) -> String {
+    timestamp
         .format(&Rfc3339)
-        .unwrap_or_else(|_| OffsetDateTime::now_utc().to_string())
+        .unwrap_or_else(|_| timestamp.to_string())
+}
+
+fn deadline_after(requested_at: OffsetDateTime, duration: StdDuration) -> Option<String> {
+    time::Duration::try_from(duration)
+        .ok()
+        .map(|duration| format_rfc3339(requested_at + duration))
 }
 
 fn new_trace_id() -> String {
@@ -1528,6 +1743,18 @@ mod tests {
             .collect()
     }
 
+    async fn event_payloads(
+        log: std::sync::Arc<crate::event_log::AnyEventLog>,
+        topic: &str,
+    ) -> Vec<serde_json::Value> {
+        log.read_range(&Topic::new(topic).expect("valid topic"), None, usize::MAX)
+            .await
+            .expect("read topic")
+            .into_iter()
+            .map(|(_, event)| event.payload)
+            .collect()
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn ask_user_coerces_to_default_type_and_logs_events() {
         tokio::task::LocalSet::new()
@@ -1597,6 +1824,51 @@ pipeline test(task) {
                         "hitl.approval_approved".to_string(),
                     ]
                 );
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn request_approval_emits_canonical_approval_request_payload() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                reset_thread_local_state();
+                let dir = tempfile::tempdir().expect("tempdir");
+                let log = install_default_for_base_dir(dir.path()).expect("install event log");
+                let source = r#"
+pipeline test(task) {
+  host_mock("hitl", "approval", {approved: true, reviewer: "alice", reason: "ok"})
+  request_approval("deploy production", {
+    args: {environment: "prod"},
+    quorum: 1,
+    reviewers: ["alice"],
+    evidence_refs: [{kind: "run", uri: "run_123"}],
+    undo_metadata: {strategy: "rollback"},
+    capabilities_requested: ["deploy.production"],
+  })
+}
+"#;
+                let chunk = compile_source(source).expect("compile source");
+                let mut vm = Vm::new();
+                register_vm_stdlib(&mut vm);
+                vm.set_source_dir(dir.path());
+                vm.execute(&chunk).await.expect("script succeeds");
+
+                let payloads = event_payloads(log, HITL_APPROVALS_TOPIC).await;
+                let request_payload = &payloads[0]["payload"];
+                let approval_request = &request_payload["approval_request"];
+                assert_eq!(approval_request["id"], request_payload["id"]);
+                assert_eq!(approval_request["action"], "deploy production");
+                assert_eq!(approval_request["args"]["environment"], "prod");
+                assert_eq!(approval_request["approvers_required"], 1);
+                assert_eq!(approval_request["evidence_refs"][0]["uri"], "run_123");
+                assert_eq!(approval_request["undo_metadata"]["strategy"], "rollback");
+                assert_eq!(
+                    approval_request["capabilities_requested"][0],
+                    "deploy.production"
+                );
+                assert!(approval_request["requested_at"].as_str().is_some());
+                assert!(approval_request["deadline"].as_str().is_some());
             })
             .await;
     }

@@ -3094,9 +3094,13 @@ syntax. The runtime owns blocking semantics, timeout behavior, event-log
 records, and replay.
 
 - `ask_user<T>(prompt: string, options?: {schema?: Schema<T>, timeout?: duration, default?: T}) -> T`
-- `request_approval(action: string, options?: {detail?: any, quorum?: int, reviewers?: list<string>, deadline?: duration})`
+- `request_approval(action: string, options?: ApprovalRequestOptions)`
   returns `{approved: bool, reviewers: list<string>, approved_at: string, reason: string | nil,
   signatures: list<{reviewer: string, signed_at: string, signature: string}>}`.
+  `ApprovalRequestOptions` is `{detail?: any, args?: any, quorum?: int,
+  reviewers?: list<string>, deadline?: duration, principal?: string,
+  evidence_refs?: list<dict>, undo_metadata?: dict,
+  capabilities_requested?: list<string>}`.
 - `dual_control<T>(n: int, m: int, action: fn() -> T, approvers?: list<string>) -> T`
 - `escalate_to(role: string, reason: string)`
   returns `{request_id: string, role: string, reason: string, trace_id: string,

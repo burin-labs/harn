@@ -161,6 +161,28 @@ Request payload (harn-issued):
 ```json
 {
   "sessionId": "session_123",
+  "approvalRequest": {
+    "id": "tool-call_123",
+    "action": "edit_file",
+    "args": {"path": "src/main.rs"},
+    "principal": "worker_3",
+    "requested_at": "2026-04-30T12:00:00Z",
+    "approvers_required": 1,
+    "evidence_refs": [
+      {
+        "kind": "workspace_path",
+        "ref": "src/main.rs",
+        "metadata": {"workspace_path": "src/main.rs"}
+      }
+    ],
+    "undo_metadata": {
+      "session_id": "session_123",
+      "run_id": "run_123",
+      "worker_id": null,
+      "mutation_scope": "apply_workspace"
+    },
+    "capabilities_requested": ["workspace.write_text"]
+  },
   "toolCall": {
     "toolCallId": "call_123",
     "toolName": "edit_file",
@@ -176,6 +198,29 @@ Request payload (harn-issued):
   "declaredPaths": ["src/main.rs"]
 }
 ```
+
+`approvalRequest` is the canonical Harn `ApprovalRequest` payload. Hosts should
+render approval UI from that object and treat the surrounding `toolCall`,
+`mutation`, and `declaredPaths` fields as compatibility/context fields. The same
+shape is used in stdlib HITL notifications at
+`harn.hitl.requested.params.payload.approval_request`, so Burin Code,
+harn-cloud approval inboxes, and CLI-style hosts can share one renderer.
+
+Field meanings:
+
+- `id`: stable approval request id. For tool permission prompts this is the
+  emitted tool-call id; for stdlib HITL it is the HITL request id.
+- `action`: human-readable action name, usually the tool or stdlib action.
+- `args`: structured action arguments safe for host rendering.
+- `principal`: agent, worker, session, or other actor requesting approval.
+- `requested_at`: RFC3339 UTC timestamp.
+- `deadline`: optional RFC3339 UTC deadline. Omitted when there is no deadline.
+- `approvers_required`: number of approving reviewers required to proceed.
+- `evidence_refs`: host-renderable evidence handles, such as declared workspace
+  paths or run artifacts.
+- `undo_metadata`: mutation/audit metadata a host can use to group undo/redo.
+- `capabilities_requested`: canonical capability operation names requested by
+  the action.
 
 Response payload (host-issued):
 

@@ -36,13 +36,37 @@ let choice: Choice = ask_user(
 )
 ```
 
-### `request_approval(action: string, options?: {detail?: any, quorum?: int, reviewers?: list<string>, deadline?: duration}) -> ApprovalRecord`
+### `request_approval(...) -> ApprovalRecord`
+
+```harn,ignore
+request_approval(
+  action: string,
+  options?: ApprovalRequestOptions,
+) -> ApprovalRecord
+
+type ApprovalRequestOptions = {
+  detail?: any,
+  args?: any,
+  quorum?: int,
+  reviewers?: list<string>,
+  deadline?: duration,
+  principal?: string,
+  evidence_refs?: list<dict>,
+  undo_metadata?: dict,
+  capabilities_requested?: list<string>,
+}
+```
 
 Emit an approval request and wait for a quorum of approving reviewers.
 
 - `quorum` defaults to `1`.
 - `deadline` defaults to 24 hours.
 - If `reviewers` is omitted, any authorized reviewer may approve.
+- `args` is the canonical host-rendered argument payload. When omitted, Harn
+  uses `detail` for compatibility with older scripts.
+- `principal` defaults to the current dispatch agent or session.
+- `evidence_refs`, `undo_metadata`, and `capabilities_requested` are forwarded
+  unchanged for hosts that render provenance, undo, or capability UX.
 - Denial raises `ApprovalDeniedError`, which scripts can catch with `try`.
 - Event log:
   - request: `hitl.approval_requested`
@@ -72,6 +96,30 @@ type ApprovalSignature = {
 Each counted approval contributes one signature receipt. Hosts may provide a
 signature directly; otherwise the VM records a deterministic receipt signature
 over the request id, reviewer, approval decision, reason, and signed timestamp.
+
+`ApprovalRequest` is the canonical host-rendered request shape used by stdlib
+HITL, bridge permission prompts, and external approval inboxes:
+
+```harn
+type ApprovalRequest = {
+  id: string,
+  action: string,
+  args: any,
+  principal: string,
+  requested_at: string,
+  deadline: string | nil,
+  approvers_required: int,
+  evidence_refs: list<dict>,
+  undo_metadata: dict | nil,
+  capabilities_requested: list<string>,
+}
+```
+
+For stdlib HITL events, the durable request envelope stores this under
+`payload.approval_request` and also mirrors the same fields at `payload.id`,
+`payload.action`, `payload.args`, and so on. Legacy `detail`, `quorum`,
+`reviewers`, and `deadline_ms` fields remain present so older hosts continue to
+render and resolve existing flows.
 
 ### `dual_control<T>(n: int, m: int, action: fn() -> T, approvers?: list<string>) -> T`
 
@@ -165,6 +213,11 @@ crash-safety guarantees as trigger dispatch records.
 When a builtin opens a HITL wait, Harn emits a bridge notification:
 
 - `harn.hitl.requested`
+
+For approval and dual-control requests, notification params are the durable
+request envelope and include `payload.approval_request` with the canonical
+`ApprovalRequest` object. Hosts should render that object instead of inventing
+host-specific approval shapes.
 
 Hosts resolve pending requests with the JSON-RPC method:
 
