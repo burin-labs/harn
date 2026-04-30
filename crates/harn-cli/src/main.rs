@@ -879,6 +879,7 @@ async fn print_model_info(args: &ModelInfoArgs) -> bool {
             "vision": capabilities.vision,
             "vision_supported": capabilities.vision_supported,
             "audio": capabilities.audio,
+            "pdf": capabilities.pdf,
             "json_schema": capabilities.json_schema,
             "thinking": !capabilities.thinking_modes.is_empty(),
             "thinking_modes": capabilities.thinking_modes,

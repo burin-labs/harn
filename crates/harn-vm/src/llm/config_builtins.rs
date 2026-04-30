@@ -555,6 +555,8 @@ fn capabilities_to_vm_value(
         "vision_supported".to_string(),
         VmValue::Bool(caps.vision_supported),
     );
+    dict.insert("audio".to_string(), VmValue::Bool(caps.audio));
+    dict.insert("pdf".to_string(), VmValue::Bool(caps.pdf));
     dict.insert(
         "preserve_thinking".to_string(),
         VmValue::Bool(caps.preserve_thinking),

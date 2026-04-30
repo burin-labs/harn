@@ -326,6 +326,18 @@ fn output_format_error(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::String(std::rc::Rc::from(message.into())))
 }
 
+fn unsupported_option_error(option: &str, provider: &str, model: &str) -> VmError {
+    VmError::Thrown(VmValue::String(std::rc::Rc::from(format!(
+        "option `{option}` is not supported by `{model}` (provider `{provider}`). See `harn check --provider-matrix` for compatibility."
+    ))))
+}
+
+fn option_is_enabled(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> bool {
+    options
+        .and_then(|o| o.get(key))
+        .is_some_and(|value| value.is_truthy())
+}
+
 fn parse_output_format_kind(raw: &str) -> Result<&'static str, VmError> {
     let normalized = raw.trim().to_ascii_lowercase();
     match normalized.as_str() {
@@ -413,28 +425,27 @@ fn validate_output_format_supported(
     output_format: &crate::llm::api::OutputFormat,
     provider: &str,
     model: &str,
+    caps: &crate::llm::capabilities::Capabilities,
 ) -> Result<(), VmError> {
     use crate::llm::api::OutputFormat;
 
     match output_format {
         OutputFormat::Text => Ok(()),
-        OutputFormat::JsonObject => Ok(()),
-        OutputFormat::JsonSchema { strict, .. } => {
-            if provider == "mock" {
-                return Ok(());
+        _ if provider == "mock" => Ok(()),
+        OutputFormat::JsonObject => {
+            if caps.structured_output.is_some() {
+                Ok(())
+            } else {
+                Err(unsupported_option_error("output_format", provider, model))
             }
-            let strategy = crate::llm::capabilities::lookup(provider, model).structured_output;
-            match strategy.as_deref() {
+        }
+        OutputFormat::JsonSchema { .. } => {
+            match caps.structured_output.as_deref() {
                 Some("native" | "tool_use" | "format_kw") => Ok(()),
                 Some(other) => Err(output_format_error(format!(
                     "output_format: provider \"{provider}\" model \"{model}\" declares unsupported structured_output strategy \"{other}\""
                 ))),
-                None => {
-                    let strict_msg = if *strict { " strict" } else { "" };
-                    Err(output_format_error(format!(
-                        "output_format: provider \"{provider}\" model \"{model}\" cannot enforce{strict_msg} json_schema output"
-                    )))
-                }
+                None => Err(unsupported_option_error("output_format", provider, model)),
             }
         }
     }
@@ -445,9 +456,7 @@ pub(crate) fn extract_llm_options(
     args: &[VmValue],
 ) -> Result<crate::llm::api::LlmCallOptions, VmError> {
     use crate::llm::api::{LlmCallOptions, ToolSearchMode, ToolSearchVariant};
-    use crate::llm::provider::{
-        provider_supports_defer_loading, provider_thinking_modes, provider_tool_search_variants,
-    };
+    use crate::llm::provider::{provider_supports_defer_loading, provider_tool_search_variants};
     use crate::llm::tools::{extract_deferred_tool_names, vm_tools_to_native};
 
     let prompt = args.first().map(|a| a.display()).unwrap_or_default();
@@ -470,6 +479,9 @@ pub(crate) fn extract_llm_options(
     }
     let fallback_chain = parse_fallback_chain_option(options.as_ref());
     let api_key = resolve_api_key(&provider)?;
+    let caps = crate::llm::capabilities::lookup(&provider, &model);
+    let enforce_capability_gates = !crate::llm::mock::cli_llm_mock_replay_active()
+        && !crate::llm::mock::builtin_llm_mock_active();
 
     // Apply providers.toml model_defaults as fallbacks for unspecified params
     // (e.g. presence_penalty=1.5 for Qwen to avoid repetition loops).
@@ -503,15 +515,56 @@ pub(crate) fn extract_llm_options(
         });
     let output_validation = opt_str(&options, "output_validation");
 
-    let thinking = parse_thinking_option(options.as_ref())?;
-    validate_thinking_supported(
+    let reasoning_effort = parse_reasoning_effort_option(options.as_ref())?;
+    let thinking_from_reasoning_effort = reasoning_effort.is_some()
+        && !options
+            .as_ref()
+            .and_then(|o| o.get("thinking"))
+            .is_some_and(|value| value.is_truthy());
+    let thinking = if let Some(level) = reasoning_effort {
+        if options
+            .as_ref()
+            .and_then(|o| o.get("thinking"))
+            .is_some_and(|value| value.is_truthy())
+        {
+            return Err(thinking_error(
+                "reasoning_effort cannot be combined with a non-disabled thinking option",
+            ));
+        }
+        crate::llm::api::ThinkingConfig::Effort { level }
+    } else {
+        parse_thinking_option(options.as_ref())?
+    };
+    if enforce_capability_gates
+        && thinking_from_reasoning_effort
+        && !caps.reasoning_effort_supported
+    {
+        return Err(unsupported_option_error(
+            "reasoning_effort",
+            &provider,
+            &model,
+        ));
+    }
+    if enforce_capability_gates {
+        validate_thinking_supported(
+            &thinking,
+            &provider,
+            &model,
+            &caps.thinking_modes,
+            if thinking_from_reasoning_effort {
+                "reasoning_effort"
+            } else {
+                "thinking"
+            },
+        )?;
+    }
+    let anthropic_beta_features = parse_anthropic_beta_features_option(
+        options.as_ref(),
         &thinking,
         &provider,
         &model,
-        &provider_thinking_modes(&provider, &model),
+        enforce_capability_gates,
     )?;
-    let anthropic_beta_features =
-        parse_anthropic_beta_features_option(options.as_ref(), &thinking, &provider, &model)?;
 
     let response_format = opt_str(&options, "response_format");
     let json_schema = parse_schema_value(
@@ -533,7 +586,9 @@ pub(crate) fn extract_llm_options(
         response_format.as_deref(),
         json_schema.as_ref(),
     )?;
-    validate_output_format_supported(&output_format, &provider, &model)?;
+    if enforce_capability_gates {
+        validate_output_format_supported(&output_format, &provider, &model, &caps)?;
+    }
     let output_schema = output_schema.or_else(|| output_format.schema().cloned());
 
     // Reject the deprecated `transcript` option key. Conversation
@@ -557,10 +612,17 @@ pub(crate) fn extract_llm_options(
     };
     let vision =
         opt_bool(&options, "vision") || crate::llm::content::messages_contain_images(&messages)?;
-    if vision && !crate::llm::capabilities::lookup(&provider, &model).vision_supported {
-        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(format!(
-            "llm_call: provider \"{provider}\" model \"{model}\" does not declare vision_supported=true"
-        )))));
+    if enforce_capability_gates && vision && !caps.vision_supported {
+        return Err(unsupported_option_error("vision", &provider, &model));
+    }
+    if enforce_capability_gates && option_is_enabled(options.as_ref(), "audio") && !caps.audio {
+        return Err(unsupported_option_error("audio", &provider, &model));
+    }
+    if enforce_capability_gates && option_is_enabled(options.as_ref(), "pdf") && !caps.pdf {
+        return Err(unsupported_option_error("pdf", &provider, &model));
+    }
+    if enforce_capability_gates && cache && !caps.prompt_caching {
+        return Err(unsupported_option_error("cache", &provider, &model));
     }
     if vision
         && provider == "ollama"
@@ -571,7 +633,20 @@ pub(crate) fn extract_llm_options(
         ))));
     }
 
-    let tools_val = options.as_ref().and_then(|o| o.get("tools")).cloned();
+    let tools_val = options
+        .as_ref()
+        .and_then(|o| o.get("tools"))
+        .filter(|value| !matches!(value, VmValue::Nil))
+        .cloned();
+    let tool_format = opt_str(&options, "tool_format")
+        .unwrap_or_else(|| crate::llm_config::default_tool_format(&model, &provider));
+    if enforce_capability_gates
+        && tools_val.is_some()
+        && tool_format == "native"
+        && !caps.native_tools
+    {
+        return Err(unsupported_option_error("tools", &provider, &model));
+    }
     let mut native_tools = if let Some(tools) = &tools_val {
         Some(vm_tools_to_native(tools, &provider)?)
     } else {
@@ -773,7 +848,11 @@ pub(crate) fn extract_llm_options(
     let tool_choice = options
         .as_ref()
         .and_then(|o| o.get("tool_choice"))
+        .filter(|value| !matches!(value, VmValue::Nil))
         .map(vm_value_to_json);
+    if enforce_capability_gates && tool_choice.is_some() && !caps.native_tools {
+        return Err(unsupported_option_error("tool_choice", &provider, &model));
+    }
 
     let provider_overrides = options
         .as_ref()
@@ -850,13 +929,36 @@ fn thinking_error(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::String(std::rc::Rc::from(message.into())))
 }
 
-fn parse_reasoning_effort(raw: &str) -> Result<crate::llm::api::ReasoningEffort, VmError> {
+fn parse_reasoning_effort_field(
+    field: &str,
+    raw: &str,
+) -> Result<crate::llm::api::ReasoningEffort, VmError> {
     match raw {
         "low" => Ok(crate::llm::api::ReasoningEffort::Low),
         "medium" => Ok(crate::llm::api::ReasoningEffort::Medium),
         "high" => Ok(crate::llm::api::ReasoningEffort::High),
         other => Err(thinking_error(format!(
-            "thinking.level: expected \"low\" | \"medium\" | \"high\", got \"{other}\""
+            "{field}: expected \"low\" | \"medium\" | \"high\", got \"{other}\""
+        ))),
+    }
+}
+
+fn parse_reasoning_effort(raw: &str) -> Result<crate::llm::api::ReasoningEffort, VmError> {
+    parse_reasoning_effort_field("thinking.level", raw)
+}
+
+fn parse_reasoning_effort_option(
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> Result<Option<crate::llm::api::ReasoningEffort>, VmError> {
+    let Some(raw) = options.and_then(|o| o.get("reasoning_effort")) else {
+        return Ok(None);
+    };
+    match raw {
+        VmValue::Nil | VmValue::Bool(false) => Ok(None),
+        VmValue::String(level) => parse_reasoning_effort_field("reasoning_effort", level).map(Some),
+        other => Err(thinking_error(format!(
+            "reasoning_effort: expected \"low\" | \"medium\" | \"high\", got {}",
+            other.type_name()
         ))),
     }
 }
@@ -968,6 +1070,7 @@ fn validate_thinking_supported(
     provider: &str,
     model: &str,
     supported_modes: &[String],
+    option_name: &str,
 ) -> Result<(), VmError> {
     use crate::llm::api::ThinkingConfig;
 
@@ -986,20 +1089,7 @@ fn validate_thinking_supported(
     if supported {
         return Ok(());
     }
-    let requested = match thinking {
-        ThinkingConfig::Disabled => "disabled",
-        ThinkingConfig::Enabled { .. } => "enabled",
-        ThinkingConfig::Adaptive => "adaptive",
-        ThinkingConfig::Effort { .. } => "effort",
-    };
-    let available = if supported_modes.is_empty() {
-        "none".to_string()
-    } else {
-        supported_modes.join(", ")
-    };
-    Err(thinking_error(format!(
-        "thinking.mode \"{requested}\" is not supported by provider \"{provider}\" model \"{model}\" (supported: {available})"
-    )))
+    Err(unsupported_option_error(option_name, provider, model))
 }
 
 fn parse_anthropic_beta_features_option(
@@ -1007,6 +1097,7 @@ fn parse_anthropic_beta_features_option(
     thinking: &crate::llm::api::ThinkingConfig,
     provider: &str,
     model: &str,
+    enforce_capability_gates: bool,
 ) -> Result<Vec<String>, VmError> {
     let mut features = Vec::new();
     if let Some(raw) = options.and_then(|o| o.get("anthropic_beta_features")) {
@@ -1054,17 +1145,24 @@ fn parse_anthropic_beta_features_option(
         }
     }
 
-    if options
+    let explicit_interleaved = options
         .and_then(|o| o.get("interleaved_thinking"))
-        .is_some_and(|value| value.is_truthy())
-    {
+        .is_some_and(|value| value.is_truthy());
+    let caps = crate::llm::capabilities::lookup(provider, model);
+    if enforce_capability_gates && explicit_interleaved && !caps.interleaved_thinking_supported {
+        return Err(unsupported_option_error(
+            "interleaved_thinking",
+            provider,
+            model,
+        ));
+    }
+    if explicit_interleaved {
         crate::llm::api::push_unique_anthropic_beta_feature(
             &mut features,
             crate::llm::providers::anthropic::ANTHROPIC_INTERLEAVED_THINKING_BETA,
         );
     }
 
-    let caps = crate::llm::capabilities::lookup(provider, model);
     if matches!(
         thinking,
         crate::llm::api::ThinkingConfig::Enabled { .. } | crate::llm::api::ThinkingConfig::Adaptive
@@ -1376,12 +1474,13 @@ mod output_format_tests {
             },
             "custom-provider",
             "custom-model",
+            &crate::llm::capabilities::lookup("custom-provider", "custom-model"),
         )
         .expect_err("unsupported structured output should fail");
 
         assert!(err
             .to_string()
-            .contains("cannot enforce strict json_schema output"));
+            .contains("option `output_format` is not supported by `custom-model`"));
     }
 
     #[test]
@@ -1402,6 +1501,7 @@ structured_output = "format_kw"
             },
             "custom-provider",
             "custom-model",
+            &crate::llm::capabilities::lookup("custom-provider", "custom-model"),
         )
         .expect("supported structured output");
         crate::llm::capabilities::clear_user_overrides();
@@ -1698,6 +1798,166 @@ mod routing_tests {
         );
     }
 
+    fn unsupported_local_options(extra: Vec<(&str, VmValue)>) -> VmError {
+        let mut options = BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(Rc::from("local".to_string())),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("unsupported-model".to_string())),
+            ),
+        ]);
+        for (key, value) in extra {
+            options.insert(key.to_string(), value);
+        }
+        match extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ]) {
+            Ok(_) => panic!("unsupported option should fail"),
+            Err(err) => err,
+        }
+    }
+
+    fn assert_unsupported_local_option(option: &str, extra: Vec<(&str, VmValue)>) {
+        crate::llm::capabilities::clear_user_overrides();
+        crate::llm_config::clear_user_overrides();
+        super::super::reset_provider_key_cache();
+
+        let err = unsupported_local_options(extra);
+
+        assert!(
+            err.to_string().contains(&format!(
+                "option `{option}` is not supported by `unsupported-model` (provider `local`). See `harn check --provider-matrix` for compatibility."
+            )),
+            "unexpected error for {option}: {err}"
+        );
+    }
+
+    fn one_tool_list() -> VmValue {
+        VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(BTreeMap::from([
+            ("name".to_string(), VmValue::String(Rc::from("lookup"))),
+            (
+                "description".to_string(),
+                VmValue::String(Rc::from("Look something up")),
+            ),
+            (
+                "parameters".to_string(),
+                VmValue::Dict(Rc::new(BTreeMap::new())),
+            ),
+        ])))]))
+    }
+
+    #[test]
+    fn unsupported_capability_options_error_with_provider_matrix_hint() {
+        assert_unsupported_local_option("thinking", vec![("thinking", VmValue::Bool(true))]);
+        assert_unsupported_local_option(
+            "output_format",
+            vec![(
+                "output_format",
+                VmValue::String(Rc::from("json_object".to_string())),
+            )],
+        );
+        assert_unsupported_local_option(
+            "tools",
+            vec![
+                (
+                    "tool_format",
+                    VmValue::String(Rc::from("native".to_string())),
+                ),
+                ("tools", one_tool_list()),
+            ],
+        );
+        assert_unsupported_local_option(
+            "tool_choice",
+            vec![(
+                "tool_choice",
+                VmValue::String(Rc::from("required".to_string())),
+            )],
+        );
+        assert_unsupported_local_option("cache", vec![("cache", VmValue::Bool(true))]);
+        assert_unsupported_local_option("vision", vec![("vision", VmValue::Bool(true))]);
+        assert_unsupported_local_option("audio", vec![("audio", VmValue::Bool(true))]);
+        assert_unsupported_local_option("pdf", vec![("pdf", VmValue::Bool(true))]);
+        assert_unsupported_local_option(
+            "reasoning_effort",
+            vec![(
+                "reasoning_effort",
+                VmValue::String(Rc::from("high".to_string())),
+            )],
+        );
+        assert_unsupported_local_option(
+            "interleaved_thinking",
+            vec![("interleaved_thinking", VmValue::Bool(true))],
+        );
+    }
+
+    #[test]
+    fn standalone_reasoning_effort_maps_to_thinking_effort_when_supported() {
+        let options = BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(Rc::from("mock".to_string())),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("o3".to_string())),
+            ),
+            (
+                "reasoning_effort".to_string(),
+                VmValue::String(Rc::from("high".to_string())),
+            ),
+        ]);
+
+        let opts = extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ])
+        .expect("supported reasoning_effort");
+
+        assert_eq!(
+            opts.thinking,
+            crate::llm::api::ThinkingConfig::Effort {
+                level: crate::llm::api::ReasoningEffort::High
+            }
+        );
+    }
+
+    #[test]
+    fn standalone_reasoning_effort_uses_dedicated_capability_gate() {
+        crate::llm::capabilities::set_user_overrides_toml(
+            r#"
+[[provider.local]]
+model_match = "thinking-effort-only"
+thinking_modes = ["effort"]
+"#,
+        )
+        .expect("capability override");
+        super::super::reset_provider_key_cache();
+
+        let err = unsupported_local_options(vec![
+            (
+                "model",
+                VmValue::String(Rc::from("thinking-effort-only".to_string())),
+            ),
+            (
+                "reasoning_effort",
+                VmValue::String(Rc::from("high".to_string())),
+            ),
+        ]);
+
+        assert!(
+            err.to_string()
+                .contains("option `reasoning_effort` is not supported"),
+            "unexpected error: {err}"
+        );
+        crate::llm::capabilities::clear_user_overrides();
+    }
+
     #[test]
     fn image_content_sets_vision_and_requires_capability() {
         let image_block = VmValue::Dict(Rc::new(BTreeMap::from([
@@ -1744,7 +2004,7 @@ mod routing_tests {
         let err = extract_llm_options(&[VmValue::String(Rc::from("")), VmValue::Nil, bad_options])
             .err()
             .expect("non-vision model should reject image content");
-        assert!(err.to_string().contains("vision_supported"));
+        assert!(err.to_string().contains("option `vision` is not supported"));
 
         let url_image = VmValue::Dict(Rc::new(BTreeMap::from([
             ("type".to_string(), VmValue::String(Rc::from("image"))),

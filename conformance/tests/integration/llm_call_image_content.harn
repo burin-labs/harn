@@ -44,6 +44,9 @@ pipeline test(task) {
   } catch (e) {
     e
   }
-  assert(contains(gate_error, "vision_supported"), "vision gate should reject non-vision models")
+  assert(
+    contains(gate_error, "option `vision` is not supported"),
+    "vision gate should reject non-vision models",
+  )
   log("llm_call_image_content tests passed")
 }
