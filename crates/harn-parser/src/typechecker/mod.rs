@@ -318,13 +318,16 @@ impl TypeChecker {
         value_span: Option<Span>,
         scope: &TypeScope,
     ) {
+        let nested_mismatch = first_nested_mismatch(expected, actual, scope);
         let mut message = format!(
             "{}: expected {}, found {}",
             context.into(),
             format_type(expected),
             format_type(actual)
         );
-        if let Some(detail) = type_mismatch_detail(expected, actual, scope) {
+        if let Some(detail) = shape_mismatch_detail(expected, actual)
+            .or_else(|| nested_mismatch.as_ref().map(|note| note.message.clone()))
+        {
             message.push_str(&format!(" ({detail})"));
         }
 
@@ -332,10 +335,10 @@ impl TypeChecker {
         if let Some((span, message)) = expected_origin {
             related.push(RelatedDiagnostic { span, message });
         }
-        for note in type_mismatch_notes(expected, actual, scope) {
+        if let Some(note) = nested_mismatch {
             related.push(RelatedDiagnostic {
                 span,
-                message: note,
+                message: format!("nested mismatch: {}", note.message),
             });
         }
 
@@ -437,24 +440,9 @@ impl TypeChecker {
     }
 }
 
-fn type_mismatch_detail(
-    expected: &TypeExpr,
-    actual: &TypeExpr,
-    scope: &TypeScope,
-) -> Option<String> {
-    shape_mismatch_detail(expected, actual)
-        .or_else(|| first_nested_mismatch(expected, actual, scope).map(|note| note.message))
-}
-
 #[derive(Debug)]
 struct MismatchNote {
     message: String,
-}
-
-fn type_mismatch_notes(expected: &TypeExpr, actual: &TypeExpr, scope: &TypeScope) -> Vec<String> {
-    first_nested_mismatch(expected, actual, scope)
-        .map(|note| vec![format!("nested mismatch: {}", note.message)])
-        .unwrap_or_default()
 }
 
 fn first_nested_mismatch(
