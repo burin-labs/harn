@@ -7,7 +7,7 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## v0.7.50
+## v0.7.51
 
 ### Added
 
@@ -32,6 +32,30 @@ granular archaeology.
   default baselines. Formatter, linter, LSP, tree-sitter, docs, generated
   keywords, and conformance coverage updated; per-case `compare_to`
   overrides manifest-level `baseline`.
+
+- **Provider-capability LLM option gating (#869/#1024).** `llm_call` options
+  are now gated against the provider capability matrix with consistent
+  provider/model error messages and a `harn check --provider-matrix` hint.
+  PDF capability metadata flows through provider rows, `model-info`,
+  `provider_capabilities`, docs, and matrix filters. CLI replay / mock-replay
+  paths bypass gates to keep fixture-backed tests unblocked.
+
+- **Signed provenance receipts (#931/#1018).** Adds Merkle-chained EventLog
+  provenance headers with per-topic prev/record hashes and Ed25519-signed
+  receipts. New `harn run --attest` / `--receipt-out` / `--attest-agent`
+  flags plus a top-level `harn verify` command for receipt verification with
+  tamper detection. Parser/unit coverage and CLI docs updated.
+
+- **Guarded stdlib tool synthesis (#966/#1017).** New `tool_synthesize`
+  builtin produces deterministic, cached callable tools from natural-language
+  specs. Default executor stays in dry-run; explicit `host_bridge` and
+  `mcp_server` dispatch paths are gated by existing `host_tool_call` /
+  `mcp_call` policy checks. Conformance coverage and highlight metadata
+  refreshed.
+
+## v0.7.50
+
+### Added
 
 - **Enterprise LLM providers (#870/#976).** First-class shims for Bedrock
   Runtime (Converse API with hand-rolled AWS SigV4 signing and

@@ -91,6 +91,7 @@ The following identifiers are reserved:
 | `while` | `.whileKw` |
 | `type` | `.typeKw` |
 | `enum` | `.enum` |
+| `eval_pack` | `.evalPack` |
 | `struct` | `.struct` |
 | `interface` | `.interface` |
 | `pub` | `.pub` |
@@ -1181,8 +1182,8 @@ The stable fields are always present, with unavailable values represented as
 `provider`, `trace_id`, `span_id`, `scheduler_key`, `runner`,
 `capacity_class`, `context_values`, `cancelled`, and `debug`.
 
-`spawn`, `parallel`, `parallel each`, and `parallel settle` create child
-logical tasks. A child task receives a deterministic `task_id`, its
+`spawn`, `parallel`, `parallel each`, `parallel each ... as stream`, and
+`parallel settle` create child logical tasks. A child task receives a deterministic `task_id`, its
 `parent_task_id` is the creating task, and its `root_task_id` is inherited from
 the root task. `parallel` siblings share a `task_group_id`.
 
@@ -1215,6 +1216,30 @@ parallel each list { item ->
 Maps over a list concurrently. Each task gets an isolated interpreter.
 The variable is bound to the current list element.
 Returns a list of results in the original order.
+
+### parallel each as stream
+
+```harn
+let results = parallel each list with { max_concurrent: 4 } { item ->
+  work(item)
+} as stream
+
+for result in results {
+  println(result)
+}
+```
+
+Maps over a list concurrently and returns `Stream<T>` instead of
+materializing a result list. The stream emits each task result as soon as
+that task completes, so output order is completion order rather than
+source order. `with { max_concurrent: N }` is honored the same way as
+eager `parallel each`. If a task throws, the error is raised when the
+consumer pulls that stream item and remaining tasks are cancelled.
+
+`parallel_race(items, callable, options?)` is the first-success helper
+for this pattern. It returns the first plain value or `Result.Ok`
+payload produced by `callable`, cancels remaining tasks, and throws an
+aggregate error if every task throws or returns `Result.Err`.
 
 ### parallel settle
 
@@ -3041,6 +3066,31 @@ let r = llm_call(prompt, nil, {
 })
 ```
 
+For call sites that want routing policy to be visibly scoped around the work,
+`cost_route` installs an inherited LLM routing context for the dynamic extent
+of its block. Nested `llm_call` invocations inherit the block's routing and
+budget options; an explicit option on the call wins for the same key.
+
+```harn
+let r = cost_route {
+  budget_usd: 0.05
+  prefer: ["anthropic:claude-haiku-4-5", "openai:gpt-5.4-mini"]
+  fallback_strategy: cheapest_first
+
+  llm_call(prompt, nil, {max_tokens: 800})
+}
+```
+
+`budget_usd` is a shorthand for `budget.max_cost_usd`. `prefer` is an ordered
+list of model aliases, model ids, or `provider:model` selectors. The
+`fallback_strategy` value may be `prefer_order`, `cheapest_first`, or
+`fastest_first`; failures on the selected route are retried against the
+remaining preferred routes before provider-level fallbacks are considered.
+Without `prefer`, `fallback_strategy: cheapest_first` and
+`fallback_strategy: fastest_first` lower to the corresponding
+`cheapest_over_quality(quality)` / `fastest_over_quality(quality)` policy,
+using `quality` or `min_quality` when present and `mid` otherwise.
+
 The emitted schema follows canonical JSON-Schema conventions (objects
 with `properties`/`required`, arrays with `items`, literal unions as
 `{type, enum}`) so it is compatible with structured-output validators
@@ -4391,6 +4441,36 @@ Threshold severity controls deployment-gate behavior:
 
 Run a pack directly with `harn eval harn.eval.toml`, or run package-declared
 packs with `harn test package --evals`.
+
+Harn source may also declare an eval pack directly:
+
+```harn
+eval_pack regression "slack-connector" {
+  baseline: "fixtures/baseline.run.json"
+  fixtures: [{id: "candidate", kind: "run-record", path: "fixtures/candidate.run.json"}]
+  rubrics: [{id: "status", kind: "deterministic", assertions: [{kind: "run-status", expected: "completed"}]}]
+  cases: [{id: "url-verification", run: "candidate", rubrics: ["status"]}]
+}
+```
+
+`eval_pack NAME { ... }` binds `NAME` to `eval_pack_manifest({ ... })`. If a
+string id is supplied after the name, that string becomes the manifest id; if
+the declaration starts with a string id, Harn derives a valid binding name from
+the id. Missing `version` defaults to `1`, and missing `id` defaults to the
+header id.
+
+Field entries use `field: expression` and are normalized through the same
+eval-pack runtime data model as TOML packs. A top-level `baseline` field acts
+as a default `compare_to` path for cases that do not specify their own
+baseline.
+
+An `eval_pack` block may include ordinary Harn statements and one
+`summarize { ... }` block. These statements run when the declaration is
+executed in script or block position, with the binding name, `id`, `version`,
+and all declared field names in scope. When a file has pipelines, top-level
+`eval_pack` declarations are preloaded as manifest values without running
+their executable body, so importing or running an unrelated pipeline does not
+trigger eval side effects.
 
 ### Package registry index
 
