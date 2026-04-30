@@ -1,7 +1,7 @@
-#![cfg(unix)]
-// Serialized with the shared process-test file lock. Nextest runs individual
-// tests in separate processes, so a static mutex would not prevent multiple
-// heavyweight `harn` child servers from cold-starting at once.
+// Portable across Unix and Windows: this suite drives `harn mcp serve` over
+// piped stdio and tears the child down with `std::process::Child::kill`
+// (TerminateProcess on Windows / SIGKILL on Unix), so it does not rely on
+// POSIX signals or platform-specific shellouts.
 #![allow(clippy::await_holding_lock)]
 
 #[path = "support/mcp.rs"]

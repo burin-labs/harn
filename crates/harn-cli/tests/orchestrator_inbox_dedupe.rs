@@ -1,3 +1,10 @@
+// POSIX-bound: this test asserts on graceful-shutdown behaviour after sending
+// SIGTERM to the orchestrator child (clean exit code, drained inbox dedupe
+// state). Windows lacks a portable signal delivery mechanism for console
+// children, so the orchestrator cannot be drained the same way under test.
+//
+// See `docs/dev/windows-test-coverage.md` for the full inventory and
+// disposition tracker (issue #946).
 #![cfg(unix)]
 
 #[path = "support/process.rs"]

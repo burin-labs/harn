@@ -2,19 +2,16 @@
 //! (`run_command`, `run_test`, `run_build_command`,
 //! `inspect_test_results`, `manage_packages`, `cancel_handle`).
 //!
-//! These spawn real subprocesses, so they're gated to Unix and rely only
-//! on coreutils / shell that ship with both macOS and standard Linux
-//! distros. The tests assert on:
+//! POSIX-bound: every fixture spawns `bash -c "<script>"` to exercise argv,
+//! cwd, env, stdin plumbing, timeouts, and the long-running-handle drain.
+//! Bash and the shell-script vocabulary used here (`echo`, `pwd`, `1>&2`,
+//! `for i in $(seq 1 N); do printf x; done`, `printenv`, `$$`, etc.) are
+//! POSIX-only; porting the suite to Windows would require rewriting every
+//! fixture against `cmd.exe` / PowerShell, with subtle quoting and exit-code
+//! semantics that no longer test the same plumbing on both sides.
 //!
-//! - argv / cwd / env / stdin plumbing matches the request schema
-//! - timeout enforcement kills the child and reports `timed_out: true`
-//! - error variants (missing argv, bad cwd, malformed types) round-trip
-//!   through `HostlibError` rather than panicking
-//! - language detection picks the right runner from manifest files
-//! - inspect_test_results parses JUnit XML written by `run_test`
-//! - long_running: true returns a handle synchronously; result lands in the
-//!   global pending-feedback queue after the process exits
-//! - cancel_handle kills the spawned process
+//! See `docs/dev/windows-test-coverage.md` for the full inventory and
+//! disposition tracker (issue #946).
 
 #![cfg(unix)]
 
