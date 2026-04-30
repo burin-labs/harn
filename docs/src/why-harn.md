@@ -23,6 +23,9 @@ under infrastructure code.
 Harn is a programming language where agent orchestration primitives are
 built into the syntax, not bolted on as libraries.
 
+For a capability-by-capability comparison with Inngest, Temporal, LangGraph,
+and Cursor Automations, see the [feature matrix](feature-matrix.md).
+
 In practice that means Harn aims to be the long-term orchestration boundary
 between product code and provider/runtime code. Product integrations should
 mainly declare workflows, policies, capabilities, and UI hooks rather than
