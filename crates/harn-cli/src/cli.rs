@@ -354,7 +354,8 @@ pub(crate) struct FmtArgs {
     /// Maximum line width before wrapping. Overrides `[fmt] line_width` in harn.toml.
     #[arg(long = "line-width")]
     pub line_width: Option<usize>,
-    /// Total width of `// ----` separator bars. Overrides `[fmt] separator_width`.
+    /// Total width of `// ----` separator bars. Defaults to line width minus indent.
+    /// Overrides `[fmt] separator_width`.
     #[arg(long = "separator-width")]
     pub separator_width: Option<usize>,
     /// One or more .harn files or directories.

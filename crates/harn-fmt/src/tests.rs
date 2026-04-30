@@ -2,7 +2,7 @@ use harn_lexer::Lexer;
 use harn_parser::Parser;
 
 use crate::helpers::format_duration;
-use crate::{format_source, format_source_opts, FmtOptions};
+use crate::{format_source, format_source_opts, FmtOptions, AUTO_SEPARATOR_WIDTH};
 
 fn assert_roundtrip(source: &str) {
     let formatted = format_source(source).unwrap();
@@ -744,7 +744,7 @@ fn test_backslash_continuation_roundtrip() {
 fn fmt_opts(source: &str, line_width: usize) -> String {
     let opts = FmtOptions {
         line_width,
-        separator_width: 80,
+        separator_width: AUTO_SEPARATOR_WIDTH,
     };
     format_source_opts(source, &opts).unwrap()
 }
@@ -836,7 +836,7 @@ fn test_custom_line_width_idempotent() {
 }"#;
     let opts = FmtOptions {
         line_width: 40,
-        separator_width: 80,
+        separator_width: AUTO_SEPARATOR_WIDTH,
     };
     let first = format_source_opts(source, &opts).unwrap();
     let second = format_source_opts(&first, &opts).unwrap();
@@ -1260,8 +1260,11 @@ fn test_doc_comment_glued_to_item_blank_line_above() {
 }
 
 fn canonical_bar() -> String {
-    // Default separator_width is 80 → 77 dashes after `// `.
-    let dashes: String = "-".repeat(77);
+    separator_bar(100)
+}
+
+fn separator_bar(width: usize) -> String {
+    let dashes: String = "-".repeat(width.saturating_sub(3));
     format!("// {dashes}")
 }
 
@@ -1347,6 +1350,37 @@ fn test_section_header_respects_custom_separator_width() {
         result.contains(&bar),
         "separator should match separator_width=40, got:\n{result}"
     );
+}
+
+#[test]
+fn test_section_header_auto_width_snapshots_across_line_widths() {
+    let source =
+        "fn a() -> int { return 1 }\n// ----\n// Helpers  \t\n// ----   \nfn b() -> int { return 2 }\n";
+    for line_width in [60, 80, 120] {
+        let opts = FmtOptions {
+            line_width,
+            separator_width: AUTO_SEPARATOR_WIDTH,
+        };
+        let bar = separator_bar(line_width);
+        let expected = format!(
+            "fn a() -> int {{\n  return 1\n}}\n\n{bar}\n// Helpers\n{bar}\n\nfn b() -> int {{\n  return 2\n}}\n"
+        );
+        let result = format_source_opts(source, &opts).unwrap();
+        assert_eq!(
+            result, expected,
+            "line_width={line_width} section-header snapshot drifted"
+        );
+        assert_eq!(
+            result,
+            format_source_opts(&result, &opts).unwrap(),
+            "line_width={line_width} section-header formatting is not idempotent"
+        );
+        assert_eq!(
+            bar.len(),
+            line_width,
+            "bar should span the configured line width"
+        );
+    }
 }
 
 #[test]

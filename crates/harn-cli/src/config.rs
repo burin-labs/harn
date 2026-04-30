@@ -11,7 +11,8 @@
 //! ```toml
 //! [fmt]
 //! line_width = 100
-//! separator_width = 80
+//! # By default, section-header separators follow line_width.
+//! # Set separator_width to force a fixed width.
 //!
 //! [lint]
 //! disabled = ["unused-import"]

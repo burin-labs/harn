@@ -234,12 +234,14 @@ harn fmt main.harn
 harn fmt src/
 harn fmt --check main.harn            # check mode (no changes, exit 1 if unformatted)
 harn fmt --line-width 80 main.harn    # custom line width
+harn fmt --separator-width 60 main.harn # fixed section-header separator width
 ```
 
 | Flag | Description |
 |---|---|
 | `--check` | Check mode: exit 1 if any file would be reformatted, make no changes |
 | `--line-width <N>` | Maximum line width before wrapping (default: 100) |
+| `--separator-width <N>` | Fixed total width for normalized `// ----` section-header separators (default: `line-width` minus indent) |
 
 The formatter enforces a **100-character line width** by default (overridable with `--line-width`). When a line exceeds
 this limit the formatter wraps it automatically:
