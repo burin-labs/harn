@@ -52,6 +52,16 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "schema_recover",
+        // Returns a diagnostic envelope dict whose `data` field
+        // narrows to `T | nil` when called with `Schema<T>` —
+        // resolved by `lookup_generic_builtin_sig`. Fall-through
+        // `None` keeps the parser from defaulting to a concrete
+        // dict type when the schema isn't a typed alias. See
+        // harn#906.
+        return_type: None,
+    },
+    BuiltinSig {
         name: "schema_to_json_schema",
         return_type: Some(BuiltinReturn::Named("dict")),
     },

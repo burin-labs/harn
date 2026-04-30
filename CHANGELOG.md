@@ -57,6 +57,17 @@ granular archaeology.
 
 ### Added
 
+- **`schema_recover` malformed-JSON repair helper (#906).** New stdlib
+  `schema_recover(text, schema, opts?)` runs a three-tier deterministic
+  recovery cascade — direct JSON parse → extract from prose / code
+  fences → regex scrape of top-level `key: value` lines — followed by
+  an optional one-shot `llm_call` repair pass. Returns the same
+  `{ok, data, raw_text, error, error_category, attempts, stage,
+  repaired}` envelope shape as `llm_call_structured_result`, with
+  `stage` reporting which tier succeeded. Designed to replace
+  hand-rolled `normalize_*()` chains downstream of LLM calls; set
+  `{llm_repair: false}` for a fully deterministic recovery pass.
+
 - **Enterprise LLM providers (#870/#976).** First-class shims for Bedrock
   Runtime (Converse API with hand-rolled AWS SigV4 signing and
   env/profile/container/instance credential resolution), Azure OpenAI
