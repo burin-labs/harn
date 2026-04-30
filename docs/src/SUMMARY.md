@@ -29,6 +29,8 @@
   - [Streaming and transcripts](./llm/streaming.md)
   - [LLM providers](./llm/providers.md)
   - [Provider capability matrix](./provider-matrix.md)
+- [Typed tools for agent loops](./typed-tools.md)
+- [Long-running tools](./long-running-tools.md)
 - [Tool surface validation](./tool-surface-validation.md)
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Current session builtin](./stdlib/agent_session_current_id.md)

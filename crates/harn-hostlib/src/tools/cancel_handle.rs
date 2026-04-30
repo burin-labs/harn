@@ -22,7 +22,8 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let map = require_dict_arg(NAME, args)?;
     let handle_id = require_string(NAME, &map, "handle_id")?;
 
-    let cancelled = super::long_running::cancel_handle(&handle_id);
+    let cancelled = super::long_running::cancel_handle(&handle_id)
+        || harn_vm::cancel_long_running_handle(&handle_id);
 
     Ok(ResponseBuilder::new()
         .str("handle_id", handle_id)

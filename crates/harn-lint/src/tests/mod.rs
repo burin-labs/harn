@@ -84,6 +84,7 @@ mod hitl;
 mod imports;
 mod invalid_binop;
 mod llm_rules;
+mod long_running;
 mod mutability;
 mod naming_types;
 mod redundant_nil_ternary;

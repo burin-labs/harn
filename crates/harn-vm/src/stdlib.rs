@@ -28,6 +28,7 @@ pub(crate) mod json;
 mod json_query;
 mod junit;
 mod logging;
+pub mod long_running;
 mod math;
 mod memory;
 mod monitors;
@@ -187,6 +188,7 @@ pub fn reset_stdlib_state() {
     io::reset_io_state();
     sandbox::reset_sandbox_state();
     fs::reset_fs_state();
+    long_running::reset_state();
     json::reset_json_state();
     host::reset_host_state();
     crate::egress::reset_egress_policy_for_host();

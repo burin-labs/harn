@@ -117,6 +117,7 @@ pub use stdlib::hitl::{
 };
 pub use stdlib::host::{clear_host_call_bridge, set_host_call_bridge, HostCallBridge};
 pub use stdlib::io::take_stderr_buffer;
+pub use stdlib::long_running::cancel_handle as cancel_long_running_handle;
 pub use stdlib::secret_scan::{
     append_secret_scan_audit, audit_secret_scan_active, scan_content as secret_scan_content,
     SecretFinding, SECRET_SCAN_AUDIT_TOPIC,

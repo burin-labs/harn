@@ -58,7 +58,9 @@ impl<'a> Linter<'a> {
                     self.test_pipeline_depth += 1;
                 }
                 let _ = self.analyze_secret_scan_block(body, false);
+                self.enter_long_running_body(body);
                 self.lint_block(body);
+                self.exit_long_running_body();
                 if Self::is_test_pipeline_name(name) {
                     self.test_pipeline_depth -= 1;
                 }
@@ -120,7 +122,9 @@ impl<'a> Linter<'a> {
                     self.connector_effect_export_stack.push(name.clone());
                 }
                 let _ = self.analyze_secret_scan_block(body, false);
+                self.enter_long_running_body(body);
                 self.lint_block(body);
+                self.exit_long_running_body();
                 if harn_vm::connector_export_effect_class(name).is_some() {
                     self.connector_effect_export_stack.pop();
                 }
@@ -158,7 +162,9 @@ impl<'a> Linter<'a> {
                 }
                 self.return_type_stack.push(return_type.clone());
                 let _ = self.analyze_secret_scan_block(body, false);
+                self.enter_long_running_body(body);
                 self.lint_block(body);
+                self.exit_long_running_body();
                 self.return_type_stack.pop();
                 self.loop_depth = saved_loop_depth;
                 self.pop_scope();
@@ -293,6 +299,9 @@ impl<'a> Linter<'a> {
                         suggestion: Some(format!("remove the redundant `{name}(...)` wrapper")),
                         fix,
                     });
+                }
+                if Self::call_uses_long_running_flag(name, args) {
+                    self.warn_unmanaged_long_running_call(name, snode.span);
                 }
                 for arg in args {
                     self.lint_node(arg);
@@ -741,7 +750,9 @@ impl<'a> Linter<'a> {
                 for p in params {
                     self.declare_parameter(&p.name, snode.span);
                 }
+                self.enter_long_running_body(body);
                 self.lint_block(body);
+                self.exit_long_running_body();
                 self.loop_depth = saved_loop_depth;
                 self.pop_scope();
             }

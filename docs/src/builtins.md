@@ -545,6 +545,8 @@ does **not** drain the iterator.
 | `delete_file(path)` | path: string | nil | Delete a file or directory (recursive). Throws on failure |
 | `file_exists(path)` | path: string | bool | Check if a file or directory exists |
 | `list_dir(path?)` | path: string (default `"."`) | list | List directory contents as sorted list of file names. Throws on failure |
+| `walk_dir(path, options?)` | path: string, options: dict | list or handle dict | Recursively list files/directories. Options: `max_depth`, `follow_symlinks`, `long_running`/`background` |
+| `glob(pattern, base_or_options?, options?)` | pattern: string, base: string or options: dict | list or handle dict | Match files under a base directory. Set `long_running`/`background` in options to return a handle |
 | `mkdir(path)` | path: string | nil | Create directory and all parent directories. Throws on failure |
 | `stat(path)` | path: string | dict | File metadata: `{size, is_file, is_dir, readonly, modified}`. Throws on failure |
 | `temp_dir()` | none | string | System temporary directory path |

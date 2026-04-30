@@ -40,7 +40,8 @@
       "type": "object",
       "additionalProperties": true
     },
-    "command": { "type": "string" }
+    "command": { "type": "string" },
+    "command_or_op_descriptor": { "type": "string" }
   },
   "required": [
     "command_id",

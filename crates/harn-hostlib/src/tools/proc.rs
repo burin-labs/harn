@@ -350,7 +350,8 @@ pub(crate) fn running_response(
         .str("output_sha256", "")
         .dict("sandbox", sandbox)
         .str("audit_id", format!("audit_{command_id}"))
-        .str("command", command_display)
+        .str("command", command_display.clone())
+        .str("command_or_op_descriptor", command_display)
         .build()
 }
 
