@@ -473,7 +473,7 @@ fn collect_calls_in_body(body: &[SNode], calls: &mut Vec<CallSite>) {
 
 fn collect_calls(node: &SNode, calls: &mut Vec<CallSite>) {
     match &node.node {
-        Node::FunctionCall { name, args } => {
+        Node::FunctionCall { name, args, .. } => {
             calls.push(CallSite {
                 name: name.clone(),
                 span: node.span,
