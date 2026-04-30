@@ -782,16 +782,70 @@ pub(super) async fn run_tool_dispatch(
                 // errors / missing method → deny.
                 if let Some(bridge) = ctx.bridge.as_ref() {
                     let mutation = crate::orchestration::current_mutation_session();
+                    let declared_paths_current = declared_paths(tool_name, &tool_args);
+                    let declared_path_entries =
+                        crate::orchestration::current_tool_declared_path_entries(
+                            tool_name, &tool_args,
+                        );
+                    let evidence_refs = declared_path_entries
+                        .iter()
+                        .filter_map(|entry| {
+                            serde_json::to_value(entry).ok().map(|metadata| {
+                                serde_json::json!({
+                                    "kind": "workspace_path",
+                                    "ref": entry.display_path(),
+                                    "metadata": metadata,
+                                })
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    let undo_metadata = mutation
+                        .as_ref()
+                        .and_then(|session| serde_json::to_value(session).ok())
+                        .unwrap_or(serde_json::Value::Null);
+                    let principal = mutation
+                        .as_ref()
+                        .and_then(|session| {
+                            session
+                                .worker_id
+                                .as_deref()
+                                .filter(|value| !value.is_empty())
+                                .or_else(|| {
+                                    (!session.session_id.is_empty())
+                                        .then_some(session.session_id.as_str())
+                                })
+                        })
+                        .map(str::to_string)
+                        .unwrap_or_else(|| ctx.session_id.to_string());
+                    let capabilities_requested = approval_capabilities_requested(tool_name)
+                        .filter(|capabilities| !capabilities.is_empty())
+                        .unwrap_or_else(|| vec![format!("tool.{tool_name}")]);
+                    let approval_id = if tool_id.is_empty() {
+                        tool_call_id.clone()
+                    } else {
+                        tool_id.to_string()
+                    };
+                    let approval_request =
+                        crate::stdlib::hitl::approval_request_for_host_permission(
+                            approval_id.clone(),
+                            tool_name.to_string(),
+                            tool_args.clone(),
+                            principal,
+                            evidence_refs,
+                            undo_metadata,
+                            capabilities_requested,
+                        );
                     let payload = serde_json::json!({
                         "sessionId": ctx.session_id,
+                        "approvalRequest": approval_request,
                         "toolCall": {
-                            "toolCallId": tool_id,
+                            "toolCallId": approval_id,
                             "toolName": tool_name,
                             "rawInput": tool_args,
                         },
                         "mutation": mutation,
-                        "declaredPaths": declared_paths(tool_name, &tool_args),
-                        "declaredPathEntries": crate::orchestration::current_tool_declared_path_entries(tool_name, &tool_args),
+                        "declaredPaths": declared_paths_current,
+                        "declaredPathEntries": declared_path_entries,
                     });
                     match bridge.call("session/request_permission", payload).await {
                         Ok(response) => {
@@ -1455,4 +1509,15 @@ pub(super) async fn run_tool_dispatch(
         tool_results_this_iter,
         observations,
     })
+}
+
+fn approval_capabilities_requested(tool_name: &str) -> Option<Vec<String>> {
+    let mut capabilities = crate::orchestration::current_tool_annotations(tool_name)?
+        .capabilities
+        .iter()
+        .flat_map(|(capability, ops)| ops.iter().map(move |op| format!("{capability}.{op}")))
+        .collect::<Vec<_>>();
+    capabilities.sort();
+    capabilities.dedup();
+    Some(capabilities)
 }

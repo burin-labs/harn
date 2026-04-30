@@ -112,8 +112,8 @@ pub use personas::{
 pub use record_filter::{normalize_record_filter_expression, CompiledRecordFilter};
 pub use schema::json_to_vm_value;
 pub use stdlib::hitl::{
-    append_hitl_response, HitlHostResponse, HITL_APPROVALS_TOPIC, HITL_DUAL_CONTROL_TOPIC,
-    HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,
+    append_hitl_response, ApprovalRequest, HitlHostResponse, HITL_APPROVALS_TOPIC,
+    HITL_DUAL_CONTROL_TOPIC, HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,
 };
 pub use stdlib::host::{clear_host_call_bridge, set_host_call_bridge, HostCallBridge};
 pub use stdlib::io::take_stderr_buffer;
