@@ -133,19 +133,19 @@ impl McpServer {
     fn handle_initialize(&self, id: &serde_json::Value) -> serde_json::Value {
         let mut capabilities = serde_json::Map::new();
         if !self.tools.is_empty() {
-            capabilities.insert("tools".into(), serde_json::json!({}));
+            capabilities.insert("tools".into(), serde_json::json!({ "listChanged": true }));
         }
         if !self.resources.is_empty()
             || !self.resource_templates.is_empty()
             || self.server_card.is_some()
         {
-            capabilities.insert("resources".into(), serde_json::json!({}));
+            capabilities.insert(
+                "resources".into(),
+                serde_json::json!({ "listChanged": true }),
+            );
         }
         if !self.prompts.is_empty() {
-            capabilities.insert(
-                "prompts".into(),
-                serde_json::json!({ "listChanged": false }),
-            );
+            capabilities.insert("prompts".into(), serde_json::json!({ "listChanged": true }));
         }
         capabilities.insert("logging".into(), serde_json::json!({}));
 
