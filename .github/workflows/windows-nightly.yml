@@ -1,0 +1,63 @@
+name: Windows nightly
+
+# Runs the full workspace nextest surface on Windows once per night, plus
+# on-demand from the Actions tab. Complements the per-PR `windows` job in
+# `ci.yml`, which builds the workspace test graph but only runs a curated
+# subset of unit tests to keep the PR pipeline fast. The nightly fan-out
+# is the cross-platform safety net: every test that is *not* gated to
+# `#![cfg(unix)]` is expected to pass here.
+#
+# Failure is informational, not blocking — the nightly does not gate the
+# `check-status` job. When something regresses, file an issue and either
+# fix the underlying portability bug or add a per-test `#[cfg(unix)]`
+# annotation with rationale, then update
+# `docs/src/dev/windows-test-coverage.md` to reflect the disposition.
+#
+# Tracking issue: harn#946.
+
+on:
+  schedule:
+    # 07:00 UTC ≈ 23:00 Pacific the previous evening, ≈ 02:00 Eastern.
+    # Picked to land outside US business hours so the nightly result is
+    # waiting when contributors start their day.
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  nextest:
+    name: Workspace nextest (windows-latest)
+    runs-on: windows-latest
+    # Don't run forks of the repo on a fork's own schedule.
+    if: github.repository == 'burin-labs/harn'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        continue-on-error: true
+        with:
+          # Reuse the same cache key as the per-PR Windows smoke job to
+          # piggy-back on whatever artifacts already landed today.
+          shared-key: workspace-windows
+          cache-on-failure: true
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@5f57d6cb7cd20b14a8a27f522884c4bc8a187458 # v2.75.19
+        with:
+          tool: nextest@0.9.133
+      - name: Run workspace nextest
+        shell: bash
+        # No package filter — the whole workspace runs. Tests gated to
+        # `#![cfg(unix)]` are excluded at compile time, so the nightly
+        # surface is exactly what is portable.
+        run: cargo nextest run --workspace --profile ci
+      - name: Smoke test harn run
+        shell: bash
+        run: |
+          echo 'pipeline main() { println("ok") }' > smoke.harn
+          ./target/debug/harn.exe run smoke.harn

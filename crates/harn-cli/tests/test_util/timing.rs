@@ -95,6 +95,14 @@ impl ChildExitWatcher {
         );
     }
 
+    /// Request graceful shutdown of the child.
+    ///
+    /// On Unix this delivers SIGTERM and the child runs its drain. Windows
+    /// has no portable equivalent that reaches an arbitrary console child
+    /// without taking over the parent's console group, so the Windows path
+    /// falls back to a forceful `taskkill /F` — no graceful drain, no
+    /// shutdown-needle log line. Tests that assert on graceful-shutdown
+    /// semantics must therefore stay `#![cfg(unix)]`.
     pub fn terminate(&mut self) {
         if self
             .try_status()
@@ -103,11 +111,7 @@ impl ChildExitWatcher {
         {
             return;
         }
-        let status = Command::new("kill")
-            .arg("-TERM")
-            .arg(self.pid.to_string())
-            .status()
-            .unwrap();
+        let status = posix_kill_or_taskkill(self.pid, KillKind::Term);
         if !status.success()
             && self
                 .try_status()
@@ -118,6 +122,11 @@ impl ChildExitWatcher {
         }
     }
 
+    /// Forcefully terminate the child.
+    ///
+    /// Maps to SIGKILL on Unix and `taskkill /F` on Windows (which calls
+    /// `TerminateProcess` underneath). Both paths are immediate and skip
+    /// any drain logic.
     pub fn kill(&mut self) {
         if self
             .try_status()
@@ -126,10 +135,7 @@ impl ChildExitWatcher {
         {
             return;
         }
-        let _ = Command::new("kill")
-            .arg("-KILL")
-            .arg(self.pid.to_string())
-            .status();
+        let _ = posix_kill_or_taskkill(self.pid, KillKind::Kill);
     }
 
     fn cache_status(
@@ -232,4 +238,38 @@ pub fn sleep_blocking(duration: Duration) {
 
 pub async fn sleep_async(duration: Duration) {
     tokio::time::sleep(duration).await;
+}
+
+#[derive(Copy, Clone)]
+enum KillKind {
+    Term,
+    Kill,
+}
+
+#[cfg(unix)]
+fn posix_kill_or_taskkill(pid: u32, kind: KillKind) -> ExitStatus {
+    let signal = match kind {
+        KillKind::Term => "-TERM",
+        KillKind::Kill => "-KILL",
+    };
+    Command::new("kill")
+        .arg(signal)
+        .arg(pid.to_string())
+        .status()
+        .unwrap()
+}
+
+#[cfg(windows)]
+fn posix_kill_or_taskkill(pid: u32, _kind: KillKind) -> ExitStatus {
+    // Windows has no portable signal-delivery mechanism for arbitrary console
+    // children, so both Term and Kill collapse to a forceful TerminateProcess
+    // via `taskkill /F`. The orchestrator's drain logic is therefore not
+    // exercised on this platform; tests that depend on it must remain gated
+    // to `#![cfg(unix)]`.
+    Command::new("taskkill")
+        .arg("/F")
+        .arg("/PID")
+        .arg(pid.to_string())
+        .status()
+        .unwrap()
 }

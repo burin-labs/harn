@@ -1,3 +1,12 @@
+// POSIX-bound: every test in this file asserts on graceful-shutdown behaviour
+// (drain progress, `graceful shutdown complete` log line, successful exit
+// code) after sending SIGTERM to the orchestrator child. Windows lacks a
+// portable signal delivery mechanism for console children, so the orchestrator
+// cannot be drained the same way under test. The Windows nightly nextest
+// matrix in `.github/workflows/windows-nightly.yml` runs every other test.
+//
+// See `docs/dev/windows-test-coverage.md` for the full inventory and
+// disposition tracker (issue #946).
 #![cfg(unix)]
 
 mod support;

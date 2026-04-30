@@ -1,8 +1,7 @@
-#![cfg(unix)]
-// These integration tests serialize CLI child processes with a cross-process
-// file lock. Nextest runs each test in a separate process, so a static mutex
-// would not prevent several heavyweight `harn` servers from cold-starting at
-// once and racing the protocol-level readiness assertions.
+// Portable across Unix and Windows: this suite drives `harn serve mcp` over
+// piped stdio and tears each child down by closing stdin or calling
+// `std::process::Child::kill` (TerminateProcess on Windows / SIGKILL on Unix),
+// so it does not rely on POSIX signals or platform-specific shellouts.
 #![allow(clippy::await_holding_lock)]
 
 #[path = "support/mcp.rs"]
