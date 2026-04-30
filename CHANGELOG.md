@@ -67,6 +67,18 @@ granular archaeology.
   `stage` reporting which tier succeeded. Designed to replace
   hand-rolled `normalize_*()` chains downstream of LLM calls; set
   `{llm_repair: false}` for a fully deterministic recovery pass.
+- **Generic webhook intake substrate (#1011).** Forge-agnostic intake layer
+  any connector can wire into. Connectors declare a path scope, signature
+  header + algorithm (`sha256` or legacy `sha1`), delivery-id header, and
+  topic; the substrate handles HMAC verification, durable delivery-id
+  deduplication via the trigger inbox, and republishes accepted deliveries
+  onto the connector's chosen topic. Exposed as `webhook_intake_register`,
+  `webhook_intake_feed`, `webhook_intake_recent`, `webhook_intake_list`,
+  and `webhook_intake_deregister` builtins. Per-forge event normalization
+  remains in each connector repo. Includes `hmac_sha1` builtin for legacy
+  signature schemes. New `triggers/webhook-intake.md` doc and conformance
+  coverage for happy path, signature rejection, replay dedupe, and
+  multi-path isolation.
 
 - **Enterprise LLM providers (#870/#976).** First-class shims for Bedrock
   Runtime (Converse API with hand-rolled AWS SigV4 signing and

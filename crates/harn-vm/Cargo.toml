@@ -41,6 +41,7 @@ data-encoding = "2"
 ed25519-dalek = { version = "2", features = ["pem", "pkcs8", "rand_core"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 hex = "0.4"
+sha1 = "0.10"
 sha2 = "0.11"
 sha3 = "0.11"
 blake3 = "1"

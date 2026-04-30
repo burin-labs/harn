@@ -125,3 +125,68 @@ Run `harn connector test .` locally. Use `--provider <id>` for a multi-provider 
 ## Example Library
 
 Ready-to-customize pipelines live under `examples/triggers/`. Each example includes `harn.toml`, `lib.harn`, `README.md`, and `SKILL.md` so it can be copied into a project or installed as a local skill bundle. Validate examples with `make check-trigger-examples`.
+
+## Generic Webhook Intake Substrate
+
+Below the per-provider connectors lives a forge-agnostic intake substrate
+that any connector can wire into. It is the lowest-level entry point: a
+connector declares a path scope, a signature header + algorithm, a
+delivery-id header, and a topic; the substrate handles HMAC verification,
+delivery-id deduplication (durable across process restarts), and
+republishing onto the chosen topic. Per-forge event normalization lives in
+the connector that consumes the topic.
+
+Builtins:
+
+- `webhook_intake_register(config) -> dict` — register an intake. Returns
+  `{ id, path, topic, signature_header, signature_prefix,
+  signature_encoding, algorithm, delivery_id_header,
+  dedupe_ttl_seconds }`. Config keys:
+  - `id` (optional) — pin the intake id; one is generated if omitted.
+  - `path` (optional) — HTTP path scope. When set, `webhook_intake_feed`
+    rejects deliveries on a different path.
+  - `secret` (string or bytes, required) — HMAC key.
+  - `signature_header` (required) — e.g. `"x-hub-signature-256"`.
+  - `signature_prefix` — defaults to `"<algorithm>="`. Pass `""` to opt out.
+  - `signature_encoding` — `"hex"` (default) or `"base64"`.
+  - `algorithm` — `"sha256"` (default) or `"sha1"` (legacy).
+  - `delivery_id_header` (required) — e.g. `"x-github-delivery"`.
+  - `topic` (required) — event-log topic accepted deliveries are appended to.
+  - `dedupe_ttl_seconds` — defaults to 24h.
+- `webhook_intake_feed(intake_id, request) -> dict` — feed a delivery.
+  Request keys: `headers` (dict), `body` (string or bytes), optional `path`
+  and `received_at` (RFC3339). Returns `{ status, intake_id, topic,
+  delivery_id, topic_event_id, reason, received_at }`. `status` is
+  `"accepted"`, `"duplicate"`, or `"rejected"`.
+- `webhook_intake_recent(intake_id, limit?) -> list` — bounded replay
+  buffer. Reads the last `limit` accepted deliveries from the topic.
+- `webhook_intake_list() -> list` — all currently-registered intakes.
+- `webhook_intake_deregister(intake_id) -> bool` — remove an intake.
+
+A connector wires this in well under 30 lines:
+
+```harn
+import "std/triggers"
+
+let intake = webhook_intake_register({
+  id: "github",
+  path: "/hooks/github",
+  secret: secret_get("github/webhook-secret"),
+  signature_header: "x-hub-signature-256",
+  delivery_id_header: "x-github-delivery",
+  topic: "github.events",
+})
+
+// In your inbound HTTP handler:
+let outcome = webhook_intake_feed(intake.id, {
+  headers: request.headers,
+  body: request.body,
+  path: request.path,
+})
+return { status: outcome.status == "rejected" ? 401 : 202 }
+```
+
+Rejections are appended to `triggers.webhook_intake.rejections` with the
+intake id and reason for audit. The substrate is agnostic to per-forge
+event shape — connectors normalize the opaque payload after consuming the
+topic.

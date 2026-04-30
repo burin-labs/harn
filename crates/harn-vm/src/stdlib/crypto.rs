@@ -725,6 +725,17 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
         )))
     });
 
+    // HMAC-SHA1 (hex). Provided for legacy webhook signatures (e.g. older
+    // Bitbucket / GitHub `x-hub-signature: sha1=<hex>`); SHA-256 should be
+    // preferred for any new integration.
+    vm.register_builtin("hmac_sha1", |args, _out| {
+        let key = args.first().map(|a| a.display()).unwrap_or_default();
+        let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
+        let mac = crate::connectors::hmac::hmac_sha1(key.as_bytes(), msg.as_bytes());
+        let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
+        Ok(VmValue::String(Rc::from(hex)))
+    });
+
     vm.register_builtin("jwt_sign", |args, _out| jwt_sign_builtin(args));
 
     vm.register_builtin("signed_url", |args, _out| signed_url_builtin(args));
