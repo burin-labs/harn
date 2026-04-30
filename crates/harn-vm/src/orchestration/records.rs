@@ -2680,15 +2680,8 @@ pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, Vm
     }
     let json = serde_json::to_string_pretty(&materialized)
         .map_err(|e| VmError::Runtime(format!("failed to encode run record: {e}")))?;
-    // Atomic write: .tmp then rename guards against partial writes on kill.
-    let tmp_path = path.with_extension("json.tmp");
-    std::fs::write(&tmp_path, &json)
+    crate::atomic_io::atomic_write(&path, json.as_bytes())
         .map_err(|e| VmError::Runtime(format!("failed to persist run record: {e}")))?;
-    std::fs::rename(&tmp_path, &path).map_err(|e| {
-        // Cross-device renames fail on some filesystems; best-effort direct write.
-        let _ = std::fs::write(&path, &json);
-        VmError::Runtime(format!("failed to finalize run record: {e}"))
-    })?;
     if let Some(observability) = materialized.observability.as_ref() {
         publish_action_graph_event(&materialized, observability, &path);
     }
