@@ -23,6 +23,70 @@ fn test_type_mismatch_let() {
 }
 
 #[test]
+fn test_match_expression_infers_common_arm_type() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  let input = "b"
+  let value: string = match input {
+    "a" -> { "alpha" }
+    "b" -> {
+      let suffix = "ravo"
+      "b" + suffix
+    }
+    _ -> { "other" }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected errors: {errs:?}");
+}
+
+#[test]
+fn test_match_expression_assignment_uses_arm_value_type() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  let input = "a"
+  let value: int = match input {
+    "a" -> { "alpha" }
+    _ -> { "other" }
+  }
+}"#,
+    );
+    assert_eq!(errs.len(), 1);
+    assert!(errs[0].contains("declared as int"));
+    assert!(errs[0].contains("assigned string"));
+}
+
+#[test]
+fn test_match_expression_mixed_arms_infer_union() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  let input = "a"
+  let value: string | int = match input {
+    "a" -> { "alpha" }
+    _ -> { 42 }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected errors: {errs:?}");
+}
+
+#[test]
+fn test_match_expression_infers_list_pattern_binding_type() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  let pair = [10, 20]
+  let value: string = match pair {
+    [_, item] -> { item }
+    _ -> { 0 }
+  }
+}"#,
+    );
+    assert_eq!(errs.len(), 1);
+    assert!(errs[0].contains("declared as string"));
+    assert!(errs[0].contains("assigned int"));
+}
+
+#[test]
 fn test_correct_typed_fn() {
     let errs =
         errors("pipeline t(task) { fn add(a: int, b: int) -> int { return a + b }\nadd(1, 2) }");

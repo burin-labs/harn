@@ -1129,6 +1129,10 @@ Maximum 10,000 iterations (safety limit). Condition is re-evaluated each iterati
 
 ### match
 
+`match` is an expression. It can be used as a standalone statement or in
+expression position; the selected arm evaluates to the value of its block's
+last expression.
+
 ```harn
 match value {
   pattern1 -> { body1 }
@@ -1141,17 +1145,17 @@ using `valuesEqual`. An arm may include an `if` guard after the pattern; when
 present, the arm only matches if the pattern matches **and** the guard expression
 evaluates to a truthy value. The first matching arm executes.
 
-If no arm matches, a runtime error is thrown (`no matching arm in match expression`).
+If no arm matches, a runtime error is thrown (`No match arm matched the value`).
 This makes non-exhaustive matches a hard failure rather than a silent `nil`.
 
 ```harn
 let x = 5
-match x {
+let label = match x {
   1 -> { "one" }
   n if n > 3 -> { "big: ${n}" }
   _ -> { "other" }
 }
-// -> "big: 5"
+// label == "big: 5"
 ```
 
 ### retry

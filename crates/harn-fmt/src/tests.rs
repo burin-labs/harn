@@ -78,6 +78,15 @@ fn test_roundtrip_match() {
 }
 
 #[test]
+fn test_format_match_expression_in_let_binding() {
+    let source = r#"pipeline default(task) { let label = match x { "a" -> { "alpha" } "b" if keep -> { "bravo" } _ -> { "other" } } }"#;
+    let result = format_source(source).unwrap();
+    assert!(result.contains("let label = match x {\n"));
+    assert!(result.contains(r#""b" if keep -> { "bravo" }"#));
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_roundtrip_computed_dict_key() {
     assert_roundtrip(
         r#"pipeline default(task) { let k = "x"
