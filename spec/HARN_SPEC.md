@@ -1219,7 +1219,7 @@ Returns a list of results in the original order.
 
 ```harn
 let results = parallel each list with { max_concurrent: 4 } { item ->
-  work(item)
+  // body for each item
 } as stream
 
 for result in results {
