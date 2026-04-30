@@ -25,24 +25,27 @@ impl HarnLsp {
             }
         };
 
-        let formatted = match harn_fmt::format_source(&source) {
-            Ok(f) => f,
-            Err(_) => return Ok(None),
-        };
+        Ok(format_whole_document_edit(&source).map(|edit| vec![edit]))
+    }
 
-        if formatted == source {
+    pub(super) async fn handle_on_type_formatting(
+        &self,
+        params: DocumentOnTypeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        if params.ch != ";" && params.ch != "}" {
             return Ok(None);
         }
 
-        let line_count = source.lines().count() as u32;
-        let last_line_len = source.lines().last().map_or(0, |l| l.len()) as u32;
-        Ok(Some(vec![TextEdit {
-            range: Range {
-                start: Position::new(0, 0),
-                end: Position::new(line_count, last_line_len),
-            },
-            new_text: formatted,
-        }]))
+        let uri = &params.text_document_position.text_document.uri;
+        let source = {
+            let docs = self.documents.lock().unwrap();
+            match docs.get(uri) {
+                Some(s) => s.source.clone(),
+                None => return Ok(None),
+            }
+        };
+
+        Ok(format_whole_document_edit(&source).map(|edit| vec![edit]))
     }
 
     pub(super) async fn handle_code_action(
@@ -282,6 +285,23 @@ impl HarnLsp {
     }
 }
 
+fn format_whole_document_edit(source: &str) -> Option<TextEdit> {
+    let formatted = harn_fmt::format_source(source).ok()?;
+    if formatted == source {
+        return None;
+    }
+
+    let line_count = source.lines().count() as u32;
+    let last_line_len = source.lines().last().map_or(0, |l| l.len()) as u32;
+    Some(TextEdit {
+        range: Range {
+            start: Position::new(0, 0),
+            end: Position::new(line_count, last_line_len),
+        },
+        new_text: formatted,
+    })
+}
+
 /// Returns `true` when the editor's `CodeActionContext.only` filter
 /// explicitly asks for a fix-all kind. We deliberately do NOT opt in
 /// when `only` is `None` so the bulk action does not pollute the regular
@@ -364,7 +384,7 @@ pub(super) fn build_missing_arms_edit(
 
 #[cfg(test)]
 mod tests {
-    use super::build_missing_arms_edit;
+    use super::{build_missing_arms_edit, format_whole_document_edit};
     use harn_lexer::Span;
 
     #[test]
@@ -423,5 +443,13 @@ mod tests {
         };
         let edit = build_missing_arms_edit(source, &span, &["\"x\"".to_string()]);
         assert!(edit.is_none());
+    }
+
+    #[test]
+    fn whole_document_format_edit_reuses_formatter_for_on_type_formatting() {
+        let source = "fn main(){\nlet x=1;\n}\n";
+        let edit = format_whole_document_edit(source).expect("expected formatting edit");
+        assert!(edit.new_text.contains("fn main() {"), "{}", edit.new_text);
+        assert!(edit.new_text.contains("let x = 1"), "{}", edit.new_text);
     }
 }

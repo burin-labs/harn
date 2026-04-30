@@ -112,6 +112,11 @@
           "default": "harn",
           "description": "Path to the harn binary"
         },
+        "harn.lspPath": {
+          "type": "string",
+          "default": "harn-lsp",
+          "description": "Path to the harn-lsp language server binary"
+        },
         "harn.dapPath": {
           "type": "string",
           "default": "harn-dap",
@@ -122,6 +127,7 @@
   },
   "scripts": {
     "compile": "tsc -p ./",
+    "test": "node --test test/*.test.js",
     "package": "vsce package"
   },
   "devDependencies": {

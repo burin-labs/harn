@@ -49,6 +49,12 @@ success-output = "never"
 [test-groups]
 harn-subprocess = { max-threads = 4 }
 harn-cli-bin = { max-threads = 4 }
+# harn-dap's unit tests are short, but several construct debugger VMs,
+# Tokio runtimes, and host-bridge state. Under full workspace fan-out on
+# macOS, that binary can report a passed test as "leaky" while teardown is
+# delayed by neighboring DAP tests. Keep leak failures enabled and remove
+# the concurrency pressure instead.
+harn-dap = { max-threads = 1 }
 
 # Transport-layer LLM tests do real localhost TCP with a 3s accept deadline.
 # They're bounded internally but give them a bit more room than the default
@@ -72,6 +78,10 @@ test-group = "harn-subprocess"
 filter = "package(harn-cli) and binary(harn)"
 test-group = "harn-cli-bin"
 
+[[profile.default.overrides]]
+filter = "package(harn-dap)"
+test-group = "harn-dap"
+
 [[profile.ci.overrides]]
 filter = "package(harn-cli) and kind(test)"
 test-group = "harn-subprocess"
@@ -79,3 +89,7 @@ test-group = "harn-subprocess"
 [[profile.ci.overrides]]
 filter = "package(harn-cli) and binary(harn)"
 test-group = "harn-cli-bin"
+
+[[profile.ci.overrides]]
+filter = "package(harn-dap)"
+test-group = "harn-dap"

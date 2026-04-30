@@ -5,8 +5,10 @@
 //! each method to an inherent `handle_*` method on `HarnLsp` defined in a
 //! topic-specific submodule.
 
+mod call_hierarchy;
 mod completion;
 mod definition;
+mod folding;
 mod formatting;
 mod hover;
 mod lifecycle;
@@ -101,5 +103,37 @@ impl tower_lsp::LanguageServer for HarnLsp {
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         self.handle_formatting(params).await
+    }
+
+    async fn on_type_formatting(
+        &self,
+        params: DocumentOnTypeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        self.handle_on_type_formatting(params).await
+    }
+
+    async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        self.handle_folding_range(params).await
+    }
+
+    async fn prepare_call_hierarchy(
+        &self,
+        params: CallHierarchyPrepareParams,
+    ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        self.handle_prepare_call_hierarchy(params).await
+    }
+
+    async fn incoming_calls(
+        &self,
+        params: CallHierarchyIncomingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
+        self.handle_incoming_calls(params).await
+    }
+
+    async fn outgoing_calls(
+        &self,
+        params: CallHierarchyOutgoingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
+        self.handle_outgoing_calls(params).await
     }
 }
