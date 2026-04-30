@@ -483,6 +483,7 @@ fn build_tracer_provider_from_env(
     use opentelemetry_otlp::{Protocol, WithExportConfig as _, WithHttpConfig as _};
     use opentelemetry_sdk::runtime;
     use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
+    use opentelemetry_sdk::trace::SimpleSpanProcessor;
     use opentelemetry_sdk::Resource;
 
     let Some(raw_endpoint) = std::env::var("HARN_OTEL_ENDPOINT")
@@ -500,6 +501,13 @@ fn build_tracer_provider_from_env(
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "harn-orchestrator".to_string());
     let headers = parse_headers(&std::env::var("HARN_OTEL_HEADERS").unwrap_or_default());
+    let processor_kind = parse_span_processor_kind(
+        std::env::var("HARN_OTEL_SPAN_PROCESSOR")
+            .ok()
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+    )?;
 
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_http()
@@ -514,13 +522,43 @@ fn build_tracer_provider_from_env(
         .build()
         .map_err(|error| format!("failed to build OTel span exporter: {error}"))?;
 
-    let batch = BatchSpanProcessor::builder(exporter, runtime::Tokio).build();
-    let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-        .with_resource(Resource::builder().with_service_name(service_name).build())
-        .with_span_processor(batch)
-        .build();
+    let mut builder = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+        .with_resource(Resource::builder().with_service_name(service_name).build());
+    builder = match processor_kind {
+        SpanProcessorKind::Batch => builder
+            .with_span_processor(BatchSpanProcessor::builder(exporter, runtime::Tokio).build()),
+        // Simple processor exports each span synchronously when it ends. This
+        // gives test harnesses a deterministic "process exit ⇒ all spans
+        // exported" guarantee without a force_flush race or scheduled-delay
+        // wall-clock dependency. Production paths must keep using batch.
+        SpanProcessorKind::Simple => {
+            builder.with_span_processor(SimpleSpanProcessor::new(exporter))
+        }
+    };
+    let provider = builder.build();
     global::set_tracer_provider(provider.clone());
     Ok(Some(provider))
+}
+
+#[cfg(feature = "otel")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SpanProcessorKind {
+    Batch,
+    Simple,
+}
+
+#[cfg(feature = "otel")]
+fn parse_span_processor_kind(value: Option<&str>) -> Result<SpanProcessorKind, String> {
+    match value {
+        None => Ok(SpanProcessorKind::Batch),
+        Some(value) => match value.to_ascii_lowercase().as_str() {
+            "batch" => Ok(SpanProcessorKind::Batch),
+            "simple" => Ok(SpanProcessorKind::Simple),
+            other => Err(format!(
+                "unsupported HARN_OTEL_SPAN_PROCESSOR value {other:?}; expected 'batch' or 'simple'"
+            )),
+        },
+    }
 }
 
 #[cfg(feature = "otel")]
@@ -635,5 +673,41 @@ mod tests {
         );
         assert_eq!(headers.get("x-tenant-id"), Some(&"tenant-123".to_string()));
         assert_eq!(headers.get("trace"), Some(&"true".to_string()));
+    }
+
+    #[test]
+    fn parses_span_processor_kind_defaults_to_batch() {
+        assert_eq!(
+            parse_span_processor_kind(None).unwrap(),
+            SpanProcessorKind::Batch
+        );
+    }
+
+    #[test]
+    fn parses_span_processor_kind_accepts_known_values() {
+        assert_eq!(
+            parse_span_processor_kind(Some("batch")).unwrap(),
+            SpanProcessorKind::Batch
+        );
+        assert_eq!(
+            parse_span_processor_kind(Some("Batch")).unwrap(),
+            SpanProcessorKind::Batch
+        );
+        assert_eq!(
+            parse_span_processor_kind(Some("simple")).unwrap(),
+            SpanProcessorKind::Simple
+        );
+        assert_eq!(
+            parse_span_processor_kind(Some("SIMPLE")).unwrap(),
+            SpanProcessorKind::Simple
+        );
+    }
+
+    #[test]
+    fn parses_span_processor_kind_rejects_unknown_values() {
+        let error = parse_span_processor_kind(Some("forwarder")).unwrap_err();
+        assert!(error.contains("forwarder"), "{error}");
+        assert!(error.contains("batch"), "{error}");
+        assert!(error.contains("simple"), "{error}");
     }
 }

@@ -7,6 +7,113 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.50
+
+### Added
+
+- **Enterprise LLM providers (#870/#976).** First-class shims for Bedrock
+  Runtime (Converse API with hand-rolled AWS SigV4 signing and
+  env/profile/container/instance credential resolution), Azure OpenAI
+  (deployment-name routing with API-key and Entra bearer-token auth), and
+  Vertex AI Gemini (`generateContent` routing with bearer-token and
+  service-account JWT exchange). Provider registry, default config, inference
+  rules, capability matrix, and conformance coverage updated; existing
+  `provider_overrides` apply uniformly to the new providers.
+
+- **Provider capability matrix (#871/#979).** New `harn check
+  --provider-matrix` with text/JSON output and feature filtering, backed by
+  vision/audio/JSON-schema fields on the live capability schema. Generated
+  `docs/src/provider-matrix.md` is gated by a CI drift check.
+
+- **Multimodal image content (#863/#977).** Provider-neutral image content
+  blocks for `llm_call` with base64/URL validation and implicit `vision`
+  capability gating. Translation at provider boundaries for Anthropic,
+  OpenAI-compatible, Gemini (now natively registered), and Ollama, plus
+  `vision_supported` capability and conformance coverage.
+
+- **First-class stream generators (#963/#978).** Contextual `gen fn`
+  declarations and `emit` statements with `Stream<T>` runtime support
+  alongside existing `yield`/`Generator<T>`. Parser/AST/formatter/linter/LSP,
+  tree-sitter grammar, docs, and spec coverage. Streams support `for`,
+  `.next()`, `.iter()`, nesting, early break, and body-error propagation;
+  `gen` stays contextual so existing identifiers keep parsing.
+
+- **LLM prompt cache usage (#862/#980).** New `usage` dict on `llm_call`
+  results with cache read/write tokens, Anthropic
+  `cache_creation_input_tokens`, `cache_hit_ratio`, and
+  `cache_savings_usd`. Parsed across Anthropic and OpenAI-compatible response
+  shapes and surfaced through structured-result envelopes; mock provider
+  simulates cache warm/read behavior.
+
+- **Unified LLM thinking config (#849/#971).** Typed `ThinkingConfig`
+  boundary with disabled, enabled-budget, adaptive, and effort modes. The
+  capability matrix replaces the `thinking` boolean with `thinking_modes`
+  (legacy boolean preserved for queries). Mapped through Anthropic,
+  OpenAI-compatible/OpenRouter, and Ollama providers, including OpenAI
+  `reasoning_effort`.
+
+- **LLM budget envelopes (#868/#961).** First-class `budget` envelopes on
+  `llm_call` with pre-flight `max_cost_usd`, `max_input_tokens`,
+  `max_output_tokens`, and `total_budget_usd` checks. Structured terminal
+  `budget_exceeded` errors flow through `try { ... }`. Same envelope threads
+  through `agent_loop`, workflow stages, and `sub_agent_run`, with aggregate
+  loop `total_budget_usd` stopping before an over-budget turn starts.
+
+- **Agent loop profiles (#861/#960).** New `tool_using`, `researcher`,
+  `verifier`, and `completer` profiles with sensible defaults and explicit
+  per-call overrides. Profile parsing applies across direct, bridge-backed,
+  `sub_agent_run`, and workflow agent-loop config paths. Adds
+  `agent_loop` schema-retry handling so verifier/schema profiles retry
+  invalid structured output before accepting a turn.
+
+- **`agent_loop` MCP server tools (#860/#962).** `agent_loop({ mcp_servers:
+  [...] })` bootstraps configured HTTP/stdio MCP servers, lists tools once,
+  prefixes them as `<server>__<tool>`, and merges them into the tool
+  registry/native tool surface. Prefixed calls route back through the live
+  client using the unprefixed MCP name; lifecycle cleanup, docs, and
+  conformance with a mocked HTTP MCP server included.
+
+- **MCP Streamable HTTP transport (#872/#972).** Canonical Streamable HTTP
+  GET/DELETE on the `/mcp` endpoint with `Mcp-Session-Id` continuity, plus
+  event-stream-only POST responses negotiated as SSE `message` events while
+  JSON clients keep `application/json`. Legacy SSE `/sse` and `/messages`
+  routes carry `Deprecation: true`; protocol/origin validation hardened.
+
+- **Project prompt templates over MCP (#879/#974).** `harn mcp serve` now
+  exposes project and prompt-library `.harn.prompt` files via `prompts/list`
+  and `prompts/get`, rendering with supplied arguments, validating required
+  args, and returning text plus structured image content. Advertises
+  `prompts.listChanged` and emits `notifications/prompts/list_changed` on
+  prompt/manifest hot reloads for stdio and legacy SSE clients.
+
+### Changed
+
+- **Canonical LLM error taxonomy enforced in retry (#854/#958).** Retry
+  decisions now consult the structured `kind` (`transient`/`terminal`) and
+  `reason` first; OpenAI-compatible, Anthropic, and Ollama HTTP/provider
+  shapes are mapped (context overflow, content policy, auth, invalid
+  request, model unavailable, rate limit, timeout, network, server). Legacy
+  `category` field and `[rate_limited]` / `[http_error]` message tags
+  preserved for compatibility.
+
+- **Audit hardening across runtime surfaces (#848).** Auth, egress, portal
+  asset serving, skill substitution, tenant registry writes, and namespaced
+  skill lookup tightened. Schema validation composition fixed so
+  `all_of`/union still apply sibling constraints. Host command handling now
+  uses canonical cwd, UTF-8-safe inline output, Gradle wrapper portability,
+  and a split artifact module. Tests isolate global egress policies and
+  agent event sinks to remove parallel-suite contamination.
+
+- **Module splits for maintainability.** `crates/harn-cli/src/package.rs`
+  split into focused submodules (`manifest`, `validation`, `registry`,
+  `lockfile`, `extensions`, `package_ops`, `skills`, with shared
+  `test_support`); every new file under 2,000 LOC (#938/#975). The trigger
+  dispatcher gains `predicate_eval.rs` (predicate evaluation, cache replay,
+  budget accounting, action-graph metadata) and `circuits.rs` (destination
+  circuit state/probing, budget/circuit DLQ helpers), reducing
+  `triggers/dispatcher/mod.rs` from 4633 to 3827 LOC with no behavior change
+  (#940/#973).
+
 ## v0.7.49
 
 ### Added
