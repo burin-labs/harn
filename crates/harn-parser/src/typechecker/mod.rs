@@ -35,6 +35,7 @@ pub struct TypeDiagnostic {
     pub severity: DiagnosticSeverity,
     pub span: Option<Span>,
     pub help: Option<String>,
+    pub related: Vec<RelatedDiagnostic>,
     /// Machine-applicable fix edits.
     pub fix: Option<Vec<FixEdit>>,
     /// Optional structured payload that higher-level tooling (e.g. the
@@ -42,6 +43,12 @@ pub struct TypeDiagnostic {
     /// need more than a static `FixEdit`. Out-of-band from `fix` so the
     /// string-based rendering pipeline doesn't have to care.
     pub details: Option<DiagnosticDetails>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RelatedDiagnostic {
+    pub span: Span,
+    pub message: String,
 }
 
 /// Optional structured companion data on a `TypeDiagnostic`. The
@@ -277,6 +284,7 @@ impl TypeChecker {
             severity: DiagnosticSeverity::Error,
             span: Some(span),
             help: None,
+            related: Vec::new(),
             fix: None,
             details: None,
         });
@@ -294,6 +302,49 @@ impl TypeChecker {
             severity: DiagnosticSeverity::Error,
             span: Some(span),
             help: Some(help),
+            related: Vec::new(),
+            fix: None,
+            details: None,
+        });
+    }
+
+    pub(in crate::typechecker) fn type_mismatch_at(
+        &mut self,
+        context: impl Into<String>,
+        expected: &TypeExpr,
+        actual: &TypeExpr,
+        span: Span,
+        expected_origin: Option<(Span, String)>,
+        value_span: Option<Span>,
+        scope: &TypeScope,
+    ) {
+        let mut message = format!(
+            "{}: expected {}, found {}",
+            context.into(),
+            format_type(expected),
+            format_type(actual)
+        );
+        if let Some(detail) = type_mismatch_detail(expected, actual, scope) {
+            message.push_str(&format!(" ({detail})"));
+        }
+
+        let mut related = Vec::new();
+        if let Some((span, message)) = expected_origin {
+            related.push(RelatedDiagnostic { span, message });
+        }
+        for note in type_mismatch_notes(expected, actual, scope) {
+            related.push(RelatedDiagnostic {
+                span,
+                message: note,
+            });
+        }
+
+        self.diagnostics.push(TypeDiagnostic {
+            message,
+            severity: DiagnosticSeverity::Error,
+            span: Some(span),
+            help: coercion_suggestion(expected, actual, value_span, self.source.as_deref()),
+            related,
             fix: None,
             details: None,
         });
@@ -310,6 +361,7 @@ impl TypeChecker {
             severity: DiagnosticSeverity::Error,
             span: Some(span),
             help: None,
+            related: Vec::new(),
             fix: Some(fix),
             details: None,
         });
@@ -327,6 +379,7 @@ impl TypeChecker {
             severity: DiagnosticSeverity::Error,
             span: Some(span),
             help: None,
+            related: Vec::new(),
             fix: None,
             details: None,
         });
@@ -347,6 +400,7 @@ impl TypeChecker {
             severity: DiagnosticSeverity::Error,
             span: Some(span),
             help: None,
+            related: Vec::new(),
             fix: None,
             details: Some(DiagnosticDetails::NonExhaustiveMatch { missing }),
         });
@@ -358,6 +412,7 @@ impl TypeChecker {
             severity: DiagnosticSeverity::Warning,
             span: Some(span),
             help: None,
+            related: Vec::new(),
             fix: None,
             details: None,
         });
@@ -375,10 +430,263 @@ impl TypeChecker {
             severity: DiagnosticSeverity::Warning,
             span: Some(span),
             help: Some(help),
+            related: Vec::new(),
             fix: None,
             details: None,
         });
     }
+}
+
+fn type_mismatch_detail(
+    expected: &TypeExpr,
+    actual: &TypeExpr,
+    scope: &TypeScope,
+) -> Option<String> {
+    shape_mismatch_detail(expected, actual)
+        .or_else(|| first_nested_mismatch(expected, actual, scope).map(|note| note.message))
+}
+
+#[derive(Debug)]
+struct MismatchNote {
+    message: String,
+}
+
+fn type_mismatch_notes(expected: &TypeExpr, actual: &TypeExpr, scope: &TypeScope) -> Vec<String> {
+    first_nested_mismatch(expected, actual, scope)
+        .map(|note| vec![format!("nested mismatch: {}", note.message)])
+        .unwrap_or_default()
+}
+
+fn first_nested_mismatch(
+    expected: &TypeExpr,
+    actual: &TypeExpr,
+    scope: &TypeScope,
+) -> Option<MismatchNote> {
+    let expected = resolve_type_for_diagnostic(expected, scope);
+    let actual = resolve_type_for_diagnostic(actual, scope);
+    match (&expected, &actual) {
+        (TypeExpr::Shape(expected_fields), TypeExpr::Shape(actual_fields)) => {
+            for expected_field in expected_fields {
+                if expected_field.optional {
+                    continue;
+                }
+                let Some(actual_field) = actual_fields
+                    .iter()
+                    .find(|actual_field| actual_field.name == expected_field.name)
+                else {
+                    return Some(MismatchNote {
+                        message: format!(
+                            "field `{}` is missing; expected {}",
+                            expected_field.name,
+                            format_type(&expected_field.type_expr)
+                        ),
+                    });
+                };
+                if !types_compatible_for_diagnostic(
+                    &expected_field.type_expr,
+                    &actual_field.type_expr,
+                    scope,
+                ) {
+                    return Some(MismatchNote {
+                        message: format!(
+                            "field `{}` expected {}, found {}",
+                            expected_field.name,
+                            format_type(&expected_field.type_expr),
+                            format_type(&actual_field.type_expr)
+                        ),
+                    });
+                }
+            }
+            None
+        }
+        (TypeExpr::List(expected_inner), TypeExpr::List(actual_inner)) => {
+            if !types_compatible_for_diagnostic(expected_inner, actual_inner, scope)
+                || !types_compatible_for_diagnostic(actual_inner, expected_inner, scope)
+            {
+                Some(MismatchNote {
+                    message: format!(
+                        "list element expected {}, found {}",
+                        format_type(expected_inner),
+                        format_type(actual_inner)
+                    ),
+                })
+            } else {
+                None
+            }
+        }
+        (
+            TypeExpr::DictType(expected_key, expected_value),
+            TypeExpr::DictType(actual_key, actual_value),
+        ) => {
+            if !types_compatible_for_diagnostic(expected_key, actual_key, scope)
+                || !types_compatible_for_diagnostic(actual_key, expected_key, scope)
+            {
+                Some(MismatchNote {
+                    message: format!(
+                        "dict key expected {}, found {}",
+                        format_type(expected_key),
+                        format_type(actual_key)
+                    ),
+                })
+            } else if !types_compatible_for_diagnostic(expected_value, actual_value, scope)
+                || !types_compatible_for_diagnostic(actual_value, expected_value, scope)
+            {
+                Some(MismatchNote {
+                    message: format!(
+                        "dict value expected {}, found {}",
+                        format_type(expected_value),
+                        format_type(actual_value)
+                    ),
+                })
+            } else {
+                None
+            }
+        }
+        (
+            TypeExpr::Applied {
+                name: expected_name,
+                args: expected_args,
+            },
+            TypeExpr::Applied {
+                name: actual_name,
+                args: actual_args,
+            },
+        ) if expected_name == actual_name => expected_args
+            .iter()
+            .zip(actual_args.iter())
+            .enumerate()
+            .find_map(|(idx, (expected_arg, actual_arg))| {
+                if types_compatible_for_diagnostic(expected_arg, actual_arg, scope)
+                    && types_compatible_for_diagnostic(actual_arg, expected_arg, scope)
+                {
+                    None
+                } else {
+                    Some(MismatchNote {
+                        message: format!(
+                            "{} type argument {} expected {}, found {}",
+                            expected_name,
+                            idx + 1,
+                            format_type(expected_arg),
+                            format_type(actual_arg)
+                        ),
+                    })
+                }
+            }),
+        (
+            TypeExpr::FnType {
+                params: expected_params,
+                return_type: expected_return,
+            },
+            TypeExpr::FnType {
+                params: actual_params,
+                return_type: actual_return,
+            },
+        ) => {
+            for (idx, (expected_param, actual_param)) in
+                expected_params.iter().zip(actual_params.iter()).enumerate()
+            {
+                if !types_compatible_for_diagnostic(actual_param, expected_param, scope) {
+                    return Some(MismatchNote {
+                        message: format!(
+                            "function parameter {} expected {}, found {}",
+                            idx + 1,
+                            format_type(expected_param),
+                            format_type(actual_param)
+                        ),
+                    });
+                }
+            }
+            if !types_compatible_for_diagnostic(expected_return, actual_return, scope) {
+                Some(MismatchNote {
+                    message: format!(
+                        "function return expected {}, found {}",
+                        format_type(expected_return),
+                        format_type(actual_return)
+                    ),
+                })
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn types_compatible_for_diagnostic(
+    expected: &TypeExpr,
+    actual: &TypeExpr,
+    scope: &TypeScope,
+) -> bool {
+    TypeChecker::new().types_compatible(expected, actual, scope)
+}
+
+fn resolve_type_for_diagnostic(ty: &TypeExpr, scope: &TypeScope) -> TypeExpr {
+    TypeChecker::new().resolve_alias(ty, scope)
+}
+
+fn coercion_suggestion(
+    expected: &TypeExpr,
+    actual: &TypeExpr,
+    value_span: Option<Span>,
+    source: Option<&str>,
+) -> Option<String> {
+    let expr = value_span
+        .and_then(|span| source.and_then(|source| source.get(span.start..span.end)))
+        .map(str::trim)
+        .filter(|expr| !expr.is_empty());
+    if is_nilable(actual) {
+        return Some("handle `nil` first or provide a default with `??`".to_string());
+    }
+    let expected_ty = expected;
+    let expected = simple_type_name(expected)?;
+    let actual_name = simple_type_name(actual)?;
+    let with_expr = |template: &str| {
+        expr.map(|expr| template.replace("{}", expr))
+            .unwrap_or_else(|| template.replace("{}", "value"))
+    };
+
+    match (expected, actual_name) {
+        ("string", "int" | "float" | "bool" | "nil" | "duration") => {
+            Some(format!("did you mean `{}`?", with_expr("to_string({})")))
+        }
+        ("int", "string") => Some(format!("did you mean `{}`?", with_expr("to_int({})"))),
+        ("float", "string" | "int") => {
+            Some(format!("did you mean `{}`?", with_expr("to_float({})")))
+        }
+        (_, "nil") => Some("handle `nil` first or provide a default with `??`".to_string()),
+        _ if actual_is_result_of(expected_ty, actual) => Some(format!(
+            "did you mean `{}` or `{}`?",
+            with_expr("{}?"),
+            with_expr("unwrap_or({}, default)")
+        )),
+        _ => None,
+    }
+}
+
+fn simple_type_name(ty: &TypeExpr) -> Option<&str> {
+    match ty {
+        TypeExpr::Named(name) => Some(name.as_str()),
+        TypeExpr::LitString(_) => Some("string"),
+        TypeExpr::LitInt(_) => Some("int"),
+        _ => None,
+    }
+}
+
+fn is_nilable(ty: &TypeExpr) -> bool {
+    match ty {
+        TypeExpr::Union(members) if members.len() == 2 => members
+            .iter()
+            .any(|member| matches!(member, TypeExpr::Named(name) if name == "nil")),
+        _ => false,
+    }
+}
+
+fn actual_is_result_of(expected: &TypeExpr, actual: &TypeExpr) -> bool {
+    matches!(
+        actual,
+        TypeExpr::Applied { name, args }
+            if name == "Result" && args.first().is_some_and(|ok| ok == expected)
+    )
 }
 
 impl Default for TypeChecker {

@@ -260,7 +260,7 @@ if y != nil {
     // s2 should fail because y was reassigned, invalidating the narrowing
     assert_eq!(errs.len(), 1, "expected 1 error, got: {:?}", errs);
     assert!(
-        errs[0].contains("declared as"),
+        errs[0].contains("expected string"),
         "expected type mismatch, got: {}",
         errs[0]
     );
@@ -493,7 +493,7 @@ pipeline t(task) {
 }"#,
     );
     assert!(
-        errs.iter().any(|e| e.contains("'wrong' declared as")),
+        errs.iter().any(|e| e.contains("let binding `wrong`")),
         "expected residual-narrowing assignment to fail, got: {:?}",
         errs
     );

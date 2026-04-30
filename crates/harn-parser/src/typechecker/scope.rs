@@ -133,6 +133,7 @@ pub(super) struct ImplMethodSig {
 pub(super) struct FnSignature {
     pub(super) params: Vec<(String, InferredType)>,
     pub(super) return_type: InferredType,
+    pub(super) definition_span: Option<harn_lexer::Span>,
     /// Generic type parameter names declared on the function.
     pub(super) type_param_names: Vec<String>,
     /// Number of required parameters (those without defaults).

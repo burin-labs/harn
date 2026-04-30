@@ -93,7 +93,7 @@ impl TypeChecker {
                         (return_type.as_ref(), ret_scope_base)
                     {
                         for stmt in body {
-                            self.check_return_type(stmt, ret_type, &mut ret_scope);
+                            self.check_return_type(stmt, ret_type, inner_node.span, &mut ret_scope);
                         }
                     }
                     self.fn_depth -= 1;
@@ -117,6 +117,7 @@ impl TypeChecker {
                             .map(|p| (p.name.clone(), p.type_expr.clone()))
                             .collect(),
                         return_type: return_type.clone(),
+                        definition_span: Some(snode.span),
                         type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
                         required_params,
                         where_clauses: where_clauses
@@ -133,6 +134,7 @@ impl TypeChecker {
                         body,
                         where_clauses,
                         *is_stream,
+                        snode.span,
                     );
                 }
                 _ => {
@@ -190,6 +192,7 @@ impl TypeChecker {
                             .map(|p| (p.name.clone(), p.type_expr.clone()))
                             .collect(),
                         return_type,
+                        definition_span: Some(inner.span),
                         type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
                         required_params: params
                             .iter()
@@ -208,6 +211,7 @@ impl TypeChecker {
                     let sig = FnSignature {
                         params: Vec::new(),
                         return_type: None,
+                        definition_span: Some(inner.span),
                         type_param_names: Vec::new(),
                         required_params: 0,
                         where_clauses: Vec::new(),
@@ -220,6 +224,7 @@ impl TypeChecker {
                     let sig = FnSignature {
                         params: Vec::new(),
                         return_type: None,
+                        definition_span: Some(inner.span),
                         type_param_names: Vec::new(),
                         required_params: 0,
                         where_clauses: Vec::new(),

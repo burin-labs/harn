@@ -94,6 +94,7 @@ impl TypeChecker {
         body: &[SNode],
         where_clauses: &[WhereClause],
         is_stream: bool,
+        expected_span: Span,
     ) {
         self.fn_depth += 1;
         let saved_stream_depth = self.stream_fn_depth;
@@ -113,6 +114,7 @@ impl TypeChecker {
             body,
             where_clauses,
             is_stream,
+            expected_span,
         );
         if is_stream {
             self.stream_emit_types.pop();
@@ -137,6 +139,7 @@ impl TypeChecker {
         body: &[SNode],
         where_clauses: &[WhereClause],
         is_stream: bool,
+        expected_span: Span,
     ) {
         let mut fn_scope = self.scope.child();
         // Register generic type parameters so they are treated as compatible
@@ -171,7 +174,7 @@ impl TypeChecker {
             if let Some(actual) = return_type {
                 self.error_at(
                     format!(
-                        "`gen fn` must return Stream<T>, got {}",
+                        "`gen fn` must return Stream<T>, found {}",
                         format_type(actual)
                     ),
                     Span::dummy(),
@@ -183,7 +186,7 @@ impl TypeChecker {
         if let Some(ret_type) = return_type {
             let mut ret_scope = ret_scope_base.unwrap();
             for stmt in body {
-                self.check_return_type(stmt, ret_type, &mut ret_scope);
+                self.check_return_type(stmt, ret_type, expected_span, &mut ret_scope);
             }
         }
     }
@@ -192,21 +195,22 @@ impl TypeChecker {
         &mut self,
         snode: &SNode,
         expected: &TypeExpr,
+        expected_span: Span,
         scope: &mut TypeScope,
     ) {
-        let span = snode.span;
         match &snode.node {
             Node::ReturnStmt { value: Some(val) } => {
                 let inferred = self.infer_type(val, scope);
                 if let Some(actual) = &inferred {
                     if !self.types_compatible(expected, actual, scope) {
-                        self.error_at(
-                            format!(
-                                "return type doesn't match: expected {}, got {}",
-                                format_type(expected),
-                                format_type(actual)
-                            ),
-                            span,
+                        self.type_mismatch_at(
+                            "return value",
+                            expected,
+                            actual,
+                            val.span,
+                            Some((expected_span, "return type declared here".to_string())),
+                            Some(val.span),
+                            scope,
                         );
                     }
                 }
@@ -220,13 +224,13 @@ impl TypeChecker {
                 let mut then_scope = scope.child();
                 refs.apply_truthy(&mut then_scope);
                 for stmt in then_body {
-                    self.check_return_type(stmt, expected, &mut then_scope);
+                    self.check_return_type(stmt, expected, expected_span, &mut then_scope);
                 }
                 if let Some(else_body) = else_body {
                     let mut else_scope = scope.child();
                     refs.apply_falsy(&mut else_scope);
                     for stmt in else_body {
-                        self.check_return_type(stmt, expected, &mut else_scope);
+                        self.check_return_type(stmt, expected, expected_span, &mut else_scope);
                     }
                     // Post-branch narrowing for return type checking
                     if Self::block_definitely_exits(then_body)

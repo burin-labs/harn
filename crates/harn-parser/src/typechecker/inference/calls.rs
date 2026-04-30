@@ -827,15 +827,16 @@ impl TypeChecker {
                     if let Some(actual) = &actual {
                         let expected = Self::apply_type_bindings(expected, &type_bindings);
                         if !self.types_compatible(&expected, actual, &call_scope) {
-                            self.error_at(
-                                format!(
-                                    "Argument {} ('{}'): expected {}, got {}",
-                                    i + 1,
-                                    param_name,
-                                    format_type(&expected),
-                                    format_type(actual)
-                                ),
+                            self.type_mismatch_at(
+                                format!("argument {} `{}`", i + 1, param_name),
+                                &expected,
+                                actual,
                                 arg.span,
+                                sig.definition_span.map(|span| {
+                                    (span, format!("parameter `{param_name}` declared here"))
+                                }),
+                                Some(arg.span),
+                                &call_scope,
                             );
                         }
                     }
