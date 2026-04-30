@@ -1,0 +1,34 @@
+pipeline test(task) {
+  // Legacy webhook providers (older Bitbucket, pre-2018 GitHub) sign with
+  // SHA-1. The substrate must let connectors opt in.
+  let _intake = webhook_intake_register(
+    {
+      id: "legacy-sha1",
+      secret: "legacy-secret",
+      algorithm: "sha1",
+      signature_header: "x-hub-signature",
+      signature_prefix: "sha1=",
+      delivery_id_header: "x-legacy-delivery",
+      topic: "tests.intake.legacy",
+    },
+  )
+  let body = "legacy-payload"
+  let signature = "sha1=" + hmac_sha1("legacy-secret", body)
+  let outcome = webhook_intake_feed(
+    "legacy-sha1",
+    {headers: {["x-hub-signature"]: signature, ["x-legacy-delivery"]: "legacy-1"}, body: body},
+  )
+  println(outcome.status == "accepted")
+  // SHA-256 signature against a SHA-1 intake is rejected (mismatch).
+  let wrong = webhook_intake_feed(
+    "legacy-sha1",
+    {
+      headers: {
+        ["x-hub-signature"]: "sha1=" + hmac_sha256("legacy-secret", body),
+        ["x-legacy-delivery"]: "legacy-2",
+      },
+      body: body,
+    },
+  )
+  println(wrong.status == "rejected")
+}

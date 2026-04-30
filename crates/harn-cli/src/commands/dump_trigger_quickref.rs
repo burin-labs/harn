@@ -189,7 +189,64 @@ fn generate_file() -> String {
     out.push_str("Run `harn connector test .` locally. Use `--provider <id>` for a multi-provider package, `--run-poll-tick` to execute the first poll tick, and `--json` for CI output.\n\n");
 
     out.push_str("## Example Library\n\n");
-    out.push_str("Ready-to-customize pipelines live under `examples/triggers/`. Each example includes `harn.toml`, `lib.harn`, `README.md`, and `SKILL.md` so it can be copied into a project or installed as a local skill bundle. Validate examples with `make check-trigger-examples`.\n");
+    out.push_str("Ready-to-customize pipelines live under `examples/triggers/`. Each example includes `harn.toml`, `lib.harn`, `README.md`, and `SKILL.md` so it can be copied into a project or installed as a local skill bundle. Validate examples with `make check-trigger-examples`.\n\n");
+
+    out.push_str("## Generic Webhook Intake Substrate\n\n");
+    out.push_str(
+        "Below the per-provider connectors lives a forge-agnostic intake substrate\n\
+that any connector can wire into. It is the lowest-level entry point: a\n\
+connector declares a path scope, a signature header + algorithm, a\n\
+delivery-id header, and a topic; the substrate handles HMAC verification,\n\
+delivery-id deduplication (durable across process restarts), and\n\
+republishing onto the chosen topic. Per-forge event normalization lives in\n\
+the connector that consumes the topic.\n\n",
+    );
+    out.push_str("Builtins:\n\n");
+    out.push_str(
+        "- `webhook_intake_register(config) -> dict` — register an intake. Returns\n  \
+`{ id, path, topic, signature_header, signature_prefix,\n  signature_encoding, algorithm, delivery_id_header,\n  dedupe_ttl_seconds }`. Config keys:\n  \
+- `id` (optional) — pin the intake id; one is generated if omitted.\n  \
+- `path` (optional) — HTTP path scope. When set, `webhook_intake_feed`\n    rejects deliveries on a different path.\n  \
+- `secret` (string or bytes, required) — HMAC key.\n  \
+- `signature_header` (required) — e.g. `\"x-hub-signature-256\"`.\n  \
+- `signature_prefix` — defaults to `\"<algorithm>=\"`. Pass `\"\"` to opt out.\n  \
+- `signature_encoding` — `\"hex\"` (default) or `\"base64\"`.\n  \
+- `algorithm` — `\"sha256\"` (default) or `\"sha1\"` (legacy).\n  \
+- `delivery_id_header` (required) — e.g. `\"x-github-delivery\"`.\n  \
+- `topic` (required) — event-log topic accepted deliveries are appended to.\n  \
+- `dedupe_ttl_seconds` — defaults to 24h.\n\
+- `webhook_intake_feed(intake_id, request) -> dict` — feed a delivery.\n  \
+Request keys: `headers` (dict), `body` (string or bytes), optional `path`\n  \
+and `received_at` (RFC3339). Returns `{ status, intake_id, topic,\n  \
+delivery_id, topic_event_id, reason, received_at }`. `status` is\n  \
+`\"accepted\"`, `\"duplicate\"`, or `\"rejected\"`.\n\
+- `webhook_intake_recent(intake_id, limit?) -> list` — bounded replay\n  \
+buffer. Reads the last `limit` accepted deliveries from the topic.\n\
+- `webhook_intake_list() -> list` — all currently-registered intakes.\n\
+- `webhook_intake_deregister(intake_id) -> bool` — remove an intake.\n\n",
+    );
+    out.push_str("A connector wires this in well under 30 lines:\n\n");
+    out.push_str(
+        "```harn\n\
+import \"std/triggers\"\n\n\
+let intake = webhook_intake_register({\n  \
+id: \"github\",\n  \
+path: \"/hooks/github\",\n  \
+secret: secret_get(\"github/webhook-secret\"),\n  \
+signature_header: \"x-hub-signature-256\",\n  \
+delivery_id_header: \"x-github-delivery\",\n  \
+topic: \"github.events\",\n\
+})\n\n\
+// In your inbound HTTP handler:\n\
+let outcome = webhook_intake_feed(intake.id, {\n  \
+headers: request.headers,\n  \
+body: request.body,\n  \
+path: request.path,\n\
+})\n\
+return { status: outcome.status == \"rejected\" ? 401 : 202 }\n\
+```\n\n",
+    );
+    out.push_str("Rejections are appended to `triggers.webhook_intake.rejections` with the\nintake id and reason for audit. The substrate is agnostic to per-forge\nevent shape — connectors normalize the opaque payload after consuming the\ntopic.\n");
     out
 }
 

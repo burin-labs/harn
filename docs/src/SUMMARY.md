@@ -74,6 +74,7 @@
 - [Trigger event schema](./triggers/event-schema.md)
 - [Trigger dispatcher](./triggers/dispatcher.md)
 - [Trigger registry](./triggers/registry.md)
+- [Webhook intake substrate](./triggers/webhook-intake.md)
 - [Orchestrator](./orchestrator.md)
 - [Hot reload](./orchestrator/hot-reload.md)
 - [Orchestrator DLQ management](./orchestrator/dlq.md)

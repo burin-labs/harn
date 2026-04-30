@@ -1185,6 +1185,37 @@ pub(crate) fn hmac_sha256(secret: &[u8], data: &[u8]) -> Vec<u8> {
     outer.finalize().to_vec()
 }
 
+pub(crate) fn hmac_sha1(secret: &[u8], data: &[u8]) -> Vec<u8> {
+    use sha1::{Digest, Sha1};
+    const BLOCK_SIZE: usize = 64;
+
+    let mut key = if secret.len() > BLOCK_SIZE {
+        Sha1::digest(secret).to_vec()
+    } else {
+        secret.to_vec()
+    };
+    key.resize(BLOCK_SIZE, 0);
+
+    let mut inner_pad = vec![0x36; BLOCK_SIZE];
+    let mut outer_pad = vec![0x5c; BLOCK_SIZE];
+    for (slot, key_byte) in inner_pad.iter_mut().zip(&key) {
+        *slot ^= key_byte;
+    }
+    for (slot, key_byte) in outer_pad.iter_mut().zip(&key) {
+        *slot ^= key_byte;
+    }
+
+    let mut inner = Sha1::new();
+    inner.update(&inner_pad);
+    inner.update(data);
+    let inner_digest = inner.finalize();
+
+    let mut outer = Sha1::new();
+    outer.update(&outer_pad);
+    outer.update(inner_digest);
+    outer.finalize().to_vec()
+}
+
 pub(crate) fn secure_eq(expected: &[u8], provided: &[u8]) -> bool {
     expected.ct_eq(provided).into()
 }

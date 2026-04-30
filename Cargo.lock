@@ -1932,6 +1932,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_yaml",
+ "sha1",
  "sha2 0.11.0",
  "sha3",
  "sqlx-core",

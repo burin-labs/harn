@@ -208,4 +208,5 @@ pub fn reset_stdlib_state() {
     vision::reset_vision_state();
     crate::skills::clear_current_skill_registry();
     template::reset_prompt_registry();
+    crate::triggers::clear_webhook_intake_state();
 }

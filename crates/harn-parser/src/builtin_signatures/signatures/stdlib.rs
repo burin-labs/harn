@@ -408,6 +408,26 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "webhook_intake_register",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "webhook_intake_feed",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "webhook_intake_deregister",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "webhook_intake_list",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "webhook_intake_recent",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "date_add",
         return_type: None,
     },
@@ -605,6 +625,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "hex_encode",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "hmac_sha1",
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {

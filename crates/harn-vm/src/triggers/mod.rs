@@ -6,6 +6,7 @@ pub mod registry;
 pub mod scheduler;
 pub mod test_util;
 pub mod topics;
+pub mod webhook_intake;
 pub mod worker_queue;
 
 pub use dispatcher::{
@@ -57,6 +58,13 @@ pub use topics::{
     TRIGGER_CANCEL_REQUESTS_TOPIC, TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC,
     TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OPERATION_AUDIT_TOPIC,
     TRIGGER_OUTBOX_TOPIC,
+};
+pub use webhook_intake::{
+    build_request as build_webhook_intake_request, clear_webhook_intake_state,
+    deregister_webhook_intake, feed_webhook_intake, intake_for_path, recent_webhook_deliveries,
+    register_webhook_intake, snapshot_webhook_intakes, HmacAlgorithm, SignatureEncoding,
+    WebhookIntakeConfig, WebhookIntakeError, WebhookIntakeId, WebhookIntakeOutcome,
+    WebhookIntakeRequest, WebhookIntakeSnapshot, WebhookIntakeStatus,
 };
 pub use worker_queue::{
     claims_topic_name as worker_claims_topic_name, job_topic_name as worker_job_topic_name,

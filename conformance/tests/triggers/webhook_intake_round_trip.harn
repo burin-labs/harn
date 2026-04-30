@@ -1,0 +1,51 @@
+pipeline test(task) {
+  let intake = webhook_intake_register(
+    {
+      id: "round-trip",
+      path: "/hooks/foo",
+      secret: "super-secret",
+      signature_header: "x-hub-signature-256",
+      delivery_id_header: "x-github-delivery",
+      topic: "tests.intake.round_trip",
+    },
+  )
+  println(intake.id == "round-trip")
+  println(intake.topic == "tests.intake.round_trip")
+  let body = "{\"hello\":\"world\"}"
+  let signature = "sha256=" + hmac_sha256("super-secret", body)
+  // Acceptance: a valid signature is accepted and republished onto the topic.
+  let accepted = webhook_intake_feed(
+    "round-trip",
+    {
+      headers: {["x-hub-signature-256"]: signature, ["x-github-delivery"]: "delivery-1"},
+      body: body,
+      path: "/hooks/foo",
+    },
+  )
+  println(accepted.status == "accepted")
+  println(accepted.delivery_id == "delivery-1")
+  // Acceptance: replay with the same delivery id is deduped.
+  let dup = webhook_intake_feed(
+    "round-trip",
+    {
+      headers: {["x-hub-signature-256"]: signature, ["x-github-delivery"]: "delivery-1"},
+      body: body,
+      path: "/hooks/foo",
+    },
+  )
+  println(dup.status == "duplicate")
+  // Acceptance: a tampered signature is rejected.
+  let bad = webhook_intake_feed(
+    "round-trip",
+    {
+      headers: {["x-hub-signature-256"]: "sha256=deadbeef", ["x-github-delivery"]: "delivery-2"},
+      body: body,
+      path: "/hooks/foo",
+    },
+  )
+  println(bad.status == "rejected")
+  // Bounded replay buffer: the topic holds the accepted delivery.
+  let recent = webhook_intake_recent("round-trip", 8)
+  println(len(recent) == 1)
+  println(recent[0].delivery_id == "delivery-1")
+}
