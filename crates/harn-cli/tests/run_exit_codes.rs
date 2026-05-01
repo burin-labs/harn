@@ -13,13 +13,13 @@ mod test_util;
 use std::fs;
 
 use tempfile::TempDir;
-use test_util::process::harn_command;
+use test_util::process::harn_e2e_command;
 
 fn run_script(body: &str) -> std::process::Output {
     let temp = TempDir::new().unwrap();
     let script = temp.path().join("main.harn");
     fs::write(&script, body).unwrap();
-    harn_command()
+    harn_e2e_command()
         .current_dir(temp.path())
         .args(["run", script.to_str().unwrap()])
         .output()

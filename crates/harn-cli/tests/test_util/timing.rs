@@ -1,19 +1,10 @@
 #![allow(dead_code)]
 
-use std::fs;
-use std::path::Path;
 use std::process::{Child, Command, ExitStatus};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
-
-pub const PROCESS_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(60);
-pub const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(10);
-pub const LOG_RECV_POLL_INTERVAL: Duration = Duration::from_millis(25);
-pub const READY_PROBE_IO_TIMEOUT: Duration = Duration::from_millis(250);
-pub const RETRY_POLL_INTERVAL: Duration = Duration::from_millis(25);
 pub const SLACK_ACK_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub struct ChildExitWatcher {
@@ -155,89 +146,8 @@ impl ChildExitWatcher {
     }
 }
 
-pub fn wait_for_existing_path(path: &Path, timeout: Duration) {
-    wait_for_path_ready(path, timeout, PathReady::Exists)
-}
-
-pub fn wait_for_nonempty_file(path: &Path, timeout: Duration) {
-    wait_for_path_ready(path, timeout, PathReady::NonEmptyFile)
-}
-
-enum PathReady {
-    Exists,
-    NonEmptyFile,
-}
-
-fn wait_for_path_ready(path: &Path, timeout: Duration, ready: PathReady) {
-    if is_path_ready(path, &ready) {
-        return;
-    }
-
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    if !parent.exists() {
-        panic!("watch parent directory missing: {}", parent.display());
-    }
-
-    path.file_name()
-        .unwrap_or_else(|| panic!("wait_for_path requires a file name: {}", path.display()));
-
-    let (tx, rx) = mpsc::channel::<()>();
-    let mut watcher: RecommendedWatcher =
-        notify::recommended_watcher(move |event: Result<Event, notify::Error>| {
-            if event.is_ok() {
-                let _ = tx.send(());
-            }
-        })
-        .unwrap_or_else(|error| panic!("failed to install notify watcher: {error}"));
-    watcher
-        .watch(parent, RecursiveMode::NonRecursive)
-        .unwrap_or_else(|error| panic!("failed to watch {}: {error}", parent.display()));
-
-    let deadline = Instant::now() + timeout;
-    loop {
-        if is_path_ready(path, &ready) {
-            return;
-        }
-        let remaining = match deadline.checked_duration_since(Instant::now()) {
-            Some(remaining) => remaining,
-            None => break,
-        };
-        match rx.recv_timeout(remaining) {
-            Ok(()) => continue,
-            Err(mpsc::RecvTimeoutError::Timeout) => break,
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                panic!(
-                    "notify watcher disconnected while waiting for {}",
-                    path.display()
-                );
-            }
-        }
-    }
-    panic!("timed out waiting for {}", path.display());
-}
-
-fn is_path_ready(path: &Path, ready: &PathReady) -> bool {
-    match ready {
-        PathReady::Exists => path.exists(),
-        PathReady::NonEmptyFile => nonempty_file(path),
-    }
-}
-
-fn nonempty_file(path: &Path) -> bool {
-    fs::metadata(path)
-        .map(|metadata| metadata.is_file() && metadata.len() > 0)
-        .unwrap_or(false)
-}
-
 pub fn sleep_blocking(duration: Duration) {
     thread::sleep(duration);
-}
-
-pub async fn sleep_async(duration: Duration) {
-    tokio::time::sleep(duration).await;
 }
 
 #[derive(Copy, Clone)]

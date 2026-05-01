@@ -8,16 +8,9 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-// MCP support is loaded via `#[path = "support/mcp.rs"] mod mcp_support;`
-// so its parent namespace is the test binary's crate root. Test
-// binaries that include `mcp_support` also declare `mod test_util;`, so
-// reach the timing constants through that sibling rather than loading
-// `timing.rs` a second time (clippy::duplicate_mod). Keeping the
-// `super::` path inside the support module makes the dependency
-// explicit at compile time.
-use super::test_util::timing;
-
 pub use process::HarnProcessTestNoLock;
+
+const MCP_LOG_RECV_INTERVAL: Duration = Duration::from_millis(25);
 
 #[allow(dead_code)]
 pub fn lock_mcp_process_tests() -> HarnProcessTestNoLock {
@@ -55,7 +48,7 @@ pub fn wait_for_child_log_suffix(
     let deadline = Instant::now() + timeout;
     let mut observed = Vec::new();
     while Instant::now() < deadline {
-        match rx.recv_timeout(timing::LOG_RECV_POLL_INTERVAL) {
+        match rx.recv_timeout(MCP_LOG_RECV_INTERVAL) {
             Ok(line) if line.contains(needle) => {
                 return line
                     .split(needle)

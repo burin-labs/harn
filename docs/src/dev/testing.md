@@ -135,9 +135,9 @@ These tests are subject to different rules:
 
 - Wall-clock timeouts (`Instant::now()` deadlines, `recv_timeout`) are acceptable
   because there is no deterministic alternative for real process I/O.
-- Use named constants (`EVENT_FAIL_FAST_TIMEOUT`, `PROCESS_FAIL_FAST_TIMEOUT`)
-  rather than inline `Duration::from_millis(…)` literals so timeout values are
-  easy to audit and tune centrally.
+- Use named constants colocated with the E2E module rather than inline
+  `Duration::from_millis(…)` literals so timeout values are easy to audit and
+  tune.
 - Always provide a human-readable timeout message so a failure says _what_ timed
   out, not just that an assertion failed.
 - Prefer `tokio::time::timeout` over `recv_timeout` even in E2E tests; it

@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
-use test_util::process::harn_command;
+use test_util::process::harn_e2e_command;
 
 // See `harn_serve_mcp_cli::PROCESS_READY_TIMEOUT` for the rationale on the 60s
 // budget — cold-starting the debug `harn` binary takes 30–40s under full
@@ -121,7 +121,7 @@ fn mcp_server_stdio_roundtrips_tools_and_resources() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
-    let mut child = harn_command()
+    let mut child = harn_e2e_command()
         .current_dir(temp.path())
         .arg("mcp")
         .arg("serve")
@@ -386,7 +386,7 @@ async fn mcp_server_http_roundtrips_initialize_and_fire() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
-    let mut child = harn_command()
+    let mut child = harn_e2e_command()
         .current_dir(temp.path())
         .arg("mcp")
         .arg("serve")

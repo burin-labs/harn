@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Output;
 
 use tempfile::TempDir;
-use test_util::process::harn_command;
+use test_util::process::harn_e2e_command;
 
 fn write_file(dir: &Path, relative: &str, contents: &str) -> String {
     let path = dir.join(relative);
@@ -17,7 +17,7 @@ fn write_file(dir: &Path, relative: &str, contents: &str) -> String {
 }
 
 fn run_harn(temp: &TempDir, args: &[&str], envs: &[(&str, &str)]) -> Output {
-    let mut command = harn_command();
+    let mut command = harn_e2e_command();
     command.current_dir(temp.path());
     command.args(args);
     for (key, value) in envs {

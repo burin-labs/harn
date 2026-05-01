@@ -30,7 +30,7 @@
 //!
 //! The companion fix that lets the parallel cohort stay healthy at
 //! higher fan-out is the dyld/AMFI pre-warm in
-//! `crates/harn-cli/tests/test_util/process.rs::harn_command()`. Every
+//! `crates/harn-cli/tests/test_util/process.rs::harn_e2e_command()`. Every
 //! subprocess test spawns through that helper, so the first call within
 //! each test-binary process warms the binary's page cache and signature
 //! state synchronously before any parallel cohort starts. With both

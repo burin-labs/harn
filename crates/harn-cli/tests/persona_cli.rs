@@ -3,7 +3,7 @@ mod test_util;
 use std::fs;
 
 use tempfile::TempDir;
-use test_util::process::harn_command;
+use test_util::process::harn_e2e_command;
 
 fn write_manifest(body: &str) -> TempDir {
     let temp = TempDir::new().unwrap();
@@ -55,7 +55,7 @@ receipt_policy = "required"
 fn persona_list_and_inspect_emit_stable_json() {
     let temp = write_manifest(valid_manifest());
 
-    let list = harn_command()
+    let list = harn_e2e_command()
         .current_dir(temp.path())
         .args(["persona", "list", "--json"])
         .output()
@@ -69,7 +69,7 @@ fn persona_list_and_inspect_emit_stable_json() {
     let personas: serde_json::Value = serde_json::from_slice(&list.stdout).unwrap();
     assert_eq!(personas.as_array().unwrap().len(), 3);
 
-    let inspect = harn_command()
+    let inspect = harn_e2e_command()
         .current_dir(temp.path())
         .args(["persona", "inspect", "merge_captain", "--json"])
         .output()
@@ -152,7 +152,7 @@ handoffs = ["review_captain"]
         ),
     ] {
         let temp = write_manifest(body);
-        let output = harn_command()
+        let output = harn_e2e_command()
             .current_dir(temp.path())
             .args(["persona", "list"])
             .output()
@@ -174,7 +174,7 @@ handoffs = ["review_captain"]
 #[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_manifest_flag_loads_example_personas() {
-    let output = harn_command()
+    let output = harn_e2e_command()
         .args([
             "persona",
             "--manifest",
@@ -202,7 +202,7 @@ fn persona_manifest_flag_loads_example_personas() {
 #[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_manifest_flag_loads_fixer_persona() {
-    let output = harn_command()
+    let output = harn_e2e_command()
         .args([
             "persona",
             "--manifest",
@@ -232,7 +232,7 @@ fn persona_manifest_flag_loads_fixer_persona() {
 #[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_manifest_flag_loads_merge_captain_persona() {
-    let output = harn_command()
+    let output = harn_e2e_command()
         .args([
             "persona",
             "--manifest",
@@ -270,7 +270,7 @@ fn persona_manifest_flag_loads_merge_captain_persona() {
 #[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_manifest_flag_loads_ship_captain_persona() {
-    let output = harn_command()
+    let output = harn_e2e_command()
         .args([
             "persona",
             "--manifest",
@@ -304,7 +304,7 @@ fn persona_runtime_status_tick_and_budget_are_persisted() {
     let temp = write_manifest(valid_manifest());
     let state_dir = temp.path().join(".harn-personas-test");
 
-    let status = harn_command()
+    let status = harn_e2e_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -327,7 +327,7 @@ fn persona_runtime_status_tick_and_budget_are_persisted() {
     assert_eq!(status_json["queued_events"], 0);
     assert_eq!(status_json["budget"]["daily_usd"], 20.0);
 
-    let tick = harn_command()
+    let tick = harn_e2e_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -362,7 +362,7 @@ fn persona_runtime_status_tick_and_budget_are_persisted() {
     // --at, the budget window is computed from real wall-clock time, so the
     // assertion silently breaks the moment the test runs after the tick's
     // UTC midnight (i.e. roughly any time of day in PT/CT/ET).
-    let status = harn_command()
+    let status = harn_e2e_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -390,7 +390,7 @@ fn persona_pause_resume_disable_trigger_controls_are_durable() {
     let temp = write_manifest(valid_manifest());
     let state_dir = temp.path().join(".harn-personas-test");
 
-    let pause = harn_command()
+    let pause = harn_e2e_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -404,7 +404,7 @@ fn persona_pause_resume_disable_trigger_controls_are_durable() {
         .unwrap();
     assert!(pause.status.success());
 
-    let trigger = harn_command()
+    let trigger = harn_e2e_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -434,7 +434,7 @@ fn persona_pause_resume_disable_trigger_controls_are_durable() {
     assert_eq!(receipt["status"], "queued");
     assert_eq!(receipt["work_key"], "github:burin-labs/harn:pr:462");
 
-    let resume = harn_command()
+    let resume = harn_e2e_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -451,7 +451,7 @@ fn persona_pause_resume_disable_trigger_controls_are_durable() {
     assert_eq!(status_json["state"], "idle");
     assert_eq!(status_json["queued_events"], 0);
 
-    let disable = harn_command()
+    let disable = harn_e2e_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -465,7 +465,7 @@ fn persona_pause_resume_disable_trigger_controls_are_durable() {
         .unwrap();
     assert!(disable.status.success());
 
-    let trigger = harn_command()
+    let trigger = harn_e2e_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -508,7 +508,7 @@ budget = { daily_usd = 0.01, run_usd = 0.01, max_tokens = 10 }
 "#,
     );
     let state_dir = temp.path().join(".harn-personas-test");
-    let trigger = harn_command()
+    let trigger = harn_e2e_command()
         .current_dir(temp.path())
         .args([
             "persona",
@@ -537,7 +537,7 @@ budget = { daily_usd = 0.01, run_usd = 0.01, max_tokens = 10 }
     assert_eq!(receipt["status"], "budget_exhausted");
     assert!(receipt["error"].as_str().unwrap().contains("run_usd"));
 
-    let status = harn_command()
+    let status = harn_e2e_command()
         .current_dir(temp.path())
         .args([
             "persona",
