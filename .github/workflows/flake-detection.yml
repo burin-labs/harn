@@ -25,9 +25,17 @@ jobs:
         id: touched
         run: |
           git fetch origin main --depth=1
+          # Match every Rust source file under any workspace crate.
+          # The narrower `crates/**/src/**/tests*.rs` glob this replaces
+          # silently skipped src/ files containing inline `#[cfg(test)]`
+          # modules (e.g. `src/foo.rs` with `mod tests { ... }`, or
+          # `src/triggers/test_util/mod.rs` from #1104). The filter
+          # script below maps any non-`tests/` path to
+          # `package(<pkg>)`, which now reruns the whole package's
+          # tests 50× — the safe default when behavior changes
+          # anywhere in a crate could introduce a flake.
           TOUCHED=$(git diff --name-only origin/main...HEAD -- \
-            'crates/**/tests/**' \
-            'crates/**/src/**/tests*.rs' | tr '\n' ' ')
+            'crates/**/*.rs' | tr '\n' ' ')
           FILTER=""
           if [[ -n "${TOUCHED// }" ]]; then
             read -ra PATHS <<< "$TOUCHED"
@@ -70,9 +78,17 @@ jobs:
         env:
           NEXTEST_FILTER: ${{ steps.touched.outputs.filter }}
         run: |
+          # `--workspace` is required: without it, `cargo nextest run`
+          # only discovers tests in the cwd's package, so `-E
+          # "package(harn-vm)"` (or any other package() filter) matches
+          # nothing at workspace root and reports "0 tests across 0
+          # binaries". `binary(...)` filters happened to work because
+          # they scan built artifacts in target/debug/deps directly, but
+          # package() filters need cargo metadata.
           for i in $(seq 50); do
             printf -- '--- Iteration %d/50 ---\n' "$i"
             cargo nextest run \
+              --workspace \
               --profile flake-detection \
               --test-threads 8 \
               -E "$NEXTEST_FILTER" \
