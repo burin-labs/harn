@@ -117,6 +117,7 @@
 - [Deploy to Railway](./deploy/railway.md)
 - [Maintainer release workflow](./maintainer-release.md)
 - [Windows test coverage](./dev/windows-test-coverage.md)
+- [Deterministic test patterns](./dev/testing.md)
 
 # Tutorials and Guides
 

@@ -89,6 +89,7 @@ jobs:
       - run: make check-connector-matrix
       - run: make check-trigger-examples
       - run: make check-docs-snippets
+      - run: make lint-test-patterns
       - run: python3 scripts/verify_release_metadata.py
 
   changes:
