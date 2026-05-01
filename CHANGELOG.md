@@ -23,20 +23,6 @@ condensed series summaries instead of full per-patch history.
   touch the workspace. `default` and `code` preserve the pre-modes
   baseline.
 
-<<<<<<< ksinder/objective-mayer-39fb12
-- **Postfix `T?` optional-type sugar (#915).** `T?` now parses as
-  syntactic sugar for `T | nil`, mirroring the safe-navigation postfix
-  already used in expressions (`obj?.method()`). Postfix `?` binds
-  tighter than `&` and `|`, so `A & B?` parses as `A & (B | nil)` and
-  `A | B?` flattens to `A | B | nil`. Equivalent narrowing rules apply
-  (`if x != nil` still narrows away the `nil` arm). The formatter
-  rewrites the explicit `T | nil` form to `T?` whenever the inner type
-  prints as a primary, and a new `prefer-optional-shorthand` lint rule
-  (with auto-fix) flags the long form independently. Tree-sitter
-  grammar, `spec/HARN_SPEC.md`, and conformance tests cover both
-  spellings; existing `T | nil` source remains valid and semantically
-  identical.
-=======
 - **Per-agent autonomy budget for `agent_loop` (#928).** New
   `autonomy_budget: {per_hour, per_day, key?, reviewer?}` option on
   `agent_loop` (and downstream `sub_agent_run` / workflow stages) caps
@@ -49,7 +35,7 @@ condensed series summaries instead of full per-patch history.
   `autonomy.tier_transition` trust-graph record from `act_auto` to
   `act_with_approval` — the same audit trail the trigger-side
   `max_autonomous_decisions_per_*` cap produces.
->>>>>>> main
+
 - **MCP elicitation (`elicitation/create`) on both roles (#875).** Harn
   servers can now prompt connected clients for structured user input
   mid-tool-call via the `mcp_elicit({ message, requestedSchema })`
@@ -63,6 +49,7 @@ condensed series summaries instead of full per-patch history.
   Bidirectional stdio is implemented; HTTP streamable-transport server
   surfaces are wired through the per-session SSE stream so a tool
   handler can elicit and receive a response over a separate POST.
+
 - **ACP slash-commands via `@command` (#896).** New `@command(name?,
   description?, hint?)` attribute on top-level pipelines. The ACP adapter
   (`harn serve --pipeline ...`) discovers tagged pipelines from the
@@ -71,6 +58,19 @@ condensed series summaries instead of full per-patch history.
   between prompts), and dispatches `/<name> args` prompts to the named
   pipeline as the entry point with `args` exposed as the `prompt`
   global. Implements ACP slash-command spec for Zed-style clients.
+
+- **Postfix `T?` optional-type sugar (#915).** `T?` now parses as
+  syntactic sugar for `T | nil`, mirroring the safe-navigation postfix
+  already used in expressions (`obj?.method()`). Postfix `?` binds
+  tighter than `&` and `|`, so `A & B?` parses as `A & (B | nil)` and
+  `A | B?` flattens to `A | B | nil`. Equivalent narrowing rules apply
+  (`if x != nil` still narrows away the `nil` arm). The formatter
+  rewrites the explicit `T | nil` form to `T?` whenever the inner type
+  prints as a primary, and a new `prefer-optional-shorthand` lint rule
+  (with auto-fix) flags the long form independently. Tree-sitter
+  grammar, `spec/HARN_SPEC.md`, and conformance tests cover both
+  spellings; existing `T | nil` source remains valid and semantically
+  identical.
 
 - **Harn-native Merge Captain persona (#1009/#1029).** Replaces the
   shell-driven Merge Captain MVP with a deterministic Harn package owning
