@@ -25,9 +25,17 @@ jobs:
         id: touched
         run: |
           git fetch origin main --depth=1
+          # Match every Rust source file under any workspace crate.
+          # The narrower `crates/**/src/**/tests*.rs` glob this replaces
+          # silently skipped src/ files containing inline `#[cfg(test)]`
+          # modules (e.g. `src/foo.rs` with `mod tests { ... }`, or
+          # `src/triggers/test_util/mod.rs` from #1104). The filter
+          # script below maps any non-`tests/` path to
+          # `package(<pkg>)`, which now reruns the whole package's
+          # tests 50× — the safe default when behavior changes
+          # anywhere in a crate could introduce a flake.
           TOUCHED=$(git diff --name-only origin/main...HEAD -- \
-            'crates/**/tests/**' \
-            'crates/**/src/**/tests*.rs' | tr '\n' ' ')
+            'crates/**/*.rs' | tr '\n' ' ')
           FILTER=""
           if [[ -n "${TOUCHED// }" ]]; then
             read -ra PATHS <<< "$TOUCHED"
