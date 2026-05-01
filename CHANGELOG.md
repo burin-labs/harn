@@ -23,6 +23,18 @@ condensed series summaries instead of full per-patch history.
   touch the workspace. `default` and `code` preserve the pre-modes
   baseline.
 
+- **Per-agent autonomy budget for `agent_loop` (#928).** New
+  `autonomy_budget: {per_hour, per_day, key?, reviewer?}` option on
+  `agent_loop` (and downstream `sub_agent_run` / workflow stages) caps
+  autonomous decisions per UTC hour / day per stable key. The check
+  fires at loop entry, before any LLM/MCP work — scripts can't bypass
+  it. When exhausted, `agent_loop` returns
+  `{status: "approval_required", request_id, reviewers, reason, ...}`,
+  appends a HITL approval request to `hitl.approvals`, emits an
+  `autonomy.budget_exceeded` lifecycle event, and writes an
+  `autonomy.tier_transition` trust-graph record from `act_auto` to
+  `act_with_approval` — the same audit trail the trigger-side
+  `max_autonomous_decisions_per_*` cap produces.
 - **MCP elicitation (`elicitation/create`) on both roles (#875).** Harn
   servers can now prompt connected clients for structured user input
   mid-tool-call via the `mcp_elicit({ message, requestedSchema })`

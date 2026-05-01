@@ -128,6 +128,7 @@ pub(super) fn base_agent_config() -> AgentLoopConfig {
         working_files: Vec::new(),
         mcp_servers: Vec::new(),
         mcp_clients: Default::default(),
+        autonomy_budget: None,
     }
 }
 

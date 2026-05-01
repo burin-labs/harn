@@ -717,6 +717,11 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
         working_files,
         mcp_servers,
         mcp_clients: Default::default(),
+        autonomy_budget: crate::llm::autonomy_budget::parse_autonomy_budget(
+            options.as_ref(),
+            &spec.session_id,
+            "sub_agent_run",
+        )?,
     })
 }
 
