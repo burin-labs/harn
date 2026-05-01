@@ -490,6 +490,25 @@ async fn planned_receipt(command: GitCommand) -> Result<VmValue, VmError> {
     Ok(crate::stdlib::json_to_vm_value(&receipt))
 }
 
+/// Environment variables that, when set on the calling process, would
+/// override the `cwd`/`argv`-based repo selection that the Harn git
+/// stdlib relies on. Strip them from every subprocess invocation so
+/// behavior is identical whether Harn is launched from a clean shell
+/// or from inside a git hook (which sets `GIT_DIR` etc. for the hook
+/// process and any of its descendants).
+///
+/// Reference: <https://git-scm.com/docs/git#_environment_variables>.
+const GIT_ENV_OVERRIDES: &[&str] = &[
+    "GIT_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_WORK_TREE",
+    "GIT_NAMESPACE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_PREFIX",
+];
+
 async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
     let mut params = BTreeMap::new();
     params.insert("mode".to_string(), VmValue::String(Rc::from("argv")));
@@ -508,6 +527,15 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
         VmValue::String(Rc::from(display_path(&command.cwd))),
     );
     params.insert("timeout_ms".to_string(), VmValue::Int(120_000));
+    params.insert(
+        "env_remove".to_string(),
+        VmValue::List(Rc::new(
+            GIT_ENV_OVERRIDES
+                .iter()
+                .map(|name| VmValue::String(Rc::from(*name)))
+                .collect(),
+        )),
+    );
     let caller = json!({
         "surface": "stdlib.git",
         "operation": command.operation,
@@ -1133,11 +1161,17 @@ mod tests {
     }
 
     fn git(cwd: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(cwd)
-            .output()
-            .expect("run git");
+        let mut command = Command::new("git");
+        command.args(args).current_dir(cwd);
+        // Mirror the production `exec_argv` env scrub so these tests
+        // also pass when invoked from inside a git hook (which sets
+        // `GIT_DIR=.git` for the hook process and its descendants —
+        // without this, a child `git init` in a temp dir reuses the
+        // outer repo's index and fails).
+        for name in super::GIT_ENV_OVERRIDES {
+            command.env_remove(name);
+        }
+        let output = command.output().expect("run git");
         assert!(
             output.status.success(),
             "git {:?} failed\nstdout:\n{}\nstderr:\n{}",
