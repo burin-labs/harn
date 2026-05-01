@@ -2,27 +2,38 @@
 //! (`run_command`, `run_test`, `run_build_command`,
 //! `inspect_test_results`, `manage_packages`, `cancel_handle`).
 //!
-//! POSIX-bound: every fixture spawns `bash -c "<script>"` to exercise argv,
-//! cwd, env, stdin plumbing, timeouts, and the long-running-handle drain.
-//! Bash and the shell-script vocabulary used here (`echo`, `pwd`, `1>&2`,
-//! `for i in $(seq 1 N); do printf x; done`, `printenv`, `$$`, etc.) are
-//! POSIX-only; porting the suite to Windows would require rewriting every
-//! fixture against `cmd.exe` / PowerShell, with subtle quoting and exit-code
-//! semantics that no longer test the same plumbing on both sides.
+//! These tests are **deterministic and mock-based**. Every spawn goes
+//! through a `MockSpawner` installed via
+//! `harn_hostlib::process::install_spawner`, so:
 //!
-//! See `docs/dev/windows-test-coverage.md` for the full inventory and
-//! disposition tracker (issue #946).
+//! - No real subprocess is spawned.
+//! - There is zero `std::thread::sleep` and zero `std::time::Instant::now()`
+//!   polling — we use [`harn_hostlib::tools::long_running::register_completion_notifier`]
+//!   to deterministically await the long-running waiter thread.
+//! - Tests run in well under 50 ms each.
+//!
+//! End-to-end coverage of the real-process spawn path is provided by
+//! `tests/process_tools_e2e.rs`. That suite is allowed to spawn real
+//! subprocesses; if it grows, it should move into the slow E2E job
+//! tracked by Tier 2A of the deflake epic (issue #1069).
 
 #![cfg(unix)]
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
+use harn_hostlib::process::{
+    install_spawner, ExitStatus, MockHandleController, MockProcessConfig, MockSpawner, SpawnerGuard,
+};
+use harn_hostlib::tools::long_running::register_completion_notifier;
 use harn_hostlib::tools::ToolsCapability;
 use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
 use harn_vm::VmValue;
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
+
+// -------- harness --------
 
 fn registry() -> BuiltinRegistry {
     let mut registry = BuiltinRegistry::new();
@@ -80,10 +91,33 @@ fn require_bool(map: &BTreeMap<String, VmValue>, key: &str) -> bool {
     }
 }
 
+/// Install a fresh `MockSpawner` for the calling thread and return both the
+/// spawner (for inspection / additional enqueues) and the `SpawnerGuard`
+/// that restores the previous spawner on drop. The guard must be kept
+/// alive for the duration of the test.
+fn install_mock() -> (Arc<MockSpawner>, SpawnerGuard) {
+    let spawner = Arc::new(MockSpawner::new());
+    let guard = install_spawner(spawner.clone());
+    (spawner, guard)
+}
+
+/// Convenience: install a mock and immediately enqueue a single config.
+/// Returns the controller for the configured spawn plus the guard.
+fn install_mock_with(
+    config: MockProcessConfig,
+) -> (Arc<MockSpawner>, MockHandleController, SpawnerGuard) {
+    let (spawner, guard) = install_mock();
+    let controller = spawner.enqueue(config);
+    (spawner, controller, guard)
+}
+
 // -------- run_command --------
 
 #[test]
 fn run_command_echoes_stdout_and_reports_exit_zero() {
+    let (_spawner, _controller, _guard) =
+        install_mock_with(MockProcessConfig::with_stdout(0, "hello\n"));
+
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["bash", "-c", "echo hello"]));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
@@ -101,6 +135,7 @@ fn run_command_echoes_stdout_and_reports_exit_zero() {
     assert!(require_str(&resp, "audit_id").starts_with("audit_cmd_"));
     assert!(matches!(resp.get("signal"), Some(VmValue::Nil)));
     assert!(require_int(&resp, "duration_ms") >= 0);
+
     let output_path = require_str(&resp, "output_path");
     assert_eq!(
         std::fs::read_to_string(&output_path).unwrap().trim(),
@@ -117,6 +152,8 @@ fn run_command_echoes_stdout_and_reports_exit_zero() {
 
 #[test]
 fn run_command_propagates_nonzero_exit_code() {
+    let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::completed(7));
+
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["bash", "-c", "exit 7"]));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
@@ -126,29 +163,53 @@ fn run_command_propagates_nonzero_exit_code() {
 
 #[test]
 fn run_command_pipes_stdin_into_child() {
+    // Mock `cat`: emit nothing on stdout from the spawn-side, but capture
+    // the bytes the spawn-side wrote to stdin and assert in two ways:
+    //   1. The captured bytes hit the controller's stdin buffer.
+    //   2. The SpawnSpec recorded `use_stdin = true`.
+    let (spawner, controller, _guard) = install_mock_with(MockProcessConfig::completed(0));
+
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["cat"]));
     req.insert("stdin".into(), vstr("from-stdin"));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
-    assert_eq!(require_str(&resp, "stdout"), "from-stdin");
+
+    assert_eq!(require_int(&resp, "exit_code"), 0);
+
+    let captured = spawner.captured();
+    assert_eq!(captured.len(), 1);
+    assert!(captured[0].use_stdin, "stdin should be wired up in spec");
+
+    assert_eq!(controller.stdin_written(), b"from-stdin");
 }
 
 #[test]
 fn run_command_runs_in_supplied_cwd() {
+    let (spawner, _controller, _guard) = install_mock_with(MockProcessConfig::completed(0));
+
     let dir = tempdir().unwrap();
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["bash", "-c", "pwd"]));
     req.insert("cwd".into(), vstr(dir.path().to_str().unwrap()));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
-    let stdout = require_str(&resp, "stdout");
+    assert_eq!(require_int(&resp, "exit_code"), 0);
+    let captured = spawner.captured();
+    assert_eq!(captured.len(), 1);
     let canon_cwd = std::fs::canonicalize(dir.path()).unwrap();
-    let canon_stdout = std::fs::canonicalize(stdout.trim()).unwrap();
-    assert_eq!(canon_stdout, canon_cwd);
+    assert_eq!(captured[0].cwd.as_ref().unwrap(), &canon_cwd);
 }
 
 #[test]
 fn run_command_kills_child_when_timeout_elapses() {
+    // No exit set + force_timeout = `wait_with_timeout` reports timeout
+    // immediately, no wall-clock dependence.
+    let config = MockProcessConfig {
+        force_timeout: true,
+        ..MockProcessConfig::running()
+    };
+    let (_spawner, _controller, _guard) = install_mock_with(config);
+
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["sleep", "30"]));
     req.insert("timeout_ms".into(), VmValue::Int(150));
@@ -161,6 +222,13 @@ fn run_command_kills_child_when_timeout_elapses() {
 
 #[test]
 fn run_command_capture_stderr_false_merges_into_stdout() {
+    let config = MockProcessConfig {
+        stdout: b"out\n".to_vec(),
+        stderr: b"err\n".to_vec(),
+        ..MockProcessConfig::default()
+    };
+    let (_spawner, _controller, _guard) = install_mock_with(config);
+
     let mut req = dict();
     req.insert(
         "argv".into(),
@@ -176,6 +244,9 @@ fn run_command_capture_stderr_false_merges_into_stdout() {
 
 #[test]
 fn run_command_supports_explicit_shell_mode() {
+    let (spawner, _controller, _guard) =
+        install_mock_with(MockProcessConfig::with_stdout(0, "shell-ok\n"));
+
     let mut shell: BTreeMap<String, VmValue> = BTreeMap::new();
     shell.insert("id".into(), vstr("sh"));
 
@@ -185,10 +256,23 @@ fn run_command_supports_explicit_shell_mode() {
     req.insert("shell".into(), VmValue::Dict(Rc::new(shell)));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
     assert_eq!(require_str(&resp, "stdout").trim(), "shell-ok");
+
+    // Shell mode resolves to a real shell argv on the spec — verify the
+    // command flows through (echo shell-ok) somewhere in the args.
+    let captured = spawner.captured();
+    let argv_blob = format!("{} {}", captured[0].program, captured[0].args.join(" "));
+    assert!(
+        argv_blob.contains("echo shell-ok"),
+        "unexpected resolved argv: {argv_blob:?}"
+    );
 }
 
 #[test]
 fn run_command_caps_inline_output_and_read_command_output_reads_artifact() {
+    let payload = vec![b'x'; 2000];
+    let (_spawner, _controller, _guard) =
+        install_mock_with(MockProcessConfig::with_stdout(0, payload));
+
     let mut capture: BTreeMap<String, VmValue> = BTreeMap::new();
     capture.insert("max_inline_bytes".into(), VmValue::Int(8));
 
@@ -222,8 +306,11 @@ fn read_command_output_rejects_arbitrary_path_reads() {
 
 #[test]
 fn run_command_passes_env_when_supplied() {
+    let (spawner, _controller, _guard) =
+        install_mock_with(MockProcessConfig::with_stdout(0, "value-42\n"));
+
     let mut env_dict: BTreeMap<String, VmValue> = BTreeMap::new();
-    env_dict.insert("PATH".into(), vstr(env!("PATH")));
+    env_dict.insert("PATH".into(), vstr("/bin:/usr/bin"));
     env_dict.insert("HOSTLIB_TEST_VAR".into(), vstr("value-42"));
 
     let mut req = dict();
@@ -234,10 +321,17 @@ fn run_command_passes_env_when_supplied() {
     req.insert("env".into(), VmValue::Dict(Rc::new(env_dict)));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
     assert_eq!(require_str(&resp, "stdout").trim(), "value-42");
+
+    let captured = spawner.captured();
+    assert_eq!(
+        captured[0].env.get("HOSTLIB_TEST_VAR"),
+        Some(&"value-42".to_string())
+    );
 }
 
 #[test]
 fn run_command_missing_argv_returns_missing_parameter() {
+    // No mock needed — fails before reaching the spawner.
     let err = call("hostlib_tools_run_command", dict()).unwrap_err();
     match err {
         HostlibError::MissingParameter { param, .. } => assert_eq!(param, "argv"),
@@ -274,6 +368,8 @@ fn run_command_argv_must_be_strings() {
 
 #[test]
 fn run_test_explicit_argv_runs_and_returns_handle() {
+    let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::completed(0));
+
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["true"]));
     let resp = require_dict(call("hostlib_tools_run_test", req).unwrap());
@@ -292,36 +388,19 @@ fn run_test_without_argv_or_manifest_errors() {
 
 #[test]
 fn run_test_inspect_returns_parsed_records_for_explicit_junit() {
-    // Stage a JUnit XML that the bundled handler would have written, then
-    // ask `run_test` to drive a no-op runner and point at it via argv.
-    let dir = tempdir().unwrap();
-    let junit = dir.path().join("junit.xml");
-    std::fs::write(
-        &junit,
-        r#"<?xml version="1.0"?>
-<testsuites>
-  <testsuite name="suite">
-    <testcase classname="C" name="passes" time="0.001"/>
-    <testcase classname="C" name="fails" time="0.005">
-      <failure message="boom">trace</failure>
-    </testcase>
-  </testsuite>
-</testsuites>"#,
-    )
-    .unwrap();
+    // Mock a cargo libtest-style stdout that the parser auto-detects.
+    let stdout = "running 2 tests\n\
+                  test a::passes ... ok\n\
+                  test a::fails ... FAILED\n\
+                  \n\
+                  test result: FAILED. 1 passed; 1 failed; 0 ignored\n";
+    let (_spawner, _controller, _guard) =
+        install_mock_with(MockProcessConfig::with_stdout(1, stdout));
 
-    // Mock pytest by passing argv that just `cat`s the JUnit and exits 0,
-    // but since explicit-argv `run_test` won't know to look for the file,
-    // we test via inspect_test_results stable behavior: shape it like
-    // the cargo libtest text path which the parser auto-detects.
     let mut req = dict();
     req.insert(
         "argv".into(),
-        vlist_str(&[
-            "bash",
-            "-c",
-            "echo 'running 2 tests'; echo 'test a::passes ... ok'; echo 'test a::fails ... FAILED'; printf '\\n'; echo 'test result: FAILED. 1 passed; 1 failed; 0 ignored'; exit 1",
-        ]),
+        vlist_str(&["bash", "-c", "echo cargo libtest output"]),
     );
     let resp = require_dict(call("hostlib_tools_run_test", req).unwrap());
     assert_eq!(require_int(&resp, "exit_code"), 1);
@@ -341,6 +420,9 @@ fn run_test_inspect_returns_parsed_records_for_explicit_junit() {
 
 #[test]
 fn run_test_summary_omitted_when_no_records_parsed() {
+    let (_spawner, _controller, _guard) =
+        install_mock_with(MockProcessConfig::with_stdout(0, "nothing\n"));
+
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["bash", "-c", "echo nothing"]));
     let resp = require_dict(call("hostlib_tools_run_test", req).unwrap());
@@ -374,6 +456,12 @@ fn inspect_test_results_missing_handle_errors() {
 
 #[test]
 fn run_build_command_explicit_argv_runs_and_parses_diagnostics() {
+    let config = MockProcessConfig {
+        stderr: b"src/foo.rs:3:7: error: parse error here\n".to_vec(),
+        ..MockProcessConfig::completed(2)
+    };
+    let (_spawner, _controller, _guard) = install_mock_with(config);
+
     let mut req = dict();
     req.insert(
         "argv".into(),
@@ -430,7 +518,6 @@ fn manage_packages_no_ecosystem_no_manifest_errors() {
 
 #[test]
 fn manage_packages_unsupported_pair_for_ecosystem_errors() {
-    // Gradle does not have a portable CLI mapping for adding dependencies.
     let mut req = dict();
     req.insert("operation".into(), vstr("add"));
     req.insert("ecosystem".into(), vstr("gradle"));
@@ -440,48 +527,34 @@ fn manage_packages_unsupported_pair_for_ecosystem_errors() {
 }
 
 #[test]
-fn manage_packages_runs_for_detected_npm_workspace_when_manifest_present() {
-    // We can't actually invoke `npm install` in a sandboxed tmp directory
-    // without network access, so use an `ecosystem` that maps to a tiny
-    // synthetic command via the executable-on-PATH machinery. We re-run
-    // the real plumbing by overriding the ecosystem to something whose
-    // first argv element is a no-op shell builtin.
-    //
-    // This test asserts that *given* an explicit ecosystem + a real cwd,
-    // the builtin assembles + spawns + collects an outcome. It uses the
-    // `bundler` ecosystem with `update` (no packages) → `bundle update`,
-    // then accepts whatever exit code the missing binary yields. The
-    // important part: no panic, structured response, lockfile_changed
-    // reported as a bool.
+fn manage_packages_runs_for_detected_ecosystem_with_explicit_cwd() {
+    let (spawner, _controller, _guard) = install_mock_with(MockProcessConfig::completed(0));
+
     let dir = tempdir().unwrap();
     let mut req = dict();
     req.insert("operation".into(), vstr("update"));
     req.insert("ecosystem".into(), vstr("bundler"));
     req.insert("cwd".into(), vstr(dir.path().to_str().unwrap()));
-    let result = call("hostlib_tools_manage_packages", req);
-    match result {
-        Ok(value) => {
-            let resp = require_dict(value);
-            assert_eq!(require_str(&resp, "ecosystem"), "bundler");
-            assert_eq!(require_str(&resp, "operation"), "update");
-            assert!(matches!(
-                resp.get("lockfile_changed"),
-                Some(VmValue::Bool(_))
-            ));
-        }
-        Err(HostlibError::Backend { .. }) => {
-            // Spawn failed because `bundle` isn't installed in CI — that's
-            // a valid sandbox-aware backend error, not a contract bug.
-        }
-        Err(other) => panic!("unexpected error variant: {other:?}"),
-    }
+    let resp = require_dict(call("hostlib_tools_manage_packages", req).unwrap());
+    assert_eq!(require_str(&resp, "ecosystem"), "bundler");
+    assert_eq!(require_str(&resp, "operation"), "update");
+    assert!(matches!(
+        resp.get("lockfile_changed"),
+        Some(VmValue::Bool(_))
+    ));
+    // Spec captured `bundle update`.
+    let captured = spawner.captured();
+    assert_eq!(captured[0].program, "bundle");
+    assert_eq!(captured[0].args, vec!["update".to_string()]);
 }
 
 // -------- long_running handles --------
 
 #[test]
 fn run_command_long_running_returns_handle_immediately() {
-    // A 10-second sleep: the handle must arrive before the process exits.
+    // Stay running until the test cancels.
+    let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
+
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
     req.insert("long_running".into(), VmValue::Bool(true));
@@ -504,17 +577,23 @@ fn run_command_long_running_returns_handle_immediately() {
         "command should contain 'sleep', got {cmd}"
     );
 
-    // Clean up: cancel so sleep doesn't outlive the test.
+    // Block on waiter completion before returning so the test stays
+    // deterministic — cancel signals the notifier itself.
+    let completion_rx = register_completion_notifier(&handle_id);
+
+    // Clean up: cancel so the waiter unblocks.
     let mut cancel_req = dict();
     cancel_req.insert("handle_id".into(), vstr(&handle_id));
     let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
     assert!(require_bool(&cancel_resp, "cancelled"));
+
+    if let Some(rx) = completion_rx {
+        let _ = rx.recv();
+    }
 }
 
 #[test]
 fn run_command_long_running_feedback_fires_after_exit() {
-    use std::time::Duration;
-
     // Use a process-unique session id so parallel tests don't interfere.
     let session_id = format!(
         "test-lr-feedback-{}-{:?}",
@@ -522,7 +601,9 @@ fn run_command_long_running_feedback_fires_after_exit() {
         std::thread::current().id()
     );
 
-    // Spawn a short-lived process: echoes stdout, stderr, then exits 0.
+    // Stay running until the controller signals exit.
+    let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
+
     let info = harn_hostlib::tools::long_running::spawn_long_running(
         "test_builtin",
         "bash".into(),
@@ -535,61 +616,61 @@ fn run_command_long_running_feedback_fires_after_exit() {
         session_id.clone(),
     )
     .expect("spawn_long_running failed");
-
     assert!(!info.handle_id.is_empty());
 
-    // Poll the global feedback queue until the item arrives (max 5 s).
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        let items = harn_vm::drain_global_pending_feedback(&session_id);
-        if !items.is_empty() {
-            let (kind, content) = &items[0];
-            assert_eq!(kind, "tool_result", "unexpected feedback kind: {kind}");
-            let payload: serde_json::Value =
-                serde_json::from_str(content).expect("feedback content not valid JSON");
-            assert_eq!(
-                payload["handle_id"].as_str().unwrap(),
-                info.handle_id,
-                "handle_id mismatch in feedback"
-            );
-            assert_eq!(payload["exit_code"], 0);
-            assert_eq!(payload["status"], "completed");
-            assert!(payload["output_path"]
-                .as_str()
-                .unwrap()
-                .contains("combined.txt"));
-            assert!(
-                payload["stdout"].as_str().unwrap().contains("hello stdout"),
-                "stdout missing: {}",
-                payload["stdout"]
-            );
-            assert!(
-                payload["stderr"].as_str().unwrap().contains("hello stderr"),
-                "stderr missing: {}",
-                payload["stderr"]
-            );
-            assert!(
-                payload["duration_ms"].as_i64().unwrap() >= 0,
-                "duration_ms must be non-negative"
-            );
-            return;
-        }
-        if std::time::Instant::now() >= deadline {
-            panic!("feedback never arrived in 5 s");
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    // Register a completion notifier BEFORE pushing the exit so we can
+    // recv on it once the waiter publishes the feedback item.
+    let completion_rx =
+        register_completion_notifier(&info.handle_id).expect("handle should still be live");
+
+    controller.append_stdout(b"hello stdout\n");
+    controller.append_stderr(b"hello stderr\n");
+    controller.complete_with(ExitStatus::from_code(0));
+
+    completion_rx.recv().expect("waiter completion never fired");
+
+    let items = harn_vm::drain_global_pending_feedback(&session_id);
+    assert_eq!(items.len(), 1, "expected exactly one feedback item");
+    let (kind, content) = &items[0];
+    assert_eq!(kind, "tool_result", "unexpected feedback kind: {kind}");
+    let payload: serde_json::Value =
+        serde_json::from_str(content).expect("feedback content not valid JSON");
+    assert_eq!(
+        payload["handle_id"].as_str().unwrap(),
+        info.handle_id,
+        "handle_id mismatch in feedback"
+    );
+    assert_eq!(payload["exit_code"], 0);
+    assert_eq!(payload["status"], "completed");
+    assert!(payload["output_path"]
+        .as_str()
+        .unwrap()
+        .contains("combined.txt"));
+    assert!(
+        payload["stdout"].as_str().unwrap().contains("hello stdout"),
+        "stdout missing: {}",
+        payload["stdout"]
+    );
+    assert!(
+        payload["stderr"].as_str().unwrap().contains("hello stderr"),
+        "stderr missing: {}",
+        payload["stderr"]
+    );
+    assert!(
+        payload["duration_ms"].as_i64().unwrap() >= 0,
+        "duration_ms must be non-negative"
+    );
 }
 
 #[test]
 fn cancel_handle_kills_long_running_process() {
-    use std::time::Duration;
-
     let session_id = format!(
         "test-lr-cancel-{}-{:?}",
         std::process::id(),
         std::thread::current().id()
     );
+
+    let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
 
     let info = harn_hostlib::tools::long_running::spawn_long_running(
         "test_builtin",
@@ -600,6 +681,9 @@ fn cancel_handle_kills_long_running_process() {
         session_id.clone(),
     )
     .expect("spawn_long_running failed");
+
+    // Register so cancel signals it.
+    let completion_rx = register_completion_notifier(&info.handle_id);
 
     // Cancel via the builtin — should return cancelled: true.
     let mut req = dict();
@@ -617,11 +701,16 @@ fn cancel_handle_kills_long_running_process() {
         "second cancel should return false"
     );
 
-    // A feedback item for the killed process may or may not arrive depending
-    // on whether the waiter thread observed the exit before we removed the
-    // entry. Drain and discard so we don't pollute other tests.
-    std::thread::sleep(Duration::from_millis(200));
-    harn_vm::drain_global_pending_feedback(&session_id);
+    if let Some(rx) = completion_rx {
+        let _ = rx.recv();
+    }
+
+    // Cancelled handles never push feedback — drain returns empty.
+    let items = harn_vm::drain_global_pending_feedback(&session_id);
+    assert!(
+        items.is_empty(),
+        "cancelled handle should not push feedback, got {items:?}"
+    );
 }
 
 #[test]
@@ -634,6 +723,8 @@ fn cancel_handle_unknown_handle_returns_false() {
 
 #[test]
 fn run_test_long_running_returns_handle() {
+    let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
+
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
     req.insert("long_running".into(), VmValue::Bool(true));
@@ -644,14 +735,19 @@ fn run_test_long_running_returns_handle() {
         "unexpected handle_id: {handle_id}"
     );
 
-    // Clean up.
+    let completion_rx = register_completion_notifier(&handle_id);
     let mut cancel_req = dict();
     cancel_req.insert("handle_id".into(), vstr(&handle_id));
     call("hostlib_tools_cancel_handle", cancel_req).unwrap();
+    if let Some(rx) = completion_rx {
+        let _ = rx.recv();
+    }
 }
 
 #[test]
 fn run_build_command_long_running_returns_handle() {
+    let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
+
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
     req.insert("long_running".into(), VmValue::Bool(true));
@@ -662,8 +758,11 @@ fn run_build_command_long_running_returns_handle() {
         "unexpected handle_id: {handle_id}"
     );
 
-    // Clean up.
+    let completion_rx = register_completion_notifier(&handle_id);
     let mut cancel_req = dict();
     cancel_req.insert("handle_id".into(), vstr(&handle_id));
     call("hostlib_tools_cancel_handle", cancel_req).unwrap();
+    if let Some(rx) = completion_rx {
+        let _ = rx.recv();
+    }
 }

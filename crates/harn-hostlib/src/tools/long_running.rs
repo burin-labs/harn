@@ -34,16 +34,14 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::Duration;
 
 use harn_vm::VmValue;
 
-use harn_vm::process_sandbox;
-
 use crate::error::HostlibError;
+use crate::process::{self as process_handle, ProcessHandle, ProcessKiller, SpawnSpec};
 use crate::tools::proc::{self, CaptureConfig, CommandStatus, EnvMode};
 
 /// Atomic counter for generating unique handle IDs within this process.
@@ -58,13 +56,17 @@ struct CancelState {
 
 /// Shared state for a single in-flight child process.
 struct HandleEntry {
-    /// The child process. `None` after the waiter thread takes ownership.
-    child: Option<Child>,
-    /// Raw OS process ID — available even after the waiter took `child`.
-    pid: u32,
+    /// The process handle. `None` after the waiter thread takes ownership.
+    handle: Option<Box<dyn ProcessHandle>>,
+    /// Killer that works even after the waiter took `handle`.
+    killer: Arc<dyn ProcessKiller>,
     session_id: String,
     /// Shared with the waiter thread.
     cancel_state: Arc<CancelState>,
+    /// Sender used by the waiter thread to signal that the post-exit
+    /// feedback push is complete. `None` if the test-side hasn't asked
+    /// to be notified.
+    completion_tx: Option<std::sync::mpsc::SyncSender<()>>,
 }
 
 #[derive(Default)]
@@ -140,58 +142,22 @@ pub(crate) fn spawn_long_running_with_options(
     capture: CaptureConfig,
     session_id: String,
 ) -> Result<LongRunningHandleInfo, HostlibError> {
-    if program.is_empty() {
-        return Err(HostlibError::InvalidParameter {
-            builtin,
-            param: "argv",
-            message: "first element of argv must be a non-empty program name".to_string(),
-        });
-    }
+    let spec = SpawnSpec {
+        builtin,
+        program: program.clone(),
+        args: args.clone(),
+        cwd,
+        env,
+        env_mode,
+        use_stdin: false,
+        configure_process_group: true,
+    };
+    let handle = process_handle::spawn_process(spec)
+        .map_err(|e| proc::process_error_to_hostlib(builtin, e))?;
 
-    let mut command =
-        process_sandbox::std_command_for(&program, &args).map_err(|e| HostlibError::Backend {
-            builtin,
-            message: format!("sandbox setup failed: {e:?}"),
-        })?;
-
-    if let Some(cwd_path) = cwd.as_ref() {
-        process_sandbox::enforce_process_cwd(cwd_path).map_err(|e| HostlibError::Backend {
-            builtin,
-            message: format!("sandbox cwd rejected: {e:?}"),
-        })?;
-        command.current_dir(cwd_path);
-    }
-
-    proc::configure_background_process_group(&mut command);
-
-    if matches!(env_mode, EnvMode::Replace) {
-        command.env_clear();
-    }
-    if !env.is_empty() {
-        for (key, value) in &env {
-            command.env(key, value);
-        }
-    }
-
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-    command.stdin(Stdio::null());
-
-    let child = command.spawn().map_err(|e| {
-        if let Some(violation) = process_sandbox::process_spawn_error(&e) {
-            return HostlibError::Backend {
-                builtin,
-                message: format!("sandbox rejected spawn: {violation:?}"),
-            };
-        }
-        HostlibError::Backend {
-            builtin,
-            message: format!("spawn failed: {e}"),
-        }
-    })?;
-
-    let pid = child.id();
-    let process_group_id = proc::child_process_group_id(pid);
+    let pid = handle.pid().unwrap_or(0);
+    let process_group_id = handle.process_group_id();
+    let killer = handle.killer();
     let id = HANDLE_COUNTER.fetch_add(1, Ordering::SeqCst);
     let handle_id = format!("hto-{:x}-{id}", std::process::id());
     let command_id = proc::next_command_id();
@@ -212,10 +178,11 @@ pub(crate) fn spawn_long_running_with_options(
         store.entries.insert(
             handle_id.clone(),
             HandleEntry {
-                child: Some(child),
-                pid,
+                handle: Some(handle),
+                killer,
                 session_id: session_id.clone(),
                 cancel_state: cancel_state.clone(),
+                completion_tx: None,
             },
         );
     }
@@ -267,15 +234,15 @@ fn waiter_thread(
 ) {
     let waiter_start = std::time::Instant::now();
 
-    // Take the child out of the store. If the entry is already gone (i.e.
+    // Take the handle out of the store. If the entry is already gone (i.e.
     // cancel_handle ran and removed it before us), exit without action.
-    let mut child = {
+    let mut handle = {
         let mut store = HANDLE_STORE
             .lock()
             .expect("long-running handle store poisoned");
         match store.entries.get_mut(&handle_id) {
-            Some(entry) => match entry.child.take() {
-                Some(c) => c,
+            Some(entry) => match entry.handle.take() {
+                Some(h) => h,
                 None => return, // already cancelled before we ran
             },
             None => return, // entry removed (cancelled before store insert — shouldn't happen)
@@ -289,20 +256,20 @@ fn waiter_thread(
     let (out_tx, out_rx) = std::sync::mpsc::channel::<Vec<u8>>();
     let (err_tx, err_rx) = std::sync::mpsc::channel::<Vec<u8>>();
 
-    if let Some(mut out) = child.stdout.take() {
+    if let Some(mut out) = handle.take_stdout() {
         std::thread::spawn(move || {
             let _ = out.read_to_end(&mut stdout_bytes);
             let _ = out_tx.send(stdout_bytes);
         });
     }
-    if let Some(mut err) = child.stderr.take() {
+    if let Some(mut err) = handle.take_stderr() {
         std::thread::spawn(move || {
             let _ = err.read_to_end(&mut stderr_bytes);
             let _ = err_tx.send(stderr_bytes);
         });
     }
 
-    let status = child.wait().ok();
+    let status = handle.wait().ok();
 
     let stdout = out_rx
         .recv_timeout(Duration::from_secs(5))
@@ -311,17 +278,28 @@ fn waiter_thread(
         .recv_timeout(Duration::from_secs(5))
         .unwrap_or_default();
 
-    // Remove our entry from the store.
-    {
+    // Remove our entry from the store, taking the completion notifier on
+    // the way out so we can signal it after the feedback push completes.
+    let completion_tx = {
         let mut store = HANDLE_STORE
             .lock()
             .expect("long-running handle store poisoned");
-        store.entries.remove(&handle_id);
-    }
+        store
+            .entries
+            .remove(&handle_id)
+            .and_then(|mut e| e.completion_tx.take())
+    };
+
+    let signal_done = move || {
+        if let Some(tx) = completion_tx {
+            let _ = tx.try_send(());
+        }
+    };
 
     // If cancellation was requested, don't push feedback — the caller
     // that cancelled doesn't want to receive a spurious tool_result.
     if cancel_state.cancelled.load(Ordering::Acquire) {
+        signal_done();
         return;
     }
 
@@ -405,28 +383,49 @@ fn waiter_thread(
 
     let content = serde_json::to_string(&payload).unwrap_or_default();
     harn_vm::push_pending_feedback_global(&session_id, "tool_result", &content);
+    signal_done();
 }
 
 /// Cancel a specific in-flight long-running handle. Kills the process and
 /// removes the entry. Returns `true` if the handle was found and cancelled.
 pub fn cancel_handle(handle_id: &str) -> bool {
-    let (pid, child, cancel_state) = {
+    let (handle_owned, killer, cancel_state, completion_tx) = {
         let mut store = HANDLE_STORE
             .lock()
             .expect("long-running handle store poisoned");
         match store.entries.remove(handle_id) {
             None => return false,
-            Some(mut entry) => (entry.pid, entry.child.take(), entry.cancel_state.clone()),
+            Some(mut entry) => (
+                entry.handle.take(),
+                entry.killer.clone(),
+                entry.cancel_state.clone(),
+                entry.completion_tx.take(),
+            ),
         }
     };
-    do_kill(pid, child, cancel_state);
+    do_kill(handle_owned, killer, cancel_state);
+    // If a test registered a completion notifier, signal it now — the
+    // waiter won't be able to (entry already removed) and we know the
+    // waiter will skip feedback because cancellation is set.
+    if let Some(tx) = completion_tx {
+        let _ = tx.try_send(());
+    }
     true
 }
+
+/// Tuple shape used by `cancel_session_handles` to drain entries while
+/// holding the store lock for as little as possible. Boxed-trait fields
+/// make it noisy to inline as an unnamed type.
+type SessionKillEntry = (
+    Option<Box<dyn ProcessHandle>>,
+    Arc<dyn ProcessKiller>,
+    Arc<CancelState>,
+);
 
 /// Cancel all in-flight handles for a given session. Called by the
 /// session-end hook to avoid orphaned processes.
 pub fn cancel_session_handles(session_id: &str) {
-    let to_kill: Vec<(u32, Option<Child>, Arc<CancelState>)> = {
+    let to_kill: Vec<SessionKillEntry> = {
         let mut store = HANDLE_STORE
             .lock()
             .expect("long-running handle store poisoned");
@@ -440,29 +439,31 @@ pub fn cancel_session_handles(session_id: &str) {
             .into_iter()
             .filter_map(|id| {
                 store.entries.remove(&id).map(|mut e| {
-                    let child = e.child.take();
-                    (e.pid, child, e.cancel_state.clone())
+                    let handle = e.handle.take();
+                    (handle, e.killer.clone(), e.cancel_state.clone())
                 })
             })
             .collect()
     };
-    for (pid, child, cancel_state) in to_kill {
-        do_kill(pid, child, cancel_state);
+    for (handle, killer, cancel_state) in to_kill {
+        do_kill(handle, killer, cancel_state);
     }
 }
 
 /// Set the cancellation flag and kill the process. Used by both `cancel_handle`
 /// and `cancel_session_handles`.
-fn do_kill(pid: u32, child: Option<Child>, cancel_state: Arc<CancelState>) {
+fn do_kill(
+    handle: Option<Box<dyn ProcessHandle>>,
+    killer: Arc<dyn ProcessKiller>,
+    cancel_state: Arc<CancelState>,
+) {
     // Signal cancellation so the waiter (if still running) skips feedback.
     cancel_state.cancelled.store(true, Ordering::Release);
-    if let Some(mut c) = child {
-        // Waiter hasn't taken the child yet — kill it directly.
-        kill_child(&mut c);
-    } else {
-        // Waiter already took the child; signal by PID.
-        kill_pid_or_group(pid);
-    }
+    // Kill via the handle's killer (works whether or not we still own
+    // the handle). If we still hold the handle, drop it after kill so the
+    // OS reaps the child.
+    killer.kill();
+    drop(handle);
 }
 
 /// Register the session-cleanup hook with harn-vm. Uses a `OnceLock` so the
@@ -478,45 +479,27 @@ pub(crate) fn register_cleanup_hook() {
     });
 }
 
-fn kill_child(child: &mut Child) {
-    kill_pid_or_group(child.id());
-    let _ = child.kill();
-    let _ = child.wait();
+fn decode_exit_status(status: process_handle::ExitStatus) -> (i32, Option<String>) {
+    if let Some(code) = status.code {
+        return (code, None);
+    }
+    if let Some(sig) = status.signal {
+        return (-1, Some(format!("SIG{sig}")));
+    }
+    (-1, None)
 }
 
-/// Kill a process by its PID. Used when the waiter thread has already taken
-/// ownership of the `Child` object but the process must still be terminated.
-fn kill_pid_or_group(pid: u32) {
-    #[cfg(unix)]
-    {
-        // SAFETY: We call kill(2) with a valid PID and SIGKILL (9). On all
-        // Unix targets pid_t and int are i32. No libc crate needed.
-        extern "C" {
-            fn kill(pid: i32, sig: i32) -> i32;
-        }
-        unsafe {
-            kill(-(pid as i32), 9); // SIGKILL process group first.
-            kill(pid as i32, 9);
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid; // No-op on non-Unix; TerminateProcess would require winapi.
-    }
-}
-
-fn decode_exit_status(status: std::process::ExitStatus) -> (i32, Option<String>) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt;
-        if let Some(code) = status.code() {
-            return (code, None);
-        }
-        if let Some(sig) = status.signal() {
-            return (-1, Some(format!("SIG{sig}")));
-        }
-        (-1, None)
-    }
-    #[cfg(not(unix))]
-    (status.code().unwrap_or(-1), None)
+/// Register a completion notifier for `handle_id`. The waiter thread sends
+/// `()` on the returned receiver after it pushes the feedback item to the
+/// global queue. Returns `None` if the handle is no longer in the store
+/// (e.g. already cancelled or completed). Used by tests to await waiter
+/// completion deterministically — no polling, no `thread::sleep`.
+pub fn register_completion_notifier(handle_id: &str) -> Option<std::sync::mpsc::Receiver<()>> {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
+    let mut store = HANDLE_STORE
+        .lock()
+        .expect("long-running handle store poisoned");
+    let entry = store.entries.get_mut(handle_id)?;
+    entry.completion_tx = Some(tx);
+    Some(rx)
 }

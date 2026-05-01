@@ -31,6 +31,7 @@ pub mod ast;
 pub mod code_index;
 pub mod error;
 pub mod fs_watch;
+pub mod process;
 pub mod scanner;
 pub mod schemas;
 pub mod tools;
