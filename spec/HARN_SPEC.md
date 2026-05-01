@@ -642,8 +642,9 @@ value:
 items |> len(_)                    // desugars to: |> { __pipe -> len(__pipe) }
 ```
 
-Without `_`, the pipe passes the value as the first argument to a closure
-or function.
+Without `_`, the pipe passes the value as the sole argument to the callable on
+the right side. Use `_` whenever the piped value should be placed inside a
+larger expression or a specific argument position.
 
 ## Scope rules
 
@@ -1063,7 +1064,7 @@ multiplicative operators, so `xs?.count ?? 0 > 0` parses as
 1. If `f` evaluates to a closure, invokes it with `a` as the single argument.
 2. If `f` is an identifier resolving to a builtin, calls the builtin with `[a]`.
 3. If `f` is an identifier resolving to a closure variable, invokes it with `a`.
-4. Otherwise returns `nil`.
+4. Otherwise raises a type error.
 
 ### Ternary (`? :`)
 

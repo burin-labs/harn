@@ -148,6 +148,20 @@ fn test_format_binary_ops() {
 }
 
 #[test]
+fn test_format_pipe_placeholder_patterns() {
+    let source = r#"pipeline default(task) {
+  let words = "hello world" |> split(_, " ")
+  let result = [3, 1, 2]
+    |> _.sort()
+    |> len(_)
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(result.contains(r#""hello world" |> split(_, " ")"#));
+    assert!(result.contains("let result = [3, 1, 2]\n    |> _.sort()\n    |> len(_)"));
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_format_duration() {
     assert_eq!(format_duration(5000), "5s");
     assert_eq!(format_duration(60000), "1m");

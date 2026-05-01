@@ -1,0 +1,25 @@
+fn last_word(text) {
+  return text |> split(_, " ") |> _.last()
+}
+
+pipeline default() {
+  fn add1(x) {
+    return x + 1
+  }
+  fn double(x) {
+    return x * 2
+  }
+  println(3 |> add1 |> double)
+  println("hello world" |> split(_, " ") |> len(_))
+  println([3, 1, 2] |> _.sort())
+  let payload = [1, 2, 3] |> {items: _, count: len(_)}
+  println(payload.count)
+  println(payload.items)
+  println({user: {name: "Ada"}} |> _.user?.name)
+  println({items: [10, 20]} |> _.items?[0])
+  println(" hi " |> _?.trim())
+  println([1, 2, 3, 4] |> _[1:3])
+  println(3 |> _ > 2 ? "big" : "small")
+  println([1, 2] |> _.map({ x -> x + 1 }))
+  println(last_word("hello harn"))
+}
