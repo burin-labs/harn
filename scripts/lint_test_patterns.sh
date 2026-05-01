@@ -43,7 +43,6 @@ TOKIO_SLEEP_ALLOWLIST=(
   "crates/harn-vm/src/connectors/linear/tests.rs"
   "crates/harn-vm/src/triggers/dispatcher/tests/retry.rs"
   "crates/harn-vm/src/orchestration/tests.rs"
-  "crates/harn-vm/src/stdlib/workflow/tests.rs"
   "crates/harn-cli/tests/test_util/timing.rs"
   "crates/harn-cli/tests/orchestrator_cli.rs"
   "crates/harn-cli/tests/orchestrator_http/admin.rs"
