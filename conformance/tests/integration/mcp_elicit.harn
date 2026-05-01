@@ -1,0 +1,25 @@
+pipeline test(task) {
+  // mcp_elicit must be called from inside an MCP-server tool
+  // handler (i.e. while `harn serve mcp` is running). When invoked
+  // outside that context, it raises a structured error rather than
+  // hanging waiting for a non-existent client.
+  //
+  // We can't run the full bidirectional MCP loop in conformance tests
+  // (it would block on stdin) but we can at least pin the error path
+  // so a future regression — e.g. a missing thread-local install or
+  // a silent fall-through to a default — gets caught here.
+  try {
+    mcp_elicit(
+      {
+        message: "Pick one",
+        requestedSchema: {type: "object", properties: {choice: {type: "string"}}, required: ["choice"]},
+      },
+    )
+    log("BUG: mcp_elicit returned without an active MCP connection")
+  } catch (e) {
+    let message = e
+    let ok = contains(message, "mcp_elicit") && contains(message, "no active MCP client connection")
+    assert(ok, "expected 'no active MCP client connection' error, got: " + message)
+    log("mcp_elicit: outside-tool-handler call raised expected error")
+  }
+}

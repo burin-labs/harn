@@ -1,7 +1,9 @@
 use std::cell::RefCell;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::sync::mpsc;
 
+use crate::mcp_elicit::{install_bus, ElicitationBus};
 use crate::stdlib::json_to_vm_value;
 use crate::value::VmError;
 use crate::vm::Vm;
@@ -56,40 +58,91 @@ impl McpServer {
         self
     }
 
-    /// Run the MCP server loop, reading JSON-RPC from stdin and writing to stdout.
+    /// Run the MCP server loop, reading JSON-RPC from stdin and writing
+    /// to stdout. The transport is split across three concurrent halves:
+    /// a stdin reader that demuxes responses to in-flight elicitation
+    /// requests away from new client requests, a stdout writer task
+    /// that drains the outbound queue, and the main dispatch loop that
+    /// owns the VM and processes new requests one at a time. This shape
+    /// is what allows a tool handler to call `mcp_elicit(...)` mid-flight
+    /// — the handler awaits an inbound response while the writer keeps
+    /// emitting the elicitation request.
     pub async fn run(&self, vm: &mut Vm) -> Result<(), VmError> {
-        let stdin = BufReader::new(tokio::io::stdin());
-        let mut stdout = tokio::io::stdout();
-        let mut lines = stdin.lines();
+        let (out_tx, mut out_rx) = mpsc::unbounded_channel::<serde_json::Value>();
+        let (in_tx, mut in_rx) = mpsc::unbounded_channel::<serde_json::Value>();
+        let bus = ElicitationBus::new(out_tx.clone());
 
-        while let Ok(Some(line)) = lines.next_line().await {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
+        let bus_for_reader = bus.clone();
+        let in_tx_reader = in_tx.clone();
+        let reader = tokio::spawn(async move {
+            let stdin = BufReader::new(tokio::io::stdin());
+            let mut lines = stdin.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let msg: serde_json::Value = match serde_json::from_str(trimmed) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                // Per JSON-RPC, responses (no `method`, has `id` + result/error)
+                // must not themselves be replied to. Route to the
+                // elicitation bus when we recognize the id; otherwise
+                // silently drop instead of letting the dispatcher
+                // bounce a "Method not found" back to the client.
+                if msg.get("method").is_none() {
+                    let _ = bus_for_reader.route_response(&msg);
+                    continue;
+                }
+                if in_tx_reader.send(msg).is_err() {
+                    break;
+                }
             }
+        });
+        // Drop the inbound sender held by the spawn closure's parent
+        // scope so closing of stdin actually terminates the dispatcher.
+        drop(in_tx);
 
-            let msg: serde_json::Value = match serde_json::from_str(trimmed) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
+        let writer = tokio::spawn(async move {
+            let mut stdout = tokio::io::stdout();
+            while let Some(msg) = out_rx.recv().await {
+                let mut line = match serde_json::to_string(&msg) {
+                    Ok(value) => value,
+                    Err(_) => continue,
+                };
+                line.push('\n');
+                if stdout.write_all(line.as_bytes()).await.is_err() {
+                    break;
+                }
+                if stdout.flush().await.is_err() {
+                    break;
+                }
+            }
+        });
 
-            let Some(response) = self.handle_json_rpc(msg, vm).await else {
-                continue;
-            };
+        // Make the bus visible to tool handlers running on this thread.
+        let previous_bus = install_bus(Some(bus));
 
-            let mut response_line = serde_json::to_string(&response)
-                .map_err(|e| VmError::Runtime(format!("MCP server serialization error: {e}")))?;
-            response_line.push('\n');
-            stdout
-                .write_all(response_line.as_bytes())
-                .await
-                .map_err(|e| VmError::Runtime(format!("MCP server write error: {e}")))?;
-            stdout
-                .flush()
-                .await
-                .map_err(|e| VmError::Runtime(format!("MCP server flush error: {e}")))?;
+        while let Some(msg) = in_rx.recv().await {
+            if let Some(response) = self.handle_json_rpc(msg, vm).await {
+                if out_tx.send(response).is_err() {
+                    break;
+                }
+            }
         }
 
+        // Closing out_tx tells the writer task to drain and exit.
+        // Restoring the previous bus (rather than always wiping)
+        // keeps nested usages well-defined if they ever appear.
+        drop(out_tx);
+        install_bus(previous_bus);
+
+        // Best-effort wait so the writer flushes any tail responses
+        // before the function returns. Reader task exits naturally
+        // when stdin closes.
+        let _ = writer.await;
+        reader.abort();
         Ok(())
     }
 
@@ -148,6 +201,10 @@ impl McpServer {
             capabilities.insert("prompts".into(), serde_json::json!({ "listChanged": true }));
         }
         capabilities.insert("logging".into(), serde_json::json!({}));
+        // Always advertise elicitation: any registered tool may decide
+        // at runtime whether to call `mcp_elicit(...)`, so capability
+        // negotiation can't be tied to a static check.
+        capabilities.insert("elicitation".into(), serde_json::json!({}));
 
         let mut server_info = serde_json::json!({
             "name": self.server_name,

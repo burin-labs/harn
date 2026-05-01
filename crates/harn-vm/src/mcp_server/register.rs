@@ -1,5 +1,9 @@
 use std::cell::RefCell;
+use std::rc::Rc;
 
+use serde_json::Value as JsonValue;
+
+use crate::mcp_elicit::current_bus;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -200,6 +204,52 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
         });
 
         Ok(VmValue::Nil)
+    });
+
+    // mcp_elicit({message, requestedSchema}) -> {action, content?}
+    //
+    // Send a structured-input prompt to the connected MCP client and
+    // await its reply. Only valid while a Harn-as-MCP-server tool
+    // handler is running (the run loop installs the elicitation bus
+    // for the lifetime of the connection).
+    //
+    // The client may respond with one of:
+    //   - {action: "accept", content: <validated against requestedSchema>}
+    //   - {action: "decline"}
+    //   - {action: "cancel"}
+    //
+    // Spec: https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation
+    vm.register_async_builtin("mcp_elicit", |args| async move {
+        let dict = match args.first() {
+            Some(VmValue::Dict(d)) => d.clone(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "mcp_elicit: argument must be a dict with {message, requestedSchema}",
+                ))));
+            }
+        };
+        let message = dict.get("message").map(VmValue::display).ok_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "mcp_elicit: 'message' is required",
+            )))
+        })?;
+        let requested_schema = dict.get("requestedSchema").or_else(|| dict.get("schema"));
+        let requested_schema = requested_schema.ok_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "mcp_elicit: 'requestedSchema' is required",
+            )))
+        })?;
+        let requested_schema_json: JsonValue = crate::mcp::vm_value_to_serde(requested_schema);
+
+        let bus = current_bus().ok_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "mcp_elicit: no active MCP client connection — \
+                 mcp_elicit can only be called from within a tool/resource/prompt handler \
+                 served via `harn serve mcp`",
+            )))
+        })?;
+
+        bus.elicit(message, requested_schema_json).await
     });
 }
 

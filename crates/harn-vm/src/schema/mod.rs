@@ -16,6 +16,24 @@ pub(crate) use api::{
 };
 pub use canonicalize::json_to_vm_value;
 
+/// Canonicalize a JSON-Schema-shaped value for use as an MCP elicitation
+/// `requestedSchema`. Reuses the same canonicalizer the rest of the
+/// language uses for `schema_from_json_schema(...)` so behavior is
+/// identical between user-facing schema builtins and elicitation.
+pub fn elicitation_validate_schema(schema: &VmValue) -> Result<VmValue, crate::value::VmError> {
+    schema_from_json_schema_value(schema)
+}
+
+/// Validate `data` against a canonicalized schema. Mirrors the
+/// `schema_expect` semantics — returns the (possibly defaulted) value
+/// on success and a thrown error string on failure.
+pub fn elicitation_validate(
+    data: &VmValue,
+    schema: &VmValue,
+) -> Result<VmValue, crate::value::VmError> {
+    schema_expect_value(data, schema, false)
+}
+
 pub(crate) const BYTES_B64_TAG: &str = "$bytes_b64";
 
 pub(crate) fn tagged_bytes_json(bytes: &[u8]) -> serde_json::Value {
