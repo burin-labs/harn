@@ -1,11 +1,25 @@
-mod test_util;
+//! In-process coverage of the `experiments/burin-mini` playground pipelines.
+//!
+//! Tier 1H follow-up (#1130, parent #1106) of the de-flake epic (#1057):
+//! these tests previously ran the `harn` binary as a subprocess. They now
+//! call `harn_cli::commands::playground::execute_playground_inputs` and
+//! `harn_cli::commands::run::execute_run` directly, asserting on the
+//! captured stdout / generated report files.
+//!
+//! These tests build their own multi-thread tokio runtime on a dedicated
+//! thread, mirroring `harn_cli::run`'s setup, so the LLM-mock thread-local
+//! state and `LocalSet` semantics match what `harn playground` sees in
+//! production.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Output;
+use std::thread;
 
+use harn_cli::commands::playground::{execute_playground_inputs, PlaygroundInputs};
+use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome};
+use harn_cli::tests::common::{cwd_lock, env_lock};
 use tempfile::TempDir;
-use test_util::process::harn_e2e_command;
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -38,27 +52,6 @@ fn setup_experiment_copy() -> (TempDir, PathBuf) {
     (temp, experiment_dst)
 }
 
-fn run_harn(current_dir: &Path, args: &[String]) -> Output {
-    run_harn_with_env(current_dir, args, &[])
-}
-
-fn run_harn_with_env(current_dir: &Path, args: &[String], envs: &[(&str, &str)]) -> Output {
-    harn_e2e_command()
-        .current_dir(current_dir)
-        .envs(envs.iter().copied())
-        .args(args)
-        .output()
-        .unwrap()
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
 fn read_json(path: &Path) -> serde_json::Value {
     let contents = fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
@@ -66,52 +59,94 @@ fn read_json(path: &Path) -> serde_json::Value {
         .unwrap_or_else(|error| panic!("failed to parse {} as JSON: {error}", path.display()))
 }
 
-fn generated_report_path(experiment_root: &Path, output: &Output, fallback_name: &str) -> PathBuf {
-    stdout(output)
+fn generated_report_path(experiment_root: &Path, stdout: &str, fallback_name: &str) -> PathBuf {
+    stdout
         .lines()
         .find_map(|line| line.strip_prefix("report=").map(PathBuf::from))
         .unwrap_or_else(|| experiment_root.join("evals/generated").join(fallback_name))
 }
 
-fn run_case(task: &str, fixture_name: &str) -> (TempDir, PathBuf, Output) {
-    let (temp, experiment_root) = setup_experiment_copy();
+/// Mirror `harn_cli::run`'s thread + multi-thread runtime setup so the
+/// `LocalSet` inside `execute_playground` binds to a thread we control,
+/// matching what `harn playground` does in production. The returned
+/// future is run via `block_on`, so it does not need to be `Send`.
+fn run_in_harn_runtime<F, Fut, R>(future_factory: F) -> R
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = R>,
+    R: Send + 'static,
+{
+    let handle = thread::Builder::new()
+        .name("harn-cli-test".to_string())
+        .stack_size(harn_cli::CLI_RUNTIME_STACK_SIZE)
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("build runtime");
+            runtime.block_on(future_factory())
+        })
+        .expect("spawn runtime thread");
+    handle.join().expect("runtime thread completed")
+}
+
+fn run_playground_case(
+    experiment_root: PathBuf,
+    task: String,
+    fixture_name: &str,
+) -> Result<String, String> {
     let host = experiment_root.join("host.harn");
     let script = experiment_root.join("pipeline.harn");
     let fixture = experiment_root.join("fixtures").join(fixture_name);
-    let output = run_harn(
-        temp.path(),
-        &[
-            "playground".to_string(),
-            "--host".to_string(),
-            host.to_string_lossy().into_owned(),
-            "--script".to_string(),
-            script.to_string_lossy().into_owned(),
-            "--llm".to_string(),
-            "anthropic:fixture-driver".to_string(),
-            "--task".to_string(),
-            task.to_string(),
-            "--llm-mock".to_string(),
-            fixture.to_string_lossy().into_owned(),
-        ],
-    );
-    (temp, experiment_root, output)
+    // Match the subprocess harness's `current_dir(experiment_root.parent())`
+    // so any cwd-relative state inside the pipeline resolves the same way.
+    let cwd_anchor = experiment_root
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| experiment_root.clone());
+
+    run_in_harn_runtime(move || {
+        async move {
+            // env_lock + cwd_lock together: pipeline/host scripts read both
+            // process-wide env vars (HARN_TASK / HARN_LLM_*) and the cwd via
+            // RunExecutionRecord.cwd, so we must serialize on both fronts.
+            let _env_guard = env_lock::lock_env().lock().await;
+            let _cwd_guard = cwd_lock::lock_cwd_async().await;
+            // Each test invocation runs in the same process, so wipe any
+            // FIFO/LLM state left by a previous case before installing the
+            // new fixture.
+            harn_vm::reset_thread_local_state();
+            let original_cwd = std::env::current_dir().ok();
+            std::env::set_current_dir(&cwd_anchor).expect("set cwd to experiment parent");
+            let result = execute_playground_inputs(PlaygroundInputs {
+                host,
+                script,
+                task,
+                llm: Some("anthropic:fixture-driver".to_string()),
+                llm_mock_mode: CliLlmMockMode::Replay {
+                    fixture_path: fixture,
+                },
+            })
+            .await;
+            if let Some(prev) = original_cwd {
+                let _ = std::env::set_current_dir(prev);
+            }
+            result
+        }
+    })
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1130 follow-up to #1106)"]
 #[test]
 fn burin_mini_explain_repo_fixture_run_passes() {
-    let (_temp, experiment_root, output) =
-        run_case("Explain this repo to me in simple terms", "explain.jsonl");
+    let (_temp, experiment_root) = setup_experiment_copy();
+    let stdout = run_playground_case(
+        experiment_root.clone(),
+        "Explain this repo to me in simple terms".to_string(),
+        "explain.jsonl",
+    )
+    .expect("playground case succeeds");
 
-    assert!(
-        output.status.success(),
-        "status={:?}\nstderr={}",
-        output.status.code(),
-        stderr(&output)
-    );
-
-    let stdout = stdout(&output);
-    let report = generated_report_path(&experiment_root, &output, "explain_repo-latest.json");
+    let report = generated_report_path(&experiment_root, &stdout, "explain_repo-latest.json");
     let report_json = read_json(&report);
     assert!(stdout.contains("task_id=explain_repo"), "stdout={stdout}");
     assert!(
@@ -121,21 +156,18 @@ fn burin_mini_explain_repo_fixture_run_passes() {
     assert_eq!(report_json["verdict"], "pass");
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1130 follow-up to #1106)"]
 #[test]
 fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
-    let (_temp, experiment_root, output) = run_case("Comment what this file does", "comment.jsonl");
+    let (_temp, experiment_root) = setup_experiment_copy();
+    let stdout = run_playground_case(
+        experiment_root.clone(),
+        "Comment what this file does".to_string(),
+        "comment.jsonl",
+    )
+    .expect("playground case succeeds");
 
-    assert!(
-        output.status.success(),
-        "status={:?}\nstderr={}",
-        output.status.code(),
-        stderr(&output)
-    );
-
-    let stdout = stdout(&output);
     assert!(stdout.contains("task_id=comment_file"), "stdout={stdout}");
-    let report = generated_report_path(&experiment_root, &output, "comment_file-latest.json");
+    let report = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
     let report_json = read_json(&report);
     assert_eq!(report_json["verdict"], "pass");
     assert_eq!(report_json["workflow_status"], "completed");
@@ -177,27 +209,21 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     );
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1130 follow-up to #1106)"]
 #[test]
 fn burin_mini_rate_limit_fixture_run_wires_middleware() {
-    let (_temp, experiment_root, output) = run_case(
-        "Add rate limiting middleware to the auth module",
+    let (_temp, experiment_root) = setup_experiment_copy();
+    let stdout = run_playground_case(
+        experiment_root.clone(),
+        "Add rate limiting middleware to the auth module".to_string(),
         "rate-limit.jsonl",
-    );
+    )
+    .expect("playground case succeeds");
 
-    assert!(
-        output.status.success(),
-        "status={:?}\nstderr={}",
-        output.status.code(),
-        stderr(&output)
-    );
-
-    let stdout = stdout(&output);
     assert!(
         stdout.contains("task_id=rate_limit_auth"),
         "stdout={stdout}"
     );
-    let report = generated_report_path(&experiment_root, &output, "rate_limit_auth-latest.json");
+    let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
     assert_eq!(report_json["verdict"], "pass");
     assert_eq!(report_json["workflow_status"], "completed");
@@ -294,32 +320,22 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     );
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1130 follow-up to #1106)"]
 #[test]
 fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
-    let (_temp, experiment_root, output) = run_case(
-        "Add rate limiting middleware to the auth module",
+    let (_temp, experiment_root) = setup_experiment_copy();
+    let stdout = run_playground_case(
+        experiment_root.clone(),
+        "Add rate limiting middleware to the auth module".to_string(),
         "rate-limit-liveish.jsonl",
-    );
+    )
+    .expect("playground case succeeds");
 
-    assert!(
-        output.status.success(),
-        "status={:?}\nstderr={}",
-        output.status.code(),
-        stderr(&output)
-    );
-
-    let stdout = stdout(&output);
     assert!(
         stdout.contains("task_id=rate_limit_auth"),
         "stdout={stdout}"
     );
-    assert!(
-        !stdout.contains("tool_rejected"),
-        "stdout={stdout}\nstderr={}",
-        stderr(&output)
-    );
-    let report = generated_report_path(&experiment_root, &output, "rate_limit_auth-latest.json");
+    assert!(!stdout.contains("tool_rejected"), "stdout={stdout}");
+    let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
     assert_eq!(report_json["verdict"], "pass");
     assert_eq!(report_json["workflow_status"], "completed");
@@ -345,32 +361,22 @@ fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     );
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1130 follow-up to #1106)"]
 #[test]
 fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
-    let (_temp, experiment_root, output) = run_case(
-        "Add rate limiting middleware to the auth module",
+    let (_temp, experiment_root) = setup_experiment_copy();
+    let stdout = run_playground_case(
+        experiment_root.clone(),
+        "Add rate limiting middleware to the auth module".to_string(),
         "rate-limit-weak-verify-plan.jsonl",
-    );
+    )
+    .expect("playground case succeeds");
 
-    assert!(
-        output.status.success(),
-        "status={:?}\nstderr={}",
-        output.status.code(),
-        stderr(&output)
-    );
-
-    let stdout = stdout(&output);
     assert!(
         stdout.contains("task_id=rate_limit_auth"),
         "stdout={stdout}"
     );
-    assert!(
-        !stdout.contains("tool_rejected"),
-        "stdout={stdout}\nstderr={}",
-        stderr(&output)
-    );
-    let report = generated_report_path(&experiment_root, &output, "rate_limit_auth-latest.json");
+    assert!(!stdout.contains("tool_rejected"), "stdout={stdout}");
+    let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
     assert_eq!(report_json["verdict"], "pass");
     assert_eq!(report_json["workflow_status"], "completed");
@@ -416,27 +422,21 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     );
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1130 follow-up to #1106)"]
 #[test]
 fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
-    let (_temp, experiment_root, output) = run_case(
-        "Add rate limiting middleware to the auth module",
+    let (_temp, experiment_root) = setup_experiment_copy();
+    let stdout = run_playground_case(
+        experiment_root.clone(),
+        "Add rate limiting middleware to the auth module".to_string(),
         "rate-limit-overresearch-planner.jsonl",
-    );
+    )
+    .expect("playground case succeeds");
 
-    assert!(
-        output.status.success(),
-        "status={:?}\nstderr={}",
-        output.status.code(),
-        stderr(&output)
-    );
-
-    let stdout = stdout(&output);
     assert!(
         stdout.contains("task_id=rate_limit_auth"),
         "stdout={stdout}"
     );
-    let report = generated_report_path(&experiment_root, &output, "rate_limit_auth-latest.json");
+    let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
     assert_eq!(report_json["verdict"], "pass");
     assert_eq!(report_json["workflow_status"], "completed");
@@ -463,31 +463,41 @@ fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
     );
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1130 follow-up to #1106)"]
 #[test]
 fn burin_mini_semantic_evaluator_heuristic_passes_for_rate_limit_fixture() {
     let (temp, experiment_root) = setup_experiment_copy();
     let evaluator = experiment_root.join("evaluator.harn");
     let report = experiment_root.join("evals/fixtures/rate_limit_auth-report.json");
     let semantic = temp.path().join("rate_limit_auth.semantic.json");
-    let eval_output = run_harn_with_env(
-        temp.path(),
-        &[
-            "run".to_string(),
-            evaluator.to_string_lossy().into_owned(),
-            "--".to_string(),
-            report.to_string_lossy().into_owned(),
-            semantic.to_string_lossy().into_owned(),
-            experiment_root.to_string_lossy().into_owned(),
-        ],
-        &[("BURIN_MINI_SEMANTIC_EVAL_MODE", "heuristic")],
-    );
+    let semantic_clone = semantic.clone();
 
-    assert!(
-        eval_output.status.success(),
-        "status={:?}\nstderr={}",
-        eval_output.status.code(),
-        stderr(&eval_output)
+    let outcome: RunOutcome = run_in_harn_runtime(move || async move {
+        let _env_guard = env_lock::lock_env().lock().await;
+        let _cwd_guard = cwd_lock::lock_cwd_async().await;
+        harn_vm::reset_thread_local_state();
+        std::env::set_var("BURIN_MINI_SEMANTIC_EVAL_MODE", "heuristic");
+        let result = execute_run(
+            &evaluator.to_string_lossy(),
+            false,
+            HashSet::new(),
+            vec![
+                report.to_string_lossy().into_owned(),
+                semantic_clone.to_string_lossy().into_owned(),
+                experiment_root.to_string_lossy().into_owned(),
+            ],
+            Vec::new(),
+            CliLlmMockMode::Off,
+            None,
+        )
+        .await;
+        std::env::remove_var("BURIN_MINI_SEMANTIC_EVAL_MODE");
+        result
+    });
+
+    assert_eq!(
+        outcome.exit_code, 0,
+        "stderr={}\nstdout={}",
+        outcome.stderr, outcome.stdout
     );
 
     let semantic_json = read_json(&semantic);

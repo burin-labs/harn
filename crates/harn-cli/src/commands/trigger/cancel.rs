@@ -1,5 +1,10 @@
 use serde::Serialize;
 
+use std::path::Path;
+use std::sync::Arc;
+
+use harn_vm::event_log::AnyEventLog;
+
 use crate::cli::TriggerCancelArgs;
 use crate::commands::trigger::ops::{
     append_bulk_cancel_requests, append_operation_audit, build_operation_audit,
@@ -8,28 +13,28 @@ use crate::commands::trigger::ops::{
 };
 
 #[derive(Clone, Debug, Serialize)]
-struct CancelItem {
-    event_id: String,
-    binding_id: String,
-    binding_version: u32,
-    binding_key: String,
-    latest_status: String,
-    status: String,
-    cancellable: bool,
+pub struct CancelItem {
+    pub event_id: String,
+    pub binding_id: String,
+    pub binding_version: u32,
+    pub binding_key: String,
+    pub latest_status: String,
+    pub status: String,
+    pub cancellable: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct CancelReport {
-    operation: String,
-    dry_run: bool,
+pub struct CancelReport {
+    pub operation: String,
+    pub dry_run: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    filter: Option<String>,
-    matched_count: usize,
-    requested_count: usize,
-    skipped_count: usize,
+    pub filter: Option<String>,
+    pub matched_count: usize,
+    pub requested_count: usize,
+    pub skipped_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
-    audit_id: Option<String>,
-    items: Vec<CancelItem>,
+    pub audit_id: Option<String>,
+    pub items: Vec<CancelItem>,
 }
 
 pub(crate) async fn run(args: TriggerCancelArgs) -> Result<(), String> {
@@ -65,6 +70,19 @@ pub(crate) async fn run(args: TriggerCancelArgs) -> Result<(), String> {
             .map_err(|error| format!("failed to encode cancel report: {error}"))?
     );
     Ok(())
+}
+
+/// In-process entry point for `harn trigger cancel <event_id>`. Used by
+/// integration tests to drive the cancel path without spawning the `harn`
+/// binary. The binary entry calls the same internals via `run`.
+pub async fn cancel_event_in_process(
+    event_log: Arc<AnyEventLog>,
+    workspace_root: &Path,
+    event_id: &str,
+) -> Result<CancelReport, String> {
+    install_trigger_runtime(workspace_root).await?;
+    let targets = load_targets_for_event_id(&event_log, event_id, None).await?;
+    cancel_targets(&event_log, targets, None, false, false, None).await
 }
 
 async fn cancel_targets(
