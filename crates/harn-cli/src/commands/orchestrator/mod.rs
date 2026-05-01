@@ -3,7 +3,7 @@ mod deploy;
 mod dlq;
 pub(crate) mod errors;
 mod fire;
-pub(crate) mod harness;
+pub mod harness;
 mod inspect;
 pub(crate) mod inspect_data;
 pub(crate) mod listener;
@@ -17,7 +17,7 @@ pub(crate) mod role;
 mod serve;
 mod stats;
 mod tenant;
-mod tls;
+pub mod tls;
 
 #[allow(unused_imports)]
 pub(crate) use errors::{OrchestratorError, OrchestratorResult};

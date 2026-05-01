@@ -102,7 +102,7 @@ pub(crate) struct AdminReloadRequest {
 }
 
 #[derive(Clone)]
-pub(crate) struct AdminReloadHandle {
+pub struct AdminReloadHandle {
     tx: mpsc::UnboundedSender<AdminReloadRequest>,
 }
 

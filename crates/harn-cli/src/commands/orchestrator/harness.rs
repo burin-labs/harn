@@ -99,7 +99,6 @@ pub struct OrchestratorConfig {
 
 impl OrchestratorConfig {
     /// Minimal defaults suitable for integration tests.
-    #[cfg(test)]
     pub fn for_test(manifest_path: PathBuf, state_dir: PathBuf) -> Self {
         Self {
             manifest_path,

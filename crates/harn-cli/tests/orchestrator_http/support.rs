@@ -1,20 +1,24 @@
-#[path = "../support/mod.rs"]
-mod shared_support;
+//! Shared helpers for orchestrator HTTP integration tests.
+//!
+//! Tests run the orchestrator in-process via [`OrchestratorHarness`] —
+//! no subprocess, no SQLite polling. Event waits use the event-log
+//! broadcast channel; lifecycle assertions read the state snapshot
+//! that the harness writes during drain.
+
+#![allow(dead_code)]
 
 pub(super) use std::fs;
-pub(super) use std::io::{BufRead, BufReader};
 pub(super) use std::path::Path;
-pub(super) use std::process::Stdio;
-pub(super) use std::sync::mpsc::{self, Receiver};
-pub(super) use std::thread;
-pub(super) use std::time::Instant;
+pub(super) use std::sync::Arc;
+pub(super) use std::time::Duration;
 
-pub(super) use crate::test_util::process::harn_command;
-pub(super) use crate::test_util::timing::{
-    self, ChildExitWatcher, EVENT_FAIL_FAST_TIMEOUT, LOG_RECV_POLL_INTERVAL,
-    PROCESS_FAIL_FAST_TIMEOUT,
+pub(super) use futures::StreamExt;
+pub(super) use harn_cli::commands::orchestrator::harness::{
+    OrchestratorConfig, OrchestratorHarness,
 };
-pub(super) use harn_vm::event_log::{EventLog, SqliteEventLog, Topic};
+pub(super) use harn_cli::env_guard::ScopedEnvVar;
+pub(super) use harn_cli::tests::common::env_lock;
+pub(super) use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
 pub(super) use hmac::{Hmac, KeyInit, Mac};
 pub(super) use rcgen::generate_simple_self_signed;
 pub(super) use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, ORIGIN};
@@ -24,15 +28,17 @@ pub(super) use serde_json::Value as JsonValue;
 pub(super) use sha2::Sha256;
 pub(super) use tempfile::TempDir;
 pub(super) use time::OffsetDateTime;
+pub(super) use tokio::sync::MutexGuard;
 
-const STARTUP_PREFIX: &str = "[harn] HTTP listener ready on ";
-const STARTUP_NEEDLE: &str = "HTTP listener ready";
-pub(super) const SHUTDOWN_NEEDLE: &str = "graceful shutdown complete";
 type HmacSha256 = Hmac<Sha256>;
 
-pub(super) fn lock_orchestrator_tests() -> shared_support::OrchestratorProcessTestLock {
-    shared_support::lock_orchestrator_process_tests()
-}
+/// Hard fail-fast ceiling for event-log waits. The broadcast channel
+/// resolves the moment a matching event lands; this just bounds the
+/// blast radius if the orchestrator never produces one.
+pub(super) const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(30);
+pub(super) const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
+
+// ── Manifest and module fixtures ─────────────────────────────────────────────
 
 pub(super) fn write_file(dir: &Path, relative: &str, contents: &str) {
     let path = dir.join(relative);
@@ -459,149 +465,191 @@ pub fn on_task(event: TriggerEvent) {
 "#
 }
 
-pub(super) fn spawn_orchestrator(
+// ── In-process harness helpers ───────────────────────────────────────────────
+
+/// Per-test guard: holds the env-mutation lock and any [`ScopedEnvVar`]
+/// guards for the test's lifetime so concurrent tests don't clobber
+/// each other's process-wide env vars.
+pub(super) struct EnvGuards {
+    pub(super) _lock: MutexGuard<'static, ()>,
+    pub(super) _vars: Vec<ScopedEnvVar>,
+}
+
+/// Acquire the env lock and apply the supplied `(name, value)` pairs as
+/// scoped env vars. Variables are removed when the returned [`EnvGuards`]
+/// drops, after the harness has shut down.
+pub(super) async fn lock_env_with(envs: &[(&'static str, &str)]) -> EnvGuards {
+    let lock = env_lock::lock_env().lock().await;
+    let vars = envs
+        .iter()
+        .map(|(key, value)| ScopedEnvVar::set(key, value))
+        .collect();
+    EnvGuards {
+        _lock: lock,
+        _vars: vars,
+    }
+}
+
+/// Build a default [`OrchestratorConfig`] rooted at `temp/harn.toml`
+/// with state in `temp/state`.
+pub(super) fn test_config(temp: &TempDir) -> OrchestratorConfig {
+    OrchestratorConfig::for_test(temp.path().join("harn.toml"), temp.path().join("state"))
+}
+
+/// Start the harness with the default config under `temp`.
+pub(super) async fn start_harness(temp: &TempDir) -> OrchestratorHarness {
+    OrchestratorHarness::start(test_config(temp))
+        .await
+        .expect("orchestrator harness start")
+}
+
+/// Start the harness with a custom config builder.
+pub(super) async fn start_harness_with(
     temp: &TempDir,
-    extra_args: &[&str],
-    envs: &[(&str, &str)],
-) -> OrchestratorProcess {
-    let mut command = harn_command();
-    command
-        .current_dir(temp.path())
-        .arg("orchestrator")
-        .arg("serve")
-        .arg("--config")
-        .arg("harn.toml")
-        .arg("--state-dir")
-        .arg("./state")
-        .arg("--role")
-        .arg("single-tenant")
-        .arg("--bind")
-        .arg("127.0.0.1:0")
-        // The 30s default is calibrated for production drains; tests don't
-        // queue real backlogs, so cap shutdown at 5s to keep flake-recovery
-        // bounded.
-        .arg("--shutdown-timeout")
-        .arg("5")
-        .stderr(Stdio::piped())
-        .stdout(Stdio::null());
-    for arg in extra_args {
-        command.arg(arg);
-    }
-    for (key, value) in envs {
-        command.env(key, value);
-    }
+    customize: impl FnOnce(OrchestratorConfig) -> OrchestratorConfig,
+) -> OrchestratorHarness {
+    OrchestratorHarness::start(customize(test_config(temp)))
+        .await
+        .expect("orchestrator harness start")
+}
 
-    let mut child = command.spawn().unwrap();
-    let stderr = child.stderr.take().expect("stderr pipe");
-    let (tx, rx) = mpsc::channel();
-    let handle = thread::spawn(move || {
-        let mut collected = String::new();
-        for line in BufReader::new(stderr).lines() {
-            let line = line.expect("stderr line");
-            collected.push_str(&line);
-            collected.push('\n');
-            let _ = tx.send(line);
-        }
-        collected
+/// Subscribe to a topic and wait for the first event matching `predicate`.
+/// Hard fail-fast ceiling: [`EVENT_FAIL_FAST_TIMEOUT`].
+pub(super) async fn await_topic_event(
+    event_log: &Arc<AnyEventLog>,
+    topic: &str,
+    predicate: impl Fn(&LogEvent) -> bool,
+) -> LogEvent {
+    let topic_obj = Topic::new(topic).unwrap_or_else(|error| {
+        panic!("invalid topic `{topic}`: {error}");
     });
-
-    OrchestratorProcess {
-        child: ChildExitWatcher::new(child),
-        rx,
-        handle: Some(handle),
-    }
+    let mut stream = event_log
+        .clone()
+        .subscribe(&topic_obj, None)
+        .await
+        .unwrap_or_else(|error| panic!("subscribe to {topic} failed: {error}"));
+    let result = tokio::time::timeout(EVENT_FAIL_FAST_TIMEOUT, async {
+        loop {
+            let next = stream
+                .next()
+                .await
+                .expect("event stream ended unexpectedly")
+                .expect("event stream error");
+            if predicate(&next.1) {
+                return next.1;
+            }
+        }
+    })
+    .await;
+    result.unwrap_or_else(|_| panic!("timed out waiting for matching {topic} event"))
 }
 
-pub(super) struct OrchestratorProcess {
-    pub(super) child: ChildExitWatcher,
-    rx: Receiver<String>,
-    handle: Option<thread::JoinHandle<String>>,
+/// Read all events for a topic from the event log.
+pub(super) async fn read_topic_events(
+    event_log: &Arc<AnyEventLog>,
+    topic: &str,
+) -> Vec<(u64, LogEvent)> {
+    let topic_obj = Topic::new(topic).unwrap_or_else(|error| {
+        panic!("invalid topic `{topic}`: {error}");
+    });
+    event_log
+        .read_range(&topic_obj, None, usize::MAX)
+        .await
+        .unwrap_or_else(|error| panic!("read_range {topic} failed: {error}"))
 }
 
-impl OrchestratorProcess {
-    pub(super) fn wait_for_listener_url(&mut self) -> String {
-        let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
-        while Instant::now() < deadline {
-            match self.rx.recv_timeout(LOG_RECV_POLL_INTERVAL) {
-                Ok(line) if line.contains(STARTUP_NEEDLE) => {
-                    if let Some(url) = listener_url_from_line(&line) {
-                        shared_support::wait_for_readyz(
-                            &mut self.child,
-                            &url,
-                            PROCESS_FAIL_FAST_TIMEOUT,
-                        )
-                        .unwrap_or_else(|error| {
-                            let stderr = self.shutdown_and_join_stderr();
-                            panic!("{error}\nstderr={stderr}");
-                        });
-                        return url;
-                    }
-                }
-                Ok(_) => continue,
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if let Some(status) = self.child.try_status().unwrap() {
-                        let stderr = self.join_stderr();
-                        panic!(
-                            "process exited before listener became ready: {status}\nstderr={stderr}"
-                        );
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    let stderr = self.shutdown_and_join_stderr();
-                    panic!("stderr stream closed before listener became ready\nstderr={stderr}");
+/// Wait until the orchestrator emits a `pump_dispatch_completed` lifecycle
+/// event with `status: "completed"`. After this fires the handler has
+/// finished, so reading any handler-written marker file is race-free.
+pub(super) async fn await_pump_dispatch_completed(harness: &OrchestratorHarness) {
+    await_topic_event(&harness.event_log(), "orchestrator.lifecycle", |event| {
+        event.kind == "pump_dispatch_completed"
+            && event.payload["status"] == serde_json::json!("completed")
+    })
+    .await;
+}
+
+/// Wait until the orchestrator emits a `pump_dispatch_completed` event whose
+/// `dispatched` count reaches `count`. Useful when several events feed the
+/// same pump and you need to wait for the Nth to drain.
+pub(super) async fn await_pump_dispatch_count(harness: &OrchestratorHarness, count: u64) {
+    let mut topic_obj = Topic::new("orchestrator.lifecycle").unwrap();
+    let _ = &mut topic_obj;
+    let mut stream = harness
+        .event_log()
+        .subscribe(&Topic::new("orchestrator.lifecycle").unwrap(), None)
+        .await
+        .expect("subscribe lifecycle");
+    let mut total: u64 = 0;
+    tokio::time::timeout(EVENT_FAIL_FAST_TIMEOUT, async {
+        loop {
+            let (_, event) = stream
+                .next()
+                .await
+                .expect("lifecycle stream ended")
+                .expect("lifecycle stream error");
+            if event.kind == "pump_dispatch_completed"
+                && event.payload["status"] == serde_json::json!("completed")
+            {
+                let dispatched = event.payload["dispatched"].as_u64().unwrap_or(0);
+                total = total.saturating_add(dispatched);
+                if total >= count {
+                    return;
                 }
             }
         }
-        let stderr = self.shutdown_and_join_stderr();
-        panic!("timed out waiting for listener startup\nstderr={stderr}");
-    }
-
-    pub(super) fn shutdown_and_join_stderr(&mut self) -> String {
-        self.child.kill();
-        let _ = self.child.wait_timeout(PROCESS_FAIL_FAST_TIMEOUT);
-        self.join_stderr()
-    }
-
-    pub(super) fn join_stderr(&mut self) -> String {
-        self.handle
-            .take()
-            .expect("stderr collector thread")
-            .join()
-            .expect("stderr collector result")
-    }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for {count} pump dispatches; got {total}"));
 }
 
-pub(super) fn listener_url_from_line(line: &str) -> Option<String> {
-    if let Some(url) = line.split(STARTUP_PREFIX).nth(1) {
-        return url
-            .split_whitespace()
-            .next()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string);
-    }
-    let field = "listener_url=";
-    let start = line.find(field)? + field.len();
-    let url = line[start..]
-        .split_whitespace()
-        .next()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
-    Some(url.to_string())
+/// Read the on-disk state snapshot. The harness writes this file at
+/// startup, during drain, and on shutdown — so callers should either
+/// shut down the harness first or wait for the relevant lifecycle
+/// event before reading.
+pub(super) fn state_snapshot(temp: &TempDir) -> String {
+    fs::read_to_string(temp.path().join("state/orchestrator-state.json")).unwrap()
 }
 
-pub(super) fn send_sigterm(child: &mut ChildExitWatcher) {
-    child.terminate();
+/// Read the state snapshot from the harness's `state_dir` while the
+/// harness is still running (e.g. after a `draining` event).
+pub(super) fn state_snapshot_at(state_dir: &Path) -> String {
+    fs::read_to_string(state_dir.join("orchestrator-state.json")).unwrap()
 }
 
-pub(super) fn wait_for_exit(child: &mut ChildExitWatcher) {
-    child.wait_for_success(PROCESS_FAIL_FAST_TIMEOUT);
+/// Drive a graceful shutdown and assert it completed.
+pub(super) async fn shutdown(harness: OrchestratorHarness) {
+    harness
+        .shutdown(SHUTDOWN_DEADLINE)
+        .await
+        .expect("orchestrator harness shutdown");
 }
 
-pub(super) async fn wait_for_exit_async(child: &mut ChildExitWatcher) -> std::process::ExitStatus {
-    child
-        .wait_timeout(PROCESS_FAIL_FAST_TIMEOUT)
-        .unwrap_or_else(|error| panic!("{error}"))
+/// Fetch the Prometheus metrics exposition from the harness's
+/// `/metrics` endpoint as plain text.
+pub(super) async fn fetch_metrics(harness: &OrchestratorHarness) -> String {
+    reqwest::Client::new()
+        .get(format!("{}/metrics", harness.listener_url()))
+        .send()
+        .await
+        .expect("metrics request")
+        .text()
+        .await
+        .expect("metrics body")
+}
+
+// ── Signing / header helpers ─────────────────────────────────────────────────
+
+pub(super) async fn assert_status(response: reqwest::Response, expected: StatusCode) {
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert_eq!(status, expected, "status={status} body={body}");
+}
+
+pub(super) fn json_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers
 }
 
 pub(super) fn github_signature(secret: &str, body: &[u8]) -> String {
@@ -667,79 +715,4 @@ pub(super) fn notion_headers(secret: &str, body: &[u8]) -> HeaderMap {
     );
     headers.insert("request-id", HeaderValue::from_static("req-notion-123"));
     headers
-}
-
-pub(super) fn state_snapshot(temp: &TempDir) -> String {
-    fs::read_to_string(temp.path().join("state/orchestrator-state.json")).unwrap()
-}
-
-pub(super) async fn read_topic_events(
-    temp: &TempDir,
-    topic: &str,
-) -> Vec<(u64, harn_vm::event_log::LogEvent)> {
-    let log = SqliteEventLog::open(temp.path().join("state/events.sqlite"), 32).unwrap();
-    let topic = Topic::new(topic).unwrap();
-    log.read_range(&topic, None, usize::MAX).await.unwrap()
-}
-
-pub(super) async fn wait_for_topic_event(
-    temp: &TempDir,
-    topic: &str,
-    predicate: impl Fn(&harn_vm::event_log::LogEvent) -> bool,
-) {
-    let deadline = Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
-    while Instant::now() < deadline {
-        if read_topic_events(temp, topic)
-            .await
-            .iter()
-            .any(|(_, event)| predicate(event))
-        {
-            return;
-        }
-        timing::sleep_async(timing::RETRY_POLL_INTERVAL).await;
-    }
-    let events = read_topic_events(temp, topic).await;
-    panic!("timed out waiting for matching {topic} event; events={events:?}");
-}
-
-pub(super) async fn assert_status(response: reqwest::Response, expected: StatusCode) {
-    let status = response.status();
-    let body = response.text().await.unwrap();
-    assert_eq!(status, expected, "status={status} body={body}");
-}
-
-pub(super) fn json_headers() -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    headers
-}
-
-pub(super) fn wait_for_path(path: &Path, timeout: std::time::Duration) {
-    timing::wait_for_nonempty_file(path, timeout);
-}
-
-pub(super) fn wait_for_json_file(path: &Path, timeout: std::time::Duration) -> JsonValue {
-    let deadline = Instant::now() + timeout;
-    loop {
-        if let Ok(contents) = fs::read_to_string(path) {
-            if !contents.is_empty() {
-                match serde_json::from_str(&contents) {
-                    Ok(value) => return value,
-                    Err(_) if Instant::now() < deadline => {}
-                    Err(error) => {
-                        panic!(
-                            "timed out waiting for valid JSON in {}: {error}; contents={contents:?}",
-                            path.display()
-                        );
-                    }
-                }
-            }
-        }
-        let remaining = match deadline.checked_duration_since(Instant::now()) {
-            Some(remaining) => remaining,
-            None => break,
-        };
-        timing::sleep_blocking(remaining.min(timing::RETRY_POLL_INTERVAL));
-    }
-    panic!("timed out waiting for valid JSON in {}", path.display());
 }

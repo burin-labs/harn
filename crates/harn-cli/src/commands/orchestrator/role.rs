@@ -5,7 +5,7 @@ use clap::ValueEnum;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "kebab-case")]
-pub(crate) enum OrchestratorRole {
+pub enum OrchestratorRole {
     SingleTenant,
     MultiTenant,
 }

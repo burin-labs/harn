@@ -39,7 +39,7 @@ const LEAKY_STATE_ENV_VARS: &[&str] = &[
 /// guard because each test resets the state on entry, so the mutex's
 /// `()` payload is irrelevant and propagating `PoisonError` would
 /// cascade a single legitimate failure across every downstream test.
-pub(crate) fn lock_harn_state() -> MutexGuard<'static, ()> {
+pub fn lock_harn_state() -> MutexGuard<'static, ()> {
     let guard = HARN_STATE_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
