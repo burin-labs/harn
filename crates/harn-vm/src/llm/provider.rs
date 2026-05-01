@@ -182,6 +182,7 @@ pub(crate) fn register_default_providers() {
             return;
         }
         names.insert("mock".to_string());
+        names.insert("fake".to_string());
         names.insert("anthropic".to_string());
         names.insert("gemini".to_string());
         names.insert("azure_openai".to_string());

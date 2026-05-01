@@ -189,6 +189,12 @@ async fn dispatch_to_registered_provider(
         return mock.chat_impl(opts, delta_tx).await;
     }
 
+    if crate::llm::fake::FakeLlmProvider::should_intercept(provider) {
+        return crate::llm::fake::FakeLlmProvider
+            .chat_impl(opts, delta_tx)
+            .await;
+    }
+
     let ollama = crate::llm::providers::OllamaProvider;
     if (provider == ollama.name() || resolved.endpoint.contains("/api/chat")) && ollama.is_local() {
         return ollama.chat_impl(opts, delta_tx).await;
