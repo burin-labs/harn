@@ -37,6 +37,53 @@ load `docs/llm/harn-triggers-quickref.md`.
     - `return Ok(_)` / no explicit return → exits 0.
   - Uncaught errors exit with 1 and a rendered diagnostic.
 
+## Merge Captain eval loop
+
+Use `harn merge-captain run` when iterating on the Merge Captain persona from a
+single command. It resolves a backend, streams canonical agent JSONL, persists a
+receipt, runs the Merge Captain oracle, and exits non-zero on unsafe action
+attempts or any oracle error.
+
+```bash
+# Mock playground smoke path. Streams JSONL to stdout and writes a receipt under
+# .harn-runs/merge-captain/<run-id>/receipt.json.
+harn merge-captain run --backend mock examples/merge_captain/playground_3repos --once
+
+# Keep stdout for the machine-readable summary and put the transcript/receipt in
+# explicit files.
+harn merge-captain run --backend mock examples/merge_captain/playground_3repos \
+  --once \
+  --model-route value/gemma \
+  --timeout-tier smoke \
+  --transcript-out .harn-runs/mc/event_log.jsonl \
+  --receipt-out .harn-runs/mc/receipt.json
+
+# Replay a deterministic transcript fixture through the same receipt + oracle
+# path.
+harn merge-captain run --backend replay \
+  examples/personas/merge_captain/transcripts/green_pr.jsonl \
+  --once --no-stdout
+```
+
+Backends:
+
+| Backend | Argument | Use |
+|---|---|---|
+| `mock` | playground directory or scenario manifest | Local fake-backend scenario loop. |
+| `replay` | transcript JSONL file or event-log directory | Deterministic replay/audit without backend I/O. |
+| `live` | none | Production connector runtime selector; fails closed when the connector runtime is unavailable. |
+
+Flags:
+
+| Flag | Use |
+|---|---|
+| `--once` / `--watch` | One sweep or finite watch mode (`--max-sweeps`, `--watch-backoff-ms`). |
+| `--model-route ROUTE` | Pin the model/profile route in the receipt. |
+| `--timeout-tier TIER` | Pin the timeout/budget tier in the receipt. |
+| `--transcript-out PATH` | Write JSONL transcript to a file instead of stdout. |
+| `--receipt-out PATH` | Write receipt JSON to an explicit path. |
+| `--summary-out PATH` | Write run summary JSON to a file. |
+
 ## stdin / stdout / stderr / TTY
 
 - `print(s)` / `println(s)` → stdout. `eprint(s)` / `eprintln(s)` →

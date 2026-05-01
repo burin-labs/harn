@@ -711,6 +711,12 @@ async fn async_main() {
             args.json,
         ),
         Command::MergeCaptain(args) => match args.command {
+            MergeCaptainCommand::Run(run) => {
+                let code = commands::merge_captain::run_driver(&run);
+                if code != 0 {
+                    process::exit(code);
+                }
+            }
             MergeCaptainCommand::Audit(audit) => {
                 let code = commands::merge_captain::run_audit(&audit);
                 if code != 0 {
