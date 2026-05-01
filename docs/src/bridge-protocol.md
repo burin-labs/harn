@@ -61,10 +61,10 @@ normal ACP forward-compatibility behavior. Hosts that render Harn
 extensions should key off the explicit extension list from `initialize`
 instead of discovering behavior from a local allow-list.
 
-Harn keeps several high-value tool-rendering fields at the top level of
-`tool_call` / `tool_call_update` rather than moving them under `_meta`,
-because downstream UIs already consume them directly. These field
-extensions are also advertised during `initialize` under
+Harn keeps its tool-rendering extensions under `tool_call._meta.harn` and
+`tool_call_update._meta.harn`, following ACP's extension convention while
+leaving canonical ACP fields at their standard locations. These Harn
+metadata keys are advertised during `initialize` under
 `agentCapabilities._meta.harn.toolLifecycleExtensionFields`:
 
 - `audit`
@@ -78,13 +78,15 @@ extensions are also advertised during `initialize` under
 
 The standard ACP fields (`toolCallId`, `title`, `kind`, `status`,
 `content`, `locations`, `rawInput`, and `rawOutput`) remain available in
-their ACP locations. Harn's pinned fixtures under
-`crates/harn-serve/tests/fixtures/acp/` pin both the standard and
-extension shapes so host integrations can reference stable examples.
+their ACP locations. Hosts migrating from pre-#904 builds should read the
+listed Harn fields from `_meta.harn` instead of the tool-call update root.
+Harn's pinned fixtures under `crates/harn-serve/tests/fixtures/acp/` pin
+both the standard and extension shapes so host integrations can reference
+stable examples.
 
 ### `audit` tag
 
-Both `tool_call` and `tool_call_update` carry an optional `audit`
+Both `tool_call` and `tool_call_update` carry an optional `_meta.harn.audit`
 field that mirrors the active mutation session for the dispatch (see
 [Trust boundary](../../spec/opentrustgraph.md)). Hosts use it to:
 
@@ -105,31 +107,35 @@ contract):
 
 ```json
 {
-  "audit": {
-    "session_id": "session_42",
-    "parent_session_id": "session_root",
-    "run_id": "run_42",
-    "worker_id": "worker_3",
-    "execution_kind": "worker",
-    "mutation_scope": "apply_workspace",
-    "approval_policy": {
-      "auto_approve": [],
-      "auto_deny": [],
-      "require_approval": ["edit_*"],
-      "write_path_allowlist": ["src/**"]
+  "_meta": {
+    "harn": {
+      "audit": {
+        "session_id": "session_42",
+        "parent_session_id": "session_root",
+        "run_id": "run_42",
+        "worker_id": "worker_3",
+        "execution_kind": "worker",
+        "mutation_scope": "apply_workspace",
+        "approval_policy": {
+          "auto_approve": [],
+          "auto_deny": [],
+          "require_approval": ["edit_*"],
+          "write_path_allowlist": ["src/**"]
+        }
+      }
     }
   }
 }
 ```
 
-The field is omitted when no mutation session is installed (read-only
+The `_meta.harn.audit` field is omitted when no mutation session is installed (read-only
 `harn run` invocations, conformance fixtures, scripts that don't enter
-a workflow). Existing clients that don't know about `audit` see the
-same wire shape they always did.
+a workflow). `worker_update.audit` remains top-level because
+`worker_update` itself is a Harn extension update.
 
 ### `executor` tag
 
-`tool_call_update` carries an optional `executor` field that names the
+`tool_call_update` carries an optional `_meta.harn.executor` field that names the
 backend that ran the tool, so clients can render "via mcp:linear" /
 "via host bridge" badges, attribute latency by transport, and route
 errors correctly. Variants:

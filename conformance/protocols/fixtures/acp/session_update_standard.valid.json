@@ -30,9 +30,13 @@
           "toolCallId": "tool-1",
           "title": "read_file",
           "status": "completed",
-          "durationMs": 8,
-          "executionDurationMs": 6,
-          "executor": "harn_builtin",
+          "_meta": {
+            "harn": {
+              "durationMs": 8,
+              "executionDurationMs": 6,
+              "executor": "harn_builtin"
+            }
+          },
           "rawOutput": {
             "ok": true
           }

@@ -56,6 +56,24 @@ impl AcpAgentEventSink {
             }
         }
     }
+
+    fn attach_harn_meta(
+        update: &mut serde_json::Value,
+        harn_meta: serde_json::Map<String, serde_json::Value>,
+    ) {
+        if harn_meta.is_empty() {
+            return;
+        }
+        let Some(update) = update.as_object_mut() else {
+            return;
+        };
+        update.insert(
+            "_meta".to_string(),
+            serde_json::json!({
+                "harn": harn_meta,
+            }),
+        );
+    }
 }
 
 impl AgentEventSink for AcpAgentEventSink {
@@ -114,14 +132,16 @@ impl AgentEventSink for AcpAgentEventSink {
                 if let Some(k) = kind {
                     update["kind"] = serde_json::to_value(k).unwrap_or_default();
                 }
+                let mut harn_meta = serde_json::Map::new();
                 if let Some(p) = parsing {
-                    update["parsing"] = serde_json::Value::Bool(*p);
+                    harn_meta.insert("parsing".to_string(), serde_json::Value::Bool(*p));
                 }
                 if let Some(record) = audit {
                     if let Ok(value) = serde_json::to_value(record) {
-                        update["audit"] = value;
+                        harn_meta.insert("audit".to_string(), value);
                     }
                 }
+                Self::attach_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
                     "update": update,
@@ -149,38 +169,49 @@ impl AgentEventSink for AcpAgentEventSink {
                     "title": tool_name,
                     "status": Self::status_str(*status),
                 });
+                let mut harn_meta = serde_json::Map::new();
                 if let Some(out) = raw_output {
                     update["rawOutput"] = out.clone();
                 }
                 if let Some(err) = error {
-                    update["error"] = serde_json::Value::String(err.clone());
+                    harn_meta.insert("error".to_string(), serde_json::Value::String(err.clone()));
                 }
                 if let Some(d) = duration_ms {
-                    update["durationMs"] = serde_json::Value::from(*d);
+                    harn_meta.insert("durationMs".to_string(), serde_json::Value::from(*d));
                 }
                 if let Some(d) = execution_duration_ms {
-                    update["executionDurationMs"] = serde_json::Value::from(*d);
+                    harn_meta.insert(
+                        "executionDurationMs".to_string(),
+                        serde_json::Value::from(*d),
+                    );
                 }
                 if let Some(cat) = error_category {
-                    update["errorCategory"] = serde_json::Value::String(cat.as_str().to_string());
+                    harn_meta.insert(
+                        "errorCategory".to_string(),
+                        serde_json::Value::String(cat.as_str().to_string()),
+                    );
                 }
                 if let Some(exec) = executor {
-                    update["executor"] = Self::executor_to_json(exec);
+                    harn_meta.insert("executor".to_string(), Self::executor_to_json(exec));
                 }
                 if let Some(p) = parsing {
-                    update["parsing"] = serde_json::Value::Bool(*p);
+                    harn_meta.insert("parsing".to_string(), serde_json::Value::Bool(*p));
                 }
                 if let Some(record) = audit {
                     if let Ok(value) = serde_json::to_value(record) {
-                        update["audit"] = value;
+                        harn_meta.insert("audit".to_string(), value);
                     }
                 }
                 if let Some(input) = raw_input {
                     update["rawInput"] = input.clone();
                 }
                 if let Some(partial) = raw_input_partial {
-                    update["rawInputPartial"] = serde_json::Value::String(partial.clone());
+                    harn_meta.insert(
+                        "rawInputPartial".to_string(),
+                        serde_json::Value::String(partial.clone()),
+                    );
                 }
+                Self::attach_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
                     "update": update,
@@ -429,6 +460,10 @@ mod tests {
             notifications.push(serde_json::from_str(&line).expect("json"));
         }
         notifications
+    }
+
+    fn update_harn_meta(payload: &serde_json::Value) -> &serde_json::Value {
+        &payload["params"]["update"]["_meta"]["harn"]
     }
 
     fn fixture_handoff() -> HandoffArtifact {
@@ -940,14 +975,11 @@ mod tests {
             "tool_call_update"
         );
         assert_eq!(payload["params"]["update"]["status"], "failed");
-        assert_eq!(
-            payload["params"]["update"]["errorCategory"],
-            "schema_validation"
-        );
-        assert_eq!(
-            payload["params"]["update"]["error"],
-            "missing required arg `path`"
-        );
+        let harn_meta = update_harn_meta(&payload);
+        assert_eq!(harn_meta["errorCategory"], "schema_validation");
+        assert_eq!(harn_meta["error"], "missing required arg `path`");
+        assert!(payload["params"]["update"].get("errorCategory").is_none());
+        assert!(payload["params"]["update"].get("error").is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -973,17 +1005,14 @@ mod tests {
         });
         let line = rx.recv().await.expect("acp tool_call_update");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-        assert!(payload["params"]["update"].get("errorCategory").is_none());
-        assert!(payload["params"]["update"].get("error").is_none());
+        assert!(payload["params"]["update"].get("_meta").is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn tool_call_carries_parsing_flag_through_to_acp_wire() {
-        // Harn#692: when the streaming candidate detector emits a
-        // tool_call with `parsing: Some(true)`, the ACP wire must carry
-        // a literal `"parsing": true` so clients can render the
-        // in-flight chip. The terminal `tool_call_update` likewise
-        // carries `"parsing": false` to retract it.
+        // Harn#692/#904: candidate parser state is Harn metadata on
+        // the ACP wire so clients can render the in-flight chip without
+        // extending the root ACP tool-call shape.
         let (tx, mut rx) = mpsc::unbounded_channel();
         let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
 
@@ -1000,7 +1029,8 @@ mod tests {
         let line = rx.recv().await.expect("acp tool_call notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
         assert_eq!(payload["params"]["update"]["sessionUpdate"], "tool_call");
-        assert_eq!(payload["params"]["update"]["parsing"], true);
+        assert_eq!(update_harn_meta(&payload)["parsing"], true);
+        assert!(payload["params"]["update"].get("parsing").is_none());
 
         sink.handle_event(&AgentEvent::ToolCallUpdate {
             session_id: "session-1".to_string(),
@@ -1026,15 +1056,13 @@ mod tests {
             payload["params"]["update"]["sessionUpdate"],
             "tool_call_update"
         );
-        assert_eq!(payload["params"]["update"]["parsing"], false);
-        assert_eq!(
-            payload["params"]["update"]["errorCategory"],
-            "parse_aborted"
-        );
+        let harn_meta = update_harn_meta(&payload);
+        assert_eq!(harn_meta["parsing"], false);
+        assert_eq!(harn_meta["errorCategory"], "parse_aborted");
+        assert!(payload["params"]["update"].get("parsing").is_none());
+        assert!(payload["params"]["update"].get("errorCategory").is_none());
 
-        // Default `parsing: None` must not surface a `parsing` field
-        // at all, so existing ACP clients that don't know about the
-        // candidate phase don't see a misleading `null`.
+        // Default `parsing: None` must not surface Harn metadata at all.
         sink.handle_event(&AgentEvent::ToolCall {
             session_id: "session-1".to_string(),
             tool_call_id: "tool-1".to_string(),
@@ -1047,15 +1075,12 @@ mod tests {
         });
         let line = rx.recv().await.expect("acp tool_call notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-        assert!(
-            payload["params"]["update"].get("parsing").is_none(),
-            "got: {payload}"
-        );
+        assert!(payload["params"]["update"].get("_meta").is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn tool_call_update_serializes_executor_per_acp_wire_format() {
-        // Harn#691: clients render badges off the ACP `executor` field.
+        // Harn#691/#904: clients render badges off Harn executor metadata.
         // The wire shape must distinguish bare-string variants from the
         // McpServer object-with-serverName form so a UI can branch on
         // `typeof executor === "string"`.
@@ -1101,11 +1126,11 @@ mod tests {
                 payload["params"]["update"]["sessionUpdate"],
                 "tool_call_update"
             );
-            assert_eq!(payload["params"]["update"]["executor"], expected);
+            assert_eq!(update_harn_meta(&payload)["executor"], expected);
+            assert!(payload["params"]["update"].get("executor").is_none());
         }
 
-        // `executor: None` must not surface on the wire so existing
-        // clients that don't know about the field aren't surprised.
+        // `executor: None` must not surface Harn metadata.
         sink.handle_event(&AgentEvent::ToolCallUpdate {
             session_id: "session-1".to_string(),
             tool_call_id: "tool-2".to_string(),
@@ -1125,18 +1150,13 @@ mod tests {
         });
         let line = rx.recv().await.expect("acp tool_call_update notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-        assert!(
-            payload["params"]["update"].get("executor").is_none(),
-            "got: {payload}"
-        );
+        assert!(payload["params"]["update"].get("_meta").is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_format() {
-        // #693: ACP wire format must mirror raw_input as `rawInput` and
-        // raw_input_partial as `rawInputPartial`. Both fields skip
-        // serialization when None so older clients see no surprise
-        // keys.
+        // #693/#904: parsed raw input remains canonical `rawInput`;
+        // unparseable raw bytes are Harn metadata under `_meta.harn`.
         let (tx, mut rx) = mpsc::unbounded_channel();
         let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
 
@@ -1161,7 +1181,7 @@ mod tests {
         let line = rx.recv().await.expect("acp tool_call_update notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
         assert_eq!(payload["params"]["update"]["rawInput"]["q"], "hello");
-        assert!(payload["params"]["update"].get("rawInputPartial").is_none());
+        assert!(payload["params"]["update"].get("_meta").is_none());
 
         // Unparseable partial bytes → `rawInputPartial` populated, `rawInput` absent.
         sink.handle_event(&AgentEvent::ToolCallUpdate {
@@ -1184,9 +1204,10 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
         assert!(payload["params"]["update"].get("rawInput").is_none());
         assert_eq!(
-            payload["params"]["update"]["rawInputPartial"],
+            update_harn_meta(&payload)["rawInputPartial"],
             r#"{"q":"hel"#
         );
+        assert!(payload["params"]["update"].get("rawInputPartial").is_none());
 
         // Terminal updates (None / None) must not introduce these keys.
         sink.handle_event(&AgentEvent::ToolCallUpdate {
@@ -1208,7 +1229,7 @@ mod tests {
         let line = rx.recv().await.expect("acp tool_call_update notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
         assert!(payload["params"]["update"].get("rawInput").is_none());
-        assert!(payload["params"]["update"].get("rawInputPartial").is_none());
+        assert!(update_harn_meta(&payload).get("rawInputPartial").is_none());
         assert_eq!(payload["params"]["update"]["status"], "completed");
     }
 
@@ -1242,7 +1263,7 @@ mod tests {
         });
         let line = rx.recv().await.expect("acp tool_call notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-        let audit_value = &payload["params"]["update"]["audit"];
+        let audit_value = &update_harn_meta(&payload)["audit"];
         assert_eq!(audit_value["session_id"], "session_42");
         assert_eq!(audit_value["parent_session_id"], "session_root");
         assert_eq!(audit_value["run_id"], "run_42");
@@ -1257,6 +1278,7 @@ mod tests {
             audit_value["approval_policy"]["write_path_allowlist"][0],
             "src/**"
         );
+        assert!(payload["params"]["update"].get("audit").is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1276,7 +1298,7 @@ mod tests {
         let line = rx.recv().await.expect("acp tool_call notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
         assert!(
-            payload["params"]["update"].get("audit").is_none(),
+            payload["params"]["update"].get("_meta").is_none(),
             "got: {payload}"
         );
     }
@@ -1312,12 +1334,18 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
         let update = &payload["params"]["update"];
         assert_eq!(update["sessionUpdate"], "tool_call_update");
-        assert_eq!(update["audit"]["session_id"], "session_42");
-        assert_eq!(update["audit"]["run_id"], "run_42");
-        assert_eq!(update["audit"]["mutation_scope"], "apply_workspace");
-        assert_eq!(update["audit"]["execution_kind"], "workflow");
-        assert_eq!(update["executor"], "host_bridge");
-        assert_eq!(update["durationMs"], 11);
+        let harn_meta = update_harn_meta(&payload);
+        assert_eq!(harn_meta["audit"]["session_id"], "session_42");
+        assert_eq!(harn_meta["audit"]["run_id"], "run_42");
+        assert_eq!(harn_meta["audit"]["mutation_scope"], "apply_workspace");
+        assert_eq!(harn_meta["audit"]["execution_kind"], "workflow");
+        assert_eq!(harn_meta["executor"], "host_bridge");
+        assert_eq!(harn_meta["durationMs"], 11);
+        assert_eq!(harn_meta["executionDurationMs"], 7);
+        assert!(update.get("audit").is_none());
+        assert!(update.get("executor").is_none());
+        assert!(update.get("durationMs").is_none());
+        assert!(update.get("executionDurationMs").is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1343,7 +1371,7 @@ mod tests {
         let line = rx.recv().await.expect("acp tool_call_update notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
         assert!(
-            payload["params"]["update"].get("audit").is_none(),
+            payload["params"]["update"].get("_meta").is_none(),
             "got: {payload}"
         );
     }

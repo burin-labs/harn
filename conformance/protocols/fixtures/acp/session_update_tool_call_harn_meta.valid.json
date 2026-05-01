@@ -1,0 +1,61 @@
+{
+  "name": "acp.session_update.tool_call_harn_meta",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "tool-1",
+          "title": "edit_file",
+          "status": "pending",
+          "rawInput": {
+            "path": "src/main.rs"
+          },
+          "_meta": {
+            "harn": {
+              "audit": {
+                "session_id": "session_42",
+                "mutation_scope": "apply_workspace"
+              },
+              "parsing": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "tool-1",
+          "title": "edit_file",
+          "status": "failed",
+          "_meta": {
+            "harn": {
+              "audit": {
+                "session_id": "session_42",
+                "mutation_scope": "apply_workspace"
+              },
+              "durationMs": 11,
+              "error": "malformed args",
+              "errorCategory": "parse_aborted",
+              "executionDurationMs": 7,
+              "executor": "host_bridge",
+              "parsing": false,
+              "rawInputPartial": "{\"path\":\"src"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
