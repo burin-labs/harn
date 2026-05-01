@@ -219,6 +219,11 @@ fn builtin_mutates_state(name: &str) -> bool {
             | "__agent_state_delete"
             | "__agent_state_handoff"
             | "mcp_release"
+            | "git.worktree.create"
+            | "git.worktree.remove"
+            | "git.fetch"
+            | "git.rebase"
+            | "git.push"
     )
 }
 
@@ -321,7 +326,20 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
                 "builtin 'apply_edit' exceeds workspace.apply_edit ceiling".to_string(),
             );
         }
-        "exec" | "exec_at" | "shell" | "shell_at"
+        "exec"
+        | "exec_at"
+        | "shell"
+        | "shell_at"
+        | "git.repo.discover"
+        | "git.worktree.create"
+        | "git.worktree.remove"
+        | "git.fetch"
+        | "git.rebase"
+        | "git.status"
+        | "git.conflicts"
+        | "git.push"
+        | "git.diff"
+        | "git.merge_base"
             if !policy_allows_capability(&policy, "process", "exec")
                 || !policy_allows_side_effect(&policy, "process_exec") =>
         {

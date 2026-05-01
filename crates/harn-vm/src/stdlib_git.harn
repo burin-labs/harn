@@ -1,0 +1,50 @@
+/**
+ * std/git — typed local git operations with audit receipts.
+ *
+ * Import: import "std/git"
+ */
+type GitOutputRef = {kind: string, bytes: int, sha256: string, inline: string, truncated: bool}
+
+type GitRepo = {
+  path: string,
+  root: string,
+  git_dir: string,
+  bare: bool,
+  inside_work_tree: bool,
+  input: string,
+}
+
+type GitStatusEntry = {
+  xy: string,
+  index: string,
+  worktree: string,
+  path: string,
+  conflict_kind: string | nil,
+}
+
+type GitConflict = {path: string, xy: string, kind: string}
+
+type GitReceipt = {
+  schema: string,
+  receipt_id: string,
+  operation: string,
+  action: string,
+  status: string,
+  success: bool,
+  exit_category: string,
+  exit_code: int,
+  command_args: list<string>,
+  argv: list<string>,
+  working_dir: string,
+  cwd: string,
+  affected_paths: list<string>,
+  agent: string,
+  trace_id: string,
+  autonomy_tier: string,
+  stdout: GitOutputRef,
+  stderr: GitOutputRef,
+  command_policy: dict | nil,
+  approval: dict | nil,
+  data: dict | nil,
+  repo: GitRepo | nil,
+}
