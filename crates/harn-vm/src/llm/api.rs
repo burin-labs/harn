@@ -162,6 +162,17 @@ async fn vm_call_llm_full_inner_request(
         return Ok(result);
     }
 
+    if crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider) {
+        // Bypass fixture/replay so the script-driven fake never collides
+        // with HARN_LLM_REPLAY/RECORD being set from an outer harness.
+        let result = crate::llm::fake::FakeLlmProvider
+            .chat_impl(request, delta_tx)
+            .await?;
+        super::trigger_predicate::note_result(request, &result);
+        record_cli_llm_result(&result);
+        return Ok(result);
+    }
+
     let replay_mode = get_replay_mode();
     let hash = fixture_hash(&request.model, &request.messages, request.system.as_deref());
 
@@ -217,6 +228,16 @@ async fn vm_call_llm_full_inner_offthread(
             request.cache,
         )
         .map_err(|e| e.to_string())?;
+        super::trigger_predicate::note_result(request, &result);
+        record_cli_llm_result(&result);
+        return Ok(result);
+    }
+
+    if crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider) {
+        let result = crate::llm::fake::FakeLlmProvider
+            .chat_impl(request, delta_tx)
+            .await
+            .map_err(|e| e.to_string())?;
         super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(&result);
         return Ok(result);
@@ -323,7 +344,8 @@ async fn try_fallback_provider(
 mod tests {
     use super::options::base_opts;
     use super::{
-        vm_call_llm_full, vm_call_llm_full_streaming_offthread, LlmRequestPayload, ThinkingConfig,
+        vm_call_llm_full, vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthread,
+        LlmRequestPayload, ThinkingConfig,
     };
     use crate::llm::env_lock;
 
@@ -505,6 +527,42 @@ mod tests {
             .block_on(vm_call_llm_full(&base_opts("mock")))
             .expect("mock provider remains available");
         assert_eq!(result.provider, "mock");
+    }
+
+    #[test]
+    fn fake_provider_routes_through_full_pipeline_with_streaming_deltas() {
+        use crate::llm::fake::{
+            install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeStopReason,
+        };
+
+        let _guard = env_lock().lock().expect("env lock");
+        // Even with HARN_LLM_CALLS_DISABLED, the fake must pass through —
+        // it never hits the network, so it must not be gated by that env.
+        let _disabled = ScopedEnvVar::set(crate::llm::LLM_CALLS_DISABLED_ENV, "1");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        let _script = install_fake_llm_script(FakeLlmScript::streaming(vec![
+            FakeLlmEvent::Token("alpha".into()),
+            FakeLlmEvent::Token(" beta".into()),
+            FakeLlmEvent::Done(FakeStopReason::EndTurn),
+        ]));
+
+        runtime.block_on(async {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            let result = vm_call_llm_full_streaming(&base_opts("fake"), tx)
+                .await
+                .expect("fake provider routes through dispatch");
+            assert_eq!(result.provider, "fake");
+            assert_eq!(result.text, "alpha beta");
+            let mut deltas = Vec::new();
+            while let Ok(delta) = rx.try_recv() {
+                deltas.push(delta);
+            }
+            assert_eq!(deltas, vec!["alpha".to_string(), " beta".to_string()]);
+        });
     }
 
     #[test]

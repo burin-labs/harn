@@ -24,6 +24,7 @@ mod conversation;
 pub(crate) mod cost;
 pub(crate) mod cost_route;
 pub(crate) mod daemon;
+pub(crate) mod fake;
 pub(crate) mod helpers;
 pub(crate) mod ledger;
 pub(crate) mod mock;
@@ -99,6 +100,10 @@ pub use api::{
     OllamaRuntimeSettings, HARN_OLLAMA_KEEP_ALIVE_ENV, HARN_OLLAMA_NUM_CTX_ENV,
     OLLAMA_DEFAULT_KEEP_ALIVE, OLLAMA_DEFAULT_NUM_CTX, OLLAMA_HOST_ENV,
 };
+pub use fake::{
+    fake_llm_captured_calls, install_fake_llm_script, FakeLlmCall, FakeLlmError, FakeLlmEvent,
+    FakeLlmGuard, FakeLlmScript, FakeLlmTurn, FakeStopReason,
+};
 pub use mock::{
     drain_tool_recordings, load_tool_replay_fixtures, set_tool_recording_mode, ToolRecordingMode,
 };
@@ -135,7 +140,7 @@ pub(crate) fn llm_calls_disabled() -> bool {
 }
 
 pub(crate) fn ensure_real_llm_allowed(provider: &str) -> Result<(), crate::value::VmError> {
-    if !llm_calls_disabled() || provider == "mock" {
+    if !llm_calls_disabled() || provider == "mock" || provider == "fake" {
         return Ok(());
     }
     Err(crate::value::VmError::Runtime(format!(
