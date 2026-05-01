@@ -115,7 +115,7 @@ fn seed_written_event(temp: &TempDir) -> serde_json::Value {
     serde_json::from_str(stdout(&output).trim()).unwrap()
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1129 follow-up to #1106)"]
 #[test]
 fn trigger_replay_diff_reports_structured_drift() {
     let temp = TempDir::new().unwrap();
@@ -171,7 +171,7 @@ pub fn on_issue(event: TriggerEvent) -> dict {
     );
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1129 follow-up to #1106)"]
 #[test]
 fn trigger_replay_as_of_uses_historical_binding_version() {
     let temp = TempDir::new().unwrap();
@@ -234,7 +234,7 @@ pub fn on_issue(event: TriggerEvent) -> dict {
     assert_eq!(report["as_of"].as_str(), Some(as_of.as_str()));
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1129 follow-up to #1106)"]
 #[test]
 fn trigger_replay_bulk_dry_run_filters_on_event_payload() {
     let temp = TempDir::new().unwrap();
@@ -281,7 +281,7 @@ pub fn on_issue(event: TriggerEvent) -> dict {
     assert!(report["items"][0]["report"].is_null());
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1129 follow-up to #1106)"]
 #[test]
 fn trigger_cancel_reports_terminal_events_as_not_cancellable() {
     let temp = TempDir::new().unwrap();
