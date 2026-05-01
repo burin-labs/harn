@@ -196,6 +196,7 @@ pub(super) async fn a2a_dispatcher_fixture(
     target: String,
     retry: TriggerRetryConfig,
     allow_cleartext: bool,
+    a2a_client: Arc<dyn crate::a2a::A2aClient>,
 ) -> (
     tempfile::TempDir,
     Arc<crate::event_log::AnyEventLog>,
@@ -241,7 +242,8 @@ pub(super) async fn a2a_dispatcher_fixture(
     .await
     .expect("install test trigger binding");
 
-    (dir, log.clone(), Dispatcher::with_event_log(vm, log))
+    let dispatcher = Dispatcher::with_event_log(vm, log.clone()).with_a2a_client(a2a_client);
+    (dir, log, dispatcher)
 }
 
 pub(super) async fn worker_dispatcher_fixture(
@@ -363,276 +365,105 @@ pub(super) fn lifecycle_payloads(
         .collect()
 }
 
-pub(super) struct MockA2aServer {
-    pub(super) authority: String,
-    requests: Receiver<MockA2aRequest>,
-    stop: Arc<AtomicBool>,
-    join: thread::JoinHandle<()>,
+/// Parameters captured from a single call to [`InProcessMockA2aClient::dispatch`].
+pub(super) struct MockA2aCall {
+    pub(super) target: String,
+    pub(super) allow_cleartext: bool,
+    pub(super) event_trace_id: String,
 }
 
-pub(super) struct MockA2aRequest {
-    pub(super) headers: BTreeMap<String, String>,
-    pub(super) body: serde_json::Value,
+/// What the mock should return when [`A2aClient::dispatch`] is called.
+pub(super) enum MockA2aResponse {
+    Inline {
+        task_id: String,
+        result: serde_json::Value,
+    },
+    Pending {
+        task_id: String,
+        state: String,
+        handle: serde_json::Value,
+    },
+    /// Return a protocol error carrying `message`.
+    Protocol(String),
+    /// Block until the cancel broadcast fires, then return `Cancelled`.
+    WaitForCancel,
 }
 
-impl MockA2aServer {
-    pub(super) fn next_request(&self) -> MockA2aRequest {
-        self.request_within(TEST_DEFAULT_TIMEOUT)
-            .expect("mock A2A request")
-    }
-
-    pub(super) fn request_within(&self, timeout: Duration) -> Option<MockA2aRequest> {
-        self.requests.recv_timeout(timeout).ok()
-    }
-
-    pub(super) fn finish(self) {
-        self.stop.store(true, Ordering::SeqCst);
-        self.join.join().expect("mock A2A thread");
-    }
+/// In-process A2A client mock — no TCP, no TLS, no OS threads, no real I/O.
+pub(super) struct InProcessMockA2aClient {
+    response: MockA2aResponse,
+    pub(super) calls: tokio::sync::Mutex<Vec<MockA2aCall>>,
 }
 
-pub(super) fn spawn_mock_a2a_server(task_result: serde_json::Value) -> MockA2aServer {
-    spawn_mock_a2a_server_with_schemes(task_result, "https", "https")
-}
-
-pub(super) fn spawn_mock_https_a2a_server_with_card_scheme(
-    task_result: serde_json::Value,
-    card_scheme: &'static str,
-) -> MockA2aServer {
-    spawn_mock_a2a_server_with_schemes(task_result, "https", card_scheme)
-}
-
-pub(super) fn spawn_mock_http_a2a_server(task_result: serde_json::Value) -> MockA2aServer {
-    spawn_mock_a2a_server_with_schemes(task_result, "http", "http")
-}
-
-pub(super) fn spawn_mock_a2a_server_with_schemes(
-    task_result: serde_json::Value,
-    listener_scheme: &'static str,
-    card_scheme: &'static str,
-) -> MockA2aServer {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock A2A listener");
-    listener
-        .set_nonblocking(true)
-        .expect("set mock A2A listener nonblocking");
-    let addr = listener.local_addr().expect("mock A2A addr");
-    let authority = format!("127.0.0.1:{}", addr.port());
-    let (tx, rx) = mpsc::channel();
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop_thread = stop.clone();
-    let tls_config = (listener_scheme == "https").then(mock_a2a_tls_config);
-    let max_connections = if listener_scheme == "http" && card_scheme == "http" {
-        // HTTPS discovery probes the canonical card path plus legacy
-        // aliases before loopback HTTP fallback. Then the successful HTTP
-        // card fetch and JSON-RPC dispatch each use a connection.
-        6
-    } else {
-        2
-    };
-    let join = thread::spawn(move || {
-        let mut handled_requests = 0;
-        while handled_requests < max_connections {
-            if stop_thread.load(Ordering::SeqCst) {
-                break;
-            }
-            let (stream, _) = match listener.accept() {
-                Ok(connection) => connection,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    thread::sleep(FILE_WATCH_FALLBACK_POLL);
-                    continue;
-                }
-                Err(error) => panic!("accept mock A2A request: {error}"),
-            };
-            stream
-                .set_nonblocking(false)
-                .expect("set mock A2A stream blocking");
-            stream
-                .set_read_timeout(Some(TEST_DEFAULT_TIMEOUT))
-                .expect("set read timeout");
-            stream
-                .set_write_timeout(Some(TEST_DEFAULT_TIMEOUT))
-                .expect("set write timeout");
-            if let Some(tls_config) = &tls_config {
-                let connection = ServerConnection::new(tls_config.clone())
-                    .expect("construct mock A2A TLS connection");
-                let mut stream = StreamOwned::new(connection, stream);
-                handle_mock_a2a_connection(
-                    &mut stream,
-                    card_scheme,
-                    addr.port(),
-                    &tx,
-                    &task_result,
-                );
-            } else {
-                let mut stream = stream;
-                let mut first = [0u8; 1];
-                let read = stream.peek(&mut first).expect("peek mock A2A stream");
-                if read == 0 || !matches!(first[0], b'G' | b'P') {
-                    handled_requests += 1;
-                    continue;
-                }
-                handle_mock_a2a_connection(
-                    &mut stream,
-                    card_scheme,
-                    addr.port(),
-                    &tx,
-                    &task_result,
-                );
-            }
-            handled_requests += 1;
-        }
-    });
-    MockA2aServer {
-        authority,
-        requests: rx,
-        stop,
-        join,
-    }
-}
-
-pub(super) fn handle_mock_a2a_connection<T: Read + Write>(
-    stream: &mut T,
-    card_scheme: &str,
-    port: u16,
-    tx: &mpsc::Sender<MockA2aRequest>,
-    task_result: &serde_json::Value,
-) {
-    let (request_line, headers, body) = read_http_request(stream);
-    if request_line.starts_with("GET /.well-known/agent-card.json ") {
-        write_json_response(
-            stream,
-            &serde_json::json!({
-                "name": "mock-a2a",
-                "description": "Mock A2A peer",
-                "version": "1.0.0",
-                "supportedInterfaces": [{
-                    "url": format!("{card_scheme}://127.0.0.1:{port}/rpc"),
-                    "protocolBinding": "JSONRPC",
-                    "protocolVersion": "0.3.0"
-                }],
-                "capabilities": {
-                    "streaming": true,
-                    "pushNotifications": true,
-                    "extendedAgentCard": false
-                },
-                "securitySchemes": {},
-                "security": [],
-                "defaultInputModes": ["application/json", "text/plain"],
-                "defaultOutputModes": ["application/json", "text/plain"],
-                "skills": [{
-                    "id": "triage",
-                    "name": "triage",
-                    "description": "Triage mock events",
-                    "tags": ["test"]
-                }],
-            }),
-        );
-        return;
-    }
-    assert!(
-        request_line.starts_with("POST /rpc "),
-        "unexpected request line: {request_line}"
-    );
-    let payload =
-        serde_json::from_slice::<serde_json::Value>(&body).expect("mock A2A request json");
-    tx.send(MockA2aRequest {
-        headers,
-        body: payload.clone(),
-    })
-    .expect("capture mock A2A request");
-    let rpc_id = payload["id"].clone();
-    write_json_response(
-        stream,
-        &crate::jsonrpc::response(rpc_id, task_result.clone()),
-    );
-}
-
-pub(super) fn mock_a2a_tls_config() -> Arc<ServerConfig> {
-    install_rustls_provider();
-    let cert = generate_simple_self_signed(vec!["127.0.0.1".to_string(), "localhost".to_string()])
-        .expect("generate mock A2A certificate");
-    let cert_der: CertificateDer<'static> = cert.cert.der().clone();
-    let key_der = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
-    Arc::new(
-        ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(vec![cert_der], key_der.into())
-            .expect("build mock A2A TLS server config"),
-    )
-}
-
-pub(super) fn install_rustls_provider() {
-    static INSTALL: Once = Once::new();
-    INSTALL.call_once(|| {
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-    });
-}
-
-pub(super) fn read_http_request<T: Read>(
-    stream: &mut T,
-) -> (String, BTreeMap<String, String>, Vec<u8>) {
-    let mut buffer = Vec::new();
-    let mut chunk = [0u8; 4096];
-    let header_end;
-    let content_length;
-    loop {
-        let read = stream.read(&mut chunk).expect("read mock A2A request");
-        assert!(read > 0, "mock A2A request closed before headers");
-        buffer.extend_from_slice(&chunk[..read]);
-        if let Some(end) = find_header_end(&buffer) {
-            header_end = end;
-            content_length = parse_content_length(&buffer[..header_end]);
-            break;
-        }
-    }
-    while buffer.len() < header_end + content_length {
-        let read = stream.read(&mut chunk).expect("read mock A2A body");
-        assert!(read > 0, "mock A2A request closed before body");
-        buffer.extend_from_slice(&chunk[..read]);
-    }
-    let headers = String::from_utf8_lossy(&buffer[..header_end]);
-    let request_line = headers.lines().next().unwrap_or_default().to_string();
-    let mut parsed_headers = BTreeMap::new();
-    for line in headers.lines().skip(1) {
-        let Some((name, value)) = line.split_once(':') else {
-            continue;
-        };
-        parsed_headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
-    }
-    let body = buffer[header_end..header_end + content_length].to_vec();
-    (request_line, parsed_headers, body)
-}
-
-pub(super) fn find_header_end(buffer: &[u8]) -> Option<usize> {
-    buffer
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|index| index + 4)
-}
-
-pub(super) fn parse_content_length(headers: &[u8]) -> usize {
-    let text = String::from_utf8_lossy(headers);
-    text.lines()
-        .find_map(|line| {
-            let (name, value) = line.split_once(':')?;
-            if name.eq_ignore_ascii_case("content-length") {
-                value.trim().parse::<usize>().ok()
-            } else {
-                None
-            }
+impl InProcessMockA2aClient {
+    pub(super) fn new(response: MockA2aResponse) -> Arc<Self> {
+        Arc::new(Self {
+            response,
+            calls: tokio::sync::Mutex::new(Vec::new()),
         })
-        .unwrap_or(0)
+    }
+
+    pub(super) async fn take_calls(&self) -> Vec<MockA2aCall> {
+        std::mem::take(&mut *self.calls.lock().await)
+    }
 }
 
-pub(super) fn write_json_response<T: Write>(stream: &mut T, body: &serde_json::Value) {
-    let payload = serde_json::to_vec(body).expect("serialize mock A2A response");
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
-        payload.len()
-    );
-    stream
-        .write_all(response.as_bytes())
-        .expect("write mock A2A headers");
-    stream.write_all(&payload).expect("write mock A2A body");
-    stream.flush().expect("flush mock A2A response");
+#[async_trait]
+impl crate::a2a::A2aClient for InProcessMockA2aClient {
+    async fn dispatch(
+        &self,
+        target: &str,
+        allow_cleartext: bool,
+        _binding_id: &str,
+        _binding_key: &str,
+        event: &crate::triggers::TriggerEvent,
+        cancel_rx: &mut tokio::sync::broadcast::Receiver<()>,
+    ) -> Result<
+        (crate::a2a::ResolvedA2aEndpoint, crate::a2a::DispatchAck),
+        crate::a2a::A2aClientError,
+    > {
+        self.calls.lock().await.push(MockA2aCall {
+            target: target.to_string(),
+            allow_cleartext,
+            event_trace_id: event.trace_id.0.clone(),
+        });
+
+        let endpoint = crate::a2a::ResolvedA2aEndpoint {
+            card_url: format!("https://{}/.well-known/agent-card.json", target),
+            rpc_url: format!("https://{}/rpc", target),
+            agent_id: None,
+            target_agent: crate::a2a::target_agent_label(target),
+        };
+
+        match &self.response {
+            MockA2aResponse::Inline { task_id, result } => Ok((
+                endpoint,
+                crate::a2a::DispatchAck::InlineResult {
+                    task_id: task_id.clone(),
+                    result: result.clone(),
+                },
+            )),
+            MockA2aResponse::Pending {
+                task_id,
+                state,
+                handle,
+            } => Ok((
+                endpoint,
+                crate::a2a::DispatchAck::PendingTask {
+                    task_id: task_id.clone(),
+                    state: state.clone(),
+                    handle: handle.clone(),
+                },
+            )),
+            MockA2aResponse::Protocol(message) => {
+                Err(crate::a2a::A2aClientError::Protocol(message.clone()))
+            }
+            MockA2aResponse::WaitForCancel => {
+                let _ = cancel_rx.recv().await;
+                Err(crate::a2a::A2aClientError::Cancelled(
+                    "A2A dispatch cancelled by shutdown".to_string(),
+                ))
+            }
+        }
+    }
 }

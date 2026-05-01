@@ -1,18 +1,10 @@
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
-use std::net::TcpListener;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
-use std::sync::Once;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use async_trait::async_trait;
 use futures::StreamExt;
-use rcgen::generate_simple_self_signed;
-use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
-use rustls::{ServerConfig, ServerConnection, StreamOwned};
 use tokio::sync::oneshot;
 
 use crate::event_log::{install_default_for_base_dir, EventLog, Topic};
@@ -24,9 +16,7 @@ use crate::triggers::registry::{
     install_manifest_triggers, resolve_live_trigger_binding, TriggerBindingSource,
     TriggerBindingSpec, TriggerHandlerSpec, TriggerPredicateSpec,
 };
-use crate::triggers::test_util::timing::{
-    FILE_WATCH_FALLBACK_POLL, NETWORK_PROBE_INITIAL, PROCESS_EXIT_GRACE, TEST_DEFAULT_TIMEOUT,
-};
+use crate::triggers::test_util::timing::TEST_DEFAULT_TIMEOUT;
 use crate::triggers::{ProviderId, ProviderPayload, SignatureStatus, TraceId, TriggerEvent};
 use crate::TriggerPredicateBudget;
 use crate::Vm;
