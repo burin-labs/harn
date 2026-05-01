@@ -274,9 +274,11 @@ The default paths are:
 
 Override them with `--mcp-path`, `--mcp-sse-path`, and
 `--mcp-messages-path`. Embedded MCP requires
-`HARN_ORCHESTRATOR_API_KEYS`; clients authenticate with
-`Authorization: Bearer <api-key>` or `x-api-key`, and MCP `initialize`
-must include the same key in the Harn extension field documented in
+`HARN_ORCHESTRATOR_API_KEYS` or HTTP OAuth resource-server settings through
+`HARN_MCP_OAUTH_*`. OAuth clients authenticate with `Authorization: Bearer
+<token>` on every HTTP request. Legacy API-key clients authenticate with
+`Authorization: Bearer <api-key>` or `x-api-key`; the old MCP `initialize`
+API-key extension is still accepted with a warning. See
 [Orchestrator MCP Server](./mcp-server.md).
 
 ## Deployment

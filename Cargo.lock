@@ -1709,6 +1709,7 @@ dependencies = [
  "include_dir",
  "jmespath",
  "jsonschema",
+ "jsonwebtoken",
  "notify",
  "nu-ansi-term",
  "rand 0.10.1",

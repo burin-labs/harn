@@ -12,6 +12,7 @@ use url::Url;
 use crate::cli::{McpCommand, McpLoginArgs, McpServerRefArgs};
 use crate::package::{self, McpServerConfig};
 
+mod oauth_resource;
 mod prompts;
 pub(crate) mod serve;
 
