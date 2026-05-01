@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use serde_json::{json, Value as JsonValue};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
@@ -515,18 +516,17 @@ async fn notion_poll_binding_emits_targeted_inbox_event_and_persists_high_water(
         }
     });
 
+    let inbox_topic = crate::event_log::Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC).unwrap();
+    let mut inbox_stream = log.clone().subscribe(&inbox_topic, None).await.unwrap();
+
     std::env::set_var("HARN_TEST_NOTION_API_BASE_URL", &base_url);
     connector.activate(&[binding]).await.unwrap();
 
-    for _ in 0..40 {
-        if !read_topic(&log, TRIGGER_INBOX_ENVELOPES_TOPIC)
-            .await
-            .is_empty()
-        {
-            break;
-        }
-        tokio::time::sleep(StdDuration::from_millis(25)).await;
-    }
+    tokio::time::timeout(StdDuration::from_secs(1), inbox_stream.next())
+        .await
+        .expect("timed out waiting for inbox envelope")
+        .expect("inbox stream closed before envelope arrived")
+        .expect("inbox subscribe yielded error");
 
     let inbox = read_topic(&log, TRIGGER_INBOX_ENVELOPES_TOPIC).await;
     assert_eq!(inbox.len(), 1);
