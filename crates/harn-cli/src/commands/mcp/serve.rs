@@ -2495,11 +2495,15 @@ required = true
 Updated: {{ code }}
 "#,
         );
-        let notification = recv_next_notification(&mut notifications).await;
-        assert_eq!(
-            notification["method"],
-            json!("notifications/prompts/list_changed")
-        );
+        // Writing a `.harn.prompt` file can also trigger the tools/resources
+        // watchers, so the order of incoming notifications is not deterministic.
+        // Drain until we observe `prompts/list_changed`; ignore any others.
+        let seen = collect_notification_methods(
+            &mut notifications,
+            &["notifications/prompts/list_changed"],
+        )
+        .await;
+        assert!(seen.contains("notifications/prompts/list_changed"));
     }
 
     #[tokio::test(flavor = "current_thread")]
