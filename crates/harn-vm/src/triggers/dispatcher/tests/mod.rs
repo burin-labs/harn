@@ -7,7 +7,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::sync::Once;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures::StreamExt;
 use rcgen::generate_simple_self_signed;
@@ -25,7 +25,7 @@ use crate::triggers::registry::{
     TriggerBindingSpec, TriggerHandlerSpec, TriggerPredicateSpec,
 };
 use crate::triggers::test_util::timing::{
-    FILE_WATCH_FALLBACK_POLL, NETWORK_PROBE_INITIAL, PROCESS_EXIT_GRACE, TEST_DEFAULT_TIMEOUT,
+    FILE_WATCH_FALLBACK_POLL, PROCESS_EXIT_GRACE, TEST_DEFAULT_TIMEOUT,
 };
 use crate::triggers::{ProviderId, ProviderPayload, SignatureStatus, TraceId, TriggerEvent};
 use crate::TriggerPredicateBudget;
@@ -34,9 +34,10 @@ use crate::Vm;
 use super::retry::TriggerRetryConfig;
 use super::uri::{DispatchUri, DispatchUriError};
 use super::{
-    append_dispatch_cancel_request, install_test_inbox_dequeued_signal, AcquiredFlowControl,
-    DispatchCancelRequest, DispatchStatus, DispatchWaitLease, Dispatcher, DispatcherRuntimeState,
-    RetryPolicy, SingletonLease, DEFAULT_AUTONOMY_BUDGET_REVIEWER,
+    append_dispatch_cancel_request, install_test_inbox_dequeued_signal,
+    install_test_inbox_subscribed_signal, AcquiredFlowControl, DispatchCancelRequest,
+    DispatchStatus, DispatchWaitLease, Dispatcher, DispatcherRuntimeState, RetryPolicy,
+    SingletonLease, DEFAULT_AUTONOMY_BUDGET_REVIEWER,
 };
 
 mod fixtures;

@@ -1,16 +1,20 @@
 use std::time::Duration;
 
-/// Poll cadence for short test-only fallback loops.
+/// Poll cadence for short test-only fallback loops on real OS resources
+/// (e.g. polling a non-blocking `TcpListener` for shutdown). Not for
+/// dispatcher logic waits — those must be event-driven and run under
+/// `tokio::test(start_paused = true)`.
 pub const FILE_WATCH_FALLBACK_POLL: Duration = Duration::from_millis(10);
-/// Grace period for negative assertions after shutdown or process cancellation.
+/// Grace period for negative assertions after shutdown or process cancellation
+/// against real network mocks (TCP). Inside `start_paused` tests, prefer
+/// `tokio::time::advance` instead.
 pub const PROCESS_EXIT_GRACE: Duration = Duration::from_millis(100);
-/// Initial wait/poll cadence for tests that probe asynchronous network dispatch.
-pub const NETWORK_PROBE_INITIAL: Duration = Duration::from_millis(20);
-/// Default upper bound for trigger test harness waits.
+/// Hard fail-fast ceiling for trigger test harness waits.
 ///
-/// Set generously enough to absorb CPU starvation when the workspace
-/// test suite runs the trigger dispatcher tests concurrently with
-/// hundreds of other tokio tasks (the original 5-second budget
-/// produced occasional spurious "timed out waiting for ..." failures
-/// in CI under load).
+/// Used as the upper bound on `tokio::time::timeout` calls and `Dispatcher::drain`
+/// — a deterministic test should never come close to this. Under
+/// `tokio::test(start_paused = true)`, paused-time auto-advance ensures the
+/// ceiling fires immediately when no work remains, instead of burning real
+/// wall-clock seconds. The 30-second value remains generous enough for
+/// real-network A2A fixture tests.
 pub const TEST_DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);

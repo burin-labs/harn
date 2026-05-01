@@ -1,6 +1,6 @@
 use super::*;
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn local_handler_round_trip_logs_outbox_lifecycle_and_action_graph() {
     let local = tokio::task::LocalSet::new();
     local
@@ -71,7 +71,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn local_handler_receives_raw_body_as_bytes() {
     let local = tokio::task::LocalSet::new();
     local
@@ -180,7 +180,7 @@ async fn a2a_handler_returns_inline_result_and_emits_a2a_action_graph() {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn worker_handler_enqueues_job_and_returns_receipt() {
     let (_dir, log, dispatcher) = worker_dispatcher_fixture(
         "triage".to_string(),

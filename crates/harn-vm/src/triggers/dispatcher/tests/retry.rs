@@ -1,6 +1,6 @@
 use super::*;
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn retry_exhaustion_moves_failed_dispatch_to_dlq() {
     let local = tokio::task::LocalSet::new();
     local
@@ -70,7 +70,7 @@ pub fn local_fn(event: TriggerEvent) -> string {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn destination_circuit_opens_and_dlqs_subsequent_dispatches() {
     let local = tokio::task::LocalSet::new();
     local
@@ -130,7 +130,7 @@ pub fn local_fn(event: TriggerEvent) -> string {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn replay_dispatch_emits_replay_chain_edge_and_headers() {
     let local = tokio::task::LocalSet::new();
     local
@@ -187,7 +187,7 @@ pub fn local_fn(event: TriggerEvent) -> dict {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn replay_dispatch_scopes_harn_replay_per_dispatch_and_child_process() {
     let local = tokio::task::LocalSet::new();
     local
@@ -273,7 +273,7 @@ pub fn local_fn(event: TriggerEvent) -> dict {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn shutdown_propagates_cancel_to_all_in_flight_local_handlers() {
     let local = tokio::task::LocalSet::new();
     local
@@ -325,7 +325,7 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn external_cancel_request_cancels_in_flight_local_handler() {
     let local = tokio::task::LocalSet::new();
     local
@@ -399,7 +399,7 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn external_cancel_request_interrupts_waitpoint_waiting_handler() {
     let local = tokio::task::LocalSet::new();
     local
@@ -476,7 +476,7 @@ pub fn wait_for_signal(event: TriggerEvent) -> string {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn run_skips_historical_inbox_entries_on_startup() {
     let local = tokio::task::LocalSet::new();
     local
@@ -505,6 +505,27 @@ pub fn local_fn(event: TriggerEvent) -> string {
                 .await
                 .expect("enqueue historical inbox entry");
 
+            // Subscribe to the outbox before starting the run task. The
+            // subscription's history-replay step backfills any events that
+            // arrive before live forwarding takes over, so this captures every
+            // dispatch the run task emits without a polling loop.
+            let outbox_topic = Topic::new("trigger.outbox").expect("outbox topic");
+            let mut outbox_stream = log
+                .clone()
+                .subscribe(&outbox_topic, None)
+                .await
+                .expect("subscribe to trigger.outbox");
+
+            // Install a one-shot signal that fires once the run loop has
+            // captured the inbox `latest()` cursor and registered its
+            // subscribe. This is the deterministic replacement for the legacy
+            // 20ms wall-clock probe: without it we'd race between the run
+            // loop's `latest()` call and the test's enqueue of `live`, and a
+            // late subscribe would advance `start_from` past `live` and skip
+            // it entirely.
+            let (subscribed_tx, subscribed_rx) = oneshot::channel();
+            super::install_test_inbox_subscribed_signal(subscribed_tx);
+
             let dispatcher_for_task = dispatcher.clone();
             let run_task = tokio::task::spawn_local(async move {
                 dispatcher_for_task
@@ -513,40 +534,50 @@ pub fn local_fn(event: TriggerEvent) -> string {
                     .expect("dispatcher run exits");
             });
 
-            tokio::time::sleep(NETWORK_PROBE_INITIAL).await;
-            let outbox_before = read_topic(log.clone(), "trigger.outbox").await;
-            assert!(
-                outbox_before.is_empty(),
-                "startup should not auto-dispatch historical inbox entries: {outbox_before:?}"
-            );
+            subscribed_rx
+                .await
+                .expect("dispatcher run loop reaches inbox subscribe");
 
+            // Now that run() is committed to start_from = historical.id, the
+            // live event - which has a strictly greater id - is guaranteed to
+            // be delivered through the inbox subscription.
             let live = trigger_event("issues.opened", "delivery-live");
+            let live_id = live.id.0.clone();
             dispatcher
-                .enqueue_targeted(Some("github-new-issue".to_string()), Some(1), live.clone())
+                .enqueue_targeted(Some("github-new-issue".to_string()), Some(1), live)
                 .await
                 .expect("enqueue live inbox entry");
 
-            let deadline = Instant::now() + TEST_DEFAULT_TIMEOUT;
-            while Instant::now() < deadline {
-                let outbox = read_topic(log.clone(), "trigger.outbox").await;
-                if outbox.iter().any(|(_, event)| {
-                    event.headers.get("event_id").map(String::as_str) == Some(live.id.0.as_str())
-                        && event.kind == "dispatch_succeeded"
-                }) {
+            loop {
+                let item = outbox_stream
+                    .next()
+                    .await
+                    .expect("outbox stream closed before live dispatch")
+                    .expect("outbox event");
+                let (_, event) = item;
+                if event.kind == "dispatch_succeeded"
+                    && event.headers.get("event_id").map(String::as_str) == Some(live_id.as_str())
+                {
                     break;
                 }
-                tokio::time::sleep(NETWORK_PROBE_INITIAL).await;
             }
 
             dispatcher.shutdown();
             run_task.await.expect("join dispatcher run task");
 
+            // Final state: live dispatched, historical never dispatched.
+            // Dispatching is append-only so this end-of-test assertion is
+            // equivalent to checking at every intermediate step.
             let outbox = read_topic(log.clone(), "trigger.outbox").await;
-            assert!(!outbox.iter().any(|(_, event)| {
-                event.headers.get("event_id").map(String::as_str) == Some(historical.id.0.as_str())
-            }));
+            assert!(
+                !outbox.iter().any(|(_, event)| {
+                    event.headers.get("event_id").map(String::as_str)
+                        == Some(historical.id.0.as_str())
+                }),
+                "historical inbox entry must not appear in outbox: {outbox:?}"
+            );
             assert!(outbox.iter().any(|(_, event)| {
-                event.headers.get("event_id").map(String::as_str) == Some(live.id.0.as_str())
+                event.headers.get("event_id").map(String::as_str) == Some(live_id.as_str())
                     && event.kind == "dispatch_succeeded"
             }));
         })
@@ -601,7 +632,7 @@ pub fn slow_handler(event: TriggerEvent) -> string {
 // Regression coverage for harn#324: dispatcher shutdown must wake handlers
 // that are blocked in `sleep()` so a cooperative `is_cancelled()` loop can
 // exit without silently dropping an already-dequeued inbox event.
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn run_shutdown_does_not_silently_drop_dequeued_inbox_events() {
     let local = tokio::task::LocalSet::new();
     local

@@ -64,6 +64,8 @@ thread_local! {
     static ACTIVE_DISPATCH_WAIT_LEASE: RefCell<Option<DispatchWaitLease>> = const { RefCell::new(None) };
     #[cfg(test)]
     static TEST_INBOX_DEQUEUED_SIGNAL: RefCell<Option<tokio::sync::oneshot::Sender<()>>> = const { RefCell::new(None) };
+    #[cfg(test)]
+    static TEST_INBOX_SUBSCRIBED_SIGNAL: RefCell<Option<tokio::sync::oneshot::Sender<()>>> = const { RefCell::new(None) };
 }
 
 tokio::task_local! {
@@ -642,6 +644,7 @@ impl Dispatcher {
             .expect("static trigger inbox envelopes topic is valid");
         let start_from = self.event_log.latest(&topic).await?;
         let stream = self.event_log.clone().subscribe(&topic, start_from).await?;
+        notify_test_inbox_subscribed();
         pin_mut!(stream);
         let mut cancel_rx = self.cancel_tx.subscribe();
 
@@ -3411,6 +3414,25 @@ fn notify_test_inbox_dequeued() {}
 #[cfg(test)]
 fn notify_test_inbox_dequeued() {
     TEST_INBOX_DEQUEUED_SIGNAL.with(|slot| {
+        if let Some(tx) = slot.borrow_mut().take() {
+            let _ = tx.send(());
+        }
+    });
+}
+
+#[cfg(test)]
+fn install_test_inbox_subscribed_signal(tx: tokio::sync::oneshot::Sender<()>) {
+    TEST_INBOX_SUBSCRIBED_SIGNAL.with(|slot| {
+        *slot.borrow_mut() = Some(tx);
+    });
+}
+
+#[cfg(not(test))]
+fn notify_test_inbox_subscribed() {}
+
+#[cfg(test)]
+fn notify_test_inbox_subscribed() {
+    TEST_INBOX_SUBSCRIBED_SIGNAL.with(|slot| {
         if let Some(tx) = slot.borrow_mut().take() {
             let _ = tx.send(());
         }

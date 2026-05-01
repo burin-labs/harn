@@ -1,6 +1,6 @@
 use super::*;
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn predicate_budget_exceeded_short_circuits_and_emits_lifecycle() {
     let local = tokio::task::LocalSet::new();
     local
@@ -88,7 +88,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn predicate_daily_budget_exceeded_short_circuits_subsequent_events() {
     let local = tokio::task::LocalSet::new();
     local
@@ -187,7 +187,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn predicate_budget_warn_strategy_proceeds_without_llm_spend() {
     let local = tokio::task::LocalSet::new();
     local
@@ -245,7 +245,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn predicate_budget_fail_strategy_moves_to_dlq() {
     let local = tokio::task::LocalSet::new();
     local
@@ -294,7 +294,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn predicate_budget_retry_later_strategy_defers_event() {
     let local = tokio::task::LocalSet::new();
     local
@@ -343,7 +343,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn predicate_replay_uses_event_cache_without_hitting_provider() {
     let local = tokio::task::LocalSet::new();
     local
@@ -424,7 +424,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn predicate_circuit_breaker_opens_after_three_failures() {
     let local = tokio::task::LocalSet::new();
     local
@@ -503,7 +503,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn autonomy_budget_routes_act_auto_to_approval() {
     crate::reset_thread_local_state();
     let dir = tempfile::tempdir().expect("tempdir");
@@ -610,7 +610,7 @@ pub fn local_fn(event: TriggerEvent) -> dict {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn handler_tier_is_enforced_through_capability_policy() {
     crate::reset_thread_local_state();
     let dir = tempfile::tempdir().expect("tempdir");

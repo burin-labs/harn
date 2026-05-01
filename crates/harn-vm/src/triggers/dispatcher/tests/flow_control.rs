@@ -1,6 +1,6 @@
 use super::*;
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn flow_control_rate_limit_skips_excess_dispatches() {
     let local = tokio::task::LocalSet::new();
     local
@@ -76,7 +76,7 @@ pub fn local_fn(event: TriggerEvent) -> string {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn flow_control_throttle_waits_for_window() {
     let local = tokio::task::LocalSet::new();
     local
@@ -215,7 +215,7 @@ pub fn slow_handler(event: TriggerEvent) -> string {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn waitpoint_wait_releases_singleton_flow_control_while_waiting() {
     crate::reset_thread_local_state();
     let dir = tempfile::tempdir().expect("tempdir");
@@ -293,7 +293,7 @@ async fn waitpoint_wait_releases_singleton_flow_control_while_waiting() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn monitor_wait_releases_singleton_flow_control_while_waiting() {
     let local = tokio::task::LocalSet::new();
     local
@@ -395,7 +395,7 @@ pub fn coordinated_handler(event: TriggerEvent) -> string {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn flow_control_debounce_keeps_latest_event() {
     let local = tokio::task::LocalSet::new();
     local
@@ -515,7 +515,7 @@ pub fn local_fn(event: TriggerEvent) -> string {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn flow_control_batch_coalesces_multiple_events() {
     let local = tokio::task::LocalSet::new();
     local
