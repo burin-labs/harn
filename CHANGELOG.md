@@ -91,6 +91,25 @@ condensed series summaries instead of full per-patch history.
   return their typed `OrchestratorError` / `PackageError::Registry`
   variants.
 
+### Tests
+
+- **`ProcessHandle` trait + `MockProcess` for deterministic
+  process-tool tests (#1062).** `crates/harn-hostlib/src/process/`
+  introduces a `ProcessHandle` / `ProcessSpawner` abstraction with a
+  real implementation that wraps `harn_vm::process_sandbox` and a
+  `MockSpawner` test double that returns scripted `MockProcess`
+  handles. `tools/proc.rs` and `tools/long_running.rs` consume the
+  trait instead of `std::process::Child` directly. The 33 integration
+  tests in `crates/harn-hostlib/tests/process_tools.rs` are rewritten
+  to install `MockSpawner` per test — zero `std::thread::sleep`, zero
+  `Instant::now()` polling, zero real subprocess spawning. Long-running
+  waiter completion is awaited deterministically via a new
+  `register_completion_notifier` API. The full file finishes in 0.01 s
+  and 50× rerun under `cargo nextest` is flake-free. Two real-process
+  smoke tests live in `crates/harn-hostlib/tests/process_tools_e2e.rs`
+  for end-to-end coverage; they keep the `_e2e.rs` suffix so issue
+  #1069's slow-job tagging can pick them up.
+
 ## v0.7.51
 
 ### Added
