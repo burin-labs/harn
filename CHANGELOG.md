@@ -118,6 +118,29 @@ condensed series summaries instead of full per-patch history.
 
 ### Fixed
 
+- **ACP vendor-extension session-update payloads follow `_meta.harn`
+  (#905).** Harn-specific session-update variants now ride their vendor
+  fields under `update._meta.harn` rather than the update root,
+  completing the namespacing pass started in #904. Affected variants:
+  `progress` (`phase`, `message`, `progress`, `total`, `data`), `log`
+  (`level`, `message`, `fields`), `fs_watch` (`subscriptionId`,
+  `events`), `worker_update` (`workerId`, `workerName`, `workerTask`,
+  `workerMode`, `event`, `status`, `terminal`, `metadata`, `audit`),
+  `transcript_compacted` (`mode`, `strategy`, `archivedMessages`,
+  `estimatedTokensBefore`, `estimatedTokensAfter`, `snapshotAssetId`),
+  `handoff` (`handoffId`, `artifactId`, `handoff`), `skill_activated` /
+  `skill_deactivated` / `skill_scope_tools` (`skillName`, `iteration`,
+  `reason`, `allowedTools`), and `tool_search_query` /
+  `tool_search_result` (`toolUseId`, `name`, `query`, `promoted`,
+  `strategy`, `mode`). Content extensions `visible_text` /
+  `visible_delta` on `agent_message_chunk` move under
+  `content._meta.harn`. The canonical `sessionUpdate` discriminator and
+  the ACP `content` block stay at their top-level locations. Burin Code
+  and other ACP hosts must migrate to the new field locations before
+  consuming this release; pre-#905 fixtures will fail to render. Burin
+  Code consumer migration is tracked in
+  [burin-code#511](https://github.com/burin-labs/burin-code/issues/511).
+
 - **ACP tool-call extension metadata follows `_meta.harn` (#904).**
   Harn-specific `tool_call` / `tool_call_update` fields (`audit`,
   `durationMs`, `executionDurationMs`, `error`, `errorCategory`,

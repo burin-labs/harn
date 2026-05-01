@@ -6,10 +6,14 @@
       "sessionId": "session-1",
       "update": {
         "content": {
+          "_meta": {
+            "harn": {
+              "visible_delta": "hello",
+              "visible_text": "hello"
+            }
+          },
           "text": "hello",
-          "type": "text",
-          "visible_delta": "hello",
-          "visible_text": "hello"
+          "type": "text"
         },
         "sessionUpdate": "agent_message_chunk"
       }
