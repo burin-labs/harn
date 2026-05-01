@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -16,7 +16,7 @@ use crate::triggers::registry::{
     install_manifest_triggers, resolve_live_trigger_binding, TriggerBindingSource,
     TriggerBindingSpec, TriggerHandlerSpec, TriggerPredicateSpec,
 };
-use crate::triggers::test_util::timing::{NETWORK_PROBE_INITIAL, TEST_DEFAULT_TIMEOUT};
+use crate::triggers::test_util::timing::TEST_DEFAULT_TIMEOUT;
 use crate::triggers::{ProviderId, ProviderPayload, SignatureStatus, TraceId, TriggerEvent};
 use crate::TriggerPredicateBudget;
 use crate::Vm;

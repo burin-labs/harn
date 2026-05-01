@@ -476,7 +476,7 @@ pub fn wait_for_signal(event: TriggerEvent) -> string {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(start_paused = true, flavor = "current_thread")]
 async fn run_skips_historical_inbox_entries_on_startup() {
     let local = tokio::task::LocalSet::new();
     local
@@ -513,7 +513,11 @@ pub fn local_fn(event: TriggerEvent) -> string {
                     .expect("dispatcher run exits");
             });
 
-            tokio::time::sleep(NETWORK_PROBE_INITIAL).await;
+            // Yield to let the run task start its subscription from the current log tail.
+            // The historical entry pre-dates that tail so it must not be dispatched.
+            for _ in 0..10 {
+                tokio::task::yield_now().await;
+            }
             let outbox_before = read_topic(log.clone(), "trigger.outbox").await;
             assert!(
                 outbox_before.is_empty(),
@@ -526,8 +530,8 @@ pub fn local_fn(event: TriggerEvent) -> string {
                 .await
                 .expect("enqueue live inbox entry");
 
-            let deadline = Instant::now() + TEST_DEFAULT_TIMEOUT;
-            while Instant::now() < deadline {
+            // The run loop is event-driven (subscribe-based); yield until dispatch completes.
+            loop {
                 let outbox = read_topic(log.clone(), "trigger.outbox").await;
                 if outbox.iter().any(|(_, event)| {
                     event.headers.get("event_id").map(String::as_str) == Some(live.id.0.as_str())
@@ -535,7 +539,7 @@ pub fn local_fn(event: TriggerEvent) -> string {
                 }) {
                     break;
                 }
-                tokio::time::sleep(NETWORK_PROBE_INITIAL).await;
+                tokio::task::yield_now().await;
             }
 
             dispatcher.shutdown();
