@@ -30,14 +30,12 @@ pub const A2A_PROTOCOL_VERSION: &str = "0.3.0";
 
 const A2A_VERSION_HEADER: &str = "a2a-version";
 const A2A_TRACE_HEADER: &str = "a2a-trace-id";
-const A2A_LEGACY_PROTOCOL_VERSIONS: &[&str] = &["1.0", "1.0.0"];
 const A2A_DEPRECATION_HEADER: &str = "deprecation";
 const A2A_AGENT_CARD_PATH: &str = "/.well-known/agent-card.json";
 
 const A2A_TASK_NOT_FOUND: i64 = -32001;
 const A2A_TASK_NOT_CANCELABLE: i64 = -32002;
 const A2A_UNSUPPORTED_OPERATION: i64 = -32003;
-const A2A_VERSION_NOT_SUPPORTED: i64 = -32009;
 
 #[derive(Clone, Debug)]
 pub struct A2aHttpServeOptions {
@@ -926,9 +924,7 @@ async fn jsonrpc_request(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = check_version_header(&headers, &body) {
-        return Json(response).into_response();
-    }
+    log_legacy_version_header(&headers);
     let request = match serde_json::from_slice::<JsonValue>(body.as_ref()) {
         Ok(value) => value,
         Err(error) => {
@@ -1029,6 +1025,7 @@ async fn rest_task_request(
     rpc_method: &str,
     rest_deprecation: Option<&'static str>,
 ) -> Response {
+    log_legacy_version_header(&headers);
     let params = match serde_json::from_slice::<JsonValue>(body.as_ref()) {
         Ok(value) => value,
         Err(error) => {
@@ -1190,24 +1187,24 @@ fn error_response(rpc_id: JsonValue, code: i64, message: &str) -> JsonValue {
     harn_vm::jsonrpc::error_response(rpc_id, code, message)
 }
 
-fn check_version_header(headers: &HeaderMap, body: &[u8]) -> Option<JsonValue> {
-    let version = headers
+/// Soft-deprecation observer for the legacy `a2a-version` request header.
+///
+/// A2A 0.3.0 negotiates protocol version through AgentCard discovery, not via
+/// request headers. We no longer reject requests carrying `a2a-version`; we
+/// just log a warning so we can spot residual client usage during the
+/// deprecation window. Slated for full removal one minor cycle after v0.7.x.
+fn log_legacy_version_header(headers: &HeaderMap) {
+    if let Some(version) = headers
         .get(A2A_VERSION_HEADER)
-        .and_then(|value| value.to_str().ok())?;
-    if version == A2A_PROTOCOL_VERSION || A2A_LEGACY_PROTOCOL_VERSIONS.contains(&version) {
-        return None;
+        .and_then(|value| value.to_str().ok())
+    {
+        tracing::warn!(
+            target: "harn_serve::a2a",
+            requested_version = %version,
+            supported_version = %A2A_PROTOCOL_VERSION,
+            "a2a-version request header is deprecated; clients should negotiate via AgentCard discovery"
+        );
     }
-    let rpc_id = serde_json::from_slice::<JsonValue>(body)
-        .ok()
-        .and_then(|value| value.get("id").cloned())
-        .unwrap_or(JsonValue::Null);
-    Some(error_response(
-        rpc_id,
-        A2A_VERSION_NOT_SUPPORTED,
-        &format!(
-            "VersionNotSupportedError: requested version {version}, supported: {A2A_PROTOCOL_VERSION}"
-        ),
-    ))
 }
 
 fn return_immediately(params: &JsonValue) -> bool {
@@ -2134,6 +2131,71 @@ pub fn triage(task: string) -> string {
             .headers()
             .get(axum::http::header::WARNING)
             .is_some());
+    }
+
+    #[tokio::test]
+    async fn unknown_a2a_version_header_no_longer_rejects_request() {
+        // Per A2A 0.3.0, version negotiation happens through AgentCard
+        // discovery; the request header is non-canonical. A request that
+        // carries an unknown `a2a-version` value must still dispatch — we
+        // only log a soft-deprecation warning. The previous behavior
+        // returned JSON-RPC `-32009 VersionNotSupportedError`.
+        let (_dir, server) = test_server(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+        );
+        let router = A2aServer::http_router(HttpState {
+            server,
+            public_url: "http://localhost:8080".to_string(),
+        });
+        let body = serde_json::to_vec(&harn_vm::jsonrpc::request(
+            "version-1",
+            "message/send",
+            json!({
+                "message": {
+                    "metadata": {"target_agent": "triage"},
+                    "parts": [{"type": "text", "text": "hello"}]
+                }
+            }),
+        ))
+        .expect("request body");
+
+        for header_value in ["1.0", "0.3.0", "9.9.9", "garbage"] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/")
+                        .header(axum::http::header::CONTENT_TYPE, "application/json")
+                        .header(A2A_VERSION_HEADER, header_value)
+                        .body(Body::from(body.clone()))
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+
+            assert_eq!(
+                response.status(),
+                StatusCode::OK,
+                "header {header_value} unexpectedly rejected"
+            );
+            let bytes = to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body");
+            let value: JsonValue = serde_json::from_slice(&bytes).expect("json body");
+            assert!(
+                value.get("error").is_none(),
+                "header {header_value} produced JSON-RPC error: {value}"
+            );
+            assert_eq!(
+                value["result"]["status"]["state"], "completed",
+                "header {header_value} did not dispatch: {value}"
+            );
+        }
     }
 
     #[tokio::test]
