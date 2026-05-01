@@ -133,6 +133,69 @@ fn deploy_activate() -> string { return "ready" }
 }
 
 #[test]
+fn test_durable_persona_annotations_are_recognized_and_validated() {
+    let warns = warnings(
+        r#"
+@persona(
+  triggers: [github.pr_opened, schedule("*/30 * * * *")],
+  tools: [github, ci, linear],
+  autonomy: act_with_approval,
+  budget: {daily_usd: 20, frontier_escalations: 3},
+  handoffs: [review_captain, human_maintainer],
+  receipts: required,
+)
+@trigger(github.check_failed)
+@handoff(target: review_captain, reason: "risky diff")
+@budget(daily_usd: 20, max_tokens: 100000)
+fn merge_captain(ctx) -> string { return "ok" }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .all(|warning| !warning.contains("unknown attribute")
+                && !warning.contains("only applies")
+                && !warning.contains("must")),
+        "durable persona annotations should validate cleanly: {warns:?}"
+    );
+}
+
+#[test]
+fn test_durable_persona_annotation_arg_type_warnings() {
+    let warns = warnings(
+        r#"
+@persona(triggers: "github.pr_opened", tools: [github, 1], budget: {daily_usd: "twenty"})
+@budget(max_tokens: "many")
+fn bad_persona(ctx) { return ctx }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|warning| warning.contains("`@persona(triggers: ...)` must be a list")),
+        "expected persona trigger list warning, got {warns:?}"
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|warning| warning.contains("`@persona(tools: ...)` must contain only")),
+        "expected persona tools warning, got {warns:?}"
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|warning| warning.contains("`@persona(daily_usd: ...)` must be a number")),
+        "expected inline budget warning, got {warns:?}"
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|warning| warning.contains("`@budget(max_tokens: ...)` must be a number")),
+        "expected budget warning, got {warns:?}"
+    );
+}
+
+#[test]
 fn test_flow_predicate_mode_attributes_warn_off_functions() {
     let warns = warnings(
         r#"

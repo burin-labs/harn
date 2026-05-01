@@ -56,7 +56,9 @@ pub fn compute_reference_counts(symbols: &mut [SymbolRecord], files: &[FileRecor
 /// Returns an empty map if `git` is unavailable, the call fails, or the
 /// repo has no commits in the window.
 pub fn compute_churn_scores(root: &Path) -> BTreeMap<String, f64> {
-    let output = Command::new("git")
+    let mut cmd = Command::new("git");
+    super::strip_ambient_git_env(&mut cmd);
+    let output = cmd
         .args([
             "-C",
             match root.to_str() {

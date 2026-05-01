@@ -2632,16 +2632,22 @@ type Box<out T> = fn(T) -> int
 Attributes are declarative metadata attached to a top-level declaration
 with the `@` prefix. They compile to side-effects (warnings, runtime
 registrations) at the attached declaration, and stack so a single decl
-can carry multiple. Arguments are restricted to literal values
-(strings, numbers, booleans, `nil`, bare identifiers) — no runtime
-evaluation, no expressions.
+can carry multiple. Arguments are restricted to compile-time values:
+strings, numbers, booleans, `nil`, bare or dotted identifiers, lists,
+dicts, and simple call-shaped sentinels such as `schedule("...")`.
+There is no runtime evaluation.
 
 ### Syntax
 
 ```ebnf
 attribute    ::= '@' IDENTIFIER ['(' attr_arg (',' attr_arg)* [','] ')']
 attr_arg     ::= [IDENTIFIER ':'] attr_value
-attr_value   ::= literal | IDENTIFIER
+attr_value   ::= literal | dotted_ident | attr_list | attr_dict | attr_call
+dotted_ident ::= IDENTIFIER ('.' IDENTIFIER)*
+attr_list    ::= '[' [attr_value (',' attr_value)* [',']] ']'
+attr_dict    ::= '{' [attr_key ':' attr_value (',' attr_key ':' attr_value)* [',']] '}'
+attr_key     ::= IDENTIFIER | STRING
+attr_call    ::= dotted_ident '(' [attr_value (',' attr_value)* [',']] ')'
 ```
 
 ```harn
@@ -2683,6 +2689,39 @@ pipeline test_smoke(task) { ... }
 Marks a pipeline as a test entry point. The conformance / `harn test`
 runner discovers attributed pipelines in addition to the legacy
 `test_*` naming convention. Both forms continue to work.
+
+#### Durable persona annotations
+
+Durable persona metadata can be declared directly on a function, tool, or
+pipeline with `@persona`, `@trigger`, `@handoff`, and `@budget`:
+
+```harn,ignore
+@persona(
+  triggers: [github.pr_opened, schedule("*/30 * * * *")],
+  tools: [github, ci, linear],
+  autonomy: act_with_approval,
+  budget: {daily_usd: 20, frontier_escalations: 3},
+  handoffs: [review_captain, human_maintainer],
+  receipts: required,
+)
+@trigger(github.check_failed)
+@handoff(target: review_captain, reason: "risky diff")
+@budget(daily_usd: 20, max_tokens: 100000)
+fn merge_captain(ctx: HandlerCtx) { ... }
+```
+
+The annotations are first-class parser and type-checker metadata. The
+attached declaration remains an ordinary callable declaration at runtime
+unless a host or packaging layer consumes the metadata. Existing manifest
+and dict-style trigger/persona metadata remains valid Harn data and is
+not rewritten by this syntax.
+
+| Attribute | Arguments |
+|---|---|
+| `@persona` | Named metadata: `triggers`, `schedules`, `tools`, `autonomy`, `budget`, `handoffs`, `context_packs`, `evals`, `receipts`, `model`, `owner`, `name`, `description` |
+| `@trigger` | Positional trigger specs (`github.pr_opened`, `"github.pr_opened"`, `schedule("cron")`) or named `id`, `provider`, `kind`, `event`, `when`, `schedule`, `budget` |
+| `@handoff` | Named `target`/`to`, `reason`, `schema`, `artifact` |
+| `@budget` | Named numeric fields: `daily_usd`, `hourly_usd`, `run_usd`, `max_tokens`, `frontier_escalations`, `max_autonomous_decisions_per_hour`, `max_autonomous_decisions_per_day`; string/symbol exhaustion policy via `on_exhausted` or `on_budget_exhausted` |
 
 #### `@complexity(allow)`
 

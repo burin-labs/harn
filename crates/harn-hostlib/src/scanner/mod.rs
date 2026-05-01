@@ -14,6 +14,7 @@
 //! caller to pass the previous result back over the wire.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -37,6 +38,16 @@ mod snapshot;
 mod subproject;
 mod symbols;
 mod test_mapping;
+
+fn strip_ambient_git_env(cmd: &mut Command) {
+    // Git exports repository-specific GIT_* variables while running hooks.
+    // Scanner probes must honor their explicit `-C <root>` argument instead.
+    for (key, _) in std::env::vars() {
+        if key.starts_with("GIT_") {
+            cmd.env_remove(&key);
+        }
+    }
+}
 
 pub use result::{
     DependencyEdge, FileRecord, FolderRecord, LanguageStat, ProjectMetadata, ScanDelta, ScanResult,

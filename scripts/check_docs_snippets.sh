@@ -98,7 +98,8 @@ extract_blocks() {
 
 while IFS= read -r -d '' md_file; do
   file_prefix="$TMP_DIR/$(basename "${md_file%.md}")"
-  results=$(extract_blocks "$md_file" "$file_prefix")
+  results_file="$TMP_DIR/$(basename "${md_file%.md}")_blocks.txt"
+  extract_blocks "$md_file" "$file_prefix" >"$results_file"
 
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
@@ -128,7 +129,7 @@ while IFS= read -r -d '' md_file; do
         fi
         ;;
     esac
-  done <<< "$results"
+  done <"$results_file"
 done < <(find docs/src -name '*.md' -print0)
 
 echo

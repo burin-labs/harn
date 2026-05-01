@@ -1,7 +1,7 @@
 pipeline default() {
   // Connect to the test MCP echo server
   let root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let server_path = root + "/conformance/helpers/mcp_echo_server.py"
+  let server_path = path_join(root, "conformance/helpers/mcp_echo_server.py")
   let client = mcp_connect("python3", [server_path])
   // Check type
   println(type_of(client))

@@ -391,8 +391,35 @@ impl Compiler {
             Node::Identifier(name) => {
                 // Treat bare identifiers as string sentinels (e.g. `kind: edit`
                 // should behave the same as `kind: "edit"`). This mirrors
-                // common attribute-DSL ergonomics.
+                // common attribute-DSL ergonomics. The parser also folds
+                // dotted sentinels like `github.pr_opened` into this node.
                 let idx = self.chunk.add_constant(Constant::String(name.clone()));
+                self.chunk.emit_u16(Op::Constant, idx, self.line);
+            }
+            Node::ListLiteral(items) => {
+                for item in items {
+                    self.compile_attribute_value(item)?;
+                }
+                self.chunk
+                    .emit_u16(Op::BuildList, items.len() as u16, self.line);
+            }
+            Node::DictLiteral(entries) => {
+                for entry in entries {
+                    self.compile_attribute_value(&entry.key)?;
+                    self.compile_attribute_value(&entry.value)?;
+                }
+                self.chunk
+                    .emit_u16(Op::BuildDict, entries.len() as u16, self.line);
+            }
+            Node::FunctionCall { name, args, .. } => {
+                let rendered_args = args
+                    .iter()
+                    .map(attribute_value_repr)
+                    .collect::<Result<Vec<_>, _>>()?
+                    .join(", ");
+                let idx = self
+                    .chunk
+                    .add_constant(Constant::String(format!("{name}({rendered_args})")));
                 self.chunk.emit_u16(Op::Constant, idx, self.line);
             }
             _ => {
@@ -403,5 +430,50 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+}
+
+fn attribute_value_repr(node: &SNode) -> Result<String, CompileError> {
+    match &node.node {
+        Node::StringLiteral(s) | Node::RawStringLiteral(s) => Ok(format!("{s:?}")),
+        Node::IntLiteral(i) => Ok(i.to_string()),
+        Node::FloatLiteral(f) => Ok(f.to_string()),
+        Node::BoolLiteral(b) => Ok(b.to_string()),
+        Node::NilLiteral => Ok("nil".to_string()),
+        Node::Identifier(name) => Ok(name.clone()),
+        Node::ListLiteral(items) => {
+            let items = items
+                .iter()
+                .map(attribute_value_repr)
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ");
+            Ok(format!("[{items}]"))
+        }
+        Node::DictLiteral(entries) => {
+            let entries = entries
+                .iter()
+                .map(|entry| {
+                    Ok(format!(
+                        "{}: {}",
+                        attribute_value_repr(&entry.key)?,
+                        attribute_value_repr(&entry.value)?
+                    ))
+                })
+                .collect::<Result<Vec<_>, CompileError>>()?
+                .join(", ");
+            Ok(format!("{{{entries}}}"))
+        }
+        Node::FunctionCall { name, args, .. } => {
+            let args = args
+                .iter()
+                .map(attribute_value_repr)
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ");
+            Ok(format!("{name}({args})"))
+        }
+        _ => Err(CompileError {
+            message: "attribute argument must be a literal value".into(),
+            line: node.span.line as u32,
+        }),
     }
 }

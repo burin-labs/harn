@@ -40,8 +40,9 @@ pub fn peel_attributes(node: &SNode) -> (&[Attribute], &SNode) {
 }
 
 /// A single argument to an attribute. Positional args have `name = None`;
-/// named args use `name: Some("key")`. Values are restricted to literal
-/// expressions by the parser (string/int/float/bool/nil/identifier).
+/// named args use `name: Some("key")`. Values are restricted to
+/// compile-time metadata expressions by the parser (literal scalars,
+/// identifiers, lists, dicts, and call-shaped sentinels).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AttributeArg {
     pub name: Option<String>,

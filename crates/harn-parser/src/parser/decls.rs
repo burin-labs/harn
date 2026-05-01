@@ -232,12 +232,10 @@ impl Parser {
         })
     }
 
-    /// Parse a literal-or-identifier expression for an attribute argument.
-    /// Restricted to keep attribute evaluation purely compile-time:
-    /// strings, ints, floats, bools, nil, bare identifiers (typically
-    /// type names like `EditArgs` or sentinel values like `allow`), and
-    /// list literals containing the same restricted values (used by Flow
-    /// `@archivist(evidence: [...])` and similar provenance attributes).
+    /// Parse a compile-time attribute argument value. Attribute values are
+    /// deliberately non-evaluating: literal scalars, bare or dotted
+    /// identifiers used as string sentinels (`github.pr_opened`), lists,
+    /// dicts, and simple call-shaped sentinels such as `schedule("...")`.
     pub(super) fn parse_attribute_value(&mut self) -> Result<SNode, ParserError> {
         let span = self.current_span();
         let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
@@ -252,7 +250,44 @@ impl Parser {
             TokenKind::True => Node::BoolLiteral(true),
             TokenKind::False => Node::BoolLiteral(false),
             TokenKind::Nil => Node::NilLiteral,
-            TokenKind::Identifier(name) => Node::Identifier(name.clone()),
+            TokenKind::Identifier(name) => {
+                let mut name = name.clone();
+                self.advance();
+                while self.check(&TokenKind::Dot) {
+                    self.advance();
+                    let property = self.consume_identifier("identifier segment after '.'")?;
+                    name.push('.');
+                    name.push_str(&property);
+                }
+                if self.check(&TokenKind::LParen) {
+                    self.advance();
+                    self.skip_newlines();
+                    let mut args = Vec::new();
+                    while !self.check(&TokenKind::RParen) {
+                        args.push(self.parse_attribute_value()?);
+                        self.skip_newlines();
+                        if self.check(&TokenKind::Comma) {
+                            self.advance();
+                            self.skip_newlines();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.consume(&TokenKind::RParen, ")")?;
+                    return Ok(spanned(
+                        Node::FunctionCall {
+                            name,
+                            type_args: Vec::new(),
+                            args,
+                        },
+                        Span::merge(span, self.prev_span()),
+                    ));
+                }
+                return Ok(spanned(
+                    Node::Identifier(name),
+                    Span::merge(span, self.prev_span()),
+                ));
+            }
             TokenKind::LBracket => {
                 self.advance();
                 self.skip_newlines();
@@ -273,6 +308,45 @@ impl Parser {
                     Span::merge(span, self.prev_span()),
                 ));
             }
+            TokenKind::LBrace => {
+                self.advance();
+                self.skip_newlines();
+                let mut entries = Vec::new();
+                while !self.check(&TokenKind::RBrace) {
+                    let key_span = self.current_span();
+                    let key = match self.current_kind().cloned() {
+                        Some(TokenKind::Identifier(name)) => {
+                            self.advance();
+                            spanned(Node::Identifier(name), key_span)
+                        }
+                        Some(TokenKind::StringLiteral(name)) => {
+                            self.advance();
+                            spanned(Node::StringLiteral(name), key_span)
+                        }
+                        Some(TokenKind::RawStringLiteral(name)) => {
+                            self.advance();
+                            spanned(Node::RawStringLiteral(name), key_span)
+                        }
+                        _ => return Err(self.error("attribute dict key")),
+                    };
+                    self.consume(&TokenKind::Colon, ":")?;
+                    self.skip_newlines();
+                    let value = self.parse_attribute_value()?;
+                    entries.push(DictEntry { key, value });
+                    self.skip_newlines();
+                    if self.check(&TokenKind::Comma) {
+                        self.advance();
+                        self.skip_newlines();
+                    } else {
+                        break;
+                    }
+                }
+                self.consume(&TokenKind::RBrace, "}")?;
+                return Ok(spanned(
+                    Node::DictLiteral(entries),
+                    Span::merge(span, self.prev_span()),
+                ));
+            }
             TokenKind::Minus => {
                 self.advance();
                 let inner_tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
@@ -289,7 +363,7 @@ impl Parser {
                 self.advance();
                 return Ok(spanned(n, Span::merge(span, self.prev_span())));
             }
-            _ => return Err(self.error("attribute argument value (literal or identifier)")),
+            _ => return Err(self.error("attribute argument value")),
         };
         self.advance();
         Ok(spanned(node, span))

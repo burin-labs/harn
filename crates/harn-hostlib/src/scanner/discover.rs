@@ -59,7 +59,9 @@ impl Default for DiscoverOptions {
 }
 
 fn git_ls_files(root: &Path) -> Option<Vec<DiscoveredFile>> {
-    let output = Command::new("git")
+    let mut cmd = Command::new("git");
+    super::strip_ambient_git_env(&mut cmd);
+    let output = cmd
         .args([
             "-C",
             root.to_str()?,
