@@ -40,8 +40,7 @@ fn fixture(scenario: &str, kind: &str) -> PathBuf {
 
 fn run_audit(scenario: &str) -> AuditReport {
     let loaded = load_transcript_jsonl(&fixture(scenario, "transcripts")).expect("load transcript");
-    let golden =
-        load_merge_captain_golden(&fixture(scenario, "goldens")).expect("load golden");
+    let golden = load_merge_captain_golden(&fixture(scenario, "goldens")).expect("load golden");
     let mut report = audit_transcript(&loaded.events, Some(&golden));
     report.source_path = Some(loaded.source_path.display().to_string());
     report

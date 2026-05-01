@@ -172,8 +172,7 @@ fn crystallize_version_bump_emits_validatable_bundle() {
 
     // Manifest sanity check: schema marker, fixture redaction, plan-vs-candidate kind.
     let manifest_path = bundle_dir.join("candidate.json");
-    let manifest_json: Value =
-        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    let manifest_json: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
     assert_eq!(
         manifest_json["schema"],
         Value::String("harn.crystallization.candidate.bundle".to_string())
@@ -243,12 +242,9 @@ fn crystallize_plan_only_bundle_keeps_plan_only_kind() {
     )
     .expect("crystallize");
 
-    let bundle = build_crystallization_bundle(
-        artifacts.clone(),
-        &normalized,
-        BundleOptions::default(),
-    )
-    .expect("build bundle");
+    let bundle =
+        build_crystallization_bundle(artifacts.clone(), &normalized, BundleOptions::default())
+            .expect("build bundle");
 
     let report = write_crystallization_artifacts(artifacts, &workflow_path, &report_path, None)
         .expect("write artifacts");

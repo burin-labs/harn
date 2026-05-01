@@ -2200,6 +2200,32 @@ pub fn on_fail(event: TriggerEvent) -> any {
         serde_json::from_str(text).unwrap_or_else(|_| json!(text))
     }
 
+    // Wait for the next non-lagged notification, treating broadcast
+    // `Lagged` errors as benign (production listeners at lines 1154 /
+    // 1786 do the same). Without this, fixture-write storms during test
+    // setup can fill the 64-slot broadcast buffer faster than the
+    // subscriber drains it on a loaded CI runner, producing a spurious
+    // `Lagged(N)` panic.
+    async fn recv_next_notification(
+        notifications: &mut broadcast::Receiver<JsonValue>,
+    ) -> JsonValue {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            assert!(!remaining.is_zero(), "timed out waiting for notification");
+            match tokio::time::timeout(remaining, notifications.recv())
+                .await
+                .expect("timed out waiting for notification")
+            {
+                Ok(msg) => return msg,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => {
+                    panic!("notification channel closed")
+                }
+            }
+        }
+    }
+
     async fn collect_notification_methods(
         notifications: &mut broadcast::Receiver<JsonValue>,
         expected: &[&str],
@@ -2209,17 +2235,8 @@ pub fn on_fail(event: TriggerEvent) -> any {
             .copied()
             .collect::<std::collections::BTreeSet<_>>();
         let mut seen = std::collections::BTreeSet::new();
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
         while !expected.iter().all(|method| seen.contains(*method)) {
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            assert!(
-                !remaining.is_zero(),
-                "timed out waiting for notifications; seen={seen:?}"
-            );
-            let notification = tokio::time::timeout(remaining, notifications.recv())
-                .await
-                .expect("timed out waiting for list_changed notification")
-                .expect("notification channel closed");
+            let notification = recv_next_notification(notifications).await;
             if let Some(method) = notification.get("method").and_then(JsonValue::as_str) {
                 seen.insert(method.to_string());
             }
@@ -2364,11 +2381,7 @@ required = true
 Updated: {{ code }}
 "#,
         );
-        let notification =
-            tokio::time::timeout(std::time::Duration::from_secs(5), notifications.recv())
-                .await
-                .expect("timed out waiting for prompt list_changed")
-                .expect("prompt notification channel closed");
+        let notification = recv_next_notification(&mut notifications).await;
         assert_eq!(
             notification["method"],
             json!("notifications/prompts/list_changed")
