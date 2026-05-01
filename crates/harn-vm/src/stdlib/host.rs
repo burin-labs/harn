@@ -592,6 +592,16 @@ pub(crate) async fn dispatch_process_exec(
             cmd.env(key, value);
         }
     }
+    // env_remove: list of environment variable names to strip before
+    // spawning. Applied after `env` so callers can both inherit and
+    // selectively unset (e.g. the git stdlib strips `GIT_*` so its
+    // operations are self-contained even when Harn is invoked from
+    // inside a git hook that sets `GIT_DIR`).
+    if let Some(env_remove) = optional_string_list(&params, "env_remove") {
+        for key in env_remove {
+            cmd.env_remove(key);
+        }
+    }
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
