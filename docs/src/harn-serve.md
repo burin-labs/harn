@@ -125,7 +125,11 @@ Behavior today:
 - A2A 0.3.0 JSON-RPC methods `message/send`, `message/stream`, `tasks/get`,
   `tasks/cancel`, `tasks/resubscribe`,
   `tasks/pushNotificationConfig/{set,get,list,delete}`, and
-  `agent/getAuthenticatedExtendedCard`
+  `agent/getAuthenticatedExtendedCard` (returns an enriched card with
+  declared security schemes and per-skill `outputSchema` to authenticated
+  callers; rejects unauthenticated calls with HTTP 401 plus a
+  `WWW-Authenticate` challenge, or `ExtendedAgentCardNotConfiguredError`
+  / `-32007` when no `AuthPolicy` methods are configured)
 - one-cycle compatibility aliases for `a2a.*`, `tasks/send`,
   `tasks/send_and_wait`, `tasks/sendSubscribe`, and `tasks/list`, with
   `Deprecation: true` on legacy HTTP responses

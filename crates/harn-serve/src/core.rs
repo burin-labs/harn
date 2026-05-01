@@ -150,6 +150,10 @@ impl DispatchCore {
         &self.catalog
     }
 
+    pub fn auth_policy(&self) -> &AuthPolicy {
+        &self.config.auth_policy
+    }
+
     pub async fn dispatch(&self, request: CallRequest) -> Result<CallResponse, DispatchError> {
         let authorization = self.config.auth_policy.authorize(&request.auth).await;
         let trace_id = request.trace_id.clone().unwrap_or_default();

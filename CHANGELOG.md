@@ -23,6 +23,20 @@ condensed series summaries instead of full per-patch history.
   touch the workspace. `default` and `code` preserve the pre-modes
   baseline.
 
+- **A2A authenticated extended agent card (#888).** `harn serve a2a` now
+  honors the A2A 0.3.0 contract for `agent/getAuthenticatedExtendedCard`.
+  Public agent cards advertise `supportsAuthenticatedExtendedCard: true`
+  (and `capabilities.extendedAgentCard: true`) when the server is
+  configured with at least one `AuthPolicy` method, otherwise both flags
+  remain `false`. The RPC method enforces the configured auth schemes:
+  unauthenticated calls return HTTP 401 with a `WWW-Authenticate`
+  challenge listing the supported schemes (`Bearer` for API key/OAuth,
+  `HMAC-SHA256` for HMAC), while authenticated callers receive an
+  extended card with `metadata.extendedAgentCard: true`, the resolved
+  principal subject, declared `securitySchemes`, and per-skill
+  `outputSchema`. When no auth is configured the server returns
+  `ExtendedAgentCardNotConfiguredError` (`-32007`) per the spec.
+
 - **Per-agent autonomy budget for `agent_loop` (#928).** New
   `autonomy_budget: {per_hour, per_day, key?, reviewer?}` option on
   `agent_loop` (and downstream `sub_agent_run` / workflow stages) caps
@@ -35,6 +49,7 @@ condensed series summaries instead of full per-patch history.
   `autonomy.tier_transition` trust-graph record from `act_auto` to
   `act_with_approval` — the same audit trail the trigger-side
   `max_autonomous_decisions_per_*` cap produces.
+
 - **MCP elicitation (`elicitation/create`) on both roles (#875).** Harn
   servers can now prompt connected clients for structured user input
   mid-tool-call via the `mcp_elicit({ message, requestedSchema })`
@@ -48,6 +63,7 @@ condensed series summaries instead of full per-patch history.
   Bidirectional stdio is implemented; HTTP streamable-transport server
   surfaces are wired through the per-session SSE stream so a tool
   handler can elicit and receive a response over a separate POST.
+
 - **ACP slash-commands via `@command` (#896).** New `@command(name?,
   description?, hint?)` attribute on top-level pipelines. The ACP adapter
   (`harn serve --pipeline ...`) discovers tagged pipelines from the

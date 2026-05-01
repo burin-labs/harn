@@ -22,8 +22,9 @@ use tokio::task::LocalSet;
 use uuid::Uuid;
 
 use crate::{
-    AdapterDescriptor, AuthRequest, CallArguments, CallRequest, CallResponse, DispatchCore,
-    DispatchError, ExportCatalog, HttpTlsConfig, TransportAdapter,
+    AdapterDescriptor, AuthMethodConfig, AuthPolicy, AuthRequest, AuthorizationDecision,
+    CallArguments, CallRequest, CallResponse, DispatchCore, DispatchError, ExportCatalog,
+    HttpTlsConfig, TransportAdapter,
 };
 
 pub const A2A_PROTOCOL_VERSION: &str = "0.3.0";
@@ -32,10 +33,12 @@ const A2A_VERSION_HEADER: &str = "a2a-version";
 const A2A_TRACE_HEADER: &str = "a2a-trace-id";
 const A2A_DEPRECATION_HEADER: &str = "deprecation";
 const A2A_AGENT_CARD_PATH: &str = "/.well-known/agent-card.json";
+const A2A_AUTH_REALM: &str = "harn-a2a";
 
 const A2A_TASK_NOT_FOUND: i64 = -32001;
 const A2A_TASK_NOT_CANCELABLE: i64 = -32002;
 const A2A_UNSUPPORTED_OPERATION: i64 = -32003;
+const A2A_EXTENDED_AGENT_CARD_NOT_CONFIGURED: i64 = -32007;
 
 #[derive(Clone, Debug)]
 pub struct A2aHttpServeOptions {
@@ -75,6 +78,7 @@ pub struct A2aServer {
     agent_name: String,
     card_signing_secret: Option<String>,
     catalog: ExportCatalog,
+    core: Arc<DispatchCore>,
     executor: ExecutionRuntime,
     tasks: TaskStore,
 }
@@ -160,6 +164,14 @@ enum RpcOutcome {
 struct ProcessedRpc {
     outcome: RpcOutcome,
     deprecation: Option<&'static str>,
+    /// HTTP status override. When `None`, the transport applies its
+    /// default (200 for ok, 400 for json-rpc errors). Set this for
+    /// transport-level outcomes that aren't expressed by the JSON-RPC
+    /// body — e.g. 401 for unauthenticated extended-card requests.
+    status: Option<StatusCode>,
+    /// `WWW-Authenticate` header value, paired with a 401 status to
+    /// advertise the auth scheme(s) the caller can satisfy.
+    auth_challenge: Option<HeaderValue>,
 }
 
 impl A2aServer {
@@ -179,7 +191,8 @@ impl A2aServer {
             agent_name,
             card_signing_secret: config.card_signing_secret,
             catalog,
-            executor: ExecutionRuntime::start(core),
+            executor: ExecutionRuntime::start(core.clone()),
+            core,
             tasks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -232,19 +245,14 @@ impl A2aServer {
             .catalog
             .functions
             .values()
-            .map(|function| {
-                json!({
-                    "id": function.name,
-                    "name": function.name,
-                    "description": format!("Invoke exported Harn function '{}'.", function.name),
-                    "tags": ["harn", "function"],
-                    "examples": [],
-                    "inputModes": ["application/json", "text/plain", "application/octet-stream"],
-                    "outputModes": ["application/json", "text/plain", "application/octet-stream"],
-                    "inputSchema": function.input_schema,
-                })
-            })
+            .map(public_skill_card)
             .collect::<Vec<_>>();
+        let extended_supported = self.extended_card_available();
+        let (security_schemes, security) = if extended_supported {
+            policy_security_schemes(self.core.auth_policy())
+        } else {
+            (json!({}), json!([]))
+        };
         let mut card = json!({
             "name": self.agent_name,
             "description": "Harn peer agent",
@@ -260,14 +268,15 @@ impl A2aServer {
                 "organization": "Harn",
                 "url": "https://harn.dev"
             },
-            "securitySchemes": {},
-            "security": [],
+            "securitySchemes": security_schemes,
+            "security": security,
+            "supportsAuthenticatedExtendedCard": extended_supported,
             "defaultInputModes": ["application/json", "text/plain", "application/octet-stream"],
             "defaultOutputModes": ["application/json", "text/plain", "application/octet-stream"],
             "capabilities": {
                 "streaming": true,
                 "pushNotifications": true,
-                "extendedAgentCard": false
+                "extendedAgentCard": extended_supported
             },
             "skills": skills
         });
@@ -275,6 +284,49 @@ impl A2aServer {
             sign_card(&mut card, secret);
         }
         card
+    }
+
+    /// Authenticated extended card. The public card advertises the
+    /// available skills with a generic description and the set of
+    /// declared security schemes; the extended card adds per-skill
+    /// `outputModes` detail (currently identical to the public card),
+    /// includes the authenticated principal's subject so callers can
+    /// verify the auth round-trip, and tags itself with
+    /// `metadata.extendedAgentCard: true` so it cannot be confused with
+    /// the public card.
+    fn extended_agent_card(&self, public_url: &str, principal_subject: &str) -> JsonValue {
+        let mut card = self.agent_card(public_url);
+        if let Some(object) = card.as_object_mut() {
+            object.insert(
+                "metadata".to_string(),
+                json!({
+                    "extendedAgentCard": true,
+                    "principal": principal_subject,
+                }),
+            );
+            // Mirror declared schemes/requirements onto the extended
+            // card. They are also on the public card when the feature
+            // is enabled, but a future change might choose to omit
+            // them publicly while keeping the extended card intact.
+            let (security_schemes, security) = policy_security_schemes(self.core.auth_policy());
+            object.insert("securitySchemes".to_string(), security_schemes);
+            object.insert("security".to_string(), security);
+            object.insert(
+                "skills".to_string(),
+                JsonValue::Array(
+                    self.catalog
+                        .functions
+                        .values()
+                        .map(extended_skill_card)
+                        .collect(),
+                ),
+            );
+        }
+        card
+    }
+
+    fn extended_card_available(&self) -> bool {
+        !self.core.auth_policy().methods.is_empty()
     }
 
     #[cfg(test)]
@@ -296,6 +348,8 @@ impl A2aServer {
             .unwrap_or_default();
         let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
 
+        let mut status: Option<StatusCode> = None;
+        let mut auth_challenge: Option<HeaderValue> = None;
         let (outcome, deprecation) = match method {
             "message/send" | "a2a.SendMessage" | "tasks/send" | "tasks/send_and_wait" => {
                 let deprecation = match method {
@@ -483,10 +537,41 @@ impl A2aServer {
                     ),
                 }
             }
-            "agent/getAuthenticatedExtendedCard" => (
-                RpcOutcome::Json(task_rpc_response(&rpc_id, self.agent_card(public_url))),
-                None,
-            ),
+            "agent/getAuthenticatedExtendedCard" => {
+                let policy = self.core.auth_policy();
+                if policy.methods.is_empty() {
+                    (
+                        RpcOutcome::Json(error_response(
+                            rpc_id,
+                            A2A_EXTENDED_AGENT_CARD_NOT_CONFIGURED,
+                            "ExtendedAgentCardNotConfiguredError: agent has no authentication methods configured",
+                        )),
+                        None,
+                    )
+                } else {
+                    match policy.authorize(&auth).await {
+                        AuthorizationDecision::Authorized(principal) => (
+                            RpcOutcome::Json(task_rpc_response(
+                                &rpc_id,
+                                self.extended_agent_card(public_url, &principal.subject),
+                            )),
+                            None,
+                        ),
+                        AuthorizationDecision::Rejected(message) => {
+                            status = Some(StatusCode::UNAUTHORIZED);
+                            auth_challenge = Some(www_authenticate_header(policy));
+                            (
+                                RpcOutcome::Json(error_response(
+                                    rpc_id,
+                                    -32000,
+                                    &format!("Unauthorized: {message}"),
+                                )),
+                                None,
+                            )
+                        }
+                    }
+                }
+            }
             _ => (
                 RpcOutcome::Json(error_response(
                     rpc_id,
@@ -499,6 +584,8 @@ impl A2aServer {
         ProcessedRpc {
             outcome,
             deprecation,
+            status,
+            auth_challenge,
         }
     }
 
@@ -1048,25 +1135,45 @@ async fn rest_task_request(
         .process_rpc_with_public_url(request, auth, &state.public_url)
         .await;
     processed.deprecation = processed.deprecation.or(rest_deprecation);
-    match processed.outcome {
-        RpcOutcome::Json(response) if response.get("error").is_some() => response_with_deprecation(
-            (StatusCode::BAD_REQUEST, Json(response)).into_response(),
-            processed.deprecation,
-        ),
+    let auth_challenge = processed.auth_challenge.clone();
+    let response = match processed.outcome {
+        RpcOutcome::Json(response) if response.get("error").is_some() => {
+            let status = processed.status.unwrap_or(StatusCode::BAD_REQUEST);
+            response_with_deprecation(
+                (status, Json(response)).into_response(),
+                processed.deprecation,
+            )
+        }
         RpcOutcome::Json(response) => {
             response_with_deprecation(Json(response["result"].clone()), processed.deprecation)
         }
         RpcOutcome::Sse(rx) => response_with_deprecation(sse_response(rx), processed.deprecation),
-    }
+    };
+    apply_auth_challenge(response, auth_challenge)
 }
 
 fn rpc_response(processed: ProcessedRpc) -> Response {
-    match processed.outcome {
+    let auth_challenge = processed.auth_challenge.clone();
+    let response = match processed.outcome {
         RpcOutcome::Json(response) => {
-            response_with_deprecation(Json(response), processed.deprecation)
+            let mut http = response_with_deprecation(Json(response), processed.deprecation);
+            if let Some(status) = processed.status {
+                *http.status_mut() = status;
+            }
+            http
         }
         RpcOutcome::Sse(rx) => response_with_deprecation(sse_response(rx), processed.deprecation),
+    };
+    apply_auth_challenge(response, auth_challenge)
+}
+
+fn apply_auth_challenge(mut response: Response, challenge: Option<HeaderValue>) -> Response {
+    if let Some(value) = challenge {
+        response
+            .headers_mut()
+            .insert(axum::http::header::WWW_AUTHENTICATE, value);
     }
+    response
 }
 
 fn response_with_deprecation(response: impl IntoResponse, message: Option<&str>) -> Response {
@@ -1812,6 +1919,125 @@ fn a2a_artifact_from_harn_artifact(artifact: &JsonValue) -> JsonValue {
     value
 }
 
+fn public_skill_card(function: &crate::ExportedFunction) -> JsonValue {
+    json!({
+        "id": function.name,
+        "name": function.name,
+        "description": format!("Invoke exported Harn function '{}'.", function.name),
+        "tags": ["harn", "function"],
+        "examples": [],
+        "inputModes": ["application/json", "text/plain", "application/octet-stream"],
+        "outputModes": ["application/json", "text/plain", "application/octet-stream"],
+        "inputSchema": function.input_schema,
+    })
+}
+
+fn extended_skill_card(function: &crate::ExportedFunction) -> JsonValue {
+    let mut card = public_skill_card(function);
+    if let Some(object) = card.as_object_mut() {
+        object.insert(
+            "description".to_string(),
+            JsonValue::String(format!(
+                "Invoke exported Harn function '{}'. Includes detailed schemas for authenticated callers.",
+                function.name
+            )),
+        );
+        // The output schema is not currently introspected from the
+        // typed return value of an exported Harn function. Emit an
+        // empty object so authenticated tooling can rely on the field
+        // being present even when the schema is unknown.
+        object.insert("outputSchema".to_string(), json!({}));
+    }
+    card
+}
+
+fn policy_security_schemes(policy: &AuthPolicy) -> (JsonValue, JsonValue) {
+    let mut schemes = serde_json::Map::new();
+    let mut requirements: Vec<JsonValue> = Vec::new();
+    for method in &policy.methods {
+        match method {
+            AuthMethodConfig::ApiKey(_) => {
+                schemes.insert(
+                    "apiKey".to_string(),
+                    json!({
+                        "type": "apiKey",
+                        "in": "header",
+                        "name": "Authorization",
+                        "description": "API key supplied as `Authorization: Bearer <key>` or `X-API-Key`.",
+                    }),
+                );
+                requirements.push(json!({"apiKey": []}));
+            }
+            AuthMethodConfig::Hmac(config) => {
+                schemes.insert(
+                    "hmac".to_string(),
+                    json!({
+                        "type": "http",
+                        "scheme": "HMAC-SHA256",
+                        "description": format!(
+                            "HMAC-SHA256 canonical request signature (provider '{}').",
+                            config.provider
+                        ),
+                    }),
+                );
+                requirements.push(json!({"hmac": []}));
+            }
+            AuthMethodConfig::OAuth21(config) => {
+                let mut scheme = json!({
+                    "type": "oauth2",
+                    "description": "OAuth 2.1 access token validated by the transport.",
+                });
+                if let Some(object) = scheme.as_object_mut() {
+                    object.insert(
+                        "issuer".to_string(),
+                        JsonValue::String(config.issuer.clone()),
+                    );
+                    if let Some(audience) = config.audience.as_ref() {
+                        object.insert("audience".to_string(), JsonValue::String(audience.clone()));
+                    }
+                }
+                schemes.insert("oauth2".to_string(), scheme);
+                let scopes = config
+                    .required_scopes
+                    .iter()
+                    .cloned()
+                    .map(JsonValue::String)
+                    .collect::<Vec<_>>();
+                requirements.push(json!({"oauth2": scopes}));
+            }
+        }
+    }
+    (JsonValue::Object(schemes), JsonValue::Array(requirements))
+}
+
+fn www_authenticate_header(policy: &AuthPolicy) -> HeaderValue {
+    let mut schemes = Vec::new();
+    for method in &policy.methods {
+        match method {
+            AuthMethodConfig::ApiKey(_) | AuthMethodConfig::OAuth21(_) => {
+                if !schemes.contains(&"Bearer") {
+                    schemes.push("Bearer");
+                }
+            }
+            AuthMethodConfig::Hmac(_) => {
+                if !schemes.contains(&"HMAC-SHA256") {
+                    schemes.push("HMAC-SHA256");
+                }
+            }
+        }
+    }
+    if schemes.is_empty() {
+        schemes.push("Bearer");
+    }
+    let value = schemes
+        .into_iter()
+        .map(|scheme| format!("{scheme} realm=\"{A2A_AUTH_REALM}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    HeaderValue::from_str(&value)
+        .unwrap_or_else(|_| HeaderValue::from_static("Bearer realm=\"harn-a2a\""))
+}
+
 fn http_auth_request(
     method: Method,
     path: &str,
@@ -2017,7 +2243,10 @@ mod tests {
         );
         assert_eq!(card["capabilities"]["streaming"], true);
         assert_eq!(card["capabilities"]["pushNotifications"], true);
+        // The default test_server configures no auth methods, so the
+        // extended-card capability is advertised as unsupported.
         assert_eq!(card["capabilities"]["extendedAgentCard"], false);
+        assert_eq!(card["supportsAuthenticatedExtendedCard"], false);
         assert_eq!(card["skills"][0]["id"], "triage");
         assert_eq!(card["skills"][0]["tags"], json!(["harn", "function"]));
         assert_eq!(
@@ -2289,8 +2518,43 @@ pub fn triage(task: string) -> string {
         assert!(response["result"].is_null());
     }
 
+    fn server_with_api_key_policy(
+        source: &str,
+        api_key: &str,
+    ) -> (tempfile::TempDir, Arc<A2aServer>) {
+        use crate::ApiKeyAuthConfig;
+        use std::collections::BTreeSet;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(&script, source).expect("write script");
+        let mut config = DispatchCoreConfig::for_script(&script);
+        config.auth_policy = AuthPolicy {
+            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+                keys: BTreeSet::from([api_key.to_string()]),
+            })],
+        };
+        let core = DispatchCore::new(config).expect("core");
+        (dir, Arc::new(A2aServer::new(A2aServerConfig::new(core))))
+    }
+
+    fn auth_request_with_bearer(token: &str) -> AuthRequest {
+        AuthRequest {
+            method: "POST".to_string(),
+            path: "/".to_string(),
+            body: Vec::new(),
+            headers: std::collections::BTreeMap::from([(
+                "authorization".to_string(),
+                format!("Bearer {token}"),
+            )]),
+            validated_oauth: None,
+        }
+    }
+
     #[tokio::test]
-    async fn authenticated_extended_card_method_returns_agent_card() {
+    async fn extended_card_unauthenticated_when_no_auth_configured_returns_not_configured() {
+        // Per A2A 0.3.0: if the agent does not have an extended card
+        // configured (i.e., no auth scheme is wired in), the server
+        // MUST return ExtendedAgentCardNotConfiguredError (-32007).
         let (_dir, server) = test_server(
             r#"
 pub fn triage(task: string) -> string {
@@ -2305,18 +2569,212 @@ pub fn triage(task: string) -> string {
             .process_rpc_with_public_url(request, AuthRequest::default(), "https://agent.example")
             .await;
         let RpcOutcome::Json(response) = processed.outcome else {
-            panic!("expected card response");
+            panic!("expected json response");
         };
-
-        assert_eq!(response["result"]["name"], "server");
+        assert!(processed.status.is_none());
+        assert!(processed.auth_challenge.is_none());
         assert_eq!(
-            response["result"]["supportedInterfaces"][0]["protocolVersion"],
+            response["error"]["code"],
+            A2A_EXTENDED_AGENT_CARD_NOT_CONFIGURED
+        );
+    }
+
+    #[tokio::test]
+    async fn extended_card_without_token_returns_401_with_challenge() {
+        let (_dir, server) = server_with_api_key_policy(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+            "secret",
+        );
+        let request =
+            harn_vm::jsonrpc::request("card-2", "agent/getAuthenticatedExtendedCard", json!({}));
+
+        let processed = server
+            .clone()
+            .process_rpc_with_public_url(request, AuthRequest::default(), "https://agent.example")
+            .await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected json response");
+        };
+        assert_eq!(processed.status, Some(StatusCode::UNAUTHORIZED));
+        let challenge = processed
+            .auth_challenge
+            .as_ref()
+            .expect("auth challenge")
+            .to_str()
+            .expect("ascii challenge");
+        assert!(
+            challenge.starts_with("Bearer realm="),
+            "challenge missing scheme: {challenge}"
+        );
+        assert_eq!(response["error"]["code"], -32000);
+    }
+
+    #[tokio::test]
+    async fn extended_card_with_valid_bearer_returns_extended_payload() {
+        let (_dir, server) = server_with_api_key_policy(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+            "secret",
+        );
+        let request =
+            harn_vm::jsonrpc::request("card-3", "agent/getAuthenticatedExtendedCard", json!({}));
+
+        let processed = server
+            .clone()
+            .process_rpc_with_public_url(
+                request,
+                auth_request_with_bearer("secret"),
+                "https://agent.example",
+            )
+            .await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected json response");
+        };
+        assert!(processed.status.is_none());
+        assert!(processed.auth_challenge.is_none());
+
+        let card = &response["result"];
+        assert_eq!(card["name"], "server");
+        assert_eq!(
+            card["supportedInterfaces"][0]["protocolVersion"],
             A2A_PROTOCOL_VERSION
         );
         assert_eq!(
-            response["result"]["supportedInterfaces"][0]["url"],
+            card["supportedInterfaces"][0]["url"],
             "https://agent.example"
         );
+        assert_eq!(card["metadata"]["extendedAgentCard"], true);
+        assert_eq!(card["metadata"]["principal"], "api-key");
+        assert_eq!(card["securitySchemes"]["apiKey"]["type"], "apiKey");
+        assert_eq!(card["security"][0]["apiKey"], json!([]));
+        assert_eq!(card["skills"][0]["id"], "triage");
+        assert_eq!(card["skills"][0]["outputSchema"], json!({}));
+    }
+
+    #[tokio::test]
+    async fn public_card_advertises_extended_support_when_auth_configured() {
+        let (_dir, server) = server_with_api_key_policy(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+            "secret",
+        );
+
+        let card = server.agent_card("https://agent.example");
+        assert_eq!(card["capabilities"]["extendedAgentCard"], true);
+        assert_eq!(card["supportsAuthenticatedExtendedCard"], true);
+        assert_eq!(card["securitySchemes"]["apiKey"]["type"], "apiKey");
+        assert_eq!(card["security"][0]["apiKey"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn http_extended_card_unauthenticated_returns_401_with_www_authenticate() {
+        // End-to-end: drive the request through the HTTP router and
+        // confirm an unauthenticated JSON-RPC call to
+        // agent/getAuthenticatedExtendedCard yields HTTP 401 plus a
+        // WWW-Authenticate header.
+        let (_dir, server) = server_with_api_key_policy(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+            "secret",
+        );
+        let public_url = "https://agent.example";
+        let router = A2aServer::http_router(HttpState {
+            server,
+            public_url: public_url.to_string(),
+        });
+        let body = serde_json::to_vec(&harn_vm::jsonrpc::request(
+            "card-http-1",
+            "agent/getAuthenticatedExtendedCard",
+            json!({}),
+        ))
+        .expect("request body");
+
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let challenge = response
+            .headers()
+            .get(axum::http::header::WWW_AUTHENTICATE)
+            .expect("WWW-Authenticate header")
+            .to_str()
+            .expect("ascii challenge");
+        assert!(
+            challenge.starts_with("Bearer realm="),
+            "challenge missing scheme: {challenge}"
+        );
+    }
+
+    #[tokio::test]
+    async fn http_extended_card_authenticated_returns_extended_payload() {
+        let (_dir, server) = server_with_api_key_policy(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+            "secret",
+        );
+        let public_url = "https://agent.example";
+        let router = A2aServer::http_router(HttpState {
+            server,
+            public_url: public_url.to_string(),
+        });
+        let body = serde_json::to_vec(&harn_vm::jsonrpc::request(
+            "card-http-2",
+            "agent/getAuthenticatedExtendedCard",
+            json!({}),
+        ))
+        .expect("request body");
+
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .header(axum::http::header::AUTHORIZATION, "Bearer secret")
+                    .body(Body::from(body))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response
+            .headers()
+            .get(axum::http::header::WWW_AUTHENTICATE)
+            .is_none());
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let envelope: JsonValue = serde_json::from_slice(&bytes).expect("envelope");
+        assert_eq!(envelope["result"]["metadata"]["extendedAgentCard"], true);
+        assert_eq!(envelope["result"]["metadata"]["principal"], "api-key");
     }
 
     #[tokio::test]
