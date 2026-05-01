@@ -52,9 +52,13 @@
     "params": {
       "sessionId": "session-1",
       "update": {
-        "durationMs": 7,
-        "executionDurationMs": 5,
-        "executor": "harn_builtin",
+        "_meta": {
+          "harn": {
+            "durationMs": 7,
+            "executionDurationMs": 5,
+            "executor": "harn_builtin"
+          }
+        },
         "rawOutput": {
           "ok": true
         },

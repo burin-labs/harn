@@ -91,6 +91,15 @@ condensed series summaries instead of full per-patch history.
 
 ### Fixed
 
+- **ACP tool-call extension metadata follows `_meta.harn` (#904).**
+  Harn-specific `tool_call` / `tool_call_update` fields (`audit`,
+  `durationMs`, `executionDurationMs`, `error`, `errorCategory`,
+  `executor`, `parsing`, and `rawInputPartial`) now live under
+  `_meta.harn` instead of the ACP update root. Canonical fields such as
+  `toolCallId`, `title`, `kind`, `status`, `rawInput`, and `rawOutput`
+  remain top-level. Burin Code consumers should migrate to the new
+  location before consuming this release.
+
 - **Protocol retry spiral after recovered tool calls (#1039).** Tool-call
   recovery no longer triggers an infinite protocol-retry loop.
 

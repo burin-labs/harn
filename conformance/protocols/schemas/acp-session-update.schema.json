@@ -80,25 +80,56 @@
     "ToolCall": {
       "type": "object",
       "required": ["sessionUpdate", "toolCallId", "title"],
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "sessionUpdate": { "const": "tool_call" },
         "toolCallId": { "type": "string", "minLength": 1 },
         "title": { "type": "string" },
-        "status": { "$ref": "#/$defs/ToolCallStatus" }
+        "kind": { "type": "string" },
+        "status": { "$ref": "#/$defs/ToolCallStatus" },
+        "content": { "type": "array" },
+        "locations": { "type": "array" },
+        "rawInput": {},
+        "rawOutput": {},
+        "_meta": { "$ref": "#/$defs/ExtensionMeta" }
       }
     },
     "ToolCallUpdate": {
       "type": "object",
       "required": ["sessionUpdate", "toolCallId"],
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "sessionUpdate": { "const": "tool_call_update" },
         "toolCallId": { "type": "string", "minLength": 1 },
         "title": { "type": ["string", "null"] },
         "status": { "$ref": "#/$defs/NullableToolCallStatus" },
+        "kind": { "type": "string" },
+        "content": { "type": "array" },
+        "locations": { "type": "array" },
+        "rawInput": {},
+        "rawOutput": {},
+        "_meta": { "$ref": "#/$defs/ExtensionMeta" }
+      }
+    },
+    "ExtensionMeta": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "harn": { "$ref": "#/$defs/HarnToolLifecycleMeta" }
+      }
+    },
+    "HarnToolLifecycleMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "audit": {},
         "durationMs": { "type": "number", "minimum": 0 },
-        "executionDurationMs": { "type": "number", "minimum": 0 }
+        "error": { "type": "string" },
+        "errorCategory": { "type": "string" },
+        "executionDurationMs": { "type": "number", "minimum": 0 },
+        "executor": {},
+        "parsing": { "type": "boolean" },
+        "rawInputPartial": { "type": "string" }
       }
     },
     "ToolCallStatus": {

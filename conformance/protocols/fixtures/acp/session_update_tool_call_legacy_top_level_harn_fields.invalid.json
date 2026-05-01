@@ -1,0 +1,27 @@
+{
+  "name": "acp.session_update.tool_call_legacy_top_level_harn_fields",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "invalid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "tool-1",
+          "title": "read_file",
+          "status": "completed",
+          "durationMs": 8,
+          "executionDurationMs": 6,
+          "executor": "harn_builtin",
+          "rawOutput": {
+            "ok": true
+          }
+        }
+      }
+    }
+  ]
+}
