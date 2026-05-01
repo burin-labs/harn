@@ -205,8 +205,8 @@ jobs:
         env:
           NEXTEST_PROFILE: e2e
 
-  check-status:
-    name: Check status
+  ci-status:
+    name: CI status
     runs-on: ubuntu-latest
     if: always()
     needs: [fmt, lint-md, rust, windows, portal, actions, e2e]
@@ -255,7 +255,7 @@ jobs:
     name: Deploy docs
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
-    needs: [check-status]
+    needs: [ci-status]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
