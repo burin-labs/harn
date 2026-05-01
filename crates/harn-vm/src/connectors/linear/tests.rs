@@ -490,7 +490,8 @@ async fn linear_client_supports_typed_methods_and_escape_hatch() {
 #[tokio::test]
 async fn linear_connector_monitor_reenables_webhook_after_probe_streak() {
     let requests = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
-    let server = spawn_monitor_server(requests.clone(), 3);
+    let probes_done = Arc::new(tokio::sync::Notify::new());
+    let server = spawn_monitor_server(requests.clone(), 3, probes_done.clone());
     let base_url = server.base_url().to_string();
     let mut binding = binding();
     binding.config = json!({
@@ -510,14 +511,9 @@ async fn linear_connector_monitor_reenables_webhook_after_probe_streak() {
     });
     let (connector, _) = connector_with_binding(binding).await;
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
-    while requests.lock().expect("requests lock").len() < 3 {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "timed out waiting for monitor probes"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    tokio::time::timeout(std::time::Duration::from_secs(1), probes_done.notified())
+        .await
+        .expect("timed out waiting for monitor probes");
     connector
         .shutdown(std::time::Duration::from_secs(1))
         .await
@@ -668,11 +664,12 @@ fn write_response_status(
 fn spawn_monitor_server(
     requests: Arc<Mutex<Vec<CapturedRequest>>>,
     expected_requests: usize,
+    probes_done: Arc<tokio::sync::Notify>,
 ) -> MockHttpServer {
     spawn_mock_http_server(
         expected_requests,
         "linear monitor server",
-        move |_index, _addr, raw, stream| {
+        move |index, _addr, raw, stream| {
             let request = capture_request(&requests, raw);
             match (request.method.as_str(), request.path.as_str()) {
                 ("GET", "/health") => {
@@ -704,6 +701,9 @@ fn spawn_monitor_server(
                     );
                 }
                 other => panic!("unexpected request {other:?}"),
+            }
+            if index + 1 == expected_requests {
+                probes_done.notify_one();
             }
         },
     )
