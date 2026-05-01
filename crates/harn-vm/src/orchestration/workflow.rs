@@ -1528,6 +1528,13 @@ pub async fn execute_stage_node(
                     working_files: Vec::new(),
                     mcp_servers: Vec::new(),
                     mcp_clients: Default::default(),
+                    autonomy_budget: crate::llm::autonomy_budget::parse_autonomy_budget(
+                        node.raw_model_policy
+                            .as_ref()
+                            .and_then(|value| value.as_dict()),
+                        &stage_session_id,
+                        "workflow model_policy",
+                    )?,
                 },
             )
             .await?

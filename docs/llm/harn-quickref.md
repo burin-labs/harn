@@ -1331,6 +1331,26 @@ dict and return `false`, `true`, `{grant: "once"}`, or `{grant: "session"}`.
 Child agents still intersect with the parent capability policy; escalation
 cannot widen a parent ceiling.
 
+Pass `autonomy_budget` to cap how many autonomous decisions an agent can
+make per UTC hour / UTC day. The check fires at loop entry, before any
+LLM/MCP work — scripts can't bypass it. When the cap is exhausted,
+`agent_loop` returns `status: "approval_required"` with a HITL approval
+request id, emits an `autonomy.budget_exceeded` lifecycle event, and
+appends an `autonomy.tier_transition` trust-graph record from `act_auto`
+to `act_with_approval`:
+
+```harn
+agent_loop(task, system, {
+  autonomy_budget: {per_hour: 10, per_day: 100, key: "captain.persona", reviewer: "oncall"},
+})
+```
+
+`key` defaults to the loop's `session_id`; pick a stable identity (e.g.
+persona name) when each call mints a fresh session. `reviewer` defaults
+to `"operator"`. Setting both `per_hour` and `per_day` to `nil` disables
+the budget. See `docs/src/triggers/budgets.md` for the matching
+trigger-side cap and audit trail shape.
+
 ### Sessions (persistent conversations)
 
 Pass `session_id` to `agent_loop` to resume a multi-turn conversation:

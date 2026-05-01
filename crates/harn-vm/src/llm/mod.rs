@@ -16,6 +16,7 @@ mod agent_config;
 mod agent_observe;
 mod agent_tools;
 pub(crate) mod api;
+pub(crate) mod autonomy_budget;
 pub mod capabilities;
 mod compaction;
 mod config_builtins;
@@ -528,6 +529,7 @@ pub fn reset_llm_state() {
     mock::reset_llm_mock_state();
     trigger_predicate::reset_trigger_predicate_state();
     capabilities::clear_user_overrides();
+    autonomy_budget::reset_autonomy_budget_state();
 }
 
 /// Shared implementation of `llm_call` / `llm_call_safe`. Runs the
@@ -1218,6 +1220,11 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let (skill_registry, skill_match, working_files) =
             crate::llm::agent::parse_skill_config(&options);
         let mcp_servers = crate::llm::agent::parse_mcp_server_specs(&options)?;
+        let autonomy_budget = crate::llm::autonomy_budget::parse_autonomy_budget(
+            options.as_ref(),
+            &session_id,
+            "agent_loop",
+        )?;
         let mut opts = extract_llm_options(&args)?;
         let budget = opts.budget.clone();
         let result = run_agent_loop_internal(
@@ -1268,6 +1275,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 working_files,
                 mcp_servers,
                 mcp_clients: Default::default(),
+                autonomy_budget,
             },
         )
         .await?;

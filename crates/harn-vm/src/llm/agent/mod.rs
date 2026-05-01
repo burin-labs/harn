@@ -355,6 +355,45 @@ pub async fn run_agent_loop_internal(
     opts: &mut super::api::LlmCallOptions,
     mut config: AgentLoopConfig,
 ) -> Result<serde_json::Value, VmError> {
+    // Per-agent autonomy budget gate: VM-enforced ratification. When
+    // the configured per-hour / per-day decision quota is exhausted,
+    // short-circuit before any LLM/MCP work fires. Records a HITL
+    // approval request, a `triggers.lifecycle` event, and a
+    // `trust_graph.records` tier_transition entry so reviewers see
+    // the same audit trail trigger-side budgets emit. The script
+    // can't bypass this — it runs ahead of any user code.
+    if let Some(autonomy_cfg) = config.autonomy_budget.clone() {
+        // Resolve the effective session id the loop will run under so
+        // budget audit metadata matches the loop's later events. Mirror
+        // the resolution `AgentLoopState::new` does, but without
+        // mutating session storage — this is a pre-flight check.
+        let effective_session_id = if config.session_id.trim().is_empty() {
+            format!("agent_session_{}", uuid::Uuid::now_v7())
+        } else {
+            config.session_id.clone()
+        };
+        // Inherit the trace_id from an outer trigger dispatch when
+        // present so cross-system correlation stays intact. Fall back
+        // to a fresh id for stand-alone agent_loop calls.
+        let trace_id = crate::triggers::dispatcher::current_dispatch_context()
+            .map(|context| context.trigger_event.trace_id.0)
+            .unwrap_or_else(|| format!("trace_{}", uuid::Uuid::now_v7()));
+        match crate::llm::autonomy_budget::enforce_budget(
+            &autonomy_cfg,
+            &effective_session_id,
+            &trace_id,
+        )
+        .await?
+        {
+            crate::llm::autonomy_budget::BudgetCheckOutcome::Approved => {
+                crate::llm::autonomy_budget::note_decision(&autonomy_cfg);
+            }
+            crate::llm::autonomy_budget::BudgetCheckOutcome::Denied { result, .. } => {
+                return Ok(result);
+            }
+        }
+    }
+
     config.mcp_clients =
         agent_mcp::bootstrap_agent_loop_mcp_servers(opts, &config.mcp_servers).await?;
     let mut mcp_cleanup = AgentLoopMcpCleanupGuard::new(config.mcp_clients.clone());
