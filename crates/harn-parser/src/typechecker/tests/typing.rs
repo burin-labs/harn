@@ -196,6 +196,54 @@ fn bad_persona(ctx) { return ctx }
 }
 
 #[test]
+fn test_command_attribute_recognized_on_pipelines_with_known_args() {
+    let warns = warnings(
+        r#"
+@command(name: "review", description: "Review the diff", hint: "focus area")
+pipeline review_branch(task) {}
+"#,
+    );
+    assert!(
+        warns.iter().all(|warning| !warning.contains("unknown")
+            && !warning.contains("only applies")
+            && !warning.contains("must")),
+        "@command on a pipeline with known args should validate cleanly: {warns:?}"
+    );
+}
+
+#[test]
+fn test_command_attribute_warns_on_unknown_args() {
+    let warns = warnings(
+        r#"
+@command(label: "oops")
+pipeline review_branch(task) {}
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("unknown `@command` argument `label`")),
+        "expected unknown-arg warning, got {warns:?}"
+    );
+}
+
+#[test]
+fn test_command_attribute_warns_on_function_decls() {
+    let warns = warnings(
+        r#"
+@command(name: "review")
+fn review_branch(task) {}
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("`@command` only applies to pipeline declarations")),
+        "expected placement warning, got {warns:?}"
+    );
+}
+
+#[test]
 fn test_flow_predicate_mode_attributes_warn_off_functions() {
     let warns = warnings(
         r#"

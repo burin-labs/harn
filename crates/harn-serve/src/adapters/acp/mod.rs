@@ -6,6 +6,7 @@
 //! structural pattern as the existing `--bridge` mode.
 
 mod builtins;
+mod commands;
 mod events;
 mod execute;
 mod io;
@@ -25,6 +26,9 @@ use tokio::io::AsyncBufReadExt;
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 use crate::{AdapterDescriptor, AuthPolicy, AuthRequest, AuthorizationDecision};
+use commands::{
+    discover_commands, parse_slash_invocation, render_available_commands, DiscoveredCommand,
+};
 use events::AcpAgentEventSink;
 use io::send_json_response;
 
@@ -135,6 +139,10 @@ struct Session {
     /// Active host bridge for queued input / daemon resume while a prompt runs.
     host_bridge: Option<Rc<harn_vm::bridge::HostBridge>>,
     info: SessionInfo,
+    /// Snapshot of slash-commands most recently advertised over
+    /// `available_commands_update` for this session, used to skip re-emits
+    /// when the underlying pipeline source hasn't changed.
+    advertised_commands: Vec<DiscoveredCommand>,
 }
 
 #[async_trait(?Send)]
@@ -353,6 +361,7 @@ impl AcpServer {
                 cancelled: Arc::new(AtomicBool::new(false)),
                 host_bridge: None,
                 info,
+                advertised_commands: Vec::new(),
             },
         );
         harn_vm::agent_sessions::open_or_create(Some(session_id));
@@ -377,6 +386,57 @@ impl AcpServer {
                     "name": "Default",
                     "description": "Execute harn pipelines",
                 }],
+            }),
+        );
+
+        self.emit_available_commands(&session_id);
+    }
+
+    /// Read the configured pipeline source for `session_id`. Returns
+    /// `None` for inline-prompt sessions (no `--pipeline`) and on read
+    /// error — the regular prompt path will surface the error to the
+    /// client at execution time.
+    fn read_pipeline_source(&self, session_id: &str) -> Option<String> {
+        let pipeline_path = self.pipeline.as_deref()?;
+        let cwd = &self.sessions.get(session_id)?.cwd;
+        let full_path = if std::path::Path::new(pipeline_path).is_absolute() {
+            PathBuf::from(pipeline_path)
+        } else {
+            cwd.join(pipeline_path)
+        };
+        std::fs::read_to_string(&full_path).ok()
+    }
+
+    /// Discover and emit `available_commands_update` if the command set
+    /// has changed since the last emission for this session.
+    fn emit_available_commands(&mut self, session_id: &str) {
+        let Some(source) = self.read_pipeline_source(session_id) else {
+            return;
+        };
+        self.refresh_advertised_commands(session_id, &source);
+    }
+
+    /// Hot-reload variant of [`Self::emit_available_commands`] that uses
+    /// pre-loaded source instead of re-reading from disk. Driven from
+    /// `handle_session_prompt` on every prompt so editor changes between
+    /// prompts propagate to the client without a restart.
+    fn refresh_advertised_commands(&mut self, session_id: &str, source: &str) {
+        let commands = discover_commands(source);
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return;
+        };
+        if session.advertised_commands == commands {
+            return;
+        }
+        session.advertised_commands = commands.clone();
+        self.send_notification(
+            "session/update",
+            serde_json::json!({
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "available_commands_update",
+                    "availableCommands": render_available_commands(&commands),
+                },
             }),
         );
     }
@@ -486,9 +546,11 @@ impl AcpServer {
                 cancelled: Arc::new(AtomicBool::new(false)),
                 host_bridge: None,
                 info: info.clone(),
+                advertised_commands: Vec::new(),
             },
         );
         self.emit_session_info_update(&new_session_id, &info);
+        self.emit_available_commands(&new_session_id);
         self.send_response(
             id,
             serde_json::json!({
@@ -569,11 +631,57 @@ impl AcpServer {
                 }
             }
         } else {
+            // Inline-prompt mode has no persistent pipeline source to host
+            // `@command`-tagged decls, so a leading slash invocation can
+            // only be the user expecting to invoke an advertised command
+            // that doesn't exist. Surface a friendly error instead of
+            // wrapping `/foo args` into `pipeline main() { /foo args }`,
+            // which would fail with a generic "Compilation error" later.
+            if parse_slash_invocation(&prompt_text).is_some() {
+                self.send_prompt_error(
+                    &session_id,
+                    id,
+                    "Slash commands require `--pipeline <file>`; the agent is running in inline mode.",
+                );
+                return;
+            }
             // Wrap inline prompt source in a pipeline so the compiler has
             // an entry point.
             let wrapped = format!("pipeline main() {{\n{prompt_text}\n}}");
             (wrapped, None)
         };
+
+        // Hot-reload: re-discover slash-commands from the just-loaded
+        // source and emit `available_commands_update` if the set changed
+        // since the last advertise. Only meaningful when a pipeline file
+        // is configured; inline prompts have no persistent surface to
+        // attach commands to.
+        if source_path.is_some() {
+            self.refresh_advertised_commands(&session_id, &source);
+        }
+
+        // Slash-command dispatch: if the prompt begins with `/<name>` and
+        // `<name>` matches an advertised command, route to the named
+        // pipeline with the post-name text as the new `prompt`. Unknown
+        // slashes fall through unmodified — the default pipeline can
+        // choose to treat them as text or surface its own diagnostic.
+        let (effective_prompt, target_pipeline) = match parse_slash_invocation(&prompt_text) {
+            Some((cmd_name, args)) => {
+                let pipeline_name = self.sessions.get(&session_id).and_then(|session| {
+                    session
+                        .advertised_commands
+                        .iter()
+                        .find(|c| c.name == cmd_name)
+                        .map(|c| c.pipeline_name.clone())
+                });
+                match pipeline_name {
+                    Some(name) => (args.to_string(), Some(name)),
+                    None => (prompt_text.clone(), None),
+                }
+            }
+            None => (prompt_text.clone(), None),
+        };
+        let prompt_text = effective_prompt;
 
         let output = self.output.clone();
         let pending = self.pending.clone();
@@ -609,7 +717,11 @@ impl AcpServer {
         host_bridge.set_session_id(&bridge.session_id);
 
         let compile_started = Instant::now();
-        let chunk = match harn_vm::compile_source(&source) {
+        let chunk = match target_pipeline.as_deref() {
+            Some(name) => harn_vm::compile_source_named(&source, name),
+            None => harn_vm::compile_source(&source),
+        };
+        let chunk = match chunk {
             Ok(c) => c,
             Err(e) => {
                 self.send_prompt_error(&session_id, id, &format!("Compilation error: {e}"));
@@ -1600,5 +1712,393 @@ mod tests {
         let error = recv_json(&mut rx).await;
         assert_eq!(error["id"], 2);
         assert_eq!(error["error"]["message"], "missing API key");
+    }
+
+    /// End-to-end ACP slash-command flow: a Zed-style client receives the
+    /// `available_commands_update` notification immediately after
+    /// `session/new`, then invokes one of the advertised commands and
+    /// observes a successful round-trip with the named pipeline executed.
+    /// Locks the wire shape required by the ACP spec
+    /// (<https://agentclientprotocol.com/protocol/slash-commands>).
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_advertises_and_dispatches_slash_commands() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let dir = tempfile::tempdir().expect("tempdir");
+                let pipeline_path = dir.path().join("commands.harn");
+                std::fs::write(
+                    &pipeline_path,
+                    "@command(name: \"review\", description: \"Review the diff\", \
+                     hint: \"focus area\")\n\
+                     pipeline review_branch(task) {\n  \
+                       println(\"REVIEW:\" + prompt)\n}\n\n\
+                     pipeline default(task) {\n  \
+                       println(\"DEFAULT:\" + prompt)\n}\n",
+                )
+                .expect("write pipeline");
+
+                let (request_tx, request_rx) = mpsc::unbounded_channel();
+                let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+                let server = tokio::task::spawn_local(super::run_acp_channel_server(
+                    AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy()),
+                    request_rx,
+                    response_tx,
+                ));
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "session/new",
+                        "params": {"cwd": dir.path()},
+                    }))
+                    .expect("send session/new");
+                let created = recv_json(&mut response_rx).await;
+                let session_id = created["result"]["sessionId"]
+                    .as_str()
+                    .expect("session id")
+                    .to_string();
+
+                let advertised = recv_json(&mut response_rx).await;
+                assert_eq!(advertised["method"], "session/update");
+                assert_eq!(advertised["params"]["sessionId"], session_id);
+                assert_eq!(
+                    advertised["params"]["update"]["sessionUpdate"],
+                    "available_commands_update"
+                );
+                let commands = advertised["params"]["update"]["availableCommands"]
+                    .as_array()
+                    .expect("availableCommands array");
+                assert_eq!(commands.len(), 1);
+                assert_eq!(commands[0]["name"], "review");
+                assert_eq!(commands[0]["description"], "Review the diff");
+                assert_eq!(commands[0]["input"]["hint"], "focus area");
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": session_id,
+                            "prompt": [{"type": "text", "text": "/review src/lib.rs"}],
+                        },
+                    }))
+                    .expect("send session/prompt");
+
+                let mut saw_review_chunk = false;
+                let mut saw_completed = false;
+                for _ in 0..32 {
+                    let message = recv_json(&mut response_rx).await;
+                    if message["method"] == "host/capabilities" {
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {},
+                            }))
+                            .expect("send host capabilities response");
+                        continue;
+                    }
+                    if message["method"] == "session/update"
+                        && message["params"]["update"]["sessionUpdate"] == "agent_message_chunk"
+                    {
+                        let text = message["params"]["update"]["content"]["text"]
+                            .as_str()
+                            .unwrap_or_default();
+                        if text.contains("REVIEW:src/lib.rs") {
+                            saw_review_chunk = true;
+                        }
+                        assert!(
+                            !text.contains("DEFAULT:"),
+                            "default pipeline must not run when slash command dispatches"
+                        );
+                    }
+                    if message["id"] == 2 {
+                        assert_eq!(message["result"]["stopReason"], "completed");
+                        saw_completed = true;
+                        break;
+                    }
+                }
+                assert!(saw_review_chunk, "named pipeline should run for /review");
+                assert!(saw_completed, "prompt should finish successfully");
+
+                drop(request_tx);
+                server.await.expect("ACP channel server task");
+            })
+            .await;
+    }
+
+    /// Unknown slash invocations (i.e. `/typo args` when `typo` isn't
+    /// advertised) must not be re-routed — the original prompt text
+    /// flows through to the default pipeline so it can decide how to
+    /// handle the literal slash.
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_unknown_slash_invocation_falls_through_to_default_pipeline() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let dir = tempfile::tempdir().expect("tempdir");
+                let pipeline_path = dir.path().join("fallthrough.harn");
+                std::fs::write(
+                    &pipeline_path,
+                    "@command(name: \"known\", description: \"known\")\n\
+                     pipeline known(task) { println(\"KNOWN\") }\n\n\
+                     pipeline default(task) { println(\"DEFAULT:\" + prompt) }\n",
+                )
+                .expect("write pipeline");
+
+                let (request_tx, request_rx) = mpsc::unbounded_channel();
+                let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+                let server = tokio::task::spawn_local(super::run_acp_channel_server(
+                    AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy()),
+                    request_rx,
+                    response_tx,
+                ));
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "session/new",
+                        "params": {"cwd": dir.path()},
+                    }))
+                    .expect("send session/new");
+                let created = recv_json(&mut response_rx).await;
+                let session_id = created["result"]["sessionId"]
+                    .as_str()
+                    .expect("session id")
+                    .to_string();
+                let _advertised = recv_json(&mut response_rx).await;
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": session_id,
+                            "prompt": [{"type": "text", "text": "/typo and friends"}],
+                        },
+                    }))
+                    .expect("send session/prompt");
+
+                let mut saw_default_with_full_text = false;
+                for _ in 0..32 {
+                    let message = recv_json(&mut response_rx).await;
+                    if message["method"] == "host/capabilities" {
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {},
+                            }))
+                            .expect("send host capabilities response");
+                        continue;
+                    }
+                    if message["method"] == "session/update"
+                        && message["params"]["update"]["sessionUpdate"] == "agent_message_chunk"
+                    {
+                        let text = message["params"]["update"]["content"]["text"]
+                            .as_str()
+                            .unwrap_or_default();
+                        if text.contains("DEFAULT:/typo and friends") {
+                            saw_default_with_full_text = true;
+                        }
+                    }
+                    if message["id"] == 2 {
+                        assert_eq!(message["result"]["stopReason"], "completed");
+                        break;
+                    }
+                }
+                assert!(
+                    saw_default_with_full_text,
+                    "default pipeline should receive the full original prompt text"
+                );
+
+                drop(request_tx);
+                server.await.expect("ACP channel server task");
+            })
+            .await;
+    }
+
+    /// Inline-prompt mode (no `--pipeline`) has no surface for
+    /// `@command`-tagged pipelines. A leading slash is unambiguously a
+    /// user error there; surface a clear diagnostic instead of letting
+    /// the compile-time `pipeline main() { /foo args }` error leak out.
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_inline_mode_rejects_slash_invocations_with_friendly_error() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server =
+            AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "session/new",
+                "params": {"cwd": "."},
+            }))
+            .await;
+        let created = recv_json(&mut rx).await;
+        let session_id = created["result"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id,
+                    "prompt": [{"type": "text", "text": "/foo args"}],
+                },
+            }))
+            .await;
+
+        let update = recv_json(&mut rx).await;
+        assert_eq!(update["method"], "session/update");
+        assert!(
+            update["params"]["update"]["content"]["visible_delta"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Slash commands require `--pipeline"),
+            "expected friendly inline-mode diagnostic, got: {update}"
+        );
+        let error = recv_json(&mut rx).await;
+        assert_eq!(error["id"], 2);
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Slash commands require `--pipeline"),
+            "expected friendly inline-mode error message, got: {error}"
+        );
+    }
+
+    /// Hot-reload: when the pipeline source changes between prompts, the
+    /// next prompt re-emits `available_commands_update` with the fresh
+    /// command set. When the source is unchanged, no duplicate update is
+    /// emitted (idempotent advertise).
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_reemits_available_commands_on_pipeline_hot_reload() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let dir = tempfile::tempdir().expect("tempdir");
+                let pipeline_path = dir.path().join("hot.harn");
+                std::fs::write(
+                    &pipeline_path,
+                    "@command(name: \"alpha\", description: \"first\")\n\
+                     pipeline alpha(task) { println(\"alpha\") }\n",
+                )
+                .expect("write initial pipeline");
+
+                let (request_tx, request_rx) = mpsc::unbounded_channel();
+                let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+                let server = tokio::task::spawn_local(super::run_acp_channel_server(
+                    AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy()),
+                    request_rx,
+                    response_tx,
+                ));
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "session/new",
+                        "params": {"cwd": dir.path()},
+                    }))
+                    .expect("send session/new");
+                let created = recv_json(&mut response_rx).await;
+                let session_id = created["result"]["sessionId"]
+                    .as_str()
+                    .expect("session id")
+                    .to_string();
+                let initial = recv_json(&mut response_rx).await;
+                let initial_commands = initial["params"]["update"]["availableCommands"]
+                    .as_array()
+                    .expect("availableCommands array");
+                assert_eq!(initial_commands.len(), 1);
+                assert_eq!(initial_commands[0]["name"], "alpha");
+
+                std::fs::write(
+                    &pipeline_path,
+                    "@command(name: \"alpha\", description: \"first\")\n\
+                     pipeline alpha(task) { println(\"alpha\") }\n\n\
+                     @command(name: \"beta\", description: \"second\")\n\
+                     pipeline beta(task) { println(\"beta\") }\n",
+                )
+                .expect("rewrite pipeline");
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": session_id,
+                            "prompt": [{"type": "text", "text": "/beta now"}],
+                        },
+                    }))
+                    .expect("send session/prompt");
+
+                let mut saw_refreshed_advertise = false;
+                let mut saw_beta_chunk = false;
+                for _ in 0..32 {
+                    let message = recv_json(&mut response_rx).await;
+                    if message["method"] == "host/capabilities" {
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {},
+                            }))
+                            .expect("send host capabilities response");
+                        continue;
+                    }
+                    if message["method"] == "session/update"
+                        && message["params"]["update"]["sessionUpdate"]
+                            == "available_commands_update"
+                    {
+                        let names: Vec<String> = message["params"]["update"]["availableCommands"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|c| c["name"].as_str().unwrap().to_string())
+                            .collect();
+                        assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
+                        saw_refreshed_advertise = true;
+                    }
+                    if message["method"] == "session/update"
+                        && message["params"]["update"]["sessionUpdate"] == "agent_message_chunk"
+                        && message["params"]["update"]["content"]["text"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .contains("beta")
+                    {
+                        saw_beta_chunk = true;
+                    }
+                    if message["id"] == 2 {
+                        assert_eq!(message["result"]["stopReason"], "completed");
+                        break;
+                    }
+                }
+                assert!(
+                    saw_refreshed_advertise,
+                    "expected fresh available_commands_update after source change"
+                );
+                assert!(
+                    saw_beta_chunk,
+                    "the newly added /beta command should dispatch"
+                );
+
+                drop(request_tx);
+                server.await.expect("ACP channel server task");
+            })
+            .await;
     }
 }

@@ -1539,7 +1539,7 @@ impl TypeChecker {
             match attr.name.as_str() {
                 "deprecated" | "test" | "complexity" | "acp_tool" | "acp_skill" | "invariant"
                 | "deterministic" | "semantic" | "archivist" | "retroactive" | "persona"
-                | "trigger" | "handoff" | "budget" => {}
+                | "trigger" | "handoff" | "budget" | "command" => {}
                 other => {
                     self.warning_at(format!("unknown attribute `@{}`", other), attr.span);
                 }
@@ -1576,6 +1576,12 @@ impl TypeChecker {
                         "`@{}` only applies to function, tool, or pipeline declarations",
                         attr.name
                     ),
+                    attr.span,
+                );
+            }
+            if attr.name == "command" && !matches!(inner.node, Node::Pipeline { .. }) {
+                self.warning_at(
+                    "`@command` only applies to pipeline declarations".to_string(),
                     attr.span,
                 );
             }
@@ -1672,10 +1678,28 @@ impl TypeChecker {
             "handoff" => self.validate_handoff_args(attr),
             "budget" => self.validate_budget_args(attr),
             "deprecated" => self.validate_deprecated_args(attr),
+            "command" => self.validate_command_args(attr),
             "test" if !attr.args.is_empty() => {
                 self.warning_at("`@test` does not accept arguments".to_string(), attr.span);
             }
             _ => {}
+        }
+    }
+
+    fn validate_command_args(&mut self, attr: &Attribute) {
+        const KNOWN_KEYS: &[&str] = &["name", "description", "hint"];
+        for arg in &attr.args {
+            let Some(name) = self.require_named_arg("@command", arg) else {
+                continue;
+            };
+            if !KNOWN_KEYS.contains(&name) {
+                self.warning_at(
+                    format!("unknown `@command` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
+                    arg.span,
+                );
+                continue;
+            }
+            self.expect_symbol_like("@command", name, &arg.value, arg.span);
         }
     }
 

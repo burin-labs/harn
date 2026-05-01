@@ -216,6 +216,24 @@ pub fn compile_source(source: &str) -> Result<Chunk, String> {
     Compiler::new().compile(&program).map_err(|e| e.to_string())
 }
 
+/// Same as [`compile_source`] but compiles a specific named pipeline as
+/// the program entry point instead of the default-pipeline-or-first
+/// selection rule. Returns a runtime error when no pipeline with
+/// `pipeline_name` exists in the source.
+pub fn compile_source_named(source: &str, pipeline_name: &str) -> Result<Chunk, String> {
+    let program = harn_parser::check_source_strict(source).map_err(|e| e.to_string())?;
+    let has_pipeline = program.iter().any(|sn| {
+        let (_, inner) = harn_parser::peel_attributes(sn);
+        matches!(&inner.node, harn_parser::Node::Pipeline { name, .. } if name == pipeline_name)
+    });
+    if !has_pipeline {
+        return Err(format!("no pipeline named `{pipeline_name}` in source"));
+    }
+    Compiler::new()
+        .compile_named(&program, pipeline_name)
+        .map_err(|e| e.to_string())
+}
+
 pub fn json_schema_for_type_expr(type_expr: &harn_parser::TypeExpr) -> Option<serde_json::Value> {
     let schema = compiler::Compiler::type_expr_to_schema_value(type_expr)?;
     let json_schema = schema::schema_to_json_schema_value(&schema).ok()?;

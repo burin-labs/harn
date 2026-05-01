@@ -2726,6 +2726,33 @@ not rewritten by this syntax.
 | `@handoff` | Named `target`/`to`, `reason`, `schema`, `artifact` |
 | `@budget` | Named numeric fields: `daily_usd`, `hourly_usd`, `run_usd`, `max_tokens`, `frontier_escalations`, `max_autonomous_decisions_per_hour`, `max_autonomous_decisions_per_day`; string/symbol exhaustion policy via `on_exhausted` or `on_budget_exhausted` |
 
+#### `@command(name?, description?, hint?)`
+
+```harn,ignore
+@command(name: "review", description: "Review the diff", hint: "(optional focus area)")
+pipeline review_branch(task) { ... }
+```
+
+Marks a top-level pipeline as an ACP slash-command. The Harn ACP adapter
+(`harn serve --pipeline ...`) discovers `@command`-tagged pipelines from
+the loaded source and advertises them to clients via the
+`available_commands_update` session notification. When a client invokes
+`/<name> args`, the named pipeline is compiled as the entry point and
+the post-name text is passed to the pipeline as the `prompt` global.
+
+Arguments are all optional and string/symbol-typed:
+
+- `name` — slash-command name advertised to the client. Defaults to the
+  pipeline's declared name.
+- `description` — human-readable summary shown next to the command.
+- `hint` — placeholder text the client displays before the user types
+  arguments. Maps to ACP's `UnstructuredCommandInput.hint`.
+
+The attribute is compile-time metadata only; outside of an ACP session
+the attached pipeline runs unchanged. Slash-command discovery refreshes
+on every prompt, so editor changes to the pipeline file propagate
+without restarting the agent.
+
 #### `@complexity(allow)`
 
 ```harn,ignore

@@ -23,6 +23,14 @@ condensed series summaries instead of full per-patch history.
   Bidirectional stdio is implemented; HTTP streamable-transport server
   surfaces are wired through the per-session SSE stream so a tool
   handler can elicit and receive a response over a separate POST.
+- **ACP slash-commands via `@command` (#896).** New `@command(name?,
+  description?, hint?)` attribute on top-level pipelines. The ACP adapter
+  (`harn serve --pipeline ...`) discovers tagged pipelines from the
+  loaded source, advertises them via `available_commands_update` after
+  `session/new` and on hot-reload (re-emitted when the source changes
+  between prompts), and dispatches `/<name> args` prompts to the named
+  pipeline as the entry point with `args` exposed as the `prompt`
+  global. Implements ACP slash-command spec for Zed-style clients.
 
 - **Harn-native Merge Captain persona (#1009/#1029).** Replaces the
   shell-driven Merge Captain MVP with a deterministic Harn package owning
