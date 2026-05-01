@@ -71,7 +71,7 @@ jobs:
           NEXTEST_FILTER: ${{ steps.touched.outputs.filter }}
         run: |
           for i in $(seq 50); do
-            printf '--- Iteration %d/50 ---\n' "$i"
+            printf -- '--- Iteration %d/50 ---\n' "$i"
             cargo nextest run \
               --profile flake-detection \
               --test-threads 8 \
