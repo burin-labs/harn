@@ -24,28 +24,101 @@ fn daemon_snapshot_roundtrip_preserves_state() {
 
 #[test]
 fn detect_watch_changes_reports_modified_files() {
-    let dir = std::env::temp_dir().join(format!("harn-watch-{}", uuid::Uuid::now_v7()));
+    let mock = MockMtimeProvider::new();
+    let path = "/virtual/watched.txt".to_string();
+    let paths = vec![path.clone()];
+
+    mock.set(&path, 1_000_000);
+    let mut state = watch_state(&mock, &paths);
+    assert_eq!(state.get(&path).copied(), Some(1_000_000));
+
+    let unchanged = detect_watch_changes(&mock, &paths, &mut state);
+    assert!(
+        unchanged.is_empty(),
+        "unchanged mtime must not be reported as modified"
+    );
+
+    mock.advance(&path, 100);
+    let changed = detect_watch_changes(&mock, &paths, &mut state);
+    assert_eq!(changed, paths, "advanced mtime must be reported");
+    assert_eq!(state.get(&path).copied(), Some(1_000_100));
+
+    let stable = detect_watch_changes(&mock, &paths, &mut state);
+    assert!(
+        stable.is_empty(),
+        "post-detection state should match current mtime, blocking re-trigger"
+    );
+}
+
+#[test]
+fn detect_watch_changes_isolates_changed_paths() {
+    let mock = MockMtimeProvider::new();
+    let a = "/virtual/a.txt".to_string();
+    let b = "/virtual/b.txt".to_string();
+    let c = "/virtual/c.txt".to_string();
+    let paths = vec![a.clone(), b.clone(), c.clone()];
+
+    mock.set(&a, 100);
+    mock.set(&b, 200);
+    mock.set(&c, 300);
+    let mut state = watch_state(&mock, &paths);
+
+    mock.advance(&b, 1);
+    let changed = detect_watch_changes(&mock, &paths, &mut state);
+    assert_eq!(changed, vec![b.clone()]);
+
+    mock.advance(&a, 5);
+    mock.advance(&c, 7);
+    let changed = detect_watch_changes(&mock, &paths, &mut state);
+    assert_eq!(changed, vec![a.clone(), c.clone()]);
+}
+
+#[test]
+fn detect_watch_changes_ignores_missing_paths() {
+    // `file_stamp` returns 0 for missing files. The detector treats 0
+    // (either prior or current) as "don't know", so a path appearing
+    // or disappearing must not register as a change. This protects
+    // against false wakes when watch_paths reference files that don't
+    // exist yet.
+    let mock = MockMtimeProvider::new();
+    let path = "/virtual/maybe.txt".to_string();
+    let paths = vec![path.clone()];
+
+    let mut state = watch_state(&mock, &paths);
+    assert_eq!(state.get(&path).copied(), Some(0));
+
+    mock.set(&path, 500);
+    let appearing = detect_watch_changes(&mock, &paths, &mut state);
+    assert!(
+        appearing.is_empty(),
+        "missing→present transition is not a change"
+    );
+    assert_eq!(state.get(&path).copied(), Some(500));
+
+    mock.clear(&path);
+    let disappearing = detect_watch_changes(&mock, &paths, &mut state);
+    assert!(
+        disappearing.is_empty(),
+        "present→missing transition is not a change"
+    );
+    assert_eq!(state.get(&path).copied(), Some(0));
+}
+
+#[test]
+fn real_mtime_provider_reads_filesystem_mtime() {
+    // Pin RealMtimeProvider behavior: existing files yield non-zero,
+    // missing files yield zero. The watcher's logic depends on this
+    // contract, and the mock would mask a regression here.
+    let dir = std::env::temp_dir().join(format!("harn-mtime-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("watched.txt");
-    std::fs::write(&path, "one").unwrap();
-    let paths = vec![path.to_string_lossy().into_owned()];
-    let mut state = watch_state(&paths);
-    // `file_stamp` snaps mtime to nanoseconds, so any non-zero sleep
-    // crosses the resolution of every filesystem Harn targets. Keep a
-    // modest 50ms pause so the OS has time to flush metadata on slow
-    // CI hosts without inflating test runtime. Loop the "modify +
-    // detect" cycle up to 20 times (~1s cap) so a quantized mtime on
-    // WSL/network filesystems gets a second chance before failing.
-    let mut changed = Vec::new();
-    for attempt in 0..20 {
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        std::fs::write(&path, format!("two-{attempt}")).unwrap();
-        changed = detect_watch_changes(&paths, &mut state);
-        if !changed.is_empty() {
-            break;
-        }
-    }
-    assert_eq!(changed, paths, "watched file mtime never advanced");
+    let path = dir.join("present.txt");
+    std::fs::write(&path, "x").unwrap();
+
+    let real = RealMtimeProvider;
+    assert!(real.mtime_ns(path.to_str().unwrap()) > 0);
+    let missing = dir.join("absent.txt");
+    assert_eq!(real.mtime_ns(missing.to_str().unwrap()), 0);
+
     let _ = std::fs::remove_dir_all(dir);
 }
 
