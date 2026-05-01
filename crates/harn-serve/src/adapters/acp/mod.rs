@@ -10,6 +10,7 @@ mod commands;
 mod events;
 mod execute;
 mod io;
+mod modes;
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -143,6 +144,9 @@ struct Session {
     /// `available_commands_update` for this session, used to skip re-emits
     /// when the underlying pipeline source hasn't changed.
     advertised_commands: Vec<DiscoveredCommand>,
+    /// Active session mode id (one of [`modes::MODE_CATALOG`]). Drives
+    /// the capability ceiling pushed for the next `session/prompt`.
+    current_mode_id: String,
 }
 
 #[async_trait(?Send)]
@@ -362,6 +366,7 @@ impl AcpServer {
                 host_bridge: None,
                 info,
                 advertised_commands: Vec::new(),
+                current_mode_id: modes::DEFAULT_MODE_ID.to_string(),
             },
         );
         harn_vm::agent_sessions::open_or_create(Some(session_id));
@@ -381,11 +386,7 @@ impl AcpServer {
             id,
             serde_json::json!({
                 "sessionId": session_id,
-                "modes": [{
-                    "id": "default",
-                    "name": "Default",
-                    "description": "Execute harn pipelines",
-                }],
+                "modes": modes::session_mode_state(modes::DEFAULT_MODE_ID),
             }),
         );
 
@@ -539,6 +540,11 @@ impl AcpServer {
             meta,
         };
 
+        let parent_mode_id = self
+            .sessions
+            .get(&src_id)
+            .map(|session| session.current_mode_id.clone())
+            .unwrap_or_else(|| modes::DEFAULT_MODE_ID.to_string());
         self.sessions.insert(
             new_session_id.clone(),
             Session {
@@ -547,6 +553,7 @@ impl AcpServer {
                 host_bridge: None,
                 info: info.clone(),
                 advertised_commands: Vec::new(),
+                current_mode_id: parent_mode_id.clone(),
             },
         );
         self.emit_session_info_update(&new_session_id, &info);
@@ -558,6 +565,7 @@ impl AcpServer {
                 "state": "forked",
                 "parent_id": src_id,
                 "branched_at": branched_at,
+                "modes": modes::session_mode_state(&parent_mode_id),
             }),
         );
     }
@@ -589,11 +597,15 @@ impl AcpServer {
             })
             .unwrap_or_default();
 
-        let (cwd, cancelled) = match self.sessions.get_mut(&session_id) {
+        let (cwd, cancelled, current_mode_id) = match self.sessions.get_mut(&session_id) {
             Some(s) => {
                 s.cancelled.store(false, Ordering::SeqCst);
                 s.host_bridge = None;
-                (s.cwd.clone(), s.cancelled.clone())
+                (
+                    s.cwd.clone(),
+                    s.cancelled.clone(),
+                    s.current_mode_id.clone(),
+                )
             }
             None => {
                 self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
@@ -746,6 +758,7 @@ impl AcpServer {
 
         let id_owned = id.clone();
         let send_output = self.output.clone();
+        let _mode_guard = modes::ModePolicyGuard::enter(&current_mode_id);
         let result = execute::execute_chunk(
             chunk,
             bridge.clone(),
@@ -756,6 +769,7 @@ impl AcpServer {
             self.runtime_configurator.clone(),
         )
         .await;
+        drop(_mode_guard);
         if let Some(session) = self.sessions.get_mut(&session_id) {
             session.host_bridge = None;
         }
@@ -1036,7 +1050,65 @@ impl AcpServer {
             id,
             serde_json::json!({
                 "session": session_value,
+                "modes": modes::session_mode_state(&session.current_mode_id),
                 "replayed": [],
+            }),
+        );
+    }
+
+    fn handle_session_set_mode(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(session_id) = params
+            .get("sessionId")
+            .or_else(|| params.get("session_id"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+        else {
+            self.send_error(id, -32602, "session/set_mode requires sessionId");
+            return;
+        };
+        let Some(mode_id) = params
+            .get("modeId")
+            .or_else(|| params.get("mode_id"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+        else {
+            self.send_error(id, -32602, "session/set_mode requires modeId");
+            return;
+        };
+
+        if !modes::is_known(&mode_id) {
+            self.send_error(
+                id,
+                -32602,
+                &format!(
+                    "Unknown mode '{mode_id}'. Available: {}",
+                    modes::known_mode_ids().join(", ")
+                ),
+            );
+            return;
+        }
+
+        let Some(session) = self.sessions.get_mut(&session_id) else {
+            self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+            return;
+        };
+
+        if session.current_mode_id == mode_id {
+            // Idempotent: ack but do not emit a redundant update.
+            self.send_response(id, serde_json::json!({}));
+            return;
+        }
+
+        session.current_mode_id = mode_id.clone();
+        self.send_response(id, serde_json::json!({}));
+        self.send_notification(
+            "session/update",
+            serde_json::json!({
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "current_mode_update",
+                    "modeId": mode_id,
+                },
             }),
         );
     }
@@ -1071,6 +1143,9 @@ impl AcpServer {
             }
             "session/fork" => {
                 self.handle_session_fork(&id, &params);
+            }
+            "session/set_mode" => {
+                self.handle_session_set_mode(&id, &params);
             }
             "session/prompt" => {
                 self.handle_session_prompt(&id, &params).await;
@@ -1712,6 +1787,526 @@ mod tests {
         let error = recv_json(&mut rx).await;
         assert_eq!(error["id"], 2);
         assert_eq!(error["error"]["message"], "missing API key");
+    }
+
+    /// `session/new` returns a spec-shaped `SessionModeState` describing
+    /// every supported mode plus the active selection. Locks the wire
+    /// shape required by ACP session-modes
+    /// (<https://agentclientprotocol.com/protocol/session-modes>).
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_session_new_advertises_session_mode_state() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server =
+            AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "session/new",
+                "params": {"cwd": "."},
+            }))
+            .await;
+        let created = recv_json(&mut rx).await;
+
+        let modes = &created["result"]["modes"];
+        assert_eq!(modes["currentModeId"], "default");
+        let available = modes["availableModes"]
+            .as_array()
+            .expect("availableModes array");
+        let ids: Vec<&str> = available
+            .iter()
+            .map(|mode| mode["id"].as_str().expect("mode id"))
+            .collect();
+        assert_eq!(ids, vec!["default", "architect", "code", "ask"]);
+        // Each entry must carry a human-readable name; description is
+        // optional per spec but Harn always populates it.
+        for mode in available {
+            assert!(
+                mode["name"].as_str().is_some_and(|name| !name.is_empty()),
+                "mode {mode} missing name"
+            );
+        }
+    }
+
+    /// `session/load` echoes the active mode state back to a
+    /// reconnecting client so the UI can re-render the selected mode
+    /// without an extra round-trip.
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_session_load_includes_current_mode_state() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server =
+            AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "session/new",
+                "params": {"cwd": "."},
+            }))
+            .await;
+        let created = recv_json(&mut rx).await;
+        let session_id = created["result"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/set_mode",
+                "params": {"sessionId": session_id, "modeId": "architect"},
+            }))
+            .await;
+        // Drain success ack and notification.
+        let _ack = recv_json(&mut rx).await;
+        let _notification = recv_json(&mut rx).await;
+
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/load",
+                "params": {"sessionId": session_id},
+            }))
+            .await;
+        let loaded = recv_json(&mut rx).await;
+        assert_eq!(loaded["result"]["modes"]["currentModeId"], "architect");
+        assert!(loaded["result"]["modes"]["availableModes"]
+            .as_array()
+            .expect("available modes")
+            .iter()
+            .any(|m| m["id"] == "architect"));
+    }
+
+    /// Setting a valid mode ack's with an empty result and emits a
+    /// `current_mode_update` notification carrying the new mode id.
+    /// Locks the canonical session-modes wire shape so clients depend
+    /// on it directly.
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_set_mode_emits_current_mode_update_notification() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server =
+            AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "session/new",
+                "params": {"cwd": "."},
+            }))
+            .await;
+        let created = recv_json(&mut rx).await;
+        let session_id = created["result"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/set_mode",
+                "params": {"sessionId": session_id, "modeId": "architect"},
+            }))
+            .await;
+        let ack = recv_json(&mut rx).await;
+        assert_eq!(ack["id"], 2);
+        assert!(ack["result"].is_object());
+        assert!(ack["error"].is_null());
+
+        let notification = recv_json(&mut rx).await;
+        assert_eq!(notification["method"], "session/update");
+        assert_eq!(notification["params"]["sessionId"], session_id);
+        assert_eq!(
+            notification["params"]["update"]["sessionUpdate"],
+            "current_mode_update"
+        );
+        assert_eq!(notification["params"]["update"]["modeId"], "architect");
+    }
+
+    /// Re-setting the same mode is a no-op: the agent ack's the
+    /// request but does not emit a `current_mode_update` notification.
+    /// Avoids spurious UI updates when a host reconciles its idea of
+    /// the active mode without intending a transition.
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_set_mode_is_idempotent_when_mode_unchanged() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server =
+            AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "session/new",
+                "params": {"cwd": "."},
+            }))
+            .await;
+        let created = recv_json(&mut rx).await;
+        let session_id = created["result"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+
+        // Active mode after session/new is "default"; re-set to it.
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/set_mode",
+                "params": {"sessionId": session_id, "modeId": "default"},
+            }))
+            .await;
+        let ack = recv_json(&mut rx).await;
+        assert_eq!(ack["id"], 2);
+        assert!(ack["result"].is_object());
+
+        // Follow up with a real transition so the channel produces a
+        // notification we can recognize. If a stray idempotent
+        // notification had been sent, it would arrive *before* this
+        // one and the assert below would fail.
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/set_mode",
+                "params": {"sessionId": session_id, "modeId": "architect"},
+            }))
+            .await;
+        let _ack2 = recv_json(&mut rx).await;
+        let notification = recv_json(&mut rx).await;
+        assert_eq!(notification["method"], "session/update");
+        assert_eq!(notification["params"]["update"]["modeId"], "architect");
+    }
+
+    /// `session/set_mode` rejects unknown sessions and unknown mode
+    /// ids with structured JSON-RPC errors instead of silently
+    /// accepting them.
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_set_mode_validates_inputs() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server =
+            AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+        // Unknown session.
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "session/set_mode",
+                "params": {"sessionId": "ghost", "modeId": "architect"},
+            }))
+            .await;
+        let unknown_session = recv_json(&mut rx).await;
+        assert_eq!(unknown_session["id"], 1);
+        assert_eq!(unknown_session["error"]["code"], -32602);
+        assert!(unknown_session["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Unknown session"));
+
+        // Unknown mode id.
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/new",
+                "params": {"cwd": "."},
+            }))
+            .await;
+        let created = recv_json(&mut rx).await;
+        let session_id = created["result"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/set_mode",
+                "params": {"sessionId": session_id, "modeId": "not-a-mode"},
+            }))
+            .await;
+        let unknown_mode = recv_json(&mut rx).await;
+        assert_eq!(unknown_mode["id"], 3);
+        assert_eq!(unknown_mode["error"]["code"], -32602);
+        assert!(unknown_mode["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Unknown mode"));
+    }
+
+    /// `architect` mode pushes a read-only capability ceiling for the
+    /// duration of `session/prompt`, so a script that calls
+    /// `write_file()` in plan mode is rejected by the VM policy gate
+    /// instead of mutating the workspace. Doubles as the conformance
+    /// case for "client switches mode mid-session, agent's behavior
+    /// changes" (#897 acceptance).
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_architect_mode_blocks_destructive_writes_in_prompt() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let dir = tempfile::tempdir().expect("tempdir");
+                let target = dir.path().join("forbidden.txt");
+                let target_str = target
+                    .to_str()
+                    .expect("temp path is utf-8")
+                    .replace('\\', "\\\\");
+
+                let (request_tx, request_rx) = mpsc::unbounded_channel();
+                let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+                let server = tokio::task::spawn_local(super::run_acp_channel_server(
+                    AcpServerConfig::new(None),
+                    request_rx,
+                    response_tx,
+                ));
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "session/new",
+                        "params": {"cwd": dir.path().display().to_string()},
+                    }))
+                    .expect("send session/new");
+                let created = recv_json(&mut response_rx).await;
+                let session_id = created["result"]["sessionId"]
+                    .as_str()
+                    .expect("session id")
+                    .to_string();
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "session/set_mode",
+                        "params": {"sessionId": session_id, "modeId": "architect"},
+                    }))
+                    .expect("send session/set_mode");
+                // Drain ack + current_mode_update notification.
+                let _ack = recv_json(&mut response_rx).await;
+                let mode_notification = recv_json(&mut response_rx).await;
+                assert_eq!(
+                    mode_notification["params"]["update"]["sessionUpdate"],
+                    "current_mode_update"
+                );
+                assert_eq!(mode_notification["params"]["update"]["modeId"], "architect");
+
+                let prompt_source =
+                    format!("write_file(\"{target_str}\", \"should not be written\")");
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": session_id,
+                            "prompt": [{"type": "text", "text": prompt_source}],
+                        },
+                    }))
+                    .expect("send session/prompt");
+
+                let mut saw_error = false;
+                for _ in 0..32 {
+                    let message = recv_json(&mut response_rx).await;
+                    if message["method"] == "host/capabilities" {
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {},
+                            }))
+                            .expect("send host capabilities response");
+                        continue;
+                    }
+                    if message["id"] == 3 {
+                        let error = &message["error"];
+                        assert!(
+                            !error.is_null(),
+                            "architect mode should reject write_file but got result {:?}",
+                            message["result"]
+                        );
+                        let message_text = error["message"].as_str().unwrap_or_default();
+                        assert!(
+                            message_text.contains("workspace write ceiling"),
+                            "unexpected error message: {message_text}"
+                        );
+                        saw_error = true;
+                        break;
+                    }
+                }
+                assert!(saw_error, "prompt should produce a JSON-RPC error response");
+                assert!(
+                    !target.exists(),
+                    "architect mode must not allow write_file to mutate the workspace"
+                );
+
+                drop(request_tx);
+                server.await.expect("ACP channel server task");
+            })
+            .await;
+    }
+
+    /// `code` mode preserves the pre-modes baseline: writes succeed
+    /// because the policy guard pushes nothing onto the execution
+    /// stack. Pairs with the architect-mode test to confirm modes are
+    /// the *only* thing changing behavior between the two prompts.
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_code_mode_allows_writes_in_prompt() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let dir = tempfile::tempdir().expect("tempdir");
+                let target = dir.path().join("allowed.txt");
+                let target_str = target
+                    .to_str()
+                    .expect("temp path is utf-8")
+                    .replace('\\', "\\\\");
+
+                let (request_tx, request_rx) = mpsc::unbounded_channel();
+                let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+                let server = tokio::task::spawn_local(super::run_acp_channel_server(
+                    AcpServerConfig::new(None),
+                    request_rx,
+                    response_tx,
+                ));
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "session/new",
+                        "params": {"cwd": dir.path().display().to_string()},
+                    }))
+                    .expect("send session/new");
+                let created = recv_json(&mut response_rx).await;
+                let session_id = created["result"]["sessionId"]
+                    .as_str()
+                    .expect("session id")
+                    .to_string();
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "session/set_mode",
+                        "params": {"sessionId": session_id, "modeId": "code"},
+                    }))
+                    .expect("send session/set_mode");
+                let _ack = recv_json(&mut response_rx).await;
+                let _notification = recv_json(&mut response_rx).await;
+
+                let prompt_source =
+                    format!("write_file(\"{target_str}\", \"hello from code mode\")");
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": session_id,
+                            "prompt": [{"type": "text", "text": prompt_source}],
+                        },
+                    }))
+                    .expect("send session/prompt");
+
+                let mut saw_completed = false;
+                for _ in 0..32 {
+                    let message = recv_json(&mut response_rx).await;
+                    if message["method"] == "host/capabilities" {
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {},
+                            }))
+                            .expect("send host capabilities response");
+                        continue;
+                    }
+                    if message["id"] == 3 {
+                        assert_eq!(message["result"]["stopReason"], "completed");
+                        saw_completed = true;
+                        break;
+                    }
+                }
+                assert!(saw_completed, "code-mode prompt should complete");
+                assert!(
+                    target.exists(),
+                    "code mode should allow write_file to mutate the workspace"
+                );
+
+                drop(request_tx);
+                server.await.expect("ACP channel server task");
+            })
+            .await;
+    }
+
+    /// `session/fork` carries the parent's active mode over to the
+    /// branched session and surfaces it on the fork response, so
+    /// clients can render the correct mode badge on the new branch
+    /// without an extra round-trip.
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_session_fork_inherits_parent_current_mode() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server =
+            AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "session/new",
+                "params": {"cwd": "."},
+            }))
+            .await;
+        let created = recv_json(&mut rx).await;
+        let parent_id = created["result"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/set_mode",
+                "params": {"sessionId": parent_id, "modeId": "architect"},
+            }))
+            .await;
+        let _ack = recv_json(&mut rx).await;
+        let _notification = recv_json(&mut rx).await;
+
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/fork",
+                "params": {"session_id": parent_id},
+            }))
+            .await;
+        // The fork emits a session_info_update notification *before*
+        // the response; drain notifications until the response with
+        // matching id arrives so the test is order-independent.
+        let mut fork_response = None;
+        for _ in 0..6 {
+            let msg = recv_json(&mut rx).await;
+            if msg["id"] == 3 {
+                fork_response = Some(msg);
+                break;
+            }
+        }
+        let fork_response = fork_response.expect("fork response");
+        assert_eq!(fork_response["result"]["state"], "forked");
+        assert_eq!(
+            fork_response["result"]["modes"]["currentModeId"],
+            "architect"
+        );
     }
 
     /// End-to-end ACP slash-command flow: a Zed-style client receives the

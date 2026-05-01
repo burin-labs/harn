@@ -96,6 +96,7 @@ surface as stdio ACP:
 - `session/cancel`
 - `session/input`
 - `session/fork`
+- `session/set_mode`
 - `agent/resume`
 - `workflow/*`
 - `harn.hitl.respond`
