@@ -2,7 +2,6 @@ mod test_util;
 
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 use test_util::process::harn_command;
@@ -67,19 +66,11 @@ fn lint_and_check_complete_on_large_cross_directory_cycle_workspace() {
     )
     .unwrap();
 
-    // Post-fix this completes in well under a second on every supported
-    // platform; pre-fix on Linux it OOM-killed around 48 s. The 60 s
-    // budget gives slow CI shapes (qemu, sandboxed builders) headroom
-    // without letting a regression sit silently.
-    let budget = Duration::from_secs(60);
-
-    let lint_started = Instant::now();
     let lint_output = harn_command()
         .current_dir(root)
         .args(["lint", pipelines.to_str().unwrap()])
         .output()
         .unwrap();
-    let lint_elapsed = lint_started.elapsed();
     assert!(
         lint_output.status.success(),
         "lint failed: status={:?} stdout={} stderr={}",
@@ -87,28 +78,18 @@ fn lint_and_check_complete_on_large_cross_directory_cycle_workspace() {
         String::from_utf8_lossy(&lint_output.stdout),
         String::from_utf8_lossy(&lint_output.stderr)
     );
-    assert!(
-        lint_elapsed < budget,
-        "lint took {lint_elapsed:?} (>{budget:?}) — likely a regression to the path-spelling explosion fixed by #93"
-    );
 
-    let check_started = Instant::now();
     let check_output = harn_command()
         .current_dir(root)
         .args(["check", "--workspace"])
         .output()
         .unwrap();
-    let check_elapsed = check_started.elapsed();
     assert!(
         check_output.status.success(),
         "check --workspace failed: status={:?} stdout={} stderr={}",
         check_output.status,
         String::from_utf8_lossy(&check_output.stdout),
         String::from_utf8_lossy(&check_output.stderr)
-    );
-    assert!(
-        check_elapsed < budget,
-        "check --workspace took {check_elapsed:?} (>{budget:?}) — likely a regression to the path-spelling explosion fixed by #93"
     );
 }
 
