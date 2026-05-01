@@ -1,15 +1,27 @@
-mod test_util;
+//! In-process coverage of `harn persona` CLI dispatch.
+//!
+//! Tier 1H follow-up (#1106) of the de-flake epic (#1057, #1067):
+//! the persona dispatcher in `crates/harn-cli/src/commands/persona.rs`
+//! is small and the JSON payload it emits is the contract under test,
+//! so each test calls the corresponding `*_payload` library fn directly
+//! and asserts on the returned struct/JSON value rather than parsing
+//! subprocess stdout.
 
 use std::fs;
+use std::path::Path;
 
+use harn_cli::commands::persona;
 use tempfile::TempDir;
-use test_util::process::harn_e2e_command;
 
 fn write_manifest(body: &str) -> TempDir {
     let temp = TempDir::new().unwrap();
     fs::create_dir_all(temp.path().join(".git")).unwrap();
     fs::write(temp.path().join("harn.toml"), body).unwrap();
     temp
+}
+
+fn manifest_path(temp: &TempDir) -> std::path::PathBuf {
+    temp.path().join("harn.toml")
 }
 
 fn write_persona_source(body: &str) -> (TempDir, std::path::PathBuf) {
@@ -58,37 +70,16 @@ receipt_policy = "required"
 "#
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_list_and_inspect_emit_stable_json() {
     let temp = write_manifest(valid_manifest());
+    let manifest = manifest_path(&temp);
 
-    let list = harn_e2e_command()
-        .current_dir(temp.path())
-        .args(["persona", "list", "--json"])
-        .output()
-        .unwrap();
-    assert!(
-        list.status.success(),
-        "stdout={}, stderr={}",
-        String::from_utf8_lossy(&list.stdout),
-        String::from_utf8_lossy(&list.stderr)
-    );
-    let personas: serde_json::Value = serde_json::from_slice(&list.stdout).unwrap();
-    assert_eq!(personas.as_array().unwrap().len(), 3);
+    let personas = persona::list_payload(Some(&manifest)).expect("list payload");
+    assert_eq!(personas.len(), 3);
 
-    let inspect = harn_e2e_command()
-        .current_dir(temp.path())
-        .args(["persona", "inspect", "merge_captain", "--json"])
-        .output()
-        .unwrap();
-    assert!(
-        inspect.status.success(),
-        "stdout={}, stderr={}",
-        String::from_utf8_lossy(&inspect.stdout),
-        String::from_utf8_lossy(&inspect.stderr)
-    );
-    let persona: serde_json::Value = serde_json::from_slice(&inspect.stdout).unwrap();
+    let persona =
+        persona::inspect_payload(Some(&manifest), "merge_captain").expect("inspect payload");
     assert_eq!(persona["name"], "merge_captain");
     assert_eq!(persona["autonomy_tier"], "act_with_approval");
     assert_eq!(persona["receipt_policy"], "required");
@@ -101,7 +92,6 @@ fn persona_list_and_inspect_emit_stable_json() {
     assert_eq!(persona["evals"][0], "merge_safety");
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_cli_rejects_required_invalid_manifest_cases() {
     for (body, expected) in [
@@ -160,54 +150,32 @@ handoffs = ["review_captain"]
         ),
     ] {
         let temp = write_manifest(body);
-        let output = harn_e2e_command()
-            .current_dir(temp.path())
-            .args(["persona", "list"])
-            .output()
-            .unwrap();
+        let manifest = manifest_path(&temp);
+        let result = persona::list_payload(Some(&manifest));
+        let Err(message) = result else {
+            panic!("expected validation failure for {expected}, got {result:?}");
+        };
         assert!(
-            !output.status.success(),
-            "expected failure for {expected}, stdout={}, stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains(expected),
-            "expected {expected:?} in stderr: {stderr}"
+            message.contains(expected),
+            "expected {expected:?} in error: {message}"
         );
     }
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+fn workspace_relative_manifest(relative: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(relative)
+}
+
 #[test]
 fn persona_manifest_flag_loads_example_personas() {
-    let output = harn_e2e_command()
-        .args([
-            "persona",
-            "--manifest",
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../examples/personas/harn.toml"
-            ),
-            "inspect",
-            "merge_captain",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "stdout={}, stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let persona: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let manifest = workspace_relative_manifest("examples/personas/harn.toml");
+    let persona = persona::inspect_payload(Some(&manifest), "merge_captain").expect("inspect");
     assert_eq!(persona["name"], "merge_captain");
     assert_eq!(persona["receipt_policy"], "required");
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_inspect_reports_source_declared_steps() {
     let (_temp, path) = write_persona_source(
@@ -229,24 +197,8 @@ fn verify_step(ctx) {
 }
 "#,
     );
-    let output = harn_e2e_command()
-        .args([
-            "persona",
-            "--manifest",
-            path.to_string_lossy().as_ref(),
-            "inspect",
-            "merge_captain",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "stdout={}, stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let persona: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let persona =
+        persona::inspect_payload(Some(&path), "merge_captain").expect("inspect source persona");
     assert_eq!(persona["steps"].as_array().unwrap().len(), 2);
     assert_eq!(persona["steps"][0]["name"], "plan");
     assert_eq!(persona["steps"][0]["model"], "gpt-5.4-mini");
@@ -256,7 +208,9 @@ fn verify_step(ctx) {
 
 #[test]
 fn lint_fails_strict_when_persona_body_calls_non_step_helper() {
-    let (temp, path) = write_persona_source(
+    use std::collections::HashSet;
+
+    let (_temp, path) = write_persona_source(
         r#"
 @persona(name: "merge_captain")
 fn merge_captain(ctx) {
@@ -268,79 +222,48 @@ fn helper(ctx) {
 }
 "#,
     );
-    fs::write(temp.path().join("harn.toml"), "[check]\nstrict = true\n").unwrap();
-    let output = harn_e2e_command()
-        .current_dir(temp.path())
-        .args(["lint", path.to_string_lossy().as_ref()])
-        .output()
-        .unwrap();
+    let source = fs::read_to_string(&path).unwrap();
+    let program = harn_parser::parse_source(&source).expect("parse");
+    let module_graph = harn_modules::build(std::slice::from_ref(&path));
+    let allowlist: Vec<String> = Vec::new();
+    let options = harn_lint::LintOptions {
+        file_path: Some(&path),
+        require_file_header: false,
+        complexity_threshold: None,
+        persona_step_allowlist: &allowlist,
+    };
+    let diagnostics = harn_lint::lint_with_module_graph(
+        &program,
+        &[],
+        Some(&source),
+        &HashSet::new(),
+        &module_graph,
+        &path,
+        &options,
+    );
     assert!(
-        !output.status.success(),
-        "expected strict lint failure, stdout={}, stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        diagnostics
+            .iter()
+            .any(|diag| diag.rule == "persona-body-must-call-steps"),
+        "expected persona-body-must-call-steps diagnostic, got: {:?}",
+        diagnostics.iter().map(|d| d.rule).collect::<Vec<_>>()
     );
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(combined.contains("persona-body-must-call-steps"));
 }
 
 #[test]
 fn persona_manifest_flag_loads_fixer_persona() {
-    let output = harn_e2e_command()
-        .args([
-            "persona",
-            "--manifest",
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../personas/fixer/harn.toml"
-            ),
-            "inspect",
-            "fixer",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "stdout={}, stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let persona: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let manifest = workspace_relative_manifest("personas/fixer/harn.toml");
+    let persona = persona::inspect_payload(Some(&manifest), "fixer").expect("inspect");
     assert_eq!(persona["name"], "fixer");
     assert_eq!(persona["triggers"][0], "invariant.blocked_with_remediation");
     assert_eq!(persona["entry_workflow"], "manifest.harn#run");
     assert_eq!(persona["receipt_policy"], "required");
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_manifest_flag_loads_merge_captain_persona() {
-    let output = harn_e2e_command()
-        .args([
-            "persona",
-            "--manifest",
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../personas/merge_captain/harn.toml"
-            ),
-            "inspect",
-            "merge_captain",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "stdout={}, stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let persona: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let manifest = workspace_relative_manifest("personas/merge_captain/harn.toml");
+    let persona = persona::inspect_payload(Some(&manifest), "merge_captain").expect("inspect");
     assert_eq!(persona["name"], "merge_captain");
     assert_eq!(persona["entry_workflow"], "manifest.harn#run");
     assert_eq!(persona["receipt_policy"], "required");
@@ -355,30 +278,10 @@ fn persona_manifest_flag_loads_merge_captain_persona() {
     assert_eq!(persona["evals"][0], "merge_captain_smoke");
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_manifest_flag_loads_ship_captain_persona() {
-    let output = harn_e2e_command()
-        .args([
-            "persona",
-            "--manifest",
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../personas/ship_captain/harn.toml"
-            ),
-            "inspect",
-            "ship_captain",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "stdout={}, stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let persona: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let manifest = workspace_relative_manifest("personas/ship_captain/harn.toml");
+    let persona = persona::inspect_payload(Some(&manifest), "ship_captain").expect("inspect");
     assert_eq!(persona["name"], "ship_captain");
     assert_eq!(persona["triggers"][0], "flow.atom_stream_updated");
     assert_eq!(persona["entry_workflow"], "manifest.harn#run");
@@ -386,201 +289,114 @@ fn persona_manifest_flag_loads_ship_captain_persona() {
     assert_eq!(persona["evals"][0], "slice_quality");
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
-#[test]
-fn persona_runtime_status_tick_and_budget_are_persisted() {
+#[tokio::test(flavor = "current_thread")]
+async fn persona_runtime_status_tick_and_budget_are_persisted() {
     let temp = write_manifest(valid_manifest());
+    let manifest = manifest_path(&temp);
     let state_dir = temp.path().join(".harn-personas-test");
 
-    let status = harn_e2e_command()
-        .current_dir(temp.path())
-        .args([
-            "persona",
-            "--state-dir",
-            state_dir.to_str().unwrap(),
-            "status",
-            "merge_captain",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        status.status.success(),
-        "stdout={}, stderr={}",
-        String::from_utf8_lossy(&status.stdout),
-        String::from_utf8_lossy(&status.stderr)
-    );
-    let status_json: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
-    assert_eq!(status_json["state"], "idle");
-    assert_eq!(status_json["queued_events"], 0);
-    assert_eq!(status_json["budget"]["daily_usd"], 20.0);
+    let status = persona::status_payload(Some(&manifest), &state_dir, "merge_captain", None)
+        .await
+        .expect("initial status");
+    assert_eq!(status.state.as_str(), "idle");
+    assert_eq!(status.queued_events, 0);
+    assert_eq!(status.budget.daily_usd, Some(20.0));
 
-    let tick = harn_e2e_command()
-        .current_dir(temp.path())
-        .args([
-            "persona",
-            "--state-dir",
-            state_dir.to_str().unwrap(),
-            "tick",
-            "merge_captain",
-            "--at",
-            "2026-04-24T12:30:00Z",
-            "--cost-usd",
-            "0.25",
-            "--tokens",
-            "12",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        tick.status.success(),
-        "stdout={}, stderr={}",
-        String::from_utf8_lossy(&tick.stdout),
-        String::from_utf8_lossy(&tick.stderr)
-    );
-    let receipt: serde_json::Value = serde_json::from_slice(&tick.stdout).unwrap();
-    assert_eq!(receipt["status"], "completed");
-    assert!(receipt["lease"]["id"]
-        .as_str()
-        .unwrap()
-        .starts_with("persona_lease_"));
+    let receipt = persona::tick_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        Some("2026-04-24T12:30:00Z"),
+        0.25,
+        12,
+    )
+    .await
+    .expect("tick");
+    assert_eq!(receipt.status, "completed");
+    assert!(receipt
+        .lease
+        .as_ref()
+        .map(|lease| lease.id.starts_with("persona_lease_"))
+        .unwrap_or(false));
 
     // Pin the status query to the same UTC day as the tick above. Without
-    // --at, the budget window is computed from real wall-clock time, so the
-    // assertion silently breaks the moment the test runs after the tick's
-    // UTC midnight (i.e. roughly any time of day in PT/CT/ET).
-    let status = harn_e2e_command()
-        .current_dir(temp.path())
-        .args([
-            "persona",
-            "--state-dir",
-            state_dir.to_str().unwrap(),
-            "status",
-            "merge_captain",
-            "--at",
-            "2026-04-24T13:00:00Z",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(status.status.success());
-    let status_json: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
-    assert_eq!(status_json["state"], "idle");
-    assert_eq!(status_json["last_run"], "2026-04-24T12:30:00Z");
-    assert_eq!(status_json["budget"]["spent_today_usd"], 0.25);
-    assert_eq!(status_json["budget"]["tokens_today"], 12);
+    // --at, the budget window is computed from real wall-clock time, so
+    // the assertion silently breaks the moment the test runs after the
+    // tick's UTC midnight.
+    let status = persona::status_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        Some("2026-04-24T13:00:00Z"),
+    )
+    .await
+    .expect("status after tick");
+    assert_eq!(status.state.as_str(), "idle");
+    assert_eq!(status.last_run.as_deref(), Some("2026-04-24T12:30:00Z"));
+    assert_eq!(status.budget.spent_today_usd, 0.25);
+    assert_eq!(status.budget.tokens_today, 12);
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
-#[test]
-fn persona_pause_resume_disable_trigger_controls_are_durable() {
+#[tokio::test(flavor = "current_thread")]
+async fn persona_pause_resume_disable_trigger_controls_are_durable() {
     let temp = write_manifest(valid_manifest());
+    let manifest = manifest_path(&temp);
     let state_dir = temp.path().join(".harn-personas-test");
 
-    let pause = harn_e2e_command()
-        .current_dir(temp.path())
-        .args([
-            "persona",
-            "--state-dir",
-            state_dir.to_str().unwrap(),
-            "pause",
-            "merge_captain",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(pause.status.success());
+    let _ = persona::pause_payload(Some(&manifest), &state_dir, "merge_captain", None)
+        .await
+        .expect("pause");
 
-    let trigger = harn_e2e_command()
-        .current_dir(temp.path())
-        .args([
-            "persona",
-            "--state-dir",
-            state_dir.to_str().unwrap(),
-            "trigger",
-            "merge_captain",
-            "--provider",
-            "github",
-            "--kind",
-            "pull_request",
-            "--metadata",
-            "repository=burin-labs/harn",
-            "--metadata",
-            "number=462",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        trigger.status.success(),
-        "stdout={}, stderr={}",
-        String::from_utf8_lossy(&trigger.stdout),
-        String::from_utf8_lossy(&trigger.stderr)
-    );
-    let receipt: serde_json::Value = serde_json::from_slice(&trigger.stdout).unwrap();
-    assert_eq!(receipt["status"], "queued");
-    assert_eq!(receipt["work_key"], "github:burin-labs/harn:pr:462");
+    let receipt = persona::trigger_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        "github",
+        "pull_request",
+        &[
+            "repository=burin-labs/harn".to_string(),
+            "number=462".to_string(),
+        ],
+        None,
+        0.0,
+        0,
+    )
+    .await
+    .expect("trigger while paused");
+    assert_eq!(receipt.status, "queued");
+    assert_eq!(receipt.work_key, "github:burin-labs/harn:pr:462");
 
-    let resume = harn_e2e_command()
-        .current_dir(temp.path())
-        .args([
-            "persona",
-            "--state-dir",
-            state_dir.to_str().unwrap(),
-            "resume",
-            "merge_captain",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(resume.status.success());
-    let status_json: serde_json::Value = serde_json::from_slice(&resume.stdout).unwrap();
-    assert_eq!(status_json["state"], "idle");
-    assert_eq!(status_json["queued_events"], 0);
+    let resumed = persona::resume_payload(Some(&manifest), &state_dir, "merge_captain", None)
+        .await
+        .expect("resume");
+    assert_eq!(resumed.state.as_str(), "idle");
+    assert_eq!(resumed.queued_events, 0);
 
-    let disable = harn_e2e_command()
-        .current_dir(temp.path())
-        .args([
-            "persona",
-            "--state-dir",
-            state_dir.to_str().unwrap(),
-            "disable",
-            "merge_captain",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(disable.status.success());
+    let _ = persona::disable_payload(Some(&manifest), &state_dir, "merge_captain", None)
+        .await
+        .expect("disable");
 
-    let trigger = harn_e2e_command()
-        .current_dir(temp.path())
-        .args([
-            "persona",
-            "--state-dir",
-            state_dir.to_str().unwrap(),
-            "trigger",
-            "merge_captain",
-            "--provider",
-            "slack",
-            "--kind",
-            "message",
-            "--metadata",
-            "channel=C123",
-            "--metadata",
-            "ts=1713988800.000100",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(trigger.status.success());
-    let receipt: serde_json::Value = serde_json::from_slice(&trigger.stdout).unwrap();
-    assert_eq!(receipt["status"], "dead_lettered");
+    let receipt = persona::trigger_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        "slack",
+        "message",
+        &[
+            "channel=C123".to_string(),
+            "ts=1713988800.000100".to_string(),
+        ],
+        None,
+        0.0,
+        0,
+    )
+    .await
+    .expect("trigger while disabled");
+    assert_eq!(receipt.status, "dead_lettered");
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
-#[test]
-fn persona_runtime_blocks_budget_exhaustion() {
+#[tokio::test(flavor = "current_thread")]
+async fn persona_runtime_blocks_budget_exhaustion() {
     let temp = write_manifest(
         r#"
 [[personas]]
@@ -595,52 +411,36 @@ triggers = ["github.pr_opened"]
 budget = { daily_usd = 0.01, run_usd = 0.01, max_tokens = 10 }
 "#,
     );
+    let manifest = manifest_path(&temp);
     let state_dir = temp.path().join(".harn-personas-test");
-    let trigger = harn_e2e_command()
-        .current_dir(temp.path())
-        .args([
-            "persona",
-            "--state-dir",
-            state_dir.to_str().unwrap(),
-            "trigger",
-            "merge_captain",
-            "--provider",
-            "github",
-            "--kind",
-            "check_run",
-            "--metadata",
-            "repository=burin-labs/harn",
-            "--metadata",
-            "check_name=ci",
-            "--cost-usd",
-            "0.02",
-            "--tokens",
-            "1",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(trigger.status.success());
-    let receipt: serde_json::Value = serde_json::from_slice(&trigger.stdout).unwrap();
-    assert_eq!(receipt["status"], "budget_exhausted");
-    assert!(receipt["error"].as_str().unwrap().contains("run_usd"));
 
-    let status = harn_e2e_command()
-        .current_dir(temp.path())
-        .args([
-            "persona",
-            "--state-dir",
-            state_dir.to_str().unwrap(),
-            "status",
-            "merge_captain",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(status.status.success());
-    let status_json: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
-    assert!(status_json["last_error"]
-        .as_str()
-        .unwrap()
-        .contains("run_usd"));
+    let receipt = persona::trigger_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        "github",
+        "check_run",
+        &[
+            "repository=burin-labs/harn".to_string(),
+            "check_name=ci".to_string(),
+        ],
+        None,
+        0.02,
+        1,
+    )
+    .await
+    .expect("trigger over budget");
+    assert_eq!(receipt.status, "budget_exhausted");
+    assert!(receipt
+        .error
+        .as_deref()
+        .is_some_and(|message| message.contains("run_usd")));
+
+    let status = persona::status_payload(Some(&manifest), &state_dir, "merge_captain", None)
+        .await
+        .expect("status after exhaustion");
+    assert!(status
+        .last_error
+        .as_deref()
+        .is_some_and(|message| message.contains("run_usd")));
 }

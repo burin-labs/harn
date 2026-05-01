@@ -11,14 +11,21 @@ use crate::cli::{
 };
 use crate::package::{self, PersonaManifestEntry, PersonaValidationError, ResolvedPersonaManifest};
 
+/// In-process variant of `harn persona list --json` used by the binary's
+/// dispatcher and by integration tests that want to assert on the
+/// structured payload without spawning a subprocess.
+pub fn list_payload(manifest: Option<&Path>) -> Result<Vec<serde_json::Value>, String> {
+    let catalog = load_catalog_result(manifest)?;
+    Ok(catalog
+        .personas
+        .iter()
+        .map(|persona| persona_to_json(persona, &catalog))
+        .collect())
+}
+
 pub(crate) fn run_list(manifest: Option<&Path>, args: &PersonaListArgs) {
-    let catalog = load_catalog_or_exit(manifest);
     if args.json {
-        let personas: Vec<serde_json::Value> = catalog
-            .personas
-            .iter()
-            .map(|persona| persona_to_json(persona, &catalog))
-            .collect();
+        let personas = list_payload(manifest).unwrap_or_else(|error| fatal(&error));
         println!(
             "{}",
             serde_json::to_string_pretty(&personas)
@@ -27,6 +34,7 @@ pub(crate) fn run_list(manifest: Option<&Path>, args: &PersonaListArgs) {
         return;
     }
 
+    let catalog = load_catalog_or_exit(manifest);
     if catalog.personas.is_empty() {
         println!(
             "No personas declared in {}.",
@@ -61,14 +69,47 @@ pub(crate) fn run_list(manifest: Option<&Path>, args: &PersonaListArgs) {
     }
 }
 
+/// In-process variant of `harn persona check --json`. Returns the JSON
+/// payload the CLI would print on success; structured validation errors
+/// surface in `Err` so callers can format or assert on them.
+pub fn check_payload(
+    path: Option<&Path>,
+) -> Result<serde_json::Value, Vec<PersonaValidationError>> {
+    let catalog = load_catalog_validation(path)?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "manifest_path": catalog.manifest_path,
+        "personas": catalog.personas.iter().map(|persona| {
+            serde_json::json!({
+                "name": persona.name.as_deref().unwrap_or_default(),
+                "triggers": &persona.triggers,
+                "tools": &persona.tools,
+                "autonomy": persona.autonomy_tier.map(|tier| tier.as_str()).unwrap_or_default(),
+                "receipts": persona.receipt_policy.map(|policy| policy.as_str()).unwrap_or_default(),
+            })
+        }).collect::<Vec<_>>(),
+    }))
+}
+
 pub(crate) fn run_check(manifest: Option<&Path>, args: &PersonaCheckArgs) {
     let selected = args.path.as_deref().or(manifest);
+    if args.json {
+        match check_payload(selected) {
+            Ok(payload) => println!(
+                "{}",
+                serde_json::to_string_pretty(&payload).unwrap_or_else(|error| fatal(&format!(
+                    "failed to serialize persona check output: {error}"
+                )))
+            ),
+            Err(errors) => {
+                print_validation_errors_json(&errors);
+                process::exit(1);
+            }
+        }
+        return;
+    }
     let catalog = match load_catalog_validation(selected) {
         Ok(catalog) => catalog,
-        Err(errors) if args.json => {
-            print_validation_errors_json(&errors);
-            process::exit(1);
-        }
         Err(errors) => fatal(
             &errors
                 .iter()
@@ -77,38 +118,41 @@ pub(crate) fn run_check(manifest: Option<&Path>, args: &PersonaCheckArgs) {
                 .join("\n"),
         ),
     };
-    if args.json {
-        let payload = serde_json::json!({
-            "ok": true,
-            "manifest_path": catalog.manifest_path,
-            "personas": catalog.personas.iter().map(|persona| {
-                serde_json::json!({
-                    "name": persona.name.as_deref().unwrap_or_default(),
-                    "triggers": &persona.triggers,
-                    "tools": &persona.tools,
-                    "autonomy": persona.autonomy_tier.map(|tier| tier.as_str()).unwrap_or_default(),
-                    "receipts": persona.receipt_policy.map(|policy| policy.as_str()).unwrap_or_default(),
-                })
-            }).collect::<Vec<_>>(),
-        });
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&payload).unwrap_or_else(|error| {
-                fatal(&format!(
-                    "failed to serialize persona check output: {error}"
-                ))
-            })
-        );
-    } else {
-        println!(
-            "ok: {} persona manifest validates ({} personas)",
-            catalog.manifest_path.display(),
-            catalog.personas.len()
-        );
-    }
+    println!(
+        "ok: {} persona manifest validates ({} personas)",
+        catalog.manifest_path.display(),
+        catalog.personas.len()
+    );
+}
+
+/// In-process variant of `harn persona inspect <name> --json`.
+pub fn inspect_payload(manifest: Option<&Path>, name: &str) -> Result<serde_json::Value, String> {
+    let catalog = load_catalog_result(manifest)?;
+    let persona = catalog
+        .personas
+        .iter()
+        .find(|persona| persona.name.as_deref() == Some(name))
+        .ok_or_else(|| {
+            format!(
+                "persona '{}' not found in {}",
+                name,
+                catalog.manifest_path.display()
+            )
+        })?;
+    Ok(persona_to_json(persona, &catalog))
 }
 
 pub(crate) fn run_inspect(manifest: Option<&Path>, args: &PersonaInspectArgs) {
+    if args.json {
+        let json = inspect_payload(manifest, &args.name).unwrap_or_else(|error| fatal(&error));
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json)
+                .unwrap_or_else(|error| fatal(&format!("failed to serialize persona: {error}")))
+        );
+        return;
+    }
+
     let catalog = load_catalog_or_exit(manifest);
     let Some(persona) = catalog
         .personas
@@ -121,16 +165,6 @@ pub(crate) fn run_inspect(manifest: Option<&Path>, args: &PersonaInspectArgs) {
             catalog.manifest_path.display()
         ));
     };
-
-    if args.json {
-        let json = persona_to_json(persona, &catalog);
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&json)
-                .unwrap_or_else(|error| fatal(&format!("failed to serialize persona: {error}")))
-        );
-        return;
-    }
 
     println!(
         "name:           {}",
@@ -185,18 +219,42 @@ pub(crate) fn run_inspect(manifest: Option<&Path>, args: &PersonaInspectArgs) {
     println!("manifest:       {}", catalog.manifest_path.display());
 }
 
+/// In-process variant of `harn persona status`.
+pub async fn status_payload(
+    manifest: Option<&Path>,
+    state_dir: &Path,
+    name: &str,
+    at: Option<&str>,
+) -> Result<harn_vm::PersonaStatus, String> {
+    let catalog = load_catalog_result(manifest)?;
+    let binding = runtime_binding_or_err(&catalog, name)?;
+    let log = open_persona_log(state_dir)?;
+    let now_ms = timestamp_arg(at)?;
+    harn_vm::persona_status(&log, &binding, now_ms).await
+}
+
 pub(crate) async fn run_status(
     manifest: Option<&Path>,
     state_dir: &Path,
     args: &PersonaStatusArgs,
 ) -> Result<(), String> {
-    let catalog = load_catalog_result(manifest)?;
-    let binding = runtime_binding_or_err(&catalog, &args.name)?;
-    let log = open_persona_log(state_dir)?;
-    let now_ms = timestamp_arg(args.at.as_deref())?;
-    let status = harn_vm::persona_status(&log, &binding, now_ms).await?;
+    let status = status_payload(manifest, state_dir, &args.name, args.at.as_deref()).await?;
     print_status(&status, args.json);
     Ok(())
+}
+
+/// In-process variant of `harn persona pause`.
+pub async fn pause_payload(
+    manifest: Option<&Path>,
+    state_dir: &Path,
+    name: &str,
+    at: Option<&str>,
+) -> Result<harn_vm::PersonaStatus, String> {
+    let catalog = load_catalog_result(manifest)?;
+    let binding = runtime_binding_or_err(&catalog, name)?;
+    let log = open_persona_log(state_dir)?;
+    let now_ms = timestamp_arg(at)?;
+    harn_vm::pause_persona(&log, &binding, now_ms).await
 }
 
 pub(crate) async fn run_pause(
@@ -204,13 +262,23 @@ pub(crate) async fn run_pause(
     state_dir: &Path,
     args: &PersonaControlArgs,
 ) -> Result<(), String> {
-    let catalog = load_catalog_result(manifest)?;
-    let binding = runtime_binding_or_err(&catalog, &args.name)?;
-    let log = open_persona_log(state_dir)?;
-    let now_ms = timestamp_arg(args.at.as_deref())?;
-    let status = harn_vm::pause_persona(&log, &binding, now_ms).await?;
+    let status = pause_payload(manifest, state_dir, &args.name, args.at.as_deref()).await?;
     print_status(&status, args.json);
     Ok(())
+}
+
+/// In-process variant of `harn persona resume`.
+pub async fn resume_payload(
+    manifest: Option<&Path>,
+    state_dir: &Path,
+    name: &str,
+    at: Option<&str>,
+) -> Result<harn_vm::PersonaStatus, String> {
+    let catalog = load_catalog_result(manifest)?;
+    let binding = runtime_binding_or_err(&catalog, name)?;
+    let log = open_persona_log(state_dir)?;
+    let now_ms = timestamp_arg(at)?;
+    harn_vm::resume_persona(&log, &binding, now_ms).await
 }
 
 pub(crate) async fn run_resume(
@@ -218,13 +286,23 @@ pub(crate) async fn run_resume(
     state_dir: &Path,
     args: &PersonaControlArgs,
 ) -> Result<(), String> {
-    let catalog = load_catalog_result(manifest)?;
-    let binding = runtime_binding_or_err(&catalog, &args.name)?;
-    let log = open_persona_log(state_dir)?;
-    let now_ms = timestamp_arg(args.at.as_deref())?;
-    let status = harn_vm::resume_persona(&log, &binding, now_ms).await?;
+    let status = resume_payload(manifest, state_dir, &args.name, args.at.as_deref()).await?;
     print_status(&status, args.json);
     Ok(())
+}
+
+/// In-process variant of `harn persona disable`.
+pub async fn disable_payload(
+    manifest: Option<&Path>,
+    state_dir: &Path,
+    name: &str,
+    at: Option<&str>,
+) -> Result<harn_vm::PersonaStatus, String> {
+    let catalog = load_catalog_result(manifest)?;
+    let binding = runtime_binding_or_err(&catalog, name)?;
+    let log = open_persona_log(state_dir)?;
+    let now_ms = timestamp_arg(at)?;
+    harn_vm::disable_persona(&log, &binding, now_ms).await
 }
 
 pub(crate) async fn run_disable(
@@ -232,13 +310,38 @@ pub(crate) async fn run_disable(
     state_dir: &Path,
     args: &PersonaControlArgs,
 ) -> Result<(), String> {
-    let catalog = load_catalog_result(manifest)?;
-    let binding = runtime_binding_or_err(&catalog, &args.name)?;
-    let log = open_persona_log(state_dir)?;
-    let now_ms = timestamp_arg(args.at.as_deref())?;
-    let status = harn_vm::disable_persona(&log, &binding, now_ms).await?;
+    let status = disable_payload(manifest, state_dir, &args.name, args.at.as_deref()).await?;
     print_status(&status, args.json);
     Ok(())
+}
+
+/// In-process variant of `harn persona tick`. Returns the run receipt that
+/// the CLI would otherwise print to stdout.
+pub async fn tick_payload(
+    manifest: Option<&Path>,
+    state_dir: &Path,
+    name: &str,
+    at: Option<&str>,
+    cost_usd: f64,
+    tokens: u64,
+) -> Result<harn_vm::PersonaRunReceipt, String> {
+    let catalog = load_catalog_result(manifest)?;
+    let binding = runtime_binding_or_err(&catalog, name)?;
+    let log = open_persona_log(state_dir)?;
+    let now_ms = timestamp_arg(at)?;
+    let receipt = harn_vm::fire_persona_schedule(
+        &log,
+        &binding,
+        harn_vm::PersonaRunCost {
+            cost_usd,
+            tokens,
+            ..Default::default()
+        },
+        now_ms,
+    )
+    .await?;
+    log.flush().await.map_err(|error| error.to_string())?;
+    Ok(receipt)
 }
 
 pub(crate) async fn run_tick(
@@ -246,24 +349,54 @@ pub(crate) async fn run_tick(
     state_dir: &Path,
     args: &PersonaTickArgs,
 ) -> Result<(), String> {
+    let receipt = tick_payload(
+        manifest,
+        state_dir,
+        &args.name,
+        args.at.as_deref(),
+        args.cost_usd,
+        args.tokens,
+    )
+    .await?;
+    print_receipt(&receipt, args.json);
+    Ok(())
+}
+
+/// In-process variant of `harn persona trigger`. `metadata_pairs` accepts
+/// the same `KEY=VALUE` strings the CLI does.
+#[allow(clippy::too_many_arguments)]
+pub async fn trigger_payload(
+    manifest: Option<&Path>,
+    state_dir: &Path,
+    name: &str,
+    provider: &str,
+    kind: &str,
+    metadata_pairs: &[String],
+    at: Option<&str>,
+    cost_usd: f64,
+    tokens: u64,
+) -> Result<harn_vm::PersonaRunReceipt, String> {
     let catalog = load_catalog_result(manifest)?;
-    let binding = runtime_binding_or_err(&catalog, &args.name)?;
+    let binding = runtime_binding_or_err(&catalog, name)?;
     let log = open_persona_log(state_dir)?;
-    let now_ms = timestamp_arg(args.at.as_deref())?;
-    let receipt = harn_vm::fire_persona_schedule(
+    let now_ms = timestamp_arg(at)?;
+    let metadata = parse_metadata(metadata_pairs)?;
+    let receipt = harn_vm::fire_persona_trigger(
         &log,
         &binding,
+        provider,
+        kind,
+        metadata,
         harn_vm::PersonaRunCost {
-            cost_usd: args.cost_usd,
-            tokens: args.tokens,
+            cost_usd,
+            tokens,
             ..Default::default()
         },
         now_ms,
     )
     .await?;
     log.flush().await.map_err(|error| error.to_string())?;
-    print_receipt(&receipt, args.json);
-    Ok(())
+    Ok(receipt)
 }
 
 pub(crate) async fn run_trigger(
@@ -271,28 +404,48 @@ pub(crate) async fn run_trigger(
     state_dir: &Path,
     args: &PersonaTriggerArgs,
 ) -> Result<(), String> {
-    let catalog = load_catalog_result(manifest)?;
-    let binding = runtime_binding_or_err(&catalog, &args.name)?;
-    let log = open_persona_log(state_dir)?;
-    let now_ms = timestamp_arg(args.at.as_deref())?;
-    let metadata = parse_metadata(&args.metadata)?;
-    let receipt = harn_vm::fire_persona_trigger(
-        &log,
-        &binding,
+    let receipt = trigger_payload(
+        manifest,
+        state_dir,
+        &args.name,
         &args.provider,
         &args.kind,
-        metadata,
+        &args.metadata,
+        args.at.as_deref(),
+        args.cost_usd,
+        args.tokens,
+    )
+    .await?;
+    print_receipt(&receipt, args.json);
+    Ok(())
+}
+
+/// In-process variant of `harn persona spend`.
+pub async fn spend_payload(
+    manifest: Option<&Path>,
+    state_dir: &Path,
+    name: &str,
+    at: Option<&str>,
+    cost_usd: f64,
+    tokens: u64,
+) -> Result<harn_vm::PersonaBudgetStatus, String> {
+    let catalog = load_catalog_result(manifest)?;
+    let binding = runtime_binding_or_err(&catalog, name)?;
+    let log = open_persona_log(state_dir)?;
+    let now_ms = timestamp_arg(at)?;
+    let budget = harn_vm::record_persona_spend(
+        &log,
+        &binding,
         harn_vm::PersonaRunCost {
-            cost_usd: args.cost_usd,
-            tokens: args.tokens,
+            cost_usd,
+            tokens,
             ..Default::default()
         },
         now_ms,
     )
     .await?;
     log.flush().await.map_err(|error| error.to_string())?;
-    print_receipt(&receipt, args.json);
-    Ok(())
+    Ok(budget)
 }
 
 pub(crate) async fn run_spend(
@@ -300,22 +453,15 @@ pub(crate) async fn run_spend(
     state_dir: &Path,
     args: &PersonaSpendArgs,
 ) -> Result<(), String> {
-    let catalog = load_catalog_result(manifest)?;
-    let binding = runtime_binding_or_err(&catalog, &args.name)?;
-    let log = open_persona_log(state_dir)?;
-    let now_ms = timestamp_arg(args.at.as_deref())?;
-    let budget = harn_vm::record_persona_spend(
-        &log,
-        &binding,
-        harn_vm::PersonaRunCost {
-            cost_usd: args.cost_usd,
-            tokens: args.tokens,
-            ..Default::default()
-        },
-        now_ms,
+    let budget = spend_payload(
+        manifest,
+        state_dir,
+        &args.name,
+        args.at.as_deref(),
+        args.cost_usd,
+        args.tokens,
     )
     .await?;
-    log.flush().await.map_err(|error| error.to_string())?;
     if args.json {
         println!(
             "{}",
