@@ -1,4 +1,4 @@
-.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-cargo test-fast conformance protocol-conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets sync-language-spec check-language-spec lint-test-patterns
+.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast conformance protocol-conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets sync-language-spec check-language-spec lint-test-patterns
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -36,9 +36,11 @@ fmt:
 lint:
 	cargo clippy --workspace --all-targets -- -D warnings
 
-# Run Rust unit tests via cargo-nextest when available for better whole-workspace
-# parallelism and bounded timeouts (see .config/nextest.toml). Falls back to
-# `cargo test --workspace` when nextest is not installed.
+# Run the fast (in-process, deterministic) test suite via cargo-nextest.
+# Subprocess-spawning integration tests are excluded by the nextest "default"
+# profile's default-filter. Run `make test-e2e` for the slow E2E suite.
+# Falls back to `cargo test --workspace` when nextest is not installed
+# (cargo test has no profile support, so it will run all tests).
 test:
 	@if command -v cargo-nextest >/dev/null 2>&1; then \
 		HARN_LLM_CALLS_DISABLED=1 cargo nextest run --workspace; \
@@ -47,6 +49,13 @@ test:
 		echo "hint: run 'make setup' or 'cargo install cargo-nextest --locked'"; \
 		HARN_LLM_CALLS_DISABLED=1 cargo test --workspace; \
 	fi
+
+# Run the slow E2E / smoke suite: subprocess-spawning CLI surface tests,
+# signal handling, MCP server launch, real ProcessHandle smoke tests, etc.
+# Runs on schedule (nightly), on the `e2e` PR label, and on merge-queue.
+# Requires cargo-nextest (no plain `cargo test` fallback for profile support).
+test-e2e:
+	HARN_LLM_CALLS_DISABLED=1 cargo nextest run --workspace --profile e2e
 
 # Run the baseline Cargo workspace test command explicitly.
 test-cargo:

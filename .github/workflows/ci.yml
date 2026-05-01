@@ -183,11 +183,33 @@ jobs:
       - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - run: make lint-actions
 
+  e2e:
+    name: Slow E2E suite
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'merge_group' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e'))
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        continue-on-error: true
+        with:
+          shared-key: e2e
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@5f57d6cb7cd20b14a8a27f522884c4bc8a187458 # v2.75.19
+        with:
+          tool: nextest@0.9.133
+      - run: make test-e2e
+        env:
+          NEXTEST_PROFILE: e2e
+
   check-status:
     name: Check status
     runs-on: ubuntu-latest
     if: always()
-    needs: [fmt, lint-md, rust, windows, portal, actions]
+    needs: [fmt, lint-md, rust, windows, portal, actions, e2e]
     steps:
       - name: Verify required CI jobs
         run: |
@@ -206,6 +228,15 @@ jobs:
           echo "Rust on Windows (build + smoke test): $windows_result"
           if [ "$windows_result" != "success" ] && [ "$windows_result" != "skipped" ]; then
             echo "::error::Windows job failed."
+            exit 1
+          fi
+
+          # The E2E job only runs on merge_group and PRs with the `e2e` label.
+          # Treat `skipped` as passing so regular PRs are not blocked.
+          e2e_result="${{ needs.e2e.result }}"
+          echo "Slow E2E suite: $e2e_result"
+          if [ "$e2e_result" != "success" ] && [ "$e2e_result" != "skipped" ]; then
+            echo "::error::E2E job failed."
             exit 1
           fi
 
