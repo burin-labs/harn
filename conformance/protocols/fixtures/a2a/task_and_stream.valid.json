@@ -15,6 +15,21 @@
           "parts": [
             {
               "text": "Review this patch"
+            },
+            {
+              "type": "file",
+              "file": {
+                "bytes": "AAEC/w==",
+                "mimeType": "application/octet-stream",
+                "name": "payload.bin"
+              }
+            },
+            {
+              "type": "data",
+              "data": {
+                "ticket": "HARN-891",
+                "priority": 2
+              }
             }
           ]
         },
@@ -40,6 +55,21 @@
               {
                 "type": "text",
                 "text": "Review this patch"
+              },
+              {
+                "type": "file",
+                "file": {
+                  "bytes": "AAEC/w==",
+                  "mimeType": "application/octet-stream",
+                  "name": "payload.bin"
+                }
+              },
+              {
+                "type": "data",
+                "data": {
+                  "ticket": "HARN-891",
+                  "priority": 2
+                }
               }
             ]
           }
