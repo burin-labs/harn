@@ -23,39 +23,39 @@ const TRIGGER_DLQ_TOPIC: &str = "trigger.dlq";
 const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
 
 #[derive(Clone, Debug, Serialize)]
-pub(crate) struct DispatchOutcomeSummary {
-    status: String,
-    attempt_count: u32,
-    handler_kind: String,
-    target_uri: Option<String>,
-    result: Option<JsonValue>,
-    error: Option<String>,
+pub struct DispatchOutcomeSummary {
+    pub status: String,
+    pub attempt_count: u32,
+    pub handler_kind: String,
+    pub target_uri: Option<String>,
+    pub result: Option<JsonValue>,
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub(crate) struct DriftField {
-    original: JsonValue,
-    replayed: JsonValue,
+pub struct DriftField {
+    pub original: JsonValue,
+    pub replayed: JsonValue,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub(crate) struct DriftReport {
-    changed: bool,
-    fields: BTreeMap<String, DriftField>,
+pub struct DriftReport {
+    pub changed: bool,
+    pub fields: BTreeMap<String, DriftField>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub(crate) struct TriggerReplayReport {
-    event_id: String,
-    binding_id: String,
-    binding_version: u32,
+pub struct TriggerReplayReport {
+    pub event_id: String,
+    pub binding_id: String,
+    pub binding_version: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    as_of: Option<String>,
-    replay: DispatchOutcomeSummary,
+    pub as_of: Option<String>,
+    pub replay: DispatchOutcomeSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
-    original: Option<DispatchOutcomeSummary>,
+    pub original: Option<DispatchOutcomeSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    drift: Option<DriftReport>,
+    pub drift: Option<DriftReport>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -142,7 +142,39 @@ pub(crate) async fn run(args: TriggerReplayArgs) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) async fn replay_report_for_event_log(
+/// In-process entry point for `harn trigger replay --where ... [--diff] [--dry-run]`.
+/// Used by integration tests to drive the bulk replay path without spawning
+/// the `harn` binary; the binary entry calls the same internals via `run`.
+pub async fn replay_bulk_in_process(
+    event_log: Arc<AnyEventLog>,
+    workspace_root: &Path,
+    where_expr: &str,
+    diff: bool,
+    dry_run: bool,
+    rate_limit: Option<f64>,
+    as_of: Option<&str>,
+) -> Result<JsonValue, String> {
+    install_trigger_runtime(workspace_root).await?;
+    let as_of_dt = as_of.map(parse_timestamp).transpose()?;
+    let (targets, normalized_filter) = load_bulk_targets(&event_log, where_expr, as_of_dt).await?;
+    let report = replay_bulk_targets(
+        &event_log,
+        workspace_root,
+        targets,
+        normalized_filter,
+        BulkReplayOptions {
+            diff,
+            dry_run,
+            progress: false,
+            rate_limit,
+            as_of,
+        },
+    )
+    .await?;
+    serde_json::to_value(report).map_err(|error| format!("failed to encode replay report: {error}"))
+}
+
+pub async fn replay_report_for_event_log(
     event_log: Arc<AnyEventLog>,
     workspace_root: &Path,
     event_id: &str,
@@ -285,7 +317,7 @@ async fn append_replay_audit(
     Ok(audit.id.clone())
 }
 
-pub(crate) fn build_replay_vm(workspace_root: &Path) -> harn_vm::Vm {
+pub fn build_replay_vm(workspace_root: &Path) -> harn_vm::Vm {
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
     harn_vm::register_store_builtins(&mut vm, workspace_root);

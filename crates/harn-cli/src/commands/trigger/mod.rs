@@ -1,6 +1,6 @@
-pub(crate) mod cancel;
+pub mod cancel;
 pub(crate) mod ops;
-pub(crate) mod replay;
+pub mod replay;
 
 use crate::cli::{TriggerArgs, TriggerCommand};
 

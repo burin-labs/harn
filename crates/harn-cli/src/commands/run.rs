@@ -111,7 +111,7 @@ fn typecheck_with_imports(
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) enum CliLlmMockMode {
+pub enum CliLlmMockMode {
     #[default]
     Off,
     Replay {
@@ -123,9 +123,19 @@ pub(crate) enum CliLlmMockMode {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct RunAttestationOptions {
+pub struct RunAttestationOptions {
     pub receipt_out: Option<PathBuf>,
     pub agent_id: Option<String>,
+}
+
+/// Captured outcome of an in-process `execute_run` invocation. Tests use this
+/// instead of spawning the `harn` binary; the binary entry point translates
+/// it into real stdout/stderr writes + `process::exit`.
+#[derive(Clone, Debug, Default)]
+pub struct RunOutcome {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
 }
 
 fn load_cli_llm_mocks(path: &Path) -> Result<Vec<harn_vm::llm::LlmMock>, String> {
@@ -312,7 +322,7 @@ fn optional_vec_field(
     }
 }
 
-pub(crate) fn install_cli_llm_mock_mode(mode: &CliLlmMockMode) -> Result<(), String> {
+pub fn install_cli_llm_mock_mode(mode: &CliLlmMockMode) -> Result<(), String> {
     harn_vm::llm::clear_cli_llm_mock_mode();
     match mode {
         CliLlmMockMode::Off => Ok(()),
@@ -328,7 +338,7 @@ pub(crate) fn install_cli_llm_mock_mode(mode: &CliLlmMockMode) -> Result<(), Str
     }
 }
 
-pub(crate) fn persist_cli_llm_mock_recording(mode: &CliLlmMockMode) -> Result<(), String> {
+pub fn persist_cli_llm_mock_recording(mode: &CliLlmMockMode) -> Result<(), String> {
     let CliLlmMockMode::Record { fixture_path } = mode else {
         return Ok(());
     };
@@ -479,32 +489,112 @@ pub(crate) async fn run_file_with_skill_dirs(
     llm_mock_mode: CliLlmMockMode,
     attestation: Option<RunAttestationOptions>,
 ) {
+    // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
+    let cancelled = install_signal_shutdown_handler();
+
+    let outcome = execute_run(
+        path,
+        trace,
+        denied_builtins,
+        script_argv,
+        skill_dirs_raw,
+        llm_mock_mode,
+        attestation,
+    )
+    .await;
+
+    // Drain stderr before stdout so users see diagnostics first when streams
+    // interleave on the terminal.
+    if !outcome.stderr.is_empty() {
+        io::stderr().write_all(outcome.stderr.as_bytes()).ok();
+    }
+    if !outcome.stdout.is_empty() {
+        io::stdout().write_all(outcome.stdout.as_bytes()).ok();
+    }
+
+    let mut exit_code = outcome.exit_code;
+    if exit_code != 0 && cancelled.load(Ordering::SeqCst) {
+        exit_code = 124;
+    }
+    if exit_code != 0 {
+        process::exit(exit_code);
+    }
+}
+
+fn install_signal_shutdown_handler() -> Arc<AtomicBool> {
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancelled_clone = cancelled.clone();
+    tokio::spawn(async move {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler");
+            let mut sigint = signal(SignalKind::interrupt()).expect("SIGINT handler");
+            tokio::select! {
+                _ = sigterm.recv() => {},
+                _ = sigint.recv() => {},
+            }
+            cancelled_clone.store(true, Ordering::SeqCst);
+            eprintln!("[harn] signal received, flushing state...");
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            process::exit(124);
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+            cancelled_clone.store(true, Ordering::SeqCst);
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            process::exit(124);
+        }
+    });
+    cancelled
+}
+
+/// In-process equivalent of `run_file_with_skill_dirs`. Returns the captured
+/// stdout, stderr, and what exit code the binary entry would have used,
+/// instead of writing to real stdout/stderr or calling `process::exit`.
+///
+/// Tests should call this directly. The `harn run` binary path wraps it.
+pub async fn execute_run(
+    path: &str,
+    trace: bool,
+    denied_builtins: HashSet<String>,
+    script_argv: Vec<String>,
+    skill_dirs_raw: Vec<String>,
+    llm_mock_mode: CliLlmMockMode,
+    attestation: Option<RunAttestationOptions>,
+) -> RunOutcome {
+    let mut stderr = String::new();
+    let mut stdout = String::new();
+
     let (source, program) = parse_source_file(path);
 
     let mut had_type_error = false;
     let type_diagnostics = typecheck_with_imports(&program, Path::new(path), &source);
     for diag in &type_diagnostics {
-        match diag.severity {
-            DiagnosticSeverity::Error => {
-                had_type_error = true;
-                let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
-                eprint!("{rendered}");
-            }
-            DiagnosticSeverity::Warning => {
-                let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
-                eprint!("{rendered}");
-            }
+        let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
+        if matches!(diag.severity, DiagnosticSeverity::Error) {
+            had_type_error = true;
         }
+        stderr.push_str(&rendered);
     }
     if had_type_error {
-        process::exit(1);
+        return RunOutcome {
+            stdout,
+            stderr,
+            exit_code: 1,
+        };
     }
 
     let chunk = match harn_vm::Compiler::new().compile(&program) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("error: compile error: {e}");
-            process::exit(1);
+            stderr.push_str(&format!("error: compile error: {e}\n"));
+            return RunOutcome {
+                stdout,
+                stderr,
+                exit_code: 1,
+            };
         }
     };
 
@@ -512,8 +602,12 @@ pub(crate) async fn run_file_with_skill_dirs(
         harn_vm::llm::enable_tracing();
     }
     if let Err(error) = install_cli_llm_mock_mode(&llm_mock_mode) {
-        eprintln!("error: {error}");
-        process::exit(1);
+        stderr.push_str(&format!("error: {error}\n"));
+        return RunOutcome {
+            stdout,
+            stderr,
+            exit_code: 1,
+        };
     }
 
     let mut vm = harn_vm::Vm::new();
@@ -592,40 +686,25 @@ pub(crate) async fn run_file_with_skill_dirs(
         }
     }
     if let Err(error) = package::install_manifest_triggers(&mut vm, &extensions).await {
-        eprintln!("error: failed to install manifest triggers: {error}");
-        process::exit(1);
+        stderr.push_str(&format!(
+            "error: failed to install manifest triggers: {error}\n"
+        ));
+        return RunOutcome {
+            stdout,
+            stderr,
+            exit_code: 1,
+        };
     }
     if let Err(error) = package::install_manifest_hooks(&mut vm, &extensions).await {
-        eprintln!("error: failed to install manifest hooks: {error}");
-        process::exit(1);
+        stderr.push_str(&format!(
+            "error: failed to install manifest hooks: {error}\n"
+        ));
+        return RunOutcome {
+            stdout,
+            stderr,
+            exit_code: 1,
+        };
     }
-
-    // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let cancelled_clone = cancelled.clone();
-    tokio::spawn(async move {
-        #[cfg(unix)]
-        {
-            use tokio::signal::unix::{signal, SignalKind};
-            let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler");
-            let mut sigint = signal(SignalKind::interrupt()).expect("SIGINT handler");
-            tokio::select! {
-                _ = sigterm.recv() => {},
-                _ = sigint.recv() => {},
-            }
-            cancelled_clone.store(true, Ordering::SeqCst);
-            eprintln!("[harn] signal received, flushing state...");
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            process::exit(124);
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = tokio::signal::ctrl_c().await;
-            cancelled_clone.store(true, Ordering::SeqCst);
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            process::exit(124);
-        }
-    });
 
     // Run inside a LocalSet so spawn_local works for concurrency builtins.
     let local = tokio::task::LocalSet::new();
@@ -638,19 +717,20 @@ pub(crate) async fn run_file_with_skill_dirs(
         })
         .await;
     if let Err(error) = persist_cli_llm_mock_recording(&llm_mock_mode) {
-        eprintln!("error: {error}");
-        process::exit(1);
+        stderr.push_str(&format!("error: {error}\n"));
+        return RunOutcome {
+            stdout,
+            stderr,
+            exit_code: 1,
+        };
     }
 
     // Always drain any captured stderr accumulated during execution.
     let buffered_stderr = harn_vm::take_stderr_buffer();
-    if !buffered_stderr.is_empty() {
-        io::stderr().write_all(buffered_stderr.as_bytes()).ok();
-    }
+    stderr.push_str(&buffered_stderr);
 
     let exit_code = match &execution {
         Ok((_, return_value)) => exit_code_from_return_value(return_value),
-        Err(_) if cancelled.load(Ordering::SeqCst) => 124,
         Err(_) => 1,
     };
 
@@ -662,34 +742,44 @@ pub(crate) async fn run_file_with_skill_dirs(
             attestation_started_at_ms,
             exit_code,
             options,
+            &mut stderr,
         )
         .await
         {
-            eprintln!("error: failed to emit provenance receipt: {error}");
-            process::exit(1);
+            stderr.push_str(&format!(
+                "error: failed to emit provenance receipt: {error}\n"
+            ));
+            return RunOutcome {
+                stdout,
+                stderr,
+                exit_code: 1,
+            };
         }
         harn_vm::event_log::reset_active_event_log();
     }
 
     match execution {
         Ok((output, return_value)) => {
-            if !output.is_empty() {
-                io::stdout().write_all(output.as_bytes()).ok();
-            }
+            stdout.push_str(output);
             if trace {
-                print_trace_summary();
+                stderr.push_str(&render_trace_summary());
             }
             if exit_code != 0 {
-                emit_return_value_error(&return_value);
-                process::exit(exit_code);
+                stderr.push_str(&render_return_value_error(&return_value));
+            }
+            RunOutcome {
+                stdout,
+                stderr,
+                exit_code,
             }
         }
         Err(rendered_error) => {
-            eprint!("{rendered_error}");
-            if cancelled.load(Ordering::SeqCst) {
-                process::exit(124);
+            stderr.push_str(&rendered_error);
+            RunOutcome {
+                stdout,
+                stderr,
+                exit_code: 1,
             }
-            process::exit(1);
         }
     }
 }
@@ -714,6 +804,7 @@ async fn emit_run_attestation(
     started_at_ms: i64,
     exit_code: i32,
     options: &RunAttestationOptions,
+    stderr: &mut String,
 ) -> Result<(), String> {
     let finished_at_ms = now_ms();
     let status = if exit_code == 0 { "success" } else { "failure" };
@@ -761,7 +852,7 @@ async fn emit_run_attestation(
         .map_err(|error| format!("failed to encode provenance receipt: {error}"))?;
     fs::write(&receipt_path, encoded)
         .map_err(|error| format!("failed to write {}: {error}", receipt_path.display()))?;
-    eprintln!("provenance receipt: {}", receipt_path.display());
+    stderr.push_str(&format!("provenance receipt: {}\n", receipt_path.display()));
     Ok(())
 }
 
@@ -804,27 +895,26 @@ fn exit_code_from_return_value(value: &harn_vm::VmValue) -> i32 {
     }
 }
 
-fn emit_return_value_error(value: &harn_vm::VmValue) {
+fn render_return_value_error(value: &harn_vm::VmValue) -> String {
     let harn_vm::VmValue::EnumVariant {
         enum_name,
         variant,
         fields,
     } = value
     else {
-        return;
+        return String::new();
     };
     if enum_name.as_ref() != "Result" || variant.as_ref() != "Err" {
-        return;
+        return String::new();
     }
     let rendered = fields.first().map(|p| p.display()).unwrap_or_default();
-    let line = if rendered.is_empty() {
+    if rendered.is_empty() {
         "error\n".to_string()
     } else if rendered.ends_with('\n') {
         rendered
     } else {
         format!("{rendered}\n")
-    };
-    io::stderr().write_all(line.as_bytes()).ok();
+    }
 }
 
 /// Connect to MCP servers declared in `harn.toml` and register them as
@@ -914,17 +1004,20 @@ pub(crate) async fn connect_mcp_servers(
     }
 }
 
-fn print_trace_summary() {
+fn render_trace_summary() -> String {
+    use std::fmt::Write;
     let entries = harn_vm::llm::take_trace();
     if entries.is_empty() {
-        return;
+        return String::new();
     }
-    eprintln!("\n\x1b[2m─── LLM trace ───\x1b[0m");
+    let mut out = String::new();
+    let _ = writeln!(out, "\n\x1b[2m─── LLM trace ───\x1b[0m");
     let mut total_input = 0i64;
     let mut total_output = 0i64;
     let mut total_ms = 0u64;
     for (i, entry) in entries.iter().enumerate() {
-        eprintln!(
+        let _ = writeln!(
+            out,
             "  #{}: {} | {} in + {} out tokens | {} ms",
             i + 1,
             entry.model,
@@ -939,7 +1032,8 @@ fn print_trace_summary() {
     let total_tokens = total_input + total_output;
     // Rough cost estimate using Sonnet 4 pricing ($3/MTok in, $15/MTok out).
     let cost = (total_input as f64 * 3.0 + total_output as f64 * 15.0) / 1_000_000.0;
-    eprintln!(
+    let _ = writeln!(
+        out,
         "  \x1b[1m{} call{}, {} tokens ({}in + {}out), {} ms, ~${:.4}\x1b[0m",
         entries.len(),
         if entries.len() == 1 { "" } else { "s" },
@@ -949,6 +1043,7 @@ fn print_trace_summary() {
         total_ms,
         cost,
     );
+    out
 }
 
 /// Run a .harn file as an MCP server using the script-driven surface.

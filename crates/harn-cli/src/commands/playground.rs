@@ -20,6 +20,19 @@ struct LlmOverride {
     model: String,
 }
 
+/// Inputs to `execute_playground_inputs` — the in-process sibling of
+/// `harn playground`. Tests construct this directly instead of going through
+/// clap. The binary entry (`run_command`) builds this from `PlaygroundArgs`.
+#[derive(Clone, Debug)]
+pub struct PlaygroundInputs {
+    pub host: PathBuf,
+    pub script: PathBuf,
+    pub task: String,
+    /// Optional `provider:model` override, in the same format `--llm` accepts.
+    pub llm: Option<String>,
+    pub llm_mock_mode: CliLlmMockMode,
+}
+
 #[derive(Clone, Debug)]
 struct PlaygroundConfig {
     host: PathBuf,
@@ -52,6 +65,24 @@ pub(crate) async fn run_command(
         }
         Ok(())
     }
+}
+
+/// In-process entry point for `harn playground`. Returns the captured stdout
+/// the CLI dispatcher would have printed, or a rendered error string.
+///
+/// This is the path tests use to exercise the playground driver without
+/// spawning the `harn` binary. Watch mode is not supported here — it has no
+/// terminal output contract worth asserting on.
+pub async fn execute_playground_inputs(inputs: PlaygroundInputs) -> Result<String, String> {
+    let llm = inputs.llm.as_deref().map(parse_llm_override).transpose()?;
+    let config = PlaygroundConfig {
+        host: canonicalize_or_err(inputs.host.to_string_lossy().as_ref())?,
+        script: canonicalize_or_err(inputs.script.to_string_lossy().as_ref())?,
+        task: inputs.task,
+        llm,
+        llm_mock_mode: inputs.llm_mock_mode,
+    };
+    execute_playground(&config).await
 }
 
 async fn run_watch(config: &PlaygroundConfig) -> Result<(), String> {
