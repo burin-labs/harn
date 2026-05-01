@@ -2696,7 +2696,7 @@ runner discovers attributed pipelines in addition to the legacy
 #### Durable persona annotations
 
 Durable persona metadata can be declared directly on a function, tool, or
-pipeline with `@persona`, `@trigger`, `@handoff`, and `@budget`:
+pipeline with `@persona`, `@step`, `@trigger`, `@handoff`, and `@budget`:
 
 ```harn,ignore
 @persona(
@@ -2711,6 +2711,16 @@ pipeline with `@persona`, `@trigger`, `@handoff`, and `@budget`:
 @handoff(target: review_captain, reason: "risky diff")
 @budget(daily_usd: 20, max_tokens: 100000)
 fn merge_captain(ctx: HandlerCtx) { ... }
+
+@step(
+  name: "plan",
+  model: "gpt-5.4-mini",
+  approval: optional,
+  receipt: audit,
+  error_boundary: fail,
+  retry: {max_attempts: 2},
+)
+fn plan_step(ctx: HandlerCtx) { ... }
 ```
 
 The annotations are first-class parser and type-checker metadata. The
@@ -2722,9 +2732,15 @@ not rewritten by this syntax.
 | Attribute | Arguments |
 |---|---|
 | `@persona` | Named metadata: `triggers`, `schedules`, `tools`, `autonomy`, `budget`, `handoffs`, `context_packs`, `evals`, `receipts`, `model`, `owner`, `name`, `description` |
+| `@step` | Named metadata: `name`, `model`, `approval` (`required`/`optional`), `receipt` (`audit`/`none`), `error_boundary` (`fail`/`continue`/`escalate`), `retry` (`{max_attempts: N}`) |
 | `@trigger` | Positional trigger specs (`github.pr_opened`, `"github.pr_opened"`, `schedule("cron")`) or named `id`, `provider`, `kind`, `event`, `when`, `schedule`, `budget` |
 | `@handoff` | Named `target`/`to`, `reason`, `schema`, `artifact` |
 | `@budget` | Named numeric fields: `daily_usd`, `hourly_usd`, `run_usd`, `max_tokens`, `frontier_escalations`, `max_autonomous_decisions_per_hour`, `max_autonomous_decisions_per_day`; string/symbol exhaustion policy via `on_exhausted` or `on_budget_exhausted` |
+
+For `@persona` functions, `harn lint` reports
+`persona-body-must-call-steps` when the body directly calls a non-stdlib
+function that is not declared with `@step`. Projects may allow specific
+legacy helpers with `[lint].persona_step_allowlist`.
 
 #### `@command(name?, description?, hint?)`
 
@@ -4771,6 +4787,7 @@ root-manifest-owned by default.
 disabled = ["unused-import"]
 require_file_header = false
 complexity_threshold = 25
+persona_step_allowlist = ["legacy_helper"]
 ```
 
 - `disabled` silences the listed rules for the whole project.
@@ -4781,6 +4798,9 @@ complexity_threshold = 25
   warning threshold (default **25**, chosen to match Clippy's
   `cognitive_complexity` default). Set lower to tighten, higher to
   loosen. Per-function escapes still go through `@complexity(allow)`.
+- `persona_step_allowlist` lists non-stdlib helper functions that
+  `@persona` bodies may call directly without a matching `@step`
+  declaration.
 
 ## Sandbox mode
 
