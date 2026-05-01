@@ -13,7 +13,7 @@ pub(crate) mod flow;
 pub(crate) mod init;
 pub(crate) mod mcp;
 pub(crate) mod merge_captain;
-pub(crate) mod orchestrator;
+pub mod orchestrator;
 pub(crate) mod persona;
 pub(crate) mod playground;
 pub(crate) mod portal;

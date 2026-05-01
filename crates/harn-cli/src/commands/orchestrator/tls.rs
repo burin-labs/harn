@@ -9,12 +9,18 @@ use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct TlsFiles {
+pub struct TlsFiles {
     pub(crate) cert: PathBuf,
     pub(crate) key: PathBuf,
 }
 
 impl TlsFiles {
+    /// Constructor used by tests and by harness consumers that supply
+    /// the cert/key paths directly.
+    pub fn new(cert: PathBuf, key: PathBuf) -> Self {
+        Self { cert, key }
+    }
+
     pub(crate) fn from_args(
         cert: Option<PathBuf>,
         key: Option<PathBuf>,

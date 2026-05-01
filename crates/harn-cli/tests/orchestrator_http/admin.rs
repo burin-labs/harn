@@ -1,19 +1,21 @@
 use super::support::*;
+use crate::test_util::process::harn_command;
+use harn_cli::commands::orchestrator::tls::TlsFiles;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn admin_reload_endpoint_applies_manifest_changes() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &a2a_manifest(None));
     write_file(temp.path(), "lib.harn", a2a_handler_module());
 
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_ORCHESTRATOR_API_KEYS", "reload-key"),
         ("HARN_ORCHESTRATOR_HMAC_SECRET", "shared-secret"),
-    ];
-    let mut process = spawn_orchestrator(&temp, &[], &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
 
     let client = reqwest::Client::new();
     let mut auth_headers = json_headers();
@@ -68,8 +70,7 @@ async fn admin_reload_endpoint_applies_manifest_changes() {
         .unwrap();
     assert_status(retired, StatusCode::NOT_FOUND).await;
 
-    send_sigterm(&mut process.child);
-    wait_for_exit(&mut process.child);
+    shutdown(harness).await;
     let snapshot = state_snapshot(&temp);
     assert!(snapshot.contains("\"listener_url\""), "snapshot={snapshot}");
     assert!(snapshot.contains("\"version\": 2"), "snapshot={snapshot}");
@@ -77,18 +78,18 @@ async fn admin_reload_endpoint_applies_manifest_changes() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn admin_reload_invalid_manifest_keeps_existing_routes_live() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &a2a_manifest(None));
     write_file(temp.path(), "lib.harn", a2a_handler_module());
 
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_ORCHESTRATOR_API_KEYS", "reload-key"),
         ("HARN_ORCHESTRATOR_HMAC_SECRET", "shared-secret"),
-    ];
-    let mut process = spawn_orchestrator(&temp, &[], &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
 
     let client = reqwest::Client::new();
     let mut auth_headers = json_headers();
@@ -120,24 +121,27 @@ async fn admin_reload_invalid_manifest_keeps_existing_routes_live() {
         .unwrap();
     assert_status(still_live, StatusCode::OK).await;
 
-    send_sigterm(&mut process.child);
-    wait_for_exit(&mut process.child);
+    shutdown(harness).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn watch_mode_reloads_manifest_changes() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &a2a_manifest(None));
     write_file(temp.path(), "lib.harn", a2a_handler_module());
 
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_ORCHESTRATOR_API_KEYS", "reload-key"),
         ("HARN_ORCHESTRATOR_HMAC_SECRET", "shared-secret"),
-    ];
-    let mut process = spawn_orchestrator(&temp, &["--watch"], &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let harness = start_harness_with(&temp, |mut config| {
+        config.watch_manifest = true;
+        config
+    })
+    .await;
+    let base_url = harness.listener_url().to_string();
 
     write_file(
         temp.path(),
@@ -149,7 +153,7 @@ async fn watch_mode_reloads_manifest_changes() {
     let mut auth_headers = json_headers();
     auth_headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer reload-key"));
 
-    let deadline = Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
+    let deadline = tokio::time::Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
     loop {
         let response = client
             .post(format!("{base_url}/a2a/review-watch"))
@@ -162,8 +166,11 @@ async fn watch_mode_reloads_manifest_changes() {
             break;
         }
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        assert!(Instant::now() < deadline, "watch reload never applied");
-        timing::sleep_async(timing::RETRY_POLL_INTERVAL).await;
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "watch reload never applied"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
     let retired = client
@@ -175,13 +182,11 @@ async fn watch_mode_reloads_manifest_changes() {
         .unwrap();
     assert_status(retired, StatusCode::NOT_FOUND).await;
 
-    send_sigterm(&mut process.child);
-    wait_for_exit(&mut process.child);
+    shutdown(harness).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn reload_cli_uses_admin_endpoint() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &a2a_manifest(None));
     write_file(temp.path(), "lib.harn", a2a_handler_module());
@@ -191,8 +196,9 @@ async fn reload_cli_uses_admin_endpoint() {
         ("HARN_ORCHESTRATOR_API_KEYS", "reload-key"),
         ("HARN_ORCHESTRATOR_HMAC_SECRET", "shared-secret"),
     ];
-    let mut process = spawn_orchestrator(&temp, &[], &envs);
-    let base_url = process.wait_for_listener_url();
+    let _envs = lock_env_with(&envs).await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
 
     write_file(
         temp.path(),
@@ -236,13 +242,11 @@ async fn reload_cli_uses_admin_endpoint() {
         .unwrap();
     assert_status(updated, StatusCode::OK).await;
 
-    send_sigterm(&mut process.child);
-    wait_for_exit(&mut process.child);
+    shutdown(harness).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tls_listener_serves_https_with_supplied_cert_and_key() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &base_manifest(None));
     write_file(temp.path(), "lib.harn", handler_module());
@@ -255,14 +259,20 @@ async fn tls_listener_serves_https_with_supplied_cert_and_key() {
     write_bytes(temp.path(), "tls/key.pem", key_pem.as_bytes());
 
     let secret = "tls-secret";
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_SECRET_GITHUB_WEBHOOK_SECRET", secret),
         ("RUST_LOG", "info"),
-    ];
-    let args = ["--cert", "tls/cert.pem", "--key", "tls/key.pem"];
-    let mut process = spawn_orchestrator(&temp, &args, &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let cert_path = temp.path().join("tls/cert.pem");
+    let key_path = temp.path().join("tls/key.pem");
+    let harness = start_harness_with(&temp, move |mut config| {
+        config.tls = Some(TlsFiles::new(cert_path, key_path));
+        config
+    })
+    .await;
+    let base_url = harness.listener_url().to_string();
     assert!(base_url.starts_with("https://"), "{base_url}");
 
     let body = br#"{"action":"opened","issue":{"number":2}}"#;
@@ -278,19 +288,11 @@ async fn tls_listener_serves_https_with_supplied_cert_and_key() {
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    send_sigterm(&mut process.child);
-    let status = process
-        .child
-        .wait_timeout(PROCESS_FAIL_FAST_TIMEOUT)
-        .unwrap_or_else(|error| panic!("{error}"));
-    let stderr = process.join_stderr();
-    assert!(status.success(), "status={status} stderr={stderr}");
-    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+    shutdown(harness).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn disallowed_origin_is_rejected() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(
         temp.path(),
@@ -303,12 +305,13 @@ allowed_origins = ["https://allowed.example"]"#,
     write_file(temp.path(), "lib.harn", handler_module());
 
     let secret = "origin-secret";
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_SECRET_GITHUB_WEBHOOK_SECRET", secret),
-    ];
-    let mut process = spawn_orchestrator(&temp, &[], &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
 
     let body = br#"{"action":"opened","issue":{"number":3}}"#;
     let response = reqwest::Client::new()
@@ -324,26 +327,23 @@ allowed_origins = ["https://allowed.example"]"#,
         .unwrap();
     assert_status(response, StatusCode::FORBIDDEN).await;
 
-    send_sigterm(&mut process.child);
-    wait_for_exit(&mut process.child);
-    let stderr = process.join_stderr();
-    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+    shutdown(harness).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn oversized_request_body_is_rejected() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &base_manifest(None));
     write_file(temp.path(), "lib.harn", handler_module());
 
     let secret = "body-limit-secret";
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_SECRET_GITHUB_WEBHOOK_SECRET", secret),
-    ];
-    let mut process = spawn_orchestrator(&temp, &[], &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
 
     let body = vec![b'a'; (10 * 1024 * 1024) + 1];
     let response = reqwest::Client::new()
@@ -355,15 +355,11 @@ async fn oversized_request_body_is_rejected() {
         .unwrap();
     assert_status(response, StatusCode::PAYLOAD_TOO_LARGE).await;
 
-    send_sigterm(&mut process.child);
-    wait_for_exit(&mut process.child);
-    let stderr = process.join_stderr();
-    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+    shutdown(harness).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn graceful_shutdown_waits_for_in_flight_request() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     let request_entered_path = temp.path().join("request-entered");
     let request_release_path = temp.path().join("request-release");
@@ -373,7 +369,7 @@ async fn graceful_shutdown_waits_for_in_flight_request() {
     write_file(temp.path(), "lib.harn", handler_module());
 
     let secret = "shutdown-secret";
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_SECRET_GITHUB_WEBHOOK_SECRET", secret),
         (
@@ -384,9 +380,11 @@ async fn graceful_shutdown_waits_for_in_flight_request() {
             "HARN_ORCHESTRATOR_TEST_REQUEST_RELEASE_FILE",
             request_release_value.as_str(),
         ),
-    ];
-    let mut process = spawn_orchestrator(&temp, &[], &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
+    let shutdown_trigger = harness.shutdown_trigger();
 
     let body = br#"{"action":"opened","issue":{"number":4}}"#.to_vec();
     let request = tokio::spawn({
@@ -396,15 +394,21 @@ async fn graceful_shutdown_waits_for_in_flight_request() {
         async move { client.post(url).headers(headers).body(body).send().await }
     });
 
-    wait_for_path(&request_entered_path, EVENT_FAIL_FAST_TIMEOUT);
-    send_sigterm(&mut process.child);
+    let entry_deadline = tokio::time::Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
+    while !request_entered_path.exists() {
+        assert!(
+            tokio::time::Instant::now() < entry_deadline,
+            "timed out waiting for request to enter handler"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let _ = shutdown_trigger.send(true);
     fs::write(&request_release_path, b"release").unwrap();
     let response = request.await.unwrap().unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    wait_for_exit(&mut process.child);
-    let stderr = process.join_stderr();
-    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+    shutdown(harness).await;
 
     let snapshot = state_snapshot(&temp);
     assert!(

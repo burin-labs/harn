@@ -1,3 +1,3 @@
-pub(crate) mod cwd_lock;
-pub(crate) mod env_lock;
-pub(crate) mod harn_state_lock;
+pub mod cwd_lock;
+pub mod env_lock;
+pub mod harn_state_lock;

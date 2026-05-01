@@ -67,6 +67,20 @@ condensed series summaries instead of full per-patch history.
 - **Virtual-clock test migration (#948/#1027).** Timing-sensitive tests
   migrated to a deterministic virtual clock to reduce flakes.
 
+- **In-process orchestrator integration tests (#1059/#1060).** Every
+  `crates/harn-cli/tests/orchestrator_*` test now runs the orchestrator
+  in-process via the new `OrchestratorHarness` library API and waits on
+  the event log's broadcast channel instead of spawning the `harn`
+  binary and polling SQLite. Wall-clock for the orchestrator HTTP
+  suite drops from minutes (per-test subprocess startup + 25 ms-poll
+  drain) to ~13 s end-to-end at `--test-threads=8`. The few tests that
+  inherently depend on subprocess semantics (raw stderr scraping,
+  `std::process::exit(86)` crash hooks, global tracing-subscriber
+  install) stay `#[ignore]`d and move to the slow E2E/smoke job
+  tracked in #1069. To support this the harn-cli crate gains a thin
+  `lib.rs` that promotes the previous `main.rs` body to public API
+  while keeping `main.rs` a 3-line shim.
+
 - **`cfg(unix)` test gate audit + nightly Windows matrix (#1026).**
   Surfaces and trims tests gated on `cfg(unix)` and adds a nightly
   Windows nextest matrix to keep cross-platform coverage honest.

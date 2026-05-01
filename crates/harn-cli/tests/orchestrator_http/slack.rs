@@ -1,8 +1,8 @@
 use super::support::*;
+use crate::test_util::timing::SLACK_ACK_TIMEOUT;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn slack_webhook_acknowledges_before_handler_finishes() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     let marker_path = temp.path().join("slack-handler.txt");
     let release_path = temp.path().join("release-slack-dispatch");
@@ -11,16 +11,18 @@ async fn slack_webhook_acknowledges_before_handler_finishes() {
     write_file(temp.path(), "lib.harn", &slack_handler_module(&marker_path));
 
     let secret = "slack-signing-secret";
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_SECRET_SLACK_SIGNING_SECRET", secret),
         (
             "HARN_TEST_ORCHESTRATOR_INBOX_TASK_RELEASE_FILE",
             release_path_value.as_str(),
         ),
-    ];
-    let mut process = spawn_orchestrator(&temp, &[], &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
+    let event_log = harness.event_log();
 
     let timestamp = OffsetDateTime::now_utc().unix_timestamp();
     let body = serde_json::to_vec(&serde_json::json!({
@@ -42,7 +44,7 @@ async fn slack_webhook_acknowledges_before_handler_finishes() {
     .unwrap();
 
     let response = tokio::time::timeout(
-        timing::SLACK_ACK_TIMEOUT,
+        SLACK_ACK_TIMEOUT,
         reqwest::Client::new()
             .post(format!("{base_url}/triggers/slack-mentions"))
             .headers(slack_headers(secret, timestamp, &body))
@@ -50,18 +52,18 @@ async fn slack_webhook_acknowledges_before_handler_finishes() {
             .send(),
     )
     .await
-    .unwrap_or_else(|_| panic!("slack ack path exceeded {:?}", timing::SLACK_ACK_TIMEOUT))
+    .unwrap_or_else(|_| panic!("slack ack path exceeded {:?}", SLACK_ACK_TIMEOUT))
     .unwrap();
     assert_status(response, StatusCode::OK).await;
     assert!(
         !marker_path.exists(),
         "dispatch should not have completed before the HTTP ack"
     );
-    wait_for_topic_event(&temp, "orchestrator.lifecycle", |event| {
+    await_topic_event(&event_log, "orchestrator.lifecycle", |event| {
         event.kind == "pump_admitted" && event.payload["event_log_id"] == serde_json::json!(1)
     })
     .await;
-    wait_for_topic_event(&temp, "orchestrator.lifecycle", |event| {
+    await_topic_event(&event_log, "orchestrator.lifecycle", |event| {
         event.kind == "pump_acked" && event.payload["event_log_id"] == serde_json::json!(1)
     })
     .await;
@@ -70,7 +72,7 @@ async fn slack_webhook_acknowledges_before_handler_finishes() {
         "dispatch should still be blocked on the explicit release gate"
     );
     fs::write(&release_path, b"release").unwrap();
-    wait_for_topic_event(&temp, "orchestrator.lifecycle", |event| {
+    await_topic_event(&event_log, "orchestrator.lifecycle", |event| {
         event.kind == "pump_dispatch_completed"
             && event.payload["event_log_id"] == serde_json::json!(1)
             && event.payload["status"] == serde_json::json!("completed")
@@ -79,13 +81,11 @@ async fn slack_webhook_acknowledges_before_handler_finishes() {
     let marker = fs::read_to_string(&marker_path).unwrap();
     assert_eq!(marker, "app_mention");
 
-    send_sigterm(&mut process.child);
-    wait_for_exit(&mut process.child);
+    shutdown(harness).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn slack_url_verification_returns_plaintext_challenge() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &slack_manifest(None));
     write_file(
@@ -95,12 +95,13 @@ async fn slack_url_verification_returns_plaintext_challenge() {
     );
 
     let secret = "slack-signing-secret";
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_SECRET_SLACK_SIGNING_SECRET", secret),
-    ];
-    let mut process = spawn_orchestrator(&temp, &[], &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
 
     let timestamp = OffsetDateTime::now_utc().unix_timestamp();
     let body = serde_json::to_vec(&serde_json::json!({
@@ -123,13 +124,11 @@ async fn slack_url_verification_returns_plaintext_challenge() {
         "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P"
     );
 
-    send_sigterm(&mut process.child);
-    wait_for_exit(&mut process.child);
+    shutdown(harness).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn slack_bad_requests_set_no_retry_header_and_export_delivery_metrics() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &slack_manifest(None));
     write_file(
@@ -139,12 +138,13 @@ async fn slack_bad_requests_set_no_retry_header_and_export_delivery_metrics() {
     );
 
     let secret = "slack-signing-secret";
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_SECRET_SLACK_SIGNING_SECRET", secret),
-    ];
-    let mut process = spawn_orchestrator(&temp, &[], &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
 
     let timestamp = OffsetDateTime::now_utc().unix_timestamp();
     let body = serde_json::to_vec(&serde_json::json!({
@@ -196,14 +196,7 @@ async fn slack_bad_requests_set_no_retry_header_and_export_delivery_metrics() {
         .unwrap();
     assert_eq!(ok.status(), StatusCode::OK);
 
-    let metrics = reqwest::Client::new()
-        .get(format!("{base_url}/metrics"))
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
+    let metrics = fetch_metrics(&harness).await;
     assert!(
         metrics.contains("slack_events_delivery_success_total 1"),
         "metrics={metrics}"
@@ -233,6 +226,5 @@ async fn slack_bad_requests_set_no_retry_header_and_export_delivery_metrics() {
         "metrics={metrics}"
     );
 
-    send_sigterm(&mut process.child);
-    wait_for_exit(&mut process.child);
+    shutdown(harness).await;
 }

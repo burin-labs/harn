@@ -1,8 +1,8 @@
 use super::support::*;
+use crate::test_util::process::harn_command;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn notion_webhook_handshake_is_captured_and_reported_by_doctor() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &notion_manifest(None));
     write_file(
@@ -11,9 +11,9 @@ async fn notion_webhook_handshake_is_captured_and_reported_by_doctor() {
         &notion_handler_module(&temp.path().join("unused-notion-marker.txt")),
     );
 
-    let envs = [("HARN_SECRET_PROVIDERS", "env")];
-    let mut process = spawn_orchestrator(&temp, &[], &envs);
-    let base_url = process.wait_for_listener_url();
+    let _envs = lock_env_with(&[("HARN_SECRET_PROVIDERS", "env")]).await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
 
     let body = serde_json::to_vec(&serde_json::json!({
         "verification_token": "secret_notion_test_token"
@@ -39,10 +39,7 @@ async fn notion_webhook_handshake_is_captured_and_reported_by_doctor() {
         Some("secret_notion_test_token")
     );
 
-    send_sigterm(&mut process.child);
-    let status = wait_for_exit_async(&mut process.child).await;
-    let stderr = process.join_stderr();
-    assert!(status.success(), "status={status} stderr={stderr}");
+    shutdown(harness).await;
 
     let doctor = harn_command()
         .current_dir(temp.path())
@@ -71,7 +68,6 @@ async fn notion_webhook_handshake_is_captured_and_reported_by_doctor() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn notion_webhook_signed_delivery_is_dispatched() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     let marker_path = temp.path().join("notion-handler.txt");
     write_file(temp.path(), "harn.toml", &notion_manifest(None));
@@ -82,12 +78,13 @@ async fn notion_webhook_signed_delivery_is_dispatched() {
     );
 
     let secret = "secret-notion-live-token";
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_SECRET_NOTION_VERIFICATION_TOKEN", secret),
-    ];
-    let mut process = spawn_orchestrator(&temp, &[], &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
 
     let body = serde_json::to_vec(&serde_json::json!({
         "id": "evt_notion_1",
@@ -112,15 +109,11 @@ async fn notion_webhook_signed_delivery_is_dispatched() {
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    wait_for_path(&marker_path, EVENT_FAIL_FAST_TIMEOUT);
+    await_pump_dispatch_completed(&harness).await;
     let marker = fs::read_to_string(&marker_path).unwrap();
     assert_eq!(marker, "page.content_updated");
 
-    send_sigterm(&mut process.child);
-    let status = wait_for_exit_async(&mut process.child).await;
-    let stderr = process.join_stderr();
-    assert!(status.success(), "status={status} stderr={stderr}");
-    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+    shutdown(harness).await;
 
     let snapshot = state_snapshot(&temp);
     assert!(snapshot.contains("\"received\": 1"), "snapshot={snapshot}");

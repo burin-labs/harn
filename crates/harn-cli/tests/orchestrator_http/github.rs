@@ -2,19 +2,19 @@ use super::support::*;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn github_webhook_delivery_is_accepted_and_persisted() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &base_manifest(None));
     write_file(temp.path(), "lib.harn", handler_module());
 
     let secret = "integration-test-secret";
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_SECRET_GITHUB_WEBHOOK_SECRET", secret),
         ("RUST_LOG", "info"),
-    ];
-    let mut process = spawn_orchestrator(&temp, &[], &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
 
     let health = reqwest::get(format!("{base_url}/health")).await.unwrap();
     assert_status(health, StatusCode::OK).await;
@@ -29,11 +29,8 @@ async fn github_webhook_delivery_is_accepted_and_persisted() {
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    send_sigterm(&mut process.child);
-    let status = wait_for_exit_async(&mut process.child).await;
-    let stderr = process.join_stderr();
-    assert!(status.success(), "status={status} stderr={stderr}");
-    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+    await_pump_dispatch_completed(&harness).await;
+    shutdown(harness).await;
 
     let snapshot = state_snapshot(&temp);
     assert!(
@@ -49,7 +46,6 @@ async fn github_webhook_delivery_is_accepted_and_persisted() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn github_provider_prefers_configured_harn_connector_over_deprecated_rust_default() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     let marker_path = temp.path().join("github-override-handler.txt");
     write_file(
@@ -68,12 +64,13 @@ async fn github_provider_prefers_configured_harn_connector_over_deprecated_rust_
         github_override_connector_module(),
     );
 
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_SECRET_GITHUB_WEBHOOK_SECRET", "override-secret"),
-    ];
-    let mut process = spawn_orchestrator(&temp, &[], &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
 
     let body = serde_json::to_vec(&serde_json::json!({
         "id": "evt-gh-override-1",
@@ -91,20 +88,14 @@ async fn github_provider_prefers_configured_harn_connector_over_deprecated_rust_
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    wait_for_path(&marker_path, EVENT_FAIL_FAST_TIMEOUT);
+    await_pump_dispatch_completed(&harness).await;
     let marker = fs::read_to_string(&marker_path).unwrap();
     assert_eq!(marker, "issues");
 
-    send_sigterm(&mut process.child);
-    let status = wait_for_exit_async(&mut process.child).await;
-    let stderr = process.join_stderr();
-    assert!(status.success(), "status={status} stderr={stderr}");
-    assert!(
-        !stderr.contains("deprecated Rust-side connector"),
-        "Harn connector overrides must suppress Rust sunset warnings; stderr={stderr}"
-    );
+    let event_log = harness.event_log();
+    shutdown(harness).await;
 
-    let lifecycle = read_topic_events(&temp, "connectors.github.override").await;
+    let lifecycle = read_topic_events(&event_log, "connectors.github.override").await;
     let lifecycle_kinds: Vec<_> = lifecycle
         .iter()
         .map(|(_, event)| event.kind.as_str())

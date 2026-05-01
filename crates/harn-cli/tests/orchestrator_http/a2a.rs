@@ -2,19 +2,19 @@ use super::support::*;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn harn_connector_module_round_trips_inbound_and_client_calls() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     let marker_path = temp.path().join("echo-handler.json");
     write_file(temp.path(), "harn.toml", &echo_manifest(None));
     write_file(temp.path(), "lib.harn", &echo_handler_module(&marker_path));
     write_file(temp.path(), "echo_connector.harn", echo_connector_module());
 
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_SECRET_ECHO_API_TOKEN", "echo-secret-token"),
-    ];
-    let mut process = spawn_orchestrator(&temp, &[], &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
 
     let body = serde_json::to_vec(&serde_json::json!({
         "id": "evt_echo_1",
@@ -30,7 +30,9 @@ async fn harn_connector_module_round_trips_inbound_and_client_calls() {
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    let marker = wait_for_json_file(&marker_path, EVENT_FAIL_FAST_TIMEOUT);
+    await_pump_dispatch_completed(&harness).await;
+    let marker: JsonValue =
+        serde_json::from_str(&fs::read_to_string(&marker_path).unwrap()).unwrap();
     assert_eq!(
         marker.get("kind").and_then(JsonValue::as_str),
         Some("echo.received")
@@ -52,14 +54,7 @@ async fn harn_connector_module_round_trips_inbound_and_client_calls() {
         Some("echo-secret-token")
     );
 
-    let metrics = reqwest::Client::new()
-        .get(format!("{base_url}/metrics"))
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
+    let metrics = fetch_metrics(&harness).await;
     assert!(
         metrics.contains("connector_custom_echo_activate_bindings_total 1"),
         "metrics={metrics}"
@@ -73,13 +68,10 @@ async fn harn_connector_module_round_trips_inbound_and_client_calls() {
         "metrics={metrics}"
     );
 
-    send_sigterm(&mut process.child);
-    let status = wait_for_exit_async(&mut process.child).await;
-    let stderr = process.join_stderr();
-    assert!(status.success(), "status={status} stderr={stderr}");
-    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+    let event_log = harness.event_log();
+    shutdown(harness).await;
 
-    let lifecycle = read_topic_events(&temp, "connectors.echo.lifecycle").await;
+    let lifecycle = read_topic_events(&event_log, "connectors.echo.lifecycle").await;
     let lifecycle_kinds: Vec<_> = lifecycle
         .iter()
         .map(|(_, event)| event.kind.as_str())
@@ -109,7 +101,7 @@ async fn harn_connector_module_round_trips_inbound_and_client_calls() {
         Some("hello from echo")
     );
 
-    let calls = read_topic_events(&temp, "connectors.echo.calls").await;
+    let calls = read_topic_events(&event_log, "connectors.echo.calls").await;
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].1.kind, "ping");
     assert_eq!(
@@ -124,7 +116,6 @@ async fn harn_connector_module_round_trips_inbound_and_client_calls() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn stream_trigger_route_uses_generic_stream_connector() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     let marker_path = temp.path().join("stream-handler.json");
     write_file(temp.path(), "harn.toml", &stream_manifest(None));
@@ -134,8 +125,9 @@ async fn stream_trigger_route_uses_generic_stream_connector() {
         &stream_handler_module(&marker_path),
     );
 
-    let mut process = spawn_orchestrator(&temp, &[], &[("HARN_SECRET_PROVIDERS", "env")]);
-    let base_url = process.wait_for_listener_url();
+    let _envs = lock_env_with(&[("HARN_SECRET_PROVIDERS", "env")]).await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
 
     let response = reqwest::Client::new()
         .post(format!("{base_url}/streams/ws"))
@@ -150,11 +142,7 @@ async fn stream_trigger_route_uses_generic_stream_connector() {
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    wait_for_topic_event(&temp, "orchestrator.lifecycle", |event| {
-        event.kind == "pump_dispatch_completed"
-            && event.payload["status"] == serde_json::json!("completed")
-    })
-    .await;
+    await_pump_dispatch_completed(&harness).await;
     let marker: JsonValue =
         serde_json::from_str(&fs::read_to_string(&marker_path).unwrap()).unwrap();
     assert_eq!(
@@ -175,30 +163,23 @@ async fn stream_trigger_route_uses_generic_stream_connector() {
     );
     assert_eq!(marker.get("amount").and_then(JsonValue::as_i64), Some(10));
 
-    send_sigterm(&mut process.child);
-    let status = wait_for_exit_async(&mut process.child).await;
-    let stderr = process.join_stderr();
-    assert!(status.success(), "status={status} stderr={stderr}");
-    assert!(
-        stderr.contains("activated connectors: websocket(1)"),
-        "stderr={stderr}"
-    );
+    shutdown(harness).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a2a_push_route_requires_bearer_or_valid_hmac() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &a2a_manifest(None));
     write_file(temp.path(), "lib.harn", a2a_handler_module());
 
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_ORCHESTRATOR_API_KEYS", "test-key-1,test-key-2"),
         ("HARN_ORCHESTRATOR_HMAC_SECRET", "shared-secret"),
-    ];
-    let mut process = spawn_orchestrator(&temp, &[], &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
 
     let client = reqwest::Client::new();
     let body = br#"{"kind":"a2a.task.received","task":{"id":"task-123"}}"#;
@@ -241,11 +222,7 @@ async fn a2a_push_route_requires_bearer_or_valid_hmac() {
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    send_sigterm(&mut process.child);
-    let status = wait_for_exit_async(&mut process.child).await;
-    let stderr = process.join_stderr();
-    assert!(status.success(), "status={status} stderr={stderr}");
-    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+    shutdown(harness).await;
 
     let snapshot = state_snapshot(&temp);
     assert!(snapshot.contains("\"received\": 3"), "snapshot={snapshot}");
@@ -258,18 +235,22 @@ async fn a2a_push_route_requires_bearer_or_valid_hmac() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn embedded_mcp_endpoint_serves_orchestrator_tools_on_listener() {
-    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &a2a_manifest(None));
     write_file(temp.path(), "lib.harn", a2a_handler_module());
 
-    let envs = [
+    let _envs = lock_env_with(&[
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_ORCHESTRATOR_API_KEYS", "mcp-key"),
         ("HARN_ORCHESTRATOR_HMAC_SECRET", "shared-secret"),
-    ];
-    let mut process = spawn_orchestrator(&temp, &["--mcp"], &envs);
-    let base_url = process.wait_for_listener_url();
+    ])
+    .await;
+    let harness = start_harness_with(&temp, |mut config| {
+        config.mcp = true;
+        config
+    })
+    .await;
+    let base_url = harness.listener_url().to_string();
 
     let client = reqwest::Client::new();
     let mut auth_headers = json_headers();
@@ -330,13 +311,5 @@ async fn embedded_mcp_endpoint_serves_orchestrator_tools_on_listener() {
         "tools={tools_body}"
     );
 
-    send_sigterm(&mut process.child);
-    let status = wait_for_exit_async(&mut process.child).await;
-    let stderr = process.join_stderr();
-    assert!(status.success(), "status={status} stderr={stderr}");
-    assert!(
-        stderr.contains("embedded MCP server mounted at /mcp"),
-        "stderr={stderr}"
-    );
-    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+    shutdown(harness).await;
 }
