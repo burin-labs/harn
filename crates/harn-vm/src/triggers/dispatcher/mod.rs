@@ -112,6 +112,7 @@ pub struct Dispatcher {
     cancel_tx: broadcast::Sender<()>,
     state: Arc<DispatcherRuntimeState>,
     metrics: Option<Arc<crate::MetricsRegistry>>,
+    a2a_client: Arc<dyn crate::a2a::A2aClient>,
 }
 
 #[derive(Debug)]
@@ -517,7 +518,14 @@ impl Dispatcher {
             cancel_tx,
             state,
             metrics,
+            a2a_client: Arc::new(crate::a2a::RealA2aClient),
         }
+    }
+
+    #[cfg(test)]
+    pub fn with_a2a_client(mut self, client: Arc<dyn crate::a2a::A2aClient>) -> Self {
+        self.a2a_client = client;
+        self
     }
 
     pub fn snapshot(&self) -> DispatcherStatsSnapshot {
@@ -2397,21 +2405,23 @@ impl Dispatcher {
                         "dispatcher shutdown cancelled A2A dispatch".to_string(),
                     ));
                 }
-                let (_endpoint, ack) = crate::a2a::dispatch_trigger_event(
-                    target,
-                    *allow_cleartext,
-                    binding.id.as_str(),
-                    &binding.binding_key(),
-                    event,
-                    cancel_rx,
-                )
-                .await
-                .map_err(|error| match error {
-                    crate::a2a::A2aClientError::Cancelled(message) => {
-                        DispatchError::Cancelled(message)
-                    }
-                    other => DispatchError::A2a(other.to_string()),
-                })?;
+                let (_endpoint, ack) = self
+                    .a2a_client
+                    .dispatch(
+                        target,
+                        *allow_cleartext,
+                        binding.id.as_str(),
+                        &binding.binding_key(),
+                        event,
+                        cancel_rx,
+                    )
+                    .await
+                    .map_err(|error| match error {
+                        crate::a2a::A2aClientError::Cancelled(message) => {
+                            DispatchError::Cancelled(message)
+                        }
+                        other => DispatchError::A2a(other.to_string()),
+                    })?;
                 match ack {
                     crate::a2a::DispatchAck::InlineResult { result, .. } => Ok(result),
                     crate::a2a::DispatchAck::PendingTask { handle, .. } => Ok(handle),

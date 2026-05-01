@@ -1,5 +1,6 @@
 use std::error::Error as _;
 
+use async_trait::async_trait;
 use reqwest::Url;
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -57,6 +58,46 @@ impl std::fmt::Display for A2aClientError {
 }
 
 impl std::error::Error for A2aClientError {}
+
+/// Abstraction over outbound A2A dispatch, injectable for tests.
+#[async_trait]
+pub trait A2aClient: Send + Sync + 'static {
+    async fn dispatch(
+        &self,
+        target: &str,
+        allow_cleartext: bool,
+        binding_id: &str,
+        binding_key: &str,
+        event: &TriggerEvent,
+        cancel_rx: &mut broadcast::Receiver<()>,
+    ) -> Result<(ResolvedA2aEndpoint, DispatchAck), A2aClientError>;
+}
+
+/// Production implementation that performs real HTTP A2A calls.
+pub struct RealA2aClient;
+
+#[async_trait]
+impl A2aClient for RealA2aClient {
+    async fn dispatch(
+        &self,
+        target: &str,
+        allow_cleartext: bool,
+        binding_id: &str,
+        binding_key: &str,
+        event: &TriggerEvent,
+        cancel_rx: &mut broadcast::Receiver<()>,
+    ) -> Result<(ResolvedA2aEndpoint, DispatchAck), A2aClientError> {
+        dispatch_trigger_event(
+            target,
+            allow_cleartext,
+            binding_id,
+            binding_key,
+            event,
+            cancel_rx,
+        )
+        .await
+    }
+}
 
 #[derive(Debug)]
 enum AgentCardFetchError {

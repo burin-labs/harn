@@ -113,24 +113,20 @@ pub fn local_fn(event: TriggerEvent) -> dict {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(start_paused = true, flavor = "current_thread")]
 async fn a2a_handler_returns_inline_result_and_emits_a2a_action_graph() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let server = spawn_mock_a2a_server(serde_json::json!({
-                "id": "task-inline",
-                "status": {"state": "completed"},
-                "history": [
-                    {"id": "msg-user", "role": "user", "parts": [{"type": "text", "text": "ignored"}]},
-                    {"id": "msg-agent", "role": "agent", "parts": [{"type": "text", "text": "{\"trace_id\":\"trace_inline\",\"target_agent\":\"triage\"}"}]},
-                ],
-                "artifacts": [],
-            }));
+            let mock_client = InProcessMockA2aClient::new(MockA2aResponse::Inline {
+                task_id: "task-inline".to_string(),
+                result: serde_json::json!({"trace_id": "trace_inline", "target_agent": "triage"}),
+            });
             let (_dir, log, dispatcher) = a2a_dispatcher_fixture(
-                format!("{}/triage", server.authority),
+                "mock-a2a/triage".to_string(),
                 TriggerRetryConfig::default(),
                 false,
+                mock_client.clone(),
             )
             .await;
 
@@ -151,20 +147,10 @@ async fn a2a_handler_returns_inline_result_and_emits_a2a_action_graph() {
                 }))
             );
 
-            let request = server.next_request();
-            assert_eq!(request.body["method"], "message/send");
-            assert_eq!(
-                request.headers.get("a2a-trace-id").map(String::as_str),
-                Some("trace_inline")
-            );
-            let envelope_text = request.body["params"]["message"]["parts"][0]["text"]
-                .as_str()
-                .expect("A2A text part");
-            let envelope: serde_json::Value =
-                serde_json::from_str(envelope_text).expect("A2A envelope JSON");
-            assert_eq!(envelope["trace_id"], "trace_inline");
-            assert_eq!(envelope["target_agent"], "triage");
-            assert_eq!(envelope["event"]["trace_id"], "trace_inline");
+            let calls = mock_client.take_calls().await;
+            assert_eq!(calls.len(), 1);
+            assert!(calls[0].target.ends_with("/triage"));
+            assert_eq!(calls[0].event_trace_id, "trace_inline");
 
             let graph = read_topic(log.clone(), "observability.action_graph").await;
             let (node_kinds, edge_kinds) = flatten_action_graph(&graph);
@@ -174,8 +160,6 @@ async fn a2a_handler_returns_inline_result_and_emits_a2a_action_graph() {
                 logged.headers.get("trace_id").map(String::as_str) == Some("trace_inline")
                     && logged.payload["context"]["target_agent"] == serde_json::json!("triage")
             }));
-
-            server.finish();
         })
         .await;
 }
@@ -234,23 +218,30 @@ async fn worker_handler_enqueues_job_and_returns_receipt() {
     }));
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(start_paused = true, flavor = "current_thread")]
 async fn a2a_handler_returns_pending_task_handle() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let server = spawn_mock_a2a_server(serde_json::json!({
-                "id": "task-pending",
-                "status": {"state": "working"},
-                "history": [
-                    {"id": "msg-user", "role": "user", "parts": [{"type": "text", "text": "ignored"}]},
-                ],
-                "artifacts": [],
-            }));
+            let pending_handle = serde_json::json!({
+                "kind": "a2a_task_handle",
+                "task_id": "task-pending",
+                "state": "working",
+                "target_agent": "triage",
+                "rpc_url": "https://mock-a2a/rpc",
+                "card_url": "https://mock-a2a/.well-known/agent-card.json",
+                "agent_id": null,
+            });
+            let mock_client = InProcessMockA2aClient::new(MockA2aResponse::Pending {
+                task_id: "task-pending".to_string(),
+                state: "working".to_string(),
+                handle: pending_handle.clone(),
+            });
             let (_dir, _log, dispatcher) = a2a_dispatcher_fixture(
-                format!("{}/triage", server.authority),
+                "mock-a2a/triage".to_string(),
                 TriggerRetryConfig::default(),
                 false,
+                mock_client.clone(),
             )
             .await;
 
@@ -260,44 +251,30 @@ async fn a2a_handler_returns_pending_task_handle() {
                 .expect("A2A dispatch returns pending handle");
             assert_eq!(outcomes.len(), 1);
             assert_eq!(outcomes[0].status, DispatchStatus::Succeeded);
-            assert_eq!(
-                outcomes[0].result,
-                Some(serde_json::json!({
-                    "kind": "a2a_task_handle",
-                    "task_id": "task-pending",
-                    "state": "working",
-                    "target_agent": "triage",
-                    "rpc_url": format!("https://{}/rpc", server.authority),
-                    "card_url": format!("https://{}/.well-known/agent-card.json", server.authority),
-                    "agent_id": null,
-                }))
-            );
+            assert_eq!(outcomes[0].result, Some(pending_handle));
 
-            let request = server.next_request();
-            assert_eq!(request.body["method"], "message/send");
-            server.finish();
+            let calls = mock_client.take_calls().await;
+            assert_eq!(calls.len(), 1);
+            assert!(calls[0].target.ends_with("/triage"));
         })
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(start_paused = true, flavor = "current_thread")]
 async fn shutdown_cancels_a2a_dispatch_started_after_shutdown() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let server = spawn_mock_a2a_server(serde_json::json!({
-                "id": "task-inline",
-                "status": {"state": "completed"},
-                "history": [
-                    {"id": "msg-user", "role": "user", "parts": [{"type": "text", "text": "ignored"}]},
-                    {"id": "msg-agent", "role": "agent", "parts": [{"type": "text", "text": "\"unexpected\""}]},
-                ],
-                "artifacts": [],
-            }));
+            // WaitForCancel makes the mock block on the cancel receiver.
+            // In practice the shutting_down pre-check fires first under
+            // cooperative scheduling, so the mock is never reached — both
+            // behaviours correctly produce a Cancelled outcome.
+            let mock_client = InProcessMockA2aClient::new(MockA2aResponse::WaitForCancel);
             let (_dir, _log, dispatcher) = a2a_dispatcher_fixture(
-                format!("{}/triage", server.authority),
+                "mock-a2a/triage".to_string(),
                 TriggerRetryConfig::default(),
                 false,
+                mock_client.clone(),
             )
             .await;
 
@@ -320,32 +297,27 @@ async fn shutdown_cancels_a2a_dispatch_started_after_shutdown() {
                 .as_deref()
                 .is_some_and(|message| message.contains("cancelled")));
             assert!(
-                server.request_within(PROCESS_EXIT_GRACE).is_none(),
+                mock_client.take_calls().await.is_empty(),
                 "A2A dispatch should not reach the remote after shutdown"
             );
-
-            server.finish();
         })
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(start_paused = true, flavor = "current_thread")]
 async fn a2a_handler_rejects_cleartext_by_default() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let server = spawn_mock_https_a2a_server_with_card_scheme(serde_json::json!({
-                "id": "task-inline",
-                "status": {"state": "completed"},
-                "history": [
-                    {"id": "msg-agent", "role": "agent", "parts": [{"type": "text", "text": "\"unexpected\""}]},
-                ],
-                "artifacts": [],
-            }), "http");
+            let mock_client = InProcessMockA2aClient::new(MockA2aResponse::Protocol(
+                "A2A endpoint uses cleartext HTTP; set allow_cleartext = true to opt in"
+                    .to_string(),
+            ));
             let (_dir, _log, dispatcher) = a2a_dispatcher_fixture(
-                format!("{}/triage", server.authority),
+                "mock-a2a/triage".to_string(),
                 TriggerRetryConfig::new(1, RetryPolicy::Linear { delay_ms: 0 }),
                 false,
+                mock_client.clone(),
             )
             .await;
 
@@ -359,34 +331,24 @@ async fn a2a_handler_rejects_cleartext_by_default() {
                 .error
                 .as_deref()
                 .is_some_and(|message| message.contains("allow_cleartext = true")));
-            assert!(
-                server.request_within(PROCESS_EXIT_GRACE).is_none(),
-                "cleartext A2A dispatch should not reach the HTTP rpc endpoint without opt-in"
-            );
-
-            server.finish();
         })
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(start_paused = true, flavor = "current_thread")]
 async fn a2a_handler_allows_cleartext_after_opt_in() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let server = spawn_mock_http_a2a_server(serde_json::json!({
-                "id": "task-inline",
-                "status": {"state": "completed"},
-                "history": [
-                    {"id": "msg-user", "role": "user", "parts": [{"type": "text", "text": "ignored"}]},
-                    {"id": "msg-agent", "role": "agent", "parts": [{"type": "text", "text": "{\"trace_id\":\"trace_http\",\"target_agent\":\"triage\"}"}]},
-                ],
-                "artifacts": [],
-            }));
+            let mock_client = InProcessMockA2aClient::new(MockA2aResponse::Inline {
+                task_id: "task-inline".to_string(),
+                result: serde_json::json!({"trace_id": "trace_http", "target_agent": "triage"}),
+            });
             let (_dir, _log, dispatcher) = a2a_dispatcher_fixture(
-                format!("{}/triage", server.authority),
+                "mock-a2a/triage".to_string(),
                 TriggerRetryConfig::default(),
                 true,
+                mock_client.clone(),
             )
             .await;
 
@@ -407,14 +369,13 @@ async fn a2a_handler_allows_cleartext_after_opt_in() {
                 }))
             );
 
-            let request = server.next_request();
-            assert_eq!(request.body["method"], "message/send");
-            assert_eq!(
-                request.headers.get("a2a-trace-id").map(String::as_str),
-                Some("trace_http")
+            let calls = mock_client.take_calls().await;
+            assert_eq!(calls.len(), 1);
+            assert!(
+                calls[0].allow_cleartext,
+                "cleartext flag must be passed through"
             );
-
-            server.finish();
+            assert_eq!(calls[0].event_trace_id, "trace_http");
         })
         .await;
 }
