@@ -70,9 +70,17 @@ jobs:
         env:
           NEXTEST_FILTER: ${{ steps.touched.outputs.filter }}
         run: |
+          # `--workspace` is required: without it, `cargo nextest run`
+          # only discovers tests in the cwd's package, so `-E
+          # "package(harn-vm)"` (or any other package() filter) matches
+          # nothing at workspace root and reports "0 tests across 0
+          # binaries". `binary(...)` filters happened to work because
+          # they scan built artifacts in target/debug/deps directly, but
+          # package() filters need cargo metadata.
           for i in $(seq 50); do
             printf -- '--- Iteration %d/50 ---\n' "$i"
             cargo nextest run \
+              --workspace \
               --profile flake-detection \
               --test-threads 8 \
               -E "$NEXTEST_FILTER" \
