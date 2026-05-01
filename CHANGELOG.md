@@ -7,6 +7,91 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.52
+
+### Added
+
+- **Harn-native Merge Captain persona (#1009/#1029).** Replaces the
+  shell-driven Merge Captain MVP with a deterministic Harn package owning
+  multi-repo PR queue scheduling, durable per-PR state, audit-grade merge
+  receipts, and a 12-state machine over each tracked PR with legal-edge
+  enforcement.
+
+- **Merge Captain JSONL transcript oracle (#1013/#1030).** New
+  `harn merge-captain audit <transcript>` CLI plus oracle infrastructure
+  for inspecting JSONL artifacts (extra model calls, invalid structured
+  outputs, repeated reads, missing approvals, non-minimal tool usage).
+  Ships five reference goldens.
+
+- **`llm_stream_call` streaming builtin (#1038).** Native LLM streaming
+  builtin returning `Stream<...>` with cancellation support; provider
+  capability matrix grows a `streaming` column.
+
+- **`schema_recover` stdlib helper (#1031).** Malformed-JSON repair helper
+  for tolerating common LLM-output mistakes.
+
+- **Generic webhook intake substrate (#1011/#1037).** Runtime + stdlib
+  primitives for receiving and routing webhooks.
+
+- **HITL primitives promoted to typed syntax (#926/#1034).** `ask_user`,
+  `dual_control`, `escalate_to`, `request_approval` are now first-class
+  keywords with typed AST and conformance coverage.
+
+- **Intersection types `A & B` (#914/#1033).** New structural composition
+  type with parser/typechecker/formatter/tree-sitter coverage; nested
+  unions parenthesise in the formatter for round-trip clarity.
+
+- **Match expressions in typed value positions (#1043).** Match arms now
+  unify type-inferentially in expression positions, enabling
+  `let result = match x { ... }`.
+
+- **Improve type mismatch diagnostics (#1045).** Richer typechecker
+  diagnostics with reduced redundant nested-mismatch walks.
+
+- **Auto-size formatter section headers (#1040).** Formatter now sizes
+  section headers to the longest line in each block.
+
+- **Trailing comma formatting policy (#1044).** Formatter enforces a
+  consistent trailing comma policy across multi-line collections.
+
+- **Agents API SDK codegen gate (#1041).** Surface verification gate for
+  `harn-cloud` Agents API SDK generation.
+
+- **Typed orchestrator + package CLI errors (#945/#1032).** Migrates
+  orchestrator and package CLI modules off `Result<T, String>` to typed
+  error enums with structured variants.
+
+- **Atomic on-disk state writes (#1028).** Standardizes temp-file +
+  rename pattern via `harn_vm::atomic_io::atomic_write` across lockfile,
+  manifest, registry, and cache writers.
+
+- **Virtual-clock test migration (#948/#1027).** Timing-sensitive tests
+  migrated to a deterministic virtual clock to reduce flakes.
+
+- **`cfg(unix)` test gate audit + nightly Windows matrix (#1026).**
+  Surfaces and trims tests gated on `cfg(unix)` and adds a nightly
+  Windows nextest matrix to keep cross-platform coverage honest.
+
+- **macOS ad-hoc codesign build target (#1042).** New
+  `make build`/`make build-release` targets that ad-hoc sign the harn
+  binaries on macOS for local development convenience.
+
+### Fixed
+
+- **Protocol retry spiral after recovered tool calls (#1039).** Tool-call
+  recovery no longer triggers an infinite protocol-retry loop.
+
+- **dyld pre-warm + nextest cap 4 → 8 (#1035).** Pre-warms dyld in
+  harn-cli subprocess tests and raises the nextest concurrency cap to
+  cut local + CI test wall-clock.
+
+- **Windows-only typed error returns** (fix-forward). The #1032
+  migration left two `cfg(not(unix))`/`cfg(windows)` paths returning
+  `Result<(), String>` against typed signatures (Ctrl-C loop in
+  `serve.rs`, `symlink_path_dependency` in `registry.rs`); both now
+  return their typed `OrchestratorError` / `PackageError::Registry`
+  variants.
+
 ## v0.7.51
 
 ### Added
