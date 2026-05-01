@@ -52,6 +52,7 @@ pub(crate) fn check_file_inner(
             file_path: Some(path),
             require_file_header: false,
             complexity_threshold: None,
+            persona_step_allowlist: &[],
         },
     );
     diagnostic_count += lint_diagnostics.len();

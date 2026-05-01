@@ -200,6 +200,28 @@ fn merge_captain(ctx) {
     }
 
     #[test]
+    fn parses_step_annotation_values() {
+        let source = r#"
+@step(name: "plan", model: "gpt-5.4-mini", approval: required, receipt: audit, error_boundary: escalate, retry: {max_attempts: 2})
+fn plan_step(ctx) {
+  return ctx
+}
+"#;
+
+        let program = parse_source(source).expect("should parse step annotations");
+        let Node::AttributedDecl { attributes, inner } = &program[0].node else {
+            panic!("expected attributed decl");
+        };
+        assert_eq!(attributes[0].name, "step");
+        assert!(matches!(inner.node, Node::FnDecl { .. }));
+        let retry = attributes[0].named_arg("retry").expect("retry arg");
+        let Node::DictLiteral(entries) = &retry.node else {
+            panic!("expected retry dict");
+        };
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
     fn parses_generic_structs_and_enums() {
         let source = r#"
 struct Pair<A, B> {

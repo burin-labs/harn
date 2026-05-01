@@ -168,6 +168,17 @@ pub(crate) fn run_inspect(manifest: Option<&Path>, args: &PersonaInspectArgs) {
     println!("handoffs:       {}", comma_or_dash(&persona.handoffs));
     println!("context_packs:  {}", comma_or_dash(&persona.context_packs));
     println!("evals:          {}", comma_or_dash(&persona.evals));
+    if !persona.steps.is_empty() {
+        println!(
+            "steps:          {}",
+            persona
+                .steps
+                .iter()
+                .map(|step| format!("{} ({})", step.name, step.function))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
     if let Some(owner) = &persona.owner {
         println!("owner:          {owner}");
     }
@@ -561,6 +572,7 @@ fn persona_to_json(
         "handoffs": &persona.handoffs,
         "context_packs": &persona.context_packs,
         "evals": &persona.evals,
+        "steps": &persona.steps,
         "owner": persona.owner.as_deref(),
         "package_source": {
             "package": persona.package_source.package.as_deref(),

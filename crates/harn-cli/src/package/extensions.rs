@@ -857,6 +857,27 @@ pub fn load_personas_from_manifest_path(
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
+    if manifest_path.extension().and_then(|ext| ext.to_str()) == Some("harn") {
+        return match harn_modules::personas::parse_persona_source_file(&manifest_path) {
+            Ok(document) if !document.personas.is_empty() => {
+                validate_and_resolve_standalone_personas(
+                    document.personas,
+                    manifest_path,
+                    manifest_dir,
+                )
+            }
+            Ok(_) => Err(vec![PersonaValidationError {
+                manifest_path: manifest_path.clone(),
+                field_path: "persona".to_string(),
+                message: "no @persona declarations found".to_string(),
+            }]),
+            Err(message) => Err(vec![PersonaValidationError {
+                manifest_path: manifest_path.clone(),
+                field_path: "persona".to_string(),
+                message,
+            }]),
+        };
+    }
     let manifest = match read_manifest_from_path(&manifest_path) {
         Ok(manifest) => manifest,
         Err(message) => {
@@ -955,11 +976,41 @@ pub(crate) fn validate_and_resolve_personas(
     ) {
         Err(errors)
     } else {
+        let mut personas = manifest.personas;
+        attach_entry_workflow_steps(&mut personas, &manifest_dir);
         Ok(ResolvedPersonaManifest {
             manifest_path,
             manifest_dir,
-            personas: manifest.personas,
+            personas,
         })
+    }
+}
+
+fn attach_entry_workflow_steps(personas: &mut [PersonaManifestEntry], manifest_dir: &Path) {
+    for persona in personas {
+        if !persona.steps.is_empty() {
+            continue;
+        }
+        let Some(entry_workflow) = persona.entry_workflow.as_deref() else {
+            continue;
+        };
+        let Some((path, entry_name)) = entry_workflow.split_once('#') else {
+            continue;
+        };
+        if !path.ends_with(".harn") {
+            continue;
+        }
+        let source_path = manifest_dir.join(path);
+        let Ok(document) = harn_modules::personas::parse_persona_source_file(&source_path) else {
+            continue;
+        };
+        let entry_name = entry_name.trim();
+        if let Some(source_persona) = document.personas.iter().find(|candidate| {
+            candidate.entry_workflow.as_deref() == Some(entry_name)
+                || candidate.name.as_deref() == persona.name.as_deref()
+        }) {
+            persona.steps.clone_from(&source_persona.steps);
+        }
     }
 }
 

@@ -139,6 +139,9 @@ fn lint_full(
     if let Some(threshold) = options.complexity_threshold {
         linter.complexity_threshold = threshold;
     }
+    linter
+        .persona_step_allowlist
+        .extend(options.persona_step_allowlist.iter().cloned());
     linter.lint_program(program);
     if let Some(src) = source {
         if options.require_file_header {

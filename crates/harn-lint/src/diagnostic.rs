@@ -44,4 +44,7 @@ pub struct LintOptions<'a> {
     /// Override the cyclomatic-complexity threshold. `None` uses
     /// [`DEFAULT_COMPLEXITY_THRESHOLD`].
     pub complexity_threshold: Option<usize>,
+    /// Extra non-stdlib function names that persona bodies may call
+    /// without requiring a `@step` declaration.
+    pub persona_step_allowlist: &'a [String],
 }

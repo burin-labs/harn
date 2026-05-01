@@ -864,6 +864,62 @@ fn test_function_breakpoint_fires_on_matching_call() {
 }
 
 #[test]
+fn test_step_over_step_stops_on_next_step_boundary() {
+    let mut dbg = Debugger::new();
+
+    let (_dir, file) = write_temp_program(
+        "step_boundary.harn",
+        r#"
+@persona(name: "merge_captain")
+fn merge_captain(ctx) {
+  first_step(ctx)
+  second_step(ctx)
+}
+
+@step(name: "first")
+fn first_step(ctx) {
+  log(ctx)
+}
+
+@step(name: "second")
+fn second_step(ctx) {
+  log(ctx)
+}
+
+pipeline test(task) {
+  merge_captain("issue")
+}
+"#,
+    );
+
+    dbg.handle_message(make_request(1, "initialize", None));
+    dbg.handle_message(make_request(
+        2,
+        "launch",
+        Some(json!({"program": file.to_string_lossy()})),
+    ));
+    let mut responses = dbg.handle_message(make_request(3, "harnStepOverStep", None));
+    while dbg.is_running() && responses.len() < 50 {
+        responses.extend(dbg.step_running_vm());
+    }
+
+    let stopped_on_step = responses.iter().any(|r| {
+        r.event.as_deref() == Some("stopped")
+            && r.body.as_ref().is_some_and(|body| {
+                body["reason"] == "step"
+                    && body["description"]
+                        .as_str()
+                        .is_some_and(|description| description.contains("@step first_step"))
+            })
+    });
+    assert!(
+        stopped_on_step,
+        "harnStepOverStep must stop at the next @step function"
+    );
+    drop(dbg);
+}
+
+#[test]
 fn test_set_breakpoints_accepts_hit_condition_and_log_message() {
     let mut dbg = Debugger::new();
     let responses = dbg.handle_message(make_request(

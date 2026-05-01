@@ -57,6 +57,7 @@ impl Debugger {
             "configurationDone" => self.handle_configuration_done(&msg),
             "continue" => self.handle_continue(&msg),
             "next" => self.handle_next(&msg),
+            "harnStepOverStep" | "harn/stepOverStep" => self.handle_step_over_step(&msg, command),
             "stepIn" => self.handle_step_in(&msg),
             "stepOut" => self.handle_step_out(&msg),
             "pause" => self.handle_pause(&msg),

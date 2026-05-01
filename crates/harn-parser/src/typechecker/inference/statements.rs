@@ -1539,7 +1539,7 @@ impl TypeChecker {
             match attr.name.as_str() {
                 "deprecated" | "test" | "complexity" | "acp_tool" | "acp_skill" | "invariant"
                 | "deterministic" | "semantic" | "archivist" | "retroactive" | "persona"
-                | "trigger" | "handoff" | "budget" | "command" => {}
+                | "step" | "trigger" | "handoff" | "budget" | "command" => {}
                 other => {
                     self.warning_at(format!("unknown attribute `@{}`", other), attr.span);
                 }
@@ -1582,6 +1582,12 @@ impl TypeChecker {
             if attr.name == "command" && !matches!(inner.node, Node::Pipeline { .. }) {
                 self.warning_at(
                     "`@command` only applies to pipeline declarations".to_string(),
+                    attr.span,
+                );
+            }
+            if attr.name == "step" && !matches!(inner.node, Node::FnDecl { .. }) {
+                self.warning_at(
+                    "`@step` only applies to function declarations".to_string(),
                     attr.span,
                 );
             }
@@ -1674,6 +1680,7 @@ impl TypeChecker {
     pub(in crate::typechecker) fn validate_standard_attribute_args(&mut self, attr: &Attribute) {
         match attr.name.as_str() {
             "persona" => self.validate_persona_args(attr),
+            "step" => self.validate_step_args(attr),
             "trigger" => self.validate_trigger_args(attr),
             "handoff" => self.validate_handoff_args(attr),
             "budget" => self.validate_budget_args(attr),
@@ -1700,6 +1707,63 @@ impl TypeChecker {
                 continue;
             }
             self.expect_symbol_like("@command", name, &arg.value, arg.span);
+        }
+    }
+
+    fn validate_step_args(&mut self, attr: &Attribute) {
+        const KNOWN_KEYS: &[&str] = &[
+            "name",
+            "model",
+            "approval",
+            "receipt",
+            "error_boundary",
+            "retry",
+        ];
+        let mut has_name = false;
+        for arg in &attr.args {
+            let Some(name) = self.require_named_arg("@step", arg) else {
+                continue;
+            };
+            if !KNOWN_KEYS.contains(&name) {
+                self.warning_at(
+                    format!("unknown `@step` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
+                    arg.span,
+                );
+                continue;
+            }
+            match name {
+                "name" => {
+                    has_name = true;
+                    self.expect_symbol_like("@step", name, &arg.value, arg.span);
+                }
+                "model" => self.expect_symbol_like("@step", name, &arg.value, arg.span),
+                "approval" => self.expect_one_of(
+                    "@step",
+                    name,
+                    &arg.value,
+                    arg.span,
+                    &["required", "optional"],
+                ),
+                "receipt" => {
+                    self.expect_one_of("@step", name, &arg.value, arg.span, &["audit", "none"])
+                }
+                "error_boundary" => self.expect_one_of(
+                    "@step",
+                    name,
+                    &arg.value,
+                    arg.span,
+                    &["fail", "continue", "escalate"],
+                ),
+                "retry" => self.expect_step_retry_dict(&arg.value, arg.span),
+                _ => {}
+            }
+        }
+        if !has_name {
+            self.warning_at(
+                "`@step(...)` should declare `name: \"...\"` for stable supervision metadata"
+                    .to_string(),
+                attr.span,
+            );
         }
     }
 
@@ -1867,6 +1931,29 @@ impl TypeChecker {
         }
     }
 
+    fn expect_one_of(
+        &mut self,
+        attr_name: &str,
+        key: &str,
+        value: &SNode,
+        span: Span,
+        allowed: &[&str],
+    ) {
+        let Some(value) = symbol_like_value(&value.node) else {
+            self.warning_at(
+                format!("`{attr_name}({key}: ...)` must be one of {allowed:?}"),
+                span,
+            );
+            return;
+        };
+        if !allowed.contains(&value) {
+            self.warning_at(
+                format!("`{attr_name}({key}: ...)` must be one of {allowed:?}"),
+                span,
+            );
+        }
+    }
+
     fn expect_list_of_symbols(&mut self, attr_name: &str, key: &str, value: &SNode, span: Span) {
         let Node::ListLiteral(items) = &value.node else {
             self.warning_at(
@@ -1926,6 +2013,44 @@ impl TypeChecker {
                 continue;
             };
             self.expect_budget_value(attr_name, field_name, &entry.value, entry.value.span);
+        }
+    }
+
+    fn expect_step_retry_dict(&mut self, value: &SNode, span: Span) {
+        let Node::DictLiteral(entries) = &value.node else {
+            self.warning_at(
+                "`@step(retry: ...)` must be a dict such as `{ max_attempts: 3 }`".to_string(),
+                span,
+            );
+            return;
+        };
+        for entry in entries {
+            let Some(field_name) = attr_key_name(&entry.key.node) else {
+                self.warning_at(
+                    "`@step(retry: ...)` field names must be strings or identifiers".to_string(),
+                    entry.key.span,
+                );
+                continue;
+            };
+            match field_name {
+                "max_attempts" => {
+                    if !matches!(entry.value.node, Node::IntLiteral(i) if i >= 1) {
+                        self.warning_at(
+                            "`@step(retry: { max_attempts: ... })` must be a positive integer"
+                                .to_string(),
+                            entry.value.span,
+                        );
+                    }
+                }
+                other => {
+                    self.warning_at(
+                        format!(
+                            "unknown `@step(retry: ...)` field `{other}`; expected `max_attempts`"
+                        ),
+                        entry.key.span,
+                    );
+                }
+            }
         }
     }
 
@@ -2039,6 +2164,15 @@ fn is_symbol_like(node: &Node) -> bool {
         node,
         Node::Identifier(_) | Node::StringLiteral(_) | Node::RawStringLiteral(_)
     )
+}
+
+fn symbol_like_value(node: &Node) -> Option<&str> {
+    match node {
+        Node::Identifier(value) | Node::StringLiteral(value) | Node::RawStringLiteral(value) => {
+            Some(value.as_str())
+        }
+        _ => None,
+    }
 }
 
 fn is_trigger_spec(node: &Node) -> bool {

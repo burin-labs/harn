@@ -34,8 +34,16 @@ pub(crate) struct Linter<'a> {
     pub(super) loop_depth: usize,
     /// Track all declared/known function names for undefined-function detection.
     pub(super) known_functions: HashSet<String>,
+    /// Builtin function names derived from the live VM stdlib.
+    pub(super) builtin_functions: HashSet<String>,
     /// Track function call sites for undefined-function checking.
     pub(super) function_calls: Vec<(String, Span)>,
+    /// Function names declared with `@step`.
+    pub(super) step_functions: HashSet<String>,
+    /// Function calls made from `@persona` bodies.
+    pub(super) persona_body_calls: Vec<(String, Span, String)>,
+    /// Opt-in function names allowed directly inside `@persona` bodies.
+    pub(super) persona_step_allowlist: HashSet<String>,
     /// Whether the file has wildcard imports (import "module").
     /// If true, skip undefined-function checks since we can't know what was imported.
     pub(super) has_wildcard_import: bool,
@@ -98,7 +106,11 @@ impl<'a> Linter<'a> {
             imports: Vec::new(),
             loop_depth: 0,
             known_functions: Self::builtin_names(),
+            builtin_functions: Self::builtin_names(),
             function_calls: Vec::new(),
+            step_functions: HashSet::new(),
+            persona_body_calls: Vec::new(),
+            persona_step_allowlist: HashSet::new(),
             has_wildcard_import: false,
             use_module_graph_for_wildcards: false,
             module_graph_wildcard_exports: None,
@@ -1037,6 +1049,7 @@ impl<'a> Linter<'a> {
     }
 
     pub(crate) fn lint_program(&mut self, nodes: &[SNode]) {
+        self.collect_persona_step_metadata(nodes);
         if let Some(src) = self.source {
             check_legacy_doc_comments(src, nodes, &mut self.diagnostics);
             check_blank_line_between_items(src, nodes, &mut self.diagnostics);
@@ -1045,6 +1058,220 @@ impl<'a> Linter<'a> {
         }
         for node in nodes {
             self.lint_node(node);
+        }
+    }
+
+    fn collect_persona_step_metadata(&mut self, nodes: &[SNode]) {
+        for node in nodes {
+            let Node::AttributedDecl { attributes, inner } = &node.node else {
+                continue;
+            };
+            let is_step = attributes.iter().any(|attr| attr.name == "step");
+            let is_persona = attributes.iter().any(|attr| attr.name == "persona");
+            if is_step {
+                if let Node::FnDecl { name, .. } = &inner.node {
+                    self.step_functions.insert(name.clone());
+                }
+            }
+            if is_persona {
+                if let Node::FnDecl { name, body, .. } = &inner.node {
+                    self.collect_persona_calls(name, body);
+                }
+            }
+        }
+    }
+
+    fn collect_persona_calls(&mut self, persona_name: &str, body: &[SNode]) {
+        for node in body {
+            self.collect_persona_calls_node(persona_name, node);
+        }
+    }
+
+    fn collect_persona_calls_node(&mut self, persona_name: &str, node: &SNode) {
+        match &node.node {
+            Node::FunctionCall { name, args, .. } => {
+                self.persona_body_calls
+                    .push((name.clone(), node.span, persona_name.to_string()));
+                for arg in args {
+                    self.collect_persona_calls_node(persona_name, arg);
+                }
+            }
+            Node::LetBinding { value, .. }
+            | Node::VarBinding { value, .. }
+            | Node::ReturnStmt { value: Some(value) }
+            | Node::YieldExpr { value: Some(value) }
+            | Node::EmitExpr { value }
+            | Node::ThrowStmt { value }
+            | Node::Spread(value)
+            | Node::TryOperator { operand: value }
+            | Node::TryStar { operand: value }
+            | Node::UnaryOp { operand: value, .. } => {
+                self.collect_persona_calls_node(persona_name, value);
+            }
+            Node::IfElse {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                self.collect_persona_calls_node(persona_name, condition);
+                self.collect_persona_calls(persona_name, then_body);
+                if let Some(else_body) = else_body {
+                    self.collect_persona_calls(persona_name, else_body);
+                }
+            }
+            Node::ForIn { iterable, body, .. } => {
+                self.collect_persona_calls_node(persona_name, iterable);
+                self.collect_persona_calls(persona_name, body);
+            }
+            Node::WhileLoop { condition, body } => {
+                self.collect_persona_calls_node(persona_name, condition);
+                self.collect_persona_calls(persona_name, body);
+            }
+            Node::Retry { count, body } => {
+                self.collect_persona_calls_node(persona_name, count);
+                self.collect_persona_calls(persona_name, body);
+            }
+            Node::CostRoute { options, body } => {
+                for (_, value) in options {
+                    self.collect_persona_calls_node(persona_name, value);
+                }
+                self.collect_persona_calls(persona_name, body);
+            }
+            Node::TryCatch {
+                body,
+                catch_body,
+                finally_body,
+                ..
+            } => {
+                self.collect_persona_calls(persona_name, body);
+                self.collect_persona_calls(persona_name, catch_body);
+                if let Some(finally_body) = finally_body {
+                    self.collect_persona_calls(persona_name, finally_body);
+                }
+            }
+            Node::TryExpr { body }
+            | Node::SpawnExpr { body }
+            | Node::DeferStmt { body }
+            | Node::MutexBlock { body }
+            | Node::Block(body)
+            | Node::Closure { body, .. } => self.collect_persona_calls(persona_name, body),
+            Node::DeadlineBlock { duration, body } => {
+                self.collect_persona_calls_node(persona_name, duration);
+                self.collect_persona_calls(persona_name, body);
+            }
+            Node::GuardStmt {
+                condition,
+                else_body,
+            } => {
+                self.collect_persona_calls_node(persona_name, condition);
+                self.collect_persona_calls(persona_name, else_body);
+            }
+            Node::RequireStmt { condition, message } => {
+                self.collect_persona_calls_node(persona_name, condition);
+                if let Some(message) = message {
+                    self.collect_persona_calls_node(persona_name, message);
+                }
+            }
+            Node::Parallel {
+                expr,
+                body,
+                options,
+                ..
+            } => {
+                self.collect_persona_calls_node(persona_name, expr);
+                for (_, value) in options {
+                    self.collect_persona_calls_node(persona_name, value);
+                }
+                self.collect_persona_calls(persona_name, body);
+            }
+            Node::SelectExpr {
+                cases,
+                timeout,
+                default_body,
+            } => {
+                for case in cases {
+                    self.collect_persona_calls_node(persona_name, &case.channel);
+                    self.collect_persona_calls(persona_name, &case.body);
+                }
+                if let Some((duration, body)) = timeout {
+                    self.collect_persona_calls_node(persona_name, duration);
+                    self.collect_persona_calls(persona_name, body);
+                }
+                if let Some(body) = default_body {
+                    self.collect_persona_calls(persona_name, body);
+                }
+            }
+            Node::MatchExpr { value, arms } => {
+                self.collect_persona_calls_node(persona_name, value);
+                for arm in arms {
+                    self.collect_persona_calls_node(persona_name, &arm.pattern);
+                    if let Some(guard) = &arm.guard {
+                        self.collect_persona_calls_node(persona_name, guard);
+                    }
+                    self.collect_persona_calls(persona_name, &arm.body);
+                }
+            }
+            Node::MethodCall { object, args, .. }
+            | Node::OptionalMethodCall { object, args, .. } => {
+                self.collect_persona_calls_node(persona_name, object);
+                for arg in args {
+                    self.collect_persona_calls_node(persona_name, arg);
+                }
+            }
+            Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
+                self.collect_persona_calls_node(persona_name, object);
+            }
+            Node::SubscriptAccess { object, index }
+            | Node::OptionalSubscriptAccess { object, index } => {
+                self.collect_persona_calls_node(persona_name, object);
+                self.collect_persona_calls_node(persona_name, index);
+            }
+            Node::SliceAccess { object, start, end } => {
+                self.collect_persona_calls_node(persona_name, object);
+                if let Some(start) = start {
+                    self.collect_persona_calls_node(persona_name, start);
+                }
+                if let Some(end) = end {
+                    self.collect_persona_calls_node(persona_name, end);
+                }
+            }
+            Node::BinaryOp { left, right, .. } => {
+                self.collect_persona_calls_node(persona_name, left);
+                self.collect_persona_calls_node(persona_name, right);
+            }
+            Node::Ternary {
+                condition,
+                true_expr,
+                false_expr,
+            } => {
+                self.collect_persona_calls_node(persona_name, condition);
+                self.collect_persona_calls_node(persona_name, true_expr);
+                self.collect_persona_calls_node(persona_name, false_expr);
+            }
+            Node::Assignment { target, value, .. } => {
+                self.collect_persona_calls_node(persona_name, target);
+                self.collect_persona_calls_node(persona_name, value);
+            }
+            Node::EnumConstruct { args, .. } | Node::ListLiteral(args) | Node::OrPattern(args) => {
+                for arg in args {
+                    self.collect_persona_calls_node(persona_name, arg);
+                }
+            }
+            Node::StructConstruct { fields, .. } | Node::DictLiteral(fields) => {
+                for entry in fields {
+                    self.collect_persona_calls_node(persona_name, &entry.key);
+                    self.collect_persona_calls_node(persona_name, &entry.value);
+                }
+            }
+            Node::HitlExpr { args, .. } => {
+                for arg in args {
+                    self.collect_persona_calls_node(persona_name, &arg.value);
+                }
+            }
+            Node::AttributedDecl { inner, .. } => {
+                self.collect_persona_calls_node(persona_name, inner)
+            }
+            _ => {}
         }
     }
 
@@ -1361,6 +1588,33 @@ impl<'a> Linter<'a> {
                     fix: None,
                 });
             }
+        }
+
+        for (name, span, persona_name) in &self.persona_body_calls {
+            if self.builtin_functions.contains(name) {
+                continue;
+            }
+            if self.step_functions.contains(name) {
+                continue;
+            }
+            if self.persona_step_allowlist.contains(name) {
+                continue;
+            }
+            if name.starts_with("__") || name.starts_with("hostlib_") {
+                continue;
+            }
+            self.diagnostics.push(LintDiagnostic {
+                rule: "persona-body-must-call-steps",
+                message: format!(
+                    "`@persona` function `{persona_name}` calls `{name}`, which is not declared `@step`"
+                ),
+                span: *span,
+                severity: LintSeverity::Warning,
+                suggestion: Some(format!(
+                    "add `@step(name: \"{name}\", ...)` to `{name}` or list it in `[lint].persona_step_allowlist`"
+                )),
+                fix: None,
+            });
         }
 
         // Variables and parameters may hold closures, so treat them as

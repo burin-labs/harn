@@ -12,6 +12,14 @@ fn write_manifest(body: &str) -> TempDir {
     temp
 }
 
+fn write_persona_source(body: &str) -> (TempDir, std::path::PathBuf) {
+    let temp = TempDir::new().unwrap();
+    fs::create_dir_all(temp.path().join(".git")).unwrap();
+    let path = temp.path().join("persona.harn");
+    fs::write(&path, body).unwrap();
+    (temp, path)
+}
+
 fn valid_manifest() -> &'static str {
     r#"
 [[personas]]
@@ -200,6 +208,86 @@ fn persona_manifest_flag_loads_example_personas() {
 }
 
 #[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+#[test]
+fn persona_inspect_reports_source_declared_steps() {
+    let (_temp, path) = write_persona_source(
+        r#"
+@persona(name: "merge_captain")
+fn merge_captain(ctx) {
+  plan_step(ctx)
+  verify_step(ctx)
+}
+
+@step(name: "plan", model: "gpt-5.4-mini", approval: optional, receipt: audit, error_boundary: fail, retry: {max_attempts: 2})
+fn plan_step(ctx) {
+  return ctx
+}
+
+@step(name: "verify", approval: required, receipt: none, error_boundary: escalate)
+fn verify_step(ctx) {
+  return ctx
+}
+"#,
+    );
+    let output = harn_command()
+        .args([
+            "persona",
+            "--manifest",
+            path.to_string_lossy().as_ref(),
+            "inspect",
+            "merge_captain",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let persona: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(persona["steps"].as_array().unwrap().len(), 2);
+    assert_eq!(persona["steps"][0]["name"], "plan");
+    assert_eq!(persona["steps"][0]["model"], "gpt-5.4-mini");
+    assert_eq!(persona["steps"][0]["retry"]["max_attempts"], 2);
+    assert_eq!(persona["steps"][1]["error_boundary"], "escalate");
+}
+
+#[test]
+fn lint_fails_strict_when_persona_body_calls_non_step_helper() {
+    let (temp, path) = write_persona_source(
+        r#"
+@persona(name: "merge_captain")
+fn merge_captain(ctx) {
+  helper(ctx)
+}
+
+fn helper(ctx) {
+  return ctx
+}
+"#,
+    );
+    fs::write(temp.path().join("harn.toml"), "[check]\nstrict = true\n").unwrap();
+    let output = harn_command()
+        .current_dir(temp.path())
+        .args(["lint", path.to_string_lossy().as_ref()])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "expected strict lint failure, stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(combined.contains("persona-body-must-call-steps"));
+}
+
 #[test]
 fn persona_manifest_flag_loads_fixer_persona() {
     let output = harn_e2e_command()

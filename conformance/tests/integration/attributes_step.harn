@@ -1,0 +1,28 @@
+// `@step` declares statically discoverable persona step metadata.
+@persona(name: "merge_captain", tools: [github], autonomy: suggest, receipts: optional)
+fn merge_captain(ctx) -> string {
+  let planned = plan_step(ctx)
+  let implemented = implement_step(planned)
+  return verify_step(implemented)
+}
+
+@step(name: "plan", model: "gpt-5.4-mini", approval: optional, receipt: audit, error_boundary: fail, retry: {max_attempts: 2})
+fn plan_step(ctx) -> string {
+  return "plan:${ctx}"
+}
+
+@step(name: "implement", approval: required, receipt: audit, error_boundary: continue)
+fn implement_step(ctx) -> string {
+  return "implement:${ctx}"
+}
+
+@step(name: "verify", model: "gpt-5.4", approval: optional, receipt: none, error_boundary: escalate)
+fn verify_step(ctx) -> string {
+  return "verify:${ctx}"
+}
+
+@test
+pipeline test_step_attributes(task) {
+  assert_eq(merge_captain("issue"), "verify:implement:plan:issue")
+  log("attributes_step ok")
+}

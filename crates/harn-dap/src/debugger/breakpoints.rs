@@ -142,13 +142,9 @@ impl Debugger {
         }
         // Mirror onto the VM so Vm::push_closure_frame latches the hit
         // on entry to any matching function.
+        let names = self.effective_function_breakpoint_names();
         if let Some(vm) = &mut self.vm {
-            vm.set_function_breakpoints(
-                self.function_breakpoints
-                    .iter()
-                    .map(|fb| fb.name.clone())
-                    .collect(),
-            );
+            vm.set_function_breakpoints(names);
         }
         // Hit counts from the prior set belong to now-stale ids; drop
         // them so a fresh edit starts counting over.
@@ -257,6 +253,27 @@ impl Debugger {
                 }
             }
         }
+    }
+
+    pub(crate) fn refresh_vm_function_breakpoints(&mut self) {
+        let names = self.effective_function_breakpoint_names();
+        if let Some(vm) = &mut self.vm {
+            vm.set_function_breakpoints(names);
+        }
+    }
+
+    fn effective_function_breakpoint_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .function_breakpoints
+            .iter()
+            .map(|fb| fb.name.clone())
+            .collect();
+        for name in &self.pending_step_boundary_functions {
+            if !names.iter().any(|existing| existing == name) {
+                names.push(name.clone());
+            }
+        }
+        names
     }
 
     /// Transition idle -> running. Snapshots breakpoint conditions and
