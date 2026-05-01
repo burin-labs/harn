@@ -10,6 +10,20 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **MCP elicitation (`elicitation/create`) on both roles (#875).** Harn
+  servers can now prompt connected clients for structured user input
+  mid-tool-call via the `mcp_elicit({ message, requestedSchema })`
+  builtin, returning the canonical `{action, content?}` envelope per
+  MCP 2025-11-25. `content` is validated against `requestedSchema`
+  before returning. The MCP server's `initialize` response now
+  advertises the `elicitation` capability. On the client side, inbound
+  `elicitation/create` requests are dispatched to the embedder via the
+  `HostCallBridge` (`capability="mcp"`, `operation="elicit"`); if no
+  host bridge is wired up, Harn responds with `{ action: "decline" }`.
+  Bidirectional stdio is implemented; HTTP streamable-transport server
+  surfaces are wired through the per-session SSE stream so a tool
+  handler can elicit and receive a response over a separate POST.
+
 - **Harn-native Merge Captain persona (#1009/#1029).** Replaces the
   shell-driven Merge Captain MVP with a deterministic Harn package owning
   multi-repo PR queue scheduling, durable per-PR state, audit-grade merge

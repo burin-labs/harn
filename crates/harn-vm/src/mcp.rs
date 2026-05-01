@@ -101,8 +101,8 @@ impl VmMcpClientHandle {
             .ok_or_else(|| VmError::Runtime("MCP client is disconnected".into()))?;
 
         match inner {
-            McpClientInner::Stdio(inner) => stdio_call(inner, method, params).await,
-            McpClientInner::Http(inner) => http_call(inner, method, params).await,
+            McpClientInner::Stdio(inner) => stdio_call(inner, &self.name, method, params).await,
+            McpClientInner::Http(inner) => http_call(inner, &self.name, method, params).await,
         }
     }
 
@@ -148,6 +148,7 @@ impl VmMcpClientHandle {
 
 async fn stdio_call(
     inner: &mut StdioMcpClientInner,
+    server_name: &str,
     method: &str,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, VmError> {
@@ -216,26 +217,43 @@ async fn stdio_call(
             return parse_jsonrpc_result(msg);
         }
 
-        if let Some(response) = client_request_rejection(&msg) {
-            let line = serde_json::to_string(&response)
-                .map_err(|e| VmError::Runtime(format!("MCP serialization error: {e}")))?;
-            inner
-                .stdin
-                .write_all(line.as_bytes())
-                .await
-                .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
-            inner
-                .stdin
-                .write_all(b"\n")
-                .await
-                .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
-            inner
-                .stdin
-                .flush()
-                .await
-                .map_err(|e| VmError::Runtime(format!("MCP flush error: {e}")))?;
-        }
+        let response = match handle_inbound_client_request(server_name, &msg).await {
+            Some(response) => response,
+            None => continue,
+        };
+        let line = serde_json::to_string(&response)
+            .map_err(|e| VmError::Runtime(format!("MCP serialization error: {e}")))?;
+        inner
+            .stdin
+            .write_all(line.as_bytes())
+            .await
+            .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
+        inner
+            .stdin
+            .write_all(b"\n")
+            .await
+            .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
+        inner
+            .stdin
+            .flush()
+            .await
+            .map_err(|e| VmError::Runtime(format!("MCP flush error: {e}")))?;
     }
+}
+
+/// Handle a server-to-client request that arrived on the stream while
+/// we were waiting for a response. Returns `Some(response)` to send
+/// back to the server, or `None` if the message wasn't actually a
+/// request (e.g. an unknown notification we should ignore).
+async fn handle_inbound_client_request(
+    server_name: &str,
+    msg: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let method = msg.get("method").and_then(|value| value.as_str())?;
+    if method == crate::mcp_elicit::ELICITATION_METHOD {
+        return Some(crate::mcp_elicit::dispatch_inbound_elicitation(server_name, msg).await);
+    }
+    client_request_rejection(msg)
 }
 
 async fn stdio_notify(
@@ -271,12 +289,13 @@ async fn stdio_notify(
 
 async fn http_call(
     inner: &mut HttpMcpClientInner,
+    server_name: &str,
     method: &str,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, VmError> {
     let id = inner.next_id;
     inner.next_id += 1;
-    send_http_request(inner, method, params, Some(id)).await
+    send_http_request(inner, server_name, method, params, Some(id)).await
 }
 
 async fn http_notify(
@@ -284,12 +303,18 @@ async fn http_notify(
     method: &str,
     params: serde_json::Value,
 ) -> Result<(), VmError> {
-    let _ = send_http_request(inner, method, params, None).await?;
+    let _ = send_http_request(inner, "", method, params, None).await?;
     Ok(())
 }
 
 async fn send_http_request(
     inner: &mut HttpMcpClientInner,
+    // TODO(#875-followup): plumb through to the streamable-HTTP GET stream
+    // so server-to-client `elicitation/create` requests reach the host
+    // bridge. Today the HTTP client only consumes the POST response and
+    // ignores any GET-stream messages; that's a pre-existing gap from
+    // #872 (transport implementation) that elicitation inherits.
+    _server_name: &str,
     method: &str,
     params: serde_json::Value,
     id: Option<u64>,

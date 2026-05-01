@@ -223,6 +223,67 @@ async fn server_advertises_resource_list_changed_capability() {
 }
 
 #[tokio::test]
+async fn server_advertises_elicitation_capability() {
+    let server = McpServer::new(
+        "test".to_string(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut vm = crate::Vm::new();
+    let response = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                1,
+                "initialize",
+                serde_json::json!({"protocolVersion": super::PROTOCOL_VERSION}),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    // Capability is signaled by an empty object — its presence
+    // alone tells the client elicitation is available.
+    assert!(
+        response["result"]["capabilities"]["elicitation"].is_object(),
+        "expected elicitation capability, got {response:?}"
+    );
+}
+
+#[tokio::test]
+async fn server_no_longer_auto_rejects_elicitation_create() {
+    // Before #875 the unsupported gap list rejected `elicitation/create`
+    // with a -32601 + an mcp.unsupportedFeature `data` payload. Now we
+    // implement bidirectional elicitation, so it's removed from that
+    // list. The server itself doesn't expect inbound elicitation
+    // requests (clients send the *response* not a fresh request), so
+    // the dispatcher's plain "Method not found" still fires — but the
+    // unsupported-feature data payload should be gone.
+    let server = McpServer::new(
+        "test".to_string(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut vm = crate::Vm::new();
+    let response = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(7, "elicitation/create", serde_json::json!({})),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert!(response.get("result").is_none());
+    assert_eq!(response["error"]["code"], serde_json::json!(-32601));
+    assert!(
+        response["error"].get("data").is_none(),
+        "expected no `data` payload now that elicitation is removed from the gap list, got {response:?}"
+    );
+}
+
+#[tokio::test]
 async fn server_tool_call_rejects_task_augmentation() {
     let server = McpServer::new(
         "test".to_string(),

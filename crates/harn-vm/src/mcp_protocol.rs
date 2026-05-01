@@ -43,12 +43,9 @@ pub const UNSUPPORTED_LATEST_SPEC_METHODS: &[UnsupportedMcpMethod] = &[
         role: "client",
         reason: "Harn does not currently let MCP servers invoke a client-side model sampler.",
     },
-    UnsupportedMcpMethod {
-        method: "elicitation/create",
-        feature: "elicitation",
-        role: "client",
-        reason: "Harn does not currently let MCP servers request client-side user elicitation.",
-    },
+    // `elicitation/create` is supported on both roles — handled in
+    // `mcp::stdio_call`/`mcp::http_call` (client) and via `mcp_elicit(...)`
+    // (server). It is intentionally omitted from this gap list.
     UnsupportedMcpMethod {
         method: "tasks/get",
         feature: "tasks",
@@ -139,7 +136,6 @@ mod tests {
             "resources/unsubscribe",
             "roots/list",
             "sampling/createMessage",
-            "elicitation/create",
             "tasks/get",
             "tasks/result",
             "tasks/list",
@@ -151,6 +147,16 @@ mod tests {
             assert_eq!(response["error"]["data"]["method"], json!(method));
             assert_eq!(response["error"]["data"]["status"], json!("unsupported"));
         }
+    }
+
+    #[test]
+    fn elicitation_create_is_no_longer_in_the_unsupported_gap_list() {
+        // Removed from `UNSUPPORTED_LATEST_SPEC_METHODS` once we
+        // implemented bidirectional elicitation (issue #875). Lookup
+        // therefore returns `None` and callers route the method
+        // through the elicitation bus (server) or the host bridge
+        // (client) instead of the auto-rejection path.
+        assert!(unsupported_latest_spec_method("elicitation/create").is_none());
     }
 
     #[test]

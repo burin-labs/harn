@@ -168,11 +168,17 @@ struct ScriptMcpRuntime {
 struct ScriptMcpJob {
     request: JsonValue,
     response_tx: oneshot::Sender<Option<JsonValue>>,
+    /// Per-session elicitation bus to install before invoking the
+    /// handler. `None` for clients that haven't opened the SSE stream
+    /// yet — `mcp_elicit(...)` will fail loudly in that case rather
+    /// than silently hanging.
+    bus: Option<harn_vm::mcp_elicit::ElicitationBus>,
 }
 
 #[derive(Default)]
 struct ScriptSessionState {
     stream_tx: Option<UnboundedSender<JsonValue>>,
+    bus: Option<harn_vm::mcp_elicit::ElicitationBus>,
 }
 
 #[derive(Clone)]
@@ -188,7 +194,19 @@ impl SharedScriptSession {
     }
 
     fn set_stream_tx(&self, tx: Option<UnboundedSender<JsonValue>>) {
-        self.inner.lock().expect("session poisoned").stream_tx = tx;
+        let mut state = self.inner.lock().expect("session poisoned");
+        match tx {
+            Some(tx) => {
+                state.bus = Some(harn_vm::mcp_elicit::ElicitationBus::new(
+                    forward_to_session_stream(tx.clone()),
+                ));
+                state.stream_tx = Some(tx);
+            }
+            None => {
+                state.bus = None;
+                state.stream_tx = None;
+            }
+        }
     }
 
     fn stream_tx(&self) -> Option<UnboundedSender<JsonValue>> {
@@ -199,6 +217,28 @@ impl SharedScriptSession {
             .as_ref()
             .cloned()
     }
+
+    fn bus(&self) -> Option<harn_vm::mcp_elicit::ElicitationBus> {
+        self.inner.lock().expect("session poisoned").bus.clone()
+    }
+}
+
+/// Bridge an `mpsc::UnboundedSender<JsonValue>` (what the elicitation
+/// bus expects) onto a `futures::channel::mpsc::UnboundedSender<JsonValue>`
+/// (what the SSE response stream consumes). One spawn-per-session is
+/// fine — the channel is closed when the SSE stream drops.
+fn forward_to_session_stream(
+    sse_tx: UnboundedSender<JsonValue>,
+) -> tokio_mpsc::UnboundedSender<JsonValue> {
+    let (tx, mut rx) = tokio_mpsc::unbounded_channel::<JsonValue>();
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if sse_tx.unbounded_send(msg).is_err() {
+                break;
+            }
+        }
+    });
+    tx
 }
 
 impl ScriptMcpRuntime {
@@ -206,25 +246,47 @@ impl ScriptMcpRuntime {
         let (tx, mut rx) = tokio_mpsc::unbounded_channel::<ScriptMcpJob>();
         tokio::task::spawn_local(async move {
             while let Some(job) = rx.recv().await {
+                let _previous = harn_vm::mcp_elicit::install_bus(job.bus);
                 let response = server.handle_json_rpc(job.request, &mut vm).await;
+                harn_vm::mcp_elicit::install_bus(_previous);
                 let _ = job.response_tx.send(response);
             }
         });
         Self { tx }
     }
 
-    async fn call(&self, request: JsonValue) -> Result<Option<JsonValue>, String> {
+    async fn call(
+        &self,
+        request: JsonValue,
+        bus: Option<harn_vm::mcp_elicit::ElicitationBus>,
+    ) -> Result<Option<JsonValue>, String> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
             .send(ScriptMcpJob {
                 request,
                 response_tx,
+                bus,
             })
             .map_err(|_| "script MCP runtime is not running".to_string())?;
         response_rx
             .await
             .map_err(|_| "script MCP runtime dropped response".to_string())
     }
+}
+
+/// Recognize a JSON-RPC payload as a response (rather than a request /
+/// notification): MUST have an `id` and exactly one of `result` /
+/// `error`, and MUST NOT have a `method`. Conservative on purpose so
+/// we don't accidentally swallow a client-initiated request that
+/// happens to share an id with a recent elicitation.
+fn looks_like_response(value: &JsonValue) -> bool {
+    if value.get("method").is_some() {
+        return false;
+    }
+    if value.get("id").is_none() {
+        return false;
+    }
+    value.get("result").is_some() || value.get("error").is_some()
 }
 
 async fn script_http_post_request(
@@ -254,11 +316,27 @@ async fn script_http_post_request(
         .get("mcp-session-id")
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
-    let (session_id, _session, created) =
+    let (session_id, session, created) =
         match script_lookup_or_create_session(&state, &request, header_session) {
             Ok(value) => value,
             Err(response) => return *response,
         };
+
+    // Streamable-HTTP clients reply to server-to-client requests
+    // (notably `elicitation/create`) by POSTing the JSON-RPC response
+    // back to the same `/mcp` endpoint. Detect that here and route to
+    // the session's elicitation bus so `mcp_elicit(...)` can wake. Per
+    // JSON-RPC etiquette we *never* reply to a response — even a stale
+    // one with no matching pending — so this path is fully terminal.
+    if looks_like_response(&request) {
+        if let Some(bus) = session.bus() {
+            let _ = bus.route_response(&request);
+        }
+        let mut http = StatusCode::ACCEPTED.into_response();
+        attach_script_http_headers(&mut http, created.then_some(session_id.as_str()));
+        return http;
+    }
+
     if let Err(response) = authorize_script_rpc(
         &state,
         &request,
@@ -271,7 +349,8 @@ async fn script_http_post_request(
         return http;
     }
 
-    match state.runtime.call(request).await {
+    let job_bus = session.bus();
+    match state.runtime.call(request, job_bus).await {
         Ok(Some(response)) => {
             let mut http = Json(response).into_response();
             attach_script_http_headers(&mut http, created.then_some(session_id.as_str()));
@@ -398,6 +477,16 @@ async fn script_legacy_sse_message(
                 .into_response()
         }
     };
+    // Legacy SSE clients reply to server-to-client requests over the
+    // same `/messages` endpoint. Route responses to the session bus so
+    // a tool handler awaiting `mcp_elicit(...)` wakes up. As above we
+    // never reply to a response, even a stale one.
+    if looks_like_response(&request) {
+        if let Some(bus) = session.bus() {
+            let _ = bus.route_response(&request);
+        }
+        return StatusCode::ACCEPTED.into_response();
+    }
     if let Err(response) = authorize_script_rpc(
         &state,
         &request,
@@ -416,7 +505,8 @@ async fn script_legacy_sse_message(
         }
         return StatusCode::GONE.into_response();
     }
-    match state.runtime.call(request).await {
+    let job_bus = session.bus();
+    match state.runtime.call(request, job_bus).await {
         Ok(Some(response)) => {
             if let Some(tx) = session.stream_tx() {
                 let _ = tx.unbounded_send(response);

@@ -255,7 +255,7 @@ messages when watched manifest, prompt, lockfile, or package metadata changes.
 control-plane server for Harn orchestration state, so it supports tools,
 resources, prompts, logging, cancellation, progress, and streamable HTTP
 sessions. It does not expose completions, resource subscriptions, roots,
-sampling, elicitation, or MCP tasks.
+sampling, or MCP tasks.
 
 | Method or feature | Status |
 |---|---|
@@ -267,11 +267,11 @@ sampling, elicitation, or MCP tasks.
 | `resources/templates/list` | Supported; returns an empty list |
 | `prompts/list` | Supported for `.harn.prompt` files in the project and prompt-library packages |
 | `prompts/get` | Supported; renders prompt templates with supplied arguments |
+| `elicitation/create` | Supported on script-driven `harn run --serve mcp` surfaces via the `mcp_elicit(...)` builtin (see [Elicitation](#elicitation)). The orchestrator-mode tool catalog does not currently issue elicitations. |
 | `completion/complete` | Explicitly unsupported |
 | `resources/subscribe`, `resources/unsubscribe` | Explicitly unsupported |
 | `roots/list` | Explicitly unsupported |
 | `sampling/createMessage` | Explicitly unsupported |
-| `elicitation/create` | Explicitly unsupported |
 | `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Explicitly unsupported |
 | `tools/call` with `params.task` | Rejected; task-augmented execution is not advertised |
 
@@ -279,6 +279,48 @@ Explicitly unsupported methods return a JSON-RPC error with code `-32601` and
 `error.data.type = "mcp.unsupportedFeature"`. Tool calls that request
 task-augmented execution return `-32602` because the request parameters ask for
 a capability Harn does not advertise.
+
+## Elicitation
+
+Script-driven MCP servers (those built with `mcp_tools(...)` /
+`mcp_resource(...)` / `mcp_prompt(...)` and started with `harn run --serve mcp`
+or `harn serve mcp`) can prompt the connected client for structured user
+input mid-tool-call via the `mcp_elicit(...)` builtin:
+
+```harn
+let answer = mcp_elicit({
+  message: "Which environment should I deploy to?",
+  requestedSchema: {
+    type: "object",
+    properties: {
+      env: { type: "string", enum: ["staging", "production"] },
+      confirm: { type: "boolean" }
+    },
+    required: ["env", "confirm"]
+  }
+})
+// answer is one of:
+//   { action: "accept", content: { env: "staging", confirm: true } }
+//   { action: "decline" }
+//   { action: "cancel" }
+```
+
+The builtin returns the canonical `{action, content?}` envelope from the
+[MCP elicitation spec](https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation).
+On `accept`, `content` is validated against `requestedSchema` before
+returning so scripts can rely on its shape. On `decline` / `cancel`,
+`content` is omitted.
+
+`mcp_elicit(...)` is only valid while a client connection is active. If
+called outside a tool / resource / prompt handler — e.g. at pipeline
+top-level — it raises a structured error rather than hanging.
+
+When Harn is on the *client* side of an MCP connection (`mcp_connect(...)`
+or `mcp_call(...)`) and a remote server sends an `elicitation/create`
+request, Harn dispatches it to the embedder via the `HostCallBridge`
+(`capability="mcp"`, `operation="elicit"`). If no host bridge is wired
+up, Harn responds with `{ action: "decline" }` so the server can fall
+back to a sensible default rather than blocking forever.
 
 ## Observability
 

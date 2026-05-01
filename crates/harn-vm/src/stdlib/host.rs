@@ -391,6 +391,28 @@ pub fn clear_host_call_bridge() {
     HOST_CALL_BRIDGE.with(|b| *b.borrow_mut() = None);
 }
 
+/// Dispatch `(capability, operation, params)` to the currently-installed
+/// `HostCallBridge`, if any. `Some(Ok(_))` means the bridge handled the
+/// call; `Some(Err(_))` means it tried but raised; `None` means there is
+/// no bridge or the bridge declined this op (returned `Ok(None)`).
+///
+/// Mirrors the inner block of `dispatch_host_operation` but without the
+/// mock-call check or the built-in fallbacks — useful for callers that
+/// want to treat the bridge as one of several sinks (e.g. inbound MCP
+/// `elicitation/create` requests).
+pub fn dispatch_host_call_bridge(
+    capability: &str,
+    operation: &str,
+    params: &BTreeMap<String, VmValue>,
+) -> Option<Result<VmValue, VmError>> {
+    let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone())?;
+    match bridge.dispatch(capability, operation, params) {
+        Ok(Some(value)) => Some(Ok(value)),
+        Ok(None) => None,
+        Err(error) => Some(Err(error)),
+    }
+}
+
 fn empty_tool_list_value() -> VmValue {
     VmValue::List(Rc::new(Vec::new()))
 }
