@@ -8,10 +8,7 @@ use time::OffsetDateTime;
 
 use super::*;
 use crate::connectors::{
-    test_util::{
-        spawn_mock_http_server, write_http_response, CapturedHttpRequest as CapturedRequest,
-        MockHttpServer,
-    },
+    test_util::{FakeHttpRequest as CapturedRequest, FakeHttpResponse, FakeHttpServer},
     Connector, ConnectorCtx, InboxIndex, MetricsRegistry, RateLimiterFactory, RawInbound,
     TriggerBinding,
 };
@@ -132,93 +129,59 @@ fn client_args(api_base_url: &str) -> JsonValue {
     })
 }
 
-fn spawn_mock_server(
+async fn spawn_mock_server(
     expected_requests: usize,
     scenario: Arc<Mutex<MockScenario>>,
-) -> MockHttpServer {
-    spawn_mock_http_server(
-        expected_requests,
+) -> FakeHttpServer {
+    FakeHttpServer::start_with_capacity(
         "github mock server",
-        move |_index, _addr, request, stream| {
-            let response = {
-                let mut state = scenario.lock().expect("scenario lock");
-                if request.path == "/app/installations/77/access_tokens" {
-                    state.token_requests += 1;
-                    let token = format!("token-{}", state.token_requests);
-                    (
-                        201,
-                        vec![("content-type", "application/json".to_string())],
-                        json!({
-                            "token": token,
-                            "expires_at": "2030-01-01T00:00:00Z",
-                        })
-                        .to_string(),
+        expected_requests,
+        move |_index, _addr, request| {
+            let mut state = scenario.lock().expect("scenario lock");
+            if request.path == "/app/installations/77/access_tokens" {
+                state.token_requests += 1;
+                let token = format!("token-{}", state.token_requests);
+                FakeHttpResponse::status_json(
+                    201,
+                    &json!({
+                        "token": token,
+                        "expires_at": "2030-01-01T00:00:00Z",
+                    }),
+                )
+            } else if state.unauthorized_once.remove(&request.path) {
+                FakeHttpResponse::status_json(401, &json!({"message": "expired token"}))
+            } else if state.rate_limit_once.remove(&request.path) {
+                FakeHttpResponse::status_json(429, &json!({"message": "slow down"}))
+                    .with_header("retry-after", "0")
+            } else {
+                state.api_requests.push(request.clone());
+                let accept = request.headers.get("accept").cloned().unwrap_or_default();
+                let response = if request.path.ends_with("/comments") {
+                    FakeHttpResponse::status_json(201, &json!({"id": 1, "body": "commented"}))
+                } else if request.path.ends_with("/labels") {
+                    FakeHttpResponse::ok_json(&json!([{"name": "bug"}, {"name": "triage"}]))
+                } else if request.path.ends_with("/requested_reviewers") {
+                    FakeHttpResponse::status_json(201, &json!({"requested_reviewers": ["alice"]}))
+                } else if request.path.ends_with("/merge") {
+                    FakeHttpResponse::ok_json(&json!({"merged": true, "message": "merged"}))
+                } else if request.path.starts_with("/search/issues") {
+                    FakeHttpResponse::ok_json(
+                        &json!({"total_count": 1, "items": [{"number": 7, "title": "stale"}]}),
                     )
-                } else if state.unauthorized_once.remove(&request.path) {
-                    (
-                        401,
-                        vec![("content-type", "application/json".to_string())],
-                        json!({"message": "expired token"}).to_string(),
-                    )
-                } else if state.rate_limit_once.remove(&request.path) {
-                    (
-                        429,
-                        vec![
-                            ("content-type", "application/json".to_string()),
-                            ("retry-after", "0".to_string()),
-                        ],
-                        json!({"message": "slow down"}).to_string(),
-                    )
+                } else if request.path.ends_with("/pulls/123")
+                    && accept.contains("application/vnd.github.diff")
+                {
+                    FakeHttpResponse::text(200, "diff --git a/file b/file\n")
+                } else if request.path.ends_with("/issues") {
+                    FakeHttpResponse::status_json(201, &json!({"number": 88, "title": "created"}))
                 } else {
-                    state.api_requests.push(request.clone());
-                    let accept = request.headers.get("accept").cloned().unwrap_or_default();
-                    let (status, body) = if request.path.ends_with("/comments") {
-                        (201, json!({"id": 1, "body": "commented"}).to_string())
-                    } else if request.path.ends_with("/labels") {
-                        (
-                            200,
-                            json!([{"name": "bug"}, {"name": "triage"}]).to_string(),
-                        )
-                    } else if request.path.ends_with("/requested_reviewers") {
-                        (201, json!({"requested_reviewers": ["alice"]}).to_string())
-                    } else if request.path.ends_with("/merge") {
-                        (
-                            200,
-                            json!({"merged": true, "message": "merged"}).to_string(),
-                        )
-                    } else if request.path.starts_with("/search/issues") {
-                        (
-                            200,
-                            json!({"total_count": 1, "items": [{"number": 7, "title": "stale"}]})
-                                .to_string(),
-                        )
-                    } else if request.path.ends_with("/pulls/123")
-                        && accept.contains("application/vnd.github.diff")
-                    {
-                        (200, "diff --git a/file b/file\n".to_string())
-                    } else if request.path.ends_with("/issues") {
-                        (201, json!({"number": 88, "title": "created"}).to_string())
-                    } else {
-                        (200, json!({"ok": true}).to_string())
-                    };
-                    let content_type = if accept.contains("application/vnd.github.diff") {
-                        "text/plain".to_string()
-                    } else {
-                        "application/json".to_string()
-                    };
-                    (
-                        status,
-                        vec![
-                            ("content-type", content_type),
-                            ("x-ratelimit-remaining", "4999".to_string()),
-                        ],
-                        body,
-                    )
-                }
-            };
-            write_http_response(stream, response.0, &response.1, &response.2);
+                    FakeHttpResponse::ok_json(&json!({"ok": true}))
+                };
+                response.with_header("x-ratelimit-remaining", "4999")
+            }
         },
     )
+    .await
 }
 
 fn github_signature(secret: &str, body: &[u8]) -> String {
@@ -494,7 +457,7 @@ async fn normalizes_monitor_github_webhook_events() {
 #[tokio::test]
 async fn outbound_methods_share_cached_installation_token() {
     let scenario = Arc::new(Mutex::new(MockScenario::default()));
-    let server = spawn_mock_server(8, scenario.clone());
+    let server = spawn_mock_server(8, scenario.clone()).await;
     let base_url = server.base_url().to_string();
     let client = initialized_client(Arc::new(StaticSecretProvider {
         namespace: "github".to_string(),
@@ -579,7 +542,7 @@ async fn outbound_methods_share_cached_installation_token() {
 #[tokio::test]
 async fn api_call_uses_authenticated_github_rest_request() {
     let scenario = Arc::new(Mutex::new(MockScenario::default()));
-    let server = spawn_mock_server(2, scenario.clone());
+    let server = spawn_mock_server(2, scenario.clone()).await;
     let base_url = server.base_url().to_string();
     let client = initialized_client(Arc::new(StaticSecretProvider {
         namespace: "github".to_string(),
@@ -632,7 +595,7 @@ async fn unauthorized_response_invalidates_token_and_remints() {
         unauthorized_once: HashSet::from(["/repos/octo/demo/issues/123/comments".to_string()]),
         ..MockScenario::default()
     }));
-    let server = spawn_mock_server(4, scenario.clone());
+    let server = spawn_mock_server(4, scenario.clone()).await;
     let base_url = server.base_url().to_string();
     let client = initialized_client(Arc::new(StaticSecretProvider {
         namespace: "github".to_string(),
@@ -667,7 +630,7 @@ async fn rate_limited_response_retries_once() {
         rate_limit_once: HashSet::from(["/repos/octo/demo/issues/123/comments".to_string()]),
         ..MockScenario::default()
     }));
-    let server = spawn_mock_server(3, scenario.clone());
+    let server = spawn_mock_server(3, scenario.clone()).await;
     let base_url = server.base_url().to_string();
     let client = initialized_client(Arc::new(StaticSecretProvider {
         namespace: "github".to_string(),

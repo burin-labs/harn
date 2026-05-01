@@ -10,10 +10,7 @@ use time::OffsetDateTime;
 
 use super::*;
 use crate::connectors::{
-    test_util::{
-        spawn_mock_http_server, write_http_response, CapturedHttpRequest as CapturedRequest,
-        MockHttpServer,
-    },
+    test_util::{FakeHttpRequest as CapturedRequest, FakeHttpResponse, FakeHttpServer},
     Connector, ConnectorCtx, InboxIndex, MetricsRegistry, RateLimiterFactory, RawInbound,
     TriggerBinding,
 };
@@ -284,35 +281,35 @@ async fn notion_webhook_signed_event_normalizes_to_typed_payload() {
     assert_eq!(payload.subscription_id.as_deref(), Some("sub_1"));
 }
 
-fn write_response(stream: &mut std::net::TcpStream, status: u16, body: &str) {
-    let headers = if status == 429 {
-        vec![
-            ("content-type", "application/json".to_string()),
-            ("retry-after", "0".to_string()),
-        ]
+fn build_response(status: u16, body: String) -> FakeHttpResponse {
+    let response = FakeHttpResponse::empty(status)
+        .with_header("content-type", "application/json")
+        .with_body(body.into_bytes());
+    if status == 429 {
+        response.with_header("retry-after", "0")
     } else {
-        vec![("content-type", "application/json".to_string())]
-    };
-    write_http_response(stream, status, &headers, body);
+        response
+    }
 }
 
-fn spawn_mock_server(
+async fn spawn_mock_server(
     expected_requests: usize,
     responder: impl Fn(usize, &CapturedRequest) -> (u16, String) + Send + 'static,
     captured: Arc<Mutex<Vec<CapturedRequest>>>,
-) -> MockHttpServer {
-    spawn_mock_http_server(
-        expected_requests,
+) -> FakeHttpServer {
+    FakeHttpServer::start_with_capacity(
         "notion mock server",
-        move |index, _addr, request, stream| {
+        expected_requests,
+        move |index, _addr, request| {
             captured
                 .lock()
                 .expect("captured requests poisoned")
                 .push(request.clone());
             let (status, body) = responder(index, request);
-            write_response(stream, status, &body);
+            build_response(status, body)
         },
     )
+    .await
 }
 
 #[tokio::test]
@@ -329,7 +326,8 @@ async fn notion_client_methods_use_current_api_headers_and_paths() {
             (200, body)
         },
         captured.clone(),
-    );
+    )
+    .await;
     let base_url = server.base_url().to_string();
 
     let secrets = Arc::new(StaticSecretProvider::new("notion", HashMap::new()));
@@ -433,7 +431,8 @@ async fn notion_client_retries_once_after_rate_limit() {
             }
         },
         captured.clone(),
-    );
+    )
+    .await;
     let base_url = server.base_url().to_string();
 
     let secrets = Arc::new(StaticSecretProvider::new("notion", HashMap::new()));
@@ -492,7 +491,8 @@ async fn notion_poll_binding_emits_targeted_inbox_event_and_persists_high_water(
             )
         },
         captured,
-    );
+    )
+    .await;
     let base_url = server.base_url().to_string();
 
     let secrets = Arc::new(StaticSecretProvider::new(
