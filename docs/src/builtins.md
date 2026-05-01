@@ -1858,6 +1858,10 @@ Notes:
 
 - `mcp_call` returns a string when the tool produces a single text block,
   a list of content dicts for multi-block results, or nil when empty.
+- HTTP MCP clients keep the server's Streamable HTTP GET event stream open
+  after initialization. If the server sends `elicitation/create`, Harn routes
+  it to the host bridge as `host_call("mcp", "elicit", ...)` and posts the
+  JSON-RPC response back to the MCP endpoint.
 - If the tool reports `isError: true`, `mcp_call` throws the error text.
 - `mcp_connect` throws if the command cannot be spawned or the initialize
   handshake fails.

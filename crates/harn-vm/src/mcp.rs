@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use futures::StreamExt;
+use reqwest_eventsource::{Event as SseEvent, EventSource};
 use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
@@ -74,6 +76,15 @@ struct HttpMcpClientInner {
     session_id: Option<String>,
     next_id: u64,
     proxy_server_name: Option<String>,
+    get_stream_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl HttpMcpClientInner {
+    fn abort_get_stream(&mut self) {
+        if let Some(task) = self.get_stream_task.take() {
+            task.abort();
+        }
+    }
 }
 
 /// Handle to an MCP client connection, stored in VmValue.
@@ -114,7 +125,7 @@ impl VmMcpClientHandle {
 
         match inner {
             McpClientInner::Stdio(inner) => stdio_notify(inner, method, params).await,
-            McpClientInner::Http(inner) => http_notify(inner, method, params).await,
+            McpClientInner::Http(inner) => http_notify(inner, &self.name, method, params).await,
         }
     }
 
@@ -125,7 +136,9 @@ impl VmMcpClientHandle {
                 McpClientInner::Stdio(mut inner) => {
                     let _ = inner.child.kill().await;
                 }
-                McpClientInner::Http(_) => {}
+                McpClientInner::Http(mut inner) => {
+                    inner.abort_get_stream();
+                }
             }
         }
         Ok(())
@@ -140,7 +153,9 @@ impl VmMcpClientHandle {
                 McpClientInner::Stdio(mut inner) => {
                     let _ = inner.child.start_kill();
                 }
-                McpClientInner::Http(_) => {}
+                McpClientInner::Http(mut inner) => {
+                    inner.abort_get_stream();
+                }
             }
         }
     }
@@ -300,21 +315,17 @@ async fn http_call(
 
 async fn http_notify(
     inner: &mut HttpMcpClientInner,
+    server_name: &str,
     method: &str,
     params: serde_json::Value,
 ) -> Result<(), VmError> {
-    let _ = send_http_request(inner, "", method, params, None).await?;
+    let _ = send_http_request(inner, server_name, method, params, None).await?;
     Ok(())
 }
 
 async fn send_http_request(
     inner: &mut HttpMcpClientInner,
-    // TODO(#875-followup): plumb through to the streamable-HTTP GET stream
-    // so server-to-client `elicitation/create` requests reach the host
-    // bridge. Today the HTTP client only consumes the POST response and
-    // ignores any GET-stream messages; that's a pre-existing gap from
-    // #872 (transport implementation) that elicitation inherits.
-    _server_name: &str,
+    server_name: &str,
     method: &str,
     params: serde_json::Value,
     id: Option<u64>,
@@ -336,6 +347,7 @@ async fn send_http_request(
 
         if status == 404 && inner.session_id.is_some() && method != "initialize" && attempt == 0 {
             inner.session_id = None;
+            inner.abort_get_stream();
             reinitialize_http_client(inner).await?;
             continue;
         }
@@ -352,15 +364,19 @@ async fn send_http_request(
             .map_err(|e| VmError::Runtime(format!("MCP HTTP read error: {e}")))?;
 
         if body.trim().is_empty() {
+            if status < 400 {
+                ensure_http_get_stream(inner, server_name);
+            }
             return Ok(serde_json::Value::Null);
         }
 
-        let msg = parse_http_response_body(&body, status)?;
+        let msg = parse_http_response_body(inner, server_name, &body, status, id).await?;
 
         if status >= 400 {
             return Err(jsonrpc_error_to_vm_error(msg.get("error").unwrap_or(&msg)));
         }
 
+        ensure_http_get_stream(inner, server_name);
         if id.is_none() {
             return Ok(msg);
         }
@@ -376,48 +392,177 @@ async fn send_http_request_once(
     params: serde_json::Value,
     id: Option<u64>,
 ) -> Result<reqwest::Response, VmError> {
-    let payload = if let Some(proxy_server_name) = &inner.proxy_server_name {
-        let mut body = serde_json::json!({
-            "serverName": proxy_server_name,
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-        });
-        if let Some(id) = id {
-            body["id"] = serde_json::json!(id);
-        }
-        body
-    } else {
-        let mut body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-        });
-        if let Some(id) = id {
-            body["id"] = serde_json::json!(id);
-        }
-        body
-    };
+    let mut payload = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+    });
+    if let Some(id) = id {
+        payload["id"] = serde_json::json!(id);
+    }
+    let payload = wrap_http_payload(payload, inner.proxy_server_name.as_deref());
 
-    let mut request = inner
+    let request = inner
         .client
         .post(&inner.url)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json, text/event-stream")
-        .header("MCP-Protocol-Version", &inner.protocol_version)
         .json(&payload);
-
-    if let Some(token) = &inner.auth_token {
-        request = request.header("Authorization", format!("Bearer {token}"));
-    }
-    if let Some(session_id) = &inner.session_id {
-        request = request.header("MCP-Session-Id", session_id);
-    }
+    let request = apply_http_headers(
+        request,
+        &inner.auth_token,
+        &inner.protocol_version,
+        inner.session_id.as_deref(),
+    );
 
     request
+        .timeout(MCP_TIMEOUT)
         .send()
         .await
         .map_err(|e| VmError::Runtime(format!("MCP HTTP request error: {e}")))
+}
+
+fn ensure_http_get_stream(inner: &mut HttpMcpClientInner, server_name: &str) {
+    if server_name.is_empty() {
+        return;
+    }
+    if inner
+        .get_stream_task
+        .as_ref()
+        .is_some_and(|task| !task.is_finished())
+    {
+        return;
+    }
+
+    let config = HttpStreamConfig {
+        client: inner.client.clone(),
+        url: inner.url.clone(),
+        auth_token: inner.auth_token.clone(),
+        protocol_version: inner.protocol_version.clone(),
+        session_id: inner.session_id.clone(),
+        proxy_server_name: inner.proxy_server_name.clone(),
+        server_name: server_name.to_string(),
+    };
+    inner.get_stream_task = Some(tokio::task::spawn_local(run_http_get_stream(config)));
+}
+
+#[derive(Clone)]
+struct HttpStreamConfig {
+    client: reqwest::Client,
+    url: String,
+    auth_token: Option<String>,
+    protocol_version: String,
+    session_id: Option<String>,
+    proxy_server_name: Option<String>,
+    server_name: String,
+}
+
+async fn run_http_get_stream(config: HttpStreamConfig) {
+    let request = apply_http_headers(
+        config
+            .client
+            .get(&config.url)
+            .header("Accept", "text/event-stream"),
+        &config.auth_token,
+        &config.protocol_version,
+        config.session_id.as_deref(),
+    );
+    let Ok(mut stream) = EventSource::new(request) else {
+        return;
+    };
+
+    while let Some(event) = stream.next().await {
+        match event {
+            Ok(SseEvent::Open) => {}
+            Ok(SseEvent::Message(message)) => {
+                if message.data.trim().is_empty() {
+                    continue;
+                }
+                let Ok(msg) = serde_json::from_str::<serde_json::Value>(&message.data) else {
+                    tracing::debug!("MCP HTTP GET stream received non-JSON event");
+                    continue;
+                };
+                if let Some(response) =
+                    handle_inbound_client_request(&config.server_name, &msg).await
+                {
+                    let _ = post_http_jsonrpc_payload(&config, response).await;
+                }
+            }
+            Err(error) => {
+                tracing::debug!("MCP HTTP GET stream ended with error: {error}");
+                break;
+            }
+        }
+    }
+    stream.close();
+}
+
+async fn post_http_jsonrpc_payload(
+    config: &HttpStreamConfig,
+    payload: serde_json::Value,
+) -> Result<(), VmError> {
+    let payload = wrap_http_payload(payload, config.proxy_server_name.as_deref());
+    let request = config
+        .client
+        .post(&config.url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .json(&payload)
+        .timeout(MCP_TIMEOUT);
+    let request = apply_http_headers(
+        request,
+        &config.auth_token,
+        &config.protocol_version,
+        config.session_id.as_deref(),
+    );
+    let response = request
+        .send()
+        .await
+        .map_err(|e| VmError::Runtime(format!("MCP HTTP response POST error: {e}")))?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(VmError::Runtime(format!(
+            "MCP HTTP response POST returned {}",
+            response.status()
+        )))
+    }
+}
+
+fn apply_http_headers(
+    mut request: reqwest::RequestBuilder,
+    auth_token: &Option<String>,
+    protocol_version: &str,
+    session_id: Option<&str>,
+) -> reqwest::RequestBuilder {
+    request = request.header("MCP-Protocol-Version", protocol_version);
+    if let Some(token) = auth_token {
+        request = request.header("Authorization", format!("Bearer {token}"));
+    }
+    if let Some(session_id) = session_id {
+        request = request.header("MCP-Session-Id", session_id);
+    }
+    request
+}
+
+fn wrap_http_payload(
+    payload: serde_json::Value,
+    proxy_server_name: Option<&str>,
+) -> serde_json::Value {
+    let Some(proxy_server_name) = proxy_server_name else {
+        return payload;
+    };
+    let mut wrapped = serde_json::Map::new();
+    wrapped.insert(
+        "serverName".to_string(),
+        serde_json::Value::String(proxy_server_name.to_string()),
+    );
+    if let Some(object) = payload.as_object() {
+        for (key, value) in object {
+            wrapped.insert(key.clone(), value.clone());
+        }
+    }
+    serde_json::Value::Object(wrapped)
 }
 
 async fn reinitialize_http_client(inner: &mut HttpMcpClientInner) -> Result<(), VmError> {
@@ -426,7 +571,9 @@ async fn reinitialize_http_client(inner: &mut HttpMcpClientInner) -> Result<(), 
         "initialize",
         serde_json::json!({
             "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {},
+            "capabilities": {
+                "elicitation": {},
+            },
             "clientInfo": {
                 "name": "harn",
                 "version": env!("CARGO_PKG_VERSION"),
@@ -454,7 +601,7 @@ async fn reinitialize_http_client(inner: &mut HttpMcpClientInner) -> Result<(), 
         .text()
         .await
         .map_err(|e| VmError::Runtime(format!("MCP HTTP read error: {e}")))?;
-    let msg = parse_http_response_body(&body, status)?;
+    let msg = parse_http_response_body(inner, "", &body, status, Some(0)).await?;
     if status >= 400 {
         return Err(jsonrpc_error_to_vm_error(msg.get("error").unwrap_or(&msg)));
     }
@@ -488,13 +635,19 @@ async fn reinitialize_http_client(inner: &mut HttpMcpClientInner) -> Result<(), 
     if body.trim().is_empty() || status < 400 {
         return Ok(());
     }
-    let msg = parse_http_response_body(&body, status)?;
+    let msg = parse_http_response_body(inner, "", &body, status, None).await?;
     Err(jsonrpc_error_to_vm_error(msg.get("error").unwrap_or(&msg)))
 }
 
-fn parse_http_response_body(body: &str, status: u16) -> Result<serde_json::Value, VmError> {
+async fn parse_http_response_body(
+    inner: &HttpMcpClientInner,
+    server_name: &str,
+    body: &str,
+    status: u16,
+    request_id: Option<u64>,
+) -> Result<serde_json::Value, VmError> {
     if body.trim_start().starts_with("event:") || body.trim_start().starts_with("data:") {
-        return parse_sse_jsonrpc_body(body);
+        return parse_sse_jsonrpc_body(inner, server_name, body, request_id).await;
     }
     serde_json::from_str(body).map_err(|e| {
         VmError::Runtime(format!(
@@ -503,7 +656,12 @@ fn parse_http_response_body(body: &str, status: u16) -> Result<serde_json::Value
     })
 }
 
-fn parse_sse_jsonrpc_body(body: &str) -> Result<serde_json::Value, VmError> {
+async fn parse_sse_jsonrpc_body(
+    inner: &HttpMcpClientInner,
+    server_name: &str,
+    body: &str,
+    request_id: Option<u64>,
+) -> Result<serde_json::Value, VmError> {
     let mut current_data = Vec::new();
     let mut messages = Vec::new();
 
@@ -523,20 +681,40 @@ fn parse_sse_jsonrpc_body(body: &str) -> Result<serde_json::Value, VmError> {
         messages.push(current_data.join("\n"));
     }
 
-    for message in messages.into_iter().rev() {
+    let config = HttpStreamConfig {
+        client: inner.client.clone(),
+        url: inner.url.clone(),
+        auth_token: inner.auth_token.clone(),
+        protocol_version: inner.protocol_version.clone(),
+        session_id: inner.session_id.clone(),
+        proxy_server_name: inner.proxy_server_name.clone(),
+        server_name: server_name.to_string(),
+    };
+
+    let mut fallback = None;
+    for message in messages {
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&message) {
-            if value.get("result").is_some()
-                || value.get("error").is_some()
-                || value.get("method").is_some()
+            if request_id.is_some()
+                && value["id"].as_u64() == request_id
+                && (value.get("result").is_some() || value.get("error").is_some())
             {
                 return Ok(value);
+            }
+            if let Some(response) = handle_inbound_client_request(server_name, &value).await {
+                let _ = post_http_jsonrpc_payload(&config, response).await;
+                continue;
+            }
+            if value.get("result").is_some() || value.get("error").is_some() {
+                fallback = Some(value);
             }
         }
     }
 
-    Err(VmError::Runtime(
-        "MCP HTTP response parse error: no JSON-RPC payload found in SSE stream".into(),
-    ))
+    fallback.ok_or_else(|| {
+        VmError::Runtime(
+            "MCP HTTP response parse error: no JSON-RPC payload found in SSE stream".into(),
+        )
+    })
 }
 
 fn parse_jsonrpc_result(msg: serde_json::Value) -> Result<serde_json::Value, VmError> {
@@ -618,7 +796,6 @@ async fn mcp_connect_stdio_impl(
 
 async fn mcp_connect_http_impl(spec: &McpServerSpec) -> Result<VmMcpClientHandle, VmError> {
     let client = reqwest::Client::builder()
-        .timeout(MCP_TIMEOUT)
         .build()
         .map_err(|e| VmError::Runtime(format!("MCP HTTP client error: {e}")))?;
 
@@ -635,6 +812,7 @@ async fn mcp_connect_http_impl(spec: &McpServerSpec) -> Result<VmMcpClientHandle
             session_id: None,
             next_id: 1,
             proxy_server_name: spec.proxy_server_name.clone(),
+            get_stream_task: None,
         })))),
     };
 
@@ -648,7 +826,9 @@ async fn initialize_client(handle: &VmMcpClientHandle) -> Result<(), VmError> {
             "initialize",
             serde_json::json!({
                 "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {},
+                "capabilities": {
+                    "elicitation": {},
+                },
                 "clientInfo": {
                     "name": "harn",
                     "version": env!("CARGO_PKG_VERSION"),
@@ -1168,6 +1348,215 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::sync::mpsc;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn http_get_stream_dispatches_inbound_elicitation_response() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (base_url, mut responses) = spawn_eliciting_http_mcp_server().await;
+                let spec = McpServerSpec {
+                    name: "mock-http".to_string(),
+                    transport: McpTransport::Http,
+                    command: String::new(),
+                    args: Vec::new(),
+                    env: BTreeMap::new(),
+                    url: format!("{base_url}/mcp"),
+                    auth_token: None,
+                    protocol_version: None,
+                    proxy_server_name: None,
+                };
+
+                let handle = connect_mcp_server_from_spec(&spec).await.unwrap();
+                let response = tokio::time::timeout(MCP_TIMEOUT, responses.recv())
+                    .await
+                    .expect("timed out waiting for elicitation response POST")
+                    .expect("mock server closed before receiving elicitation response");
+
+                assert_eq!(response["id"], serde_json::json!(99));
+                assert_eq!(
+                    response["result"]["action"],
+                    serde_json::json!("decline"),
+                    "without a host bridge, inbound elicitation should decline cleanly"
+                );
+                handle.disconnect().await.unwrap();
+            })
+            .await;
+    }
+
+    async fn spawn_eliciting_http_mcp_server(
+    ) -> (String, mpsc::UnboundedReceiver<serde_json::Value>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (response_tx, response_rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let response_tx = response_tx.clone();
+                tokio::spawn(async move {
+                    let _ = handle_mock_http_mcp_connection(stream, response_tx).await;
+                });
+            }
+        });
+
+        (format!("http://{addr}"), response_rx)
+    }
+
+    async fn handle_mock_http_mcp_connection(
+        mut stream: TcpStream,
+        response_tx: mpsc::UnboundedSender<serde_json::Value>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (request_line, headers, body) = read_http_request(&mut stream).await?;
+        if request_line.starts_with("GET ") {
+            let response = concat!(
+                "HTTP/1.1 200 OK\r\n",
+                "content-type: text/event-stream\r\n",
+                "cache-control: no-cache\r\n",
+                "\r\n",
+                "id: prime\r\n",
+                "data: \r\n",
+                "\r\n",
+                "id: elicit-1\r\n",
+                "event: message\r\n",
+                "data: {\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"elicitation/create\",\"params\":{\"message\":\"Need input\",\"requestedSchema\":{\"type\":\"object\",\"properties\":{}}}}\r\n",
+                "\r\n"
+            );
+            stream.write_all(response.as_bytes()).await?;
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            return Ok(());
+        }
+
+        let request: serde_json::Value = serde_json::from_slice(&body)?;
+        let method = request.get("method").and_then(|value| value.as_str());
+        match method {
+            Some("initialize") => {
+                write_http_json(
+                    &mut stream,
+                    "200 OK",
+                    &[("MCP-Session-Id", "test-session")],
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request["id"].clone(),
+                        "result": {
+                            "protocolVersion": PROTOCOL_VERSION,
+                            "capabilities": {
+                                "elicitation": {},
+                                "tools": {}
+                            },
+                            "serverInfo": {
+                                "name": "mock",
+                                "version": "0.0.0"
+                            }
+                        }
+                    }),
+                )
+                .await?;
+            }
+            Some("notifications/initialized") => {
+                write_http_empty(&mut stream, "202 Accepted").await?;
+            }
+            _ if request.get("result").is_some() || request.get("error").is_some() => {
+                assert_eq!(
+                    headers.get("mcp-session-id").map(String::as_str),
+                    Some("test-session")
+                );
+                let _ = response_tx.send(request);
+                write_http_empty(&mut stream, "202 Accepted").await?;
+            }
+            _ => {
+                write_http_json(
+                    &mut stream,
+                    "200 OK",
+                    &[],
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request["id"].clone(),
+                        "result": {}
+                    }),
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn read_http_request(
+        stream: &mut TcpStream,
+    ) -> Result<(String, BTreeMap<String, String>, Vec<u8>), Box<dyn std::error::Error + Send + Sync>>
+    {
+        let mut buffer = Vec::new();
+        loop {
+            let mut chunk = [0; 1024];
+            let bytes = stream.read(&mut chunk).await?;
+            if bytes == 0 {
+                break;
+            }
+            buffer.extend_from_slice(&chunk[..bytes]);
+            if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let header_end = buffer
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .ok_or("missing HTTP header terminator")?;
+        let header_text = String::from_utf8(buffer[..header_end].to_vec())?;
+        let mut lines = header_text.lines();
+        let request_line = lines.next().unwrap_or_default().to_string();
+        let mut headers = BTreeMap::new();
+        for line in lines {
+            if let Some((name, value)) = line.split_once(':') {
+                headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+            }
+        }
+        let content_length = headers
+            .get("content-length")
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
+        let mut body = buffer[header_end + 4..].to_vec();
+        while body.len() < content_length {
+            let mut chunk = vec![0; content_length - body.len()];
+            let bytes = stream.read(&mut chunk).await?;
+            if bytes == 0 {
+                break;
+            }
+            body.extend_from_slice(&chunk[..bytes]);
+        }
+        body.truncate(content_length);
+        Ok((request_line, headers, body))
+    }
+
+    async fn write_http_json(
+        stream: &mut TcpStream,
+        status: &str,
+        headers: &[(&str, &str)],
+        body: serde_json::Value,
+    ) -> Result<(), std::io::Error> {
+        let body = serde_json::to_string(&body).unwrap();
+        let mut response = format!(
+            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n",
+            body.len()
+        );
+        for (name, value) in headers {
+            response.push_str(name);
+            response.push_str(": ");
+            response.push_str(value);
+            response.push_str("\r\n");
+        }
+        response.push_str("\r\n");
+        response.push_str(&body);
+        stream.write_all(response.as_bytes()).await
+    }
+
+    async fn write_http_empty(stream: &mut TcpStream, status: &str) -> Result<(), std::io::Error> {
+        let response = format!("HTTP/1.1 {status}\r\ncontent-length: 0\r\n\r\n");
+        stream.write_all(response.as_bytes()).await
+    }
 
     #[test]
     fn test_vm_value_to_serde_string() {
@@ -1223,10 +1612,22 @@ mod tests {
         assert!(output.contains("image"));
     }
 
-    #[test]
-    fn test_parse_sse_jsonrpc_body_uses_last_jsonrpc_message() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_parse_sse_jsonrpc_body_uses_matching_jsonrpc_response() {
+        let inner = HttpMcpClientInner {
+            client: reqwest::Client::new(),
+            url: "http://127.0.0.1/mcp".to_string(),
+            auth_token: None,
+            protocol_version: PROTOCOL_VERSION.to_string(),
+            session_id: None,
+            next_id: 1,
+            proxy_server_name: None,
+            get_stream_task: None,
+        };
         let body = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\"}\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[]}}\n\n";
-        let parsed = parse_sse_jsonrpc_body(body).unwrap();
+        let parsed = parse_sse_jsonrpc_body(&inner, "mock", body, Some(1))
+            .await
+            .unwrap();
         assert_eq!(parsed["result"]["tools"], serde_json::json!([]));
     }
 
