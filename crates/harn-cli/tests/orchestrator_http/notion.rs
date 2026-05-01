@@ -1,5 +1,5 @@
 use super::support::*;
-use crate::test_util::process::harn_command;
+use crate::test_util::process::harn_e2e_command;
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[tokio::test(flavor = "multi_thread")]
@@ -42,7 +42,7 @@ async fn notion_webhook_handshake_is_captured_and_reported_by_doctor() {
 
     shutdown(harness).await;
 
-    let doctor = harn_command()
+    let doctor = harn_e2e_command()
         .current_dir(temp.path())
         .arg("doctor")
         .arg("--no-network")

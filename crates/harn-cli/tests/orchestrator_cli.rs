@@ -29,7 +29,7 @@ use harn_vm::event_log::{
 };
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use tempfile::TempDir;
-use test_util::process::harn_command;
+use test_util::process::harn_e2e_command;
 use tokio::sync::MutexGuard;
 
 const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -263,7 +263,7 @@ async fn wait_for_metrics_contains(
 }
 
 fn run_harn_with_env(temp: &TempDir, args: &[&str], envs: &[(&str, &str)]) -> Output {
-    let mut command = harn_command();
+    let mut command = harn_e2e_command();
     command.current_dir(temp.path()).args(args);
     for (key, value) in envs {
         command.env(key, value);

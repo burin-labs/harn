@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 
 use tempfile::TempDir;
-use test_util::process::harn_command;
+use test_util::process::harn_e2e_command;
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -43,7 +43,7 @@ fn run_harn(current_dir: &Path, args: &[String]) -> Output {
 }
 
 fn run_harn_with_env(current_dir: &Path, args: &[String], envs: &[(&str, &str)]) -> Output {
-    harn_command()
+    harn_e2e_command()
         .current_dir(current_dir)
         .envs(envs.iter().copied())
         .args(args)

@@ -16,9 +16,6 @@
 # pre-existing technical debt tracked under the deflake epic; new entries
 # require explicit reviewer justification.
 #
-# Pending Tier 1A (#1057): spawn_orchestrator / harn_command checks are
-# commented-out below. Enable them once Tier 1A renames those helpers.
-
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -43,7 +40,6 @@ TOKIO_SLEEP_ALLOWLIST=(
   "crates/harn-vm/src/connectors/linear/tests.rs"
   "crates/harn-vm/src/triggers/dispatcher/tests/retry.rs"
   "crates/harn-vm/src/orchestration/tests.rs"
-  "crates/harn-cli/tests/test_util/timing.rs"
   "crates/harn-cli/tests/orchestrator_cli.rs"
   "crates/harn-cli/tests/orchestrator_http/admin.rs"
 )
@@ -76,7 +72,7 @@ SYSTEM_TIME_ALLOWLIST=(
 )
 
 # recv_timeout with an explicit sub-second Duration literal.
-# Named-constant variants (LOG_RECV_POLL_INTERVAL etc.) are not caught here
+# Named-constant variants (for example MCP_LOG_RECV_INTERVAL) are not caught here
 # because the constant value cannot be resolved by a static text search.
 RECV_TIMEOUT_MILLIS_ALLOWLIST=(
   "crates/harn-cli/tests/harn_serve_mcp_cli.rs"
@@ -100,6 +96,33 @@ in_allowlist() {
     fi
   done
   return 1
+}
+
+is_e2e_subprocess_path() {
+  local path="$1"
+  local rel="${path#"$ROOT_DIR/"}"
+  case "$rel" in
+    crates/harn-cli/tests/acp_server_cli.rs | \
+    crates/harn-cli/tests/burin_mini_playground.rs | \
+    crates/harn-cli/tests/flow_ship_cli.rs | \
+    crates/harn-cli/tests/harn_serve_mcp_cli.rs | \
+    crates/harn-cli/tests/llm_mock_cli.rs | \
+    crates/harn-cli/tests/mcp_server_cli.rs | \
+    crates/harn-cli/tests/orchestrator_cli.rs | \
+    crates/harn-cli/tests/persona_cli.rs | \
+    crates/harn-cli/tests/run_exit_codes.rs | \
+    crates/harn-cli/tests/trigger_replay_cli.rs | \
+    crates/harn-cli/tests/orchestrator_http.rs | \
+    crates/harn-cli/tests/orchestrator_http/* | \
+    crates/harn-cli/tests/support/mcp.rs | \
+    crates/harn-cli/tests/support/process.rs | \
+    crates/harn-cli/tests/test_util/process.rs)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 # Collect test file paths into a temp file so we can reuse the list.
@@ -168,32 +191,37 @@ check_pattern \
   RECV_TIMEOUT_MILLIS_ALLOWLIST \
   "Use an event-driven wait (channel recv with tokio::time::timeout) instead of busy-polling."
 
-# ---------------------------------------------------------------------------
-# Tier 1A gate — enable once Tier 1A of #1057 renames these helpers.
-# Uncomment both blocks below after that cleanup lands.
-# ---------------------------------------------------------------------------
-#
-# echo "--- spawn_orchestrator outside *_e2e.rs ---"
-# while IFS= read -r file; do
-#   [[ "$file" == *_e2e.rs ]] && continue
-#   while IFS= read -r hit; do
-#     [[ -z "$hit" ]] && continue
-#     echo "  $hit"
-#     echo "    hint: spawn_orchestrator is E2E-only; use OrchestratorHarness in fast tests."
-#     violations=$((violations + 1))
-#   done < <(grep -n "spawn_orchestrator(" "$file" 2>/dev/null || true)
-# done < "$TEST_FILES_TMP"
-#
-# echo "--- harn_command outside *_e2e.rs ---"
-# while IFS= read -r file; do
-#   [[ "$file" == *_e2e.rs ]] && continue
-#   while IFS= read -r hit; do
-#     [[ -z "$hit" ]] && continue
-#     echo "  $hit"
-#     echo "    hint: harn_command is E2E-only; use OrchestratorHarness in fast tests."
-#     violations=$((violations + 1))
-#   done < <(grep -n "harn_command(" "$file" 2>/dev/null || true)
-# done < "$TEST_FILES_TMP"
+echo "--- obsolete harn_command helper ---"
+while IFS= read -r file; do
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    echo "  $hit"
+    echo "    hint: harn_command was retired; use in-process APIs in fast tests or harn_e2e_command in the E2E suite."
+    violations=$((violations + 1))
+  done < <(grep -n "harn_command(" "$file" 2>/dev/null || true)
+done < "$TEST_FILES_TMP"
+
+echo "--- harn_e2e_command outside E2E subprocess tests ---"
+while IFS= read -r file; do
+  is_e2e_subprocess_path "$file" && continue
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    echo "  $hit"
+    echo "    hint: harn_e2e_command is E2E-only; use in-process command/library APIs in fast tests."
+    violations=$((violations + 1))
+  done < <(grep -n "harn_e2e_command(" "$file" 2>/dev/null || true)
+done < "$TEST_FILES_TMP"
+
+echo "--- spawn_orchestrator outside E2E subprocess tests ---"
+while IFS= read -r file; do
+  is_e2e_subprocess_path "$file" && continue
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    echo "  $hit"
+    echo "    hint: spawn_orchestrator is E2E-only; use OrchestratorHarness in fast tests."
+    violations=$((violations + 1))
+  done < <(grep -n "spawn_orchestrator(" "$file" 2>/dev/null || true)
+done < "$TEST_FILES_TMP"
 
 # ---------------------------------------------------------------------------
 echo

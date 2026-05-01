@@ -58,8 +58,8 @@ success-output = "never"
 # seconds — the tail of that cohort then trips the 60 s slow-test ceiling.
 #
 # That cap was a workaround, not a fix. As of harn#949 the architectural
-# fix is in place: every harn-cli subprocess test spawns through
-# `crates/harn-cli/tests/test_util/process.rs::harn_command()`, which
+# fix is in place: every harn-cli E2E subprocess test spawns through
+# `crates/harn-cli/tests/test_util/process.rs::harn_e2e_command()`, which
 # pre-warms the binary's dyld page cache and AMFI signature with a single
 # synchronous `harn --version` invocation on first call within each test
 # binary process. Subsequent spawns short-circuit the cold-cache path
@@ -70,8 +70,7 @@ success-output = "never"
 # softer constraint: several orchestrator integration tests (e.g.
 # `bounded_pump_drain_truncates_and_replays_remaining_backlog_after_restart`)
 # spawn an orchestrator subprocess and then assert that 60+ events
-# dispatch within `EVENT_FAIL_FAST_TIMEOUT` (10 s, see
-# `tests/test_util/timing.rs`). Under nextest's full workspace fan-out
+# dispatch within a tight fail-fast timeout. Under nextest's full workspace fan-out
 # every additional concurrent subprocess steals CPU from the in-flight
 # dispatcher, so at high concurrency the dispatch budget itself starts
 # tipping over.
@@ -80,8 +79,7 @@ success-output = "never"
 # regression in 5x stress runs (`scripts/stress_subprocess_tests.sh`),
 # and leaves enough CPU headroom for the time-sensitive dispatcher
 # assertions to stay well within budget. Push higher only after relaxing
-# `EVENT_FAIL_FAST_TIMEOUT` — the limiter becomes the test, not the
-# scheduler.
+# those event budgets — the limiter becomes the test, not the scheduler.
 [test-groups]
 harn-subprocess = { max-threads = 8 }
 harn-cli-bin = { max-threads = 8 }

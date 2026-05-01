@@ -6,7 +6,7 @@ use std::process::Output;
 use std::time::Duration;
 
 use tempfile::TempDir;
-use test_util::process::harn_command;
+use test_util::process::harn_e2e_command;
 use test_util::timing;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -78,7 +78,7 @@ pipeline default() {{
 }
 
 fn run_harn(temp: &TempDir, args: &[&str]) -> Output {
-    harn_command()
+    harn_e2e_command()
         .current_dir(temp.path())
         .args(args)
         .output()

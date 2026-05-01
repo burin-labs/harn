@@ -21,8 +21,8 @@
 //!
 //! ## What this module does
 //!
-//! Every test that spawns the `harn` binary obtains its `Command`
-//! through [`harn_command`]. On first call within a given test-binary
+//! Every E2E test that spawns the `harn` binary obtains its `Command`
+//! through [`harn_e2e_command`]. On first call within a given test-binary
 //! process, a one-shot pre-warm runs `harn --version` synchronously
 //! with a tight timeout. That single invocation:
 //!
@@ -56,19 +56,18 @@ use std::time::{Duration, Instant};
 /// happy-path warm-up on Apple Silicon dev hardware is sub-second; the
 /// pre-warm is intentionally invoked from a directory with no `harn.toml`
 /// so path-discovery walking doesn't pad the cold-start budget. We
-/// match the workspace-wide `PROCESS_FAIL_FAST_TIMEOUT` (60 s, defined
-/// in [`crate::test_util::timing`]) here because a heavily-loaded
-/// developer box (concurrent worktree builds, Spotlight indexing, AMFI
-/// signature daemon catch-up) can legitimately push the very first cold
-/// spawn into double-digit seconds. Shorter would let environmental
-/// noise turn the architectural fix into a flake source. A hung
-/// pre-warm still surfaces as an actionable panic, not a silent hang.
+/// keep the budget at 60 s because a heavily-loaded developer box
+/// (concurrent worktree builds, Spotlight indexing, AMFI signature
+/// daemon catch-up) can legitimately push the very first cold spawn
+/// into double-digit seconds. Shorter would let environmental noise
+/// turn the architectural fix into a flake source. A hung pre-warm
+/// still surfaces as an actionable panic, not a silent hang.
 const PREWARM_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Resolved path to the `harn` debug binary, with the dyld + AMFI
-/// caches warmed on first access. Always go through this rather than
-/// `env!("CARGO_BIN_EXE_harn")` directly.
-pub fn harn_binary() -> &'static Path {
+/// caches warmed on first access. E2E subprocess tests should go through
+/// this rather than `env!("CARGO_BIN_EXE_harn")` directly.
+pub fn harn_e2e_binary() -> &'static Path {
     static WARMED: LazyLock<PathBuf> = LazyLock::new(|| {
         let path = PathBuf::from(env!("CARGO_BIN_EXE_harn"));
         prewarm(&path);
@@ -78,11 +77,10 @@ pub fn harn_binary() -> &'static Path {
 }
 
 /// Returns a `Command` builder for the warmed `harn` binary. Equivalent
-/// to `Command::new(harn_binary())` but communicates intent at call
-/// sites and serves as the canonical entry point for future
-/// instrumentation (e.g. spawn-rate metering).
-pub fn harn_command() -> Command {
-    Command::new(harn_binary())
+/// to `Command::new(harn_e2e_binary())` but makes the slow-suite boundary
+/// explicit at call sites.
+pub fn harn_e2e_command() -> Command {
+    Command::new(harn_e2e_binary())
 }
 
 fn prewarm(path: &Path) {

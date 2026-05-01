@@ -1,5 +1,5 @@
 use super::support::*;
-use crate::test_util::process::harn_command;
+use crate::test_util::process::harn_e2e_command;
 use harn_cli::commands::orchestrator::tls::TlsFiles;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -207,7 +207,7 @@ async fn reload_cli_uses_admin_endpoint() {
         &a2a_manifest(None).replace("/a2a/review", "/a2a/review-cli"),
     );
 
-    let output = harn_command()
+    let output = harn_e2e_command()
         .current_dir(temp.path())
         .arg("orchestrator")
         .arg("reload")
