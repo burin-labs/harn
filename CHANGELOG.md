@@ -23,6 +23,19 @@ condensed series summaries instead of full per-patch history.
   touch the workspace. `default` and `code` preserve the pre-modes
   baseline.
 
+- **A2A authenticated extended agent card (#888).** `harn serve a2a` now
+  honors the A2A 0.3.0 contract for `agent/getAuthenticatedExtendedCard`.
+  Public agent cards advertise `supportsAuthenticatedExtendedCard: true`
+  (and `capabilities.extendedAgentCard: true`) when the server is
+  configured with at least one `AuthPolicy` method, otherwise both flags
+  remain `false`. The RPC method enforces the configured auth schemes:
+  unauthenticated calls return HTTP 401 with a `WWW-Authenticate`
+  challenge listing the supported schemes (`Bearer` for API key/OAuth,
+  `HMAC-SHA256` for HMAC), while authenticated callers receive an
+  extended card with `metadata.extendedAgentCard: true`, the resolved
+  principal subject, declared `securitySchemes`, and per-skill
+  `outputSchema`. When no auth is configured the server returns
+  `ExtendedAgentCardNotConfiguredError` (`-32007`) per the spec.
 - **MCP elicitation (`elicitation/create`) on both roles (#875).** Harn
   servers can now prompt connected clients for structured user input
   mid-tool-call via the `mcp_elicit({ message, requestedSchema })`
