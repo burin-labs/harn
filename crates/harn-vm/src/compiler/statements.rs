@@ -3,6 +3,7 @@ use harn_parser::{Node, SNode};
 use crate::chunk::{Constant, Op};
 
 use super::error::CompileError;
+use super::pipe::contains_pipe_placeholder;
 use super::{Compiler, LoopContext};
 
 impl Compiler {
@@ -217,7 +218,7 @@ impl Compiler {
                     self.chunk
                         .emit_u8(Op::TailCall, args.len() as u8, self.line);
                 } else if let Node::BinaryOp { op, left, right } = &val.node {
-                    if op == "|>" {
+                    if op == "|>" && !contains_pipe_placeholder(right) {
                         self.compile_node(left)?;
                         self.compile_node(right)?;
                         self.chunk.emit(Op::Swap, self.line);

@@ -20,6 +20,7 @@
 - [Streams](./streams.md)
 - [Runtime context](./runtime-context.md)
 - [Language specification](./language-spec.md)
+- [ADRs](./adr/0001-pipe-operator.md)
 
 # Agent Runtime
 
