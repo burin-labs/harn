@@ -229,7 +229,7 @@ fn verify_step(ctx) {
 }
 "#,
     );
-    let output = harn_command()
+    let output = harn_e2e_command()
         .args([
             "persona",
             "--manifest",
@@ -269,7 +269,7 @@ fn helper(ctx) {
 "#,
     );
     fs::write(temp.path().join("harn.toml"), "[check]\nstrict = true\n").unwrap();
-    let output = harn_command()
+    let output = harn_e2e_command()
         .current_dir(temp.path())
         .args(["lint", path.to_string_lossy().as_ref()])
         .output()
