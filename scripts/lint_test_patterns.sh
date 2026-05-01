@@ -65,12 +65,13 @@ INSTANT_NOW_WHILE_ALLOWLIST=(
 )
 
 # SystemTime::now() in test files — use injected clock / MockClock instead.
+# Remaining entries: legitimate fixture-setup uses against real OS time
+# (httpdate Retry-After parsing, real-mtime touch fixtures, tempdir
+# nano-suffix uniqueness, prompt-template `now_ms()` round-trip).
 SYSTEM_TIME_ALLOWLIST=(
-  "crates/harn-vm/src/triggers/dispatcher/tests/dispatch.rs"
   "crates/harn-vm/src/http/tests.rs"
   "crates/harn-vm/src/stdlib/template/tests.rs"
   "crates/harn-hostlib/tests/scanner_e2e.rs"
-  "crates/harn-cli/tests/orchestrator_cli.rs"
   "crates/harn-cli/src/commands/check/tests.rs"
 )
 

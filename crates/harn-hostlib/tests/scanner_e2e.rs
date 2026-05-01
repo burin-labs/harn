@@ -14,7 +14,7 @@
 
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use harn_hostlib::scanner::{
     scan_incremental, scan_project, FileRecord, ScanProjectOptions, SymbolKind,
@@ -359,24 +359,18 @@ fn scan_project_self_smoke_test() {
         ..ScanProjectOptions::default()
     };
 
-    let start = std::time::Instant::now();
     let result = scan_project(workspace_root, opts);
-    let elapsed = start.elapsed();
 
     assert!(!result.files.is_empty(), "harn workspace should have files");
     assert!(
         !result.symbols.is_empty(),
         "harn workspace should have symbols"
     );
-    const SOFT_BUDGET: Duration = Duration::from_secs(30);
-    const HARD_BUDGET: Duration = Duration::from_secs(120);
-    if elapsed > SOFT_BUDGET {
-        eprintln!("scan_project_self_smoke_test took {elapsed:?}, exceeded advisory budget");
-    }
-    assert!(
-        elapsed < HARD_BUDGET,
-        "scan took {elapsed:?}, exceeded {HARD_BUDGET:?} hard budget"
-    );
+
+    // Wall-clock budgets here flake on shared CI under load. Performance
+    // characterization belongs in `cargo bench`, not in correctness tests.
+    // The file-count + symbol-count invariants above already catch shape
+    // regressions.
 
     // Sanity: well-known top-level files show up.
     let names: Vec<&str> = result
