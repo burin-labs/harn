@@ -270,19 +270,16 @@ async fn execute_join_policy_stops_after_first_completion() {
         .run_until(async {
             let tasks: Vec<LocalTask<i32>> = vec![
                 Box::pin(async {
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    // Never resolves on its own; the "first" join policy
+                    // must abort this branch once the immediate one wins.
+                    std::future::pending::<()>().await;
                     1
                 }),
-                Box::pin(async {
-                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-                    2
-                }),
+                Box::pin(async { 2 }),
             ];
             let started = std::time::Instant::now();
             let results = execute_join_policy(tasks, "first", None, None).await;
             assert_eq!(results.len(), 1);
-            // Wall-clock elapsed stays small — virtual sleeps auto-advance
-            // tokio time without blocking the executor.
             assert!(started.elapsed() < std::time::Duration::from_millis(500));
             assert_eq!(results[0].as_ref().ok().copied(), Some(2));
         })
@@ -302,7 +299,11 @@ async fn execute_join_policy_honors_quorum_and_concurrency_limit() {
                     Box::pin(async move {
                         active.set(active.get() + 1);
                         max_seen.set(max_seen.get().max(active.get()));
-                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                        // Yield twice so the executor schedules the sibling
+                        // task and `max_seen` observes both branches in
+                        // flight before either decrements `active`.
+                        tokio::task::yield_now().await;
+                        tokio::task::yield_now().await;
                         active.set(active.get().saturating_sub(1));
                         value
                     }) as LocalTask<i32>
@@ -319,7 +320,7 @@ async fn execute_join_policy_honors_quorum_and_concurrency_limit() {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn failed_verify_stage_preserves_verification_artifact_and_result() {
     let node = crate::orchestration::WorkflowNode {
         id: Some("verify".to_string()),
@@ -370,7 +371,7 @@ fn failing_verify_command() -> &'static str {
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn verify_stage_reads_transcript_from_session_store() {
     crate::reset_thread_local_state();
     let session_id = "session-for-verify-stage".to_string();
@@ -427,7 +428,7 @@ async fn verify_stage_reads_transcript_from_session_store() {
     assert_eq!(msg_list.len(), 3);
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn failing_stage_records_exactly_one_attempt_regardless_of_max_attempts() {
     // `retry_policy.max_attempts` is a no-op. A stage that fails runs once;
     // iteration lives at the workflow-graph level.
@@ -463,7 +464,7 @@ async fn failing_stage_records_exactly_one_attempt_regardless_of_max_attempts() 
     assert_eq!(executed.branch.as_deref(), Some("failed"));
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn succeeding_stage_records_single_attempt() {
     let node = crate::orchestration::WorkflowNode {
         id: Some("verify".to_string()),
@@ -491,7 +492,7 @@ async fn succeeding_stage_records_single_attempt() {
     assert_eq!(executed.status, "completed");
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn stage_task_reaches_execution_verbatim() {
     let node = crate::orchestration::WorkflowNode {
         id: Some("verify".to_string()),
@@ -558,7 +559,7 @@ fn workflow_verification_contracts_collect_exact_requirements() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn workflow_execute_injects_verify_contract_into_act_prompt() {
     crate::reset_thread_local_state();
     crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
@@ -669,7 +670,7 @@ async fn workflow_execute_injects_verify_contract_into_act_prompt() {
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn stage_prompt_loads_contract_file_relative_to_execution_context() {
     crate::reset_thread_local_state();
     crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
@@ -753,7 +754,7 @@ async fn stage_prompt_loads_contract_file_relative_to_execution_context() {
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn stage_prompt_can_scope_verification_to_local_contract_only() {
     crate::reset_thread_local_state();
     crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
@@ -857,7 +858,7 @@ fn mock_llm_opts() -> crate::llm::api::LlmCallOptions {
     crate::llm::extract_llm_options(&args).expect("mock LlmCallOptions")
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn workflow_resolve_stage_auto_compact_forwards_raw_keep_last_and_summary_prompt() {
     crate::reset_thread_local_state();
     let opts = mock_llm_opts();
@@ -915,7 +916,7 @@ async fn workflow_resolve_stage_auto_compact_forwards_raw_keep_last_and_summary_
     let _ = std::fs::remove_file(&prompt_path);
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn workflow_resolve_stage_auto_compact_accepts_keep_last_alias_and_skips_empty_summary_prompt(
 ) {
     crate::reset_thread_local_state();
@@ -949,7 +950,7 @@ async fn workflow_resolve_stage_auto_compact_accepts_keep_last_alias_and_skips_e
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn workflow_resolve_stage_auto_compact_returns_none_when_disabled() {
     crate::reset_thread_local_state();
     let opts = mock_llm_opts();
