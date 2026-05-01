@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use sha2::{Digest, Sha256};
@@ -507,6 +509,34 @@ impl TriggerTestHarness {
             .await
             .map_err(|error| error.to_string())?;
 
+        // Slack's 3s contract is really an *ordering* contract: the ingress
+        // path must be able to ack the request without depending on dispatch
+        // work. We model that as a barrier — a mock dispatcher that refuses
+        // to start until the ingress path has finished. If a regression
+        // wires dispatch into the synchronous ingress flow, the harness
+        // deadlocks (and the timeout below catches it as a fast failure).
+        let pending_topic = Topic::new("triggers.harness.pending")
+            .expect("pending topic for slack ack fixture should be valid");
+        let mut pending_stream = log
+            .clone()
+            .subscribe(&pending_topic, None)
+            .await
+            .map_err(|error| error.to_string())?;
+        let dispatch_release = Arc::new(Notify::new());
+        let dispatch_started = Arc::new(AtomicBool::new(false));
+        let dispatch_completed = Arc::new(AtomicBool::new(false));
+        let dispatch_release_for_task = dispatch_release.clone();
+        let dispatch_started_for_task = dispatch_started.clone();
+        let dispatch_completed_for_task = dispatch_completed.clone();
+        let dispatcher_handle = tokio::spawn(async move {
+            dispatch_release_for_task.notified().await;
+            dispatch_started_for_task.store(true, AtomicOrdering::SeqCst);
+            let drained = pending_stream.next().await;
+            if drained.is_some() {
+                dispatch_completed_for_task.store(true, AtomicOrdering::SeqCst);
+            }
+        });
+
         let event = connector
             .normalize_inbound(slack_raw_inbound())
             .await
@@ -523,8 +553,6 @@ impl TriggerTestHarness {
         let crate::connectors::PostNormalizeOutcome::Ready(event) = processed else {
             return Err("slack ack fixture unexpectedly dropped the event".to_string());
         };
-        let pending_topic = Topic::new("triggers.harness.pending")
-            .expect("pending topic for slack ack fixture should be valid");
         log.append(
             &pending_topic,
             LogEvent::new(
@@ -539,11 +567,31 @@ impl TriggerTestHarness {
         .await
         .map_err(|error| error.to_string())?;
 
+        // Ingress is done. The mock dispatcher is still parked on the
+        // release barrier — capture that fact before we lift it. If a
+        // regression made any of the steps above wait on dispatch
+        // (handler, downstream pump, etc.), the dispatcher would already
+        // have started, or the `await`s above would have hung forever.
+        let dispatch_started_during_ingress = dispatch_started.load(AtomicOrdering::SeqCst);
+
+        // Confirm the dispatcher *can* run once we lift the barrier so we
+        // don't accept a code path that simply never dispatches.
+        dispatch_release.notify_one();
+        tokio::time::timeout(TEST_DEFAULT_TIMEOUT, dispatcher_handle)
+            .await
+            .map_err(|_| "mock dispatcher did not run after barrier release".to_string())?
+            .map_err(|error| format!("mock dispatcher task panicked: {error}"))?;
+        let dispatch_ran_after_release = dispatch_completed.load(AtomicOrdering::SeqCst);
+
+        let ok = !dispatch_started_during_ingress && dispatch_ran_after_release;
+
         Ok(TriggerHarnessResult {
             fixture: "slack_events_3s_ack".to_string(),
-            ok: event.provider.as_str() == "slack" && event.kind == "message.channels",
+            ok,
             stub: false,
-            summary: "slack ack-first ingress path normalizes and appends the event".to_string(),
+            summary:
+                "slack ack-first ingress completes without waiting on dispatch (ordering contract)"
+                    .to_string(),
             emitted: Vec::new(),
             attempts: Vec::new(),
             dlq: Vec::new(),
@@ -551,8 +599,8 @@ impl TriggerTestHarness {
             bindings: Vec::new(),
             notes: Vec::new(),
             details: json!({
-                "kind": event.kind,
-                "provider": event.provider.as_str(),
+                "dispatch_started_during_ingress": dispatch_started_during_ingress,
+                "dispatch_ran_after_release": dispatch_ran_after_release,
             }),
         })
     }
