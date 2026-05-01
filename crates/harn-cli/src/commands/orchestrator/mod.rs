@@ -3,6 +3,7 @@ mod deploy;
 mod dlq;
 pub(crate) mod errors;
 mod fire;
+pub(crate) mod harness;
 mod inspect;
 pub(crate) mod inspect_data;
 pub(crate) mod listener;
