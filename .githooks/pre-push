@@ -108,4 +108,34 @@ else
   echo "=== Pre-push: skipping portal lint (no portal changes) ==="
 fi
 
+# Generated-mirror drift guard. The `harn-generated` merge driver
+# silently keeps the current side during merge/rebase (see
+# scripts/configure_merge_drivers.sh) and the post-rewrite hook
+# auto-folds the regen into single-commit rebases, but neither covers
+# every case (multi-commit rebases, hooks disabled, etc.). Run the
+# same check CI runs so any drift fails the push instead of the PR.
+if hook_paths_match "$changed" "$HOOK_LANGSPEC_PATTERN"; then
+  echo "=== Pre-push: checking docs/src/language-spec.md mirror ==="
+  if ! make -s check-language-spec >/tmp/harn-prepush-langspec.log 2>&1; then
+    cat /tmp/harn-prepush-langspec.log >&2
+    rm -f /tmp/harn-prepush-langspec.log
+    echo "" >&2
+    echo "  This can happen after rebasing onto a branch that also touched" >&2
+    echo "  the spec — the merge driver intentionally keeps the current" >&2
+    echo "  mirror without regenerating from the merged source." >&2
+    echo "" >&2
+    echo "  Fix:" >&2
+    echo "    make sync-language-spec" >&2
+    echo "    git add docs/src/language-spec.md" >&2
+    echo "    git commit --amend --no-edit       # fold into the last commit" >&2
+    echo "    git push --force-with-lease         # if you've already pushed" >&2
+    echo "" >&2
+    exit 1
+  fi
+  rm -f /tmp/harn-prepush-langspec.log
+  echo "    Language spec mirror OK."
+else
+  echo "=== Pre-push: skipping language spec check (no spec changes) ==="
+fi
+
 echo "=== Pre-push checks passed. ==="

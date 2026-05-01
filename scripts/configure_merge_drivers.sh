@@ -4,6 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# `harn-generated` is wired to `true` so noisy generated mirrors
+# (`docs/src/language-spec.md`, `docs/theme/harn-keywords.js`) never
+# produce conflict markers during merge — the driver succeeds without
+# writing %A, so git keeps the current side and trusts the user (or a
+# follow-up hook) to regenerate from the authoring source.
+#
+# WARNING: this is only safe when something else regenerates the mirror
+# afterwards. The pre-commit hook handles plain commits; the
+# `.githooks/post-rewrite` hook handles single-commit rebases; the
+# pre-push hook (`make check-language-spec`) is the final guard before
+# CI. Without one of those, a rebase silently drops mirror updates.
 git config merge.harn-generated.name "Keep current generated file during merge; regenerate after merge"
 git config merge.harn-generated.driver true
 

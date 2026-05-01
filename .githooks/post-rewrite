@@ -1,0 +1,93 @@
+#!/bin/sh
+# post-rewrite: re-sync `cat`-style generated mirror files after a
+# rebase or `git commit --amend` rewrites a commit that edited the
+# authoring source.
+#
+# Why this hook exists:
+#   `docs/src/language-spec.md` is a header-prefixed `cat` of
+#   `spec/HARN_SPEC.md`. The repo configures a custom merge driver
+#   `merge.harn-generated.driver = true` (see scripts/configure_merge_drivers.sh)
+#   that silently keeps the current side of the merge instead of trying
+#   to combine both. That works during plain merges where the user
+#   regenerates afterwards, but during a rebase it silently drops the
+#   author's mirror update — the spec is preserved (it has its own
+#   3-way merge), but the mirror reverts to the upstream version. CI
+#   then fails on `make check-language-spec`.
+#
+# What this does:
+#   When the most recent rewrite touched `spec/HARN_SPEC.md`, regenerate
+#   `docs/src/language-spec.md`. If that produces changes, fold them
+#   into the latest rewritten commit via `--amend --no-edit --no-verify`.
+#   `--no-verify` skips the pre-commit hook so we don't recurse.
+#
+# Safety:
+#   - Only fires when the trigger is `rebase` (skips `amend` to avoid
+#     amend-during-amend infinite loops if anyone wires this in oddly).
+#   - Only fires when exactly one rewritten commit touched the spec, so
+#     a multi-commit rebase doesn't silently fold the regen into the
+#     wrong commit. The else-branch warns instead.
+#   - Bails on a detached HEAD or if the regen script fails.
+
+set -e
+
+trigger=$1
+[ "$trigger" = "rebase" ] || exit 0
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+cd "$repo_root"
+
+rewrites=$(cat) || exit 0
+[ -n "$rewrites" ] || exit 0
+
+# `spec/HARN_SPEC.md` → `docs/src/language-spec.md` is the only mirror
+# pair we know how to regenerate cheaply (no cargo build). Other generated
+# files (`docs/theme/harn-keywords.js` from the live stdlib) need a Rust
+# build; we leave those to the pre-commit hook + CI.
+spec_path="spec/HARN_SPEC.md"
+mirror_path="docs/src/language-spec.md"
+sync_script="scripts/sync_language_spec.sh"
+
+[ -x "$sync_script" ] || exit 0
+
+# How many of the rewritten commits touched the spec?
+spec_touching_news=$(echo "$rewrites" | awk '{print $2}' | while read -r sha; do
+  [ -n "$sha" ] || continue
+  if git show --name-only --pretty=format: "$sha" 2>/dev/null | grep -Fxq "$spec_path"; then
+    echo "$sha"
+  fi
+done)
+
+count=$(printf '%s\n' "$spec_touching_news" | grep -c .)
+[ "$count" -gt 0 ] || exit 0
+
+last_sha=$(git rev-parse HEAD 2>/dev/null) || exit 0
+last_touched=$(printf '%s\n' "$spec_touching_news" | tail -n 1)
+
+"$sync_script" >/dev/null 2>&1 || exit 0
+
+if git diff --quiet --exit-code -- "$mirror_path"; then
+  exit 0
+fi
+
+if [ "$count" -eq 1 ] && [ "$last_touched" = "$last_sha" ]; then
+  echo "post-rewrite: regenerated $mirror_path from $spec_path; folding into $(git rev-parse --short HEAD)" >&2
+  git add -- "$mirror_path"
+  GIT_EDITOR=true git commit --amend --no-edit --no-verify >/dev/null
+  exit 0
+fi
+
+# Multi-commit rewrite or spec touch wasn't on the tip — auto-amending
+# would put the regen in the wrong commit. Leave the regenerated file
+# in the working tree and let the user fold it in manually.
+echo "" >&2
+echo "post-rewrite: docs/src/language-spec.md is stale relative to spec/HARN_SPEC.md." >&2
+echo "" >&2
+echo "  $count rewritten commit(s) touched the spec; auto-amend would land the" >&2
+echo "  mirror update on the wrong commit. The regenerated mirror is in your" >&2
+echo "  working tree." >&2
+echo "" >&2
+echo "  Fold it into the right commit, e.g.:" >&2
+echo "    git add $mirror_path" >&2
+echo "    git rebase -i ${last_touched}^   # squash the regen into the spec commit" >&2
+echo "" >&2
+exit 0

@@ -455,8 +455,21 @@ type_expr          ::= IDENTIFIER
                      | 'fn' '(' [type_expr (',' type_expr)*] ')' '->' type_expr
                      | '{' shape_field (',' shape_field)* '}'
                      | type_expr '|' type_expr
+                     | type_expr '?'
                      | STRING_LITERAL
                      | INT_LITERAL
+
+Postfix `?` is sugar for `T | nil`: `int?` is identical to `int | nil`,
+including narrowing rules. `?` binds tighter than `&` and `|`, so
+`A & B?` parses as `A & (B | nil)` and `A | B?` flattens to
+`A | B | nil`. Note that `??` is the nil-coalescing operator and is
+lexed as a single token, so writing two `?`s in a row never stacks
+optionals; redundancies in the surface form (`T? | nil`) are
+deduplicated to `T | nil` during parsing. The formatter and the
+`prefer-optional-shorthand` lint rule rewrite the explicit
+`T | nil` form into `T?` whenever the inner type prints as a type
+primary (i.e. it isn't itself a union, intersection, or `fn(...)
+-> ...` type).
 
 A rest parameter (`...name`) must be the last parameter in the list. At call
 time, any arguments beyond the positional parameters are collected into a list
