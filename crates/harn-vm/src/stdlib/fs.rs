@@ -751,17 +751,22 @@ mod tests {
     }
 
     fn drain_feedback(handle_id: &str) -> serde_json::Value {
-        for _ in 0..50 {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut seen_handles = Vec::new();
+        while std::time::Instant::now() < deadline {
             for (kind, content) in crate::llm::drain_global_pending_feedback("") {
                 assert_eq!(kind, "tool_result");
                 let payload: serde_json::Value = serde_json::from_str(&content).unwrap();
                 if payload["handle_id"] == handle_id {
                     return payload;
                 }
+                if let Some(seen) = payload["handle_id"].as_str() {
+                    seen_handles.push(seen.to_string());
+                }
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        panic!("timed out waiting for feedback for {handle_id}");
+        panic!("timed out waiting for feedback for {handle_id}; saw handles {seen_handles:?}");
     }
 
     #[test]

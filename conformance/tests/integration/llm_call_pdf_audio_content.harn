@@ -1,0 +1,41 @@
+import { upload } from "std/files"
+
+pipeline test(task) {
+  llm_mock_clear()
+  let pdf_path = "sample.pdf"
+  write_file_bytes(pdf_path, bytes_from_string("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n"))
+  let file_id = upload(pdf_path, "mock")
+  let file_id_again = upload(pdf_path, "mock")
+  delete_file(pdf_path)
+  assert_eq(file_id, file_id_again)
+  assert(contains(file_id, "mock_file_"), "mock upload should return a stable file_id")
+  llm_mock({text: "summary"})
+  let result = llm_call(
+    "",
+    nil,
+    {
+      provider: "mock",
+      model: "claude-sonnet-4-7",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {type: "pdf", file_id: file_id},
+            {type: "audio", base64: "UklGRg==", media_type: "audio/wav"},
+            {type: "text", text: "Summarize the document and audio."},
+          ],
+        },
+      ],
+    },
+  )
+  assert_eq(result.text, "summary")
+  let calls = llm_mock_calls()
+  assert_eq(len(calls), 1)
+  let blocks = calls[0].messages[0].content
+  assert_eq(blocks[0].type, "pdf")
+  assert_eq(blocks[0].file_id, file_id)
+  assert_eq(blocks[1].type, "audio")
+  assert_eq(blocks[1].media_type, "audio/wav")
+  assert_eq(blocks[1].base64, "UklGRg==")
+  log("llm_call_pdf_audio_content tests passed")
+}

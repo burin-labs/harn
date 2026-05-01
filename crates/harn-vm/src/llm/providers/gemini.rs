@@ -286,4 +286,58 @@ mod tests {
         );
         assert_eq!(body["system_instruction"]["parts"][0]["text"], "system");
     }
+
+    #[test]
+    fn gemini_pdf_and_audio_content_maps_to_parts() {
+        let payload = LlmRequestPayload {
+            provider: "gemini".to_string(),
+            model: "gemini-2.5-flash".to_string(),
+            api_key: String::new(),
+            fallback_chain: Vec::new(),
+            route_fallbacks: Vec::new(),
+            messages: vec![serde_json::json!({
+                "role": "user",
+                "content": [
+                    {"type": "pdf", "base64": "JVBERi0xLjQK"},
+                    {"type": "audio", "file_id": "https://generativelanguage.googleapis.com/v1beta/files/abc", "media_type": "audio/mpeg"}
+                ],
+            })],
+            system: None,
+            max_tokens: 64,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop: None,
+            seed: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            output_format: crate::llm::api::OutputFormat::Text,
+            response_format: None,
+            json_schema: None,
+            thinking: ThinkingConfig::Disabled,
+            anthropic_beta_features: Vec::new(),
+            vision: true,
+            native_tools: None,
+            tool_choice: None,
+            cache: false,
+            timeout: None,
+            stream: false,
+            provider_overrides: None,
+            prefill: None,
+            session_id: None,
+        };
+
+        let body = GeminiProvider::build_request_body(&payload);
+        assert_eq!(
+            body["contents"][0]["parts"][0]["inline_data"],
+            serde_json::json!({"mime_type": "application/pdf", "data": "JVBERi0xLjQK"})
+        );
+        assert_eq!(
+            body["contents"][0]["parts"][1]["file_data"],
+            serde_json::json!({
+                "mime_type": "audio/mpeg",
+                "file_uri": "https://generativelanguage.googleapis.com/v1beta/files/abc",
+            })
+        );
+    }
 }

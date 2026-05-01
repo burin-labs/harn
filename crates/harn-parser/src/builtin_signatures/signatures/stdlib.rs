@@ -4,6 +4,10 @@ use super::{BuiltinReturn, BuiltinSig, UNION_INT_NIL, UNION_STRING_NIL};
 
 pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
+        name: "__files_upload",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "__waitpoint_cancel",
         return_type: Some(BuiltinReturn::Named("dict")),
     },

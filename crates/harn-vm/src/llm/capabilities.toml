@@ -30,8 +30,10 @@
 #                     Used by harn-lint to warn about oversized registries.
 #   prompt_caching  : whether the provider honors cache_control blocks.
 #   vision          : whether Harn can send visual input blocks on this route.
-#   audio           : whether Harn can send audio input blocks on this route.
-#   pdf             : whether Harn can send PDF/document input blocks on this route.
+#   audio_supported : whether Harn can send audio input blocks on this route.
+#   pdf_supported   : whether Harn can send PDF/document input blocks on this route.
+#   files_api_supported:
+#                     whether file_id references from std/files::upload are accepted.
 #   structured_output: structured-output transport: native, tool_use, format_kw, none.
 #   thinking_modes  : supported script-facing modes: enabled, adaptive, effort.
 #   interleaved_thinking_supported:
@@ -61,6 +63,9 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 structured_output = "tool_use"
 thinking_modes = ["adaptive"]
 vision_supported = true
@@ -74,6 +79,9 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 structured_output = "tool_use"
 thinking_modes = ["adaptive"]
 interleaved_thinking_supported = true
@@ -88,6 +96,9 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 structured_output = "tool_use"
 thinking_modes = ["adaptive"]
 vision_supported = true
@@ -102,6 +113,9 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 structured_output = "tool_use"
 thinking_modes = ["enabled"]
 vision_supported = true
@@ -116,6 +130,9 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 json_schema = "tool_use"
 thinking_modes = ["enabled"]
 interleaved_thinking_supported = true
@@ -130,6 +147,9 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 structured_output = "tool_use"
 thinking_modes = ["enabled"]
 vision_supported = true
@@ -144,6 +164,9 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 structured_output = "tool_use"
 thinking_modes = ["enabled"]
 vision_supported = true
@@ -158,6 +181,9 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 structured_output = "tool_use"
 thinking_modes = ["adaptive"]
 vision_supported = true
@@ -171,6 +197,9 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 structured_output = "tool_use"
 thinking_modes = ["adaptive"]
 interleaved_thinking_supported = true
@@ -185,6 +214,9 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 structured_output = "tool_use"
 thinking_modes = ["adaptive"]
 vision_supported = true
@@ -198,6 +230,9 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 structured_output = "tool_use"
 thinking_modes = ["enabled"]
 vision_supported = true
@@ -211,6 +246,9 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 json_schema = "tool_use"
 thinking_modes = ["enabled"]
 interleaved_thinking_supported = true
@@ -225,6 +263,9 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 structured_output = "tool_use"
 thinking_modes = ["enabled"]
 vision_supported = true
@@ -238,6 +279,9 @@ tool_search = ["bm25", "regex"]
 max_tools = 10000
 prompt_caching = true
 vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 structured_output = "tool_use"
 thinking_modes = ["enabled"]
 vision_supported = true
@@ -249,6 +293,9 @@ model_match = "claude-*"
 native_tools = true
 prompt_caching = true
 vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 structured_output = "tool_use"
 thinking_modes = ["enabled"]
 vision_supported = true
@@ -265,7 +312,7 @@ vision_supported = true
 model_match = "gpt-4o*"
 native_tools = true
 vision = true
-audio = true
+audio_supported = true
 structured_output = "native"
 vision_supported = true
 
@@ -321,7 +368,7 @@ reasoning_effort_supported = true
 model_match = "openai/gpt-4o*"
 native_tools = true
 vision = true
-audio = true
+audio_supported = true
 structured_output = "native"
 vision_supported = true
 
@@ -671,15 +718,23 @@ thinking_modes = ["enabled", "effort"]
 prompt_caching = true
 vision_supported = true
 vision = true
+audio_supported = true
+pdf_supported = true
 structured_output = "native"
 
 [[provider.gemini]]
 model_match = "gemini-*"
 vision_supported = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 
 [[provider.gemini]]
 model_match = "models/gemini-*"
 vision_supported = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
 
 [[provider.openrouter]]
 model_match = "google/gemma-4*"

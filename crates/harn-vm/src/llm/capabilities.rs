@@ -72,12 +72,15 @@ pub struct ProviderRule {
     pub vision: Option<bool>,
     /// Whether this provider/model route accepts audio input blocks
     /// through Harn's LLM message path.
-    #[serde(default)]
+    #[serde(default, alias = "audio_supported")]
     pub audio: Option<bool>,
     /// Whether this provider/model route accepts PDF/document input blocks
     /// through Harn's LLM message path.
-    #[serde(default)]
+    #[serde(default, alias = "pdf_supported")]
     pub pdf: Option<bool>,
+    /// Whether uploaded file references can be reused in message content.
+    #[serde(default)]
+    pub files_api_supported: Option<bool>,
     /// Structured-output transport strategy. Known values are:
     /// `native`, `tool_use`, `format_kw`, and `none`.
     #[serde(default)]
@@ -152,6 +155,7 @@ pub struct Capabilities {
     pub vision: bool,
     pub audio: bool,
     pub pdf: bool,
+    pub files_api_supported: bool,
     pub structured_output: Option<String>,
     /// Legacy mirror for CLI display and older callers.
     pub json_schema: Option<String>,
@@ -179,6 +183,7 @@ impl Default for Capabilities {
             vision: false,
             audio: false,
             pdf: false,
+            files_api_supported: false,
             structured_output: None,
             json_schema: None,
             thinking_modes: Vec::new(),
@@ -209,6 +214,7 @@ pub struct ProviderCapabilityMatrixRow {
     pub audio: bool,
     pub pdf: bool,
     pub streaming: bool,
+    pub files_api_supported: bool,
     pub json_schema: Option<String>,
     pub tools: bool,
     pub cache: bool,
@@ -327,6 +333,7 @@ fn rule_to_matrix_row(
         audio: rule.audio.unwrap_or(false),
         pdf: rule.pdf.unwrap_or(false),
         streaming: true,
+        files_api_supported: rule.files_api_supported.unwrap_or(false),
         json_schema: rule_structured_output(rule),
         tools: rule.native_tools.unwrap_or(false),
         cache: rule.prompt_caching.unwrap_or(false),
@@ -428,6 +435,7 @@ fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
         vision: rule_vision(rule),
         audio: rule.audio.unwrap_or(false),
         pdf: rule.pdf.unwrap_or(false),
+        files_api_supported: rule.files_api_supported.unwrap_or(false),
         structured_output: rule_structured_output(rule),
         json_schema: rule_structured_output(rule),
         thinking_modes,
@@ -528,6 +536,9 @@ mod tests {
         assert!(caps.prompt_caching);
         assert_eq!(caps.thinking_modes, vec!["adaptive"]);
         assert!(caps.vision_supported);
+        assert!(caps.audio);
+        assert!(caps.pdf);
+        assert!(caps.files_api_supported);
         assert_eq!(caps.max_tools, Some(10000));
     }
 
@@ -620,6 +631,7 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert!(caps.native_tools);
         assert!(caps.vision);
         assert!(caps.audio);
+        assert!(!caps.pdf);
         assert_eq!(caps.json_schema.as_deref(), Some("native"));
     }
 
@@ -641,8 +653,12 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert!(lookup("openai", "gpt-4o").vision_supported);
         assert!(lookup("openai", "gpt-5.4-preview").vision_supported);
         assert!(lookup("anthropic", "claude-sonnet-4-6").vision_supported);
+        assert!(lookup("anthropic", "claude-sonnet-4-6").pdf);
+        assert!(lookup("anthropic", "claude-sonnet-4-6").files_api_supported);
         assert!(lookup("openrouter", "google/gemini-2.5-flash").vision_supported);
         assert!(lookup("gemini", "gemini-2.5-flash").vision_supported);
+        assert!(lookup("gemini", "gemini-2.5-flash").audio);
+        assert!(lookup("gemini", "gemini-2.5-flash").pdf);
         assert!(lookup("ollama", "llava:latest").vision_supported);
         assert!(!lookup("openai", "gpt-3.5-turbo").vision_supported);
         assert!(!lookup("ollama", "qwen3.5:35b-a3b-coding-nvfp4").vision_supported);

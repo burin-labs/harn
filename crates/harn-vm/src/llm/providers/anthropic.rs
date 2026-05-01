@@ -572,6 +572,54 @@ mod tests {
     }
 
     #[test]
+    fn pdf_file_id_content_maps_to_anthropic_document_block() {
+        let mut payload = base_payload();
+        payload.messages = vec![serde_json::json!({
+            "role": "user",
+            "content": [
+                {"type": "pdf", "file_id": "file_123", "title": "Report"}
+            ],
+        })];
+
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert_eq!(
+            body["messages"][0]["content"][0],
+            serde_json::json!({
+                "type": "document",
+                "source": {
+                    "type": "file",
+                    "file_id": "file_123",
+                },
+                "title": "Report",
+            })
+        );
+    }
+
+    #[test]
+    fn audio_base64_content_maps_to_anthropic_audio_block() {
+        let mut payload = base_payload();
+        payload.messages = vec![serde_json::json!({
+            "role": "user",
+            "content": [
+                {"type": "audio", "base64": "UklGRg==", "media_type": "audio/wav"}
+            ],
+        })];
+
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert_eq!(
+            body["messages"][0]["content"][0],
+            serde_json::json!({
+                "type": "audio",
+                "source": {
+                    "type": "base64",
+                    "media_type": "audio/wav",
+                    "data": "UklGRg==",
+                }
+            })
+        );
+    }
+
+    #[test]
     fn cache_uses_top_level_automatic_prompt_caching() {
         let mut payload = base_payload();
         payload.cache = true;
