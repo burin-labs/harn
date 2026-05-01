@@ -2370,6 +2370,88 @@ pub(crate) enum MergeCaptainCommand {
     Run(MergeCaptainRunArgs),
     /// Audit a JSONL transcript against the Merge Captain oracle.
     Audit(MergeCaptainAuditArgs),
+    /// Manage a mock-repos playground (real temp git repos + fake GitHub HTTP).
+    #[command(subcommand)]
+    Mock(MergeCaptainMockCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum MergeCaptainMockCommand {
+    /// Materialize a playground directory with real bare+working git repos.
+    Init(MergeCaptainMockInitArgs),
+    /// Apply a named scenario step or a one-off action to the playground state.
+    Step(MergeCaptainMockStepArgs),
+    /// Show the playground's current PR / check / history state.
+    Status(MergeCaptainMockStatusArgs),
+    /// Serve the fake GitHub HTTP API backed by the playground.
+    Serve(MergeCaptainMockServeArgs),
+    /// Idempotently remove the playground directory.
+    Cleanup(MergeCaptainMockCleanupArgs),
+    /// List the names of built-in scenarios.
+    Scenarios,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct MergeCaptainMockInitArgs {
+    /// Directory to materialize. Created if missing; refuses to overwrite an
+    /// existing playground unless `--force` is passed.
+    pub dir: String,
+    /// Built-in scenario name (see `mock scenarios`). Mutually exclusive
+    /// with `--manifest`.
+    #[arg(long)]
+    pub scenario: Option<String>,
+    /// Path to a custom scenario manifest (JSON or YAML). Overrides
+    /// `--scenario` when present.
+    #[arg(long)]
+    pub manifest: Option<String>,
+    /// Cleanup any existing playground at DIR first.
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("merge_captain_mock_step_target")
+        .args(["name", "action"])
+        .multiple(false)
+        .required(true)
+))]
+pub(crate) struct MergeCaptainMockStepArgs {
+    /// Playground directory.
+    pub dir: String,
+    /// Named step from the scenario manifest.
+    #[arg(long, value_name = "STEP")]
+    pub name: Option<String>,
+    /// Inline JSON-encoded `ScenarioAction` for one-off mutations.
+    #[arg(long, value_name = "JSON")]
+    pub action: Option<String>,
+    /// Print machine-readable status JSON instead of a text summary.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct MergeCaptainMockStatusArgs {
+    pub dir: String,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct MergeCaptainMockServeArgs {
+    pub dir: String,
+    /// Bind address (e.g. `127.0.0.1:0` for an ephemeral port).
+    #[arg(long, default_value = "127.0.0.1:0")]
+    pub bind: String,
+    /// Print the resolved bind address as JSON to stdout once the server
+    /// is ready, then keep serving until SIGINT / SIGTERM.
+    #[arg(long)]
+    pub print_addr: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct MergeCaptainMockCleanupArgs {
+    pub dir: String,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

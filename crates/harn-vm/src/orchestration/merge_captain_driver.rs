@@ -224,6 +224,24 @@ fn resolve_backend(backend: &MergeCaptainDriverBackend) -> Result<ResolvedScenar
             })
         }
         MergeCaptainDriverBackend::Mock { playground_dir } => {
+            // Prefer the on-disk playground (presence of `playground.json`)
+            // — that's the #1020 surface with real bare git repos. Fall
+            // back to the legacy transcript-replay manifest for backwards
+            // compatibility with examples/merge_captain/playground_3repos.
+            if super::playground::playground_marker_path(playground_dir).exists() {
+                let (state, manifest) = super::playground::load_playground(playground_dir)?;
+                let events = super::playground::synthesize_sweep(
+                    &state,
+                    &super::playground::TranscriptOptions::default(),
+                );
+                let golden = load_playground_golden_if_present(playground_dir)?;
+                return Ok(ResolvedScenario {
+                    events,
+                    golden,
+                    scenario: Some(manifest.scenario),
+                    backend_source: Some(playground_dir.display().to_string()),
+                });
+            }
             let manifest_path = find_mock_manifest(playground_dir)?;
             let bytes = fs::read(&manifest_path).map_err(|error| {
                 VmError::Runtime(format!(
@@ -258,6 +276,16 @@ fn resolve_backend(backend: &MergeCaptainDriverBackend) -> Result<ResolvedScenar
             })
         }
     }
+}
+
+fn load_playground_golden_if_present(
+    playground_dir: &Path,
+) -> Result<Option<MergeCaptainGolden>, VmError> {
+    let candidate = playground_dir.join("golden.json");
+    if candidate.exists() {
+        return load_merge_captain_golden(&candidate).map(Some);
+    }
+    Ok(None)
 }
 
 fn find_mock_manifest(playground_dir: &Path) -> Result<PathBuf, VmError> {
@@ -606,6 +634,48 @@ mod tests {
         assert!(!output.summary.prs_touched.is_empty());
         assert!(output.receipt_path.exists());
         assert!(output.transcript_path.unwrap().exists());
+    }
+
+    #[test]
+    fn mock_backend_drives_real_on_disk_playground() {
+        if std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            eprintln!("(skipping — git not on PATH)");
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let playground = temp.path().join("pg");
+        let manifest = super::super::playground::load_builtin("single_green").unwrap();
+        super::super::playground::init_playground_at(super::super::playground::InitOptions {
+            dir: &playground,
+            manifest: &manifest,
+            allow_existing: false,
+        })
+        .unwrap();
+        let output = run_merge_captain_driver(MergeCaptainDriverOptions {
+            backend: MergeCaptainDriverBackend::Mock {
+                playground_dir: playground.clone(),
+            },
+            mode: MergeCaptainDriverMode::Once,
+            model_route: None,
+            timeout_tier: None,
+            transcript_out: Some(temp.path().join("event_log.jsonl")),
+            receipt_out: Some(temp.path().join("receipt.json")),
+            run_root: temp.path().join("runs"),
+            max_sweeps: 1,
+            watch_backoff_ms: 0,
+            stream_stdout: false,
+        })
+        .unwrap();
+        assert_eq!(output.summary.backend, "mock");
+        assert_eq!(output.summary.scenario.as_deref(), Some("single_green"));
+        assert!(output.summary.event_count > 0);
+        // PR coverage gets populated from the synthesized transcript.
+        assert!(!output.summary.prs_touched.is_empty());
     }
 
     #[test]

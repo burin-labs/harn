@@ -17,9 +17,9 @@ use std::sync::Arc;
 use std::{env, fs, process, thread};
 
 use cli::{
-    Cli, Command, MergeCaptainCommand, ModelInfoArgs, PackageCacheCommand, PackageCommand,
-    PersonaCommand, RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
-    SkillsCommand,
+    Cli, Command, MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs, PackageCacheCommand,
+    PackageCommand, PersonaCommand, RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand,
+    SkillTrustCommand, SkillsCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -719,6 +719,31 @@ async fn async_main() {
             }
             MergeCaptainCommand::Audit(audit) => {
                 let code = commands::merge_captain::run_audit(&audit);
+                if code != 0 {
+                    process::exit(code);
+                }
+            }
+            MergeCaptainCommand::Mock(mock) => {
+                let code = match mock {
+                    MergeCaptainMockCommand::Init(args) => {
+                        commands::merge_captain_mock::run_init(&args)
+                    }
+                    MergeCaptainMockCommand::Step(args) => {
+                        commands::merge_captain_mock::run_step(&args)
+                    }
+                    MergeCaptainMockCommand::Status(args) => {
+                        commands::merge_captain_mock::run_status(&args)
+                    }
+                    MergeCaptainMockCommand::Serve(args) => {
+                        commands::merge_captain_mock::run_serve(&args).await
+                    }
+                    MergeCaptainMockCommand::Cleanup(args) => {
+                        commands::merge_captain_mock::run_cleanup(&args)
+                    }
+                    MergeCaptainMockCommand::Scenarios => {
+                        commands::merge_captain_mock::run_scenarios()
+                    }
+                };
                 if code != 0 {
                     process::exit(code);
                 }
