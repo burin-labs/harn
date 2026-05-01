@@ -447,6 +447,7 @@ The ACP server supports these JSON-RPC methods:
 | `session/list` | List active sessions known to the ACP adapter |
 | `session/prompt` | Send a prompt to the agent for execution |
 | `session/cancel` | Cancel the currently running prompt |
+| `session/set_mode` | Switch the active session mode |
 | `workflow/signal` | Enqueue a workflow signal message in the current session workspace |
 | `workflow/query` | Read a named workflow query value from the current session workspace |
 | `workflow/update` | Send a workflow update request and wait for a response |
@@ -502,6 +503,62 @@ When a fork is created, Harn also emits a `session/update` notification with
 hosts can render branch-aware session UIs without scraping text output. The
 forked session gets its own stream; subscriber sinks and in-flight prompt state
 are not copied from the parent.
+
+### Session Modes
+
+Harn implements ACP
+[session-modes](https://agentclientprotocol.com/protocol/session-modes) so a
+host can clamp the agent's tool ceiling at runtime. The `session/new` and
+`session/load` results carry a spec-shaped `modes` field:
+
+```json
+{
+  "modes": {
+    "currentModeId": "default",
+    "availableModes": [
+      { "id": "default",   "name": "Default",   "description": "..." },
+      { "id": "architect", "name": "Architect", "description": "..." },
+      { "id": "code",      "name": "Code",      "description": "..." },
+      { "id": "ask",       "name": "Ask",       "description": "..." }
+    ]
+  }
+}
+```
+
+Mode semantics:
+
+- `default` — preserves the pre-modes baseline (no extra capability ceiling).
+- `architect` — read-only planning mode. Builtins that mutate the workspace,
+  execute processes, or hit the network are rejected by the VM policy gate
+  before they run. Reads, listings, and analysis stay available.
+- `code` — full tool access; equivalent to `default` for the purposes of the
+  capability ceiling. Surfaces a distinct id so hosts can render the mode
+  the user explicitly opted into.
+- `ask` — read-only by default; destructive operations are gated through the
+  ACP `session/request_permission` flow on the host before executing.
+
+Switching modes:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 17,
+  "method": "session/set_mode",
+  "params": { "sessionId": "sess_abc", "modeId": "architect" }
+}
+```
+
+The agent ack's with an empty result and emits a `session/update`
+notification with `sessionUpdate: "current_mode_update"` carrying the new
+`modeId`. Re-setting the same mode is a no-op (ack only, no notification).
+`session/fork` carries the parent's active mode over to the new branch and
+echoes it back on the fork response.
+
+The selected mode is enforced for the next `session/prompt`: while the
+prompt runs, the matching capability policy is pushed onto the VM
+execution stack and popped when the prompt completes. The conformance
+case `acp_architect_mode_blocks_destructive_writes_in_prompt` locks this
+behavior end-to-end.
 
 ### Queued user messages during agent execution
 

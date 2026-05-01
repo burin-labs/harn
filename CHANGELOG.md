@@ -10,6 +10,19 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **ACP session modes (#897).** The ACP adapter now implements the
+  [session-modes](https://agentclientprotocol.com/protocol/session-modes)
+  spec: `session/new` and `session/load` return a `SessionModeState`
+  (`{ currentModeId, availableModes }`) describing the four-mode catalog
+  (`default`, `architect`, `code`, `ask`); `session/set_mode` switches
+  the active mode and emits a `current_mode_update` notification; and
+  `session/fork` carries the parent's mode over to the new branch.
+  `architect` and `ask` modes push a read-only capability ceiling onto
+  the VM execution stack while the prompt runs, so destructive builtins
+  (`write_file`, `exec`, network calls, etc.) are rejected before they
+  touch the workspace. `default` and `code` preserve the pre-modes
+  baseline.
+
 - **MCP elicitation (`elicitation/create`) on both roles (#875).** Harn
   servers can now prompt connected clients for structured user input
   mid-tool-call via the `mcp_elicit({ message, requestedSchema })`
