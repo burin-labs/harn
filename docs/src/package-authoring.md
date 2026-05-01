@@ -50,6 +50,17 @@ contract fixtures, package-local fixture tests, install/import smoke tests, and
 standalone Harn doc examples. Use `harn connector check .` when you only need
 the lower-level pure-Harn connector contract check.
 
+Connector packages should also declare package-facing capability coverage on
+their `[[providers]]` entry so `harn check --connector-matrix` can compare
+provider support:
+
+```toml
+[[providers]]
+id = "acme"
+connector = { harn = "src/lib.harn" }
+capabilities = ["webhook", "oauth", "rate_limit", "pagination", "graphql", "streaming"]
+```
+
 ## Manifest metadata
 
 Publishable packages should include:

@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-cargo test-fast conformance protocol-conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-trigger-examples check-docs-snippets sync-language-spec check-language-spec
+.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-cargo test-fast conformance protocol-conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets sync-language-spec check-language-spec
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance protocol-conformance check-highlight check-language-spec check-trigger-quickref check-provider-matrix check-trigger-examples check-docs-snippets portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance protocol-conformance check-highlight check-language-spec check-trigger-quickref check-provider-matrix check-connector-matrix check-trigger-examples check-docs-snippets portal-check
 
 check: all
 
@@ -204,6 +204,16 @@ check-provider-matrix:
 	@echo "=== Checking docs/src/provider-matrix.md is up to date ==="
 	@cargo run --quiet -p harn-cli -- dump-provider-matrix --check
 	@echo "    Harn provider matrix OK."
+
+# Regenerate the connector capability parity matrix from package manifests.
+gen-connector-matrix:
+	cargo run --quiet -p harn-cli -- dump-connector-matrix
+
+# CI guard: fail if the connector parity docs drift from package manifests.
+check-connector-matrix:
+	@echo "=== Checking docs/src/connectors/parity-matrix.md is up to date ==="
+	@cargo run --quiet -p harn-cli -- dump-connector-matrix --check
+	@echo "    Harn connector matrix OK."
 
 # Validate the ready-to-customize trigger example library.
 check-trigger-examples:

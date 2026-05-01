@@ -1,10 +1,12 @@
 [package]
-name = "slack-connector-contract-fixture"
+name = "harn-slack-connector"
 version = "0.1.0"
+repository = "https://github.com/burin-labs/harn-slack-connector"
 
 [[providers]]
 id = "slack"
 connector = { harn = "./lib.harn" }
+capabilities = ["webhook", "rate_limit", "pagination"]
 
 [connector_contract]
 version = 1

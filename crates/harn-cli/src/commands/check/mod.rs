@@ -1,6 +1,7 @@
 mod bundle;
 mod check_cmd;
 mod config;
+pub(crate) mod connector_matrix;
 mod fmt;
 mod host_capabilities;
 mod imports;

@@ -1,10 +1,12 @@
 [package]
-name = "github-connector-contract-fixture"
+name = "harn-github-connector"
 version = "0.1.0"
+repository = "https://github.com/burin-labs/harn-github-connector"
 
 [[providers]]
 id = "github"
 connector = { harn = "./lib.harn" }
+capabilities = ["webhook", "rate_limit", "pagination", "graphql"]
 
 [connector_contract]
 version = 1

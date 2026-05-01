@@ -1,10 +1,12 @@
 [package]
-name = "linear-connector-contract-fixture"
+name = "harn-linear-connector"
 version = "0.1.0"
+repository = "https://github.com/burin-labs/harn-linear-connector"
 
 [[providers]]
 id = "linear"
 connector = { harn = "./lib.harn" }
+capabilities = ["webhook", "oauth", "rate_limit", "pagination", "graphql"]
 
 [connector_contract]
 version = 1

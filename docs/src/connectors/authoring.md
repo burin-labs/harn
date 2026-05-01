@@ -40,6 +40,7 @@ Root manifests can override a provider's connector implementation:
 [[providers]]
 id = "echo"
 connector = { harn = "./echo_connector.harn" }
+capabilities = ["webhook", "oauth", "rate_limit", "pagination"]
 oauth = {
   resource = "https://api.echo.example/",
   authorization_endpoint = "https://auth.echo.example/oauth/authorize",
@@ -61,6 +62,12 @@ The optional `oauth` table is package-owned setup metadata consumed by
 `authorization_endpoint`, `token_endpoint`, `registration_endpoint`, `scopes`,
 `client_id`, `client_secret`, and `token_endpoint_auth_method`; operator CLI
 flags override those values for a single run.
+
+The optional `capabilities` declaration feeds `harn check --connector-matrix`
+and the generated connector parity docs. Declare any of `webhook`, `oauth`,
+`rate_limit`, `pagination`, `graphql`, and `streaming` that the package
+supports. Hyphenated names such as `rate-limit` are accepted in manifests and
+CLI filters.
 
 The referenced `.harn` module must export:
 

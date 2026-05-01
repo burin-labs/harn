@@ -8,6 +8,10 @@ into a smaller core substrate plus pure-Harn provider packages.
 This page is the current source of truth for what belongs in this repository
 after the connector pivot.
 
+For declared package feature coverage, see the generated
+[connector parity matrix](./parity-matrix.md). It is built from connector
+package manifests and checked in CI so docs drift fails the build.
+
 ## Core responsibilities
 
 Harn core owns the primitives that every connector implementation needs:

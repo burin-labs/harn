@@ -1,10 +1,12 @@
 [package]
-name = "notion-connector-contract-fixture"
+name = "harn-notion-connector"
 version = "0.1.0"
+repository = "https://github.com/burin-labs/harn-notion-connector"
 
 [[providers]]
 id = "notion"
 connector = { harn = "./lib.harn" }
+capabilities = ["webhook", "rate_limit", "pagination"]
 
 [connector_contract]
 version = 1
