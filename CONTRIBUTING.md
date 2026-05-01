@@ -172,6 +172,14 @@ the subdirectory that best matches their area.
 - Rust files use standard `rustfmt` defaults
 - Avoid adding comments unless the logic is non-obvious
 
+## Maintaining the changelog
+
+Keep `CHANGELOG.md` focused on the actively maintained release range. When a
+future major-version cut makes older release headers mostly archaeological,
+move the already-condensed older entries into a versioned archive such as
+`CHANGELOG-pre-0.6.md` and leave a one-line link near the top of
+`CHANGELOG.md`.
+
 ## Key references
 
 - [Language spec](spec/HARN_SPEC.md) -- authoritative language specification
