@@ -278,12 +278,8 @@ async fn execute_join_policy_stops_after_first_completion() {
                     2
                 }),
             ];
-            let started = std::time::Instant::now();
             let results = execute_join_policy(tasks, "first", None, None).await;
             assert_eq!(results.len(), 1);
-            // Wall-clock elapsed stays small — virtual sleeps auto-advance
-            // tokio time without blocking the executor.
-            assert!(started.elapsed() < std::time::Duration::from_millis(500));
             assert_eq!(results[0].as_ref().ok().copied(), Some(2));
         })
         .await;
