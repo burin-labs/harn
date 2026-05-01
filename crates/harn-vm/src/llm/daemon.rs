@@ -86,35 +86,49 @@ impl DaemonSnapshot {
     }
 }
 
-/// Snapshot a file's mtime as nanoseconds since the Unix epoch.
-/// Nanosecond precision avoids a second-boundary race: two edits to
-/// the same path less than a full second apart would both read the
-/// same `as_secs()` value and be reported as unchanged, which has
-/// bitten the watch test on coarser-resolution filesystems. u64
-/// covers nanos-since-epoch through year 2554.
-fn file_stamp(path: &str) -> u64 {
-    std::fs::metadata(path)
-        .ok()
-        .and_then(|metadata| metadata.modified().ok())
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .and_then(|duration| u64::try_from(duration.as_nanos()).ok())
-        .unwrap_or(0)
+/// Reads a file's modification time. Production uses
+/// [`RealMtimeProvider`]; tests inject [`MockMtimeProvider`] to drive
+/// the watcher with virtual time and skip filesystem-quantization
+/// races entirely.
+pub(crate) trait MtimeProvider {
+    /// Returns the file's mtime as nanoseconds since the Unix epoch,
+    /// or `0` when the path is missing or unreadable. Nanosecond
+    /// precision avoids a second-boundary race: two edits to the same
+    /// path less than a full second apart would otherwise read the
+    /// same `as_secs()` value and be reported as unchanged.
+    fn mtime_ns(&self, path: &str) -> u64;
 }
 
-pub(crate) fn watch_state(paths: &[String]) -> BTreeMap<String, u64> {
+/// Production [`MtimeProvider`] backed by `std::fs::metadata`. u64
+/// covers nanos-since-epoch through year 2554.
+pub(crate) struct RealMtimeProvider;
+
+impl MtimeProvider for RealMtimeProvider {
+    fn mtime_ns(&self, path: &str) -> u64 {
+        std::fs::metadata(path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .and_then(|duration| u64::try_from(duration.as_nanos()).ok())
+            .unwrap_or(0)
+    }
+}
+
+pub(crate) fn watch_state(provider: &dyn MtimeProvider, paths: &[String]) -> BTreeMap<String, u64> {
     paths
         .iter()
-        .map(|path| (path.clone(), file_stamp(path)))
+        .map(|path| (path.clone(), provider.mtime_ns(path)))
         .collect::<BTreeMap<_, _>>()
 }
 
 pub(crate) fn detect_watch_changes(
+    provider: &dyn MtimeProvider,
     paths: &[String],
     previous: &mut BTreeMap<String, u64>,
 ) -> Vec<String> {
     let mut changed = Vec::new();
     for path in paths {
-        let current = file_stamp(path);
+        let current = provider.mtime_ns(path);
         let prior = previous.get(path).copied().unwrap_or(0);
         if prior != 0 && current != 0 && current != prior {
             changed.push(path.clone());
@@ -122,6 +136,44 @@ pub(crate) fn detect_watch_changes(
         previous.insert(path.clone(), current);
     }
     changed
+}
+
+/// Test-only [`MtimeProvider`] backed by an in-memory map. Tests pin
+/// the mtime for each watched path explicitly (`set`) and advance it
+/// (`advance`) without touching the filesystem or the wall clock.
+#[cfg(test)]
+pub(crate) struct MockMtimeProvider {
+    stamps: std::cell::RefCell<BTreeMap<String, u64>>,
+}
+
+#[cfg(test)]
+impl MockMtimeProvider {
+    pub(crate) fn new() -> Self {
+        Self {
+            stamps: std::cell::RefCell::new(BTreeMap::new()),
+        }
+    }
+
+    pub(crate) fn set(&self, path: impl Into<String>, ns: u64) {
+        self.stamps.borrow_mut().insert(path.into(), ns);
+    }
+
+    pub(crate) fn advance(&self, path: &str, delta_ns: u64) {
+        let mut stamps = self.stamps.borrow_mut();
+        let entry = stamps.entry(path.to_string()).or_insert(0);
+        *entry = entry.saturating_add(delta_ns);
+    }
+
+    pub(crate) fn clear(&self, path: &str) {
+        self.stamps.borrow_mut().remove(path);
+    }
+}
+
+#[cfg(test)]
+impl MtimeProvider for MockMtimeProvider {
+    fn mtime_ns(&self, path: &str) -> u64 {
+        self.stamps.borrow().get(path).copied().unwrap_or(0)
+    }
 }
 
 pub(crate) fn persist_snapshot(path: &str, snapshot: &DaemonSnapshot) -> Result<String, VmError> {

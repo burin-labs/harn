@@ -7,7 +7,7 @@
 
 use std::rc::Rc;
 
-use crate::llm::daemon::{watch_state, DaemonLoopConfig};
+use crate::llm::daemon::{watch_state, DaemonLoopConfig, RealMtimeProvider};
 use crate::value::{VmError, VmValue};
 
 use super::super::agent_config::AgentLoopConfig;
@@ -1226,7 +1226,7 @@ impl AgentLoopState {
             "done".to_string()
         };
         let mut daemon_snapshot_path: Option<String> = None;
-        let mut daemon_watch_state = watch_state(&daemon_config.watch_paths);
+        let mut daemon_watch_state = watch_state(&RealMtimeProvider, &daemon_config.watch_paths);
         let native_text_tool_fallbacks = 0usize;
         let native_text_tool_fallback_rejections = 0usize;
         let mut resumed_iterations = 0usize;
@@ -1254,7 +1254,7 @@ impl AgentLoopState {
                 idle_backoff_ms = snapshot.idle_backoff_ms.max(1);
                 last_run_exit_code = snapshot.last_run_exit_code;
                 daemon_watch_state = if snapshot.watch_state.is_empty() {
-                    watch_state(&daemon_config.watch_paths)
+                    watch_state(&RealMtimeProvider, &daemon_config.watch_paths)
                 } else {
                     snapshot.watch_state
                 };

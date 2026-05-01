@@ -44,7 +44,7 @@ use crate::bridge::HostBridge;
 use crate::orchestration::{AutoCompactConfig, TurnPolicy};
 use crate::value::{VmError, VmValue};
 
-use super::super::daemon::{detect_watch_changes, DaemonLoopConfig};
+use super::super::daemon::{detect_watch_changes, DaemonLoopConfig, RealMtimeProvider};
 use super::super::helpers::transcript_event;
 use super::helpers::{
     action_turn_nudge, append_host_messages_to_recorded, append_message_to_contexts,
@@ -563,6 +563,7 @@ pub(super) async fn run_post_turn(
                 Vec::new()
             } else {
                 detect_watch_changes(
+                    &RealMtimeProvider,
                     &ctx.daemon_config.watch_paths,
                     &mut state.daemon_watch_state,
                 )
