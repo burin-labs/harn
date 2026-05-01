@@ -68,7 +68,7 @@ therefore treat those features as unavailable when connected to Harn.
 | `completion/complete` | Not exposed as a Harn builtin |
 | `roots/list` | Unsupported; Harn does not advertise roots |
 | `sampling/createMessage` | Unsupported; Harn does not advertise sampling |
-| `elicitation/create` | Unsupported; Harn does not advertise elicitation |
+| `elicitation/create` | Supported; Harn advertises elicitation and dispatches inbound requests to the host bridge (`capability="mcp"`, `operation="elicit"`) |
 | MCP task methods and task-augmented requests | Unsupported; Harn does not advertise task support |
 
 ### Disconnecting
@@ -371,7 +371,7 @@ JSON-RPC error containing `error.data.type = "mcp.unsupportedFeature"`.
 | `resources/subscribe`, `resources/unsubscribe` | Explicitly unsupported |
 | `roots/list` | Explicitly unsupported; client-side roots are not served by Harn |
 | `sampling/createMessage` | Explicitly unsupported; Harn does not let connected servers invoke sampling |
-| `elicitation/create` | Explicitly unsupported; Harn does not expose client-side elicitation |
+| `elicitation/create` | Supported outbound from script-driven handlers via `mcp_elicit(...)`; inbound client requests to the server are still rejected as normal unknown methods |
 | `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Explicitly unsupported |
 | `tools/call` with `params.task` | Rejected with `-32602`; task-augmented execution is not advertised |
 
