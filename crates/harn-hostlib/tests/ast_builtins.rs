@@ -6,10 +6,8 @@
 //! includes a perf smoke check against a known input.
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Instant;
 
 use harn_hostlib::{ast::AstCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
@@ -165,35 +163,10 @@ fn outline_caps_depth_when_max_depth_supplied() {
     }
 }
 
-/// Perf smoke test from issue #564: parse a known file within a budget.
-/// We don't pin the exact cutoff because tree-sitter performance varies
-/// across CI machines, but a 20ms budget is comfortable on local dev
-/// hardware and gives ample headroom on CI.
-#[test]
-fn parse_file_meets_perf_budget_on_a_known_input() {
-    let registry = ast_registry();
-    // Use the largest fixture we ship (Rust). Running against an in-tree
-    // fixture keeps the test hermetic and CI-friendly.
-    let path = fixture_path("rust/source.rs");
-    let payload = dict(&[(
-        "path",
-        VmValue::String(Rc::from(path.to_string_lossy().as_ref())),
-    )]);
-
-    // Warm up: first call sometimes pays a one-time grammar load.
-    let _ = invoke(&registry, "hostlib_ast_parse_file", payload.clone());
-
-    let start = Instant::now();
-    let _ = invoke(&registry, "hostlib_ast_parse_file", payload);
-    let elapsed = start.elapsed();
-
-    // 20ms target from the issue. Doubled to 40ms here so the test is
-    // immune to noisy CI; the realistic warm-call latency is sub-1ms.
-    assert!(
-        elapsed.as_millis() < 40,
-        "parse_file took {elapsed:?} (>40ms ceiling)",
-    );
-}
+// Issue #564's 20ms parse-time target moved to a Criterion benchmark
+// (`benches/ast_parse.rs`). Wall-clock perf budgets in tests flake on
+// shared CI runners; Criterion's statistical sampling tracks the same
+// signal without that flake.
 
 // ---------------------------------------------------------------------------
 // Mutation + bracket-balance builtins (issue #775)
@@ -527,33 +500,8 @@ fn undefined_names_marks_unsupported_languages() {
     assert!(diagnostics.is_empty());
 }
 
-#[test]
-fn perf_smoke_against_external_file_when_available() {
-    // Optional maintainer smoke test for a larger real-world file. CI
-    // leaves this unset, so the test remains hermetic by default.
-    let target = std::env::var("HARN_AST_PERF_SMOKE_PATH")
-        .ok()
-        .map(PathBuf::from);
-    let Some(path) = target.filter(|p| p.exists()) else {
-        return;
-    };
-
-    let registry = ast_registry();
-    let payload = dict(&[(
-        "path",
-        VmValue::String(Rc::from(path.to_string_lossy().as_ref())),
-    )]);
-    let _warmup = invoke(&registry, "hostlib_ast_parse_file", payload.clone());
-    let start = Instant::now();
-    let _ = invoke(&registry, "hostlib_ast_parse_file", payload);
-    let elapsed = start.elapsed();
-    let bytes = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-    eprintln!(
-        "external parse_file perf smoke: {elapsed:?} ({} bytes)",
-        bytes
-    );
-    assert!(
-        elapsed.as_millis() < 50,
-        "Package.swift parse took {elapsed:?} (>50ms)"
-    );
-}
+// `perf_smoke_against_external_file_when_available` (env-gated maintainer
+// perf check, never run in CI) was removed alongside the in-tree perf
+// budget assertion. Use `cargo bench --bench ast_parse` for parse latency
+// characterization; it runs against the in-tree fixture without depending
+// on a maintainer-local file.

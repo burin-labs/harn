@@ -176,13 +176,8 @@ fn live_code_index_smoke() {
     let mut registry = BuiltinRegistry::new();
     cap.register_builtins(&mut registry);
 
-    let started = std::time::Instant::now();
     let files_indexed = rebuild(&registry, &path);
-    let elapsed = started.elapsed();
-    eprintln!(
-        "live code-index scenario rebuild: {files_indexed} files in {:.2}s",
-        elapsed.as_secs_f64()
-    );
+    eprintln!("live code-index scenario rebuild: {files_indexed} files");
     assert!(files_indexed > 0);
 
     assert_substring_query_finds(&registry, "TrigramIndex", &["TrigramIndex.swift"]);

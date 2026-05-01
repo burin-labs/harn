@@ -297,11 +297,13 @@ fn seed_legacy_inbox_records(temp: &TempDir) {
     let log = harn_vm::event_log::open_event_log(&config).unwrap();
 
     let legacy_topic = Topic::new(harn_vm::TRIGGER_INBOX_LEGACY_TOPIC).unwrap();
-    let future_expiry_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as i64
-        + 60_000;
+    // Use `i64::MAX` so the dedupe claim is treated as still-active for the
+    // duration of the test regardless of wall-clock skew on shared CI.
+    // `InboxIndex` checks `claim.expires_at_ms > now_ms` (see
+    // `crates/harn-vm/src/triggers/inbox.rs`); a never-expiring fixture lets
+    // us assert the legacy record is honored without scheduling a real
+    // expiry deadline against `SystemTime::now()`.
+    let future_expiry_ms = i64::MAX;
     futures::executor::block_on(log.append(
         &legacy_topic,
         LogEvent::new(
