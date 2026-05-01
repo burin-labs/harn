@@ -103,6 +103,11 @@ at `.claude/skills/harn-scripting/SKILL.md`.
   `npm run portal:build`.
 - If you change the VS Code extension, run `(cd editors/vscode && npm run compile)`.
 - If you change tree-sitter grammar or queries, run `(cd tree-sitter-harn && npm test)`.
+- Do not add `std::thread::sleep`, `tokio::time::sleep`, `Instant::now()` polling loops,
+  `SystemTime::now()`, or short `recv_timeout` calls to test files. These patterns are banned
+  by `make lint-test-patterns`. Use `tokio::time::pause()`/`advance()`, `EventLog::subscribe()`,
+  or `OrchestratorHarness` instead. See `docs/dev/testing.md` for approved patterns and the
+  opt-out procedure.
 
 ## Generated Files And Sync Rules
 

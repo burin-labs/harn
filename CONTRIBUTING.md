@@ -165,6 +165,23 @@ Tests live under `conformance/tests/` (passing) and `conformance/errors/`
 runner discovers `.harn` files recursively, so just drop new tests into
 the subdirectory that best matches their area.
 
+## Writing tests
+
+Wall-clock waits are banned in test files. Do not use `std::thread::sleep`,
+`tokio::time::sleep` (outside a `start_paused = true` test), `Instant::now()`
+polling loops, `SystemTime::now()`, or short `recv_timeout` calls. The
+`make lint-test-patterns` step in CI enforces this.
+
+Use the approved alternatives instead:
+
+- `tokio::time::pause()` + `advance()` for simulating time in async tests
+- `EventLog::subscribe()` + `tokio::time::timeout` for waiting on events
+- `OrchestratorHarness` for orchestrator tests that do not need real subprocesses
+
+See [`docs/src/dev/testing.md`](docs/src/dev/testing.md) for detailed guidance,
+common pitfalls, and the opt-out procedure for cases where a wall-clock wait is
+genuinely unavoidable.
+
 ## Code style
 
 - Clippy warnings are treated as errors -- fix all warnings before committing
