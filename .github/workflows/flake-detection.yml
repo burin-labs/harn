@@ -1,0 +1,80 @@
+name: Flake detection
+
+on:
+  pull_request:
+  merge_group:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Incremental compilation fights sccache; disable on CI.
+  CARGO_INCREMENTAL: "0"
+  HARN_LLM_CALLS_DISABLED: "1"
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  flake-rerun:
+    name: 50x flake rerun (touched tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Detect touched test files
+        id: touched
+        run: |
+          git fetch origin main --depth=1
+          TOUCHED=$(git diff --name-only origin/main...HEAD -- \
+            'crates/**/tests/**' \
+            'crates/**/src/**/tests*.rs' | tr '\n' ' ')
+          FILTER=""
+          if [[ -n "${TOUCHED// }" ]]; then
+            read -ra PATHS <<< "$TOUCHED"
+            FILTER=$(./scripts/nextest_filters_from_paths.sh "${PATHS[@]}" 2>/dev/null || true)
+          fi
+          if [[ -n "$FILTER" ]]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+            echo "filter=$FILTER" >> "$GITHUB_OUTPUT"
+            echo "Touched test filter: $FILTER"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No touched Rust test files detected; skipping flake rerun."
+          fi
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        if: steps.touched.outputs.has_tests == 'true'
+
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+        if: steps.touched.outputs.has_tests == 'true'
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        if: steps.touched.outputs.has_tests == 'true'
+        continue-on-error: true
+        with:
+          shared-key: workspace
+
+      - name: Install cargo-nextest
+        if: steps.touched.outputs.has_tests == 'true'
+        uses: taiki-e/install-action@5f57d6cb7cd20b14a8a27f522884c4bc8a187458 # v2.75.19
+        continue-on-error: true
+        with:
+          tool: nextest@0.9.133
+
+      - name: Build test binaries
+        if: steps.touched.outputs.has_tests == 'true'
+        run: cargo test --no-run --workspace
+
+      - name: 50x flake rerun
+        if: steps.touched.outputs.has_tests == 'true'
+        env:
+          NEXTEST_FILTER: ${{ steps.touched.outputs.filter }}
+        run: |
+          for i in $(seq 50); do
+            printf '--- Iteration %d/50 ---\n' "$i"
+            cargo nextest run \
+              --profile flake-detection \
+              --test-threads 8 \
+              -E "$NEXTEST_FILTER" \
+              || { echo "::error::Flake detected on iteration $i"; exit 1; }
+          done
