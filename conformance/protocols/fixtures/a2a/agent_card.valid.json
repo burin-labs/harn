@@ -21,8 +21,8 @@
       },
       "securitySchemes": {},
       "security": [],
-      "defaultInputModes": ["application/json", "text/plain"],
-      "defaultOutputModes": ["application/json", "text/plain"],
+      "defaultInputModes": ["application/json", "text/plain", "application/octet-stream"],
+      "defaultOutputModes": ["application/json", "text/plain", "application/octet-stream"],
       "capabilities": {
         "streaming": true,
         "pushNotifications": true,
@@ -34,8 +34,8 @@
           "name": "review",
           "description": "Invoke exported Harn function 'review'.",
           "tags": ["harn", "function"],
-          "inputModes": ["application/json", "text/plain"],
-          "outputModes": ["application/json", "text/plain"],
+          "inputModes": ["application/json", "text/plain", "application/octet-stream"],
+          "outputModes": ["application/json", "text/plain", "application/octet-stream"],
           "inputSchema": {
             "type": "object"
           }

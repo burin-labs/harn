@@ -125,6 +125,7 @@ struct TaskState {
     context_id: Option<String>,
     status: TaskStatus,
     history: Vec<TaskMessage>,
+    artifacts: Vec<JsonValue>,
     metadata: BTreeMap<String, JsonValue>,
     push_configs: Vec<JsonValue>,
     events: Vec<JsonValue>,
@@ -240,8 +241,8 @@ impl A2aServer {
                     "description": format!("Invoke exported Harn function '{}'.", function.name),
                     "tags": ["harn", "function"],
                     "examples": [],
-                    "inputModes": ["application/json", "text/plain"],
-                    "outputModes": ["application/json", "text/plain"],
+                    "inputModes": ["application/json", "text/plain", "application/octet-stream"],
+                    "outputModes": ["application/json", "text/plain", "application/octet-stream"],
                     "inputSchema": function.input_schema,
                 })
             })
@@ -263,8 +264,8 @@ impl A2aServer {
             },
             "securitySchemes": {},
             "security": [],
-            "defaultInputModes": ["application/json", "text/plain"],
-            "defaultOutputModes": ["application/json", "text/plain"],
+            "defaultInputModes": ["application/json", "text/plain", "application/octet-stream"],
+            "defaultOutputModes": ["application/json", "text/plain", "application/octet-stream"],
             "capabilities": {
                 "streaming": true,
                 "pushNotifications": true,
@@ -508,13 +509,15 @@ impl A2aServer {
         params: &JsonValue,
         auth: AuthRequest,
     ) -> Result<PreparedTask, A2aPrepareError> {
-        let text = message_text(params);
+        let parts = message_parts(params)?;
+        let text = message_text(params, &parts);
         let function = select_function(&self.catalog, params)?;
         let arguments = message_arguments(
             self.catalog
                 .function(&function)
                 .expect("selected function exists"),
             params,
+            &parts,
             &text,
         )?;
         let task_id = Uuid::now_v7().to_string();
@@ -540,8 +543,9 @@ impl A2aServer {
             history: vec![TaskMessage {
                 id: Uuid::now_v7().to_string(),
                 role: "user".to_string(),
-                parts: vec![json!({"type": "text", "text": text})],
+                parts: parts.clone(),
             }],
+            artifacts: a2a_artifacts_from_parts(&parts),
             metadata: BTreeMap::new(),
             push_configs: push_config.into_iter().collect(),
             events: Vec::new(),
@@ -626,7 +630,8 @@ impl A2aServer {
     }
 
     fn complete_task(&self, task_id: &str, response: CallResponse) {
-        let text = response_text(&response.value);
+        let parts = response_parts(&response.value);
+        let artifacts = response_artifacts(&response.value, &parts);
         let handoff_metadata = handoff_task_metadata(&response);
         let message = json!({
             "type": "message",
@@ -634,7 +639,7 @@ impl A2aServer {
             "message": {
                 "id": Uuid::now_v7().to_string(),
                 "role": "agent",
-                "parts": [{"type": "text", "text": text}]
+                "parts": parts
             }
         });
         let task_for_push = {
@@ -645,8 +650,9 @@ impl A2aServer {
             task.history.push(TaskMessage {
                 id: Uuid::now_v7().to_string(),
                 role: "agent".to_string(),
-                parts: vec![json!({"type": "text", "text": text})],
+                parts,
             });
+            task.artifacts.extend(artifacts);
             if let Some(metadata) = handoff_metadata {
                 task.metadata.extend(metadata);
             }
@@ -1134,7 +1140,7 @@ fn task_to_json(task: &TaskState) -> JsonValue {
         "id": task.id,
         "status": {"state": task.status.as_str()},
         "history": history,
-        "artifacts": [],
+        "artifacts": task.artifacts.clone(),
     });
     if let Some(context_id) = task.context_id.as_ref() {
         value["contextId"] = JsonValue::String(context_id.clone());
@@ -1235,22 +1241,279 @@ fn push_config_id_param(params: &JsonValue) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
-fn message_text(params: &JsonValue) -> String {
-    params
+fn message_parts(params: &JsonValue) -> Result<Vec<JsonValue>, A2aPrepareError> {
+    let parts = params
         .pointer("/message/parts")
         .and_then(JsonValue::as_array)
-        .and_then(|parts| {
-            parts.iter().find_map(|part| {
-                if part.get("type").and_then(JsonValue::as_str) == Some("text") {
-                    part.get("text").and_then(JsonValue::as_str)
-                } else {
-                    None
-                }
-            })
+        .map(|parts| {
+            parts
+                .iter()
+                .enumerate()
+                .map(|(index, part)| normalize_part(part, index))
+                .collect::<Result<Vec<_>, _>>()
         })
-        .or_else(|| params.get("text").and_then(JsonValue::as_str))
-        .unwrap_or_default()
-        .to_string()
+        .transpose()?;
+    if let Some(parts) = parts {
+        if !parts.is_empty() {
+            return Ok(parts);
+        }
+    }
+    Ok(vec![json!({
+        "type": "text",
+        "text": params
+            .get("text")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default()
+    })])
+}
+
+fn message_text(params: &JsonValue, parts: &[JsonValue]) -> String {
+    let text = parts
+        .iter()
+        .filter(|part| part_kind(part) == Some("text"))
+        .filter_map(|part| part.get("text").and_then(JsonValue::as_str))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if text.is_empty() {
+        params
+            .get("text")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default()
+            .to_string()
+    } else {
+        text
+    }
+}
+
+fn normalize_part(part: &JsonValue, index: usize) -> Result<JsonValue, A2aPrepareError> {
+    let Some(object) = part.as_object() else {
+        return Err(A2aPrepareError::new(
+            -32602,
+            format!("A2A message part {index} must be an object"),
+        ));
+    };
+    let kind = part_kind(part);
+    match kind {
+        Some("text") | None if object.contains_key("text") => {
+            let text = part
+                .get("text")
+                .and_then(JsonValue::as_str)
+                .ok_or_else(|| {
+                    A2aPrepareError::new(-32602, format!("A2A text part {index} requires text"))
+                })?;
+            let mut normalized = json!({"type": "text", "text": text});
+            copy_optional_part_fields(part, &mut normalized);
+            Ok(normalized)
+        }
+        Some("file") | None if object.contains_key("file") || has_flat_file_fields(part) => {
+            let file = normalize_file_part(part, index)?;
+            let mut normalized = json!({"type": "file", "file": file});
+            copy_optional_part_fields(part, &mut normalized);
+            Ok(normalized)
+        }
+        Some("data") | None if object.contains_key("data") => {
+            let data = part.get("data").cloned().ok_or_else(|| {
+                A2aPrepareError::new(-32602, format!("A2A data part {index} requires data"))
+            })?;
+            let mut normalized = json!({"type": "data", "data": data});
+            copy_optional_part_fields(part, &mut normalized);
+            Ok(normalized)
+        }
+        Some(kind) => Err(A2aPrepareError::new(
+            -32602,
+            format!("unsupported A2A message part type '{kind}' at index {index}"),
+        )),
+        None => Err(A2aPrepareError::new(
+            -32602,
+            format!("A2A message part {index} requires text, file, or data content"),
+        )),
+    }
+}
+
+fn part_kind(part: &JsonValue) -> Option<&str> {
+    part.get("type")
+        .or_else(|| part.get("kind"))
+        .and_then(JsonValue::as_str)
+}
+
+fn has_flat_file_fields(part: &JsonValue) -> bool {
+    part.get("bytes").is_some() || part.get("uri").is_some()
+}
+
+fn copy_optional_part_fields(source: &JsonValue, target: &mut JsonValue) {
+    for field in ["metadata", "mediaType"] {
+        if let Some(value) = source.get(field) {
+            target[field] = value.clone();
+        }
+    }
+}
+
+fn normalize_file_part(part: &JsonValue, index: usize) -> Result<JsonValue, A2aPrepareError> {
+    let source = part.get("file").unwrap_or(part);
+    let bytes = source
+        .get("bytes")
+        .and_then(JsonValue::as_str)
+        .filter(|value| !value.is_empty());
+    let uri = source
+        .get("uri")
+        .and_then(JsonValue::as_str)
+        .filter(|value| !value.is_empty());
+    match (bytes, uri) {
+        (Some(_), Some(_)) => {
+            return Err(A2aPrepareError::new(
+                -32602,
+                format!("A2A file part {index} must contain exactly one of bytes or uri"),
+            ));
+        }
+        (None, None) => {
+            return Err(A2aPrepareError::new(
+                -32602,
+                format!("A2A file part {index} requires bytes or uri"),
+            ));
+        }
+        (Some(bytes), None) => {
+            base64::engine::general_purpose::STANDARD
+                .decode(bytes.as_bytes())
+                .map_err(|error| {
+                    A2aPrepareError::new(
+                        -32602,
+                        format!("A2A file part {index} bytes must be base64: {error}"),
+                    )
+                })?;
+        }
+        (None, Some(_)) => {}
+    }
+
+    let mut file = json!({});
+    if let Some(bytes) = bytes {
+        file["bytes"] = JsonValue::String(bytes.to_string());
+    }
+    if let Some(uri) = uri {
+        file["uri"] = JsonValue::String(uri.to_string());
+    }
+    if let Some(mime_type) = source
+        .get("mimeType")
+        .or_else(|| source.get("mime_type"))
+        .and_then(JsonValue::as_str)
+        .filter(|value| !value.is_empty())
+    {
+        file["mimeType"] = JsonValue::String(mime_type.to_string());
+    } else {
+        file["mimeType"] = JsonValue::String("application/octet-stream".to_string());
+    }
+    if let Some(name) = source
+        .get("name")
+        .or_else(|| source.get("filename"))
+        .and_then(JsonValue::as_str)
+        .filter(|value| !value.is_empty())
+    {
+        file["name"] = JsonValue::String(name.to_string());
+    }
+    Ok(file)
+}
+
+fn artifacts_from_parts(parts: &[JsonValue]) -> Vec<JsonValue> {
+    parts
+        .iter()
+        .enumerate()
+        .filter_map(|(index, part)| artifact_from_part(index, part))
+        .collect()
+}
+
+fn a2a_artifacts_from_parts(parts: &[JsonValue]) -> Vec<JsonValue> {
+    artifacts_from_parts(parts)
+        .iter()
+        .map(a2a_artifact_from_harn_artifact)
+        .collect()
+}
+
+fn artifact_from_part(index: usize, part: &JsonValue) -> Option<JsonValue> {
+    match part_kind(part)? {
+        "file" => {
+            let file = part.get("file")?;
+            let id = part
+                .pointer("/metadata/artifact_id")
+                .or_else(|| part.pointer("/metadata/id"))
+                .and_then(JsonValue::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("a2a-file-{index}"));
+            Some(json!({
+                "_type": "artifact",
+                "id": id,
+                "kind": "file",
+                "title": file.get("name").and_then(JsonValue::as_str).unwrap_or("file"),
+                "data": file,
+                "metadata": {
+                    "a2a_part_index": index,
+                    "mimeType": file.get("mimeType").cloned().unwrap_or(JsonValue::Null)
+                }
+            }))
+        }
+        "data" => {
+            let id = part
+                .pointer("/metadata/artifact_id")
+                .or_else(|| part.pointer("/metadata/id"))
+                .and_then(JsonValue::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("a2a-data-{index}"));
+            Some(json!({
+                "_type": "artifact",
+                "id": id,
+                "kind": "data",
+                "title": "structured data",
+                "data": part.get("data").cloned().unwrap_or(JsonValue::Null),
+                "metadata": {
+                    "a2a_part_index": index
+                }
+            }))
+        }
+        _ => None,
+    }
+}
+
+fn message_argument_payload(params: &JsonValue, parts: &[JsonValue], text: &str) -> JsonValue {
+    let mut message = params
+        .get("message")
+        .cloned()
+        .unwrap_or_else(|| json!({"role": "user"}));
+    message["parts"] = JsonValue::Array(parts.to_vec());
+    if message.get("role").and_then(JsonValue::as_str).is_none() {
+        message["role"] = JsonValue::String("user".to_string());
+    }
+
+    let mut payload = json!({
+        "message": message,
+        "parts": parts,
+        "text": text,
+        "artifacts": artifacts_from_parts(parts),
+    });
+    if let Some(context_id) = params.get("contextId").cloned() {
+        payload["contextId"] = context_id;
+    }
+    payload
+}
+
+fn param_accepts_structured_message(param: &crate::ExportedParam, parts: &[JsonValue]) -> bool {
+    let has_non_text = parts.iter().any(|part| part_kind(part) != Some("text"));
+    if !has_non_text {
+        return false;
+    }
+    param
+        .type_expr
+        .as_ref()
+        .is_some_and(type_expr_accepts_json_object)
+        || param.input_schema.get("type").and_then(JsonValue::as_str) == Some("object")
+}
+
+fn type_expr_accepts_json_object(type_expr: &harn_parser::TypeExpr) -> bool {
+    match type_expr {
+        harn_parser::TypeExpr::Named(name) => name == "dict",
+        harn_parser::TypeExpr::Shape(_) | harn_parser::TypeExpr::DictType(_, _) => true,
+        harn_parser::TypeExpr::Union(types) | harn_parser::TypeExpr::Intersection(types) => {
+            types.iter().any(type_expr_accepts_json_object)
+        }
+        _ => false,
+    }
 }
 
 fn caller_label(params: &JsonValue) -> String {
@@ -1307,6 +1570,7 @@ fn select_function(catalog: &ExportCatalog, params: &JsonValue) -> Result<String
 fn message_arguments(
     function: &crate::ExportedFunction,
     params: &JsonValue,
+    parts: &[JsonValue],
     text: &str,
 ) -> Result<CallArguments, A2aPrepareError> {
     if let Some(arguments) = params
@@ -1330,9 +1594,14 @@ fn message_arguments(
             "A2A task text can only be inferred for a single-argument export or a task/message/input parameter",
         ));
     };
+    let value = if param_accepts_structured_message(param, parts) {
+        message_argument_payload(params, parts, text)
+    } else {
+        JsonValue::String(text.to_string())
+    };
     Ok(CallArguments::Named(BTreeMap::from([(
         param.name.clone(),
-        JsonValue::String(text.to_string()),
+        value,
     )])))
 }
 
@@ -1353,6 +1622,197 @@ fn response_text(value: &JsonValue) -> String {
         JsonValue::String(text) => text.clone(),
         _ => serde_json::to_string(value).unwrap_or_else(|_| value.to_string()),
     }
+}
+
+fn response_parts(value: &JsonValue) -> Vec<JsonValue> {
+    for pointer in ["/parts", "/message/parts", "/result/parts"] {
+        if let Some(parts) = value.pointer(pointer).and_then(JsonValue::as_array) {
+            let normalized = parts
+                .iter()
+                .enumerate()
+                .filter_map(|(index, part)| normalize_part(part, index).ok())
+                .collect::<Vec<_>>();
+            if !normalized.is_empty() {
+                return normalized;
+            }
+        }
+    }
+
+    let mut parts = Vec::new();
+    if let Some(text) = value
+        .get("visible_text")
+        .or_else(|| value.get("text"))
+        .and_then(JsonValue::as_str)
+        .filter(|text| !text.is_empty())
+    {
+        parts.push(json!({"type": "text", "text": text}));
+    }
+
+    for artifact in artifacts_in_value(value) {
+        if let Some(part) = part_from_artifact(artifact) {
+            parts.push(part);
+        }
+    }
+
+    if parts.is_empty() {
+        parts.push(json!({"type": "text", "text": response_text(value)}));
+    }
+    parts
+}
+
+fn response_artifacts(value: &JsonValue, parts: &[JsonValue]) -> Vec<JsonValue> {
+    let artifacts = artifacts_in_value(value)
+        .into_iter()
+        .map(a2a_artifact_from_harn_artifact)
+        .collect::<Vec<_>>();
+    if artifacts.is_empty() {
+        a2a_artifacts_from_parts(parts)
+    } else {
+        artifacts
+    }
+}
+
+fn artifacts_in_value(value: &JsonValue) -> Vec<&JsonValue> {
+    let mut artifacts = Vec::new();
+    if is_harn_artifact(value) {
+        artifacts.push(value);
+    }
+    for pointer in ["/artifacts", "/run/artifacts", "/result/artifacts"] {
+        if let Some(items) = value.pointer(pointer).and_then(JsonValue::as_array) {
+            artifacts.extend(items.iter().filter(|item| is_harn_artifact(item)));
+        }
+    }
+    artifacts
+}
+
+fn is_harn_artifact(value: &JsonValue) -> bool {
+    value.get("_type").and_then(JsonValue::as_str) == Some("artifact")
+        || value.get("kind").and_then(JsonValue::as_str).is_some()
+            && (value.get("data").is_some()
+                || value.get("text").is_some()
+                || value.get("metadata").is_some())
+}
+
+fn part_from_artifact(artifact: &JsonValue) -> Option<JsonValue> {
+    let kind = artifact
+        .get("kind")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("");
+    if let Some(file) = file_part_from_artifact(artifact, kind) {
+        return Some(file);
+    }
+    if kind == "data" || kind == "handoff" {
+        return Some(json!({
+            "type": "data",
+            "data": artifact.get("data").cloned().unwrap_or_else(|| artifact.clone()),
+            "metadata": {
+                "artifact_id": artifact.get("id").cloned().unwrap_or(JsonValue::Null),
+                "artifact_kind": kind,
+            }
+        }));
+    }
+    None
+}
+
+fn file_part_from_artifact(artifact: &JsonValue, kind: &str) -> Option<JsonValue> {
+    let data = artifact.get("data");
+    let metadata = artifact.get("metadata");
+    let bytes = data
+        .and_then(|data| data.get("bytes").or_else(|| data.get("bytes_base64")))
+        .and_then(JsonValue::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            if matches!(kind, "workspace_file" | "file") {
+                data.and_then(|data| data.get("content"))
+                    .or_else(|| artifact.get("text"))
+                    .and_then(JsonValue::as_str)
+                    .map(|content| {
+                        base64::engine::general_purpose::STANDARD.encode(content.as_bytes())
+                    })
+            } else {
+                None
+            }
+        });
+    let uri = data
+        .and_then(|data| data.get("uri").or_else(|| data.get("url")))
+        .or_else(|| {
+            metadata.and_then(|metadata| metadata.get("uri").or_else(|| metadata.get("url")))
+        })
+        .and_then(JsonValue::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if bytes.is_none() && uri.is_none() && !matches!(kind, "file" | "workspace_file") {
+        return None;
+    }
+    let mut file = json!({});
+    if let Some(bytes) = bytes {
+        file["bytes"] = JsonValue::String(bytes);
+    } else if let Some(uri) = uri {
+        file["uri"] = JsonValue::String(uri);
+    } else {
+        return None;
+    }
+    file["mimeType"] = JsonValue::String(
+        data.and_then(|data| data.get("mimeType").or_else(|| data.get("mime_type")))
+            .or_else(|| {
+                metadata.and_then(|metadata| {
+                    metadata
+                        .get("mimeType")
+                        .or_else(|| metadata.get("mime_type"))
+                })
+            })
+            .and_then(JsonValue::as_str)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(if kind == "workspace_file" {
+                "text/plain"
+            } else {
+                "application/octet-stream"
+            })
+            .to_string(),
+    );
+    if let Some(name) = data
+        .and_then(|data| data.get("name").or_else(|| data.get("filename")))
+        .or_else(|| metadata.and_then(|metadata| metadata.get("path")))
+        .or_else(|| artifact.get("title"))
+        .and_then(JsonValue::as_str)
+        .filter(|value| !value.is_empty())
+    {
+        file["name"] = JsonValue::String(name.to_string());
+    }
+    Some(json!({
+        "type": "file",
+        "file": file,
+        "metadata": {
+            "artifact_id": artifact.get("id").cloned().unwrap_or(JsonValue::Null),
+            "artifact_kind": kind,
+        }
+    }))
+}
+
+fn a2a_artifact_from_harn_artifact(artifact: &JsonValue) -> JsonValue {
+    let part = part_from_artifact(artifact).unwrap_or_else(|| {
+        json!({
+            "type": "data",
+            "data": artifact,
+        })
+    });
+    let mut value = json!({
+        "artifactId": artifact
+            .get("id")
+            .and_then(JsonValue::as_str)
+            .unwrap_or("artifact"),
+        "name": artifact
+            .get("title")
+            .or_else(|| artifact.get("kind"))
+            .and_then(JsonValue::as_str)
+            .unwrap_or("artifact"),
+        "parts": [part],
+    });
+    if let Some(metadata) = artifact.get("metadata") {
+        value["metadata"] = metadata.clone();
+    }
+    value
 }
 
 fn http_auth_request(
@@ -1552,11 +2012,11 @@ mod tests {
         assert_eq!(card["security"], json!([]));
         assert_eq!(
             card["defaultInputModes"],
-            json!(["application/json", "text/plain"])
+            json!(["application/json", "text/plain", "application/octet-stream"])
         );
         assert_eq!(
             card["defaultOutputModes"],
-            json!(["application/json", "text/plain"])
+            json!(["application/json", "text/plain", "application/octet-stream"])
         );
         assert_eq!(card["capabilities"]["streaming"], true);
         assert_eq!(card["capabilities"]["pushNotifications"], true);
@@ -1565,11 +2025,11 @@ mod tests {
         assert_eq!(card["skills"][0]["tags"], json!(["harn", "function"]));
         assert_eq!(
             card["skills"][0]["inputModes"],
-            json!(["application/json", "text/plain"])
+            json!(["application/json", "text/plain", "application/octet-stream"])
         );
         assert_eq!(
             card["skills"][0]["outputModes"],
-            json!(["application/json", "text/plain"])
+            json!(["application/json", "text/plain", "application/octet-stream"])
         );
     }
 
@@ -1836,6 +2296,122 @@ pub fn triage(task: string) -> string {
     }
 
     #[tokio::test]
+    async fn send_message_round_trips_file_and_data_parts() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r#"
+pub fn triage(message: dict) -> dict {
+  return message
+}
+"#,
+        )
+        .expect("write script");
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+        let request = harn_vm::jsonrpc::request(
+            "parts-1",
+            "message/send",
+            json!({
+                "message": {
+                    "metadata": {"target_agent": "triage"},
+                    "parts": [
+                        {"type": "text", "text": "inspect attachments"},
+                        {
+                            "type": "file",
+                            "file": {
+                                "bytes": "AAEC/w==",
+                                "mimeType": "application/octet-stream",
+                                "name": "payload.bin"
+                            }
+                        },
+                        {
+                            "kind": "file",
+                            "file": {
+                                "uri": "https://example.test/report.pdf",
+                                "mimeType": "application/pdf",
+                                "name": "report.pdf"
+                            }
+                        },
+                        {
+                            "type": "data",
+                            "data": {"ticket": "HARN-891", "priority": 2}
+                        }
+                    ]
+                }
+            }),
+        );
+
+        let processed = server.process_rpc(request, AuthRequest::default()).await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected json response");
+        };
+
+        assert_eq!(response["result"]["status"]["state"], "completed");
+        let user_parts = response["result"]["history"][0]["parts"]
+            .as_array()
+            .expect("user parts");
+        assert_eq!(user_parts[1]["type"], "file");
+        assert_eq!(user_parts[1]["file"]["bytes"], "AAEC/w==");
+        assert_eq!(
+            user_parts[2]["file"]["uri"],
+            "https://example.test/report.pdf"
+        );
+        assert_eq!(user_parts[3]["type"], "data");
+        assert_eq!(user_parts[3]["data"]["ticket"], "HARN-891");
+
+        let agent_parts = response["result"]["history"][1]["parts"]
+            .as_array()
+            .expect("agent parts");
+        assert_eq!(agent_parts, user_parts);
+        assert!(response["result"]["artifacts"]
+            .as_array()
+            .expect("artifacts")
+            .iter()
+            .any(|artifact| artifact["parts"][0]["type"] == "file"));
+    }
+
+    #[test]
+    fn response_artifacts_emit_file_and_data_parts() {
+        let response = json!({
+            "visible_text": "done",
+            "artifacts": [
+                {
+                    "_type": "artifact",
+                    "id": "artifact_file",
+                    "kind": "file",
+                    "title": "payload.bin",
+                    "data": {
+                        "bytes": "AAEC/w==",
+                        "mimeType": "application/octet-stream",
+                        "name": "payload.bin"
+                    }
+                },
+                {
+                    "_type": "artifact",
+                    "id": "artifact_data",
+                    "kind": "data",
+                    "data": {"answer": 42}
+                }
+            ]
+        });
+
+        let parts = super::response_parts(&response);
+        assert_eq!(parts[0], json!({"type": "text", "text": "done"}));
+        assert_eq!(parts[1]["type"], "file");
+        assert_eq!(parts[1]["file"]["bytes"], "AAEC/w==");
+        assert_eq!(parts[1]["file"]["mimeType"], "application/octet-stream");
+        assert_eq!(parts[2]["type"], "data");
+        assert_eq!(parts[2]["data"]["answer"], 42);
+
+        let artifacts = super::response_artifacts(&response, &parts);
+        assert_eq!(artifacts[0]["artifactId"], "artifact_file");
+        assert_eq!(artifacts[0]["parts"][0]["type"], "file");
+        assert_eq!(artifacts[1]["parts"][0]["type"], "data");
+    }
+
+    #[tokio::test]
     async fn send_message_surfaces_handoff_metadata() {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("server.harn");
@@ -2010,6 +2586,7 @@ pub fn triage(task: string) -> string {
             context_id: None,
             status: TaskStatus::Working,
             history: Vec::new(),
+            artifacts: Vec::new(),
             metadata: BTreeMap::new(),
             push_configs: Vec::new(),
             events: Vec::new(),
@@ -2065,6 +2642,7 @@ pub fn triage(task: string) -> string {
             context_id: None,
             status: TaskStatus::Working,
             history: Vec::new(),
+            artifacts: Vec::new(),
             metadata: BTreeMap::new(),
             push_configs: Vec::new(),
             events: Vec::new(),
@@ -2136,6 +2714,7 @@ pub fn run(task: string) -> string {
                     context_id: None,
                     status: TaskStatus::Working,
                     history: Vec::new(),
+                    artifacts: Vec::new(),
                     metadata: BTreeMap::new(),
                     push_configs: Vec::new(),
                     events: Vec::new(),

@@ -297,11 +297,49 @@
         },
         {
           "type": "object",
-          "required": ["data"],
+          "required": ["type", "file"],
           "additionalProperties": true,
           "properties": {
+            "type": { "const": "file" },
+            "file": { "$ref": "#/$defs/FileContent" },
+            "metadata": { "type": "object" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "data"],
+          "additionalProperties": true,
+          "properties": {
+            "type": { "const": "data" },
             "data": {},
+            "metadata": { "type": "object" },
             "mediaType": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "FileContent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["bytes"],
+          "not": { "required": ["uri"] },
+          "additionalProperties": true,
+          "properties": {
+            "bytes": { "type": "string", "minLength": 1 },
+            "mimeType": { "type": "string" },
+            "name": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["uri"],
+          "not": { "required": ["bytes"] },
+          "additionalProperties": true,
+          "properties": {
+            "uri": { "type": "string", "minLength": 1 },
+            "mimeType": { "type": "string" },
+            "name": { "type": "string" }
           }
         }
       ]
