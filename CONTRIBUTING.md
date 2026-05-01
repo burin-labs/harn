@@ -51,6 +51,29 @@ What triggers a cold rebuild:
 On macOS, Spotlight may index freshly-linked test binaries on first run,
 adding ~30–60 s of stat traffic unrelated to cargo.
 
+### Test tiers
+
+The workspace splits tests into two tiers to keep the pre-push hook fast:
+
+**Fast suite** — `make test`
+
+In-process, deterministic, zero subprocess-per-test. Wall-clock budget: <2 min
+on a warm cache. Runs automatically on pre-push and on every PR. The nextest
+`default` and `ci` profiles exclude the `harn-cli` integration test binaries
+(those live in `crates/harn-cli/tests/` and spawn the compiled `harn` binary as
+a subprocess).
+
+**Slow E2E suite** — `make test-e2e`
+
+Subprocess-spawning binary surface tests: CLI invocation, signal handling, MCP
+server launch, real `ProcessHandle` smoke, orchestrator drain/replay, etc. Uses
+the nextest `e2e` profile, which targets `package(harn-cli) and kind(test)`.
+Runs on:
+
+- Schedule — nightly at 3 AM UTC (`.github/workflows/e2e.yml`)
+- `e2e` PR label — add the label to opt in before merge
+- Merge-queue — the `e2e` job in `ci.yml` runs before a PR lands
+
 ### Preferred Rust test path
 
 `make test` is the default Rust workspace test entry point. When
@@ -63,12 +86,13 @@ manually:
 
 ```bash
 cargo install cargo-nextest --locked
-make test
+make test       # fast suite
+make test-e2e   # slow E2E suite (requires nextest)
 ```
 
 The workspace `.config/nextest.toml` applies a 15 s slow-test threshold by
 default and a 60 s hard termination cap. Tests that legitimately need more
-time (the LLM transport tests) have targeted overrides.
+time (the LLM transport tests, E2E subprocess tests) have targeted overrides.
 
 If you need the baseline Cargo behavior explicitly, use:
 
@@ -84,6 +108,7 @@ make bench-vm    # opt-in interpreter microbenchmark suite
 make portal      # launch the local Harn observability portal
 make setup       # rerun repo bootstrap
 make test-cargo  # force plain cargo test --workspace
+make test-e2e    # run slow E2E / smoke suite
 ```
 
 This runs:

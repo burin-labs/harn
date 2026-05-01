@@ -7,6 +7,10 @@
 # bound a `TcpListener` in blocking mode have hung CI for many minutes).
 
 [profile.default]
+# Fast suite only — subprocess-spawning integration tests run via `make test-e2e`
+# (nextest profile "e2e"). This keeps the pre-push hook and PR suite under 2 min
+# on a warm cache. See CONTRIBUTING.md for the two-tier test model.
+default-filter = "not (package(harn-cli) and kind(test))"
 # Any test that runs longer than 15s is considered "slow"; if it exceeds
 # the 60s hard cap three times it is terminated so the suite keeps moving.
 slow-timeout = { period = "15s", terminate-after = 4, grace-period = "5s" }
@@ -24,9 +28,23 @@ leak-timeout = { period = "5s", result = "fail" }
 fail-fast = false
 
 # CI profile is stricter: one warning at 30s, hard kill at 120s.
+# Inherits the same default-filter as the default profile (fast suite only).
 [profile.ci]
+default-filter = "not (package(harn-cli) and kind(test))"
 slow-timeout = { period = "30s", terminate-after = 4, grace-period = "10s" }
 leak-timeout = { period = "5s", result = "fail" }
+fail-fast = false
+failure-output = "immediate-final"
+success-output = "never"
+
+# E2E profile: subprocess-spawning integration tests — CLI invocation, signal
+# handling, MCP server launch, real ProcessHandle, real process tools.
+# Run with `make test-e2e` or `cargo nextest run --profile e2e`.
+# Triggered nightly, on the `e2e` PR label, and on merge-queue.
+[profile.e2e]
+default-filter = "package(harn-cli) and kind(test)"
+slow-timeout = { period = "60s", terminate-after = 3, grace-period = "15s" }
+leak-timeout = { period = "15s", result = "pass" }
 fail-fast = false
 failure-output = "immediate-final"
 success-output = "never"
@@ -156,3 +174,10 @@ leak-timeout = { period = "10s", result = "pass" }
 [[profile.flake-detection.overrides]]
 filter = "package(harn-dap)"
 test-group = "harn-dap"
+
+# E2E profile overrides: throttle subprocess concurrency the same way the
+# default/ci profiles do so nightly runs stay deterministic.
+[[profile.e2e.overrides]]
+filter = "package(harn-cli) and kind(test)"
+test-group = "harn-subprocess"
+leak-timeout = { period = "15s", result = "pass" }

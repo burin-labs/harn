@@ -1,0 +1,46 @@
+name: E2E
+
+# Slow E2E / smoke suite — subprocess-spawning binary surface tests.
+# Runs:
+#   - nightly (3 AM UTC)
+#   - when the `e2e` label is added to a pull request
+#   - manually via workflow_dispatch
+#
+# The merge-queue E2E run lives in ci.yml (needs the same check-status gate).
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  e2e:
+    name: Slow E2E suite
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e'))
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        continue-on-error: true
+        with:
+          shared-key: e2e
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@5f57d6cb7cd20b14a8a27f522884c4bc8a187458 # v2.75.19
+        with:
+          tool: nextest@0.9.133
+      - run: make test-e2e
+        env:
+          NEXTEST_PROFILE: e2e

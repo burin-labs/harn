@@ -51,7 +51,16 @@ fi
 
 echo "=== Pre-push: running fast release-quality checks ==="
 if hook_paths_match "$changed" "$HOOK_TEST_PATTERN"; then
-  make test
+  test_start=$(date +%s)
+  make test || exit 1
+  test_elapsed=$(( $(date +%s) - test_start ))
+  if [ "$test_elapsed" -gt 120 ]; then
+    echo ""
+    echo "error: pre-push 'make test' exceeded 120s budget (took ${test_elapsed}s)" >&2
+    echo "hint: Move slow tests to the e2e suite (cargo nextest profile 'e2e')." >&2
+    echo "      See CONTRIBUTING.md for the two-tier test model." >&2
+    exit 2
+  fi
 else
   echo "=== Pre-push: skipping Rust/Harn tests (no code changes) ==="
 fi
