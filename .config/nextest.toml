@@ -123,3 +123,36 @@ leak-timeout = { period = "10s", result = "pass" }
 [[profile.ci.overrides]]
 filter = "package(harn-dap)"
 test-group = "harn-dap"
+
+# Flake-detection profile: zero retries, no fail-fast, tighter slow-test
+# threshold.  Used by the flake-detection CI workflow which runs touched
+# test binaries 50× at --test-threads=8.
+#
+# Profile overrides do NOT inherit from [[profile.default.overrides]], so
+# the subprocess-group caps and leak-timeout exemptions must be duplicated
+# here to avoid false "leaky" failures and DAP teardown races.
+[profile.flake-detection]
+retries = 0
+slow-timeout = { period = "15s", terminate-after = 4, grace-period = "5s" }
+leak-timeout = { period = "5s", result = "fail" }
+fail-fast = false
+failure-output = "immediate-final"
+success-output = "never"
+
+[[profile.flake-detection.overrides]]
+filter = 'package(harn-vm) and test(/llm::api::tests/)'
+slow-timeout = { period = "30s", terminate-after = 3, grace-period = "5s" }
+
+[[profile.flake-detection.overrides]]
+filter = "package(harn-cli) and kind(test)"
+test-group = "harn-subprocess"
+leak-timeout = { period = "10s", result = "pass" }
+
+[[profile.flake-detection.overrides]]
+filter = "package(harn-cli) and binary(harn)"
+test-group = "harn-cli-bin"
+leak-timeout = { period = "10s", result = "pass" }
+
+[[profile.flake-detection.overrides]]
+filter = "package(harn-dap)"
+test-group = "harn-dap"
