@@ -1,0 +1,155 @@
+{
+  "_type": "merge_captain_playground_scenario",
+  "scenario": "three_repo_basic",
+  "description": "Three repos with the canonical PR states the Merge Captain has to reason about: green-ready, behind-base, lockfile-conflict, failing-CI. Use as the default playground for brute-force tuning.",
+  "owner": "burin-labs",
+  "repos": [
+    {
+      "name": "alpha",
+      "default_branch": "main",
+      "files": {
+        "README.md": "# alpha\n\nMerge Captain playground seed for the green-ready PR.\n",
+        "src/lib.rs": "pub fn alpha() -> &'static str { \"alpha\" }\n"
+      },
+      "branches": [
+        {
+          "name": "feature/green-ready",
+          "files_set": {
+            "src/lib.rs": "pub fn alpha() -> &'static str { \"alpha\" }\npub fn alpha2() -> &'static str { \"alpha2\" }\n"
+          },
+          "commit_message": "feat(alpha): add alpha2"
+        }
+      ]
+    },
+    {
+      "name": "beta",
+      "default_branch": "main",
+      "files": {
+        "README.md": "# beta\n\nMerge Captain playground seed for the behind-base + lockfile PR.\n",
+        "Cargo.toml": "[package]\nname = \"beta\"\nversion = \"0.1.0\"\n",
+        "Cargo.lock": "# Lockfile v3\n[[package]]\nname = \"beta\"\nversion = \"0.1.0\"\n"
+      },
+      "default_branch_extra_commits": [
+        {
+          "message": "chore(beta): bump deps on main",
+          "files_set": {
+            "Cargo.lock": "# Lockfile v3\n[[package]]\nname = \"beta\"\nversion = \"0.1.1\"\n"
+          }
+        }
+      ],
+      "branches": [
+        {
+          "name": "feature/behind-base",
+          "fork_before_extra_commits": true,
+          "files_set": {
+            "Cargo.lock": "# Lockfile v3\n[[package]]\nname = \"beta\"\nversion = \"0.1.0\"\n[[package]]\nname = \"beta-dep\"\nversion = \"0.1.0\"\n",
+            "src/lib.rs": "pub fn beta() -> &'static str { \"beta\" }\n"
+          },
+          "commit_message": "feat(beta): add beta-dep before main bumped"
+        }
+      ]
+    },
+    {
+      "name": "gamma",
+      "default_branch": "main",
+      "files": {
+        "README.md": "# gamma\n\nMerge Captain playground seed for the failing-CI PR.\n",
+        "src/main.rs": "fn main() { println!(\"hi\"); }\n"
+      },
+      "branches": [
+        {
+          "name": "feature/failing-ci",
+          "files_set": {
+            "src/main.rs": "fn main() { println!(\"oops\")  // syntax error\n}\n"
+          },
+          "commit_message": "feat(gamma): wire new entrypoint"
+        }
+      ]
+    }
+  ],
+  "pull_requests": [
+    {
+      "repo": "alpha",
+      "number": 101,
+      "title": "alpha: add alpha2",
+      "body": "Adds a tiny helper. Should sail through.",
+      "state": "open",
+      "head_branch": "feature/green-ready",
+      "base_branch": "main",
+      "user": "alice",
+      "labels": ["ready-to-merge"],
+      "checks": [
+        {"name": "ci", "status": "completed", "conclusion": "success"},
+        {"name": "lint", "status": "completed", "conclusion": "success"}
+      ],
+      "mergeable": true,
+      "mergeable_state": "clean"
+    },
+    {
+      "repo": "beta",
+      "number": 202,
+      "title": "beta: introduce beta-dep",
+      "body": "Predates the main lockfile bump — captain should flag and rebase.",
+      "state": "open",
+      "head_branch": "feature/behind-base",
+      "base_branch": "main",
+      "user": "bob",
+      "labels": ["needs-rebase"],
+      "checks": [
+        {"name": "ci", "status": "completed", "conclusion": "success"}
+      ],
+      "mergeable": false,
+      "mergeable_state": "behind"
+    },
+    {
+      "repo": "gamma",
+      "number": 303,
+      "title": "gamma: rewrite entrypoint",
+      "body": "CI is failing — captain should hand off to the author.",
+      "state": "open",
+      "head_branch": "feature/failing-ci",
+      "base_branch": "main",
+      "user": "carol",
+      "labels": [],
+      "checks": [
+        {"name": "ci", "status": "completed", "conclusion": "failure", "details_url": "https://example.invalid/ci/303"}
+      ],
+      "mergeable": true,
+      "mergeable_state": "unstable"
+    }
+  ],
+  "steps": [
+    {
+      "name": "alpha_pass_to_merge_queue",
+      "description": "Promote the green-ready PR through the merge queue.",
+      "actions": [
+        {"kind": "set_merge_queue_status", "repo": "alpha", "pr_number": 101, "status": "queued"},
+        {"kind": "set_merge_queue_status", "repo": "alpha", "pr_number": 101, "status": "merged"},
+        {"kind": "merge_pull_request", "repo": "alpha", "pr_number": 101, "merge_method": "queue"}
+      ]
+    },
+    {
+      "name": "beta_advance_main",
+      "description": "Land another commit on main so the behind-base PR's mergeable_state stays behind.",
+      "actions": [
+        {"kind": "advance_base", "repo": "beta", "files_set": {"Cargo.lock": "# Lockfile v3\n[[package]]\nname = \"beta\"\nversion = \"0.1.2\"\n"}, "commit_message": "chore(beta): another lockfile bump"}
+      ]
+    },
+    {
+      "name": "gamma_force_push_fix",
+      "description": "Author force-pushes a corrected entrypoint and CI flips green.",
+      "actions": [
+        {"kind": "force_push_author", "repo": "gamma", "branch": "feature/failing-ci", "files_set": {"src/main.rs": "fn main() { println!(\"hi\"); }\n"}, "commit_message": "fix(gamma): repair entrypoint"},
+        {"kind": "set_check", "repo": "gamma", "pr_number": 303, "name": "ci", "status": "completed", "conclusion": "success"},
+        {"kind": "set_mergeability", "repo": "gamma", "pr_number": 303, "mergeable": true, "mergeable_state": "clean"}
+      ]
+    },
+    {
+      "name": "advance_clock_one_minute",
+      "description": "Advance the playground clock by 60 seconds. Useful for steady-state tests of staleness.",
+      "actions": [
+        {"kind": "advance_time_ms", "ms": 60000}
+      ]
+    }
+  ]
+}

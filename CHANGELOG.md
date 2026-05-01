@@ -62,6 +62,23 @@ condensed series summaries instead of full per-patch history.
   timeout-tier receipt pins, JSONL transcript streaming, persisted receipts,
   run summaries, and a checked-in mock smoke scenario.
 
+- **Merge Captain mock-repos playground (#1020).** New
+  `harn merge-captain mock {init,step,status,serve,cleanup,scenarios}`
+  subcommand tree materializing a real on-disk sandbox: bare + working git
+  repos seeded from a checked-in scenario manifest plus a fake GitHub HTTP
+  server (`pulls`, `pulls/.../merge`, `commits/.../check-runs`,
+  `actions/runs/.../logs`, `merge_queue/queues/...`, `issues`,
+  `issues/.../comments`, `issues/.../labels`). Step actions (`set_check`,
+  `add_pull_request`, `merge_pull_request`, `force_push_author`,
+  `advance_base`, `set_labels`, `set_merge_queue_status`,
+  `set_mergeability`, `advance_time_ms`) flip state declaratively, with
+  the git-native ones producing real commits on the bare remote so the
+  captain's rebase / force-with-lease / merge-queue codepaths run
+  unchanged. Ships three built-in scenarios (`three_repo_basic`,
+  `single_green`, `force_push_drill`) and extends `--backend mock` to
+  detect the on-disk playground and synthesize a canonical sweep
+  transcript from the live state.
+
 - **`llm_stream_call` streaming builtin (#1038).** Native LLM streaming
   builtin returning `Stream<...>` with cancellation support; provider
   capability matrix grows a `streaming` column.

@@ -84,6 +84,56 @@ Flags:
 | `--receipt-out PATH` | Write receipt JSON to an explicit path. |
 | `--summary-out PATH` | Write run summary JSON to a file. |
 
+### Mock-repos playground (#1020)
+
+`harn merge-captain mock` materializes a real on-disk sandbox — temp
+git repos plus a fake GitHub HTTP server — so you can iterate on the
+captain against real `git` codepaths without touching live
+infrastructure. This is the recommended local iteration loop.
+
+```bash
+# 1. Create a playground from a built-in scenario. Default scenario is
+#    `three_repo_basic`. List built-ins with `mock scenarios`.
+harn merge-captain mock init ./pg --scenario three_repo_basic
+
+# 2. Sweep the captain against it. The driver detects the on-disk
+#    playground and synthesizes a canonical JSONL transcript reflecting
+#    the live state.
+harn merge-captain run --backend mock ./pg --once
+
+# 3. Advance the scenario between sweeps — flip a check, advance base,
+#    force-push as the author, merge a PR, etc. Steps come from the
+#    scenario manifest; `--action <json>` is the one-off escape hatch.
+harn merge-captain mock step ./pg --name gamma_force_push_fix
+harn merge-captain mock step ./pg --action \
+  '{"kind":"set_check","repo":"alpha","pr_number":101,"name":"ci","status":"completed","conclusion":"success"}'
+
+# 4. Boot the fake GitHub HTTP server pointing at the playground state.
+#    Real HTTP clients (e.g. harn-github-connector) talk to this; the
+#    captain still uses real `git` against bare remotes under
+#    ./pg/remotes/<repo>.git.
+harn merge-captain mock serve ./pg --bind 127.0.0.1:0 --print-addr
+
+# 5. Snapshot or tear down.
+harn merge-captain mock status ./pg --json
+harn merge-captain mock cleanup ./pg
+```
+
+Subcommands:
+
+| Subcommand | Purpose |
+|---|---|
+| `mock init <dir>` | Materialize bare+working git repos + `state.json` from a scenario. `--scenario` (built-in) or `--manifest <path>` (custom JSON/YAML). `--force` cleans up first. |
+| `mock step <dir>` | Apply a manifest-defined `--name <step>` or one-off `--action <json>`. Mutates `state.json` (and the bare remote when the action is `merge_pull_request`, `force_push_author`, or `advance_base`). |
+| `mock status <dir>` | Print the current PR/check/history state. `--json` for machine output. |
+| `mock serve <dir>` | Boot the fake GitHub HTTP server. Endpoints: `pulls`, `pulls/.../merge`, `pulls/.../files`, `commits/.../check-runs`, `actions/runs/.../logs`, `merge_queue/queues/...`, `issues`, `issues/.../comments`, `issues/.../labels`. |
+| `mock cleanup <dir>` | Remove the playground. Idempotent and refuses to delete arbitrary directories without the playground marker. |
+| `mock scenarios` | List built-in scenarios. |
+
+Scenario manifests live at `examples/merge_captain/scenarios/*.json`
+and follow the `merge_captain_playground_scenario` schema documented
+in `crates/harn-vm/src/orchestration/playground/manifest.rs`.
+
 ## stdin / stdout / stderr / TTY
 
 - `print(s)` / `println(s)` → stdout. `eprint(s)` / `eprintln(s)` →

@@ -63,6 +63,8 @@ pub use merge_captain_audit::*;
 mod merge_captain_driver;
 pub use merge_captain_driver::*;
 
+pub mod playground;
+
 thread_local! {
     static CURRENT_MUTATION_SESSION: RefCell<Option<MutationSessionRecord>> = const { RefCell::new(None) };
     /// Workflow-level skill context, installed by `workflow_execute` so
