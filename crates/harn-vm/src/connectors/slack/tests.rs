@@ -8,10 +8,7 @@ use time::OffsetDateTime;
 
 use super::*;
 use crate::connectors::{
-    test_util::{
-        spawn_mock_http_server, write_http_response, CapturedHttpRequest as CapturedRequest,
-        MockHttpServer,
-    },
+    test_util::{FakeHttpRequest as CapturedRequest, FakeHttpResponse, FakeHttpServer},
     Connector, ConnectorClient, ConnectorCtx, InboxIndex, MetricsRegistry, RateLimiterFactory,
     RawInbound, TriggerBinding,
 };
@@ -414,83 +411,62 @@ struct MockScenario {
     requests: Vec<CapturedRequest>,
 }
 
-fn spawn_mock_server(
+fn json_body(body: &str) -> FakeHttpResponse {
+    FakeHttpResponse::empty(200)
+        .with_header("content-type", "application/json")
+        .with_body(body.as_bytes().to_vec())
+}
+
+async fn spawn_mock_server(
     expected_requests: usize,
     scenario: Arc<Mutex<MockScenario>>,
-) -> MockHttpServer {
-    spawn_mock_http_server(
-        expected_requests,
+) -> FakeHttpServer {
+    FakeHttpServer::start_with_capacity(
         "slack mock server",
-        move |_index, addr, request, stream| {
+        expected_requests,
+        move |_index, addr, request| {
             scenario
                 .lock()
                 .expect("scenario lock")
                 .requests
                 .push(request.clone());
             match request.path.as_str() {
-                "/chat.postMessage" => write_http_response(
-                    stream,
-                    200,
-                    &[("content-type", "application/json".to_string())],
+                "/chat.postMessage" => json_body(
                     r#"{"ok":true,"channel":"C123ABC456","ts":"1715.000100","message":{"text":"hello from harn"}}"#,
                 ),
-                "/chat.update" => write_http_response(
-                    stream,
-                    200,
-                    &[("content-type", "application/json".to_string())],
+                "/chat.update" => json_body(
                     r#"{"ok":true,"channel":"C123ABC456","ts":"1715.000100","text":"updated"}"#,
                 ),
-                "/reactions.add" => write_http_response(
-                    stream,
-                    200,
-                    &[("content-type", "application/json".to_string())],
-                    r#"{"ok":true}"#,
-                ),
-                "/views.open" => write_http_response(
-                    stream,
-                    200,
-                    &[("content-type", "application/json".to_string())],
-                    r#"{"ok":true,"view":{"id":"V123ABC456","type":"modal"}}"#,
-                ),
-                path if path.starts_with("/users.info") => write_http_response(
-                    stream,
-                    200,
-                    &[("content-type", "application/json".to_string())],
-                    r#"{"ok":true,"user":{"id":"U123ABC456","name":"roadrunner"}}"#,
-                ),
-                "/auth.test" => write_http_response(
-                    stream,
-                    200,
-                    &[("content-type", "application/json".to_string())],
+                "/reactions.add" => json_body(r#"{"ok":true}"#),
+                "/views.open" => {
+                    json_body(r#"{"ok":true,"view":{"id":"V123ABC456","type":"modal"}}"#)
+                }
+                path if path.starts_with("/users.info") => {
+                    json_body(r#"{"ok":true,"user":{"id":"U123ABC456","name":"roadrunner"}}"#)
+                }
+                "/auth.test" => json_body(
                     r#"{"ok":true,"url":"https://example.slack.com/","team":"Example","user":"bot"}"#,
                 ),
-                "/files.getUploadURLExternal" => write_http_response(
-                    stream,
-                    200,
-                    &[("content-type", "application/json".to_string())],
-                    &format!(
-                        "{{\"ok\":true,\"upload_url\":\"http://{}/upload/F123\",\"file_id\":\"F123\"}}",
-                        addr
-                    ),
-                ),
-                "/upload/F123" => write_http_response(stream, 200, &[], ""),
-                "/files.completeUploadExternal" => write_http_response(
-                    stream,
-                    200,
-                    &[("content-type", "application/json".to_string())],
-                    r#"{"ok":true,"files":[{"id":"F123","title":"notes.txt"}]}"#,
-                ),
+                "/files.getUploadURLExternal" => json_body(&format!(
+                    "{{\"ok\":true,\"upload_url\":\"http://{}/upload/F123\",\"file_id\":\"F123\"}}",
+                    addr
+                )),
+                "/upload/F123" => FakeHttpResponse::empty(200),
+                "/files.completeUploadExternal" => {
+                    json_body(r#"{"ok":true,"files":[{"id":"F123","title":"notes.txt"}]}"#)
+                }
                 other => panic!("unexpected path {other}"),
             }
         },
     )
+    .await
 }
 
 #[tokio::test]
 async fn slack_outbound_helpers_hit_expected_api_methods() {
     let client = initialized_client().await;
     let scenario = Arc::new(Mutex::new(MockScenario::default()));
-    let server = spawn_mock_server(9, scenario.clone());
+    let server = spawn_mock_server(9, scenario.clone()).await;
     let base_url = server.base_url().to_string();
 
     let posted = client

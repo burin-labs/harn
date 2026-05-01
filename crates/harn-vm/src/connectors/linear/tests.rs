@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -9,7 +8,7 @@ use time::OffsetDateTime;
 
 use super::*;
 use crate::connectors::{
-    test_util::{spawn_mock_http_server, MockHttpServer},
+    test_util::{FakeHttpRequest, FakeHttpResponse, FakeHttpServer},
     Connector, ConnectorClient, ConnectorCtx, InboxIndex, MetricsRegistry, RateLimiterFactory,
     RawInbound, TriggerBinding,
 };
@@ -384,7 +383,7 @@ async fn linear_connector_rejects_stale_timestamps_and_records_metric() {
 #[tokio::test]
 async fn linear_client_supports_typed_methods_and_escape_hatch() {
     let requests = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
-    let server = spawn_mock_server(requests.clone(), 5);
+    let server = spawn_mock_server(requests.clone(), 5).await;
     let base_url = server.base_url().to_string();
     let client = initialized_client(&base_url).await;
 
@@ -491,7 +490,7 @@ async fn linear_client_supports_typed_methods_and_escape_hatch() {
 async fn linear_connector_monitor_reenables_webhook_after_probe_streak() {
     let requests = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
     let probes_done = Arc::new(tokio::sync::Notify::new());
-    let server = spawn_monitor_server(requests.clone(), 3, probes_done.clone());
+    let server = spawn_monitor_server(requests.clone(), 3, probes_done.clone()).await;
     let base_url = server.base_url().to_string();
     let mut binding = binding();
     binding.config = json!({
@@ -548,7 +547,7 @@ async fn linear_connector_monitor_reenables_webhook_after_probe_streak() {
 
 fn capture_request(
     requests: &Arc<Mutex<Vec<CapturedRequest>>>,
-    raw: &crate::connectors::test_util::CapturedHttpRequest,
+    raw: &FakeHttpRequest,
 ) -> CapturedRequest {
     let body = if raw.body.is_empty() {
         None
@@ -568,14 +567,14 @@ fn capture_request(
     captured
 }
 
-fn spawn_mock_server(
+async fn spawn_mock_server(
     requests: Arc<Mutex<Vec<CapturedRequest>>>,
     expected_requests: usize,
-) -> MockHttpServer {
-    spawn_mock_http_server(
-        expected_requests,
+) -> FakeHttpServer {
+    FakeHttpServer::start_with_capacity(
         "linear mock server",
-        move |_index, _addr, raw, stream| {
+        expected_requests,
+        move |_index, _addr, raw| {
             let request = capture_request(&requests, raw);
             let query = request
                 .body
@@ -625,56 +624,24 @@ fn spawn_mock_server(
                     }
                 })
             };
-            write_response(
-                stream,
-                &body.to_string(),
-                &[("x-complexity", "12"), ("content-type", "application/json")],
-            );
+            FakeHttpResponse::ok_json(&body).with_header("x-complexity", "12")
         },
     )
+    .await
 }
 
-fn write_response(stream: &mut std::net::TcpStream, body: &str, headers: &[(&str, &str)]) {
-    write_response_status(stream, "200 OK", body, headers);
-}
-
-fn write_response_status(
-    stream: &mut std::net::TcpStream,
-    status: &str,
-    body: &str,
-    headers: &[(&str, &str)],
-) {
-    let mut response = format!(
-        "HTTP/1.1 {status}\r\ncontent-length: {}\r\nconnection: close\r\n",
-        body.len()
-    );
-    for (name, value) in headers {
-        response.push_str(name);
-        response.push_str(": ");
-        response.push_str(value);
-        response.push_str("\r\n");
-    }
-    response.push_str("\r\n");
-    response.push_str(body);
-    stream
-        .write_all(response.as_bytes())
-        .expect("write response");
-}
-
-fn spawn_monitor_server(
+async fn spawn_monitor_server(
     requests: Arc<Mutex<Vec<CapturedRequest>>>,
     expected_requests: usize,
     probes_done: Arc<tokio::sync::Notify>,
-) -> MockHttpServer {
-    spawn_mock_http_server(
-        expected_requests,
+) -> FakeHttpServer {
+    FakeHttpServer::start_with_capacity(
         "linear monitor server",
-        move |index, _addr, raw, stream| {
+        expected_requests,
+        move |index, _addr, raw| {
             let request = capture_request(&requests, raw);
-            match (request.method.as_str(), request.path.as_str()) {
-                ("GET", "/health") => {
-                    write_response_status(stream, "200 OK", "", &[("content-type", "text/plain")]);
-                }
+            let response = match (request.method.as_str(), request.path.as_str()) {
+                ("GET", "/health") => FakeHttpResponse::text(200, ""),
                 ("POST", "/") => {
                     let query = request
                         .body
@@ -686,25 +653,22 @@ fn spawn_monitor_server(
                         query.contains("webhookUpdate"),
                         "unexpected GraphQL query: {query}"
                     );
-                    write_response(
-                        stream,
-                        &json!({
-                            "data": {
-                                "webhookUpdate": {
-                                    "success": true,
-                                    "webhook": { "id": "wh-123", "enabled": true }
-                                }
+                    FakeHttpResponse::ok_json(&json!({
+                        "data": {
+                            "webhookUpdate": {
+                                "success": true,
+                                "webhook": { "id": "wh-123", "enabled": true }
                             }
-                        })
-                        .to_string(),
-                        &[("content-type", "application/json")],
-                    );
+                        }
+                    }))
                 }
                 other => panic!("unexpected request {other:?}"),
-            }
+            };
             if index + 1 == expected_requests {
                 probes_done.notify_one();
             }
+            response
         },
     )
+    .await
 }

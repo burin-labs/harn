@@ -11,7 +11,7 @@ use super::{
     handle_from_value, http_mock_calls_snapshot, mock_call_headers_value, push_http_mock,
     redact_mock_call_url, reset_http_state, HttpMockResponse,
 };
-use crate::connectors::test_util::{spawn_mock_http_server, write_http_response};
+use crate::connectors::test_util::{FakeHttpResponse, FakeHttpServer};
 use crate::value::VmValue;
 use base64::Engine;
 use rcgen::generate_simple_self_signed;
@@ -296,23 +296,20 @@ async fn http_download_mock_writes_file() {
 #[tokio::test]
 async fn http_proxy_routes_requests_through_configured_proxy() {
     reset_http_state();
-    let proxy = spawn_mock_http_server(1, "proxy listener", |_index, _addr, request, stream| {
-        assert_eq!(request.method, "GET");
-        assert_eq!(request.path, "http://example.invalid/proxy-check");
-        assert_eq!(
-            request
-                .headers
-                .get("proxy-authorization")
-                .map(String::as_str),
-            Some("Basic dXNlcjpwYXNz")
-        );
-        write_http_response(
-            stream,
-            200,
-            &[("content-type", "text/plain".to_string())],
-            "proxied",
-        );
-    });
+    let proxy =
+        FakeHttpServer::start_with_capacity("proxy listener", 1, |_index, _addr, request| {
+            assert_eq!(request.method, "GET");
+            assert_eq!(request.path, "http://example.invalid/proxy-check");
+            assert_eq!(
+                request
+                    .headers
+                    .get("proxy-authorization")
+                    .map(String::as_str),
+                Some("Basic dXNlcjpwYXNz")
+            );
+            FakeHttpResponse::text(200, "proxied")
+        })
+        .await;
 
     let options = BTreeMap::from([
         (
