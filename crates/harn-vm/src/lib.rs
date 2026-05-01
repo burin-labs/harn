@@ -29,6 +29,7 @@ pub mod orchestration;
 pub mod personas;
 pub mod process_sandbox;
 pub mod provenance;
+pub mod receipts;
 pub mod record_filter;
 pub mod runtime_context;
 pub mod runtime_paths;
@@ -114,6 +115,10 @@ pub use personas::{
 pub use provenance::{
     build_signed_receipt, load_or_generate_agent_signing_key, verify_receipt, ProvenanceReceipt,
     ReceiptBuildOptions, ReceiptVerificationReport,
+};
+pub use receipts::{
+    Receipt, ReceiptSink, ReceiptStatus, ReceiptValidationError, RedactionClass, RECEIPT_SCHEMA_ID,
+    RECEIPT_SCHEMA_JSON, RECEIPT_SCHEMA_VERSION,
 };
 pub use record_filter::{normalize_record_filter_expression, CompiledRecordFilter};
 pub use schema::json_to_vm_value;
