@@ -7,4 +7,5 @@
 pub(crate) mod blank_lines;
 pub(crate) mod file_header;
 pub(crate) mod import_order;
+pub(crate) mod optional_shorthand;
 pub(crate) mod trailing_comma;

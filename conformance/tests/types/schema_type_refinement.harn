@@ -5,7 +5,7 @@ pipeline test(task) {
     println(x.upper())
   }
   let user_schema = {type: "dict", properties: {name: {type: "string"}}, required: ["name"]}
-  let y: dict | nil = {name: "Ada"}
+  let y: dict? = {name: "Ada"}
   if schema_is(y, user_schema) {
     println(y.name)
   }

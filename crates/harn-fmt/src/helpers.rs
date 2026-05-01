@@ -269,15 +269,27 @@ pub(crate) fn format_type_ann(type_ann: &Option<TypeExpr>) -> String {
 pub(crate) fn format_type_expr(te: &TypeExpr) -> String {
     match te {
         TypeExpr::Named(name) => name.clone(),
-        TypeExpr::Union(types) => types
-            .iter()
-            .map(format_type_expr)
-            .collect::<Vec<_>>()
-            .join(" | "),
+        TypeExpr::Union(types) => {
+            if let Some(inner) = optional_sugar_inner(types) {
+                return format!("{}?", format_type_expr(inner));
+            }
+            types
+                .iter()
+                .map(format_type_expr)
+                .collect::<Vec<_>>()
+                .join(" | ")
+        }
         TypeExpr::Intersection(types) => types
             .iter()
             .map(|t| match t {
-                // Parenthesise nested unions so `(A | B) & C` reads back unambiguously.
+                // A `T | nil` arm renders as `T?`, which binds tighter than
+                // `&` and round-trips through the parser without parens.
+                TypeExpr::Union(members) if optional_sugar_inner(members).is_some() => {
+                    format_type_expr(t)
+                }
+                // Other nested unions still get parenthesised for readability,
+                // even though parens are not yet a valid type-grammar form
+                // — that is a pre-existing limitation of the surface syntax.
                 TypeExpr::Union(_) => format!("({})", format_type_expr(t)),
                 _ => format_type_expr(t),
             })
@@ -356,6 +368,12 @@ pub(crate) fn format_type_expr_wrapped(
     match te {
         TypeExpr::Shape(fields) => format_shape_wrapped(fields, indent, line_width),
         TypeExpr::Union(types) => {
+            if let Some(inner) = optional_sugar_inner(types) {
+                // The wrapped variant follows the inline form for `T?`;
+                // the inner type may still wrap if it is itself a shape.
+                let inner_str = format_type_expr_wrapped(inner, indent, prefix_len, line_width);
+                return format!("{inner_str}?");
+            }
             // Wrap each union arm; if any arm is itself a Shape it can
             // recurse and emit its own multi-line form.
             let arms: Vec<String> = types
@@ -366,6 +384,32 @@ pub(crate) fn format_type_expr_wrapped(
         }
         _ => inline,
     }
+}
+
+/// If `types` is exactly two members and one is `nil`, return the
+/// non-`nil` member when it can be safely rendered as `T?`. Returns
+/// `None` for unions that need explicit `T | nil` form because the
+/// non-`nil` arm would re-bind unexpectedly under postfix `?` (today:
+/// `Union`, `Intersection`, and `FnType`, where `?` would attach to the
+/// inner return type instead of the whole arm).
+pub(crate) fn optional_sugar_inner(types: &[TypeExpr]) -> Option<&TypeExpr> {
+    if types.len() != 2 {
+        return None;
+    }
+    let nil_idx = types
+        .iter()
+        .position(|t| matches!(t, TypeExpr::Named(n) if n == "nil"))?;
+    let inner = &types[1 - nil_idx];
+    if matches!(
+        inner,
+        TypeExpr::Union(_) | TypeExpr::Intersection(_) | TypeExpr::FnType { .. }
+    ) {
+        return None;
+    }
+    if matches!(inner, TypeExpr::Named(n) if n == "nil") {
+        return None;
+    }
+    Some(inner)
 }
 
 fn format_shape_wrapped(

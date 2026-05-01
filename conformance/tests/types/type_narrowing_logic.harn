@@ -1,4 +1,4 @@
-// Test logical operator narrowing (&&, ||, !)
+/** Test logical operator narrowing (&&, ||, !) */
 pipeline test(task) {
   fn and_check(x: string | int | nil) -> string {
     if x != nil && type_of(x) == "string" {
@@ -6,7 +6,7 @@ pipeline test(task) {
     }
     return "other"
   }
-  fn or_falsy(x: string | nil, y: int | nil) -> string {
+  fn or_falsy(x: string?, y: int?) -> string {
     if x || y {
       return "at least one truthy"
     }

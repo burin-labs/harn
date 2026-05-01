@@ -11,15 +11,25 @@ use crate::ast::*;
 pub fn format_type(ty: &TypeExpr) -> String {
     match ty {
         TypeExpr::Named(n) => n.clone(),
-        TypeExpr::Union(types) => types
-            .iter()
-            .map(format_type)
-            .collect::<Vec<_>>()
-            .join(" | "),
+        TypeExpr::Union(types) => {
+            if let Some(inner) = optional_sugar_inner(types) {
+                return format!("{}?", format_type(inner));
+            }
+            types
+                .iter()
+                .map(format_type)
+                .collect::<Vec<_>>()
+                .join(" | ")
+        }
         TypeExpr::Intersection(types) => types
             .iter()
             .map(|m| match m {
-                // Parenthesise nested unions so `(A | B) & C` reads back unambiguously.
+                // `T | nil` arms render as the sugared `T?`, which binds
+                // tighter than `&` and reads back unambiguously.
+                TypeExpr::Union(members) if optional_sugar_inner(members).is_some() => {
+                    format_type(m)
+                }
+                // Other nested unions still get parenthesised for readability.
                 TypeExpr::Union(_) => format!("({})", format_type(m)),
                 _ => format_type(m),
             })
@@ -97,6 +107,32 @@ pub fn shape_mismatch_detail(expected: &TypeExpr, actual: &TypeExpr) -> Option<S
     } else {
         None
     }
+}
+
+/// If `types` is exactly two members and one is `nil`, return the
+/// non-`nil` member when it can be safely rendered as `T?`. Mirrors the
+/// formatter's rule in `harn-fmt::helpers::optional_sugar_inner`: only
+/// types that appear at primary precedence (or below) can be sugared,
+/// because postfix `?` parses tighter than `&` / `|` / `fn(...) -> ...`
+/// return positions.
+fn optional_sugar_inner(types: &[TypeExpr]) -> Option<&TypeExpr> {
+    if types.len() != 2 {
+        return None;
+    }
+    let nil_idx = types
+        .iter()
+        .position(|t| matches!(t, TypeExpr::Named(n) if n == "nil"))?;
+    let inner = &types[1 - nil_idx];
+    if matches!(
+        inner,
+        TypeExpr::Union(_) | TypeExpr::Intersection(_) | TypeExpr::FnType { .. }
+    ) {
+        return None;
+    }
+    if matches!(inner, TypeExpr::Named(n) if n == "nil") {
+        return None;
+    }
+    Some(inner)
 }
 
 /// Returns true when the type is obvious from the RHS expression

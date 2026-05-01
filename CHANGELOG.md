@@ -23,6 +23,18 @@ condensed series summaries instead of full per-patch history.
   touch the workspace. `default` and `code` preserve the pre-modes
   baseline.
 
+- **Postfix `T?` optional-type sugar (#915).** `T?` now parses as
+  syntactic sugar for `T | nil`, mirroring the safe-navigation postfix
+  already used in expressions (`obj?.method()`). Postfix `?` binds
+  tighter than `&` and `|`, so `A & B?` parses as `A & (B | nil)` and
+  `A | B?` flattens to `A | B | nil`. Equivalent narrowing rules apply
+  (`if x != nil` still narrows away the `nil` arm). The formatter
+  rewrites the explicit `T | nil` form to `T?` whenever the inner type
+  prints as a primary, and a new `prefer-optional-shorthand` lint rule
+  (with auto-fix) flags the long form independently. Tree-sitter
+  grammar, `spec/HARN_SPEC.md`, and conformance tests cover both
+  spellings; existing `T | nil` source remains valid and semantically
+  identical.
 - **MCP elicitation (`elicitation/create`) on both roles (#875).** Harn
   servers can now prompt connected clients for structured user input
   mid-tool-call via the `mcp_elicit({ message, requestedSchema })`

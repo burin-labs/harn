@@ -434,7 +434,13 @@ fn test_union_type_compatible() {
 fn test_union_type_mismatch() {
     let errs = errors(r#"pipeline t(task) { let x: string | nil = 42 }"#);
     assert_eq!(errs.len(), 1);
-    assert!(errs[0].contains("expected string | nil"));
+    // Type-checker errors print the canonical sugared form for
+    // `T | nil` unions; the source can use either spelling.
+    assert!(
+        errs[0].contains("expected string?"),
+        "expected sugared form in: {}",
+        errs[0]
+    );
     assert!(errs[0].contains("found int"));
 }
 

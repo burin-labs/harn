@@ -1,7 +1,7 @@
 pipeline test(task) {
-  let a: string | nil = "hello"
+  let a: string? = "hello"
   log(a)
-  let b: string | nil = nil
+  let b: string? = nil
   log(b)
   let c: int | float = 3.14
   log(c)

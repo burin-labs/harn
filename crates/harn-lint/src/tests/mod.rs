@@ -89,6 +89,7 @@ mod llm_rules;
 mod long_running;
 mod mutability;
 mod naming_types;
+mod optional_shorthand;
 mod persona_steps;
 mod redundant_nil_ternary;
 mod secret_scan_rules;

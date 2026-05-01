@@ -1004,6 +1004,9 @@ module.exports = grammar({
         seq($.identifier, "<", $.type_annotation, ">"),
         prec.left(1, seq($.type_annotation, "|", $.type_annotation)),
         prec.left(2, seq($.type_annotation, "&", $.type_annotation)),
+        // Postfix `?` is sugar for `T | nil`. Higher precedence than
+        // `&` and `|` so `A & B?` parses as `A & (B?)`.
+        prec.left(3, seq($.type_annotation, "?")),
         $.shape_type,
         $.identifier,
         $.string_literal,

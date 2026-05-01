@@ -17,6 +17,7 @@ use crate::harndoc::check_legacy_doc_comments;
 use crate::naming::{is_pascal_case, is_snake_case, to_pascal_case, to_snake_case};
 use crate::rules::blank_lines::check_blank_line_between_items;
 use crate::rules::import_order::check_import_order;
+use crate::rules::optional_shorthand::check_prefer_optional_shorthand;
 use crate::rules::trailing_comma::check_trailing_comma;
 
 mod walk;
@@ -1055,6 +1056,7 @@ impl<'a> Linter<'a> {
             check_blank_line_between_items(src, nodes, &mut self.diagnostics);
             check_trailing_comma(src, &mut self.diagnostics);
             check_import_order(src, nodes, &mut self.diagnostics);
+            check_prefer_optional_shorthand(src, nodes, &mut self.diagnostics);
         }
         for node in nodes {
             self.lint_node(node);
