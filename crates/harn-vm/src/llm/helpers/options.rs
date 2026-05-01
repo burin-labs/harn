@@ -692,7 +692,7 @@ pub(crate) fn extract_llm_options(
             },
         )?;
     }
-    let anthropic_beta_features = parse_anthropic_beta_features_option(
+    let mut anthropic_beta_features = parse_anthropic_beta_features_option(
         options.as_ref(),
         &thinking,
         &provider,
@@ -746,14 +746,31 @@ pub(crate) fn extract_llm_options(
     };
     let vision =
         opt_bool(&options, "vision") || crate::llm::content::messages_contain_images(&messages)?;
+    let audio = option_is_enabled(options.as_ref(), "audio")
+        || crate::llm::content::messages_contain_audio(&messages)?;
+    let pdf = option_is_enabled(options.as_ref(), "pdf")
+        || crate::llm::content::messages_contain_pdf(&messages)?;
+    let uses_file_ids = crate::llm::content::messages_contain_file_ids(&messages)?;
     if enforce_capability_gates && vision && !caps.vision_supported {
         return Err(unsupported_option_error("vision", &provider, &model));
     }
-    if enforce_capability_gates && option_is_enabled(options.as_ref(), "audio") && !caps.audio {
+    if enforce_capability_gates && audio && !caps.audio {
         return Err(unsupported_option_error("audio", &provider, &model));
     }
-    if enforce_capability_gates && option_is_enabled(options.as_ref(), "pdf") && !caps.pdf {
+    if enforce_capability_gates && pdf && !caps.pdf {
         return Err(unsupported_option_error("pdf", &provider, &model));
+    }
+    if enforce_capability_gates && uses_file_ids && !caps.files_api_supported {
+        return Err(unsupported_option_error("files_api", &provider, &model));
+    }
+    if uses_file_ids
+        && (provider == "anthropic"
+            || (provider == "mock" && model.to_lowercase().contains("claude")))
+    {
+        crate::llm::api::push_unique_anthropic_beta_feature(
+            &mut anthropic_beta_features,
+            crate::stdlib::files::ANTHROPIC_FILES_API_BETA,
+        );
     }
     if enforce_capability_gates && cache && !caps.prompt_caching {
         return Err(unsupported_option_error("cache", &provider, &model));
@@ -2212,5 +2229,60 @@ thinking_modes = ["effort"]
                 .err()
                 .expect("ollama should reject url image content");
         assert!(err.to_string().contains("requires image base64"));
+    }
+
+    #[test]
+    fn pdf_and_audio_content_require_capabilities() {
+        let pdf_block = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("type".to_string(), VmValue::String(Rc::from("pdf"))),
+            ("file_id".to_string(), VmValue::String(Rc::from("file_123"))),
+        ])));
+        let audio_block = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("type".to_string(), VmValue::String(Rc::from("audio"))),
+            ("base64".to_string(), VmValue::String(Rc::from("UklGRg=="))),
+            (
+                "media_type".to_string(),
+                VmValue::String(Rc::from("audio/wav")),
+            ),
+        ])));
+        let message = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("role".to_string(), VmValue::String(Rc::from("user"))),
+            (
+                "content".to_string(),
+                VmValue::List(Rc::new(vec![pdf_block, audio_block])),
+            ),
+        ])));
+        let options = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("provider".to_string(), VmValue::String(Rc::from("mock"))),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("claude-sonnet-4-7")),
+            ),
+            (
+                "messages".to_string(),
+                VmValue::List(Rc::new(vec![message.clone()])),
+            ),
+        ])));
+        let opts =
+            extract_llm_options(&[VmValue::String(Rc::from("")), VmValue::Nil, options]).unwrap();
+        assert!(opts
+            .anthropic_beta_features
+            .contains(&crate::stdlib::files::ANTHROPIC_FILES_API_BETA.to_string()));
+
+        let bad_options = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("provider".to_string(), VmValue::String(Rc::from("mock"))),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("gpt-3.5-turbo")),
+            ),
+            (
+                "messages".to_string(),
+                VmValue::List(Rc::new(vec![message])),
+            ),
+        ])));
+        let err = extract_llm_options(&[VmValue::String(Rc::from("")), VmValue::Nil, bad_options])
+            .err()
+            .expect("non-multimodal model should reject pdf/audio content");
+        assert!(err.to_string().contains("option `audio` is not supported"));
     }
 }

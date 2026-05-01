@@ -12,6 +12,7 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "graphql" => Some(include_str!("stdlib_graphql.harn")),
         "schema" => Some(include_str!("stdlib_schema.harn")),
         "testing" => Some(include_str!("stdlib_testing.harn")),
+        "files" => Some(include_str!("stdlib_files.harn")),
         "vision" => Some(include_str!("stdlib_vision.harn")),
         "context" => Some(include_str!("stdlib_context.harn")),
         "runtime" => Some(include_str!("stdlib_runtime.harn")),
