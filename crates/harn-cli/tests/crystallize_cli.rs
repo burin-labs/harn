@@ -1,20 +1,26 @@
+//! In-process coverage of `harn crystallize` mining + bundle behavior.
+//!
+//! Tier 1H of the de-flake epic (#1057, #1067): the CLI command is a
+//! thin wrapper around library functions in
+//! `harn_vm::orchestration::{crystallize_traces,
+//! build_crystallization_bundle, write_crystallization_artifacts,
+//! write_crystallization_bundle, validate_crystallization_bundle,
+//! shadow_replay_bundle}`. Tests call those library functions
+//! directly and assert on the returned data structures plus the
+//! manifest written to disk.
+
 mod test_util;
 
 use std::fs;
 use std::path::Path;
-use std::process::Output;
 
+use harn_vm::orchestration::{
+    build_crystallization_bundle, crystallize_traces, load_crystallization_traces_from_dir,
+    shadow_replay_bundle, validate_crystallization_bundle, write_crystallization_artifacts,
+    write_crystallization_bundle, BundleOptions, CrystallizeOptions,
+};
 use serde_json::{json, Value};
 use tempfile::TempDir;
-use test_util::process::harn_command;
-
-fn run_harn(cwd: &Path, args: &[&str]) -> Output {
-    harn_command()
-        .current_dir(cwd)
-        .args(args)
-        .output()
-        .expect("failed to spawn harn binary")
-}
 
 fn write_trace(dir: &Path, name: &str, payload: &Value) {
     let path = dir.join(name);
@@ -119,86 +125,94 @@ fn crystallize_version_bump_emits_validatable_bundle() {
     let eval_pack_path = temp.path().join("version_bump.harn.eval.toml");
     let bundle_dir = temp.path().join("bundle");
 
-    let mine = run_harn(
-        temp.path(),
-        &[
-            "crystallize",
-            "--from",
-            traces_dir.to_str().unwrap(),
-            "--out",
-            workflow_path.to_str().unwrap(),
-            "--report",
-            report_path.to_str().unwrap(),
-            "--eval-pack",
-            eval_pack_path.to_str().unwrap(),
-            "--bundle",
-            bundle_dir.to_str().unwrap(),
-            "--workflow-name",
-            "version_bump",
-            "--package-name",
-            "release-workflows",
-            "--bundle-team",
-            "platform",
-            "--bundle-repo",
-            "burin-labs/harn",
-            "--min-examples",
-            "5",
-        ],
-    );
+    let traces = load_crystallization_traces_from_dir(&traces_dir).expect("load traces");
+    let normalized = traces.clone();
+    let artifacts = crystallize_traces(
+        traces,
+        CrystallizeOptions {
+            min_examples: 5,
+            workflow_name: Some("version_bump".to_string()),
+            package_name: Some("release-workflows".to_string()),
+            author: None,
+            approver: None,
+            eval_pack_link: Some(eval_pack_path.to_string_lossy().into_owned()),
+        },
+    )
+    .expect("crystallize");
+
+    let bundle = build_crystallization_bundle(
+        artifacts.clone(),
+        &normalized,
+        BundleOptions {
+            external_key: None,
+            title: None,
+            team: Some("platform".to_string()),
+            repo: Some("burin-labs/harn".to_string()),
+            risk_level: None,
+            rollout_policy: None,
+        },
+    )
+    .expect("build bundle");
+
+    let report = write_crystallization_artifacts(
+        artifacts,
+        &workflow_path,
+        &report_path,
+        Some(eval_pack_path.as_path()),
+    )
+    .expect("write artifacts");
+
     assert!(
-        mine.status.success(),
-        "mine failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&mine.stdout),
-        String::from_utf8_lossy(&mine.stderr),
+        report.selected_candidate_id.is_some(),
+        "expected a safe candidate to be selected; report: {report:#?}"
     );
+
+    let manifest = write_crystallization_bundle(&bundle, &bundle_dir).expect("write bundle");
+    assert_eq!(manifest.fixtures.len(), 5);
 
     // Manifest sanity check: schema marker, fixture redaction, plan-vs-candidate kind.
     let manifest_path = bundle_dir.join("candidate.json");
-    let manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    let manifest_json: Value =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
     assert_eq!(
-        manifest["schema"],
+        manifest_json["schema"],
         Value::String("harn.crystallization.candidate.bundle".to_string())
     );
-    assert_eq!(manifest["schema_version"], json!(1));
-    assert_eq!(manifest["kind"], json!("candidate"));
-    assert_eq!(manifest["external_key"], json!("version-bump"));
-    let workflow = &manifest["workflow"];
+    assert_eq!(manifest_json["schema_version"], json!(1));
+    assert_eq!(manifest_json["kind"], json!("candidate"));
+    assert_eq!(manifest_json["external_key"], json!("version-bump"));
+    let workflow = &manifest_json["workflow"];
     assert_eq!(workflow["name"], json!("version_bump"));
     assert_eq!(workflow["package_name"], json!("release-workflows"));
     assert_eq!(workflow["path"], json!("workflow.harn"));
-    assert_eq!(manifest["team"], json!("platform"));
-    let fixtures = manifest["fixtures"].as_array().unwrap();
+    assert_eq!(manifest_json["team"], json!("platform"));
+    let fixtures = manifest_json["fixtures"].as_array().unwrap();
     assert_eq!(fixtures.len(), 5);
     assert!(fixtures
         .iter()
         .all(|fixture| fixture["redacted"] == json!(true)));
 
-    // The validate subcommand exits 0 and reports OK.
-    let validate = run_harn(
-        temp.path(),
-        &["crystallize", "validate", bundle_dir.to_str().unwrap()],
-    );
+    // Bundle validation passes against itself.
+    let validation = validate_crystallization_bundle(&bundle_dir).expect("validate");
     assert!(
-        validate.status.success(),
-        "validate failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&validate.stdout),
-        String::from_utf8_lossy(&validate.stderr),
+        validation.problems.is_empty(),
+        "validation reported problems: {:#?}",
+        validation.problems
     );
-    assert!(String::from_utf8_lossy(&validate.stdout).contains("OK"));
+    assert!(validation.manifest_ok);
+    assert!(validation.workflow_ok);
+    assert!(validation.report_ok);
+    assert!(validation.fixtures_ok);
+    assert!(validation.redaction_ok);
 
     // Shadow replay also passes against the bundle's own redacted fixtures.
-    let shadow = run_harn(
-        temp.path(),
-        &["crystallize", "shadow", bundle_dir.to_str().unwrap()],
-    );
+    let (shadow_manifest, shadow) = shadow_replay_bundle(&bundle_dir).expect("shadow replay");
     assert!(
-        shadow.status.success(),
-        "shadow failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&shadow.stdout),
-        String::from_utf8_lossy(&shadow.stderr),
+        shadow.pass,
+        "shadow replay failed for candidate {}: {:#?}",
+        shadow_manifest.candidate_id, shadow.failures
     );
-    let stdout = String::from_utf8_lossy(&shadow.stdout);
-    assert!(stdout.contains("pass=true"));
+    assert!(shadow.compared_traces > 0);
 }
 
 #[test]
@@ -217,39 +231,39 @@ fn crystallize_plan_only_bundle_keeps_plan_only_kind() {
     let report_path = temp.path().join("plan.report.json");
     let bundle_dir = temp.path().join("bundle");
 
-    let mine = run_harn(
-        temp.path(),
-        &[
-            "crystallize",
-            "--from",
-            traces_dir.to_str().unwrap(),
-            "--out",
-            workflow_path.to_str().unwrap(),
-            "--report",
-            report_path.to_str().unwrap(),
-            "--bundle",
-            bundle_dir.to_str().unwrap(),
-            "--workflow-name",
-            "linear_triage_plan",
-            "--min-examples",
-            "3",
-        ],
-    );
-    assert!(mine.status.success(), "{:?}", mine);
+    let traces = load_crystallization_traces_from_dir(&traces_dir).expect("load traces");
+    let normalized = traces.clone();
+    let artifacts = crystallize_traces(
+        traces,
+        CrystallizeOptions {
+            min_examples: 3,
+            workflow_name: Some("linear_triage_plan".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("crystallize");
 
-    let manifest: Value =
+    let bundle = build_crystallization_bundle(
+        artifacts.clone(),
+        &normalized,
+        BundleOptions::default(),
+    )
+    .expect("build bundle");
+
+    let report = write_crystallization_artifacts(artifacts, &workflow_path, &report_path, None)
+        .expect("write artifacts");
+    assert!(report.selected_candidate_id.is_some());
+
+    write_crystallization_bundle(&bundle, &bundle_dir).expect("write bundle");
+    let manifest_json: Value =
         serde_json::from_slice(&fs::read(bundle_dir.join("candidate.json")).unwrap()).unwrap();
-    assert_eq!(manifest["kind"], json!("plan_only"));
-    assert_eq!(manifest["risk_level"], json!("low"));
+    assert_eq!(manifest_json["kind"], json!("plan_only"));
+    assert_eq!(manifest_json["risk_level"], json!("low"));
 
-    let validate = run_harn(
-        temp.path(),
-        &["crystallize", "validate", bundle_dir.to_str().unwrap()],
-    );
+    let validation = validate_crystallization_bundle(&bundle_dir).expect("validate");
     assert!(
-        validate.status.success(),
-        "validate failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&validate.stdout),
-        String::from_utf8_lossy(&validate.stderr),
+        validation.problems.is_empty(),
+        "validation reported problems: {:#?}",
+        validation.problems
     );
 }

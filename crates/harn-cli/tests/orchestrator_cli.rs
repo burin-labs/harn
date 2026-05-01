@@ -967,6 +967,7 @@ pub fn on_task(event: TriggerEvent) -> string {
 #[test]
 fn restart_surfaces_stranded_envelopes_and_recover_replays_them_explicitly() {}
 
+#[ignore = "asserts on subprocess stdout for `harn orchestrator fire`/`queue ls`/`queue drain` — moves to slow E2E/smoke job (issue #1069)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn worker_queue_drain_uses_consumer_manifest_and_persists_response_records() {
     let temp = TempDir::new().unwrap();

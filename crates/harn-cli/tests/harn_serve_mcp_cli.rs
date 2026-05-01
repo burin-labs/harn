@@ -201,6 +201,7 @@ async fn collect_sse_body_after_progress(
     body
 }
 
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
     let _guard = lock_harn_serve_mcp_tests();
@@ -353,6 +354,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
     assert!(status.success(), "status={status}");
 }
 
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn serve_mcp_stdio_exposes_script_registered_surface() {
     let _guard = lock_harn_serve_mcp_tests();
@@ -457,6 +459,7 @@ fn serve_mcp_stdio_exposes_script_registered_surface() {
     assert!(status.success(), "status={status}");
 }
 
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
     let _guard = lock_harn_serve_mcp_tests();
@@ -637,6 +640,7 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
     handle.join().unwrap();
 }
 
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn serve_mcp_http_exposes_script_registered_surface() {
     let _guard = lock_harn_serve_mcp_tests();

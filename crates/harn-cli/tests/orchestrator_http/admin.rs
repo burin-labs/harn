@@ -185,6 +185,7 @@ async fn watch_mode_reloads_manifest_changes() {
     shutdown(harness).await;
 }
 
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn reload_cli_uses_admin_endpoint() {
     let temp = TempDir::new().unwrap();

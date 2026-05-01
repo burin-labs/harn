@@ -114,6 +114,7 @@ fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>
     )
 }
 
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn mcp_server_stdio_roundtrips_tools_and_resources() {
     let _guard = lock_mcp_cli_tests();
@@ -378,6 +379,7 @@ fn mcp_server_stdio_roundtrips_tools_and_resources() {
     assert!(status.success(), "status={status}");
 }
 
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn mcp_server_http_roundtrips_initialize_and_fire() {
     let _guard = lock_mcp_cli_tests();
