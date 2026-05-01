@@ -4,7 +4,7 @@ import "std/triggers"
 
 pub fn hitl_handler(event: TriggerEvent) -> dict {
   let answer = ask_user("Should we continue handling " + event.kind + "?")
-  let approval: {approved: bool, reviewers: list<string>, approved_at: string, reason: string | nil, signatures: list<{reviewer: string, signed_at: string, signature: string}>} = request_approval("approve " + event.kind, {quorum: 2, reviewers: ["alice", "bob", "carol"]})
+  let approval: {approved: bool, reviewers: list<string>, approved_at: string, reason: string?, signatures: list<{reviewer: string, signed_at: string, signature: string}>} = request_approval("approve " + event.kind, {quorum: 2, reviewers: ["alice", "bob", "carol"]})
   return {
     verdict: answer.verdict,
     event_id: event.id,

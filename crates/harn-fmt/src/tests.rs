@@ -1527,6 +1527,41 @@ fn test_nil_coalescing_chained_with_method_call_wraps() {
 }
 
 #[test]
+fn test_optional_shorthand_rewrites_t_or_nil() {
+    let source = "pipeline default(task) { let x: int | nil = nil\nlog(x) }";
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains("let x: int? = nil"),
+        "expected `int?` sugar, got:\n{formatted}"
+    );
+    assert!(
+        !formatted.contains("int | nil"),
+        "expected no `int | nil`, got:\n{formatted}"
+    );
+}
+
+#[test]
+fn test_optional_shorthand_idempotent() {
+    let source = "pipeline default(task) { let x: int? = nil\nlog(x) }";
+    let formatted = format_source(source).unwrap();
+    let formatted2 = format_source(&formatted).unwrap();
+    assert_eq!(formatted, formatted2);
+    assert!(formatted.contains("int?"));
+}
+
+#[test]
+fn test_optional_shorthand_skips_when_arm_is_union_or_intersection() {
+    // `(A & B) | nil` cannot round-trip via `T?` because postfix `?`
+    // attaches to a primary; the explicit form must be preserved.
+    let source = "pipeline default(task) { let x: {a: int} & {b: string} | nil = nil\nlog(x) }";
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains(" | nil"),
+        "intersection-union should keep the long form, got:\n{formatted}"
+    );
+}
+
+#[test]
 fn test_imports_stay_tight_then_blank_before_first_item() {
     let source = "import \"std/http\"\nimport \"alpha\"\nimport \"zeta\"\npipeline default(task) { log(1) }\n";
     let result = format_source(source).unwrap();

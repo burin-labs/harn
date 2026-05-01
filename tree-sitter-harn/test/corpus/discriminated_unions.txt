@@ -99,3 +99,53 @@ type Tagged = A & B | C
           (identifier)))
       (type_annotation
         (identifier)))))
+
+==================
+Optional Type Sugar
+==================
+
+type Maybe = string?
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (type_annotation
+        (identifier)))))
+
+==================
+Optional Type With Generic
+==================
+
+type MaybeList = list<int>?
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (type_annotation
+        (identifier)
+        (type_annotation
+          (identifier))))))
+
+==================
+Optional Binds Tighter Than Intersection
+==================
+
+type Tagged = A & B?
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (type_annotation
+        (identifier))
+      (type_annotation
+        (type_annotation
+          (identifier))))))

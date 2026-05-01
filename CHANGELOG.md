@@ -73,6 +73,19 @@ condensed series summaries instead of full per-patch history.
   pipeline as the entry point with `args` exposed as the `prompt`
   global. Implements ACP slash-command spec for Zed-style clients.
 
+- **Postfix `T?` optional-type sugar (#915).** `T?` now parses as
+  syntactic sugar for `T | nil`, mirroring the safe-navigation postfix
+  already used in expressions (`obj?.method()`). Postfix `?` binds
+  tighter than `&` and `|`, so `A & B?` parses as `A & (B | nil)` and
+  `A | B?` flattens to `A | B | nil`. Equivalent narrowing rules apply
+  (`if x != nil` still narrows away the `nil` arm). The formatter
+  rewrites the explicit `T | nil` form to `T?` whenever the inner type
+  prints as a primary, and a new `prefer-optional-shorthand` lint rule
+  (with auto-fix) flags the long form independently. Tree-sitter
+  grammar, `spec/HARN_SPEC.md`, and conformance tests cover both
+  spellings; existing `T | nil` source remains valid and semantically
+  identical.
+
 - **Harn-native Merge Captain persona (#1009/#1029).** Replaces the
   shell-driven Merge Captain MVP with a deterministic Harn package owning
   multi-repo PR queue scheduling, durable per-PR state, audit-grade merge

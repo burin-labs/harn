@@ -107,17 +107,25 @@ impl Parser {
     }
 
     /// Parse a type expression: `int`, `string | nil`, `A & B`,
-    /// `{name: string, age?: int}`. `&` binds tighter than `|`, so
-    /// `A & B | C` parses as `(A & B) | C`.
+    /// `{name: string, age?: int}`, `int?`. `&` binds tighter than `|`,
+    /// and postfix `?` (sugar for `T | nil`) binds tightest of all, so
+    /// `A & B | C` parses as `(A & B) | C` and `A | B?` parses as
+    /// `A | (B | nil)` — flattened to `A | B | nil`.
     pub(super) fn parse_type_expr(&mut self) -> Result<TypeExpr, ParserError> {
         self.skip_newlines();
         let first = self.parse_type_intersection()?;
 
         if self.check(&TokenKind::Bar) {
-            let mut types = vec![first];
+            let mut types: Vec<TypeExpr> = Vec::new();
+            flatten_union_into(&mut types, first);
             while self.check(&TokenKind::Bar) {
                 self.advance();
-                types.push(self.parse_type_intersection()?);
+                let next = self.parse_type_intersection()?;
+                flatten_union_into(&mut types, next);
+            }
+            dedupe_in_order(&mut types);
+            if types.len() == 1 {
+                return Ok(types.into_iter().next().unwrap());
             }
             return Ok(TypeExpr::Union(types));
         }
@@ -142,7 +150,26 @@ impl Parser {
     }
 
     /// Accepts identifiers and the `nil`/`true`/`false` keywords as type names.
+    /// Handles postfix `?` as sugar for `T | nil` after the base primary.
     pub(super) fn parse_type_primary(&mut self) -> Result<TypeExpr, ParserError> {
+        let base = self.parse_type_primary_base()?;
+        Ok(self.attach_optional_postfix(base))
+    }
+
+    /// Apply trailing `?` markers to the base type. Stacked `?` (e.g.
+    /// `T??`) collapses idempotently because `T | nil | nil` simplifies
+    /// to `T | nil` after dedupe in `parse_type_expr`. We also avoid
+    /// re-wrapping `nil?` (which would produce `nil | nil`) and types
+    /// whose union already contains `nil`.
+    fn attach_optional_postfix(&mut self, mut ty: TypeExpr) -> TypeExpr {
+        while self.check(&TokenKind::Question) {
+            self.advance();
+            ty = wrap_optional(ty);
+        }
+        ty
+    }
+
+    fn parse_type_primary_base(&mut self) -> Result<TypeExpr, ParserError> {
         self.skip_newlines();
         if self.check(&TokenKind::LBrace) {
             return self.parse_shape_type();
@@ -269,4 +296,53 @@ impl Parser {
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(TypeExpr::Shape(fields))
     }
+}
+
+fn is_nil_named(ty: &TypeExpr) -> bool {
+    matches!(ty, TypeExpr::Named(n) if n == "nil")
+}
+
+fn union_contains_nil(types: &[TypeExpr]) -> bool {
+    types.iter().any(is_nil_named)
+}
+
+/// Wrap `ty` in `T | nil` unless it already includes `nil`.
+fn wrap_optional(ty: TypeExpr) -> TypeExpr {
+    if is_nil_named(&ty) {
+        return ty;
+    }
+    if let TypeExpr::Union(members) = &ty {
+        if union_contains_nil(members) {
+            return ty;
+        }
+    }
+    TypeExpr::Union(vec![ty, TypeExpr::Named("nil".to_string())])
+}
+
+/// Append `ty` (or its members, recursively, if it is a `Union`) to `out`.
+/// Used so postfix `?` and explicit `|` arms compose flatly: `T? | U`
+/// becomes `T | nil | U` rather than a nested union.
+fn flatten_union_into(out: &mut Vec<TypeExpr>, ty: TypeExpr) {
+    match ty {
+        TypeExpr::Union(members) => {
+            for m in members {
+                flatten_union_into(out, m);
+            }
+        }
+        other => out.push(other),
+    }
+}
+
+/// Remove duplicate type expressions while preserving order, so
+/// `T | T?` collapses to `T | nil` rather than `T | T | nil`.
+fn dedupe_in_order(types: &mut Vec<TypeExpr>) {
+    let mut seen: Vec<TypeExpr> = Vec::with_capacity(types.len());
+    types.retain(|t| {
+        if seen.contains(t) {
+            false
+        } else {
+            seen.push(t.clone());
+            true
+        }
+    });
 }

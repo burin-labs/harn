@@ -1,6 +1,6 @@
-// Test guard statement narrowing applies to outer scope
+/** Test guard statement narrowing applies to outer scope */
 pipeline test(task) {
-  fn require_string(x: string | nil) -> string {
+  fn require_string(x: string?) -> string {
     guard x != nil else {
       return "missing"
     }

@@ -11,7 +11,7 @@ pipeline test(task) {
       {approved: true, reviewer: "bob", reason: "approved"},
     ],
   )
-  let record: {approved: bool, reviewers: list<string>, approved_at: string, reason: string | nil, signatures: list<{reviewer: string, signed_at: string, signature: string}>} = request_approval("deploy production", {quorum: 2, reviewers: ["alice", "bob", "carol"]})
+  let record: {approved: bool, reviewers: list<string>, approved_at: string, reason: string?, signatures: list<{reviewer: string, signed_at: string, signature: string}>} = request_approval("deploy production", {quorum: 2, reviewers: ["alice", "bob", "carol"]})
   println(record.approved)
   println(len(record.reviewers))
   println(record.reviewers[0])

@@ -519,4 +519,76 @@ pipeline p(task) {
             "double semicolon should fail"
         );
     }
+
+    fn parse_let_type(source: &str) -> TypeExpr {
+        let nodes = parse_source(source).expect("source parses");
+        let pipeline = nodes.first().expect("at least one decl");
+        let body = match &pipeline.node {
+            Node::Pipeline { body, .. } => body,
+            other => panic!("expected pipeline, got {other:?}"),
+        };
+        match &body[0].node {
+            Node::LetBinding { type_ann, .. } => type_ann.clone().expect("type annotation present"),
+            other => panic!("expected let binding, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn optional_postfix_is_alias_for_union_with_nil() {
+        let sugar = parse_let_type("pipeline p(task) { let x: int? = nil }");
+        let unsugar = parse_let_type("pipeline p(task) { let x: int | nil = nil }");
+        assert_eq!(sugar, unsugar);
+        assert_eq!(
+            sugar,
+            TypeExpr::Union(vec![
+                TypeExpr::Named("int".into()),
+                TypeExpr::Named("nil".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn optional_flattens_in_outer_union() {
+        let ty = parse_let_type("pipeline p(task) { let x: int | string? = nil }");
+        // `int | string?` flattens to `int | string | nil` rather than
+        // a nested `int | (string | nil)`.
+        assert_eq!(
+            ty,
+            TypeExpr::Union(vec![
+                TypeExpr::Named("int".into()),
+                TypeExpr::Named("string".into()),
+                TypeExpr::Named("nil".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn optional_dedupes_repeated_nil_arms() {
+        let ty = parse_let_type("pipeline p(task) { let x: int? | nil = nil }");
+        assert_eq!(
+            ty,
+            TypeExpr::Union(vec![
+                TypeExpr::Named("int".into()),
+                TypeExpr::Named("nil".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn optional_binds_tighter_than_intersection() {
+        // `A & B?` parses as `A & (B | nil)`, not `(A & B) | nil`.
+        let ty = parse_let_type("pipeline p(task) { let x: {a: int} & {b: string}? = nil }");
+        match ty {
+            TypeExpr::Intersection(parts) => {
+                assert_eq!(parts.len(), 2);
+                assert!(matches!(parts[0], TypeExpr::Shape(_)));
+                let TypeExpr::Union(members) = &parts[1] else {
+                    panic!("expected second arm to be union, got {:?}", parts[1]);
+                };
+                assert_eq!(members.len(), 2);
+                assert!(matches!(members[1], TypeExpr::Named(ref n) if n == "nil"));
+            }
+            other => panic!("expected intersection, got {other:?}"),
+        }
+    }
 }

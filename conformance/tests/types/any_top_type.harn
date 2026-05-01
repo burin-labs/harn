@@ -1,4 +1,4 @@
-// `any` is a true top type — everything flows in, everything flows out.
+/** `any` is a true top type — everything flows in, everything flows out. */
 pipeline test(task) {
   // Every concrete type is assignable to `any`.
   let a1: any = 42
@@ -25,7 +25,7 @@ pipeline test(task) {
   log(passthrough(nil))
   // `any | nil` is still legal — union with top is equivalent to `any`,
   // but explicit unions remain valid annotations.
-  fn maybe() -> any | nil {
+  fn maybe() -> any? {
     return nil
   }
   log(maybe())
