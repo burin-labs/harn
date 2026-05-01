@@ -212,6 +212,7 @@ default = "src/lib.harn"
 [[providers]]
 id = "acme"
 connector = { harn = "src/lib.harn" }
+capabilities = ["webhook"]
 
 [connector_contract]
 version = 1

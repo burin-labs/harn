@@ -86,6 +86,7 @@ jobs:
       - run: make check-highlight
       - run: make check-language-spec
       - run: make check-trigger-quickref
+      - run: make check-connector-matrix
       - run: make check-trigger-examples
       - run: make check-docs-snippets
       - run: python3 scripts/verify_release_metadata.py

@@ -169,6 +169,14 @@ async fn async_main() {
                 commands::check::provider_matrix::run(args.format, args.filter.as_deref());
                 return;
             }
+            if args.connector_matrix {
+                commands::check::connector_matrix::run(
+                    args.format,
+                    args.filter.as_deref(),
+                    &args.targets,
+                );
+                return;
+            }
             let mut target_strings: Vec<String> = args.targets.clone();
             if args.workspace {
                 let anchor = target_strings.first().map(Path::new);
@@ -827,6 +835,9 @@ async fn async_main() {
         }
         Command::DumpProviderMatrix(args) => {
             commands::check::provider_matrix::run_docs(&args.output, args.check);
+        }
+        Command::DumpConnectorMatrix(args) => {
+            commands::check::connector_matrix::run_docs(&args.output, &args.sources, args.check);
         }
     }
 }

@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration as StdDuration;
 
-use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, ArgGroup, Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -171,6 +171,13 @@ SCRIPTING
     /// `make gen-provider-matrix` target.
     #[command(hide = true, name = "dump-provider-matrix")]
     DumpProviderMatrix(DumpProviderMatrixArgs),
+    /// Regenerate docs/src/connectors/parity-matrix.md from connector package manifests.
+    ///
+    /// Dev-only. Hidden from `--help` — invoke via
+    /// `cargo run -p harn-cli -- dump-connector-matrix` or the
+    /// `make gen-connector-matrix` target.
+    #[command(hide = true, name = "dump-connector-matrix")]
+    DumpConnectorMatrix(DumpConnectorMatrixArgs),
 }
 
 #[derive(Debug, Args)]
@@ -228,15 +235,23 @@ pub(crate) struct RunArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("matrix")
+        .args(["provider_matrix", "connector_matrix"])
+        .multiple(false)
+))]
 pub(crate) struct CheckArgs {
     /// Print the provider/model capability matrix instead of checking files.
     #[arg(long = "provider-matrix")]
     pub provider_matrix: bool,
-    /// Output format for `--provider-matrix`.
-    #[arg(long = "format", value_enum, default_value_t = CheckOutputFormat::Text, requires = "provider_matrix")]
+    /// Print the connector package capability matrix instead of checking files.
+    #[arg(long = "connector-matrix")]
+    pub connector_matrix: bool,
+    /// Output format for matrix commands.
+    #[arg(long = "format", value_enum, default_value_t = CheckOutputFormat::Text, requires = "matrix")]
     pub format: CheckOutputFormat,
-    /// Only include provider matrix rows that support the named feature.
-    #[arg(long = "filter", value_name = "FEATURE", requires = "provider_matrix")]
+    /// Only include matrix rows that support the named feature.
+    #[arg(long = "filter", value_name = "FEATURE", requires = "matrix")]
     pub filter: Option<String>,
     /// Extra host capability schema for preflight validation.
     #[arg(long = "host-capabilities")]
@@ -1883,6 +1898,20 @@ pub(crate) struct DumpProviderMatrixArgs {
     pub output: String,
     /// Verify the on-disk file matches what would be generated; exit non-zero
     /// if stale. Used by CI to prevent drift from capabilities.toml.
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct DumpConnectorMatrixArgs {
+    /// Path to the generated connector parity matrix page (relative to the repo root).
+    #[arg(long, default_value = "docs/src/connectors/parity-matrix.md")]
+    pub output: String,
+    /// Package manifest, package directory, or directory tree to scan. Repeatable.
+    #[arg(long = "source", value_name = "PATH")]
+    pub sources: Vec<String>,
+    /// Verify the on-disk file matches what would be generated; exit non-zero
+    /// if stale. Used by CI to prevent drift from connector package manifests.
     #[arg(long)]
     pub check: bool,
 }
@@ -4255,5 +4284,27 @@ mod tests {
         assert_eq!(args.format, CheckOutputFormat::Json);
         assert_eq!(args.filter.as_deref(), Some("json-schema"));
         assert!(args.targets.is_empty());
+    }
+
+    #[test]
+    fn test_parses_check_connector_matrix_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "check",
+            "--connector-matrix",
+            "--format",
+            "json",
+            "--filter",
+            "rate-limit",
+            "fixtures/connectors",
+        ]);
+
+        let Command::Check(args) = cli.command.unwrap() else {
+            panic!("expected check command");
+        };
+        assert!(args.connector_matrix);
+        assert_eq!(args.format, CheckOutputFormat::Json);
+        assert_eq!(args.filter.as_deref(), Some("rate-limit"));
+        assert_eq!(args.targets, vec!["fixtures/connectors"]);
     }
 }

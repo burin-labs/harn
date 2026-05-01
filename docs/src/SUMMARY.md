@@ -90,6 +90,7 @@
 - [Package authoring](./package-authoring.md)
 - [Connector authoring](./connectors/authoring.md)
 - [Connector architecture status](./connectors/architecture.md)
+- [Connector parity matrix](./connectors/parity-matrix.md)
 - [Connector catalog](./connectors/catalog.md)
 - [Connector testkit](./connectors/testkit.md)
 - [Cron connector](./connectors/cron.md)
