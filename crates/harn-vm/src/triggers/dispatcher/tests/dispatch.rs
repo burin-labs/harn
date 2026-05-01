@@ -195,11 +195,10 @@ async fn worker_handler_enqueues_job_and_returns_receipt() {
 
     let queue = crate::WorkerQueue::new(log.clone());
     let state = queue.queue_state("triage").await.expect("load queue state");
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system clock")
-        .as_millis() as i64;
-    assert_eq!(state.summary(now_ms).ready, 1);
+    // Use `i64::MAX` as the "now" reference so every enqueued job is past its
+    // scheduled `not_before` and counted as ready, independent of wall-clock
+    // drift between fixture setup and assertion.
+    assert_eq!(state.summary(i64::MAX).ready, 1);
     assert_eq!(state.jobs.len(), 1);
     assert_eq!(state.jobs[0].job.trigger_id, "github-worker-review");
     assert_eq!(state.jobs[0].job.priority, crate::WorkerQueuePriority::High);
