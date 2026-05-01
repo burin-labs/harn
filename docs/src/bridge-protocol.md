@@ -84,6 +84,56 @@ Harn's pinned fixtures under `crates/harn-serve/tests/fixtures/acp/` pin
 both the standard and extension shapes so host integrations can reference
 stable examples.
 
+#### Vendor-extension session-update payload namespacing (#905)
+
+Following the
+[ACP extensibility convention](https://agentclientprotocol.com/protocol/extensibility),
+**every vendor field on a Harn extension session-update is emitted under
+`update._meta.harn`** — never as a bare top-level field. The `sessionUpdate`
+discriminator stays at the canonical location so existing dispatchers
+that route on it keep working unchanged. Concretely:
+
+| Update variant         | Vendor fields under `_meta.harn`                                                                                                       |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `progress`             | `phase`, `message`, `progress`, `total`, `data`                                                                                        |
+| `log`                  | `level`, `message`, `fields`                                                                                                           |
+| `fs_watch`             | `subscriptionId`, `events`                                                                                                             |
+| `worker_update`        | `workerId`, `workerName`, `workerTask`, `workerMode`, `event`, `status`, `terminal`, `metadata`, `audit`                               |
+| `transcript_compacted` | `mode`, `strategy`, `archivedMessages`, `estimatedTokensBefore`, `estimatedTokensAfter`, `snapshotAssetId`                             |
+| `handoff`              | `handoffId`, `artifactId`, `handoff`                                                                                                   |
+| `skill_activated`      | `skillName`, `iteration`, `reason`                                                                                                     |
+| `skill_deactivated`    | `skillName`, `iteration`                                                                                                               |
+| `skill_scope_tools`    | `skillName`, `allowedTools`                                                                                                            |
+| `tool_search_query`    | `toolUseId`, `name`, `query`, `strategy`, `mode`                                                                                       |
+| `tool_search_result`   | `toolUseId`, `promoted`, `strategy`, `mode`                                                                                            |
+
+Hosts migrating from pre-#905 builds must read these fields from
+`_meta.harn.<field>` instead of the update root. The fixture
+`crates/harn-serve/tests/fixtures/acp/session_update_extensions.json`
+pins the new wire shape verbatim.
+
+Content extensions (`visible_text` and `visible_delta` on the
+`agent_message_chunk` content block, advertised via
+`agentCapabilities._meta.harn.contentExtensionFields`) follow the same
+convention but ride under `content._meta.harn` because they extend the
+canonical ACP content block, not the session-update envelope. Example:
+
+```json
+{
+  "sessionUpdate": "agent_message_chunk",
+  "content": {
+    "type": "text",
+    "text": "hello",
+    "_meta": {
+      "harn": {
+        "visible_text": "hello",
+        "visible_delta": "hello"
+      }
+    }
+  }
+}
+```
+
 ### `audit` tag
 
 Both `tool_call` and `tool_call_update` carry an optional `_meta.harn.audit`
@@ -267,7 +317,9 @@ expect more events on the same `worker_id` after they fire.
 ACP and A2A adapters subscribe to the canonical `AgentEvent::WorkerUpdate`
 variant and translate it into their respective wire formats from one
 typed source. ACP emits a `session/update` with `sessionUpdate:
-"worker_update"`:
+"worker_update"`. Per the [vendor-extension namespacing
+rule](#vendor-extension-session-update-payload-namespacing-905), all
+worker fields ride under `update._meta.harn`:
 
 ```json
 {
@@ -277,26 +329,30 @@ typed source. ACP emits a `session/update` with `sessionUpdate:
     "sessionId": "session_123",
     "update": {
       "sessionUpdate": "worker_update",
-      "workerId": "worker_abc",
-      "workerName": "review_captain",
-      "workerTask": "Review PR #42",
-      "workerMode": "delegated_stage",
-      "event": "WorkerWaitingForInput",
-      "status": "awaiting_input",
-      "terminal": false,
-      "metadata": {
-        "task": "Review PR #42",
-        "mode": "delegated_stage",
-        "started_at": "0193...",
-        "finished_at": null,
-        "awaiting_started_at": "0193...",
-        "child_run_id": "run_xyz",
-        "child_run_path": ".harn-runs/run_xyz",
-        "snapshot_path": ".harn/workers/worker_abc.json",
-        "audit": { "...": "MutationSessionRecord" },
-        "error": null
-      },
-      "audit": { "...": "MutationSessionRecord" }
+      "_meta": {
+        "harn": {
+          "workerId": "worker_abc",
+          "workerName": "review_captain",
+          "workerTask": "Review PR #42",
+          "workerMode": "delegated_stage",
+          "event": "WorkerWaitingForInput",
+          "status": "awaiting_input",
+          "terminal": false,
+          "metadata": {
+            "task": "Review PR #42",
+            "mode": "delegated_stage",
+            "started_at": "0193...",
+            "finished_at": null,
+            "awaiting_started_at": "0193...",
+            "child_run_id": "run_xyz",
+            "child_run_path": ".harn-runs/run_xyz",
+            "snapshot_path": ".harn/workers/worker_abc.json",
+            "audit": { "...": "MutationSessionRecord" },
+            "error": null
+          },
+          "audit": { "...": "MutationSessionRecord" }
+        }
+      }
     }
   }
 }
@@ -310,10 +366,9 @@ name.
 
 A2A surfaces the same event as a task-stream entry of type
 `worker_update`, scoped to the task whose dispatch spawned the worker.
-The payload mirrors the ACP shape (worker fields under camelCase keys
-plus `metadata`/`audit`). Subscribers receive these alongside the
-existing `status`/`message` events on the SSE / push-notification
-streams.
+A2A is a separate protocol surface and keeps the worker fields at the
+task-stream entry root (it has its own envelope conventions). ACP hosts
+should always read worker fields from `update._meta.harn.<field>`.
 
 Structured Harn plan emissions use the same task stream. When an agent calls
 `emit_plan` or `update_plan`, A2A subscribers receive a `harn_plan` entry with

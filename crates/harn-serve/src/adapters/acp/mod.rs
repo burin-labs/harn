@@ -304,18 +304,27 @@ impl AcpServer {
     #[allow(dead_code)]
     fn send_update(&self, session_id: &str, text: &str) {
         let visible_text = sanitize_visible_assistant_text(text, true);
+        let mut content = serde_json::json!({
+            "type": "text",
+            "text": text,
+        });
+        let mut content_meta = serde_json::Map::new();
+        content_meta.insert(
+            "visible_text".to_string(),
+            serde_json::Value::String(visible_text.clone()),
+        );
+        content_meta.insert(
+            "visible_delta".to_string(),
+            serde_json::Value::String(visible_text),
+        );
+        events::merge_harn_meta(&mut content, content_meta);
         self.send_notification(
             "session/update",
             serde_json::json!({
                 "sessionId": session_id,
                 "update": {
                     "sessionUpdate": "agent_message_chunk",
-                    "content": {
-                        "type": "text",
-                        "text": text,
-                        "visible_text": visible_text.clone(),
-                        "visible_delta": visible_text,
-                    },
+                    "content": content,
                 },
             }),
         );
@@ -1262,18 +1271,27 @@ impl AcpBridge {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push(text, true);
+        let mut content = serde_json::json!({
+            "type": "text",
+            "text": text,
+        });
+        let mut content_meta = serde_json::Map::new();
+        content_meta.insert(
+            "visible_text".to_string(),
+            serde_json::Value::String(visible_text),
+        );
+        content_meta.insert(
+            "visible_delta".to_string(),
+            serde_json::Value::String(visible_delta),
+        );
+        events::merge_harn_meta(&mut content, content_meta);
         self.send_notification(
             "session/update",
             serde_json::json!({
                 "sessionId": self.session_id,
                 "update": {
                     "sessionUpdate": "agent_message_chunk",
-                    "content": {
-                        "type": "text",
-                        "text": text,
-                        "visible_text": visible_text,
-                        "visible_delta": visible_delta,
-                    },
+                    "content": content,
                 },
             }),
         );
@@ -1281,7 +1299,8 @@ impl AcpBridge {
 
     /// Send a structured `session/update` with progress phase, message,
     /// and data. `progress` is a harn vendor-extension session-update
-    /// variant; canonical ACP has no progress-phase concept.
+    /// variant; canonical ACP has no progress-phase concept, so all
+    /// vendor fields ride under `update._meta.harn`.
     pub(super) fn send_progress(
         &self,
         phase: &str,
@@ -1292,18 +1311,26 @@ impl AcpBridge {
     ) {
         let mut update = serde_json::json!({
             "sessionUpdate": "progress",
-            "phase": phase,
-            "message": message,
         });
+        let mut harn_meta = serde_json::Map::new();
+        harn_meta.insert(
+            "phase".to_string(),
+            serde_json::Value::String(phase.to_string()),
+        );
+        harn_meta.insert(
+            "message".to_string(),
+            serde_json::Value::String(message.to_string()),
+        );
         if let Some(p) = progress {
-            update["progress"] = serde_json::json!(p);
+            harn_meta.insert("progress".to_string(), serde_json::Value::from(p));
         }
         if let Some(t) = total {
-            update["total"] = serde_json::json!(t);
+            harn_meta.insert("total".to_string(), serde_json::Value::from(t));
         }
         if let Some(d) = data {
-            update["data"] = d;
+            harn_meta.insert("data".to_string(), d);
         }
+        events::merge_harn_meta(&mut update, harn_meta);
         self.send_notification(
             "session/update",
             serde_json::json!({
@@ -1315,19 +1342,28 @@ impl AcpBridge {
 
     /// Send a structured `session/update` with log level, message, and
     /// fields. `log` is a harn vendor-extension; canonical ACP has no
-    /// log channel on the session-update stream.
+    /// log channel on the session-update stream, so all vendor fields
+    /// ride under `update._meta.harn`.
     pub(super) fn send_log(&self, level: &str, message: &str, fields: Option<serde_json::Value>) {
         if level == "info" && suppress_default_info_log(message) {
             return;
         }
         let mut update = serde_json::json!({
             "sessionUpdate": "log",
-            "level": level,
-            "message": message,
         });
+        let mut harn_meta = serde_json::Map::new();
+        harn_meta.insert(
+            "level".to_string(),
+            serde_json::Value::String(level.to_string()),
+        );
+        harn_meta.insert(
+            "message".to_string(),
+            serde_json::Value::String(message.to_string()),
+        );
         if let Some(f) = fields {
-            update["fields"] = f;
+            harn_meta.insert("fields".to_string(), f);
         }
+        events::merge_harn_meta(&mut update, harn_meta);
         self.send_notification(
             "session/update",
             serde_json::json!({
@@ -1678,9 +1714,13 @@ mod tests {
                         && message["params"]["update"]["sessionUpdate"] == "agent_message_chunk"
                     {
                         assert_eq!(
-                            message["params"]["update"]["content"]["visible_delta"],
+                            message["params"]["update"]["content"]["_meta"]["harn"]
+                                ["visible_delta"],
                             "hello from acp"
                         );
+                        assert!(message["params"]["update"]["content"]
+                            .get("visible_delta")
+                            .is_none());
                         saw_update = true;
                     }
                     if message["id"] == 4 {
@@ -1781,9 +1821,12 @@ mod tests {
         let update = recv_json(&mut rx).await;
         assert_eq!(update["method"], "session/update");
         assert_eq!(
-            update["params"]["update"]["content"]["visible_delta"],
+            update["params"]["update"]["content"]["_meta"]["harn"]["visible_delta"],
             "Error: missing API key"
         );
+        assert!(update["params"]["update"]["content"]
+            .get("visible_delta")
+            .is_none());
         let error = recv_json(&mut rx).await;
         assert_eq!(error["id"], 2);
         assert_eq!(error["error"]["message"], "missing API key");
@@ -2557,7 +2600,7 @@ mod tests {
         let update = recv_json(&mut rx).await;
         assert_eq!(update["method"], "session/update");
         assert!(
-            update["params"]["update"]["content"]["visible_delta"]
+            update["params"]["update"]["content"]["_meta"]["harn"]["visible_delta"]
                 .as_str()
                 .unwrap_or_default()
                 .contains("Slash commands require `--pipeline"),

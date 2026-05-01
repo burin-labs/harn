@@ -61,18 +61,38 @@ impl AcpAgentEventSink {
         update: &mut serde_json::Value,
         harn_meta: serde_json::Map<String, serde_json::Value>,
     ) {
-        if harn_meta.is_empty() {
-            return;
-        }
-        let Some(update) = update.as_object_mut() else {
-            return;
-        };
-        update.insert(
-            "_meta".to_string(),
-            serde_json::json!({
-                "harn": harn_meta,
-            }),
-        );
+        merge_harn_meta(update, harn_meta);
+    }
+}
+
+/// Merge `harn_meta` keys into `value._meta.harn`, creating intermediate
+/// objects as needed. Existing `_meta.harn` keys are preserved (unless
+/// overwritten by `harn_meta`). No-op when `harn_meta` is empty or
+/// `value` is not a JSON object.
+pub(super) fn merge_harn_meta(
+    value: &mut serde_json::Value,
+    harn_meta: serde_json::Map<String, serde_json::Value>,
+) {
+    if harn_meta.is_empty() {
+        return;
+    }
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    let meta = obj
+        .entry("_meta".to_string())
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    let Some(meta_obj) = meta.as_object_mut() else {
+        return;
+    };
+    let harn = meta_obj
+        .entry("harn".to_string())
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    let Some(harn_obj) = harn.as_object_mut() else {
+        return;
+    };
+    for (k, v) in harn_meta {
+        harn_obj.insert(k, v);
     }
 }
 
@@ -84,16 +104,25 @@ impl AgentEventSink for AcpAgentEventSink {
                 content,
             } => {
                 let visible = sanitize_visible_assistant_text(content, true);
+                let mut content_block = serde_json::json!({
+                    "type": "text",
+                    "text": content,
+                });
+                let mut content_meta = serde_json::Map::new();
+                content_meta.insert(
+                    "visible_text".to_string(),
+                    serde_json::Value::String(visible.clone()),
+                );
+                content_meta.insert(
+                    "visible_delta".to_string(),
+                    serde_json::Value::String(visible),
+                );
+                merge_harn_meta(&mut content_block, content_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
                     "update": {
                         "sessionUpdate": "agent_message_chunk",
-                        "content": {
-                            "type": "text",
-                            "text": content,
-                            "visible_text": visible.clone(),
-                            "visible_delta": visible,
-                        },
+                        "content": content_block,
                     },
                 }));
             }
@@ -249,14 +278,23 @@ impl AgentEventSink for AcpAgentEventSink {
                 iteration,
                 reason,
             } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "skill_activated",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "skillName".to_string(),
+                    serde_json::Value::String(skill_name.clone()),
+                );
+                harn_meta.insert("iteration".to_string(), serde_json::Value::from(*iteration));
+                harn_meta.insert(
+                    "reason".to_string(),
+                    serde_json::Value::String(reason.clone()),
+                );
+                merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "skill_activated",
-                        "skillName": skill_name,
-                        "iteration": iteration,
-                        "reason": reason,
-                    },
+                    "update": update,
                 }));
             }
             AgentEvent::SkillDeactivated {
@@ -264,13 +302,19 @@ impl AgentEventSink for AcpAgentEventSink {
                 skill_name,
                 iteration,
             } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "skill_deactivated",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "skillName".to_string(),
+                    serde_json::Value::String(skill_name.clone()),
+                );
+                harn_meta.insert("iteration".to_string(), serde_json::Value::from(*iteration));
+                merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "skill_deactivated",
-                        "skillName": skill_name,
-                        "iteration": iteration,
-                    },
+                    "update": update,
                 }));
             }
             AgentEvent::SkillScopeTools {
@@ -278,13 +322,22 @@ impl AgentEventSink for AcpAgentEventSink {
                 skill_name,
                 allowed_tools,
             } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "skill_scope_tools",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "skillName".to_string(),
+                    serde_json::Value::String(skill_name.clone()),
+                );
+                harn_meta.insert(
+                    "allowedTools".to_string(),
+                    serde_json::to_value(allowed_tools).unwrap_or_default(),
+                );
+                merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "skill_scope_tools",
-                        "skillName": skill_name,
-                        "allowedTools": allowed_tools,
-                    },
+                    "update": update,
                 }));
             }
             AgentEvent::ToolSearchQuery {
@@ -295,16 +348,25 @@ impl AgentEventSink for AcpAgentEventSink {
                 strategy,
                 mode,
             } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "tool_search_query",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "toolUseId".to_string(),
+                    serde_json::Value::String(tool_use_id.clone()),
+                );
+                harn_meta.insert("name".to_string(), serde_json::Value::String(name.clone()));
+                harn_meta.insert("query".to_string(), query.clone());
+                harn_meta.insert(
+                    "strategy".to_string(),
+                    serde_json::Value::String(strategy.clone()),
+                );
+                harn_meta.insert("mode".to_string(), serde_json::Value::String(mode.clone()));
+                merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "tool_search_query",
-                        "toolUseId": tool_use_id,
-                        "name": name,
-                        "query": query,
-                        "strategy": strategy,
-                        "mode": mode,
-                    },
+                    "update": update,
                 }));
             }
             AgentEvent::ToolSearchResult {
@@ -314,15 +376,27 @@ impl AgentEventSink for AcpAgentEventSink {
                 strategy,
                 mode,
             } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "tool_search_result",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "toolUseId".to_string(),
+                    serde_json::Value::String(tool_use_id.clone()),
+                );
+                harn_meta.insert(
+                    "promoted".to_string(),
+                    serde_json::to_value(promoted).unwrap_or_default(),
+                );
+                harn_meta.insert(
+                    "strategy".to_string(),
+                    serde_json::Value::String(strategy.clone()),
+                );
+                harn_meta.insert("mode".to_string(), serde_json::Value::String(mode.clone()));
+                merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "tool_search_result",
-                        "toolUseId": tool_use_id,
-                        "promoted": promoted,
-                        "strategy": strategy,
-                        "mode": mode,
-                    },
+                    "update": update,
                 }));
             }
             AgentEvent::TranscriptCompacted {
@@ -334,17 +408,38 @@ impl AgentEventSink for AcpAgentEventSink {
                 estimated_tokens_after,
                 snapshot_asset_id,
             } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "transcript_compacted",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert("mode".to_string(), serde_json::Value::String(mode.clone()));
+                harn_meta.insert(
+                    "strategy".to_string(),
+                    serde_json::Value::String(strategy.clone()),
+                );
+                harn_meta.insert(
+                    "archivedMessages".to_string(),
+                    serde_json::Value::from(*archived_messages),
+                );
+                harn_meta.insert(
+                    "estimatedTokensBefore".to_string(),
+                    serde_json::Value::from(*estimated_tokens_before),
+                );
+                harn_meta.insert(
+                    "estimatedTokensAfter".to_string(),
+                    serde_json::Value::from(*estimated_tokens_after),
+                );
+                harn_meta.insert(
+                    "snapshotAssetId".to_string(),
+                    match snapshot_asset_id {
+                        Some(id) => serde_json::Value::String(id.clone()),
+                        None => serde_json::Value::Null,
+                    },
+                );
+                merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "transcript_compacted",
-                        "mode": mode,
-                        "strategy": strategy,
-                        "archivedMessages": archived_messages,
-                        "estimatedTokensBefore": estimated_tokens_before,
-                        "estimatedTokensAfter": estimated_tokens_after,
-                        "snapshotAssetId": snapshot_asset_id,
-                    },
+                    "update": update,
                 }));
             }
             AgentEvent::Handoff {
@@ -352,14 +447,26 @@ impl AgentEventSink for AcpAgentEventSink {
                 artifact_id,
                 handoff,
             } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "handoff",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "handoffId".to_string(),
+                    serde_json::Value::String(handoff.id.clone()),
+                );
+                harn_meta.insert(
+                    "artifactId".to_string(),
+                    serde_json::Value::String(artifact_id.clone()),
+                );
+                harn_meta.insert(
+                    "handoff".to_string(),
+                    serde_json::to_value(handoff).unwrap_or_default(),
+                );
+                merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "handoff",
-                        "handoffId": handoff.id,
-                        "artifactId": artifact_id,
-                        "handoff": handoff,
-                    },
+                    "update": update,
                 }));
             }
             AgentEvent::FsWatch {
@@ -367,13 +474,22 @@ impl AgentEventSink for AcpAgentEventSink {
                 subscription_id,
                 events,
             } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "fs_watch",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "subscriptionId".to_string(),
+                    serde_json::Value::String(subscription_id.clone()),
+                );
+                harn_meta.insert(
+                    "events".to_string(),
+                    serde_json::to_value(events).unwrap_or_default(),
+                );
+                merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "fs_watch",
-                        "subscriptionId": subscription_id,
-                        "events": events,
-                    },
+                    "update": update,
                 }));
             }
             AgentEvent::WorkerUpdate {
@@ -389,18 +505,41 @@ impl AgentEventSink for AcpAgentEventSink {
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "worker_update",
-                    "workerId": worker_id,
-                    "workerName": worker_name,
-                    "workerTask": worker_task,
-                    "workerMode": worker_mode,
-                    "event": event.as_str(),
-                    "status": status,
-                    "terminal": event.is_terminal(),
-                    "metadata": metadata,
                 });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "workerId".to_string(),
+                    serde_json::Value::String(worker_id.clone()),
+                );
+                harn_meta.insert(
+                    "workerName".to_string(),
+                    serde_json::Value::String(worker_name.clone()),
+                );
+                harn_meta.insert(
+                    "workerTask".to_string(),
+                    serde_json::Value::String(worker_task.clone()),
+                );
+                harn_meta.insert(
+                    "workerMode".to_string(),
+                    serde_json::Value::String(worker_mode.clone()),
+                );
+                harn_meta.insert(
+                    "event".to_string(),
+                    serde_json::Value::String(event.as_str().to_string()),
+                );
+                harn_meta.insert(
+                    "status".to_string(),
+                    serde_json::Value::String(status.clone()),
+                );
+                harn_meta.insert(
+                    "terminal".to_string(),
+                    serde_json::Value::Bool(event.is_terminal()),
+                );
+                harn_meta.insert("metadata".to_string(), metadata.clone());
                 if let Some(audit) = audit {
-                    update["audit"] = audit.clone();
+                    harn_meta.insert("audit".to_string(), audit.clone());
                 }
+                merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
                     "update": update,
@@ -737,15 +876,19 @@ mod tests {
             assert_eq!(payload["params"]["sessionId"], "session-1");
             let update = &payload["params"]["update"];
             assert_eq!(update["sessionUpdate"], "worker_update");
-            assert_eq!(update["workerId"], "worker-1");
-            assert_eq!(update["workerName"], "review");
-            assert_eq!(update["workerTask"], "review pr");
-            assert_eq!(update["workerMode"], "delegated_stage");
-            assert_eq!(update["event"], worker_event.as_str());
-            assert_eq!(update["status"], status);
-            assert_eq!(update["terminal"], terminal);
-            assert_eq!(update["metadata"]["child_run_id"], "run_x");
-            assert_eq!(update["audit"]["run_id"], "run_x");
+            // Vendor-extension fields ride under `_meta.harn` per harn#905.
+            let harn_meta = update_harn_meta(&payload);
+            assert_eq!(harn_meta["workerId"], "worker-1");
+            assert_eq!(harn_meta["workerName"], "review");
+            assert_eq!(harn_meta["workerTask"], "review pr");
+            assert_eq!(harn_meta["workerMode"], "delegated_stage");
+            assert_eq!(harn_meta["event"], worker_event.as_str());
+            assert_eq!(harn_meta["status"], status);
+            assert_eq!(harn_meta["terminal"], terminal);
+            assert_eq!(harn_meta["metadata"]["child_run_id"], "run_x");
+            assert_eq!(harn_meta["audit"]["run_id"], "run_x");
+            assert!(update.get("workerId").is_none());
+            assert!(update.get("audit").is_none());
         }
     }
 
@@ -766,6 +909,8 @@ mod tests {
         });
         let line = rx.recv().await.expect("acp worker_update notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        let harn_meta = update_harn_meta(&payload);
+        assert!(harn_meta.get("audit").is_none());
         assert!(payload["params"]["update"].get("audit").is_none());
     }
 
@@ -796,11 +941,15 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
         assert_eq!(payload["method"], "session/update");
         assert_eq!(payload["params"]["update"]["sessionUpdate"], "handoff");
-        assert_eq!(payload["params"]["update"]["handoffId"], "handoff-1");
+        // Vendor-extension fields ride under `_meta.harn` per harn#905.
+        let harn_meta = update_harn_meta(&payload);
+        assert_eq!(harn_meta["handoffId"], "handoff-1");
         assert_eq!(
-            payload["params"]["update"]["handoff"]["target_persona_or_human"]["label"],
+            harn_meta["handoff"]["target_persona_or_human"]["label"],
             "review_captain"
         );
+        assert!(payload["params"]["update"].get("handoffId").is_none());
+        assert!(payload["params"]["update"].get("handoff").is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1374,6 +1523,209 @@ mod tests {
             payload["params"]["update"].get("_meta").is_none(),
             "got: {payload}"
         );
+    }
+
+    /// harn#905 conformance: vendor-extension session-update fields
+    /// must travel under `update._meta.harn` and **must not** appear at
+    /// the update root. Canonical ACP fields (`sessionUpdate`, `content`,
+    /// etc.) stay at their canonical locations. This test pins the
+    /// contract field-by-field for every `HARN_SESSION_UPDATE_EXTENSIONS`
+    /// variant the adapter emits so a regression in any one variant
+    /// fails this single test.
+    #[tokio::test(flavor = "current_thread")]
+    async fn vendor_extension_session_update_fields_live_under_meta_harn() {
+        let actual = collect_notifications(extension_fixture_events()).await;
+
+        let expectations: &[(&str, &[&str])] = &[
+            ("skill_activated", &["skillName", "iteration", "reason"]),
+            ("skill_deactivated", &["skillName", "iteration"]),
+            ("skill_scope_tools", &["skillName", "allowedTools"]),
+            (
+                "tool_search_query",
+                &["toolUseId", "name", "query", "strategy", "mode"],
+            ),
+            (
+                "tool_search_result",
+                &["toolUseId", "promoted", "strategy", "mode"],
+            ),
+            (
+                "transcript_compacted",
+                &[
+                    "mode",
+                    "strategy",
+                    "archivedMessages",
+                    "estimatedTokensBefore",
+                    "estimatedTokensAfter",
+                    "snapshotAssetId",
+                ],
+            ),
+            ("handoff", &["handoffId", "artifactId", "handoff"]),
+            ("fs_watch", &["subscriptionId", "events"]),
+            (
+                "worker_update",
+                &[
+                    "workerId",
+                    "workerName",
+                    "workerTask",
+                    "workerMode",
+                    "event",
+                    "status",
+                    "terminal",
+                    "metadata",
+                    "audit",
+                ],
+            ),
+        ];
+
+        assert_eq!(
+            actual.len(),
+            expectations.len(),
+            "fixture event count must match expectations table"
+        );
+
+        for (notification, (variant, vendor_fields)) in actual.iter().zip(expectations.iter()) {
+            let update = &notification["params"]["update"];
+            assert_eq!(
+                update["sessionUpdate"], *variant,
+                "update[{variant}] must keep canonical sessionUpdate at the root"
+            );
+            let harn_meta = &update["_meta"]["harn"];
+            assert!(
+                harn_meta.is_object(),
+                "update[{variant}] must carry _meta.harn object, got: {update}"
+            );
+            for field in *vendor_fields {
+                assert!(
+                    harn_meta.get(field).is_some(),
+                    "update[{variant}]._meta.harn must contain `{field}`, got: {harn_meta}"
+                );
+                assert!(
+                    update.get(field).is_none(),
+                    "update[{variant}].`{field}` must not be emitted at the root, got: {update}"
+                );
+            }
+            // No vendor field other than `_meta` and `sessionUpdate`
+            // should be present at the update root.
+            let update_obj = update.as_object().expect("update is object");
+            for key in update_obj.keys() {
+                assert!(
+                    matches!(key.as_str(), "sessionUpdate" | "_meta"),
+                    "update[{variant}] must not carry root key `{key}` (vendor extension); got: {update}"
+                );
+            }
+        }
+    }
+
+    /// harn#905 conformance: `progress` and `log` are emitted by
+    /// `AcpBridge` (not `AcpAgentEventSink`), so cover them with a
+    /// dedicated bridge-side test. Both variants are entirely
+    /// vendor — every field other than `sessionUpdate` itself must
+    /// land under `_meta.harn`.
+    #[tokio::test(flavor = "current_thread")]
+    async fn bridge_progress_and_log_session_updates_namespace_vendor_fields() {
+        use std::collections::HashMap;
+        use std::rc::Rc;
+        use std::sync::atomic::{AtomicBool, AtomicU64};
+        use std::sync::Arc;
+        use tokio::sync::Mutex as TokioMutex;
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let (tx, mut rx) = mpsc::unbounded_channel();
+                let bridge = Rc::new(super::super::AcpBridge {
+                    session_id: "session-1".to_string(),
+                    output: AcpOutput::Channel(tx),
+                    pending: Arc::new(TokioMutex::new(HashMap::new())),
+                    next_id_counter: AtomicU64::new(1),
+                    cancelled: Arc::new(AtomicBool::new(false)),
+                    script_name: std::sync::Mutex::new(String::new()),
+                    assistant_state: std::sync::Mutex::new(
+                        harn_vm::visible_text::VisibleTextState::default(),
+                    ),
+                });
+
+                bridge.send_progress(
+                    "ingest",
+                    "loading",
+                    Some(3),
+                    Some(10),
+                    Some(serde_json::json!({"item": "row-7"})),
+                );
+                let line = rx.recv().await.expect("progress notification");
+                let payload: serde_json::Value =
+                    serde_json::from_str(&line).expect("progress json");
+                let update = &payload["params"]["update"];
+                assert_eq!(update["sessionUpdate"], "progress");
+                let harn_meta = &update["_meta"]["harn"];
+                assert_eq!(harn_meta["phase"], "ingest");
+                assert_eq!(harn_meta["message"], "loading");
+                assert_eq!(harn_meta["progress"], 3);
+                assert_eq!(harn_meta["total"], 10);
+                assert_eq!(harn_meta["data"]["item"], "row-7");
+                for forbidden in ["phase", "message", "progress", "total", "data"] {
+                    assert!(
+                        update.get(forbidden).is_none(),
+                        "progress.{forbidden} must live under _meta.harn, got: {update}"
+                    );
+                }
+
+                bridge.send_log(
+                    "warn",
+                    "deprecated builtin: foo",
+                    Some(serde_json::json!({"builtin": "foo"})),
+                );
+                let line = rx.recv().await.expect("log notification");
+                let payload: serde_json::Value = serde_json::from_str(&line).expect("log json");
+                let update = &payload["params"]["update"];
+                assert_eq!(update["sessionUpdate"], "log");
+                let harn_meta = &update["_meta"]["harn"];
+                assert_eq!(harn_meta["level"], "warn");
+                assert_eq!(harn_meta["message"], "deprecated builtin: foo");
+                assert_eq!(harn_meta["fields"]["builtin"], "foo");
+                for forbidden in ["level", "message", "fields"] {
+                    assert!(
+                        update.get(forbidden).is_none(),
+                        "log.{forbidden} must live under _meta.harn, got: {update}"
+                    );
+                }
+
+                // Optional fields are simply absent under `_meta.harn`,
+                // not promoted back to the root.
+                bridge.send_progress("ingest", "starting", None, None, None);
+                let line = rx.recv().await.expect("minimal progress notification");
+                let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+                let update = &payload["params"]["update"];
+                let harn_meta = &update["_meta"]["harn"];
+                assert!(harn_meta.get("progress").is_none());
+                assert!(harn_meta.get("total").is_none());
+                assert!(harn_meta.get("data").is_none());
+                assert!(update.get("progress").is_none());
+            })
+            .await;
+    }
+
+    /// harn#905 conformance: `agent_message_chunk` is canonical, so the
+    /// content block and its `text` field stay at the canonical
+    /// location; only the harn-specific `visible_text` /
+    /// `visible_delta` content extensions move under `content._meta.harn`.
+    #[tokio::test(flavor = "current_thread")]
+    async fn agent_message_chunk_visible_text_lives_under_content_meta_harn() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+        sink.handle_event(&AgentEvent::AgentMessageChunk {
+            session_id: "session-1".to_string(),
+            content: "hello".to_string(),
+        });
+        let line = rx.recv().await.expect("agent_message_chunk notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        let content = &payload["params"]["update"]["content"];
+        assert_eq!(content["type"], "text");
+        assert_eq!(content["text"], "hello");
+        assert_eq!(content["_meta"]["harn"]["visible_text"], "hello");
+        assert_eq!(content["_meta"]["harn"]["visible_delta"], "hello");
+        assert!(content.get("visible_text").is_none());
+        assert!(content.get("visible_delta").is_none());
     }
 
     #[test]
