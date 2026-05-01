@@ -116,6 +116,7 @@ fn seed_written_event(temp: &TempDir) -> serde_json::Value {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn trigger_replay_diff_reports_structured_drift() {
     let temp = TempDir::new().unwrap();
     write_manifest(temp.path());
@@ -171,6 +172,7 @@ pub fn on_issue(event: TriggerEvent) -> dict {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn trigger_replay_as_of_uses_historical_binding_version() {
     let temp = TempDir::new().unwrap();
     write_manifest(temp.path());
@@ -233,6 +235,7 @@ pub fn on_issue(event: TriggerEvent) -> dict {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn trigger_replay_bulk_dry_run_filters_on_event_payload() {
     let temp = TempDir::new().unwrap();
     write_manifest(temp.path());
@@ -279,6 +282,7 @@ pub fn on_issue(event: TriggerEvent) -> dict {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn trigger_cancel_reports_terminal_events_as_not_cancellable() {
     let temp = TempDir::new().unwrap();
     write_manifest(temp.path());

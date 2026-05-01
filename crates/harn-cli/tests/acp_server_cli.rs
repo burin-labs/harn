@@ -120,6 +120,7 @@ fn latest_prompt_summary(notifications: &[JsonValue], session_id: &str) -> JsonV
 }
 
 #[test]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     let _guard = lock_acp_cli_tests();
     let temp = TempDir::new().unwrap();
@@ -319,6 +320,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
 }
 
 #[test]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 fn serve_acp_stdio_runs_packaged_adapter() {
     let _guard = lock_acp_cli_tests();
     let temp = TempDir::new().unwrap();

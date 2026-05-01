@@ -115,6 +115,7 @@ fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>
 }
 
 #[test]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 fn mcp_server_stdio_roundtrips_tools_and_resources() {
     let _guard = lock_mcp_cli_tests();
     let temp = TempDir::new().unwrap();
@@ -379,6 +380,7 @@ fn mcp_server_stdio_roundtrips_tools_and_resources() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 async fn mcp_server_http_roundtrips_initialize_and_fire() {
     let _guard = lock_mcp_cli_tests();
     let temp = TempDir::new().unwrap();

@@ -84,6 +84,19 @@ condensed series summaries instead of full per-patch history.
   harn-cli subprocess tests and raises the nextest concurrency cap to
   cut local + CI test wall-clock.
 
+- **In-process CLI tests (#1067).** `merge_captain_cli`,
+  `crystallize_cli`, and `check_cli` now exercise the underlying
+  workspace library crates (`harn_vm::orchestration::*`,
+  `harn_parser::TypeChecker`, `harn_modules::build`) directly instead of
+  spawning the `harn` debug binary per case. Subprocess-driven CLI
+  tests that genuinely cover binary surface (signal handling, exit-code
+  mapping, stdio JSON-RPC) — `run_exit_codes`, `mcp_server_cli`,
+  `acp_server_cli`, `harn_serve_mcp_cli`, `orchestrator_cli`,
+  `orchestrator_inbox_dedupe`, plus `flow_ship_cli`, `persona_cli`,
+  `llm_mock_cli`, `trigger_replay_cli`, `burin_mini_playground` pending
+  follow-up library-API extraction — are gated behind `#[ignore]` for
+  the slow E2E suite (#1069) and skipped on the push hook.
+
 - **Windows-only typed error returns** (fix-forward). The #1032
   migration left two `cfg(not(unix))`/`cfg(windows)` paths returning
   `Result<(), String>` against typed signatures (Ctrl-C loop in

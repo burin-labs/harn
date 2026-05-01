@@ -202,6 +202,7 @@ async fn collect_sse_body_after_progress(
 }
 
 #[test]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
     let _guard = lock_harn_serve_mcp_tests();
     let temp = TempDir::new().unwrap();
@@ -354,6 +355,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
 }
 
 #[test]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 fn serve_mcp_stdio_exposes_script_registered_surface() {
     let _guard = lock_harn_serve_mcp_tests();
     let temp = TempDir::new().unwrap();
@@ -458,6 +460,7 @@ fn serve_mcp_stdio_exposes_script_registered_surface() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
     let _guard = lock_harn_serve_mcp_tests();
     let temp = TempDir::new().unwrap();
@@ -638,6 +641,7 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 async fn serve_mcp_http_exposes_script_registered_surface() {
     let _guard = lock_harn_serve_mcp_tests();
     let temp = TempDir::new().unwrap();

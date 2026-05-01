@@ -27,6 +27,7 @@ fn run_script(body: &str) -> std::process::Output {
 }
 
 #[test]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 fn pipeline_main_returning_int_sets_exit_code() {
     let out = run_script("pipeline main() {\n  return 42\n}\n");
     assert_eq!(
@@ -39,6 +40,7 @@ fn pipeline_main_returning_int_sets_exit_code() {
 }
 
 #[test]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 fn pipeline_main_returning_err_writes_stderr_and_exits_one() {
     let out = run_script("pipeline main() {\n  return Err(\"boom\")\n}\n");
     assert_eq!(out.status.code(), Some(1));
@@ -50,12 +52,14 @@ fn pipeline_main_returning_err_writes_stderr_and_exits_one() {
 }
 
 #[test]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 fn pipeline_main_returning_ok_exits_zero() {
     let out = run_script("pipeline main() {\n  return Ok(\"done\")\n}\n");
     assert_eq!(out.status.code(), Some(0));
 }
 
 #[test]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 fn pipeline_main_implicit_return_exits_zero() {
     let out = run_script("pipeline main() {\n  println(\"hi\")\n}\n");
     assert_eq!(out.status.code(), Some(0));
@@ -63,6 +67,7 @@ fn pipeline_main_implicit_return_exits_zero() {
 }
 
 #[test]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 fn pipeline_main_int_clamped_to_byte_range() {
     let out = run_script("pipeline main() {\n  return 999\n}\n");
     // Linux limits child exit codes to a byte; we clamp to 0..=255 explicitly.
@@ -70,6 +75,7 @@ fn pipeline_main_int_clamped_to_byte_range() {
 }
 
 #[test]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 fn explicit_exit_builtin_still_works() {
     let out = run_script("pipeline main() {\n  exit(3)\n}\n");
     assert_eq!(out.status.code(), Some(3));

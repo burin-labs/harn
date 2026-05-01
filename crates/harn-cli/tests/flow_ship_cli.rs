@@ -61,6 +61,7 @@ fn phase_zero_demo(slice) {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn flow_ship_watch_injects_atoms_and_opens_mock_pr() {
     let repo = demo_repo();
     let store_path = repo.path().join(".harn/flow.sqlite");
@@ -169,6 +170,7 @@ fn write_invariants_with_many_predicates(dir: &std::path::Path, count: usize) {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn flow_ship_watch_surfaces_bootstrap_policy_when_present() {
     let repo = demo_repo();
     fs::write(
@@ -232,6 +234,7 @@ fn _bootstrap_marker() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn flow_ship_watch_marks_bootstrap_policy_absent_when_missing() {
     let repo = demo_repo();
     let store_path = repo.path().join(".harn/flow.sqlite");
@@ -261,6 +264,7 @@ fn flow_ship_watch_marks_bootstrap_policy_absent_when_missing() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn flow_ship_watch_blocks_when_predicate_union_explodes() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();

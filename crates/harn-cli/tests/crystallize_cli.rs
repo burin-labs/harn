@@ -1,20 +1,17 @@
-mod test_util;
+//! In-process tests for the `harn crystallize` library API
+//! (`harn_vm::orchestration::*`). Replaces the prior subprocess-spawning
+//! version that ran the `harn` binary per case (#1067).
 
 use std::fs;
 use std::path::Path;
-use std::process::Output;
 
+use harn_vm::orchestration::{
+    build_crystallization_bundle, crystallize_traces, load_crystallization_traces_from_dir,
+    shadow_replay_bundle, validate_crystallization_bundle, write_crystallization_artifacts,
+    write_crystallization_bundle, BundleOptions, CrystallizationArtifacts, CrystallizeOptions,
+};
 use serde_json::{json, Value};
 use tempfile::TempDir;
-use test_util::process::harn_command;
-
-fn run_harn(cwd: &Path, args: &[&str]) -> Output {
-    harn_command()
-        .current_dir(cwd)
-        .args(args)
-        .output()
-        .expect("failed to spawn harn binary")
-}
 
 fn write_trace(dir: &Path, name: &str, payload: &Value) {
     let path = dir.join(name);
@@ -102,6 +99,84 @@ fn plan_only_trace(idx: usize) -> Value {
     })
 }
 
+/// Run the same pipeline as `harn crystallize <flags>` (the `mine`
+/// path). Returns `(report_path, bundle_dir)` so callers can inspect
+/// on-disk artifacts.
+struct MineOutcome {
+    artifacts: CrystallizationArtifacts,
+    workflow_path: std::path::PathBuf,
+    report_path: std::path::PathBuf,
+    eval_pack_path: Option<std::path::PathBuf>,
+    bundle_dir: std::path::PathBuf,
+}
+
+fn mine(
+    temp: &TempDir,
+    traces_dir: &Path,
+    workflow_name: &str,
+    package_name: Option<&str>,
+    bundle_team: Option<&str>,
+    bundle_repo: Option<&str>,
+    eval_pack: bool,
+    min_examples: usize,
+) -> MineOutcome {
+    let traces = load_crystallization_traces_from_dir(traces_dir).unwrap();
+    let normalized = traces.clone();
+    let eval_pack_path = if eval_pack {
+        Some(temp.path().join(format!("{workflow_name}.harn.eval.toml")))
+    } else {
+        None
+    };
+    let artifacts = crystallize_traces(
+        traces,
+        CrystallizeOptions {
+            min_examples,
+            workflow_name: Some(workflow_name.to_string()),
+            package_name: package_name.map(str::to_string),
+            author: None,
+            approver: None,
+            eval_pack_link: eval_pack_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned()),
+        },
+    )
+    .unwrap();
+
+    let bundle_dir = temp.path().join("bundle");
+    let bundle = build_crystallization_bundle(
+        artifacts.clone(),
+        &normalized,
+        BundleOptions {
+            external_key: None,
+            title: None,
+            team: bundle_team.map(str::to_string),
+            repo: bundle_repo.map(str::to_string),
+            risk_level: None,
+            rollout_policy: None,
+        },
+    )
+    .unwrap();
+
+    let workflow_path = temp.path().join(format!("{workflow_name}.harn"));
+    let report_path = temp.path().join("report.json");
+    write_crystallization_artifacts(
+        artifacts.clone(),
+        &workflow_path,
+        &report_path,
+        eval_pack_path.as_deref(),
+    )
+    .unwrap();
+    write_crystallization_bundle(&bundle, &bundle_dir).unwrap();
+
+    MineOutcome {
+        artifacts,
+        workflow_path,
+        report_path,
+        eval_pack_path,
+        bundle_dir,
+    }
+}
+
 #[test]
 fn crystallize_version_bump_emits_validatable_bundle() {
     let temp = TempDir::new().unwrap();
@@ -114,46 +189,27 @@ fn crystallize_version_bump_emits_validatable_bundle() {
             &version_bump_trace(idx),
         );
     }
-    let workflow_path = temp.path().join("version_bump.harn");
-    let report_path = temp.path().join("report.json");
-    let eval_pack_path = temp.path().join("version_bump.harn.eval.toml");
-    let bundle_dir = temp.path().join("bundle");
 
-    let mine = run_harn(
-        temp.path(),
-        &[
-            "crystallize",
-            "--from",
-            traces_dir.to_str().unwrap(),
-            "--out",
-            workflow_path.to_str().unwrap(),
-            "--report",
-            report_path.to_str().unwrap(),
-            "--eval-pack",
-            eval_pack_path.to_str().unwrap(),
-            "--bundle",
-            bundle_dir.to_str().unwrap(),
-            "--workflow-name",
-            "version_bump",
-            "--package-name",
-            "release-workflows",
-            "--bundle-team",
-            "platform",
-            "--bundle-repo",
-            "burin-labs/harn",
-            "--min-examples",
-            "5",
-        ],
+    let outcome = mine(
+        &temp,
+        &traces_dir,
+        "version_bump",
+        Some("release-workflows"),
+        Some("platform"),
+        Some("burin-labs/harn"),
+        true,
+        5,
     );
     assert!(
-        mine.status.success(),
-        "mine failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&mine.stdout),
-        String::from_utf8_lossy(&mine.stderr),
+        outcome.workflow_path.exists(),
+        "workflow file missing at {}",
+        outcome.workflow_path.display()
     );
+    assert!(outcome.report_path.exists());
+    assert!(outcome.eval_pack_path.as_ref().unwrap().exists());
 
     // Manifest sanity check: schema marker, fixture redaction, plan-vs-candidate kind.
-    let manifest_path = bundle_dir.join("candidate.json");
+    let manifest_path = outcome.bundle_dir.join("candidate.json");
     let manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
     assert_eq!(
         manifest["schema"],
@@ -173,32 +229,22 @@ fn crystallize_version_bump_emits_validatable_bundle() {
         .iter()
         .all(|fixture| fixture["redacted"] == json!(true)));
 
-    // The validate subcommand exits 0 and reports OK.
-    let validate = run_harn(
-        temp.path(),
-        &["crystallize", "validate", bundle_dir.to_str().unwrap()],
-    );
+    // The validate library API succeeds with zero problems.
+    let validation = validate_crystallization_bundle(&outcome.bundle_dir).unwrap();
     assert!(
-        validate.status.success(),
-        "validate failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&validate.stdout),
-        String::from_utf8_lossy(&validate.stderr),
+        validation.is_ok(),
+        "validation problems: {:#?}",
+        validation.problems
     );
-    assert!(String::from_utf8_lossy(&validate.stdout).contains("OK"));
 
     // Shadow replay also passes against the bundle's own redacted fixtures.
-    let shadow = run_harn(
-        temp.path(),
-        &["crystallize", "shadow", bundle_dir.to_str().unwrap()],
+    let (shadow_manifest, shadow) = shadow_replay_bundle(&outcome.bundle_dir).unwrap();
+    assert!(shadow.pass, "shadow failures: {:#?}", shadow.failures);
+    assert_eq!(
+        serde_json::to_value(&shadow_manifest.kind).unwrap(),
+        manifest["kind"]
     );
-    assert!(
-        shadow.status.success(),
-        "shadow failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&shadow.stdout),
-        String::from_utf8_lossy(&shadow.stderr),
-    );
-    let stdout = String::from_utf8_lossy(&shadow.stdout);
-    assert!(stdout.contains("pass=true"));
+    let _ = outcome.artifacts;
 }
 
 #[test]
@@ -213,43 +259,28 @@ fn crystallize_plan_only_bundle_keeps_plan_only_kind() {
             &plan_only_trace(idx),
         );
     }
-    let workflow_path = temp.path().join("plan.harn");
-    let report_path = temp.path().join("plan.report.json");
-    let bundle_dir = temp.path().join("bundle");
 
-    let mine = run_harn(
-        temp.path(),
-        &[
-            "crystallize",
-            "--from",
-            traces_dir.to_str().unwrap(),
-            "--out",
-            workflow_path.to_str().unwrap(),
-            "--report",
-            report_path.to_str().unwrap(),
-            "--bundle",
-            bundle_dir.to_str().unwrap(),
-            "--workflow-name",
-            "linear_triage_plan",
-            "--min-examples",
-            "3",
-        ],
+    let outcome = mine(
+        &temp,
+        &traces_dir,
+        "linear_triage_plan",
+        None,
+        None,
+        None,
+        false,
+        3,
     );
-    assert!(mine.status.success(), "{:?}", mine);
 
     let manifest: Value =
-        serde_json::from_slice(&fs::read(bundle_dir.join("candidate.json")).unwrap()).unwrap();
+        serde_json::from_slice(&fs::read(outcome.bundle_dir.join("candidate.json")).unwrap())
+            .unwrap();
     assert_eq!(manifest["kind"], json!("plan_only"));
     assert_eq!(manifest["risk_level"], json!("low"));
 
-    let validate = run_harn(
-        temp.path(),
-        &["crystallize", "validate", bundle_dir.to_str().unwrap()],
-    );
+    let validation = validate_crystallization_bundle(&outcome.bundle_dir).unwrap();
     assert!(
-        validate.status.success(),
-        "validate failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&validate.stdout),
-        String::from_utf8_lossy(&validate.stderr),
+        validation.is_ok(),
+        "validation problems: {:#?}",
+        validation.problems
     );
 }

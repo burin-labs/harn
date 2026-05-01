@@ -51,6 +51,7 @@ receipt_policy = "required"
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn persona_list_and_inspect_emit_stable_json() {
     let temp = write_manifest(valid_manifest());
 
@@ -93,6 +94,7 @@ fn persona_list_and_inspect_emit_stable_json() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn persona_cli_rejects_required_invalid_manifest_cases() {
     for (body, expected) in [
         (
@@ -170,6 +172,7 @@ handoffs = ["review_captain"]
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn persona_manifest_flag_loads_example_personas() {
     let output = harn_command()
         .args([
@@ -197,6 +200,7 @@ fn persona_manifest_flag_loads_example_personas() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn persona_manifest_flag_loads_fixer_persona() {
     let output = harn_command()
         .args([
@@ -226,6 +230,7 @@ fn persona_manifest_flag_loads_fixer_persona() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn persona_manifest_flag_loads_merge_captain_persona() {
     let output = harn_command()
         .args([
@@ -263,6 +268,7 @@ fn persona_manifest_flag_loads_merge_captain_persona() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn persona_manifest_flag_loads_ship_captain_persona() {
     let output = harn_command()
         .args([
@@ -293,6 +299,7 @@ fn persona_manifest_flag_loads_ship_captain_persona() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn persona_runtime_status_tick_and_budget_are_persisted() {
     let temp = write_manifest(valid_manifest());
     let state_dir = temp.path().join(".harn-personas-test");
@@ -378,6 +385,7 @@ fn persona_runtime_status_tick_and_budget_are_persisted() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn persona_pause_resume_disable_trigger_controls_are_durable() {
     let temp = write_manifest(valid_manifest());
     let state_dir = temp.path().join(".harn-personas-test");
@@ -483,6 +491,7 @@ fn persona_pause_resume_disable_trigger_controls_are_durable() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn persona_runtime_blocks_budget_exhaustion() {
     let temp = write_manifest(
         r#"

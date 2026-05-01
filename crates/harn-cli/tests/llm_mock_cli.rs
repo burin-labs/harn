@@ -35,6 +35,7 @@ fn stderr(output: &Output) -> String {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn llm_mock_replays_fifo_fixtures_for_non_mock_provider() {
     let temp = TempDir::new().unwrap();
     let script = write_file(
@@ -71,6 +72,7 @@ pipeline default() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn llm_mock_reuses_glob_matches() {
     let temp = TempDir::new().unwrap();
     let script = write_file(
@@ -106,6 +108,7 @@ pipeline default() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn llm_mock_reports_unmatched_prompt_snippet() {
     let temp = TempDir::new().unwrap();
     let script = write_file(
@@ -137,6 +140,7 @@ pipeline default() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn llm_mock_record_replays_identical_output() {
     let temp = TempDir::new().unwrap();
     let script = write_file(
@@ -188,6 +192,7 @@ pipeline default() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn playground_llm_mock_replays_fifo_fixtures_for_non_mock_provider() {
     let temp = TempDir::new().unwrap();
     let host = write_file(
@@ -244,6 +249,7 @@ pipeline default() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn playground_llm_mock_record_replays_identical_output() {
     let temp = TempDir::new().unwrap();
     let host = write_file(
@@ -319,6 +325,7 @@ pipeline default() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn playground_llm_mock_sub_agent_tool_calls_mutate_host_workspace() {
     let temp = TempDir::new().unwrap();
     let host = write_file(
@@ -421,6 +428,7 @@ pipeline default() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn playground_llm_mock_sub_agent_handles_multiple_tool_calls_in_one_turn() {
     let temp = TempDir::new().unwrap();
     fs::write(temp.path().join("seed.txt"), "seed contents").unwrap();
@@ -529,6 +537,7 @@ pipeline default() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn playground_llm_mock_consume_match_advances_between_identical_patterns() {
     let temp = TempDir::new().unwrap();
     let host = write_file(
@@ -622,6 +631,7 @@ pipeline default() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn eval_runs_baseline_and_structural_variant_for_pipeline_file() {
     let temp = TempDir::new().unwrap();
     let script = write_file(

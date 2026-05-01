@@ -98,6 +98,7 @@ fn run_case(task: &str, fixture_name: &str) -> (TempDir, PathBuf, Output) {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn burin_mini_explain_repo_fixture_run_passes() {
     let (_temp, experiment_root, output) =
         run_case("Explain this repo to me in simple terms", "explain.jsonl");
@@ -121,6 +122,7 @@ fn burin_mini_explain_repo_fixture_run_passes() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     let (_temp, experiment_root, output) = run_case("Comment what this file does", "comment.jsonl");
 
@@ -176,6 +178,7 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     let (_temp, experiment_root, output) = run_case(
         "Add rate limiting middleware to the auth module",
@@ -292,6 +295,7 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     let (_temp, experiment_root, output) = run_case(
         "Add rate limiting middleware to the auth module",
@@ -342,6 +346,7 @@ fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     let (_temp, experiment_root, output) = run_case(
         "Add rate limiting middleware to the auth module",
@@ -412,6 +417,7 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
     let (_temp, experiment_root, output) = run_case(
         "Add rate limiting middleware to the auth module",
@@ -458,6 +464,7 @@ fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
 }
 
 #[test]
+#[ignore = "subprocess CLI test deferred to slow E2E suite (#1069); see harn#1067 for the planned in-process conversion via library-API extraction"]
 fn burin_mini_semantic_evaluator_heuristic_passes_for_rate_limit_fixture() {
     let (temp, experiment_root) = setup_experiment_copy();
     let evaluator = experiment_root.join("evaluator.harn");

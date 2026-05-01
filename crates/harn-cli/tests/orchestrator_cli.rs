@@ -438,6 +438,7 @@ fn wait_for_sqlite_event_count(state_dir: &Path, topic_name: &str, kind: &str, e
 }
 
 #[test]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 fn orchestrator_serve_starts_and_shuts_down_cleanly() {
     let _lock = support::lock_orchestrator_process_tests();
     let temp = TempDir::new().unwrap();
@@ -499,6 +500,7 @@ pub fn on_issue(event: TriggerEvent) {
 // a2a-push dispatch finish within the configured shutdown window and emit the
 // terminal `dispatch_succeeded` lifecycle event instead of a shutdown failure.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 async fn graceful_shutdown_drains_in_flight_dispatch_and_emits_lifecycle_events() {
     let _lock = support::lock_orchestrator_process_tests();
     let temp = TempDir::new().unwrap();
@@ -587,6 +589,7 @@ handler = "handlers::on_task"
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 async fn graceful_shutdown_continues_after_pump_error_and_persists_stopped_state() {
     let _lock = support::lock_orchestrator_process_tests();
     let temp = TempDir::new().unwrap();
@@ -664,6 +667,7 @@ pub fn on_task(event: TriggerEvent) -> string {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 async fn graceful_shutdown_waits_for_spawned_inbox_dispatch_tasks() {
     let _lock = support::lock_orchestrator_process_tests();
     let temp = TempDir::new().unwrap();
@@ -763,6 +767,7 @@ pub fn on_task(event: TriggerEvent) -> string {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 async fn inbox_pump_backpressures_before_ack_when_outstanding_limit_is_full() {
     let _lock = support::lock_orchestrator_process_tests();
     let temp = TempDir::new().unwrap();
@@ -905,6 +910,7 @@ pub fn on_task(event: TriggerEvent) -> string {
 }
 
 #[test]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 fn orchestrator_queue_soft_migrates_legacy_inbox_topics() {
     let _lock = support::lock_orchestrator_process_tests();
     let temp = TempDir::new().unwrap();
@@ -982,6 +988,7 @@ pub fn on_event(event: TriggerEvent) {
 // shutdown, persist each pump's consumer cursor in the event log, and let the
 // next orchestrator run replay the remaining backlog to completion.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 async fn bounded_pump_drain_truncates_and_replays_remaining_backlog_after_restart() {
     let _lock = support::lock_orchestrator_process_tests();
     const TOTAL_EVENTS: usize = 60;
@@ -1108,6 +1115,7 @@ pub fn on_task(event: TriggerEvent) -> string {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 async fn restart_surfaces_stranded_envelopes_and_recover_replays_them_explicitly() {
     let _lock = support::lock_orchestrator_process_tests();
     let temp = TempDir::new().unwrap();
@@ -1312,6 +1320,7 @@ pub fn on_task(event: TriggerEvent) -> string {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 async fn worker_queue_drain_uses_consumer_manifest_and_persists_response_records() {
     let temp = TempDir::new().unwrap();
     write_file(

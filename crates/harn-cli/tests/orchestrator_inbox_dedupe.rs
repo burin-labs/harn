@@ -170,6 +170,7 @@ async fn wait_for_tick_count(temp: &TempDir, min_count: usize) -> HashMap<String
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "binary-surface CLI test moved to slow E2E suite (#1069); see harn#1067 for the in-process conversion follow-up"]
 async fn restart_after_emit_does_not_duplicate_cron_dispatch() {
     let _lock = process_support::lock_harn_process_tests();
     let temp = TempDir::new().unwrap();

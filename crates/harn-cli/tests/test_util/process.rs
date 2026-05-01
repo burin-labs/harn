@@ -1,6 +1,11 @@
 #![allow(dead_code)]
 
-//! Subprocess harness shared by every harn-cli integration test binary.
+//! Subprocess harness shared by harn-cli integration tests that still
+//! cover binary surface (signal handling, exit-code mapping, stdio
+//! JSON-RPC). As of harn#1067 every fast-suite caller has either moved
+//! to in-process invocation against the underlying library crates or is
+//! gated behind `#[ignore]` pending follow-up extraction. The helper is
+//! preserved for the slow E2E suite (see harn#1069).
 //!
 //! ## Why this module exists
 //!

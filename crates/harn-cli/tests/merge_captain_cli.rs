@@ -1,5 +1,14 @@
-use std::path::PathBuf;
-use std::process::Command;
+//! In-process tests for the `harn merge-captain audit` library API
+//! (`harn_vm::orchestration::audit_transcript`). Replaces the prior
+//! subprocess-spawning version that ran the `harn` binary per case
+//! (#1067).
+
+use std::path::{Path, PathBuf};
+
+use harn_vm::orchestration::{
+    audit_transcript, load_merge_captain_golden, load_transcript_jsonl, AuditReport,
+    MergeCaptainGolden,
+};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -22,135 +31,89 @@ fn fixture(scenario: &str, kind: &str) -> PathBuf {
         .join(format!("{scenario}.{ext}"))
 }
 
+/// Mirror of `harn-cli`'s `run_audit` inner work: load transcript, load
+/// optional golden, audit, attach `source_path`. Tests use the report
+/// directly instead of inspecting CLI stdout/stderr.
+fn audit(scenario: &str, with_golden: bool) -> AuditReport {
+    let transcript = fixture(scenario, "transcripts");
+    let loaded = load_transcript_jsonl(&transcript).expect("load transcript");
+    let golden: Option<MergeCaptainGolden> = if with_golden {
+        Some(load_merge_captain_golden(&fixture(scenario, "goldens")).expect("load golden"))
+    } else {
+        None
+    };
+    let mut report = audit_transcript(&loaded.events, golden.as_ref());
+    report.source_path = Some(loaded.source_path.display().to_string());
+    report
+}
+
 #[test]
 fn green_pr_passes_audit() {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
-        .args([
-            "merge-captain",
-            "audit",
-            fixture("green_pr", "transcripts").to_str().unwrap(),
-            "--golden",
-            fixture("green_pr", "goldens").to_str().unwrap(),
-        ])
-        .output()
-        .expect("run harn merge-captain audit");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "expected pass; stdout={}\nstderr={}",
-        stdout,
-        stderr
-    );
-    assert!(stdout.contains("PASS"));
-    assert!(stdout.contains("scenario=green_pr"));
+    let report = audit("green_pr", true);
+    assert!(report.pass, "report={:#?}", report);
+    assert_eq!(report.scenario.as_deref(), Some("green_pr"));
+    let rendered = format!("{report}");
+    assert!(rendered.contains("PASS"));
+    assert!(rendered.contains("scenario=green_pr"));
 }
 
 #[test]
 fn failing_ci_passes_audit_with_handoff() {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
-        .args([
-            "merge-captain",
-            "audit",
-            fixture("failing_ci", "transcripts").to_str().unwrap(),
-            "--golden",
-            fixture("failing_ci", "goldens").to_str().unwrap(),
-        ])
-        .output()
-        .expect("run audit");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "stdout={}", stdout);
-    assert!(stdout.contains("handoff <- handoff"));
+    let report = audit("failing_ci", true);
+    assert!(report.pass, "report={:#?}", report);
+    let rendered = format!("{report}");
+    assert!(
+        rendered.contains("handoff <- handoff"),
+        "missing handoff transition in:\n{rendered}"
+    );
 }
 
 #[test]
 fn semantic_conflict_passes_audit() {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
-        .args([
-            "merge-captain",
-            "audit",
-            fixture("semantic_conflict", "transcripts")
-                .to_str()
-                .unwrap(),
-            "--golden",
-            fixture("semantic_conflict", "goldens").to_str().unwrap(),
-        ])
-        .output()
-        .expect("run audit");
-    assert!(output.status.success());
+    let report = audit("semantic_conflict", true);
+    assert!(report.pass, "report={:#?}", report);
 }
 
 #[test]
 fn merge_queue_passes_audit() {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
-        .args([
-            "merge-captain",
-            "audit",
-            fixture("merge_queue", "transcripts").to_str().unwrap(),
-            "--golden",
-            fixture("merge_queue", "goldens").to_str().unwrap(),
-        ])
-        .output()
-        .expect("run audit");
-    assert!(output.status.success());
+    let report = audit("merge_queue", true);
+    assert!(report.pass, "report={:#?}", report);
 }
 
 #[test]
 fn new_pr_arrival_passes_audit() {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
-        .args([
-            "merge-captain",
-            "audit",
-            fixture("new_pr_arrival", "transcripts").to_str().unwrap(),
-            "--golden",
-            fixture("new_pr_arrival", "goldens").to_str().unwrap(),
-        ])
-        .output()
-        .expect("run audit");
-    assert!(output.status.success());
+    let report = audit("new_pr_arrival", true);
+    assert!(report.pass, "report={:#?}", report);
 }
 
 #[test]
 fn bad_unsafe_merge_fails_audit_with_findings() {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
-        .args([
-            "merge-captain",
-            "audit",
-            fixture("bad_unsafe_merge", "transcripts").to_str().unwrap(),
-            "--golden",
-            fixture("bad_unsafe_merge", "goldens").to_str().unwrap(),
-        ])
-        .output()
-        .expect("run audit");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        !output.status.success(),
-        "expected non-zero exit; stdout={}",
-        stdout
-    );
-    assert!(stdout.contains("FAIL"));
-    assert!(stdout.contains("repeated_read"));
-    assert!(stdout.contains("unsafe_attempted_action"));
-    assert!(stdout.contains("missing_state_step"));
-    assert!(stdout.contains("skipped_verification"));
+    let report = audit("bad_unsafe_merge", true);
+    assert!(!report.pass, "report={:#?}", report);
+    assert!(report.error_findings() > 0);
+    let categories: Vec<_> = report
+        .findings
+        .iter()
+        .map(|f| f.category.as_str().to_string())
+        .collect();
+    for expected in [
+        "repeated_read",
+        "unsafe_attempted_action",
+        "missing_state_step",
+        "skipped_verification",
+    ] {
+        assert!(
+            categories.iter().any(|c| c == expected),
+            "missing finding category {expected}; got {categories:?}"
+        );
+    }
 }
 
 #[test]
 fn json_output_is_machine_readable() {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
-        .args([
-            "merge-captain",
-            "audit",
-            fixture("green_pr", "transcripts").to_str().unwrap(),
-            "--golden",
-            fixture("green_pr", "goldens").to_str().unwrap(),
-            "--format",
-            "json",
-        ])
-        .output()
-        .expect("run audit");
-    let stdout = String::from_utf8(output.stdout).expect("utf8");
-    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("parse json");
+    let report = audit("green_pr", true);
+    let json = serde_json::to_string(&report).expect("serialize");
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse json");
     assert_eq!(parsed["pass"], serde_json::Value::Bool(true));
     assert_eq!(
         parsed["scenario"],
@@ -161,17 +124,14 @@ fn json_output_is_machine_readable() {
 
 #[test]
 fn audit_without_golden_uses_defaults() {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
-        .args([
-            "merge-captain",
-            "audit",
-            fixture("green_pr", "transcripts").to_str().unwrap(),
-        ])
-        .output()
-        .expect("run audit");
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("scenario=<none>"));
+    let report = audit("green_pr", false);
+    assert!(report.pass, "report={:#?}", report);
+    assert!(report.scenario.is_none());
+    let rendered = format!("{report}");
+    assert!(
+        rendered.contains("scenario=<none>"),
+        "expected scenario=<none> placeholder in:\n{rendered}"
+    );
 }
 
 #[test]
@@ -181,9 +141,7 @@ fn directory_argument_loads_rotated_logs() {
     std::fs::create_dir_all(&session).unwrap();
     let src = std::fs::read_to_string(fixture("green_pr", "transcripts")).unwrap();
     std::fs::write(session.join("event_log.jsonl"), &src).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
-        .args(["merge-captain", "audit", session.to_str().unwrap()])
-        .output()
-        .expect("run audit");
-    assert!(output.status.success());
+    let loaded = load_transcript_jsonl(Path::new(&session)).expect("load directory transcript");
+    let report = audit_transcript(&loaded.events, None);
+    assert!(report.pass, "report={:#?}", report);
 }

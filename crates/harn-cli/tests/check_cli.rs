@@ -1,120 +1,95 @@
-mod test_util;
+//! In-process tests for `harn check` / `harn lint` semantics.
+//!
+//! Replaces the prior subprocess-spawning version (#1067). The two
+//! regressions guarded here both live in workspace library crates
+//! (`harn_parser` for the type-diagnostic case, `harn_modules` for the
+//! cross-directory cycle case), so the tests call those crates directly
+//! without paying the cold-start cost of spawning the `harn` binary.
 
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use harn_lexer::Lexer;
+use harn_parser::{diagnostic::render_type_diagnostic, DiagnosticSeverity, Parser, TypeChecker};
 use tempfile::TempDir;
-use test_util::process::harn_command;
 
 #[test]
 fn check_reports_unknown_struct_type_in_stderr() {
     let temp = TempDir::new().unwrap();
     let script = temp.path().join("main.harn");
-    fs::write(&script, "let p = Point { x: 3, y: 4 }\n").unwrap();
+    let source = "let p = Point { x: 3, y: 4 }\n";
+    fs::write(&script, source).unwrap();
 
-    let output = harn_command()
-        .current_dir(temp.path())
-        .args(["check", script.to_str().unwrap()])
-        .output()
-        .unwrap();
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().expect("lex");
+    let program = Parser::new(tokens).parse().expect("parse");
+    let diagnostics = TypeChecker::new().check_with_source(&program, source);
+
+    let path_str = script.to_string_lossy().into_owned();
+    let mut rendered_messages = String::new();
+    let mut had_error = false;
+    for diag in &diagnostics {
+        if matches!(diag.severity, DiagnosticSeverity::Error) {
+            had_error = true;
+        }
+        rendered_messages.push_str(&render_type_diagnostic(source, &path_str, diag));
+    }
 
     assert!(
-        !output.status.success(),
-        "expected nonzero exit, stdout={}, stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        had_error,
+        "expected a type-checker error; got diagnostics={:#?}",
+        diagnostics
     );
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("unknown struct type `Point`"),
-        "missing unknown-struct diagnostic: {stderr}"
+        rendered_messages.contains("unknown struct type `Point`"),
+        "missing unknown-struct diagnostic in:\n{rendered_messages}"
     );
     assert!(
-        stderr.contains(&format!("{}:1:9", script.display())),
-        "missing precise location in stderr: {stderr}"
+        rendered_messages.contains(&format!("{}:1:9", path_str)),
+        "missing precise location in:\n{rendered_messages}"
     );
 }
 
-/// CLI-level regression for the Linux hang on `harn lint <dir>` and
+/// Regression for the Linux hang on `harn lint <dir>` and
 /// `harn check --workspace` against pipeline trees with cyclic
 /// cross-sibling-directory relative imports (#748). The underlying fix
-/// (`harn_modules::build()` canonicalizing before seen-set dedupe,
-/// #93) already has a unit test in `harn-modules`. This test guards
-/// the same regression at the CLI surface so a future walker change in
-/// `lint` / `check --workspace` that re-introduces the explosion is
-/// caught here rather than in downstream pipeline trees like
-/// burin-code's. Four sibling directories × six files importing every
-/// other directory by relative path — the exact pattern that produced
-/// fresh path spellings on every round-trip and OOM-killed Linux CI
-/// runners around 48 s pre-fix.
+/// (`harn_modules::build()` canonicalizing before seen-set dedupe, #93)
+/// already has a unit test in `harn-modules`; this test guards the same
+/// regression at the API the CLI walkers actually call. Pre-fix the
+/// `build` call OOM-killed Linux CI runners around 48s; post-fix every
+/// supported platform completes in well under a second.
 #[test]
-fn lint_and_check_complete_on_large_cross_directory_cycle_workspace() {
+fn module_graph_build_completes_on_large_cross_directory_cycle_workspace() {
     let temp = TempDir::new().unwrap();
-    let root = temp.path();
-    let pipelines = root.join("Sources/pipelines");
-    write_cross_directory_cycle_workspace(&pipelines);
+    let pipelines = temp.path().join("Sources/pipelines");
+    let files = write_cross_directory_cycle_workspace(&pipelines);
 
-    fs::write(
-        root.join("harn.toml"),
-        "[package]\n\
-         name = \"hang-regression\"\n\
-         version = \"0.0.0\"\n\
-         \n\
-         [workspace]\n\
-         pipelines = [\"Sources/pipelines\"]\n",
-    )
-    .unwrap();
-
-    // Post-fix this completes in well under a second on every supported
-    // platform; pre-fix on Linux it OOM-killed around 48 s. The 60 s
-    // budget gives slow CI shapes (qemu, sandboxed builders) headroom
-    // without letting a regression sit silently.
     let budget = Duration::from_secs(60);
-
-    let lint_started = Instant::now();
-    let lint_output = harn_command()
-        .current_dir(root)
-        .args(["lint", pipelines.to_str().unwrap()])
-        .output()
-        .unwrap();
-    let lint_elapsed = lint_started.elapsed();
+    let started = Instant::now();
+    let graph = harn_modules::build(&files);
+    let elapsed = started.elapsed();
     assert!(
-        lint_output.status.success(),
-        "lint failed: status={:?} stdout={} stderr={}",
-        lint_output.status,
-        String::from_utf8_lossy(&lint_output.stdout),
-        String::from_utf8_lossy(&lint_output.stderr)
+        elapsed < budget,
+        "harn_modules::build took {elapsed:?} (>{budget:?}) — likely a regression to the path-spelling explosion fixed by #93"
     );
-    assert!(
-        lint_elapsed < budget,
-        "lint took {lint_elapsed:?} (>{budget:?}) — likely a regression to the path-spelling explosion fixed by #93"
-    );
-
-    let check_started = Instant::now();
-    let check_output = harn_command()
-        .current_dir(root)
-        .args(["check", "--workspace"])
-        .output()
-        .unwrap();
-    let check_elapsed = check_started.elapsed();
-    assert!(
-        check_output.status.success(),
-        "check --workspace failed: status={:?} stdout={} stderr={}",
-        check_output.status,
-        String::from_utf8_lossy(&check_output.stdout),
-        String::from_utf8_lossy(&check_output.stderr)
-    );
-    assert!(
-        check_elapsed < budget,
-        "check --workspace took {check_elapsed:?} (>{budget:?}) — likely a regression to the path-spelling explosion fixed by #93"
-    );
+    // Every file participated in the graph (no silent drops). The walker
+    // must reach every entry point at least once even with cyclic edges.
+    for file in &files {
+        // A file that the walker actually visited will have at least one
+        // imported-name set (every file imports from three siblings).
+        assert!(
+            graph.imported_names_for_file(file).is_some(),
+            "module graph missing entry for {}",
+            file.display()
+        );
+    }
 }
 
-fn write_cross_directory_cycle_workspace(pipelines: &Path) {
+fn write_cross_directory_cycle_workspace(pipelines: &Path) -> Vec<std::path::PathBuf> {
     let dirs = ["context", "runtime", "host", "tools"];
     let files_per_dir = 6;
+    let mut files = Vec::new();
     for dir in dirs {
         fs::create_dir_all(pipelines.join(dir)).unwrap();
     }
@@ -129,11 +104,10 @@ fn write_cross_directory_cycle_workspace(pipelines: &Path) {
                 source.push_str(&format!("import \"../{other}/{target}\"\n"));
             }
             source.push_str(&format!("pub fn {dir}_m{file_idx}() {{ {file_idx} }}\n"));
-            fs::write(
-                pipelines.join(dir).join(format!("m{file_idx}.harn")),
-                source,
-            )
-            .unwrap();
+            let path = pipelines.join(dir).join(format!("m{file_idx}.harn"));
+            fs::write(&path, source).unwrap();
+            files.push(path);
         }
     }
+    files
 }
