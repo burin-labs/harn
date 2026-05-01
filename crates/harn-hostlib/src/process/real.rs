@@ -1,0 +1,283 @@
+//! Production [`ProcessSpawner`] implementation backed by
+//! `std::process::Command` + `harn_vm::process_sandbox`.
+
+use std::io::{self, Read, Write};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Stdio};
+use std::sync::{Arc, LazyLock};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use harn_vm::process_sandbox;
+
+use super::handle::{
+    EnvMode, ExitStatus, ProcessError, ProcessHandle, ProcessKiller, ProcessSpawner, SpawnSpec,
+};
+
+/// Spawner that produces real OS processes via `std::process::Command`.
+pub struct RealSpawner;
+
+static REAL_SPAWNER: LazyLock<Arc<dyn ProcessSpawner>> =
+    LazyLock::new(|| Arc::new(RealSpawner) as Arc<dyn ProcessSpawner>);
+
+/// Returns the singleton real spawner used as the default.
+pub fn default_spawner() -> Arc<dyn ProcessSpawner> {
+    Arc::clone(&REAL_SPAWNER)
+}
+
+impl ProcessSpawner for RealSpawner {
+    fn spawn(&self, spec: SpawnSpec) -> Result<Box<dyn ProcessHandle>, ProcessError> {
+        if spec.program.is_empty() {
+            return Err(ProcessError::InvalidArgv(
+                "first element of argv must be a non-empty program name".to_string(),
+            ));
+        }
+
+        let mut command = process_sandbox::std_command_for(&spec.program, &spec.args)
+            .map_err(|e| ProcessError::SandboxSetup(format!("{e:?}")))?;
+
+        if let Some(cwd) = spec.cwd.as_ref() {
+            process_sandbox::enforce_process_cwd(cwd)
+                .map_err(|e| ProcessError::SandboxCwd(format!("{e:?}")))?;
+            command.current_dir(cwd);
+        }
+
+        if matches!(spec.env_mode, EnvMode::Replace) {
+            command.env_clear();
+        }
+        for (key, value) in &spec.env {
+            command.env(key, value);
+        }
+
+        if spec.configure_process_group {
+            configure_background_process_group(&mut command);
+        }
+
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+        command.stdin(if spec.use_stdin {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        });
+
+        let child = command.spawn().map_err(|e| {
+            if let Some(violation) = process_sandbox::process_spawn_error(&e) {
+                return ProcessError::SandboxSpawn(format!("{violation:?}"));
+            }
+            ProcessError::Spawn(format!("{e}"))
+        })?;
+
+        let pid = child.id();
+        let pgid = child_process_group_id(pid);
+        let killer: Arc<dyn ProcessKiller> = Arc::new(RealKiller { pid });
+
+        Ok(Box::new(RealProcess {
+            pid,
+            pgid,
+            killer,
+            child: Some(child),
+            stdin: None,
+            stdout: None,
+            stderr: None,
+            stdin_taken: false,
+            stdout_taken: false,
+            stderr_taken: false,
+        }))
+    }
+}
+
+struct RealProcess {
+    pid: u32,
+    pgid: Option<u32>,
+    killer: Arc<dyn ProcessKiller>,
+    child: Option<Child>,
+    stdin: Option<ChildStdin>,
+    stdout: Option<ChildStdout>,
+    stderr: Option<ChildStderr>,
+    stdin_taken: bool,
+    stdout_taken: bool,
+    stderr_taken: bool,
+}
+
+impl RealProcess {
+    fn ensure_pipes_taken(&mut self) {
+        if let Some(child) = self.child.as_mut() {
+            if self.stdin.is_none() && !self.stdin_taken {
+                self.stdin = child.stdin.take();
+            }
+            if self.stdout.is_none() && !self.stdout_taken {
+                self.stdout = child.stdout.take();
+            }
+            if self.stderr.is_none() && !self.stderr_taken {
+                self.stderr = child.stderr.take();
+            }
+        }
+    }
+}
+
+impl ProcessHandle for RealProcess {
+    fn pid(&self) -> Option<u32> {
+        Some(self.pid)
+    }
+
+    fn process_group_id(&self) -> Option<u32> {
+        self.pgid
+    }
+
+    fn killer(&self) -> Arc<dyn ProcessKiller> {
+        Arc::clone(&self.killer)
+    }
+
+    fn take_stdin(&mut self) -> Option<Box<dyn Write + Send>> {
+        self.ensure_pipes_taken();
+        self.stdin_taken = true;
+        self.stdin
+            .take()
+            .map(|s| Box::new(s) as Box<dyn Write + Send>)
+    }
+
+    fn take_stdout(&mut self) -> Option<Box<dyn Read + Send>> {
+        self.ensure_pipes_taken();
+        self.stdout_taken = true;
+        self.stdout
+            .take()
+            .map(|s| Box::new(s) as Box<dyn Read + Send>)
+    }
+
+    fn take_stderr(&mut self) -> Option<Box<dyn Read + Send>> {
+        self.ensure_pipes_taken();
+        self.stderr_taken = true;
+        self.stderr
+            .take()
+            .map(|s| Box::new(s) as Box<dyn Read + Send>)
+    }
+
+    fn wait_with_timeout(
+        &mut self,
+        timeout: Option<Duration>,
+    ) -> io::Result<(Option<ExitStatus>, bool)> {
+        let Some(child) = self.child.as_mut() else {
+            return Ok((None, false));
+        };
+        let Some(timeout) = timeout else {
+            let status = child.wait()?;
+            return Ok((Some(decode_status(status)), false));
+        };
+        let deadline = Instant::now() + timeout;
+        loop {
+            match child.try_wait()? {
+                Some(status) => return Ok((Some(decode_status(status)), false)),
+                None => {
+                    if Instant::now() >= deadline {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Ok((None, true));
+                    }
+                    // Cheap poll. Real workloads are dominated by spawn cost
+                    // and pipe drain, not this sleep.
+                    thread::sleep(Duration::from_millis(20));
+                }
+            }
+        }
+    }
+
+    fn wait(&mut self) -> io::Result<ExitStatus> {
+        let child = self
+            .child
+            .as_mut()
+            .ok_or_else(|| io::Error::other("child already reaped"))?;
+        let status = child.wait()?;
+        Ok(decode_status(status))
+    }
+}
+
+struct RealKiller {
+    pid: u32,
+}
+
+impl ProcessKiller for RealKiller {
+    fn kill(&self) {
+        kill_pid_or_group(self.pid);
+    }
+}
+
+#[cfg(unix)]
+fn decode_status(status: std::process::ExitStatus) -> ExitStatus {
+    use std::os::unix::process::ExitStatusExt;
+    if let Some(code) = status.code() {
+        ExitStatus::from_code(code)
+    } else if let Some(sig) = status.signal() {
+        ExitStatus::from_signal(sig)
+    } else {
+        ExitStatus {
+            code: None,
+            signal: None,
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn decode_status(status: std::process::ExitStatus) -> ExitStatus {
+    ExitStatus::from_code(status.code().unwrap_or(-1))
+}
+
+pub(crate) fn child_process_group_id(pid: u32) -> Option<u32> {
+    #[cfg(unix)]
+    {
+        extern "C" {
+            fn getpgid(pid: i32) -> i32;
+        }
+        let pgid = unsafe { getpgid(pid as i32) };
+        if pgid > 0 {
+            Some(pgid as u32)
+        } else {
+            None
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        Some(pid)
+    }
+}
+
+pub(crate) fn configure_background_process_group(command: &mut std::process::Command) {
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        command.pre_exec(|| {
+            extern "C" {
+                fn setpgid(pid: i32, pgid: i32) -> i32;
+            }
+            if setpgid(0, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = command;
+    }
+}
+
+/// Send SIGKILL to a pid (and its process group). Public so existing
+/// non-trait paths (e.g. session-end cleanup) can keep using it during
+/// the transition.
+pub(crate) fn kill_pid_or_group(pid: u32) {
+    #[cfg(unix)]
+    {
+        // SAFETY: kill(2) takes a pid_t (i32 on all Unix targets) and a
+        // signal number. Calling it with SIGKILL (9) is well-defined.
+        extern "C" {
+            fn kill(pid: i32, sig: i32) -> i32;
+        }
+        unsafe {
+            kill(-(pid as i32), 9);
+            kill(pid as i32, 9);
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+    }
+}

@@ -2,9 +2,13 @@
 //! `tools/run_*` and `tools/manage_packages` builtin.
 //!
 //! All process tools funnel through here so:
-//! 1. Each spawn goes through [`harn_vm::process_sandbox`], so the active
-//!    orchestration capability policy applies (Linux seccomp/landlock,
-//!    macOS `sandbox-exec`, workspace-root cwd enforcement).
+//! 1. Each spawn goes through the [`crate::process::ProcessSpawner`]
+//!    currently installed (default: real spawner backed by
+//!    `harn_vm::process_sandbox`), so the active orchestration capability
+//!    policy applies (Linux seccomp/landlock, macOS `sandbox-exec`,
+//!    workspace-root cwd enforcement). Tests install a mock spawner so
+//!    every test in `tests/process_tools.rs` is deterministic and
+//!    free of wall-clock dependence.
 //! 2. Pipe drains run on background threads so >64 KB output never
 //!    deadlocks `wait()`.
 //! 3. Timeout enforcement is uniform: when a deadline elapses, the child
@@ -13,18 +17,17 @@
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
-use harn_vm::process_sandbox;
 use harn_vm::VmValue;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::error::HostlibError;
+use crate::process::{self as process_handle, ProcessError, SpawnSpec};
 use crate::tools::response::ResponseBuilder;
 
 mod artifacts;
@@ -73,12 +76,7 @@ pub(crate) struct SpawnOutcome {
     pub(crate) timed_out: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EnvMode {
-    InheritClean,
-    Replace,
-    Patch,
-}
+pub(crate) use crate::process::EnvMode;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CaptureConfig {
@@ -123,66 +121,28 @@ impl CommandStatus {
 /// `HostlibError::Backend` so the surrounding builtin gets a uniform
 /// `Thrown` dict on the script side.
 pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
-    if req.program.is_empty() {
-        return Err(HostlibError::InvalidParameter {
-            builtin: req.builtin,
-            param: "argv",
-            message: "first element of argv must be a non-empty program name".to_string(),
-        });
-    }
-
-    let mut command = process_sandbox::std_command_for(&req.program, &req.args).map_err(|e| {
-        HostlibError::Backend {
-            builtin: req.builtin,
-            message: format!("sandbox setup failed: {e:?}"),
-        }
-    })?;
-
-    if let Some(cwd) = req.cwd.as_ref() {
-        process_sandbox::enforce_process_cwd(cwd).map_err(|e| HostlibError::Backend {
-            builtin: req.builtin,
-            message: format!("sandbox cwd rejected: {e:?}"),
-        })?;
-        command.current_dir(cwd);
-    }
-
-    if matches!(req.env_mode, EnvMode::Replace) {
-        command.env_clear();
-    }
-    if !req.env.is_empty() {
-        for (key, value) in &req.env {
-            command.env(key, value);
-        }
-    }
-
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-    command.stdin(if req.stdin.is_some() {
-        Stdio::piped()
-    } else {
-        Stdio::null()
-    });
-
-    let command_id = next_command_id();
-    let started = Instant::now();
+    let started = std::time::Instant::now();
     let started_at = now_rfc3339();
-    let mut child = command.spawn().map_err(|e| {
-        if let Some(violation) = process_sandbox::process_spawn_error(&e) {
-            return HostlibError::Backend {
-                builtin: req.builtin,
-                message: format!("sandbox rejected spawn: {violation:?}"),
-            };
-        }
-        HostlibError::Backend {
-            builtin: req.builtin,
-            message: format!("spawn failed: {e}"),
-        }
-    })?;
-    let pid = Some(child.id());
-    let process_group_id = child_process_group_id(child.id());
+    let command_id = next_command_id();
+
+    let spec = SpawnSpec {
+        builtin: req.builtin,
+        program: req.program.clone(),
+        args: req.args.clone(),
+        cwd: req.cwd.clone(),
+        env: req.env.clone(),
+        env_mode: req.env_mode,
+        use_stdin: req.stdin.is_some(),
+        configure_process_group: false,
+    };
+    let mut handle = process_handle::spawn_process(spec)
+        .map_err(|e| process_error_to_hostlib(req.builtin, e))?;
+
+    let pid = handle.pid();
+    let process_group_id = handle.process_group_id();
 
     if let Some(stdin_data) = req.stdin.as_ref() {
-        if let Some(mut stdin) = child.stdin.take() {
+        if let Some(mut stdin) = handle.take_stdin() {
             use std::io::Write;
             // A failed write is non-fatal — the child may have closed stdin
             // immediately. We surface the eventual exit code regardless.
@@ -190,28 +150,29 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         }
     }
 
-    let stdout_handle = child.stdout.take();
-    let stderr_handle = child.stderr.take();
+    let stdout_reader = handle.take_stdout();
+    let stderr_reader = handle.take_stderr();
 
     let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
     let (err_tx, err_rx) = mpsc::channel::<Vec<u8>>();
 
-    let stdout_thread = stdout_handle.map(|mut handle| {
+    let stdout_thread = stdout_reader.map(|mut reader| {
         thread::spawn(move || {
             let mut buf = Vec::new();
-            let _ = handle.read_to_end(&mut buf);
+            let _ = reader.read_to_end(&mut buf);
             let _ = out_tx.send(buf);
         })
     });
-    let stderr_thread = stderr_handle.map(|mut handle| {
+    let stderr_thread = stderr_reader.map(|mut reader| {
         thread::spawn(move || {
             let mut buf = Vec::new();
-            let _ = handle.read_to_end(&mut buf);
+            let _ = reader.read_to_end(&mut buf);
             let _ = err_tx.send(buf);
         })
     });
 
-    let (status, timed_out) = wait_with_timeout(&mut child, req.timeout);
+    let (status, timed_out): (Option<process_handle::ExitStatus>, bool) =
+        handle.wait_with_timeout(req.timeout).unwrap_or_default();
 
     if let Some(t) = stdout_thread {
         let _ = t.join();
@@ -227,7 +188,7 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
 
     let exited = status.is_some();
     let (exit_code, signal) = match status {
-        Some(status) => decode_status(status),
+        Some(s) => decode_status(s),
         None => (-1, Some("SIGKILL".to_string())),
     };
     let command_status = if timed_out {
@@ -260,6 +221,32 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         duration: started.elapsed(),
         timed_out,
     })
+}
+
+pub(crate) fn process_error_to_hostlib(builtin: &'static str, err: ProcessError) -> HostlibError {
+    match err {
+        ProcessError::InvalidArgv(message) => HostlibError::InvalidParameter {
+            builtin,
+            param: "argv",
+            message,
+        },
+        ProcessError::SandboxSetup(message) => HostlibError::Backend {
+            builtin,
+            message: format!("sandbox setup failed: {message}"),
+        },
+        ProcessError::SandboxCwd(message) => HostlibError::Backend {
+            builtin,
+            message: format!("sandbox cwd rejected: {message}"),
+        },
+        ProcessError::SandboxSpawn(message) => HostlibError::Backend {
+            builtin,
+            message: format!("sandbox rejected spawn: {message}"),
+        },
+        ProcessError::Spawn(message) => HostlibError::Backend {
+            builtin,
+            message: format!("spawn failed: {message}"),
+        },
+    }
 }
 
 pub(crate) fn build_response(
@@ -405,71 +392,6 @@ pub(crate) fn inline_output(
     )
 }
 
-pub(crate) fn child_process_group_id(pid: u32) -> Option<u32> {
-    #[cfg(unix)]
-    {
-        extern "C" {
-            fn getpgid(pid: i32) -> i32;
-        }
-        let pgid = unsafe { getpgid(pid as i32) };
-        if pgid > 0 {
-            Some(pgid as u32)
-        } else {
-            None
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        Some(pid)
-    }
-}
-
-pub(crate) fn configure_background_process_group(command: &mut std::process::Command) {
-    #[cfg(unix)]
-    unsafe {
-        use std::os::unix::process::CommandExt;
-        command.pre_exec(|| {
-            extern "C" {
-                fn setpgid(pid: i32, pgid: i32) -> i32;
-            }
-            if setpgid(0, 0) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = command;
-    }
-}
-
-fn wait_with_timeout(
-    child: &mut std::process::Child,
-    timeout: Option<Duration>,
-) -> (Option<std::process::ExitStatus>, bool) {
-    let Some(timeout) = timeout else {
-        return (child.wait().ok(), false);
-    };
-    let deadline = Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return (Some(status), false),
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return (None, true);
-                }
-                // Cheap poll. Real workloads are dominated by spawn cost
-                // and pipe drain, not this sleep.
-                thread::sleep(Duration::from_millis(20));
-            }
-            Err(_) => return (child.wait().ok(), false),
-        }
-    }
-}
-
 fn lossy_prefix(bytes: &[u8], max_inline_bytes: usize) -> String {
     let cap = bytes.len().min(max_inline_bytes);
     match std::str::from_utf8(&bytes[..cap]) {
@@ -494,24 +416,16 @@ fn sandbox_enforced() -> bool {
     harn_vm::orchestration::current_execution_policy().is_some()
 }
 
-#[cfg(unix)]
-fn decode_status(status: std::process::ExitStatus) -> (i32, Option<String>) {
-    use std::os::unix::process::ExitStatusExt;
-    if let Some(code) = status.code() {
+fn decode_status(status: process_handle::ExitStatus) -> (i32, Option<String>) {
+    if let Some(code) = status.code {
         (code, None)
-    } else if let Some(sig) = status.signal() {
+    } else if let Some(sig) = status.signal {
         (-1, Some(format_signal(sig)))
     } else {
         (-1, None)
     }
 }
 
-#[cfg(not(unix))]
-fn decode_status(status: std::process::ExitStatus) -> (i32, Option<String>) {
-    (status.code().unwrap_or(-1), None)
-}
-
-#[cfg(unix)]
 fn format_signal(sig: i32) -> String {
     // Stay minimal: expose the conventional signal names hosts render.
     match sig {
