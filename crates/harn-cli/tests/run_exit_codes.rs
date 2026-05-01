@@ -26,6 +26,7 @@ fn run_script(body: &str) -> std::process::Output {
         .unwrap()
 }
 
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn pipeline_main_returning_int_sets_exit_code() {
     let out = run_script("pipeline main() {\n  return 42\n}\n");
@@ -38,6 +39,7 @@ fn pipeline_main_returning_int_sets_exit_code() {
     );
 }
 
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn pipeline_main_returning_err_writes_stderr_and_exits_one() {
     let out = run_script("pipeline main() {\n  return Err(\"boom\")\n}\n");
@@ -49,12 +51,14 @@ fn pipeline_main_returning_err_writes_stderr_and_exits_one() {
     );
 }
 
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn pipeline_main_returning_ok_exits_zero() {
     let out = run_script("pipeline main() {\n  return Ok(\"done\")\n}\n");
     assert_eq!(out.status.code(), Some(0));
 }
 
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn pipeline_main_implicit_return_exits_zero() {
     let out = run_script("pipeline main() {\n  println(\"hi\")\n}\n");
@@ -62,6 +66,7 @@ fn pipeline_main_implicit_return_exits_zero() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("hi"));
 }
 
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn pipeline_main_int_clamped_to_byte_range() {
     let out = run_script("pipeline main() {\n  return 999\n}\n");
@@ -69,6 +74,7 @@ fn pipeline_main_int_clamped_to_byte_range() {
     assert_eq!(out.status.code(), Some(255));
 }
 
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn explicit_exit_builtin_still_works() {
     let out = run_script("pipeline main() {\n  exit(3)\n}\n");

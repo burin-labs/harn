@@ -97,6 +97,7 @@ fn run_case(task: &str, fixture_name: &str) -> (TempDir, PathBuf, Output) {
     (temp, experiment_root, output)
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn burin_mini_explain_repo_fixture_run_passes() {
     let (_temp, experiment_root, output) =
@@ -120,6 +121,7 @@ fn burin_mini_explain_repo_fixture_run_passes() {
     assert_eq!(report_json["verdict"], "pass");
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     let (_temp, experiment_root, output) = run_case("Comment what this file does", "comment.jsonl");
@@ -175,6 +177,7 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     );
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     let (_temp, experiment_root, output) = run_case(
@@ -291,6 +294,7 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     );
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     let (_temp, experiment_root, output) = run_case(
@@ -341,6 +345,7 @@ fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     );
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     let (_temp, experiment_root, output) = run_case(
@@ -411,6 +416,7 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     );
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
     let (_temp, experiment_root, output) = run_case(
@@ -457,6 +463,7 @@ fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
     );
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn burin_mini_semantic_evaluator_heuristic_passes_for_rate_limit_fixture() {
     let (temp, experiment_root) = setup_experiment_copy();

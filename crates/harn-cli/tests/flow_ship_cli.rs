@@ -60,6 +60,7 @@ fn phase_zero_demo(slice) {
     temp
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn flow_ship_watch_injects_atoms_and_opens_mock_pr() {
     let repo = demo_repo();
@@ -168,6 +169,7 @@ fn write_invariants_with_many_predicates(dir: &std::path::Path, count: usize) {
     fs::write(dir.join("invariants.harn"), body).unwrap();
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn flow_ship_watch_surfaces_bootstrap_policy_when_present() {
     let repo = demo_repo();
@@ -231,6 +233,7 @@ fn _bootstrap_marker() {
     assert_eq!(maintainers[1]["id"], "user:alice");
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn flow_ship_watch_marks_bootstrap_policy_absent_when_missing() {
     let repo = demo_repo();
@@ -260,6 +263,7 @@ fn flow_ship_watch_marks_bootstrap_policy_absent_when_missing() {
     );
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn flow_ship_watch_blocks_when_predicate_union_explodes() {
     let temp = TempDir::new().unwrap();

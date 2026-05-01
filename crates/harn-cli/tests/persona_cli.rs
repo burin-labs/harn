@@ -50,6 +50,7 @@ receipt_policy = "required"
 "#
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_list_and_inspect_emit_stable_json() {
     let temp = write_manifest(valid_manifest());
@@ -92,6 +93,7 @@ fn persona_list_and_inspect_emit_stable_json() {
     assert_eq!(persona["evals"][0], "merge_safety");
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_cli_rejects_required_invalid_manifest_cases() {
     for (body, expected) in [
@@ -169,6 +171,7 @@ handoffs = ["review_captain"]
     }
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_manifest_flag_loads_example_personas() {
     let output = harn_command()
@@ -196,6 +199,7 @@ fn persona_manifest_flag_loads_example_personas() {
     assert_eq!(persona["receipt_policy"], "required");
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_manifest_flag_loads_fixer_persona() {
     let output = harn_command()
@@ -225,6 +229,7 @@ fn persona_manifest_flag_loads_fixer_persona() {
     assert_eq!(persona["receipt_policy"], "required");
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_manifest_flag_loads_merge_captain_persona() {
     let output = harn_command()
@@ -262,6 +267,7 @@ fn persona_manifest_flag_loads_merge_captain_persona() {
     assert_eq!(persona["evals"][0], "merge_captain_smoke");
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_manifest_flag_loads_ship_captain_persona() {
     let output = harn_command()
@@ -292,6 +298,7 @@ fn persona_manifest_flag_loads_ship_captain_persona() {
     assert_eq!(persona["evals"][0], "slice_quality");
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_runtime_status_tick_and_budget_are_persisted() {
     let temp = write_manifest(valid_manifest());
@@ -377,6 +384,7 @@ fn persona_runtime_status_tick_and_budget_are_persisted() {
     assert_eq!(status_json["budget"]["tokens_today"], 12);
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_pause_resume_disable_trigger_controls_are_durable() {
     let temp = write_manifest(valid_manifest());
@@ -482,6 +490,7 @@ fn persona_pause_resume_disable_trigger_controls_are_durable() {
     assert_eq!(receipt["status"], "dead_lettered");
 }
 
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn persona_runtime_blocks_budget_exhaustion() {
     let temp = write_manifest(

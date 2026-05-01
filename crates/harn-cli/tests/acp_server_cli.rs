@@ -119,6 +119,7 @@ fn latest_prompt_summary(notifications: &[JsonValue], session_id: &str) -> JsonV
         .unwrap_or_else(|| panic!("no prompt summary found for session {session_id}"))
 }
 
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     let _guard = lock_acp_cli_tests();
@@ -318,6 +319,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     assert!(status.success(), "status={status}");
 }
 
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn serve_acp_stdio_runs_packaged_adapter() {
     let _guard = lock_acp_cli_tests();
