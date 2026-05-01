@@ -3,9 +3,11 @@
 `OpenTrustGraph` is a portable event schema for recording autonomy and approval
 decisions around agent dispatch. Harn emits these records onto `trust_graph`
 plus the per-agent topic `trust_graph.<agent_id>` (`trust.graph` is still read
-for compatibility), but the format is designed to
-be runtime-neutral so other schedulers and workflow engines can adopt the same
-stream shape.
+for compatibility). Harn also mirrors a compact runtime projection to
+`trust_graph.records` with `actor_id`, `action`, `approver`, `outcome`,
+`evidence_refs`, `trace_id`, `timestamp`, and `autonomy_tier_at_time`. The
+OpenTrustGraph format is designed to be runtime-neutral so other schedulers and
+workflow engines can adopt the same stream shape.
 
 Version markers:
 

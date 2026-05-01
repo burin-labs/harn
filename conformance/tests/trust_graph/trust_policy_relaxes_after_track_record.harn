@@ -1,0 +1,35 @@
+import "std/trust"
+
+pipeline test(task) {
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let actor_id = "trust-policy-" + unique
+  record(
+    {
+      actor_id: actor_id,
+      action: "trust.promote",
+      approver: "maintainer-1",
+      outcome: "success",
+      trace_id: "trace-control-" + unique,
+      autonomy_tier_at_time: "act_with_approval",
+    },
+  )
+  var i = 0
+  while i < 10 {
+    record(
+      {
+        actor_id: actor_id,
+        action: "merge_pr",
+        approver: "maintainer-1",
+        outcome: "success",
+        trace_id: "trace-merge-" + to_string(i) + "-" + unique,
+        autonomy_tier_at_time: "act_with_approval",
+        evidence_refs: [{kind: "pull_request", id: to_string(i)}],
+      },
+    )
+    i = i + 1
+  }
+  let policy: CapabilityPolicy = policy_for(actor_id)
+  let records: list<TrustGraphRecord> = query({actor_id: actor_id, action: "merge_pr"})
+  println(len(records) == 10)
+  println(policy.side_effect_level == "network")
+}

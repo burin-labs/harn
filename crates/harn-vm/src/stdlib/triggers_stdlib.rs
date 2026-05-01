@@ -21,8 +21,9 @@ use crate::triggers::{
     WebhookIntakeError, WebhookIntakeRequest, TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_DLQ_TOPIC,
 };
 use crate::trust_graph::{
-    group_trust_records_by_trace, policy_for_agent, query_trust_records, trust_score_for,
-    verify_trust_chain, AutonomyTier, TrustOutcome, TrustQueryFilters, TrustRecord,
+    group_trust_records_by_trace, policy_for_agent, query_trust_graph_records, query_trust_records,
+    trust_score_for, verify_trust_chain, AutonomyTier, TrustOutcome, TrustQueryFilters,
+    TrustRecord,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -95,6 +96,8 @@ struct ActionGraphEventRecord {
 }
 
 pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
+    register_trust_namespace(vm);
+
     vm.register_builtin("handler_context", |_args, _out| {
         let Some(context) = current_dispatch_context() else {
             return Ok(VmValue::Nil);
@@ -210,7 +213,7 @@ pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
         let decision = args.first().ok_or_else(|| {
             VmError::Runtime("trust_graph_record: expected decision dict".to_string())
         })?;
-        let record = append_trust_record_from_decision(decision).await?;
+        let record = append_trust_record_from_decision_for("trust_graph_record", decision).await?;
         Ok(VmValue::String(Rc::from(record.record_id)))
     });
 
@@ -259,6 +262,59 @@ pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
         let report = verify_trust_chain(&log)
             .await
             .map_err(|error| VmError::Runtime(format!("trust_graph_verify_chain: {error}")))?;
+        Ok(value_from_serde(&report))
+    });
+
+    vm.register_async_builtin("trust.query", |args| async move {
+        let filters = args
+            .first()
+            .map(parse_trust_query_filters)
+            .transpose()?
+            .unwrap_or_default();
+        let log = ensure_trigger_event_log();
+        let records = query_trust_graph_records(&log, &filters)
+            .await
+            .map_err(|error| VmError::Runtime(format!("trust.query: {error}")))?;
+        Ok(VmValue::List(Rc::new(
+            records
+                .into_iter()
+                .map(|record| value_from_serde(&record))
+                .collect(),
+        )))
+    });
+
+    vm.register_async_builtin("trust.record", |args| async move {
+        let decision = args
+            .first()
+            .ok_or_else(|| VmError::Runtime("trust.record: expected decision dict".to_string()))?;
+        let record = append_trust_record_from_decision_for("trust.record", decision).await?;
+        Ok(VmValue::String(Rc::from(record.record_id)))
+    });
+
+    vm.register_async_builtin("trust.score", |args| async move {
+        let agent = required_string_arg(&args, 0, "trust.score", "actor_id")?;
+        let action = optional_string_arg(&args, 1, "trust.score", "action")?;
+        let log = ensure_trigger_event_log();
+        let score = trust_score_for(&log, &agent, action.as_deref())
+            .await
+            .map_err(|error| VmError::Runtime(format!("trust.score: {error}")))?;
+        Ok(value_from_serde(&score))
+    });
+
+    vm.register_async_builtin("trust.policy_for", |args| async move {
+        let agent = required_string_arg(&args, 0, "trust.policy_for", "actor_id")?;
+        let log = ensure_trigger_event_log();
+        let policy = policy_for_agent(&log, &agent)
+            .await
+            .map_err(|error| VmError::Runtime(format!("trust.policy_for: {error}")))?;
+        Ok(value_from_serde(&policy))
+    });
+
+    vm.register_async_builtin("trust.verify_chain", |_args| async move {
+        let log = ensure_trigger_event_log();
+        let report = verify_trust_chain(&log)
+            .await
+            .map_err(|error| VmError::Runtime(format!("trust.verify_chain: {error}")))?;
         Ok(value_from_serde(&report))
     });
 
@@ -337,6 +393,23 @@ pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
             .map_err(|error| VmError::Runtime(format!("trigger_test_harness: {error}")))?;
         Ok(value_from_serde(&result))
     });
+}
+
+fn register_trust_namespace(vm: &mut Vm) {
+    let names = ["query", "record", "score", "policy_for", "verify_chain"];
+    vm.set_global(
+        "trust",
+        VmValue::Dict(Rc::new(
+            std::iter::once(("_namespace".to_string(), VmValue::String(Rc::from("trust"))))
+                .chain(names.into_iter().map(|name| {
+                    (
+                        name.to_string(),
+                        VmValue::BuiltinRef(Rc::from(format!("trust.{name}"))),
+                    )
+                }))
+                .collect::<BTreeMap<_, _>>(),
+        )),
+    );
 }
 
 async fn dispatch_trigger_event(
@@ -1122,26 +1195,37 @@ async fn append_trust_record_from_parts(
     .await
 }
 
-async fn append_trust_record_from_decision(value: &VmValue) -> Result<TrustRecord, VmError> {
+async fn append_trust_record_from_decision_for(
+    builtin: &str,
+    value: &VmValue,
+) -> Result<TrustRecord, VmError> {
     let VmValue::Dict(map) = value else {
-        return Err(VmError::Runtime(
-            "trust_graph_record: expected decision dict".to_string(),
-        ));
+        return Err(VmError::Runtime(format!(
+            "{builtin}: expected decision dict"
+        )));
     };
-    let agent = required_string(map, "agent", "trust_graph_record")?;
-    let action = required_string(map, "action", "trust_graph_record")?;
+    let agent = optional_string(map, "agent")
+        .or_else(|| optional_string(map, "actor"))
+        .or_else(|| optional_string(map, "actor_id"))
+        .ok_or_else(|| {
+            VmError::Runtime(format!(
+                "{builtin}: missing string field `actor_id` (or `agent`)"
+            ))
+        })?;
+    let action = required_string(map, "action", builtin)?;
     let approver = optional_string(map, "approver");
     let outcome = map
         .get("outcome")
         .map(parse_trust_outcome)
         .transpose()?
-        .ok_or_else(|| VmError::Runtime("trust_graph_record: missing outcome".to_string()))?;
+        .ok_or_else(|| VmError::Runtime(format!("{builtin}: missing outcome")))?;
     let tier = map
         .get("autonomy_tier")
+        .or_else(|| map.get("autonomy_tier_at_time"))
         .or_else(|| map.get("tier"))
         .map(parse_autonomy_tier)
         .transpose()?
-        .ok_or_else(|| VmError::Runtime("trust_graph_record: missing autonomy_tier".to_string()))?;
+        .ok_or_else(|| VmError::Runtime(format!("{builtin}: missing autonomy_tier")))?;
     let trace_id = optional_string(map, "trace_id")
         .or_else(|| current_dispatch_context().map(|context| context.trigger_event.trace_id.0))
         .unwrap_or_else(|| format!("trace-{}", uuid::Uuid::now_v7()));
@@ -1149,16 +1233,32 @@ async fn append_trust_record_from_decision(value: &VmValue) -> Result<TrustRecor
     if let Some(cost_usd) = map.get("cost_usd").and_then(vm_number_as_f64) {
         record.cost_usd = Some(cost_usd);
     }
+    if let Some(evidence_refs) = map.get("evidence_refs") {
+        let VmValue::List(items) = evidence_refs else {
+            return Err(VmError::Runtime(format!(
+                "{builtin}: evidence_refs must be a list"
+            )));
+        };
+        record.metadata.insert(
+            "evidence_refs".to_string(),
+            serde_json::Value::Array(
+                items
+                    .iter()
+                    .map(crate::llm::vm_value_to_json)
+                    .collect::<Vec<_>>(),
+            ),
+        );
+    }
     if let Some(metadata) = map.get("metadata") {
         let metadata_json = crate::llm::vm_value_to_json(metadata);
         let serde_json::Value::Object(object) = metadata_json else {
-            return Err(VmError::Runtime(
-                "trust_graph_record: metadata must be a dict".to_string(),
-            ));
+            return Err(VmError::Runtime(format!(
+                "{builtin}: metadata must be a dict"
+            )));
         };
-        record.metadata = object.into_iter().collect();
+        record.metadata.extend(object);
     }
-    append_trust_record_value("trust_graph_record", record).await
+    append_trust_record_value(builtin, record).await
 }
 
 async fn append_trust_record_value(
@@ -1186,7 +1286,9 @@ fn parse_trust_query_filters(value: &VmValue) -> Result<TrustQueryFilters, VmErr
         ));
     };
     Ok(TrustQueryFilters {
-        agent: optional_string(map, "agent"),
+        agent: optional_string(map, "agent")
+            .or_else(|| optional_string(map, "actor"))
+            .or_else(|| optional_string(map, "actor_id")),
         action: optional_string(map, "action"),
         since: optional_string(map, "since")
             .map(|raw| parse_query_timestamp("trust_query", "since", &raw))
@@ -1194,7 +1296,12 @@ fn parse_trust_query_filters(value: &VmValue) -> Result<TrustQueryFilters, VmErr
         until: optional_string(map, "until")
             .map(|raw| parse_query_timestamp("trust_query", "until", &raw))
             .transpose()?,
-        tier: map.get("tier").map(parse_autonomy_tier).transpose()?,
+        tier: map
+            .get("tier")
+            .or_else(|| map.get("autonomy_tier"))
+            .or_else(|| map.get("autonomy_tier_at_time"))
+            .map(parse_autonomy_tier)
+            .transpose()?,
         outcome: map.get("outcome").map(parse_trust_outcome).transpose()?,
         limit: map.get("limit").map(parse_trust_query_limit).transpose()?,
         grouped_by_trace: map
