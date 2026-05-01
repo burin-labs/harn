@@ -454,9 +454,9 @@ async fn orchestrator_lifecycle(
             &config.mcp_sse_path,
             &config.mcp_messages_path,
         )?;
-        if !has_orchestrator_api_keys_configured() {
+        if !has_orchestrator_api_keys_configured() && !has_mcp_oauth_configured() {
             return Err(OrchestratorError::Serve(
-                "--mcp requires HARN_ORCHESTRATOR_API_KEYS so the embedded MCP management surface is authenticated"
+                "--mcp requires HARN_ORCHESTRATOR_API_KEYS or HARN_MCP_OAUTH_AUTHORIZATION_SERVERS so the embedded MCP management surface is authenticated"
                     .to_string(),
             ));
         }
@@ -2335,6 +2335,12 @@ fn trigger_kind_name(kind: crate::package::TriggerKind) -> &'static str {
 
 fn has_orchestrator_api_keys_configured() -> bool {
     std::env::var("HARN_ORCHESTRATOR_API_KEYS")
+        .ok()
+        .is_some_and(|value| value.split(',').any(|segment| !segment.trim().is_empty()))
+}
+
+fn has_mcp_oauth_configured() -> bool {
+    std::env::var("HARN_MCP_OAUTH_AUTHORIZATION_SERVERS")
         .ok()
         .is_some_and(|value| value.split(',').any(|segment| !segment.trim().is_empty()))
 }

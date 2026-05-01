@@ -61,6 +61,7 @@ webbrowser = "1"
 rand = "0.10"
 regex = "1"
 jsonschema = { version = "0.46.3", default-features = false }
+jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
 clap = { version = "4", features = ["derive", "env"] }
 tower = { version = "0.5", features = ["util"] }
 time = { version = "0.3", features = ["formatting", "parsing"] }

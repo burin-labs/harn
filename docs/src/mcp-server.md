@@ -85,15 +85,50 @@ harn mcp serve \
 
 ## Auth
 
-Set `HARN_ORCHESTRATOR_API_KEYS` to a comma-separated key list to require API
-keys.
+For HTTP transports, prefer OAuth resource-server mode. Set
+`HARN_MCP_OAUTH_AUTHORIZATION_SERVERS` to a comma-separated list of issuer URLs
+and configure exactly how the MCP server validates bearer tokens:
+
+- `HARN_MCP_OAUTH_INTROSPECTION_URL` for opaque-token introspection, optionally
+  with `HARN_MCP_OAUTH_INTROSPECTION_CLIENT_ID`,
+  `HARN_MCP_OAUTH_INTROSPECTION_CLIENT_SECRET`, or
+  `HARN_MCP_OAUTH_INTROSPECTION_TOKEN`
+- `HARN_MCP_OAUTH_JWKS_URL` for JWT validation against a JWKS endpoint
+
+Recommended production settings:
+
+- `HARN_MCP_OAUTH_RESOURCE` to the canonical MCP resource URI clients pass as
+  the RFC 8707 `resource` value, for example `https://mcp.example.com/mcp`
+- `HARN_MCP_OAUTH_AUDIENCE` when tokens use an audience value different from
+  the resource URI
+- `HARN_MCP_OAUTH_ISSUER` when tokens should be pinned to one issuer
+- `HARN_MCP_OAUTH_SCOPES` as a comma- or space-separated list of scopes required
+  for the MCP control plane
+
+When OAuth mode is configured, unauthenticated HTTP requests return `401` with
+`WWW-Authenticate: Bearer resource_metadata="..."`, and the server publishes
+RFC 9728 protected resource metadata at both:
+
+- `/.well-known/oauth-protected-resource`
+- `/.well-known/oauth-protected-resource/<mcp-path>`
+
+The metadata includes `authorization_servers`, the canonical `resource`, and
+`scopes_supported` when scopes are configured. Access tokens must be sent on
+every HTTP request as `Authorization: Bearer <token>`. Tokens are rejected when
+they are inactive, expired, issued for a different audience/resource, or missing
+required scopes.
+
+`HARN_ORCHESTRATOR_API_KEYS` remains available as a legacy compatibility mode.
+Set it to a comma-separated key list to require API keys.
 
 HTTP clients can authenticate with either:
 
 - `Authorization: Bearer <key>`
 - `x-api-key: <key>`
 
-Stdio clients authenticate during `initialize` using a Harn extension field:
+Stdio clients, and legacy HTTP clients that do not yet send an Authorization
+header, can authenticate during `initialize` using a deprecated Harn extension
+field:
 
 ```json
 {
@@ -105,7 +140,9 @@ Stdio clients authenticate during `initialize` using a Harn extension field:
 }
 ```
 
-If `HARN_ORCHESTRATOR_API_KEYS` is unset, the MCP server runs without auth.
+The server prints a warning when this `apiKey` initialize extension is used. If
+neither OAuth mode nor `HARN_ORCHESTRATOR_API_KEYS` is configured, the MCP
+server runs without auth.
 
 ## Tool Catalog
 

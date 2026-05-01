@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::body::Bytes;
 use axum::extract::{Query, State};
-use axum::http::header::ACCEPT;
+use axum::http::header::{ACCEPT, AUTHORIZATION, WWW_AUTHENTICATE};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -38,6 +38,7 @@ use crate::commands::orchestrator::inspect_data::{
 use crate::commands::orchestrator::listener::ListenerAuth;
 use crate::package::CollectedTriggerHandler;
 
+use super::oauth_resource::{OAuthChallengeError, OAuthResourceServer, OAuthTokenError};
 use super::prompts::FilePromptCatalog;
 
 const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
@@ -54,6 +55,7 @@ pub(crate) struct McpOrchestratorService {
     state_dir: PathBuf,
     manifest_source: Arc<Mutex<String>>,
     auth: ListenerAuth,
+    oauth: Option<OAuthResourceServer>,
     prompt_catalog: Arc<Mutex<FilePromptCatalog>>,
     list_notify_tx: broadcast::Sender<JsonValue>,
     _list_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
@@ -253,6 +255,7 @@ impl McpOrchestratorService {
             )
         })?;
         let auth = ListenerAuth::from_env(false)?;
+        let oauth = OAuthResourceServer::from_env()?;
         let project_root = local
             .config
             .parent()
@@ -276,6 +279,7 @@ impl McpOrchestratorService {
             state_dir: local.state_dir,
             manifest_source,
             auth,
+            oauth,
             prompt_catalog,
             list_notify_tx,
             _list_watcher: Arc::new(Mutex::new(list_watcher)),
@@ -388,7 +392,13 @@ impl McpOrchestratorService {
             .unwrap_or(MCP_PROTOCOL_VERSION)
             .to_string();
 
-        if self.auth.has_api_keys() {
+        if initialize_api_key(params).is_some() {
+            eprintln!(
+                "[harn] warning: MCP initialize capabilities.harn.apiKey is deprecated; use HTTP Authorization: Bearer tokens with OAuth protected-resource metadata instead"
+            );
+        }
+
+        if self.auth.has_api_keys() && !session.authenticated {
             let api_key = initialize_api_key(params);
             if api_key.is_none_or(|value| !self.auth.matches_api_key(value)) {
                 return harn_vm::jsonrpc::error_response(id, -32001, "unauthorized");
@@ -1315,6 +1325,14 @@ fn http_router(
     };
     Router::new()
         .route(
+            "/.well-known/oauth-protected-resource",
+            get(oauth_protected_resource_metadata),
+        )
+        .route(
+            "/.well-known/oauth-protected-resource/{*path}",
+            get(oauth_protected_resource_metadata),
+        )
+        .route(
             &path,
             post(http_post_request)
                 .get(http_get_stream)
@@ -1342,6 +1360,16 @@ async fn serve_http_router(
         .map_err(|error| format!("MCP HTTP server failed: {error}"))
 }
 
+async fn oauth_protected_resource_metadata(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(oauth) = &state.service.oauth else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    Json(oauth.metadata(&headers, &state.mcp_path)).into_response()
+}
+
 async fn http_post_request(
     State(state): State<HttpState>,
     method: Method,
@@ -1355,27 +1383,18 @@ async fn http_post_request(
         return *response;
     }
 
-    let normalized = normalized_headers(&headers);
-    if state.service.auth.has_api_keys() {
-        let auth_log = match auth_event_log(&state.service.state_dir) {
-            Ok(log) => log,
-            Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
-        };
-        if let Err(()) = state
-            .service
-            .auth
-            .authorize(
-                auth_log.as_ref(),
-                method.as_str(),
-                &state.mcp_path,
-                &normalized,
-                body.as_ref(),
-            )
-            .await
-        {
-            return (StatusCode::UNAUTHORIZED, "auth failed").into_response();
-        }
-    }
+    let authenticated = match authorize_http_request(
+        &state,
+        method.as_str(),
+        &state.mcp_path,
+        &headers,
+        body.as_ref(),
+    )
+    .await
+    {
+        Ok(authenticated) => authenticated,
+        Err(response) => return response,
+    };
 
     let request: JsonValue = match serde_json::from_slice(body.as_ref()) {
         Ok(value) => value,
@@ -1398,7 +1417,10 @@ async fn http_post_request(
             Err(response) => return response,
         };
 
-    let current = session.state.lock().expect("HTTP session poisoned").clone();
+    let mut current = session.state.lock().expect("HTTP session poisoned").clone();
+    if authenticated {
+        current.authenticated = true;
+    }
     let (updated, response_json) = match state.rpc.call(current, request).await {
         Ok(result) => result,
         Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
@@ -1434,20 +1456,10 @@ async fn http_get_stream(State(state): State<HttpState>, headers: HeaderMap) -> 
     if let Err(response) = validate_protocol_header(&headers) {
         return *response;
     }
-    if state.service.auth.has_api_keys() {
-        let normalized = normalized_headers(&headers);
-        let auth_log = match auth_event_log(&state.service.state_dir) {
-            Ok(log) => log,
-            Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
-        };
-        if let Err(()) = state
-            .service
-            .auth
-            .authorize(auth_log.as_ref(), "GET", &state.mcp_path, &normalized, &[])
-            .await
-        {
-            return (StatusCode::UNAUTHORIZED, "auth failed").into_response();
-        }
+    if let Err(response) =
+        authorize_http_request(&state, "GET", &state.mcp_path, &headers, &[]).await
+    {
+        return response;
     }
     if !accepts_media(&headers, "text/event-stream") {
         return StatusCode::NOT_ACCEPTABLE.into_response();
@@ -1490,26 +1502,10 @@ async fn http_delete_session(State(state): State<HttpState>, headers: HeaderMap)
     if let Err(response) = validate_protocol_header(&headers) {
         return *response;
     }
-    if state.service.auth.has_api_keys() {
-        let normalized = normalized_headers(&headers);
-        let auth_log = match auth_event_log(&state.service.state_dir) {
-            Ok(log) => log,
-            Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
-        };
-        if let Err(()) = state
-            .service
-            .auth
-            .authorize(
-                auth_log.as_ref(),
-                "DELETE",
-                &state.mcp_path,
-                &normalized,
-                &[],
-            )
-            .await
-        {
-            return (StatusCode::UNAUTHORIZED, "auth failed").into_response();
-        }
+    if let Err(response) =
+        authorize_http_request(&state, "DELETE", &state.mcp_path, &headers, &[]).await
+    {
+        return response;
     }
     let Some(session_id) = headers
         .get(MCP_SESSION_HEADER)
@@ -1535,38 +1531,31 @@ async fn legacy_sse_stream(State(state): State<HttpState>, headers: HeaderMap) -
     if let Err(response) = validate_origin(&headers) {
         return *response;
     }
-    let normalized = normalized_headers(&headers);
-    if state.service.auth.has_api_keys() {
-        let auth_log =
-            match harn_vm::event_log::EventLogConfig::for_base_dir(&state.service.state_dir)
-                .ok()
-                .and_then(|config| harn_vm::event_log::open_event_log(&config).ok())
-            {
-                Some(log) => log,
-                None => {
-                    let mut response = (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "failed to open event log",
-                    )
-                        .into_response();
-                    attach_legacy_deprecation_headers(&mut response);
-                    return response;
-                }
-            };
-        if let Err(()) = state
-            .service
-            .auth
-            .authorize(auth_log.as_ref(), "GET", &state.sse_path, &normalized, &[])
-            .await
-        {
-            let mut response = (StatusCode::UNAUTHORIZED, "auth failed").into_response();
-            attach_legacy_deprecation_headers(&mut response);
-            return response;
-        }
+    let authenticated =
+        match authorize_http_request(&state, "GET", &state.sse_path, &headers, &[]).await {
+            Ok(authenticated) => authenticated,
+            Err(mut response) => {
+                attach_legacy_deprecation_headers(&mut response);
+                return response;
+            }
+        };
+
+    if authenticated {
+        eprintln!(
+            "[harn] warning: legacy MCP SSE transport is deprecated; use Streamable HTTP at {}",
+            state.mcp_path
+        );
     }
 
     let session_id = Uuid::now_v7().to_string();
     let session = Arc::new(HttpSession::default());
+    if authenticated {
+        session
+            .state
+            .lock()
+            .expect("legacy SSE session poisoned")
+            .authenticated = true;
+    }
     let (tx, rx) = unbounded::<JsonValue>();
     *session.sse_tx.lock().expect("SSE sender poisoned") = Some(tx);
     let list_tx = session
@@ -1609,6 +1598,21 @@ async fn legacy_sse_message(
     if let Err(response) = validate_origin(&headers) {
         return *response;
     }
+    let authenticated = match authorize_http_request(
+        &state,
+        "POST",
+        &state.messages_path,
+        &headers,
+        body.as_ref(),
+    )
+    .await
+    {
+        Ok(authenticated) => authenticated,
+        Err(mut response) => {
+            attach_legacy_deprecation_headers(&mut response);
+            return response;
+        }
+    };
     let Some(session_id) = query.get("session_id") else {
         let mut response = (StatusCode::BAD_REQUEST, "missing session_id").into_response();
         attach_legacy_deprecation_headers(&mut response);
@@ -1637,11 +1641,14 @@ async fn legacy_sse_message(
             return response;
         }
     };
-    let current = session
+    let mut current = session
         .state
         .lock()
         .expect("legacy SSE session poisoned")
         .clone();
+    if authenticated {
+        current.authenticated = true;
+    }
     let (updated, response) = match state.rpc.call(current, request).await {
         Ok(result) => result,
         Err(error) => {
@@ -1858,6 +1865,108 @@ fn validate_origin(headers: &HeaderMap) -> Result<(), Box<Response>> {
     }
 }
 
+async fn authorize_http_request(
+    state: &HttpState,
+    method: &str,
+    path: &str,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Result<bool, Response> {
+    if state.service.auth.has_api_keys()
+        && authorize_legacy_http_request(state, method, path, headers, body)
+            .await
+            .is_ok()
+    {
+        return Ok(true);
+    }
+
+    if let Some(oauth) = &state.service.oauth {
+        let Some(token) = bearer_token(headers) else {
+            return Err(oauth_challenge_response(
+                oauth,
+                headers,
+                &state.mcp_path,
+                None,
+                StatusCode::UNAUTHORIZED,
+            ));
+        };
+        return match oauth.validate_bearer(token, headers, &state.mcp_path).await {
+            Ok(()) => Ok(true),
+            Err(OAuthTokenError::InsufficientScope) => Err(oauth_challenge_response(
+                oauth,
+                headers,
+                &state.mcp_path,
+                Some(OAuthChallengeError::InsufficientScope),
+                StatusCode::FORBIDDEN,
+            )),
+            Err(OAuthTokenError::InvalidToken(error)) => Err(oauth_challenge_response(
+                oauth,
+                headers,
+                &state.mcp_path,
+                Some(OAuthChallengeError::InvalidToken(error)),
+                StatusCode::UNAUTHORIZED,
+            )),
+        };
+    }
+
+    if state.service.auth.has_api_keys() {
+        return Err((StatusCode::UNAUTHORIZED, "auth failed").into_response());
+    }
+
+    Ok(false)
+}
+
+async fn authorize_legacy_http_request(
+    state: &HttpState,
+    method: &str,
+    path: &str,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Result<(), Response> {
+    let auth_log = auth_event_log(&state.service.state_dir)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error).into_response())?;
+    state
+        .service
+        .auth
+        .authorize(
+            auth_log.as_ref(),
+            method,
+            path,
+            &normalized_headers(headers),
+            body,
+        )
+        .await
+        .map_err(|()| (StatusCode::UNAUTHORIZED, "auth failed").into_response())
+}
+
+fn oauth_challenge_response(
+    oauth: &OAuthResourceServer,
+    headers: &HeaderMap,
+    mcp_path: &str,
+    error: Option<OAuthChallengeError>,
+    status: StatusCode,
+) -> Response {
+    let mut response = status.into_response();
+    response.headers_mut().insert(
+        WWW_AUTHENTICATE,
+        oauth.challenge_header(headers, mcp_path, error),
+    );
+    response
+}
+
+fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    let authorization = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())?;
+    let (scheme, value) = authorization.split_once(' ')?;
+    if scheme.eq_ignore_ascii_case("bearer") {
+        let value = value.trim();
+        (!value.is_empty()).then_some(value)
+    } else {
+        None
+    }
+}
+
 fn initialize_api_key(params: &JsonValue) -> Option<&str> {
     params
         .pointer("/capabilities/harn/apiKey")
@@ -2041,13 +2150,18 @@ fn auth_event_log(state_dir: &Path) -> Result<Arc<harn_vm::event_log::AnyEventLo
 mod tests {
     use super::*;
     use axum::body::{to_bytes, Body};
+    use axum::extract::Form;
     use axum::http::Request;
+    use axum::routing::post;
+    use axum::Router as AxumRouter;
     use std::fs;
     use std::path::Path;
 
     use tempfile::TempDir;
     use tower::ServiceExt;
 
+    use crate::env_guard::ScopedEnvVar;
+    use crate::tests::common::env_lock::lock_env;
     use crate::tests::common::harn_state_lock::lock_harn_state;
 
     fn write_file(dir: &Path, relative: &str, contents: &str) {
@@ -2862,6 +2976,237 @@ version = "0.1.0"
             .await
             .unwrap();
         assert_eq!(after_delete.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn oauth_metadata_and_challenge_are_served_when_configured() {
+        let _env_lock = lock_env().lock().await;
+        let _auth_servers = ScopedEnvVar::set(
+            "HARN_MCP_OAUTH_AUTHORIZATION_SERVERS",
+            "https://auth.example.test",
+        );
+        let _introspection = ScopedEnvVar::set(
+            "HARN_MCP_OAUTH_INTROSPECTION_URL",
+            "https://auth.example.test/introspect",
+        );
+        let _resource =
+            ScopedEnvVar::set("HARN_MCP_OAUTH_RESOURCE", "https://mcp.example.test/mcp");
+        let _audience =
+            ScopedEnvVar::set("HARN_MCP_OAUTH_AUDIENCE", "https://mcp.example.test/mcp");
+        let _scopes = ScopedEnvVar::set("HARN_MCP_OAUTH_SCOPES", "harn:mcp");
+
+        let _guard = lock_harn_state();
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        let args = fixture_args(&temp);
+        let router = http_router_for_local(
+            args.local.clone(),
+            "/mcp".to_string(),
+            "/sse".to_string(),
+            "/messages".to_string(),
+        )
+        .unwrap();
+
+        let metadata = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/.well-known/oauth-protected-resource/mcp")
+                    .header("host", "mcp.example.test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(metadata.status(), StatusCode::OK);
+        let body = to_bytes(metadata.into_body(), usize::MAX).await.unwrap();
+        let metadata: JsonValue = serde_json::from_slice(&body).unwrap();
+        assert_eq!(metadata["resource"], json!("https://mcp.example.test/mcp"));
+        assert_eq!(
+            metadata["authorization_servers"],
+            json!(["https://auth.example.test"])
+        );
+        assert_eq!(metadata["scopes_supported"], json!(["harn:mcp"]));
+
+        let unauthorized = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mcp")
+                    .header("host", "mcp.example.test")
+                    .header("accept", "application/json")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        harn_vm::jsonrpc::request(1, "initialize", json!({})).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+        let challenge = unauthorized
+            .headers()
+            .get(WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap();
+        assert!(challenge.starts_with("Bearer "), "{challenge}");
+        assert!(
+            challenge.contains(
+                "resource_metadata=\"http://mcp.example.test/.well-known/oauth-protected-resource/mcp\""
+            ),
+            "{challenge}"
+        );
+        assert!(challenge.contains("scope=\"harn:mcp\""), "{challenge}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
+        async fn introspect(Form(form): Form<BTreeMap<String, String>>) -> Json<JsonValue> {
+            match form.get("token").map(String::as_str) {
+                Some("valid-token") => Json(json!({
+                    "active": true,
+                    "aud": "mcp://harn-test",
+                    "scope": "harn:mcp",
+                    "exp": OffsetDateTime::now_utc().unix_timestamp() + 3600
+                })),
+                Some("wrong-audience") => Json(json!({
+                    "active": true,
+                    "aud": "mcp://other",
+                    "scope": "harn:mcp",
+                    "exp": OffsetDateTime::now_utc().unix_timestamp() + 3600
+                })),
+                Some("expired-token") => Json(json!({
+                    "active": true,
+                    "aud": "mcp://harn-test",
+                    "scope": "harn:mcp",
+                    "exp": OffsetDateTime::now_utc().unix_timestamp() - 1
+                })),
+                Some("missing-scope") => Json(json!({
+                    "active": true,
+                    "aud": "mcp://harn-test",
+                    "scope": "other:scope",
+                    "exp": OffsetDateTime::now_utc().unix_timestamp() + 3600
+                })),
+                _ => Json(json!({ "active": false })),
+            }
+        }
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let auth_addr = listener.local_addr().unwrap();
+        let auth_server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                AxumRouter::new().route("/introspect", post(introspect)),
+            )
+            .await
+            .unwrap();
+        });
+
+        let _env_lock = lock_env().lock().await;
+        let auth_server_url = format!("http://{auth_addr}");
+        let introspection_url = format!("{auth_server_url}/introspect");
+        let _auth_servers =
+            ScopedEnvVar::set("HARN_MCP_OAUTH_AUTHORIZATION_SERVERS", &auth_server_url);
+        let _introspection =
+            ScopedEnvVar::set("HARN_MCP_OAUTH_INTROSPECTION_URL", &introspection_url);
+        let _audience = ScopedEnvVar::set("HARN_MCP_OAUTH_AUDIENCE", "mcp://harn-test");
+        let _scopes = ScopedEnvVar::set("HARN_MCP_OAUTH_SCOPES", "harn:mcp");
+        let _resource = ScopedEnvVar::set("HARN_MCP_OAUTH_RESOURCE", "mcp://harn-test");
+
+        let _guard = lock_harn_state();
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        let args = fixture_args(&temp);
+        let router = http_router_for_local(
+            args.local.clone(),
+            "/mcp".to_string(),
+            "/sse".to_string(),
+            "/messages".to_string(),
+        )
+        .unwrap();
+
+        let initialize_body = Body::from(
+            harn_vm::jsonrpc::request(
+                1,
+                "initialize",
+                json!({
+                    "protocolVersion": MCP_PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": { "name": "oauth-test", "version": "1.0.0" }
+                }),
+            )
+            .to_string(),
+        );
+        let valid = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mcp")
+                    .header("accept", "application/json")
+                    .header("content-type", "application/json")
+                    .header(AUTHORIZATION, "Bearer valid-token")
+                    .body(initialize_body)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(valid.status(), StatusCode::OK);
+
+        for token in ["wrong-audience", "expired-token"] {
+            let rejected = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/mcp")
+                        .header("accept", "application/json")
+                        .header("content-type", "application/json")
+                        .header(AUTHORIZATION, format!("Bearer {token}"))
+                        .body(Body::from(
+                            harn_vm::jsonrpc::request(1, "initialize", json!({})).to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED, "token={token}");
+            assert!(rejected
+                .headers()
+                .get(WWW_AUTHENTICATE)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|challenge| challenge.contains("error=\"invalid_token\"")));
+        }
+
+        let insufficient_scope = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mcp")
+                    .header("accept", "application/json")
+                    .header("content-type", "application/json")
+                    .header(AUTHORIZATION, "Bearer missing-scope")
+                    .body(Body::from(
+                        harn_vm::jsonrpc::request(1, "initialize", json!({})).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(insufficient_scope.status(), StatusCode::FORBIDDEN);
+        assert!(insufficient_scope
+            .headers()
+            .get(WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(
+                |challenge| challenge.contains("error=\"insufficient_scope\"")
+                    && challenge.contains("scope=\"harn:mcp\"")
+            ));
+
+        auth_server.abort();
     }
 
     #[tokio::test(flavor = "current_thread")]
