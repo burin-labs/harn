@@ -1,10 +1,12 @@
 # Trust graph
 
 Harn's trust graph is the runtime-owned event stream for autonomy decisions.
-Every trigger dispatch now appends a `TrustRecord` to `trust_graph` plus the
-per-agent topic `trust_graph.<agent_id>`. Harn still reads and mirrors the older
-`trust.graph` topic names for compatibility. The same stream also carries explicit
-promotion and demotion events recorded by `harn trust promote` and
+Every trigger dispatch now appends a hash-chained OpenTrustGraph `TrustRecord`
+to `trust_graph` plus the per-agent topic `trust_graph.<agent_id>`. It also
+mirrors a compact `TrustGraphRecord` projection to `trust_graph.records` for
+runtime policy and application queries. Harn still reads and mirrors the older
+`trust.graph` topic names for compatibility. The same stream also carries
+explicit promotion and demotion events recorded by `harn trust promote` and
 `harn trust demote`.
 
 ## Record model
@@ -25,6 +27,17 @@ Each record carries:
 - `previous_hash`
 - `entry_hash`
 - `metadata`
+
+The `trust_graph.records` projection carries the runtime query shape:
+
+- `actor_id`
+- `action`
+- `approver`
+- `outcome`
+- `evidence_refs`
+- `trace_id`
+- `timestamp`
+- `autonomy_tier_at_time`
 
 See [`spec/opentrustgraph.md`](../../spec/opentrustgraph.md) for the normative
 record model, chain export model, and sample event stream. The small public
@@ -81,6 +94,24 @@ harn trust demote github-triage-bot --to shadow --reason "unexpected prod mutati
 
 ## Script APIs
 
+Import `std/trust` for the focused TrustGraph API:
+
+- `query(filters)` returns `TrustGraphRecord` rows. Filters accept `actor`,
+  `actor_id`, `agent`, `action`, `outcome`, `since`, `until`,
+  `autonomy_tier_at_time`, `tier`, and `limit`.
+- `record(decision)` appends a trust decision and returns its `TrustEntryId`.
+  Decisions accept `actor_id` (or `agent`), `action`, `approver`, `outcome`,
+  `trace_id`, `autonomy_tier_at_time` (or `autonomy_tier`/`tier`),
+  `evidence_refs`, `cost_usd`, and `metadata`.
+- `score(actor_id, action?)` returns a `TrustScore`.
+- `policy_for(actor_id)` returns the capability policy derived from trust
+  history.
+- `verify_chain()` verifies the underlying OpenTrustGraph hash chain.
+
+The native namespace exposes the same focused query as `trust.query(...)`,
+matching the API shape `harn::trust::query({actor: ..., action: ...})` in host
+integrations.
+
 Import `std/triggers` and use:
 
 - `handler_context()` to inspect the current dispatch context, including
@@ -98,6 +129,19 @@ Import `std/triggers` and use:
 - `trust_graph_verify_chain()` to verify the local hash chain
 
 Example:
+
+```harn
+import "std/trust"
+
+let records: list<TrustGraphRecord> = query({
+  actor: "github-triage-bot",
+  action: "merge_pr",
+  outcome: "success",
+  since: "2026-04-01T00:00:00Z",
+})
+```
+
+The legacy trigger API remains available:
 
 ```harn
 import "std/triggers"

@@ -222,16 +222,19 @@ pub fn on_quotes(event: TriggerEvent) -> dict {
 
 ### `trust_record(agent, action, approver, outcome, tier)`
 
-Append a manual `TrustRecord` to the trust graph. Scripts usually rely on the
-dispatcher's automatic end-of-handler records, but this builtin is available for
-control-plane events such as promotions, demotions, or manual audit entries.
-The returned record includes `chain_index`, `previous_hash`, and `entry_hash`.
+Append a manual OpenTrustGraph `TrustRecord` to the trust graph. Scripts usually
+rely on the dispatcher's automatic end-of-handler records, but this builtin is
+available for control-plane events such as promotions, demotions, or manual
+audit entries. The returned record includes `chain_index`, `previous_hash`, and
+`entry_hash`, and the runtime also mirrors a compact projection to
+`trust_graph.records`.
 
 ### `trust_graph_record(decision)`
 
 Append a decision dict to the trust graph and return its `TrustEntryId`
-(`record_id`). The dict accepts `agent`, `action`, `approver`, `outcome`,
-`trace_id`, `autonomy_tier` (or `tier`), `cost_usd`, and `metadata`.
+(`record_id`). The dict accepts `agent`/`actor_id`, `action`, `approver`,
+`outcome`, `trace_id`, `autonomy_tier`/`autonomy_tier_at_time` (or `tier`),
+`evidence_refs`, `cost_usd`, and `metadata`.
 
 ### `trust_graph_query(agent, action)`
 
@@ -266,6 +269,10 @@ Supported filter keys:
 `limit` keeps only the newest N matching records. When `grouped_by_trace` is
 `true`, the builtin returns `list<{trace_id, records}>` trace buckets instead of
 the default flat `list<TrustRecord>`.
+
+For new code, prefer `import "std/trust"` and call `query(...)` or
+`trust.query(...)` to receive the compact issue-facing `TrustGraphRecord` shape
+with `actor_id`, `evidence_refs`, and `autonomy_tier_at_time`.
 
 ## Example
 

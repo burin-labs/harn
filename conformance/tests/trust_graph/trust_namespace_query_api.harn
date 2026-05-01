@@ -1,0 +1,28 @@
+import "std/trust"
+
+pipeline test(task) {
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let actor_id = "trust-namespace-" + unique
+  let trace_id = "trace-" + unique
+  let entry_id: TrustEntryId = record(
+    {
+      actor_id: actor_id,
+      action: "merge_pr",
+      approver: "maintainer-1",
+      outcome: "success",
+      trace_id: trace_id,
+      autonomy_tier_at_time: "act_with_approval",
+      evidence_refs: [{kind: "pull_request", uri: "https://example.invalid/pr/927"}],
+    },
+  )
+  let records: list<TrustGraphRecord> = query({actor: actor_id, action: "merge_pr", outcome: "success"})
+  let namespaced: list<TrustGraphRecord> = trust
+    .query({actor_id: actor_id, since: "2000-01-01T00:00:00Z"})
+  println(len(records) == 1)
+  println(records[0].actor_id == actor_id)
+  println(records[0].autonomy_tier_at_time == "act_with_approval")
+  println(records[0].evidence_refs[0].uri == "https://example.invalid/pr/927")
+  println(len(namespaced) == 1 && namespaced[0].trace_id == trace_id)
+  println(entry_id != "")
+  println(event_log.latest("trust_graph.records") != nil)
+}

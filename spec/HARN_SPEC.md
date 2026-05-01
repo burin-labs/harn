@@ -362,6 +362,8 @@ Imports starting with `std/` load embedded stdlib modules:
   agent_state_handoff)
 - `import "std/memory"` — append-only durable memory helpers
   (memory_store, memory_recall, memory_summarize, memory_forget)
+- `import "std/trust"` — TrustGraph query and policy helpers
+  (query, record, score, policy_for, verify_chain)
 - `import "std/postgres"` — Postgres persistence helpers (pg_pool,
   pg_connect, pg_query, pg_query_one, pg_execute, pg_transaction, pg_close,
   pg_mock_pool, pg_mock_calls)

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::event_log::{
@@ -13,6 +13,7 @@ use crate::event_log::{
 use crate::orchestration::CapabilityPolicy;
 
 pub const OPENTRUSTGRAPH_SCHEMA_V0: &str = "opentrustgraph/v0";
+pub const TRUST_GRAPH_RECORDS_TOPIC: &str = "trust_graph.records";
 pub const TRUST_GRAPH_GLOBAL_TOPIC: &str = "trust_graph";
 pub const TRUST_GRAPH_LEGACY_GLOBAL_TOPIC: &str = "trust.graph";
 pub const TRUST_GRAPH_TOPIC_PREFIX: &str = "trust_graph.";
@@ -111,6 +112,35 @@ impl TrustRecord {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TrustGraphRecord {
+    pub actor_id: String,
+    pub action: String,
+    pub approver: Option<String>,
+    pub outcome: TrustOutcome,
+    #[serde(default)]
+    pub evidence_refs: Vec<serde_json::Value>,
+    pub trace_id: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub timestamp: OffsetDateTime,
+    pub autonomy_tier_at_time: AutonomyTier,
+}
+
+impl TrustGraphRecord {
+    pub fn from_trust_record(record: &TrustRecord) -> Self {
+        Self {
+            actor_id: record.agent.clone(),
+            action: record.action.clone(),
+            approver: record.approver.clone(),
+            outcome: record.outcome,
+            evidence_refs: evidence_refs_from_metadata(&record.metadata),
+            trace_id: record.trace_id.clone(),
+            timestamp: record.timestamp,
+            autonomy_tier_at_time: record.autonomy_tier,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TrustQueryFilters {
@@ -181,6 +211,10 @@ fn legacy_global_topic() -> Result<Topic, LogError> {
     Topic::new(TRUST_GRAPH_LEGACY_GLOBAL_TOPIC)
 }
 
+fn records_topic() -> Result<Topic, LogError> {
+    Topic::new(TRUST_GRAPH_RECORDS_TOPIC)
+}
+
 pub fn topic_for_agent(agent: &str) -> Result<Topic, LogError> {
     Topic::new(format!(
         "{TRUST_GRAPH_TOPIC_PREFIX}{}",
@@ -218,6 +252,7 @@ pub async fn append_trust_record(
     for topic in append_topics_for_record(&finalized)? {
         log.append(&topic, event.clone()).await?;
     }
+    append_trust_graph_record_projection(log, &finalized).await?;
     Ok(finalized)
 }
 
@@ -260,6 +295,48 @@ pub async fn query_trust_records(
     });
     apply_record_limit(&mut records, filters.limit);
     Ok(records)
+}
+
+pub async fn query_trust_graph_records(
+    log: &Arc<AnyEventLog>,
+    filters: &TrustQueryFilters,
+) -> Result<Vec<TrustGraphRecord>, LogError> {
+    let mut graph_records = Vec::new();
+    let mut seen = HashSet::new();
+
+    for record in query_trust_records(log, filters).await? {
+        let graph_record = TrustGraphRecord::from_trust_record(&record);
+        let dedupe_key = trust_graph_record_dedupe_key(&graph_record);
+        if seen.insert(dedupe_key) {
+            graph_records.push(graph_record);
+        }
+    }
+
+    for (_, event) in log.read_range(&records_topic()?, None, usize::MAX).await? {
+        if event.kind != TRUST_GRAPH_EVENT_KIND {
+            continue;
+        }
+        let Ok(record) = serde_json::from_value::<TrustGraphRecord>(event.payload) else {
+            continue;
+        };
+        if !matches_graph_filters(&record, filters) {
+            continue;
+        }
+        let dedupe_key = trust_graph_record_dedupe_key(&record);
+        if seen.insert(dedupe_key) {
+            graph_records.push(record);
+        }
+    }
+
+    graph_records.sort_by(|left, right| {
+        left.timestamp
+            .cmp(&right.timestamp)
+            .then(left.actor_id.cmp(&right.actor_id))
+            .then(left.action.cmp(&right.action))
+            .then(left.trace_id.cmp(&right.trace_id))
+    });
+    apply_graph_record_limit(&mut graph_records, filters.limit);
+    Ok(graph_records)
 }
 
 pub async fn trust_score_for(
@@ -468,6 +545,40 @@ fn matches_filters(record: &TrustRecord, filters: &TrustQueryFilters) -> bool {
     true
 }
 
+fn matches_graph_filters(record: &TrustGraphRecord, filters: &TrustQueryFilters) -> bool {
+    if let Some(agent) = filters.agent.as_deref() {
+        if record.actor_id != agent {
+            return false;
+        }
+    }
+    if let Some(action) = filters.action.as_deref() {
+        if record.action != action {
+            return false;
+        }
+    }
+    if let Some(since) = filters.since {
+        if record.timestamp < since {
+            return false;
+        }
+    }
+    if let Some(until) = filters.until {
+        if record.timestamp > until {
+            return false;
+        }
+    }
+    if let Some(tier) = filters.tier {
+        if record.autonomy_tier_at_time != tier {
+            return false;
+        }
+    }
+    if let Some(outcome) = filters.outcome {
+        if record.outcome != outcome {
+            return false;
+        }
+    }
+    true
+}
+
 fn query_topics(filters: &TrustQueryFilters) -> Result<Vec<Topic>, LogError> {
     match filters.agent.as_deref() {
         Some(agent) => unique_topics(vec![
@@ -493,6 +604,29 @@ fn unique_topics(topics: Vec<Topic>) -> Result<Vec<Topic>, LogError> {
         .into_iter()
         .filter(|topic| seen.insert(topic.as_str().to_string()))
         .collect())
+}
+
+async fn append_trust_graph_record_projection(
+    log: &Arc<AnyEventLog>,
+    record: &TrustRecord,
+) -> Result<(), LogError> {
+    let payload = serde_json::to_value(TrustGraphRecord::from_trust_record(record))
+        .map_err(|error| LogError::Serde(format!("trust graph record encode error: {error}")))?;
+    let mut headers = BTreeMap::new();
+    headers.insert("trace_id".to_string(), record.trace_id.clone());
+    headers.insert("actor_id".to_string(), record.agent.clone());
+    headers.insert("action".to_string(), record.action.clone());
+    headers.insert(
+        "autonomy_tier_at_time".to_string(),
+        record.autonomy_tier.as_str().to_string(),
+    );
+    headers.insert("outcome".to_string(), record.outcome.as_str().to_string());
+    log.append(
+        &records_topic()?,
+        LogEvent::new(TRUST_GRAPH_EVENT_KIND, payload).with_headers(headers),
+    )
+    .await?;
+    Ok(())
 }
 
 async fn finalize_trust_record(
@@ -568,6 +702,33 @@ fn trust_record_dedupe_key(record: &TrustRecord) -> String {
     record.record_id.clone()
 }
 
+fn trust_graph_record_dedupe_key(record: &TrustGraphRecord) -> String {
+    format!(
+        "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
+        record.actor_id,
+        record.action,
+        record.trace_id,
+        record.timestamp,
+        record.outcome.as_str()
+    )
+}
+
+fn evidence_refs_from_metadata(
+    metadata: &BTreeMap<String, serde_json::Value>,
+) -> Vec<serde_json::Value> {
+    metadata
+        .get("evidence_refs")
+        .or_else(|| metadata.get("evidenceRefs"))
+        .or_else(|| {
+            metadata
+                .get("approval")
+                .and_then(|approval| approval.get("evidence_refs"))
+        })
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default()
+}
+
 fn score_from_records(
     agent: &str,
     action: Option<&str>,
@@ -580,6 +741,9 @@ fn score_from_records(
         effective_tier,
         ..TrustScore::default()
     };
+    let recent_cutoff = OffsetDateTime::now_utc() - Duration::days(30);
+    let mut recent_successes = 0;
+    let mut recent_bad_or_rollback = false;
     for record in records {
         score.total += 1;
         match record.outcome {
@@ -587,6 +751,16 @@ fn score_from_records(
             TrustOutcome::Failure => score.failures += 1,
             TrustOutcome::Denied => score.denied += 1,
             TrustOutcome::Timeout => score.timeouts += 1,
+        }
+        if record.timestamp >= recent_cutoff {
+            if record.outcome == TrustOutcome::Success && !is_control_plane_action(&record.action) {
+                recent_successes += 1;
+            } else if record.outcome != TrustOutcome::Success {
+                recent_bad_or_rollback = true;
+            }
+            if record.action.contains("rollback") {
+                recent_bad_or_rollback = true;
+            }
         }
         score.latest_outcome = Some(record.outcome);
         score.latest_timestamp = Some(record.timestamp);
@@ -596,18 +770,28 @@ fn score_from_records(
     } else {
         score.successes as f64 / score.total as f64
     };
-    score.policy = policy_from_score(&score);
+    score.policy = policy_from_score(&score, recent_successes, recent_bad_or_rollback);
     score
 }
 
-fn policy_from_score(score: &TrustScore) -> CapabilityPolicy {
+fn policy_from_score(
+    score: &TrustScore,
+    recent_successes: u64,
+    recent_bad_or_rollback: bool,
+) -> CapabilityPolicy {
     let mut policy = policy_for_autonomy_tier(score.effective_tier);
     let latest_bad = matches!(
         score.latest_outcome,
         Some(TrustOutcome::Denied | TrustOutcome::Failure | TrustOutcome::Timeout)
     );
-    if latest_bad || (score.total >= 3 && score.success_rate < 0.5) {
+    let trusted_recent_track_record = score.effective_tier == AutonomyTier::ActWithApproval
+        && recent_successes >= 10
+        && !recent_bad_or_rollback;
+    if latest_bad || (!trusted_recent_track_record && score.total >= 3 && score.success_rate < 0.5)
+    {
         policy.side_effect_level = Some("read_only".to_string());
+    } else if trusted_recent_track_record {
+        policy.side_effect_level = Some("network".to_string());
     }
     policy
 }
@@ -637,6 +821,24 @@ fn apply_record_limit(records: &mut Vec<TrustRecord>, limit: Option<usize>) {
     }
     let keep_from = records.len() - limit;
     records.drain(0..keep_from);
+}
+
+fn apply_graph_record_limit(records: &mut Vec<TrustGraphRecord>, limit: Option<usize>) {
+    let Some(limit) = limit else {
+        return;
+    };
+    if records.len() <= limit {
+        return;
+    }
+    let keep_from = records.len() - limit;
+    records.drain(0..keep_from);
+}
+
+fn is_control_plane_action(action: &str) -> bool {
+    matches!(
+        action,
+        "trust.promote" | "trust.demote" | "autonomy.tier_transition"
+    )
 }
 
 #[cfg(test)]

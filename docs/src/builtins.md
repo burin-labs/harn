@@ -1430,6 +1430,11 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `trust_graph_policy_for(agent)` | agent: string | dict | Return the capability policy derived from the agent's effective tier and trust history |
 | `trust_graph_verify_chain()` | none | dict | Verify the active trust graph hash chain and return `{verified, root_hash, errors, ...}` |
 | `trust_query(filters)` | filters: dict | list | Query trust-graph records by `agent`, `action`, `since`, `until`, `tier`, `outcome`, `limit`, and/or `grouped_by_trace` |
+| `trust.query(filters)` | filters: dict | list | Query compact `TrustGraphRecord` rows by `actor`/`actor_id`/`agent`, `action`, `outcome`, `since`, `until`, `autonomy_tier_at_time`, and `limit` |
+| `trust.record(decision)` | decision: dict | string | Append a trust decision and return its `TrustEntryId`; accepts `actor_id`, `action`, `approver`, `outcome`, `trace_id`, `autonomy_tier_at_time`, `evidence_refs`, `cost_usd`, and `metadata` |
+| `trust.score(actor_id, action)` | actor_id: string, action: string or nil | dict | Return aggregate trust counters and the derived capability policy |
+| `trust.policy_for(actor_id)` | actor_id: string | dict | Return only the derived capability policy |
+| `trust.verify_chain()` | none | dict | Verify the underlying OpenTrustGraph hash chain |
 | `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
 | `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
 | `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias or provider-prefixed selector to `{id, provider, alias, tool_format, tier}` via providers.toml |
