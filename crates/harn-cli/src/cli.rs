@@ -2366,8 +2366,65 @@ pub(crate) struct MergeCaptainArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum MergeCaptainCommand {
+    /// Run a Merge Captain sweep against a live, mock, or replay backend.
+    Run(MergeCaptainRunArgs),
     /// Audit a JSONL transcript against the Merge Captain oracle.
     Audit(MergeCaptainAuditArgs),
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum MergeCaptainBackendKind {
+    /// Production connectors and real worktrees.
+    Live,
+    /// Scenario manifest plus fake backend/playground directory.
+    Mock,
+    /// Deterministic JSONL transcript fixture.
+    Replay,
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("merge_captain_run_mode")
+        .args(["once", "watch"])
+        .multiple(false)
+))]
+pub(crate) struct MergeCaptainRunArgs {
+    /// Backend selector. `mock` and `replay` require BACKEND_ARG.
+    #[arg(long, value_enum, default_value_t = MergeCaptainBackendKind::Mock)]
+    pub backend: MergeCaptainBackendKind,
+    /// Mock playground directory or replay transcript fixture.
+    #[arg(value_name = "BACKEND_ARG")]
+    pub backend_arg: Option<String>,
+    /// Run a single sweep and exit.
+    #[arg(long)]
+    pub once: bool,
+    /// Keep sweeping with backoff. This finite CLI driver caps sweeps via --max-sweeps.
+    #[arg(long)]
+    pub watch: bool,
+    /// Model route/profile identifier to pin in the receipt.
+    #[arg(long = "model-route", value_name = "ROUTE")]
+    pub model_route: Option<String>,
+    /// Timeout or budget tier identifier to pin in the receipt.
+    #[arg(long = "timeout-tier", value_name = "TIER")]
+    pub timeout_tier: Option<String>,
+    /// Write streamed JSONL transcript to this path.
+    #[arg(long = "transcript-out", value_name = "PATH")]
+    pub transcript_out: Option<String>,
+    /// Write the receipt JSON to this path. Defaults under `.harn-runs/merge-captain/`.
+    #[arg(long = "receipt-out", value_name = "PATH")]
+    pub receipt_out: Option<String>,
+    /// Write the machine-readable run summary JSON to this path.
+    #[arg(long = "summary-out", value_name = "PATH")]
+    pub summary_out: Option<String>,
+    /// Maximum sweeps when --watch is selected. Defaults to one for deterministic CLI runs.
+    #[arg(long = "max-sweeps", default_value_t = 1)]
+    pub max_sweeps: u32,
+    /// Backoff between watch sweeps in milliseconds.
+    #[arg(long = "watch-backoff-ms", default_value_t = 1000)]
+    pub watch_backoff_ms: u64,
+    /// Do not stream transcript JSONL to stdout.
+    #[arg(long = "no-stdout")]
+    pub no_stdout: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

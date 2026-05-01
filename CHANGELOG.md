@@ -36,6 +36,11 @@ condensed series summaries instead of full per-patch history.
   outputs, repeated reads, missing approvals, non-minimal tool usage).
   Ships five reference goldens.
 
+- **Merge Captain end-to-end driver (#1019).** Adds
+  `harn merge-captain run --backend {mock,replay,live}` with model-route and
+  timeout-tier receipt pins, JSONL transcript streaming, persisted receipts,
+  run summaries, and a checked-in mock smoke scenario.
+
 - **`llm_stream_call` streaming builtin (#1038).** Native LLM streaming
   builtin returning `Stream<...>` with cancellation support; provider
   capability matrix grows a `streaming` column.

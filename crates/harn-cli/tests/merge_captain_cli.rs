@@ -12,6 +12,7 @@
 mod test_util;
 
 use std::path::PathBuf;
+use std::process::Command;
 
 use harn_vm::orchestration::{
     audit_transcript, load_merge_captain_golden, load_transcript_jsonl, AuditReport,
@@ -44,6 +45,10 @@ fn run_audit(scenario: &str) -> AuditReport {
     let mut report = audit_transcript(&loaded.events, Some(&golden));
     report.source_path = Some(loaded.source_path.display().to_string());
     report
+}
+
+fn playground() -> PathBuf {
+    repo_root().join("examples/merge_captain/playground_3repos")
 }
 
 #[test]
@@ -159,4 +164,85 @@ fn directory_argument_loads_rotated_logs() {
     // The directory case is about loading mechanics, not pass/fail; calling
     // audit_transcript is enough to exercise the post-load wiring.
     let _ = audit_transcript(&loaded.events, None);
+}
+
+#[test]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+fn run_mock_playground_once_writes_receipt_and_summary() {
+    let temp = tempfile::tempdir().unwrap();
+    let transcript = temp.path().join("event_log.jsonl");
+    let receipt = temp.path().join("receipt.json");
+    let summary = temp.path().join("summary.json");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .args([
+            "merge-captain",
+            "run",
+            "--backend",
+            "mock",
+            playground().to_str().unwrap(),
+            "--once",
+            "--model-route",
+            "mock/value",
+            "--timeout-tier",
+            "smoke",
+            "--transcript-out",
+            transcript.to_str().unwrap(),
+            "--receipt-out",
+            receipt.to_str().unwrap(),
+            "--summary-out",
+            summary.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run merge-captain driver");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        stdout,
+        stderr
+    );
+    assert!(transcript.exists());
+    assert!(receipt.metadata().unwrap().len() > 0);
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(summary).unwrap()).expect("summary json");
+    assert_eq!(parsed["_type"], "merge_captain_run_summary");
+    assert_eq!(parsed["backend"], "mock");
+    assert_eq!(parsed["scenario"], "green_pr");
+    assert_eq!(parsed["pass"], true);
+    assert!(!parsed["prs_touched"].as_array().unwrap().is_empty());
+}
+
+#[test]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+fn run_replay_unsafe_fixture_exits_non_zero() {
+    let temp = tempfile::tempdir().unwrap();
+    let transcript = temp.path().join("event_log.jsonl");
+    let receipt = temp.path().join("receipt.json");
+    let summary = temp.path().join("summary.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .args([
+            "merge-captain",
+            "run",
+            "--backend",
+            "replay",
+            fixture("bad_unsafe_merge", "transcripts").to_str().unwrap(),
+            "--once",
+            "--transcript-out",
+            transcript.to_str().unwrap(),
+            "--receipt-out",
+            receipt.to_str().unwrap(),
+            "--summary-out",
+            summary.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run merge-captain replay driver");
+
+    assert!(!output.status.success());
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(summary).unwrap()).expect("summary json");
+    assert_eq!(parsed["pass"], false);
+    assert!(parsed["oracle_error_findings"].as_u64().unwrap() > 0);
 }
