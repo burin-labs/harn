@@ -27,6 +27,7 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "postgres" => Some(include_str!("stdlib_postgres.harn")),
         "checkpoint" => Some(include_str!("stdlib_checkpoint.harn")),
         "host" => Some(include_str!("stdlib_host.harn")),
+        "git" => Some(include_str!("stdlib_git.harn")),
         "hitl" => Some(include_str!("stdlib_hitl.harn")),
         "trust" => Some(include_str!("stdlib_trust.harn")),
         "plan" => Some(include_str!("stdlib_plan.harn")),

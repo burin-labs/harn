@@ -21,6 +21,7 @@ mod event_log;
 pub(crate) mod files;
 mod flow;
 mod fs;
+mod git;
 pub(crate) mod hitl;
 mod hitl_read;
 pub mod host;
@@ -108,6 +109,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     host::register_host_builtins(vm);
     fs::register_fs_builtins(vm);
     files::register_file_builtins(vm);
+    git::register_git_builtins(vm);
     vision::register_vision_builtins(vm);
     agent_state::register_agent_state_builtins(vm);
     memory::register_memory_builtins(vm);

@@ -1325,6 +1325,33 @@ let result = try { host_call("project.scan", {}) }
 assert(is_err(result))
 ```
 
+## Git Stdlib
+
+The `git` namespace provides typed local repository operations over the
+runtime command runner. These are local subprocess operations, not forge
+connector calls. Every operation returns a `harn-stdlib-git-receipt-v1`
+envelope with command args, working directory, status, exit category, output
+refs, affected paths, agent identity, trace id, command-policy audit data, and
+operation data. Receipts are appended to `stdlib.git.receipts`; each operation
+also writes a TrustGraph record.
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `git.status(repo)` | repo: path string or repo dict | `GitReceipt` | Run `git status --porcelain=v1 --branch` and return structured entries |
+| `git.conflicts(repo)` | repo: path string or repo dict | `GitReceipt` | Return structured unmerged paths and conflict kinds where git exposes them |
+| `git.fetch(repo, remote, refspecs)` | repo: path/dict, remote: string, refspecs: list of strings | `GitReceipt` | Fetch from an existing local remote configuration |
+| `git.rebase(repo, base_ref)` | repo: path/dict, base_ref: string | `GitReceipt` | Rebase the current branch onto `base_ref`; treated as risky for approval/autonomy |
+| `git.push(repo, remote, refspec, lease?)` | repo: path/dict, remote: string, refspec: string, lease: `{ref?, expected_oid}` or oid string | `GitReceipt` | Push a refspec. Force-with-lease requires an expected remote OID and fails with `lease_mismatch` if the remote advanced |
+| `git.diff(repo, selector?)` | selector: range string, path list, or `{range?, paths?}` | `GitReceipt` | Return diff text for a range and/or paths |
+| `git.merge_base(repo, left, right)` | left/right: refs | `GitReceipt` | Return the merge-base OID |
+| `git.repo_discover(path)` | path: string | `GitReceipt` | Discover repository root/git-dir metadata |
+| `git.worktree_create(repo, branch, path, options?)` | options: `{base_ref?, force?, detach?}` | `GitReceipt` | Create a worktree using argv-mode git |
+| `git.worktree_remove(path, options?)` | options: `{force?}` | `GitReceipt` | Remove a worktree; missing paths return an idempotent `status: "no_op"` receipt |
+
+Canonical builtin names are also registered as `git.repo.discover`,
+`git.worktree.create`, and `git.worktree.remove`. The root aliases above are
+the ergonomic Harn call surface for nested operations.
+
 ## Command Policy
 
 | Function | Parameters | Returns | Description |

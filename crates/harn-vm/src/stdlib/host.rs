@@ -445,7 +445,7 @@ pub(crate) async fn dispatch_host_tool_call(
     Ok(crate::bridge::json_result_to_vm_value(&result))
 }
 
-async fn dispatch_host_operation(
+pub(crate) async fn dispatch_host_operation(
     capability: &str,
     operation: &str,
     params: &BTreeMap<String, VmValue>,
@@ -469,117 +469,7 @@ async fn dispatch_host_operation(
                 "operation": "exec",
                 "session_id": crate::llm::current_agent_session_id(),
             });
-            let (params, command_policy_context, command_policy_decisions) =
-                match crate::orchestration::run_command_policy_preflight(params, caller).await? {
-                    crate::orchestration::CommandPolicyPreflight::Proceed {
-                        params,
-                        context,
-                        decisions,
-                    } => (params, context, decisions),
-                    crate::orchestration::CommandPolicyPreflight::Blocked {
-                        status,
-                        message,
-                        context,
-                        decisions,
-                    } => {
-                        return Ok(crate::orchestration::blocked_command_response(
-                            params, status, &message, context, decisions,
-                        ));
-                    }
-                };
-            let (program, args) = process_exec_argv(&params)?;
-            let timeout_ms = optional_i64(&params, "timeout")
-                .or_else(|| optional_i64(&params, "timeout_ms"))
-                .filter(|value| *value > 0)
-                .map(|value| value as u64);
-            let mut cmd =
-                crate::process_sandbox::tokio_command_for(&program, &args).map_err(|e| {
-                    VmError::Runtime(format!("host_call process.exec sandbox setup: {e}"))
-                })?;
-            if let Some(cwd) = optional_string(&params, "cwd") {
-                crate::process_sandbox::enforce_process_cwd(std::path::Path::new(&cwd))
-                    .map_err(|e| VmError::Runtime(format!("host_call process.exec cwd: {e}")))?;
-                cmd.current_dir(cwd);
-            }
-            if let Some(env) = optional_string_dict(&params, "env")? {
-                let env_mode = optional_string(&params, "env_mode");
-                if env_mode.as_deref().unwrap_or("replace") == "replace" {
-                    cmd.env_clear();
-                }
-                for (key, value) in env {
-                    cmd.env(key, value);
-                }
-            }
-            cmd.stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .kill_on_drop(true);
-            let started_at = chrono::Utc::now().to_rfc3339();
-            let started = Instant::now();
-            let child = cmd
-                .spawn()
-                .map_err(|e| VmError::Runtime(format!("host_call process.exec: {e}")))?;
-            let pid = child.id();
-            let timed_out;
-            let output_result = if let Some(timeout_ms) = timeout_ms {
-                match tokio::time::timeout(
-                    std::time::Duration::from_millis(timeout_ms),
-                    child.wait_with_output(),
-                )
-                .await
-                {
-                    Ok(result) => {
-                        timed_out = false;
-                        result
-                    }
-                    Err(_) => {
-                        let response = process_exec_response(ProcessExecResponse {
-                            pid,
-                            started_at,
-                            started,
-                            stdout: "",
-                            stderr: "",
-                            exit_code: -1,
-                            status: "timed_out",
-                            success: false,
-                            timed_out: true,
-                        });
-                        return crate::orchestration::run_command_policy_postflight(
-                            &params,
-                            response,
-                            command_policy_context,
-                            command_policy_decisions,
-                        )
-                        .await;
-                    }
-                }
-            } else {
-                timed_out = false;
-                child.wait_with_output().await
-            };
-            let output = output_result
-                .map_err(|e| VmError::Runtime(format!("host_call process.exec: {e}")))?;
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            let exit_code = output.status.code().unwrap_or(-1);
-            let response = process_exec_response(ProcessExecResponse {
-                pid,
-                started_at,
-                started,
-                stdout: &stdout,
-                stderr: &stderr,
-                exit_code,
-                status: if timed_out { "timed_out" } else { "completed" },
-                success: output.status.success(),
-                timed_out,
-            });
-            crate::orchestration::run_command_policy_postflight(
-                &params,
-                response,
-                command_policy_context,
-                command_policy_decisions,
-            )
-            .await
+            dispatch_process_exec(params, caller).await
         }
         ("process", "list_shells") => Ok(crate::shells::list_shells_vm_value()),
         ("process", "get_default_shell") => Ok(crate::shells::default_shell_vm_value()),
@@ -635,6 +525,121 @@ async fn dispatch_host_operation(
             "host_call: unsupported operation {capability}.{operation}"
         ))))),
     }
+}
+
+pub(crate) async fn dispatch_process_exec(
+    params: &BTreeMap<String, VmValue>,
+    caller: serde_json::Value,
+) -> Result<VmValue, VmError> {
+    let (params, command_policy_context, command_policy_decisions) =
+        match crate::orchestration::run_command_policy_preflight(params, caller).await? {
+            crate::orchestration::CommandPolicyPreflight::Proceed {
+                params,
+                context,
+                decisions,
+            } => (params, context, decisions),
+            crate::orchestration::CommandPolicyPreflight::Blocked {
+                status,
+                message,
+                context,
+                decisions,
+            } => {
+                return Ok(crate::orchestration::blocked_command_response(
+                    params, status, &message, context, decisions,
+                ));
+            }
+        };
+    let (program, args) = process_exec_argv(&params)?;
+    let timeout_ms = optional_i64(&params, "timeout")
+        .or_else(|| optional_i64(&params, "timeout_ms"))
+        .filter(|value| *value > 0)
+        .map(|value| value as u64);
+    let mut cmd = crate::process_sandbox::tokio_command_for(&program, &args)
+        .map_err(|e| VmError::Runtime(format!("host_call process.exec sandbox setup: {e}")))?;
+    if let Some(cwd) = optional_string(&params, "cwd") {
+        crate::process_sandbox::enforce_process_cwd(std::path::Path::new(&cwd))
+            .map_err(|e| VmError::Runtime(format!("host_call process.exec cwd: {e}")))?;
+        cmd.current_dir(cwd);
+    }
+    if let Some(env) = optional_string_dict(&params, "env")? {
+        let env_mode = optional_string(&params, "env_mode");
+        if env_mode.as_deref().unwrap_or("replace") == "replace" {
+            cmd.env_clear();
+        }
+        for (key, value) in env {
+            cmd.env(key, value);
+        }
+    }
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    let started_at = chrono::Utc::now().to_rfc3339();
+    let started = Instant::now();
+    let child = cmd
+        .spawn()
+        .map_err(|e| VmError::Runtime(format!("host_call process.exec: {e}")))?;
+    let pid = child.id();
+    let timed_out;
+    let output_result = if let Some(timeout_ms) = timeout_ms {
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(timeout_ms),
+            child.wait_with_output(),
+        )
+        .await
+        {
+            Ok(result) => {
+                timed_out = false;
+                result
+            }
+            Err(_) => {
+                let response = process_exec_response(ProcessExecResponse {
+                    pid,
+                    started_at,
+                    started,
+                    stdout: "",
+                    stderr: "",
+                    exit_code: -1,
+                    status: "timed_out",
+                    success: false,
+                    timed_out: true,
+                });
+                return crate::orchestration::run_command_policy_postflight(
+                    &params,
+                    response,
+                    command_policy_context,
+                    command_policy_decisions,
+                )
+                .await;
+            }
+        }
+    } else {
+        timed_out = false;
+        child.wait_with_output().await
+    };
+    let output =
+        output_result.map_err(|e| VmError::Runtime(format!("host_call process.exec: {e}")))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let exit_code = output.status.code().unwrap_or(-1);
+    let response = process_exec_response(ProcessExecResponse {
+        pid,
+        started_at,
+        started,
+        stdout: &stdout,
+        stderr: &stderr,
+        exit_code,
+        status: if timed_out { "timed_out" } else { "completed" },
+        success: output.status.success(),
+        timed_out,
+    });
+    crate::orchestration::run_command_policy_postflight(
+        &params,
+        response,
+        command_policy_context,
+        command_policy_decisions,
+    )
+    .await
 }
 
 struct ProcessExecResponse<'a> {
