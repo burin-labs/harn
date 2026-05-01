@@ -48,6 +48,17 @@ pub(crate) fn harn_lint_complexity_threshold(path: &Path) -> Option<usize> {
     }
 }
 
+/// Read `[lint] persona_step_allowlist` from the nearest harn.toml.
+pub(crate) fn harn_lint_persona_step_allowlist(path: &Path) -> Vec<String> {
+    match harn_config::load_for_path(path) {
+        Ok(cfg) => cfg.lint.persona_step_allowlist,
+        Err(e) => {
+            eprintln!("warning: {e}");
+            Vec::new()
+        }
+    }
+}
+
 pub(crate) fn collect_harn_targets(targets: &[&str]) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for target in targets {

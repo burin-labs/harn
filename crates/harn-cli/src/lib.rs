@@ -270,6 +270,8 @@ async fn async_main() {
                         || commands::check::harn_lint_require_file_header(file);
                     let complexity_threshold =
                         commands::check::harn_lint_complexity_threshold(file);
+                    let persona_step_allowlist =
+                        commands::check::harn_lint_persona_step_allowlist(file);
                     commands::check::lint_fix_file(
                         file,
                         &config,
@@ -277,6 +279,7 @@ async fn async_main() {
                         &module_graph,
                         require_header,
                         complexity_threshold,
+                        &persona_step_allowlist,
                     );
                 }
             } else {
@@ -288,6 +291,8 @@ async fn async_main() {
                         || commands::check::harn_lint_require_file_header(file);
                     let complexity_threshold =
                         commands::check::harn_lint_complexity_threshold(file);
+                    let persona_step_allowlist =
+                        commands::check::harn_lint_persona_step_allowlist(file);
                     let outcome = commands::check::lint_file_inner(
                         file,
                         &config,
@@ -295,6 +300,7 @@ async fn async_main() {
                         &module_graph,
                         require_header,
                         complexity_threshold,
+                        &persona_step_allowlist,
                     );
                     should_fail |= outcome.should_fail(config.strict);
                 }

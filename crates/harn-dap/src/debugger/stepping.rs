@@ -27,6 +27,16 @@ fn extract_exception_kind(msg: &str) -> Option<String> {
 impl Debugger {
     pub(crate) fn compile_program(&mut self, source: &str) -> Result<(), String> {
         let mut chunk = harn_vm::compile_source(source)?;
+        self.step_functions = harn_parser::parse_source(source)
+            .ok()
+            .map(|program| {
+                harn_modules::personas::extract_step_metadata_from_program(&program)
+                    .into_iter()
+                    .map(|step| step.function)
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.pending_step_boundary_functions.clear();
         // Tag the main program's chunk with its source path so
         // `Vm::breakpoint_matches` can match DAP breakpoints keyed by the
         // absolute path the client sent (otherwise `current_source_file()`
@@ -161,12 +171,39 @@ impl Debugger {
     }
 
     pub(crate) fn handle_next(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        if msg
+            .arguments
+            .as_ref()
+            .and_then(|args| args.get("granularity"))
+            .and_then(|value| value.as_str())
+            == Some("step")
+        {
+            return self.handle_step_over_step(msg, "next");
+        }
         self.step_mode = StepMode::StepOver;
         if let Some(vm) = &mut self.vm {
             vm.set_step_over();
         }
         let seq = self.next_seq();
         let response = DapResponse::success(seq, msg.seq, "next", None);
+        self.enter_running();
+        vec![response]
+    }
+
+    pub(crate) fn handle_step_over_step(
+        &mut self,
+        msg: &DapMessage,
+        command: &str,
+    ) -> Vec<DapResponse> {
+        if self.step_functions.is_empty() {
+            return vec![self.dap_error(msg, command, "no @step declarations in launched source")];
+        }
+        self.pending_step_boundary_functions = self.step_functions.clone();
+        self.refresh_vm_function_breakpoints();
+        self.step_mode = StepMode::Continue;
+        self.stopped = false;
+        let seq = self.next_seq();
+        let response = DapResponse::success(seq, msg.seq, command, None);
         self.enter_running();
         vec![response]
     }
@@ -362,6 +399,11 @@ impl Debugger {
                     .as_mut()
                     .and_then(|vm| vm.take_pending_function_bp());
                 if let Some(fn_name) = function_bp_name {
+                    let step_boundary_hit = self.pending_step_boundary_functions.contains(&fn_name);
+                    if step_boundary_hit {
+                        self.pending_step_boundary_functions.clear();
+                        self.refresh_vm_function_breakpoints();
+                    }
                     // Honor condition / hitCondition the same way
                     // classify_breakpoint_hit does for line BPs.
                     let fb_idx = self
@@ -369,30 +411,34 @@ impl Debugger {
                         .iter()
                         .position(|fb| fb.name == fn_name);
                     let mut should_stop = true;
-                    if let Some(idx) = fb_idx {
-                        let fb = self.function_breakpoints[idx].clone();
-                        let counter = self.bp_hit_counts.entry(fb.id).or_insert(0);
-                        *counter += 1;
-                        let hits = *counter;
-                        if let Some(ref hc) = fb.hit_condition {
-                            if super::breakpoints::hit_condition_matches(hc, hits) == Some(false) {
-                                should_stop = false;
+                    if !step_boundary_hit {
+                        if let Some(idx) = fb_idx {
+                            let fb = self.function_breakpoints[idx].clone();
+                            let counter = self.bp_hit_counts.entry(fb.id).or_insert(0);
+                            *counter += 1;
+                            let hits = *counter;
+                            if let Some(ref hc) = fb.hit_condition {
+                                if super::breakpoints::hit_condition_matches(hc, hits)
+                                    == Some(false)
+                                {
+                                    should_stop = false;
+                                }
                             }
-                        }
-                        if should_stop {
-                            if let Some(ref cond) = fb.condition {
-                                self.ensure_runtime();
-                                if let Some(vm) = self.vm.as_mut() {
-                                    let runtime = self.runtime.as_ref().unwrap();
-                                    let truthy = runtime
-                                        .block_on(async {
-                                            let local = tokio::task::LocalSet::new();
-                                            local.run_until(vm.evaluate_in_frame(cond, 0)).await
-                                        })
-                                        .map(|v| v.is_truthy())
-                                        .unwrap_or(true);
-                                    if !truthy {
-                                        should_stop = false;
+                            if should_stop {
+                                if let Some(ref cond) = fb.condition {
+                                    self.ensure_runtime();
+                                    if let Some(vm) = self.vm.as_mut() {
+                                        let runtime = self.runtime.as_ref().unwrap();
+                                        let truthy = runtime
+                                            .block_on(async {
+                                                let local = tokio::task::LocalSet::new();
+                                                local.run_until(vm.evaluate_in_frame(cond, 0)).await
+                                            })
+                                            .map(|v| v.is_truthy())
+                                            .unwrap_or(true);
+                                        if !truthy {
+                                            should_stop = false;
+                                        }
                                     }
                                 }
                             }
@@ -410,12 +456,22 @@ impl Debugger {
                     self.flush_output_into(&mut responses);
                     self.end_progress(&mut responses);
                     let seq = self.next_seq();
+                    let reason = if step_boundary_hit {
+                        "step"
+                    } else {
+                        "function breakpoint"
+                    };
+                    let description = if step_boundary_hit {
+                        format!("@step {fn_name}")
+                    } else {
+                        fn_name
+                    };
                     responses.push(DapResponse::event(
                         seq,
                         "stopped",
                         Some(json!({
-                            "reason": "function breakpoint",
-                            "description": fn_name,
+                            "reason": reason,
+                            "description": description,
                             "threadId": self.current_thread_id as i64,
                             "allThreadsStopped": true,
                         })),

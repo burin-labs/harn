@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -106,6 +106,10 @@ pub struct Debugger {
     /// the full list here; it's mirrored onto the VM on each launch /
     /// edit so `Vm::function_breakpoints` stays in lockstep.
     pub(crate) function_breakpoints: Vec<crate::protocol::FunctionBreakpoint>,
+    /// Function names declared with `@step` in the launched source.
+    pub(crate) step_functions: BTreeSet<String>,
+    /// Temporary function names used by "step over to next @step".
+    pub(crate) pending_step_boundary_functions: BTreeSet<String>,
     /// Armed state for triggered breakpoints (#102). A BP with
     /// `triggered_by: [A, B]` stays disarmed until A or B fires at
     /// least once; then flips to armed for the rest of the run.
@@ -177,6 +181,8 @@ impl Debugger {
             bp_conditions: Vec::new(),
             bp_hit_counts: BTreeMap::new(),
             function_breakpoints: Vec::new(),
+            step_functions: BTreeSet::new(),
+            pending_step_boundary_functions: BTreeSet::new(),
             armed_breakpoints: BTreeMap::new(),
             pending_pause: false,
             active_progress_id: None,

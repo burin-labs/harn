@@ -66,6 +66,7 @@ pub(super) fn lint_with_require_header(
         file_path: path,
         require_file_header: true,
         complexity_threshold: None,
+        persona_step_allowlist: &[],
     };
     lint_with_options(&program, &[], Some(source), &HashSet::new(), &options)
 }
@@ -88,6 +89,7 @@ mod llm_rules;
 mod long_running;
 mod mutability;
 mod naming_types;
+mod persona_steps;
 mod redundant_nil_ternary;
 mod secret_scan_rules;
 mod shadowing;

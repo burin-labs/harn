@@ -18,6 +18,7 @@
 //! disabled = ["unused-import"]
 //! require_file_header = false
 //! complexity_threshold = 25
+//! persona_step_allowlist = ["legacy_helper"]
 //! ```
 
 use std::fmt;
@@ -67,6 +68,10 @@ pub struct LintConfig {
     /// snake_case and kebab-case for consistency with the other keys.
     #[serde(default, alias = "complexity-threshold")]
     pub complexity_threshold: Option<usize>,
+    /// Non-stdlib functions that may be called directly from `@persona`
+    /// bodies without being declared as `@step`.
+    #[serde(default, alias = "persona-step-allowlist")]
+    pub persona_step_allowlist: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

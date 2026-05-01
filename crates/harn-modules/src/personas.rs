@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use harn_parser::{Attribute, DictEntry, Node, SNode};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -49,8 +50,33 @@ pub struct PersonaManifestEntry {
     pub package_source: PersonaPackageSource,
     #[serde(default)]
     pub rollout_policy: PersonaRolloutPolicy,
+    #[serde(default)]
+    pub steps: Vec<PersonaStepMetadata>,
     #[serde(flatten, default)]
     pub extra: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PersonaStepMetadata {
+    pub name: String,
+    pub function: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_boundary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry: Option<PersonaStepRetry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PersonaStepRetry {
+    pub max_attempts: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,6 +99,20 @@ impl PersonaAutonomyTier {
     }
 }
 
+impl FromStr for PersonaAutonomyTier {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "shadow" => Ok(Self::Shadow),
+            "suggest" => Ok(Self::Suggest),
+            "act_with_approval" => Ok(Self::ActWithApproval),
+            "act_auto" => Ok(Self::ActAuto),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PersonaReceiptPolicy {
@@ -88,6 +128,20 @@ impl PersonaReceiptPolicy {
             Self::Optional => "optional",
             Self::Required => "required",
             Self::Disabled => "disabled",
+        }
+    }
+}
+
+impl FromStr for PersonaReceiptPolicy {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "optional" => Ok(Self::Optional),
+            "required" => Ok(Self::Required),
+            "disabled" => Ok(Self::Disabled),
+            "none" => Ok(Self::Disabled),
+            _ => Err(()),
         }
     }
 }
@@ -212,6 +266,359 @@ pub fn parse_persona_manifest_file(path: &Path) -> Result<PersonaManifestDocumen
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     parse_persona_manifest_str(&content)
         .map_err(|error| format!("failed to parse {}: {error}", path.display()))
+}
+
+pub fn parse_persona_source_file(path: &Path) -> Result<PersonaManifestDocument, String> {
+    let content = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    parse_persona_source_str(&content)
+        .map_err(|error| format!("failed to parse {}: {error}", path.display()))
+}
+
+pub fn parse_persona_source_str(source: &str) -> Result<PersonaManifestDocument, String> {
+    let program = harn_parser::parse_source(source).map_err(|error| error.to_string())?;
+    Ok(extract_personas_from_program(&program))
+}
+
+pub fn extract_personas_from_program(program: &[SNode]) -> PersonaManifestDocument {
+    let step_decls = collect_step_declarations(program);
+    let mut personas = Vec::new();
+    for snode in program {
+        let Node::AttributedDecl { attributes, inner } = &snode.node else {
+            continue;
+        };
+        let Some(persona_attr) = attributes.iter().find(|attr| attr.name == "persona") else {
+            continue;
+        };
+        let Node::FnDecl { name, body, .. } = &inner.node else {
+            continue;
+        };
+        let persona_name = attr_string(persona_attr, "name").unwrap_or_else(|| name.clone());
+        let mut seen = BTreeSet::new();
+        let mut steps = Vec::new();
+        for call_name in collect_called_functions(body) {
+            if !seen.insert(call_name.clone()) {
+                continue;
+            }
+            if let Some(step) = step_decls.get(&call_name) {
+                steps.push(step.clone());
+            }
+        }
+        personas.push(PersonaManifestEntry {
+            name: Some(persona_name),
+            description: Some(
+                attr_string(persona_attr, "description")
+                    .unwrap_or_else(|| "Source-declared persona".to_string()),
+            ),
+            entry_workflow: Some(name.clone()),
+            tools: attr_string_list(persona_attr, "tools"),
+            capabilities: {
+                let capabilities = attr_string_list(persona_attr, "capabilities");
+                if capabilities.is_empty() {
+                    vec!["project.test_commands".to_string()]
+                } else {
+                    capabilities
+                }
+            },
+            autonomy_tier: attr_string(persona_attr, "autonomy")
+                .as_deref()
+                .and_then(|value| PersonaAutonomyTier::from_str(value).ok())
+                .or(Some(PersonaAutonomyTier::Suggest)),
+            receipt_policy: attr_string(persona_attr, "receipts")
+                .as_deref()
+                .and_then(|value| PersonaReceiptPolicy::from_str(value).ok())
+                .or(Some(PersonaReceiptPolicy::Optional)),
+            steps,
+            ..PersonaManifestEntry::default()
+        });
+    }
+    PersonaManifestDocument { personas }
+}
+
+pub fn extract_step_metadata_from_program(program: &[SNode]) -> Vec<PersonaStepMetadata> {
+    collect_step_declarations(program).into_values().collect()
+}
+
+fn collect_step_declarations(program: &[SNode]) -> BTreeMap<String, PersonaStepMetadata> {
+    let mut steps = BTreeMap::new();
+    for snode in program {
+        let Node::AttributedDecl { attributes, inner } = &snode.node else {
+            continue;
+        };
+        let Some(step_attr) = attributes.iter().find(|attr| attr.name == "step") else {
+            continue;
+        };
+        let Node::FnDecl { name, .. } = &inner.node else {
+            continue;
+        };
+        steps.insert(
+            name.clone(),
+            PersonaStepMetadata {
+                name: attr_string(step_attr, "name").unwrap_or_else(|| name.clone()),
+                function: name.clone(),
+                model: attr_string(step_attr, "model"),
+                approval: attr_string(step_attr, "approval"),
+                receipt: attr_string(step_attr, "receipt"),
+                error_boundary: attr_string(step_attr, "error_boundary"),
+                retry: attr_retry(step_attr),
+                line: Some(inner.span.line),
+            },
+        );
+    }
+    steps
+}
+
+fn attr_string(attr: &Attribute, key: &str) -> Option<String> {
+    attr.named_arg(key).and_then(node_string)
+}
+
+fn attr_string_list(attr: &Attribute, key: &str) -> Vec<String> {
+    let Some(value) = attr.named_arg(key) else {
+        return Vec::new();
+    };
+    let Node::ListLiteral(items) = &value.node else {
+        return Vec::new();
+    };
+    items.iter().filter_map(node_string).collect()
+}
+
+fn node_string(node: &SNode) -> Option<String> {
+    match &node.node {
+        Node::StringLiteral(value) | Node::RawStringLiteral(value) | Node::Identifier(value) => {
+            Some(value.clone())
+        }
+        _ => None,
+    }
+}
+
+fn attr_retry(attr: &Attribute) -> Option<PersonaStepRetry> {
+    let retry = attr.named_arg("retry")?;
+    let Node::DictLiteral(entries) = &retry.node else {
+        return None;
+    };
+    for entry in entries {
+        if entry_key(&entry.key) == Some("max_attempts") {
+            if let Node::IntLiteral(value) = entry.value.node {
+                if value >= 1 {
+                    return Some(PersonaStepRetry {
+                        max_attempts: value as u64,
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+fn entry_key(node: &SNode) -> Option<&str> {
+    match &node.node {
+        Node::Identifier(value) | Node::StringLiteral(value) | Node::RawStringLiteral(value) => {
+            Some(value.as_str())
+        }
+        _ => None,
+    }
+}
+
+fn collect_called_functions(body: &[SNode]) -> Vec<String> {
+    let mut calls = Vec::new();
+    for node in body {
+        collect_called_functions_node(node, &mut calls);
+    }
+    calls
+}
+
+fn collect_called_functions_node(node: &SNode, calls: &mut Vec<String>) {
+    match &node.node {
+        Node::FunctionCall { name, args, .. } => {
+            calls.push(name.clone());
+            collect_many(args, calls);
+        }
+        Node::LetBinding { value, .. }
+        | Node::VarBinding { value, .. }
+        | Node::ReturnStmt { value: Some(value) }
+        | Node::YieldExpr { value: Some(value) }
+        | Node::EmitExpr { value }
+        | Node::ThrowStmt { value }
+        | Node::Spread(value)
+        | Node::TryOperator { operand: value }
+        | Node::TryStar { operand: value }
+        | Node::UnaryOp { operand: value, .. } => collect_called_functions_node(value, calls),
+        Node::IfElse {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            collect_called_functions_node(condition, calls);
+            collect_many(then_body, calls);
+            if let Some(else_body) = else_body {
+                collect_many(else_body, calls);
+            }
+        }
+        Node::ForIn { iterable, body, .. } => {
+            collect_called_functions_node(iterable, calls);
+            collect_many(body, calls);
+        }
+        Node::MatchExpr { value, arms } => {
+            collect_called_functions_node(value, calls);
+            for arm in arms {
+                collect_called_functions_node(&arm.pattern, calls);
+                if let Some(guard) = &arm.guard {
+                    collect_called_functions_node(guard, calls);
+                }
+                collect_many(&arm.body, calls);
+            }
+        }
+        Node::WhileLoop { condition, body } => {
+            collect_called_functions_node(condition, calls);
+            collect_many(body, calls);
+        }
+        Node::Retry { count, body } => {
+            collect_called_functions_node(count, calls);
+            collect_many(body, calls);
+        }
+        Node::CostRoute { options, body } => {
+            for (_, value) in options {
+                collect_called_functions_node(value, calls);
+            }
+            collect_many(body, calls);
+        }
+        Node::TryCatch {
+            body,
+            catch_body,
+            finally_body,
+            ..
+        } => {
+            collect_many(body, calls);
+            collect_many(catch_body, calls);
+            if let Some(finally_body) = finally_body {
+                collect_many(finally_body, calls);
+            }
+        }
+        Node::TryExpr { body }
+        | Node::SpawnExpr { body }
+        | Node::DeferStmt { body }
+        | Node::MutexBlock { body }
+        | Node::Block(body)
+        | Node::Closure { body, .. } => collect_many(body, calls),
+        Node::DeadlineBlock { duration, body } => {
+            collect_called_functions_node(duration, calls);
+            collect_many(body, calls);
+        }
+        Node::GuardStmt {
+            condition,
+            else_body,
+        } => {
+            collect_called_functions_node(condition, calls);
+            collect_many(else_body, calls);
+        }
+        Node::RequireStmt { condition, message } => {
+            collect_called_functions_node(condition, calls);
+            if let Some(message) = message {
+                collect_called_functions_node(message, calls);
+            }
+        }
+        Node::Parallel {
+            expr,
+            body,
+            options,
+            ..
+        } => {
+            collect_called_functions_node(expr, calls);
+            for (_, value) in options {
+                collect_called_functions_node(value, calls);
+            }
+            collect_many(body, calls);
+        }
+        Node::SelectExpr {
+            cases,
+            timeout,
+            default_body,
+        } => {
+            for case in cases {
+                collect_called_functions_node(&case.channel, calls);
+                collect_many(&case.body, calls);
+            }
+            if let Some((duration, body)) = timeout {
+                collect_called_functions_node(duration, calls);
+                collect_many(body, calls);
+            }
+            if let Some(body) = default_body {
+                collect_many(body, calls);
+            }
+        }
+        Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
+            collect_called_functions_node(object, calls);
+            collect_many(args, calls);
+        }
+        Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
+            collect_called_functions_node(object, calls);
+        }
+        Node::SubscriptAccess { object, index }
+        | Node::OptionalSubscriptAccess { object, index } => {
+            collect_called_functions_node(object, calls);
+            collect_called_functions_node(index, calls);
+        }
+        Node::SliceAccess { object, start, end } => {
+            collect_called_functions_node(object, calls);
+            if let Some(start) = start {
+                collect_called_functions_node(start, calls);
+            }
+            if let Some(end) = end {
+                collect_called_functions_node(end, calls);
+            }
+        }
+        Node::BinaryOp { left, right, .. } => {
+            collect_called_functions_node(left, calls);
+            collect_called_functions_node(right, calls);
+        }
+        Node::Ternary {
+            condition,
+            true_expr,
+            false_expr,
+        } => {
+            collect_called_functions_node(condition, calls);
+            collect_called_functions_node(true_expr, calls);
+            collect_called_functions_node(false_expr, calls);
+        }
+        Node::Assignment { target, value, .. } => {
+            collect_called_functions_node(target, calls);
+            collect_called_functions_node(value, calls);
+        }
+        Node::EnumConstruct { args, .. } => collect_many(args, calls),
+        Node::StructConstruct { fields, .. } | Node::DictLiteral(fields) => {
+            collect_dict_calls(fields, calls);
+        }
+        Node::ListLiteral(items) | Node::OrPattern(items) => collect_many(items, calls),
+        Node::HitlExpr { args, .. } => {
+            for arg in args {
+                collect_called_functions_node(&arg.value, calls);
+            }
+        }
+        Node::AttributedDecl { inner, .. } => collect_called_functions_node(inner, calls),
+        Node::Pipeline { body, .. }
+        | Node::OverrideDecl { body, .. }
+        | Node::FnDecl { body, .. }
+        | Node::ToolDecl { body, .. } => collect_many(body, calls),
+        Node::SkillDecl { fields, .. } | Node::EvalPackDecl { fields, .. } => {
+            for (_, value) in fields {
+                collect_called_functions_node(value, calls);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_many(nodes: &[SNode], calls: &mut Vec<String>) {
+    for node in nodes {
+        collect_called_functions_node(node, calls);
+    }
+}
+
+fn collect_dict_calls(entries: &[DictEntry], calls: &mut Vec<String>) {
+    for entry in entries {
+        collect_called_functions_node(&entry.key, calls);
+        collect_called_functions_node(&entry.value, calls);
+    }
 }
 
 pub fn validate_persona_manifests(
@@ -697,5 +1104,37 @@ surprise = true
         assert!(fields.contains("[[personas]][0].budget.daily_usd"));
         assert!(fields.contains("[[personas]][0].budget.surprise"));
         assert!(fields.contains("[[personas]][0].surprise"));
+    }
+
+    #[test]
+    fn source_persona_extracts_called_steps_in_order() {
+        let parsed = parse_persona_source_str(
+            r#"
+@persona(name: "merge_captain")
+fn merge_captain(ctx) {
+  plan(ctx)
+  verify(ctx)
+}
+
+@step(name: "plan", model: "gpt-5.4-mini", retry: {max_attempts: 2})
+fn plan(ctx) {
+  return ctx
+}
+
+@step(name: "verify", error_boundary: continue)
+fn verify(ctx) {
+  return ctx
+}
+"#,
+        )
+        .expect("source persona parses");
+        assert_eq!(parsed.personas.len(), 1);
+        let persona = &parsed.personas[0];
+        assert_eq!(persona.name.as_deref(), Some("merge_captain"));
+        assert_eq!(persona.steps.len(), 2);
+        assert_eq!(persona.steps[0].name, "plan");
+        assert_eq!(persona.steps[0].model.as_deref(), Some("gpt-5.4-mini"));
+        assert_eq!(persona.steps[0].retry.as_ref().unwrap().max_attempts, 2);
+        assert_eq!(persona.steps[1].error_boundary.as_deref(), Some("continue"));
     }
 }

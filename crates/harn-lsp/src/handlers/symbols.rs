@@ -1,6 +1,9 @@
 //! Document symbols, workspace symbol search, and semantic tokens.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use harn_lexer::Lexer;
+use harn_parser::Node;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
@@ -25,8 +28,23 @@ impl HarnLsp {
         let symbols = state.symbols.clone();
         drop(docs);
 
+        let step_symbols: Vec<_> = symbols
+            .iter()
+            .filter(|sym| {
+                sym.scope_span.is_none()
+                    && sym.kind == HarnSymbolKind::Function
+                    && sym.attributes.iter().any(|attr| attr.name == "step")
+            })
+            .collect();
+        let persona_steps = persona_step_map(&source);
         let mut doc_symbols = Vec::new();
         for sym in &symbols {
+            let is_step = sym.scope_span.is_none()
+                && sym.kind == HarnSymbolKind::Function
+                && sym.attributes.iter().any(|attr| attr.name == "step");
+            if is_step {
+                continue;
+            }
             let kind = match sym.kind {
                 HarnSymbolKind::Pipeline => SymbolKind::FUNCTION,
                 HarnSymbolKind::Function => SymbolKind::FUNCTION,
@@ -55,6 +73,38 @@ impl HarnLsp {
                 HarnSymbolKind::Interface => "interface",
                 HarnSymbolKind::Parameter => "parameter",
             };
+            let children = if sym.scope_span.is_none()
+                && sym.kind == HarnSymbolKind::Function
+                && sym.attributes.iter().any(|attr| attr.name == "persona")
+            {
+                let persona_name = persona_outline_name(sym);
+                let called_steps = persona_steps.get(&persona_name);
+                Some(
+                    step_symbols
+                        .iter()
+                        .filter(|step| {
+                            called_steps
+                                .map(|called| called.contains(step.name.as_str()))
+                                .unwrap_or(true)
+                        })
+                        .map(|step| {
+                            let range = span_to_full_range(&step.def_span, &source);
+                            DocumentSymbol {
+                                name: step_outline_name(step),
+                                detail: Some(format!("step: {}", step.name)),
+                                kind: SymbolKind::FUNCTION,
+                                range,
+                                selection_range: range,
+                                tags: None,
+                                deprecated: None,
+                                children: None,
+                            }
+                        })
+                        .collect(),
+                )
+            } else {
+                None
+            };
             doc_symbols.push(DocumentSymbol {
                 name: sym.name.clone(),
                 detail: Some(detail.to_string()),
@@ -63,7 +113,7 @@ impl HarnLsp {
                 selection_range: range,
                 tags: None,
                 deprecated: None,
-                children: None,
+                children,
             });
         }
 
@@ -142,5 +192,54 @@ impl HarnLsp {
             result_id: None,
             data: semantic_tokens,
         })))
+    }
+}
+
+fn persona_step_map(source: &str) -> BTreeMap<String, BTreeSet<String>> {
+    let Ok(document) = harn_modules::personas::parse_persona_source_str(source) else {
+        return BTreeMap::new();
+    };
+    document
+        .personas
+        .into_iter()
+        .filter_map(|persona| {
+            let name = persona.name?;
+            let steps = persona
+                .steps
+                .into_iter()
+                .map(|step| step.function)
+                .collect::<BTreeSet<_>>();
+            Some((name, steps))
+        })
+        .collect()
+}
+
+fn persona_outline_name(sym: &crate::symbols::SymbolInfo) -> String {
+    let Some(attr) = sym.attributes.iter().find(|attr| attr.name == "persona") else {
+        return sym.name.clone();
+    };
+    let Some(value) = attr.named_arg("name") else {
+        return sym.name.clone();
+    };
+    match &value.node {
+        Node::StringLiteral(name) | Node::RawStringLiteral(name) | Node::Identifier(name) => {
+            name.clone()
+        }
+        _ => sym.name.clone(),
+    }
+}
+
+fn step_outline_name(sym: &crate::symbols::SymbolInfo) -> String {
+    let Some(attr) = sym.attributes.iter().find(|attr| attr.name == "step") else {
+        return sym.name.clone();
+    };
+    let Some(value) = attr.named_arg("name") else {
+        return sym.name.clone();
+    };
+    match &value.node {
+        Node::StringLiteral(name) | Node::RawStringLiteral(name) | Node::Identifier(name) => {
+            name.clone()
+        }
+        _ => sym.name.clone(),
     }
 }

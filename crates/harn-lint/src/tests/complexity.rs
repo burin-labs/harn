@@ -110,6 +110,7 @@ pipeline default(task) {
         file_path: None,
         require_file_header: false,
         complexity_threshold: Some(5),
+        persona_step_allowlist: &[],
     };
     let diags = lint_with_options(&program, &[], Some(source), &externally_imported, &options);
     let complexity_warnings: Vec<_> = diags
@@ -175,6 +176,7 @@ pipeline default(task) {
         file_path: None,
         require_file_header: false,
         complexity_threshold: Some(100),
+        persona_step_allowlist: &[],
     };
     let diags = lint_with_options(&program, &[], Some(source), &externally_imported, &options);
     assert!(

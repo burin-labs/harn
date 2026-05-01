@@ -17,6 +17,7 @@ pub(crate) fn lint_file_inner(
     module_graph: &harn_modules::ModuleGraph,
     require_file_header: bool,
     complexity_threshold: Option<usize>,
+    persona_step_allowlist: &[String],
 ) -> CommandOutcome {
     let path_str = path.to_string_lossy().into_owned();
     let (source, program) = parse_source_file(&path_str);
@@ -25,6 +26,7 @@ pub(crate) fn lint_file_inner(
         file_path: Some(path),
         require_file_header,
         complexity_threshold,
+        persona_step_allowlist,
     };
     let diagnostics = harn_lint::lint_with_module_graph(
         &program,
@@ -61,6 +63,7 @@ pub(crate) fn lint_fix_file(
     module_graph: &harn_modules::ModuleGraph,
     require_file_header: bool,
     complexity_threshold: Option<usize>,
+    persona_step_allowlist: &[String],
 ) -> usize {
     let path_str = path.to_string_lossy().into_owned();
     let (source, program) = parse_source_file(&path_str);
@@ -69,6 +72,7 @@ pub(crate) fn lint_fix_file(
         file_path: Some(path),
         require_file_header,
         complexity_threshold,
+        persona_step_allowlist,
     };
     let lint_diags = harn_lint::lint_with_module_graph(
         &program,

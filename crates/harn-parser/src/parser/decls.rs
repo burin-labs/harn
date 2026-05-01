@@ -32,6 +32,10 @@ fn sanitize_eval_pack_binding(id: &str) -> String {
     }
 }
 
+fn is_attribute_key_token(token: &TokenKind) -> bool {
+    matches!(token, TokenKind::Identifier(_) | TokenKind::Retry)
+}
+
 impl Parser {
     pub(super) fn parse_pipeline_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
@@ -213,8 +217,8 @@ impl Parser {
         let start = self.current_span();
         // Detect `key: value` form by looking ahead.
         if let (Some(t1), Some(t2)) = (self.peek_kind_at(0), self.peek_kind_at(1)) {
-            if matches!(t1, TokenKind::Identifier(_)) && matches!(t2, TokenKind::Colon) {
-                let key = self.consume_identifier("argument name")?;
+            if is_attribute_key_token(t1) && matches!(t2, TokenKind::Colon) {
+                let key = self.consume_attribute_key("argument name")?;
                 self.consume(&TokenKind::Colon, ":")?;
                 let value = self.parse_attribute_value()?;
                 return Ok(AttributeArg {
@@ -250,6 +254,7 @@ impl Parser {
             TokenKind::True => Node::BoolLiteral(true),
             TokenKind::False => Node::BoolLiteral(false),
             TokenKind::Nil => Node::NilLiteral,
+            TokenKind::Continue => Node::Identifier("continue".to_string()),
             TokenKind::Identifier(name) => {
                 let mut name = name.clone();
                 self.advance();
@@ -319,6 +324,10 @@ impl Parser {
                             self.advance();
                             spanned(Node::Identifier(name), key_span)
                         }
+                        Some(TokenKind::Retry) => {
+                            self.advance();
+                            spanned(Node::Identifier("retry".to_string()), key_span)
+                        }
                         Some(TokenKind::StringLiteral(name)) => {
                             self.advance();
                             spanned(Node::StringLiteral(name), key_span)
@@ -367,6 +376,20 @@ impl Parser {
         };
         self.advance();
         Ok(spanned(node, span))
+    }
+
+    fn consume_attribute_key(&mut self, expected: &str) -> Result<String, ParserError> {
+        match self.current_kind().cloned() {
+            Some(TokenKind::Identifier(name)) => {
+                self.advance();
+                Ok(name)
+            }
+            Some(TokenKind::Retry) => {
+                self.advance();
+                Ok("retry".to_string())
+            }
+            _ => Err(self.error(expected)),
+        }
     }
 
     pub(super) fn parse_fn_decl_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {

@@ -18,7 +18,8 @@ pub(crate) use bundle::build_bundle_manifest;
 pub(crate) use check_cmd::check_file_inner;
 pub(crate) use config::{
     apply_harn_lint_config, build_module_graph, collect_cross_file_imports, collect_harn_targets,
-    harn_lint_complexity_threshold, harn_lint_require_file_header,
+    harn_lint_complexity_threshold, harn_lint_persona_step_allowlist,
+    harn_lint_require_file_header,
 };
 pub(crate) use fmt::{fmt_targets, FmtMode};
 pub(crate) use host_capabilities::load_host_capabilities;
