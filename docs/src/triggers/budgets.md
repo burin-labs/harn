@@ -93,3 +93,65 @@ skipping the handler, Harn appends a `request_approval` HITL record with the
 default `operator` reviewer, adds an approval gate node to the action graph, and
 records an `autonomy.tier_transition` trust-graph audit entry from `act_auto` to
 `act_with_approval`.
+
+## Per-agent Autonomy Budget
+
+`agent_loop` accepts an `autonomy_budget` option that gates an autonomous
+loop the same way the trigger-level cap gates a webhook handler. The check
+runs at loop entry, before any LLM or MCP work fires — scripts can't bypass
+it by skipping the option in a nested call.
+
+```harn
+let result = agent_loop(
+  prompt,
+  system,
+  {
+    provider: "anthropic",
+    autonomy_budget: {per_hour: 10, per_day: 100, key: "captain.persona", reviewer: "oncall"},
+  },
+)
+```
+
+Supported fields:
+
+- `per_hour`: maximum approved agent_loop dispatches in a UTC hour. `nil`
+  disables the hourly cap. Must be `>= 1` if set.
+- `per_day`: maximum approved agent_loop dispatches in a UTC day. `nil`
+  disables the daily cap. Must be `>= 1` if set.
+- `key`: stable identifier used to group decisions across agent_loop
+  invocations. Defaults to the loop's `session_id`. Choose a stable key
+  (typically the persona name or agent identity) when each call mints a
+  fresh session — otherwise the budget effectively never accumulates.
+- `reviewer`: reviewer name attached to the HITL approval request when
+  the budget is exhausted. Defaults to `"operator"`.
+
+When the budget is exhausted, `agent_loop` returns immediately with a
+result of this shape (`reason` is `"hourly_autonomy_budget_exceeded"` or
+`"daily_autonomy_budget_exceeded"`):
+
+```text
+{
+  status: "approval_required",
+  approval_required: true,
+  reason: <one of the two reason strings>,
+  request_id: "hitl_approval_...",
+  reviewers: ["oncall"],
+  from_tier: "act_auto",
+  requested_tier: "act_with_approval",
+  per_hour: ..., per_day: ...,
+  autonomous_decisions_hour: ..., autonomous_decisions_today: ...,
+  ...
+}
+```
+
+The same side effects as the trigger-side path land:
+
+- a HITL approval request on `hitl.approvals` (queryable via `hitl_pending`)
+- a `triggers.lifecycle` event named `autonomy.budget_exceeded` carrying
+  the agent key, session id, trace id, and reason
+- a `trust_graph.records` entry tagged `autonomy.tier_transition` from
+  `act_auto` to `act_with_approval`
+
+Counters reset at each UTC hour and UTC day boundary. They live in
+process-thread-local memory and are reset by `harn_vm::reset_thread_local_state`
+between test runs.
