@@ -116,6 +116,18 @@ condensed series summaries instead of full per-patch history.
   `make build`/`make build-release` targets that ad-hoc sign the harn
   binaries on macOS for local development convenience.
 
+### Changed
+
+- **A2A `a2a-version` request-header negotiation soft-deprecated (#894).**
+  The A2A 0.3.0 spec encodes protocol version in AgentCard discovery, not
+  request headers. The harn-serve A2A adapter no longer rejects unknown
+  values of the `a2a-version` HTTP header with JSON-RPC `-32009
+  VersionNotSupportedError`; clients should read `protocolVersion` from
+  the AgentCard and choose compatible methods. For one minor cycle, any
+  request that still carries `a2a-version` is logged via
+  `tracing::warn!(target = "harn_serve::a2a", …)` so we can spot
+  residual client usage; the header is then slated for full removal.
+
 ### Fixed
 
 - **ACP tool-call extension metadata follows `_meta.harn` (#904).**
