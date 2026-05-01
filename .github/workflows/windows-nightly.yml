@@ -8,7 +8,7 @@ name: Windows nightly
 # `#![cfg(unix)]` is expected to pass here.
 #
 # Failure is informational, not blocking — the nightly does not gate the
-# `check-status` job. When something regresses, file an issue and either
+# `ci-status` job. When something regresses, file an issue and either
 # fix the underlying portability bug or add a per-test `#[cfg(unix)]`
 # annotation with rationale, then update
 # `docs/src/dev/windows-test-coverage.md` to reflect the disposition.
