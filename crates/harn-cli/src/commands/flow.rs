@@ -89,27 +89,45 @@ pub(crate) fn run_replay_audit(args: &FlowReplayAuditArgs) -> Result<i32, String
     })
 }
 
-fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
-    let store = open_store(&args.store)?;
+/// Inputs for [`ship_watch_payload`]. Mirrors the fields the CLI's
+/// `harn flow ship watch` accepts, but lets in-process callers (tests
+/// and library consumers) build the JSON receipt without going through
+/// clap or the binary surface.
+#[derive(Debug, Clone)]
+pub struct FlowShipWatchInputs<'a> {
+    pub store: &'a Path,
+    pub predicate_root: &'a Path,
+    pub touched_dirs: &'a [PathBuf],
+    pub persona: &'a str,
+    /// Optional path to receive the JSON receipt as a side effect, matching
+    /// the CLI's `--mock-pr-out` flag.
+    pub mock_pr_out: Option<&'a Path>,
+}
+
+/// In-process implementation of `harn flow ship watch`.
+///
+/// Returns the same JSON payload the CLI prints to stdout. When
+/// `inputs.mock_pr_out` is set the payload is also written to that
+/// path, matching the binary's `--mock-pr-out` behavior so callers can
+/// verify the file/stdout contract without spawning a subprocess.
+pub fn ship_watch_payload(inputs: &FlowShipWatchInputs<'_>) -> Result<serde_json::Value, String> {
+    let store = open_store(inputs.store)?;
     let atom_refs = store
         .list_atoms()
         .map_err(|error| format!("failed to list Flow atoms: {error}"))?;
     if atom_refs.is_empty() {
-        let payload = json!({
+        // Idle payload intentionally does not honor `mock_pr_out` — the
+        // CLI's pre-#1106 behavior only wrote the receipt file when an
+        // actual mock PR was opened, not on idle no-op runs.
+        return Ok(json!({
             "status": "idle",
             "reason": "no_atoms",
-            "persona": args.persona,
+            "persona": inputs.persona,
             "phase": "phase_0",
             "mode": "shadow",
             "autonomy": "propose_with_approval",
             "receipts_required": true,
-        });
-        print_payload(
-            args.json,
-            "Ship Captain idle: no atoms in the Flow store.",
-            &payload,
-        );
-        return Ok(0);
+        }));
     }
 
     let atoms = atom_refs
@@ -139,15 +157,12 @@ fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
         })
         .collect::<Vec<_>>();
 
-    let chains = current_predicate_chains(&args.predicate_root, &args.touched_dirs);
+    let chains = current_predicate_chains(inputs.predicate_root, inputs.touched_dirs);
     let diagnostics = discovery_diagnostics(&chains);
     if has_discovery_error(&diagnostics) {
         return Err(render_discovery_diagnostics(&diagnostics));
     }
-    if !args.json {
-        print_discovery_warnings(&diagnostics);
-    }
-    let bootstrap_payload = bootstrap_policy_payload(&args.predicate_root);
+    let bootstrap_payload = bootstrap_policy_payload(inputs.predicate_root);
     let predicates = harn_vm::flow::resolve_predicates_for_touched_directories(&chains);
     let predicate_payload = predicates
         .iter()
@@ -198,7 +213,7 @@ fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
     });
     let payload = json!({
         "status": "mock_pr_opened",
-        "persona": args.persona,
+        "persona": inputs.persona,
         "phase": "phase_0",
         "mode": "shadow",
         "autonomy": "propose_with_approval",
@@ -211,11 +226,11 @@ fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
         },
         "intents": intent_payload,
         "predicate_validation": {
-            "predicate_root": args.predicate_root,
-            "touched_dirs": if args.touched_dirs.is_empty() {
+            "predicate_root": inputs.predicate_root,
+            "touched_dirs": if inputs.touched_dirs.is_empty() {
                 vec![PathBuf::from(".")]
             } else {
-                args.touched_dirs.clone()
+                inputs.touched_dirs.to_vec()
             },
             "status": validation_status,
             "predicates": predicate_payload,
@@ -236,15 +251,43 @@ fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
         "eval_packs": SHIP_CAPTAIN_EVAL_PACKS,
     });
 
-    if let Some(path) = &args.mock_pr_out {
+    if let Some(path) = inputs.mock_pr_out {
         write_json(path, &payload)
             .map_err(|error| format!("failed to write mock PR receipt: {error}"))?;
     }
-    print_payload(
-        args.json,
-        &format!("mock PR opened for candidate slice {}", slice.id),
-        &payload,
-    );
+    Ok(payload)
+}
+
+fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
+    let inputs = FlowShipWatchInputs {
+        store: &args.store,
+        predicate_root: &args.predicate_root,
+        touched_dirs: &args.touched_dirs,
+        persona: &args.persona,
+        mock_pr_out: args.mock_pr_out.as_deref(),
+    };
+
+    if !args.json {
+        let chains = current_predicate_chains(&args.predicate_root, &args.touched_dirs);
+        let diagnostics = discovery_diagnostics(&chains);
+        if !has_discovery_error(&diagnostics) {
+            print_discovery_warnings(&diagnostics);
+        }
+    }
+
+    let payload = ship_watch_payload(&inputs)?;
+    let summary = match payload.get("status").and_then(|status| status.as_str()) {
+        Some("idle") => "Ship Captain idle: no atoms in the Flow store.".to_string(),
+        _ => match payload
+            .get("slice")
+            .and_then(|slice| slice.get("id"))
+            .and_then(|id| id.as_str())
+        {
+            Some(slice_id) => format!("mock PR opened for candidate slice {slice_id}"),
+            None => "Ship Captain receipt emitted.".to_string(),
+        },
+    };
+    print_payload(args.json, &summary, &payload);
     Ok(0)
 }
 

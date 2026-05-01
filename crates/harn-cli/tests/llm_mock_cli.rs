@@ -34,7 +34,7 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1131 follow-up to #1106)"]
 #[test]
 fn llm_mock_replays_fifo_fixtures_for_non_mock_provider() {
     let temp = TempDir::new().unwrap();
@@ -71,7 +71,7 @@ pipeline default() {
     assert_eq!(stdout(&output), "first\nsecond\n");
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1131 follow-up to #1106)"]
 #[test]
 fn llm_mock_reuses_glob_matches() {
     let temp = TempDir::new().unwrap();
@@ -107,7 +107,7 @@ pipeline default() {
     assert_eq!(stdout(&output), "matched\nmatched\n");
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1131 follow-up to #1106)"]
 #[test]
 fn llm_mock_reports_unmatched_prompt_snippet() {
     let temp = TempDir::new().unwrap();
@@ -139,7 +139,7 @@ pipeline default() {
     assert!(stderr.contains("this prompt is intentionally unmatched"));
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1131 follow-up to #1106)"]
 #[test]
 fn llm_mock_record_replays_identical_output() {
     let temp = TempDir::new().unwrap();
@@ -191,7 +191,7 @@ pipeline default() {
     assert_eq!(stdout(&recorded), stdout(&replayed));
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1131 follow-up to #1106)"]
 #[test]
 fn playground_llm_mock_replays_fifo_fixtures_for_non_mock_provider() {
     let temp = TempDir::new().unwrap();
@@ -248,7 +248,7 @@ pipeline default() {
     assert_eq!(stdout(&output), "playground replay\n");
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1131 follow-up to #1106)"]
 #[test]
 fn playground_llm_mock_record_replays_identical_output() {
     let temp = TempDir::new().unwrap();
@@ -324,7 +324,7 @@ pipeline default() {
     assert_eq!(stdout(&recorded), stdout(&replayed));
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1131 follow-up to #1106)"]
 #[test]
 fn playground_llm_mock_sub_agent_tool_calls_mutate_host_workspace() {
     let temp = TempDir::new().unwrap();
@@ -427,7 +427,7 @@ pipeline default() {
     assert!(stdout(&output).contains("write complete"));
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1131 follow-up to #1106)"]
 #[test]
 fn playground_llm_mock_sub_agent_handles_multiple_tool_calls_in_one_turn() {
     let temp = TempDir::new().unwrap();
@@ -536,7 +536,7 @@ pipeline default() {
     assert!(stdout(&output).contains("multi tool complete"));
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1131 follow-up to #1106)"]
 #[test]
 fn playground_llm_mock_consume_match_advances_between_identical_patterns() {
     let temp = TempDir::new().unwrap();
@@ -630,7 +630,7 @@ pipeline default() {
     assert!(stdout(&output).contains("matched summary"));
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+#[ignore = "subprocess CLI test pending in-process conversion (issue #1131 follow-up to #1106)"]
 #[test]
 fn eval_runs_baseline_and_structural_variant_for_pipeline_file() {
     let temp = TempDir::new().unwrap();

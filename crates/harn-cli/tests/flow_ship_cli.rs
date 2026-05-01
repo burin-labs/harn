@@ -1,11 +1,18 @@
-mod test_util;
+//! In-process coverage of `harn flow ship watch`.
+//!
+//! Tier 1H follow-up (#1106) of the de-flake epic (#1057, #1067):
+//! the JSON receipt that `flow ship watch` emits is the contract under
+//! test, so we hoisted the payload-building logic into
+//! `harn_cli::commands::flow::ship_watch_payload` and call it directly
+//! instead of spawning the `harn` binary.
 
 use std::fs;
+use std::path::PathBuf;
 
 use ed25519_dalek::SigningKey;
+use harn_cli::commands::flow::{ship_watch_payload, FlowShipWatchInputs};
 use harn_vm::flow::{Atom, AtomId, Provenance, SqliteFlowStore, TextOp, VcsBackend};
 use tempfile::TempDir;
-use test_util::process::harn_e2e_command;
 use time::OffsetDateTime;
 
 fn key(seed: u8) -> SigningKey {
@@ -60,7 +67,22 @@ fn phase_zero_demo(slice) {
     temp
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
+fn run_ship_watch(
+    repo: &std::path::Path,
+    store_path: &std::path::Path,
+    mock_pr_out: Option<&std::path::Path>,
+) -> serde_json::Value {
+    let touched: Vec<PathBuf> = Vec::new();
+    let inputs = FlowShipWatchInputs {
+        store: store_path,
+        predicate_root: repo,
+        touched_dirs: &touched,
+        persona: "ship_captain",
+        mock_pr_out,
+    };
+    ship_watch_payload(&inputs).expect("ship watch payload")
+}
+
 #[test]
 fn flow_ship_watch_injects_atoms_and_opens_mock_pr() {
     let repo = demo_repo();
@@ -80,28 +102,7 @@ fn flow_ship_watch_injects_atoms_and_opens_mock_pr() {
     drop(store);
 
     let mock_pr_path = repo.path().join(".harn/flow/mock-pr.json");
-    let output = harn_e2e_command()
-        .current_dir(repo.path())
-        .args([
-            "flow",
-            "ship",
-            "watch",
-            "--store",
-            store_path.to_str().unwrap(),
-            "--mock-pr-out",
-            mock_pr_path.to_str().unwrap(),
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "stdout={}, stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let stdout_payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let stdout_payload = run_ship_watch(repo.path(), &store_path, Some(&mock_pr_path));
     let file_payload: serde_json::Value =
         serde_json::from_slice(&fs::read(&mock_pr_path).unwrap()).unwrap();
     assert_eq!(stdout_payload, file_payload);
@@ -169,7 +170,6 @@ fn write_invariants_with_many_predicates(dir: &std::path::Path, count: usize) {
     fs::write(dir.join("invariants.harn"), body).unwrap();
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn flow_ship_watch_surfaces_bootstrap_policy_when_present() {
     let repo = demo_repo();
@@ -199,28 +199,8 @@ fn _bootstrap_marker() {
     drop(store);
 
     let mock_pr_path = repo.path().join(".harn/flow/mock-pr.json");
-    let output = harn_e2e_command()
-        .current_dir(repo.path())
-        .args([
-            "flow",
-            "ship",
-            "watch",
-            "--store",
-            store_path.to_str().unwrap(),
-            "--mock-pr-out",
-            mock_pr_path.to_str().unwrap(),
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "stdout={}, stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
+    let payload = run_ship_watch(repo.path(), &store_path, Some(&mock_pr_path));
 
-    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let bootstrap = &payload["predicate_validation"]["bootstrap_policy"];
     assert_eq!(bootstrap["status"], "present");
     let hash = bootstrap["hash"].as_str().unwrap();
@@ -233,7 +213,6 @@ fn _bootstrap_marker() {
     assert_eq!(maintainers[1]["id"], "user:alice");
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn flow_ship_watch_marks_bootstrap_policy_absent_when_missing() {
     let repo = demo_repo();
@@ -242,28 +221,13 @@ fn flow_ship_watch_marks_bootstrap_policy_absent_when_missing() {
     store.emit_atom(&atom(0, Vec::new())).unwrap();
     drop(store);
 
-    let output = harn_e2e_command()
-        .current_dir(repo.path())
-        .args([
-            "flow",
-            "ship",
-            "watch",
-            "--store",
-            store_path.to_str().unwrap(),
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-
-    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let payload = run_ship_watch(repo.path(), &store_path, None);
     assert_eq!(
         payload["predicate_validation"]["bootstrap_policy"]["status"],
         "absent"
     );
 }
 
-#[ignore = "subprocess CLI test pending in-process conversion (issue #1106 follow-up to #1067)"]
 #[test]
 fn flow_ship_watch_blocks_when_predicate_union_explodes() {
     let temp = TempDir::new().unwrap();
@@ -289,28 +253,8 @@ fn flow_ship_watch_blocks_when_predicate_union_explodes() {
     drop(store);
 
     let mock_pr_path = repo.join(".harn/flow/mock-pr.json");
-    let output = harn_e2e_command()
-        .current_dir(repo)
-        .args([
-            "flow",
-            "ship",
-            "watch",
-            "--store",
-            store_path.to_str().unwrap(),
-            "--mock-pr-out",
-            mock_pr_path.to_str().unwrap(),
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "stdout={}, stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let payload = run_ship_watch(repo, &store_path, Some(&mock_pr_path));
 
-    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(payload["predicate_validation"]["status"], "blocked");
     assert_eq!(payload["mock_pr"]["validation_status"], "blocked");
     let ceiling = &payload["predicate_validation"]["ceiling"];
