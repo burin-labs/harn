@@ -170,6 +170,7 @@ pub fn snapshot(id: &str) -> Option<VmValue> {
 /// re-register — sinks are per-session, owned by the first opener.
 pub fn open_or_create(id: Option<String>) -> String {
     let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    let parent_session = current_session_id();
     let mut was_new = false;
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
@@ -191,6 +192,9 @@ pub fn open_or_create(id: Option<String>) -> String {
         map.insert(resolved.clone(), SessionState::new(resolved.clone()));
     });
     if was_new {
+        if let Some(parent) = parent_session.as_deref() {
+            crate::agent_events::mirror_session_sinks(parent, &resolved);
+        }
         try_register_event_log(&resolved);
     }
     resolved

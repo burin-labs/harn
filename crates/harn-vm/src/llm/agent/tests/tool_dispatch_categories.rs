@@ -134,6 +134,43 @@ fn tool_call_mock(tool_name: &str, args: serde_json::Value) -> crate::llm::mock:
     }
 }
 
+fn text_mock(text: &str) -> crate::llm::mock::LlmMock {
+    crate::llm::mock::LlmMock {
+        text: text.to_string(),
+        tool_calls: Vec::new(),
+        match_pattern: None,
+        consume_on_match: true,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        thinking: None,
+        thinking_summary: None,
+        stop_reason: None,
+        model: "mock".to_string(),
+        provider: None,
+        blocks: None,
+        error: None,
+    }
+}
+
+fn native_read_file_schema() -> serde_json::Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read a file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"}
+                },
+                "required": ["path"]
+            }
+        }
+    })
+}
+
 fn assert_tool_execution_with_category(
     result: &serde_json::Value,
     expected_tool: &str,
@@ -174,6 +211,52 @@ async fn schema_validation_failure_emits_categorized_event() {
     let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
     assert_tool_execution_with_category(&result, "read", ToolCallErrorCategory::SchemaValidation);
 
+    reset_llm_mock_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn native_persistent_answer_after_successful_tool_does_not_require_done_sentinel() {
+    let _guard = serialize_tests();
+    drain_thread_local_state();
+    reset_llm_mock_state();
+    let path = std::env::temp_dir().join(format!(
+        "harn-native-final-answer-{}-{}.txt",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::write(&path, "@burin/tui\n").expect("write temp file");
+
+    crate::llm::mock::push_llm_mock(tool_call_mock(
+        "read_file",
+        json!({"path": path.to_string_lossy().to_string()}),
+    ));
+    crate::llm::mock::push_llm_mock(text_mock("@burin/tui"));
+    crate::llm::mock::push_llm_mock(text_mock("unexpected extra turn"));
+
+    let mut opts = base_opts(vec![
+        json!({"role": "user", "content": "read package name"}),
+    ]);
+    opts.native_tools = Some(vec![native_read_file_schema()]);
+    let mut config = base_agent_config();
+    config.persistent = true;
+    config.max_iterations = 3;
+    config.tool_format = "native".to_string();
+    config.turn_policy = Some(TurnPolicy {
+        require_action_or_yield: true,
+        allow_done_sentinel: true,
+        max_prose_chars: None,
+    });
+    config.session_id = "test-native-final-after-tool".to_string();
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    let calls = get_llm_mock_calls();
+    assert_eq!(calls.len(), 2, "native final answer should stop the loop");
+    assert_eq!(result["text"].as_str(), Some("@burin/tui"));
+
+    let _ = std::fs::remove_file(path);
     reset_llm_mock_state();
 }
 

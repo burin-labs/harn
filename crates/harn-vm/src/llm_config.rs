@@ -531,7 +531,17 @@ pub fn alias_entries() -> Vec<(String, AliasDef)> {
 
 /// Return every configured model-catalog entry, sorted by provider then id.
 pub fn model_catalog_entries() -> Vec<(String, ModelDef)> {
-    let mut entries: Vec<_> = effective_config().models.into_iter().collect();
+    let mut entries: Vec<_> = effective_config()
+        .models
+        .into_iter()
+        .map(|(id, model)| {
+            let provider = model.provider.clone();
+            (
+                id.clone(),
+                with_effective_capability_tags(id, provider, model),
+            )
+        })
+        .collect();
     entries.sort_by(|(id_a, model_a), (id_b, model_b)| {
         model_a
             .provider
@@ -542,7 +552,14 @@ pub fn model_catalog_entries() -> Vec<(String, ModelDef)> {
 }
 
 pub fn model_catalog_entry(model_id: &str) -> Option<ModelDef> {
-    effective_config().models.get(model_id).cloned()
+    effective_config()
+        .models
+        .get(model_id)
+        .cloned()
+        .map(|model| {
+            let provider = model.provider.clone();
+            with_effective_capability_tags(model_id.to_string(), provider, model)
+        })
 }
 
 pub fn qc_default_model(provider: &str) -> Option<String> {
@@ -614,7 +631,7 @@ pub fn available_provider_names() -> Vec<String> {
         .collect()
 }
 
-/// Check if a provider advertises a feature (e.g., "native_tools").
+/// Check if a provider advertises a legacy provider-level feature.
 pub fn provider_has_feature(provider: &str, feature: &str) -> bool {
     provider_config(provider)
         .map(|p| p.features.iter().any(|f| f == feature))
@@ -631,7 +648,8 @@ pub fn provider_economics(provider: &str) -> (Option<f64>, Option<f64>, Option<u
 }
 
 /// Resolve the default tool format for a model+provider combination.
-/// Priority: alias `tool_format` (matched by model ID) > provider feature > "text".
+/// Priority: alias `tool_format` (matched by model ID) > provider/model
+/// capability matrix > legacy provider feature > "text".
 pub fn default_tool_format(model: &str, provider: &str) -> String {
     let config = effective_config();
     default_tool_format_with_config(&config, model, provider)
@@ -651,16 +669,73 @@ fn default_tool_format_with_config(
             }
         }
     }
-    if config
+    let capability_matrix_native = crate::llm::capabilities::lookup(provider, model).native_tools;
+    let legacy_provider_native = config
         .providers
         .get(provider)
         .map(|p| p.features.iter().any(|f| f == "native_tools"))
-        .unwrap_or(false)
-    {
+        .unwrap_or(false);
+    if capability_matrix_native || legacy_provider_native {
         "native".to_string()
     } else {
         "text".to_string()
     }
+}
+
+fn with_effective_capability_tags(
+    model_id: String,
+    provider: String,
+    mut model: ModelDef,
+) -> ModelDef {
+    model.capabilities = effective_model_capability_tags(&provider, &model_id);
+    model
+}
+
+/// Legacy display tags derived from the canonical provider/model capability
+/// matrix. The matrix is the source of truth; `models.*.capabilities` in
+/// providers.toml is accepted only for backwards-compatible parsing.
+pub fn effective_model_capability_tags(provider: &str, model_id: &str) -> Vec<String> {
+    let caps = crate::llm::capabilities::lookup(provider, model_id);
+    let mut tags = Vec::new();
+    // Today all Harn chat providers expose streaming. Keep this as a
+    // transport baseline rather than a duplicated per-model declaration.
+    tags.push("streaming".to_string());
+    if caps.native_tools {
+        tags.push("tools".to_string());
+    }
+    if !caps.tool_search.is_empty() {
+        tags.push("tool_search".to_string());
+    }
+    if caps.vision || caps.vision_supported {
+        tags.push("vision".to_string());
+    }
+    if caps.audio {
+        tags.push("audio".to_string());
+    }
+    if caps.pdf {
+        tags.push("pdf".to_string());
+    }
+    if caps.files_api_supported {
+        tags.push("files".to_string());
+    }
+    if caps.prompt_caching {
+        tags.push("prompt_caching".to_string());
+    }
+    if !caps.thinking_modes.is_empty() {
+        tags.push("thinking".to_string());
+    }
+    if caps.interleaved_thinking_supported
+        || caps
+            .thinking_modes
+            .iter()
+            .any(|mode| mode == "adaptive" || mode == "effort")
+    {
+        tags.push("extended_thinking".to_string());
+    }
+    if caps.json_schema.is_some() {
+        tags.push("structured_output".to_string());
+    }
+    tags
 }
 
 /// Resolve a tier or alias into a concrete model/provider pair.
@@ -1806,6 +1881,17 @@ mod tests {
     }
 
     #[test]
+    fn test_default_tool_format_uses_capability_matrix() {
+        reset_overrides();
+
+        assert_eq!(
+            default_tool_format("qwen3.6-35b-a3b-ud-q4-k-xl", "llamacpp"),
+            "native"
+        );
+        assert_eq!(default_tool_format("gemma-4-26b-a4b-it", "local"), "text");
+    }
+
+    #[test]
     fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
         reset_overrides();
         let mut overlay = ProvidersConfig::default();
@@ -1832,6 +1918,7 @@ mod tests {
 
         let entry = model_catalog_entry("acme/model-fast").expect("catalog entry");
         assert_eq!(entry.context_window, 65_536);
+        assert_eq!(entry.capabilities, vec!["streaming".to_string()]);
         assert_eq!(
             entry.pricing.as_ref().map(|pricing| pricing.input_per_mtok),
             Some(1.25)
