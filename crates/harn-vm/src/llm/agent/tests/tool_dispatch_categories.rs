@@ -219,14 +219,8 @@ async fn native_persistent_answer_after_successful_tool_does_not_require_done_se
     let _guard = serialize_tests();
     drain_thread_local_state();
     reset_llm_mock_state();
-    let path = std::env::temp_dir().join(format!(
-        "harn-native-final-answer-{}-{}.txt",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
+    let temp_file = tempfile::NamedTempFile::new().expect("create temp file");
+    let path = temp_file.path().to_path_buf();
     std::fs::write(&path, "@burin/tui\n").expect("write temp file");
 
     crate::llm::mock::push_llm_mock(tool_call_mock(
