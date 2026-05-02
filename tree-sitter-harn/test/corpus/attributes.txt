@@ -42,3 +42,42 @@ fn no_secrets(slice) -> bool {
       body: (block
         (return_statement
           (true))))))
+
+==================
+Attribute Path And Call Sentinels
+==================
+
+@trigger(github.check_failed)
+@schedule(every: schedule("*/30 * * * *"))
+fn merge_captain(ctx) -> string {
+  return "ok"
+}
+
+---
+
+(source_file
+  (attributed_declaration
+    (attribute
+      name: (identifier)
+      (attribute_arg
+        (attribute_path
+          (identifier)
+          (identifier))))
+    (attribute
+      name: (identifier)
+      (attribute_arg
+        name: (identifier)
+        value: (attribute_call
+          (identifier)
+          (attribute_arg
+            (string_literal)))))
+    (fn_declaration
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier)))
+      (type_annotation
+        (identifier))
+      body: (block
+        (return_statement
+          (string_literal))))))
