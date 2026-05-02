@@ -3686,6 +3686,11 @@ version = "0.1.0"
     #[tokio::test(flavor = "current_thread")]
     async fn oauth_metadata_and_challenge_are_served_when_configured() {
         let _env_lock = lock_env().lock().await;
+        // Acquire the harn-state lock BEFORE setting env vars. Rust drops
+        // bindings in reverse declaration order, so env vars must be
+        // declared *after* the lock to be cleared before another test
+        // can acquire `lock_harn_state()` and read leaked OAuth config.
+        let _guard = lock_harn_state();
         let _auth_servers = ScopedEnvVar::set(
             "HARN_MCP_OAUTH_AUTHORIZATION_SERVERS",
             "https://auth.example.test",
@@ -3699,8 +3704,6 @@ version = "0.1.0"
         let _audience =
             ScopedEnvVar::set("HARN_MCP_OAUTH_AUDIENCE", "https://mcp.example.test/mcp");
         let _scopes = ScopedEnvVar::set("HARN_MCP_OAUTH_SCOPES", "harn:mcp");
-
-        let _guard = lock_harn_state();
         let temp = TempDir::new().unwrap();
         write_fixture(&temp);
         let args = fixture_args(&temp);
@@ -3810,6 +3813,11 @@ version = "0.1.0"
         });
 
         let _env_lock = lock_env().lock().await;
+        // Acquire the harn-state lock BEFORE setting env vars so they
+        // are dropped (cleared) before another test can re-enter the
+        // lock — see the matching comment in
+        // `oauth_metadata_and_challenge_are_served_when_configured`.
+        let _guard = lock_harn_state();
         let auth_server_url = format!("http://{auth_addr}");
         let introspection_url = format!("{auth_server_url}/introspect");
         let _auth_servers =
@@ -3819,8 +3827,6 @@ version = "0.1.0"
         let _audience = ScopedEnvVar::set("HARN_MCP_OAUTH_AUDIENCE", "mcp://harn-test");
         let _scopes = ScopedEnvVar::set("HARN_MCP_OAUTH_SCOPES", "harn:mcp");
         let _resource = ScopedEnvVar::set("HARN_MCP_OAUTH_RESOURCE", "mcp://harn-test");
-
-        let _guard = lock_harn_state();
         let temp = TempDir::new().unwrap();
         write_fixture(&temp);
         let args = fixture_args(&temp);

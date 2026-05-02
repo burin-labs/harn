@@ -2,12 +2,17 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 static HARN_STATE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
-/// Process-global env vars that point harn_vm at a specific state dir.
-/// Any test that leaves these set leaks its (now-deleted) `TempDir`
-/// path into subsequent tests' `install_default_for_base_dir(base_dir)`
-/// calls because `state_root()` / `event_log_*` resolvers honor an
-/// absolute env-var value over the supplied `base_dir`, silently
-/// pointing every test at the same stale SQLite file.
+/// Process-global env vars that point harn_vm at a specific state dir
+/// or flip the MCP serve auth posture. Any test that leaves these set
+/// leaks state into subsequent tests:
+/// - State-dir vars leak the previous test's (now-deleted) `TempDir`
+///   path into `install_default_for_base_dir(base_dir)` because
+///   `state_root()` / `event_log_*` resolvers honor an absolute env-var
+///   value over the supplied `base_dir`.
+/// - `HARN_MCP_OAUTH_*` vars flip `McpOrchestratorService::new_local`
+///   into OAuth-required mode, so a test that constructs a service
+///   while a previous OAuth test's env is still live receives 401 on
+///   every unauthenticated request.
 const LEAKY_STATE_ENV_VARS: &[&str] = &[
     harn_vm::runtime_paths::HARN_STATE_DIR_ENV,
     harn_vm::runtime_paths::HARN_RUN_DIR_ENV,
@@ -16,6 +21,11 @@ const LEAKY_STATE_ENV_VARS: &[&str] = &[
     harn_vm::event_log::HARN_EVENT_LOG_DIR_ENV,
     harn_vm::event_log::HARN_EVENT_LOG_SQLITE_PATH_ENV,
     harn_vm::event_log::HARN_EVENT_LOG_QUEUE_DEPTH_ENV,
+    "HARN_MCP_OAUTH_AUTHORIZATION_SERVERS",
+    "HARN_MCP_OAUTH_INTROSPECTION_URL",
+    "HARN_MCP_OAUTH_RESOURCE",
+    "HARN_MCP_OAUTH_AUDIENCE",
+    "HARN_MCP_OAUTH_SCOPES",
 ];
 
 /// Serialize tests that mutate harn_vm process-global state.

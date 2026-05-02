@@ -210,6 +210,14 @@ pub(crate) fn register_cleanup_hook() {
     });
 }
 
+/// Cancel every in-flight long-running handle and clear the registry.
+///
+/// Used only by the long-running fs/glob tests to start each test from
+/// a clean store. Production callers must NOT use this — it wipes
+/// process-global state shared across threads. Removed from
+/// `reset_stdlib_state` so other tests can't accidentally cancel a
+/// concurrent fs/glob worker thread mid-flight.
+#[cfg(test)]
 pub(crate) fn reset_state() {
     let entries = {
         let mut store = HANDLE_STORE
