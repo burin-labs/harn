@@ -10,11 +10,33 @@ pub(crate) struct MergeCaptainArgs {
 pub(crate) enum MergeCaptainCommand {
     /// Run a Merge Captain sweep against a live, mock, or replay backend.
     Run(MergeCaptainRunArgs),
+    /// Run a route/timeout ladder and write per-tier eval artifacts.
+    Ladder(MergeCaptainLadderArgs),
     /// Audit a JSONL transcript against the Merge Captain oracle.
     Audit(MergeCaptainAuditArgs),
     /// Manage a mock-repos playground (real temp git repos + fake GitHub HTTP).
     #[command(subcommand)]
     Mock(MergeCaptainMockCommand),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct MergeCaptainLadderArgs {
+    /// Persona eval ladder manifest (TOML or JSON).
+    pub manifest: String,
+    /// Write the aggregate ladder report JSON to this path.
+    #[arg(long = "report-out", value_name = "PATH")]
+    pub report_out: Option<String>,
+    /// Output format. Defaults to `text`.
+    #[arg(long, value_enum, default_value_t = MergeCaptainLadderFormat::Text)]
+    pub format: MergeCaptainLadderFormat,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum MergeCaptainLadderFormat {
+    /// Human-readable summary suitable for terminals.
+    Text,
+    /// Pretty-printed JSON suitable for hosts and CI gates.
+    Json,
 }
 
 #[derive(Debug, Subcommand)]

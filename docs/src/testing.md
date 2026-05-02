@@ -336,6 +336,38 @@ context-pack suggestion assertions, and cost/latency/token/stage thresholds.
 prompt-version metadata for hosted or explicit judge runners; a blocking
 `llm-judge` rubric fails locally rather than being silently skipped.
 
+Eval packs can also include persona timeout ladders. A `[[ladders]]`
+entry runs the same persona fixture across every configured
+`model-routes` / `timeout-tiers` combination, writes per-tier JSONL
+transcripts, receipts, and summaries, and reports the first route/tier
+that completed correctly. Degraded and looping tiers remain in the
+machine-readable report so host CLIs and TUIs can render the same
+result without reimplementing the matrix runner.
+
+```toml
+[[ladders]]
+id = "merge-captain-green-pr"
+persona = "merge_captain"
+artifact-root = ".harn-runs/merge-captain-timeout-ladder"
+
+[ladders.backend]
+kind = "replay"
+path = "../../examples/personas/merge_captain/transcripts/green_pr.jsonl"
+
+[[ladders.model-routes]]
+id = "gemma-value"
+route = "local/gemma-value"
+provider = "llama.cpp"
+model = "gemma"
+profile = "value"
+
+[[ladders.timeout-tiers]]
+id = "balanced"
+timeout-ms = 500
+max-tool-calls = 4
+max-model-calls = 1
+```
+
 Repeated-friction cases use `friction_events = "<fixture-id-or-path>"` and a
 rubric assertion such as:
 

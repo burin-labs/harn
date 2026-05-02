@@ -80,6 +80,8 @@ pub struct MergeCaptainRunReceipt {
     pub event_count: u64,
     pub model_calls: u64,
     pub tool_calls: u64,
+    pub cost_usd: f64,
+    pub latency_ms: u64,
     pub approvals_requested: u64,
     pub unsafe_action_attempts: u64,
     pub prs_touched: Vec<MergeCaptainPrTouch>,
@@ -105,6 +107,8 @@ pub struct MergeCaptainRunSummary {
     pub backend_source: Option<String>,
     pub scenario: Option<String>,
     pub mode: MergeCaptainDriverMode,
+    pub model_route: Option<String>,
+    pub timeout_tier: Option<String>,
     pub sweeps: u32,
     pub transcript_path: Option<String>,
     pub receipt_path: String,
@@ -115,6 +119,7 @@ pub struct MergeCaptainRunSummary {
     pub model_calls: u64,
     pub tool_calls: u64,
     pub cost_usd: f64,
+    pub latency_ms: u64,
     pub oracle_findings: usize,
     pub oracle_error_findings: usize,
     pub oracle_warn_findings: usize,
@@ -391,6 +396,8 @@ fn build_receipt(
         event_count: report.event_count,
         model_calls: report.model_call_count,
         tool_calls: report.tool_call_count,
+        cost_usd: 0.0,
+        latency_ms: transcript_latency_ms(&resolved.events),
         approvals_requested: stats.approvals_requested,
         unsafe_action_attempts: stats.unsafe_action_attempts,
         prs_touched: stats.prs_touched,
@@ -418,6 +425,8 @@ fn build_summary(
         backend_source: resolved.backend_source.clone(),
         scenario: receipt.scenario.clone(),
         mode: options.mode.clone(),
+        model_route: options.model_route.clone(),
+        timeout_tier: options.timeout_tier.clone(),
         sweeps: receipt.sweeps,
         transcript_path: transcript_path.map(|path| path.display().to_string()),
         receipt_path: receipt_path.display().to_string(),
@@ -427,7 +436,8 @@ fn build_summary(
         approvals_requested: receipt.approvals_requested,
         model_calls: report.model_call_count,
         tool_calls: report.tool_call_count,
-        cost_usd: 0.0,
+        cost_usd: receipt.cost_usd,
+        latency_ms: receipt.latency_ms,
         oracle_findings: report.findings.len(),
         oracle_error_findings: report.error_findings(),
         oracle_warn_findings: report.warn_findings(),
@@ -480,6 +490,23 @@ fn collect_stats(events: &[PersistedAgentEvent]) -> TranscriptStats {
 
     stats.prs_touched = prs.into_iter().collect();
     stats
+}
+
+fn transcript_latency_ms(events: &[PersistedAgentEvent]) -> u64 {
+    let Some(first) = events.first() else {
+        return 0;
+    };
+    let min = events
+        .iter()
+        .map(|event| event.emitted_at_ms)
+        .min()
+        .unwrap_or(first.emitted_at_ms);
+    let max = events
+        .iter()
+        .map(|event| event.emitted_at_ms)
+        .max()
+        .unwrap_or(first.emitted_at_ms);
+    max.saturating_sub(min) as u64
 }
 
 fn insert_pr_touch(value: &serde_json::Value, prs: &mut BTreeSet<MergeCaptainPrTouch>) {

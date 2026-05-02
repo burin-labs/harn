@@ -74,6 +74,10 @@ harn run personas/merge_captain/manifest.harn
 # Persona inspection + smoke eval.
 harn persona --manifest personas/merge_captain/harn.toml inspect merge_captain --json
 harn eval personas/merge_captain/evals/merge_captain_smoke.json
+harn eval personas/merge_captain/harn.eval.toml
+harn merge-captain ladder personas/merge_captain/harn.eval.toml \
+  --report-out .harn-runs/merge-captain-ladder/report.json \
+  --format json
 
 # Unit tests for every layer.
 harn test personas/merge_captain/tests/states_test.harn
@@ -110,6 +114,16 @@ connector. You still need a registered `github` connector client — the
 adapter never shells out to `gh`. Local verification commands are the
 one exception; they run via `process.exec` per the per-repo
 `local_verification` list.
+
+## Timeout ladders
+
+`harn.eval.toml` ships a value-model timeout ladder for the green-PR
+fixture. It runs the same transcript across increasing timeout/tool-call
+tiers for the `gemma-value` route, emits per-tier JSONL transcripts,
+receipts, and summaries, and marks the first tier that completed correctly.
+Run it through `harn eval`, `harn test package --evals`, or
+`harn merge-captain ladder` depending on whether you want eval-pack output
+or a standalone machine-readable ladder report.
 
 ## Repair-worker checkpoint contract
 

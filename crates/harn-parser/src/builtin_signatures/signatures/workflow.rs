@@ -108,6 +108,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "persona_eval_ladder_manifest",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "persona_eval_ladder_run",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "eval_suite_manifest",
         return_type: Some(BuiltinReturn::Named("dict")),
     },

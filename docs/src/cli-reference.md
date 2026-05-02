@@ -666,12 +666,13 @@ harn eval evals/clarifying-question.json
 harn eval --llm-mock fixtures.jsonl --structural-experiment doubled_prompt pipeline.harn
 ```
 
-`harn eval` accepts four inputs:
+`harn eval` accepts five inputs:
 
 - a single run record JSON file
 - a directory of run record JSON files
 - an eval suite manifest JSON file with grouped cases and optional baseline comparisons
 - an eval-pack v1 TOML/JSON manifest such as `harn.eval.toml`
+- a standalone persona eval ladder manifest
 
 Run eval packs declared by a package manifest with:
 
@@ -693,6 +694,21 @@ the pipeline twice in isolated temp run directories: once as the baseline and
 once with `HARN_STRUCTURAL_EXPERIMENT=<spec>`. The CLI then evaluates both run
 sets against their embedded replay fixtures and prints a paired A/B summary.
 Use `--llm-mock <fixture.jsonl>` to keep the two runs deterministic.
+
+## harn merge-captain
+
+Run, audit, or exercise Merge Captain fixtures.
+
+```bash
+harn merge-captain run --backend replay examples/personas/merge_captain/transcripts/green_pr.jsonl --once
+harn merge-captain audit examples/personas/merge_captain/transcripts/green_pr.jsonl --golden examples/personas/merge_captain/goldens/green_pr.json
+harn merge-captain ladder personas/merge_captain/harn.eval.toml --format json --report-out .harn-runs/merge-captain-ladder/report.json
+```
+
+`harn merge-captain ladder` runs every configured model route and timeout
+tier against the same backend fixture. It writes per-tier JSONL transcripts,
+receipts, and summaries, and emits an aggregate report with the first correct
+tier plus degraded or looping tiers.
 
 ## harn orchestrator
 

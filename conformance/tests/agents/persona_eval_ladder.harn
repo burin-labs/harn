@@ -1,0 +1,32 @@
+pipeline main() {
+  let root = project_root() ?? cwd()
+  let artifacts = path_join(temp_dir(), "harn-persona-eval-ladder-" + uuid())
+  let manifest = persona_eval_ladder_manifest(
+    {
+      id: "merge-captain-ladder-conformance",
+      persona: "merge_captain",
+      base_dir: root,
+      artifact_root: artifacts,
+      backend: {kind: "replay", path: "examples/personas/merge_captain/transcripts/green_pr.jsonl"},
+      model_routes: [
+        {
+          id: "gemma-value",
+          route: "local/gemma-value",
+          provider: "llama.cpp",
+          model: "gemma",
+          profile: "value",
+        },
+      ],
+      timeout_tiers: [{id: "tiny", max_tool_calls: 1}, {id: "balanced", max_tool_calls: 4, max_model_calls: 1}],
+    },
+  )
+  let report = persona_eval_ladder_run(manifest)
+  println(report.pass)
+  println(report.total)
+  println(report.first_correct_tier)
+  println(report.first_correct_route)
+  println(report.tiers[0].outcome)
+  println(report.tiers[1].outcome)
+  println(len(report.tiers[1].state_machine_coverage.observed_steps) > 0)
+  println(file_exists(report.tiers[1].receipt_path))
+}

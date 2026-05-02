@@ -10,9 +10,10 @@ use crate::orchestration::{
     extract_handoff_from_artifact, generate_context_pack_suggestions, handoff_context_text,
     handoff_from_json_value, normalize_artifact, normalize_context_pack_manifest,
     normalize_eval_pack_manifest_value, normalize_eval_suite_manifest, normalize_friction_event,
-    normalize_handoff_artifact_json, normalize_run_record, parse_context_pack_manifest_src,
-    parse_friction_events_value, render_artifacts_context, render_unified_diff,
-    replay_fixture_from_run, save_run_record, select_artifacts, ArtifactRecord,
+    normalize_handoff_artifact_json, normalize_persona_eval_ladder_manifest_value,
+    normalize_run_record, parse_context_pack_manifest_src, parse_friction_events_value,
+    render_artifacts_context, render_unified_diff, replay_fixture_from_run,
+    run_persona_eval_ladder, save_run_record, select_artifacts, ArtifactRecord,
     ContextPackSuggestionExpectation, ContextPackSuggestionOptions, ContextPolicy, ReplayFixture,
 };
 use crate::value::{VmError, VmValue};
@@ -747,6 +748,24 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
             VmError::Runtime("eval_pack_run: missing manifest payload".to_string())
         })?)?;
         to_vm(&evaluate_eval_pack_manifest(&manifest)?)
+    });
+
+    vm.register_builtin("persona_eval_ladder_manifest", |args, _out| {
+        let manifest =
+            normalize_persona_eval_ladder_manifest_value(args.first().ok_or_else(|| {
+                VmError::Runtime(
+                    "persona_eval_ladder_manifest: missing manifest payload".to_string(),
+                )
+            })?)?;
+        to_vm(&manifest)
+    });
+
+    vm.register_builtin("persona_eval_ladder_run", |args, _out| {
+        let manifest =
+            normalize_persona_eval_ladder_manifest_value(args.first().ok_or_else(|| {
+                VmError::Runtime("persona_eval_ladder_run: missing manifest payload".to_string())
+            })?)?;
+        to_vm(&run_persona_eval_ladder(&manifest)?)
     });
 
     vm.register_builtin("friction_event", |args, _out| {

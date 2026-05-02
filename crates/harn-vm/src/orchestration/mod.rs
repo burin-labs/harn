@@ -66,6 +66,9 @@ pub use merge_captain_audit::*;
 mod merge_captain_driver;
 pub use merge_captain_driver::*;
 
+mod merge_captain_ladder;
+pub use merge_captain_ladder::*;
+
 pub mod playground;
 
 thread_local! {

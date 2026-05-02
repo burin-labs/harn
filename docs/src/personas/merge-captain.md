@@ -48,6 +48,12 @@ harn persona --manifest personas/merge_captain/harn.toml \
 
 # Smoke eval.
 harn eval personas/merge_captain/evals/merge_captain_smoke.json
+harn eval personas/merge_captain/harn.eval.toml
+
+# Timeout/budget ladder with machine-readable output.
+harn merge-captain ladder personas/merge_captain/harn.eval.toml \
+  --report-out .harn-runs/merge-captain-ladder/report.json \
+  --format json
 
 # Unit tests for every layer.
 harn test personas/merge_captain/tests/states_test.harn
@@ -82,6 +88,16 @@ pipeline serves both the smoke fixture and a production sweep.
 The `github` connector must be active for live mode. Local
 verification commands run via the host's `process.exec` capability;
 no other I/O leaves the typed connector layer.
+
+## Timeout ladders
+
+`harn.eval.toml` contains a Merge Captain ladder that replays the same
+green-PR fixture through a Gemma value-model profile and increasing
+timeout/tool-call budgets. Each route/tier writes an `event_log.jsonl`,
+`receipt.json`, and `summary.json`; the aggregate report records the first
+tier that completed correctly and every tier that degraded or looped. The
+same manifest can be run with `harn eval`, `harn test package --evals`, or
+`harn merge-captain ladder`, so host surfaces consume one JSON contract.
 
 ## Authoring per-repo policy
 

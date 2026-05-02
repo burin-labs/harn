@@ -4551,7 +4551,8 @@ evals = ["evals/webhooks.toml"]
 ```
 
 An eval pack is a TOML document with `version = 1`, package metadata, fixture
-references, rubrics, optional judge calibration, thresholds, and cases:
+references, rubrics, optional judge calibration, thresholds, cases, and optional
+persona timeout ladders:
 
 ```toml
 version = 1
@@ -4588,6 +4589,35 @@ max-latency-ms = 500
 max-cost-usd = 0.001
 ```
 
+Persona timeout ladders run one fixture across a matrix of model routes and
+timeout/budget tiers. The local runner currently supports the Merge Captain
+persona and emits per-tier JSONL transcripts, receipts, summaries, counts,
+state-machine coverage, and first-correct-tier metadata:
+
+```toml
+[[ladders]]
+id = "merge-captain-green-pr"
+persona = "merge_captain"
+artifact-root = ".harn-runs/merge-captain-timeout-ladder"
+
+[ladders.backend]
+kind = "replay"
+path = "../../examples/personas/merge_captain/transcripts/green_pr.jsonl"
+
+[[ladders.model-routes]]
+id = "gemma-value"
+route = "local/gemma-value"
+provider = "llama.cpp"
+model = "gemma"
+profile = "value"
+
+[[ladders.timeout-tiers]]
+id = "balanced"
+timeout-ms = 500
+max-tool-calls = 4
+max-model-calls = 1
+```
+
 Fixture `kind` values are portable labels: `run-record`, `replay-fixture`,
 `jsonl-trace`, `provider-events`, and `connector-payload`. Local CLI evaluation
 executes run-record/replay-fixture cases and deterministic assertions; other
@@ -4607,8 +4637,9 @@ Threshold severity controls deployment-gate behavior:
 | `warning` | Failure is reported but does not block |
 | `informational` | Failure is reported for comparison and dashboards only |
 
-Run a pack directly with `harn eval harn.eval.toml`, or run package-declared
-packs with `harn test package --evals`.
+Run a pack directly with `harn eval harn.eval.toml`, run package-declared packs
+with `harn test package --evals`, or run a ladder directly with `harn
+merge-captain ladder <manifest>`.
 
 Harn source may also declare an eval pack directly:
 
