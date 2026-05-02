@@ -138,4 +138,19 @@ else
   echo "=== Pre-push: skipping language spec check (no spec changes) ==="
 fi
 
+# Block retroactive edits to released CHANGELOG sections. New entries
+# belong under `## Unreleased` (or the in-progress next-version heading
+# in a release PR), not under a section that already shipped under a tag.
+if hook_paths_match "$changed" '^CHANGELOG\.md$'; then
+  echo "=== Pre-push: checking CHANGELOG for retroactive edits ==="
+  if ! python3 scripts/check_changelog_no_retroactive_edits.py; then
+    echo "" >&2
+    echo "  Bypass for genuine fix-ups (typos, broken links):" >&2
+    echo "    ALLOW_CHANGELOG_RETROACTIVE_EDIT=1 git push" >&2
+    exit 1
+  fi
+else
+  echo "=== Pre-push: skipping CHANGELOG retroactive-edit check (no CHANGELOG.md changes) ==="
+fi
+
 echo "=== Pre-push checks passed. ==="
