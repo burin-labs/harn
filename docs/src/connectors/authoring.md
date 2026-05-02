@@ -32,6 +32,60 @@ Harn also exposes that same catalog to scripts through
 `import "std/triggers"` and `list_providers()`, so connector metadata has one
 runtime-facing source instead of separate registry and docs tables.
 
+## External connector repository guidance
+
+This page is the canonical authoring guide for first-party connector package
+repositories. Repo-local `CLAUDE.md` and `AGENTS.md` files should stay as thin
+pointers plus provider-specific notes.
+
+Keep repo-local guidance limited to details that differ by provider:
+
+- webhook header names, signature schemes, and replay windows
+- auth token shapes, API base URLs, and host-specific endpoint caveats
+- polling caveats, if the provider has a poll-based surface
+- dependency boundaries such as a sibling SDK package that owns outbound API
+  definitions
+
+Do not copy shared Harn syntax, package layout, connector export contracts,
+fixture schema, effect-policy rules, or test command matrices into connector
+repos. If a shared instruction is missing, add it here first and point external
+repos at this page.
+
+Each connector repo should run a cheap guidance guard in CI before expensive
+Harn setup:
+
+```yaml
+- name: Check connector guidance is canonical
+  shell: bash
+  run: |
+    set -euo pipefail
+    guidance_files=()
+    for file in CLAUDE.md AGENTS.md; do
+      if [[ -f "${file}" ]]; then
+        guidance_files+=("${file}")
+      fi
+    done
+    if [[ "${#guidance_files[@]}" -eq 0 ]]; then
+      echo "Add CLAUDE.md or AGENTS.md with a pointer to the canonical connector authoring guide." >&2
+      exit 1
+    fi
+    copied_guidance='(^## (Quick repo conventions|How to test|Reference Rust impl|Upstream conventions|Harn module connectors|Connector package gate|Rust connectors|Testing|Development)$|File extension:|Entry point:|Tests live under|Run targeted checks|Run checks|cargo install harn-cli|harn --version|harn install|harn (check|lint|fmt|connector (check|test))|for test in tests/\*\.harn)'
+    for file in "${guidance_files[@]}"; do
+      if ! grep -Eq 'docs/src/connectors/authoring\.md|docs\.harnlang\.com/connectors/authoring\.html' "${file}"; then
+        echo "${file} must link to docs/src/connectors/authoring.md instead of restating it." >&2
+        exit 1
+      fi
+      if grep -Eiq "${copied_guidance}" "${file}"; then
+        echo "${file} is re-implementing canonical Harn authoring guidance; keep only provider-specific notes." >&2
+        exit 1
+      fi
+    done
+    if [[ -f CLAUDE.md ]] && ! grep -Eq '^## Provider Notes$' CLAUDE.md; then
+      echo "CLAUDE.md must keep local content under a Provider Notes section." >&2
+      exit 1
+    fi
+```
+
 ## Harn module connectors
 
 Root manifests can override a provider's connector implementation:
