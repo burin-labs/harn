@@ -44,6 +44,10 @@ pub struct SessionState {
     /// deactivation phase cleared them. Re-entering the session
     /// restores these as the initial active set before matching runs.
     pub active_skills: Vec<String>,
+    /// Tool-calling protocol claimed by the first agent loop that uses
+    /// this session. A transcript is only replayable under the same
+    /// contract that produced its prompt/history.
+    pub tool_format: Option<String>,
 }
 
 impl SessionState {
@@ -60,6 +64,7 @@ impl SessionState {
             child_ids: Vec::new(),
             branched_at_event_index: None,
             active_skills: Vec::new(),
+            tool_format: None,
         }
     }
 }
@@ -192,7 +197,7 @@ pub fn open_or_create(id: Option<String>) -> String {
 }
 
 pub fn open_child_session(parent_id: &str, id: Option<String>) -> String {
-    let resolved = fork(parent_id, id.clone()).unwrap_or_else(|| open_or_create(id));
+    let resolved = open_or_create(id);
     link_child_session(parent_id, &resolved);
     resolved
 }
@@ -290,6 +295,7 @@ pub fn reset_transcript(id: &str) -> bool {
             return false;
         };
         state.transcript = empty_transcript(id);
+        state.tool_format = None;
         state.last_accessed = Instant::now();
         true
     })
@@ -302,13 +308,13 @@ pub fn reset_transcript(id: &str) -> bool {
 /// operation itself can't make `src` look stale and kick it out of
 /// the LRU just to make room for the new fork.
 pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
-    let (src_transcript, dst) = SESSIONS.with(|s| {
+    let (src_transcript, src_tool_format, dst) = SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let src = map.get_mut(src_id)?;
         src.last_accessed = Instant::now();
         let dst = dst_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let forked_transcript = clone_transcript_with_id(&src.transcript, &dst);
-        Some((forked_transcript, dst))
+        Some((forked_transcript, src.tool_format.clone(), dst))
     })?;
     // Ensure cap is respected when inserting the fork.
     open_or_create(Some(dst.clone()));
@@ -316,6 +322,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
         let mut map = s.borrow_mut();
         if let Some(state) = map.get_mut(&dst) {
             state.transcript = src_transcript;
+            state.tool_format = src_tool_format;
             state.last_accessed = Instant::now();
         }
         update_lineage(&mut map, src_id, &dst, None);
@@ -536,7 +543,7 @@ pub fn prompt_state_json(id: &str) -> SessionPromptState {
 pub fn store_transcript(id: &str, transcript: VmValue) {
     SESSIONS.with(|s| {
         if let Some(state) = s.borrow_mut().get_mut(id) {
-            state.transcript = transcript;
+            state.transcript = transcript_with_session_metadata(transcript, state);
             state.last_accessed = Instant::now();
         }
     });
@@ -669,6 +676,46 @@ pub fn active_skills(id: &str) -> Vec<String> {
     })
 }
 
+/// Claim the tool-calling contract for a session.
+///
+/// The first loop against a named session records its `tool_format`.
+/// Later re-entry must use the same format so prompt/history generated
+/// under a text contract is never replayed as native, or vice versa.
+pub fn claim_tool_format(id: &str, tool_format: &str) -> Result<(), String> {
+    let tool_format = tool_format.trim();
+    if tool_format.is_empty() {
+        return Ok(());
+    }
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!("agent session '{id}' does not exist"));
+        };
+        match state.tool_format.as_deref() {
+            Some(existing) if existing != tool_format => Err(format!(
+                "agent session '{id}' is locked to tool_format='{existing}', but this run requested tool_format='{tool_format}'. Start a new session or fork/reset the transcript before changing tool mode."
+            )),
+            Some(_) => {
+                state.last_accessed = Instant::now();
+                Ok(())
+            }
+            None => {
+                state.tool_format = Some(tool_format.to_string());
+                state.last_accessed = Instant::now();
+                Ok(())
+            }
+        }
+    })
+}
+
+pub fn tool_format(id: &str) -> Option<String> {
+    SESSIONS.with(|s| {
+        s.borrow()
+            .get(id)
+            .and_then(|state| state.tool_format.clone())
+    })
+}
+
 fn empty_transcript(id: &str) -> VmValue {
     use crate::llm::helpers::new_transcript_with;
     new_transcript_with(Some(id.to_string()), Vec::new(), None, None)
@@ -706,6 +753,28 @@ fn clone_transcript_with_parent(transcript: &VmValue, parent_id: &str) -> VmValu
         )]))),
     };
     next.insert("metadata".to_string(), metadata);
+    VmValue::Dict(Rc::new(next))
+}
+
+fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -> VmValue {
+    let Some(dict) = transcript.as_dict() else {
+        return transcript;
+    };
+    let mut next = dict.clone();
+    let mut metadata = match next.get("metadata") {
+        Some(VmValue::Dict(metadata)) => metadata.as_ref().clone(),
+        _ => BTreeMap::new(),
+    };
+    if let Some(tool_format) = state.tool_format.as_ref() {
+        metadata.insert(
+            "tool_format".to_string(),
+            VmValue::String(Rc::from(tool_format.clone())),
+        );
+        metadata.insert("tool_mode_locked".to_string(), VmValue::Bool(true));
+    }
+    if !metadata.is_empty() {
+        next.insert("metadata".to_string(), VmValue::Dict(Rc::new(metadata)));
+    }
     VmValue::Dict(Rc::new(next))
 }
 
@@ -943,20 +1012,17 @@ mod tests {
     }
 
     #[test]
-    fn child_session_forks_parent_transcript() {
+    fn child_session_records_lineage_without_reusing_parent_transcript() {
         reset_session_store();
         let parent = open_or_create(Some("parent-fork-parent".into()));
         inject_message(&parent, make_msg("user", "parent context")).unwrap();
+        claim_tool_format(&parent, "native").unwrap();
 
         let child = open_child_session(&parent, Some("parent-fork-child".into()));
         assert_eq!(message_count(&parent), 1);
-        assert_eq!(message_count(&child), 1);
-
-        let child_messages = messages_json(&child);
-        assert_eq!(
-            child_messages[0]["content"].as_str(),
-            Some("parent context"),
-        );
+        assert_eq!(message_count(&child), 0);
+        assert_eq!(tool_format(&child), None);
+        assert_eq!(parent_id(&child).as_deref(), Some(parent.as_str()));
     }
 
     #[test]

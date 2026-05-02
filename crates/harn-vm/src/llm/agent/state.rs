@@ -917,7 +917,11 @@ impl AgentLoopState {
         let break_unless_phase = config.break_unless_phase.clone();
         let tool_retries = config.tool_retries;
         let tool_backoff_ms = config.tool_backoff_ms;
-        let tool_format = config.tool_format.clone();
+        let tool_format = if config.tool_format.trim().is_empty() {
+            crate::llm_config::default_tool_format(&opts.model, &opts.provider)
+        } else {
+            config.tool_format.clone()
+        };
         let mut transcript_summary = opts.transcript_summary.clone();
         let (session_id, anonymous_session) = if config.session_id.trim().is_empty() {
             (format!("agent_session_{}", uuid::Uuid::now_v7()), true)
@@ -926,6 +930,8 @@ impl AgentLoopState {
             (resolved, false)
         };
         if !anonymous_session {
+            crate::agent_sessions::claim_tool_format(&session_id, &tool_format)
+                .map_err(VmError::Runtime)?;
             let prior = crate::agent_sessions::prompt_state_json(&session_id);
             if transcript_summary.is_none() {
                 transcript_summary = prior.summary.clone();

@@ -620,7 +620,11 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
     let schema_retries = crate::llm::helpers::opt_int(&options, "schema_retries")
         .unwrap_or(profile_defaults.schema_retries) as usize;
     let tool_backoff_ms = crate::llm::helpers::opt_int(&options, "tool_backoff_ms").unwrap_or(1000);
-    let tool_format = crate::llm::helpers::opt_str(&options, "tool_format");
+    let provider = crate::llm::helpers::opt_str(&options, "provider").unwrap_or_default();
+    let model = crate::llm::helpers::opt_str(&options, "model").unwrap_or_default();
+    let tool_format = crate::llm::helpers::opt_str(&options, "tool_format")
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| crate::llm_config::default_tool_format(&model, &provider));
     let done_sentinel = crate::llm::helpers::opt_str(&options, "done_sentinel");
     let break_unless_phase = crate::llm::helpers::opt_str(&options, "break_unless_phase");
     let policy = options.as_ref().and_then(|o| o.get("policy")).map(|v| {
@@ -672,7 +676,7 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
         tool_backoff_ms: tool_backoff_ms as u64,
         schema_retries,
         schema_retry_nudge: crate::llm::parse_schema_nudge(&options),
-        tool_format: tool_format.unwrap_or_default(),
+        tool_format,
         native_tool_fallback,
         auto_compact: None,
         policy,
@@ -1011,12 +1015,13 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn execute_sub_agent_forks_parent_context_and_appends_parent_events() {
+    async fn execute_sub_agent_uses_child_transcript_and_appends_parent_events() {
         crate::agent_sessions::reset_session_store();
         reset_llm_mock_state();
         let parent = crate::agent_sessions::open_or_create(Some("parent-subagent".into()));
         crate::agent_sessions::inject_message(&parent, assistant_message("parent context"))
             .unwrap();
+        crate::agent_sessions::claim_tool_format(&parent, "text").unwrap();
         push_llm_mock(LlmMock {
             text: "child result".to_string(),
             tool_calls: Vec::new(),
@@ -1053,9 +1058,12 @@ mod tests {
         assert_eq!(result.payload["ok"].as_bool(), Some(true));
 
         let child_messages = crate::agent_sessions::messages_json("child-subagent");
+        assert!(!child_messages
+            .iter()
+            .any(|message| message["content"].as_str() == Some("parent context")));
         assert_eq!(
-            child_messages[0]["content"].as_str(),
-            Some("parent context")
+            crate::agent_sessions::tool_format("child-subagent").as_deref(),
+            Some("text")
         );
 
         let parent_events = crate::agent_sessions::snapshot(&parent)

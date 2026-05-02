@@ -79,6 +79,55 @@ pipeline main(task) {
 }
 
 #[test]
+fn tool_format_contract_is_first_class_and_resettable() {
+    let lines = out(r#"
+pipeline main(task) {
+  let s = agent_session_open("tool-contract")
+  log(agent_session_tool_format(s) == nil)
+  agent_session_claim_tool_format(s, "native")
+  log(agent_session_tool_format(s))
+  let conflict = try {
+    agent_session_claim_tool_format(s, "text")
+  }
+  log(is_err(conflict))
+  agent_session_reset(s)
+  log(agent_session_tool_format(s) == nil)
+  agent_session_claim_tool_format(s, "text")
+  log(agent_session_tool_format(s))
+}
+"#);
+    assert_eq!(lines, vec!["true", "native", "true", "true", "text"]);
+}
+
+#[test]
+fn agent_loop_rejects_tool_format_switch_on_same_session() {
+    let lines = out(r#"
+pipeline main(task) {
+  llm_mock_clear()
+  llm_mock({text: "first ##DONE##"})
+  let s = agent_session_open("agent-loop-tool-contract")
+  let first = agent_loop(
+    "first turn",
+    nil,
+    {provider: "mock", model: "mock", session_id: s, max_iterations: 1, tool_format: "text"},
+  )
+  log(first?.tools?.mode)
+  log(agent_session_tool_format(s))
+  let switched = try {
+    agent_loop(
+      "second turn",
+      nil,
+      {provider: "mock", model: "mock", session_id: s, max_iterations: 1, tool_format: "native"},
+    )
+  }
+  log(is_err(switched))
+  log(contains(json_stringify(unwrap_err(switched)), "tool_format"))
+}
+"#);
+    assert_eq!(lines, vec!["text", "text", "true", "true"]);
+}
+
+#[test]
 fn fork_is_independent_in_both_directions() {
     let lines = out(r#"
 pipeline main(task) {
@@ -103,6 +152,23 @@ pipeline main(task) {
 }
 "#);
     assert_eq!(lines, vec!["1", "true", "1", "true", "2", "3", "false"]);
+}
+
+#[test]
+fn fork_carries_tool_format_contract() {
+    let lines = out(r#"
+pipeline main(task) {
+  let src = agent_session_open("tool-fork-src")
+  agent_session_claim_tool_format(src, "native")
+  let dst = agent_session_fork(src, "tool-fork-dst")
+  log(agent_session_tool_format(dst))
+  let conflict = try {
+    agent_session_claim_tool_format(dst, "text")
+  }
+  log(is_err(conflict))
+}
+"#);
+    assert_eq!(lines, vec!["native", "true"]);
 }
 
 #[test]

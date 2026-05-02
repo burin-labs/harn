@@ -48,6 +48,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Union(UNION_DICT_NIL)),
     },
     BuiltinSig {
+        name: "agent_session_claim_tool_format",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
         name: "agent_session_close",
         return_type: Some(BuiltinReturn::Named("nil")),
     },
@@ -90,6 +94,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "agent_session_snapshot",
         return_type: Some(BuiltinReturn::Union(UNION_DICT_NIL)),
+    },
+    BuiltinSig {
+        name: "agent_session_tool_format",
+        return_type: Some(BuiltinReturn::Union(UNION_STRING_NIL)),
     },
     BuiltinSig {
         name: "agent_session_trim",
