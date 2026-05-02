@@ -41,6 +41,8 @@ use super::syntax::{ident_length, parse_ts_call_from};
 
 const TAGGED_OPEN: &str = "<tool_call>";
 const TAGGED_CLOSE: &str = "</tool_call>";
+const TAGGED_OPEN_COMPACT: &str = "<toolcall>";
+const TAGGED_CLOSE_COMPACT: &str = "</toolcall>";
 
 /// Streaming candidate detector for text-mode tool calls.
 ///
@@ -75,6 +77,7 @@ enum DetectorState {
     /// Inside a `<tool_call>...` block. Buffering until `</tool_call>`.
     InTaggedBlock {
         body_start: usize,
+        close_tag: &'static str,
         tool_call_id: String,
     },
     /// Inside a bare `name(` call. Buffering until the TS-call parser
@@ -237,8 +240,8 @@ impl StreamingToolCallDetector {
 
                 // Tagged opener.
                 let rest = &self.buffer[j..];
-                if rest.starts_with(TAGGED_OPEN) {
-                    let body_start = j + TAGGED_OPEN.len();
+                if let Some((open_tag, close_tag)) = tagged_open_at(rest) {
+                    let body_start = j + open_tag.len();
                     let id = self.next_candidate_id();
                     events.push(AgentEvent::ToolCall {
                         session_id: self.session_id.clone(),
@@ -252,12 +255,13 @@ impl StreamingToolCallDetector {
                     });
                     self.state = DetectorState::InTaggedBlock {
                         body_start,
+                        close_tag,
                         tool_call_id: id,
                     };
                     self.cursor = body_start;
                     return true;
                 }
-                if TAGGED_OPEN.starts_with(rest) {
+                if is_partial_tagged_open(rest) {
                     // Partial `<tool_call>` prefix — wait for the rest.
                     self.cursor = i;
                     return false;
@@ -320,18 +324,19 @@ impl StreamingToolCallDetector {
     }
 
     fn scan_tagged(&mut self, events: &mut Vec<AgentEvent>) -> bool {
-        let (body_start, tool_call_id) = match &self.state {
+        let (body_start, close_tag, tool_call_id) = match &self.state {
             DetectorState::InTaggedBlock {
                 body_start,
+                close_tag,
                 tool_call_id,
-            } => (*body_start, tool_call_id.clone()),
+            } => (*body_start, *close_tag, tool_call_id.clone()),
             _ => return false,
         };
-        let Some(close_rel) = self.buffer[body_start..].find(TAGGED_CLOSE) else {
+        let Some(close_rel) = self.buffer[body_start..].find(close_tag) else {
             return false;
         };
         let body_end = body_start + close_rel;
-        let after = body_end + TAGGED_CLOSE.len();
+        let after = body_end + close_tag.len();
         let body = self.buffer[body_start..body_end].trim().to_string();
         let parse_attempt = if body.is_empty() {
             Err("<tool_call> body was empty.".to_string())
@@ -400,6 +405,20 @@ impl StreamingToolCallDetector {
             }
         }
     }
+}
+
+fn tagged_open_at(rest: &str) -> Option<(&'static str, &'static str)> {
+    if rest.starts_with(TAGGED_OPEN) {
+        Some((TAGGED_OPEN, TAGGED_CLOSE))
+    } else if rest.starts_with(TAGGED_OPEN_COMPACT) {
+        Some((TAGGED_OPEN_COMPACT, TAGGED_CLOSE_COMPACT))
+    } else {
+        None
+    }
+}
+
+fn is_partial_tagged_open(rest: &str) -> bool {
+    TAGGED_OPEN.starts_with(rest) || TAGGED_OPEN_COMPACT.starts_with(rest)
 }
 
 fn promote_event(
@@ -559,6 +578,29 @@ mod tests {
                 "<tool_call>\n",
                 "run({ command: \"ls\" })\n",
                 "</tool_call>",
+            ],
+            &mut det,
+        );
+        assert_eq!(events.len(), 2, "events={events:#?}");
+        let (start_id, start_name, parsing) = unwrap_call(&events[0]);
+        assert_eq!(start_name, "");
+        assert_eq!(parsing, Some(true));
+        let (terminal_id, terminal_name, status, parsing, cat) = unwrap_update(&events[1]);
+        assert_eq!(start_id, terminal_id, "ids match across promote");
+        assert_eq!(terminal_name, "run");
+        assert_eq!(status, ToolCallStatus::Pending);
+        assert_eq!(parsing, Some(false));
+        assert!(cat.is_none());
+    }
+
+    #[test]
+    fn compact_tagged_candidate_promotes_when_block_closes() {
+        let mut det = detector(&["run"]);
+        let events = run(
+            &[
+                "<toolcall>\n",
+                "run({ command: \"git status\" })\n",
+                "</toolcall>",
             ],
             &mut det,
         );

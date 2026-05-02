@@ -83,7 +83,9 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             continue;
         }
 
-        if let Some((body, after)) = match_block(src, cursor, "tool_call") {
+        if let Some((body, after)) =
+            match_block(src, cursor, "tool_call").or_else(|| match_block(src, cursor, "toolcall"))
+        {
             match parse_single_tool_call(body, tools_val) {
                 Ok(call) => {
                     let name = call
@@ -104,14 +106,18 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 Err(msg) => errors.push(msg),
             }
             cursor = after;
-        } else if let Some((body, after)) = match_block(src, cursor, "assistant_prose") {
+        } else if let Some((body, after)) = match_block(src, cursor, "assistant_prose")
+            .or_else(|| match_block(src, cursor, "assistantprose"))
+        {
             let trimmed = body.trim();
             if !trimmed.is_empty() {
                 assistant_prose_parts.push(trimmed.to_string());
                 canonical_parts.push(format!("<assistant_prose>\n{trimmed}\n</assistant_prose>"));
             }
             cursor = after;
-        } else if let Some((body, after)) = match_block(src, cursor, "user_response") {
+        } else if let Some((body, after)) = match_block(src, cursor, "user_response")
+            .or_else(|| match_block(src, cursor, "userresponse"))
+        {
             let trimmed = body.trim();
             if !trimmed.is_empty() {
                 user_response_parts.push(trimmed.to_string());
