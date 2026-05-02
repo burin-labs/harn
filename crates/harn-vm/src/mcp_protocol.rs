@@ -44,12 +44,13 @@ pub const UNSUPPORTED_LATEST_SPEC_METHODS: &[UnsupportedMcpMethod] = &[
         role: "client",
         reason: "Harn does not currently expose host root discovery to MCP servers.",
     },
-    UnsupportedMcpMethod {
-        method: "sampling/createMessage",
-        feature: "sampling",
-        role: "client",
-        reason: "Harn does not currently let MCP servers invoke a client-side model sampler.",
-    },
+    // `sampling/createMessage` (client) is supported — handled in
+    // `mcp::handle_inbound_client_request` via
+    // `mcp_sampling::dispatch_inbound_sampling`, which routes the
+    // request through the host bridge's `("mcp", "sample")` operation
+    // and on to Harn's `llm_call`. Intentionally omitted from this
+    // gap list.
+    //
     // `elicitation/create` is supported on both roles — handled in
     // `mcp::stdio_call`/`mcp::http_call` (client) and via `mcp_elicit(...)`
     // (server). It is intentionally omitted from this gap list.
@@ -202,7 +203,6 @@ mod tests {
             "resources/subscribe",
             "resources/unsubscribe",
             "roots/list",
-            "sampling/createMessage",
         ] {
             let response = unsupported_latest_spec_method_response(json!(1), method)
                 .expect("expected explicit unsupported method");
@@ -220,6 +220,16 @@ mod tests {
         // through the elicitation bus (server) or the host bridge
         // (client) instead of the auto-rejection path.
         assert!(unsupported_latest_spec_method("elicitation/create").is_none());
+    }
+
+    #[test]
+    fn sampling_create_message_is_no_longer_in_the_unsupported_gap_list() {
+        // Removed from `UNSUPPORTED_LATEST_SPEC_METHODS` once we
+        // implemented inbound server-to-client sampling (issue #874).
+        // Lookup therefore returns `None` and callers route the method
+        // through `mcp_sampling::dispatch_inbound_sampling` on the
+        // client side instead of the auto-rejection path.
+        assert!(unsupported_latest_spec_method("sampling/createMessage").is_none());
     }
 
     #[test]

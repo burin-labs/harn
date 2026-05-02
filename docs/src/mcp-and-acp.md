@@ -54,9 +54,10 @@ let prompt = mcp_get_prompt(client, "review", {code: "fn main() {}"})
 
 ### MCP client support matrix
 
-Harn's MCP client negotiates protocol version `2025-11-25` and advertises no
-client-side roots, sampling, elicitation, or task capabilities. Servers should
-therefore treat those features as unavailable when connected to Harn.
+Harn's MCP client negotiates protocol version `2025-11-25` and advertises
+the `elicitation` and `sampling` client capabilities. It does not advertise
+client-side roots or task capabilities. Servers should therefore treat
+roots and tasks as unavailable when connected to Harn.
 
 | Method or feature | Harn as MCP client |
 |---|---|
@@ -67,7 +68,7 @@ therefore treat those features as unavailable when connected to Harn.
 | `prompts/list`, `prompts/get` | Supported through prompt builtins |
 | `completion/complete` | Not exposed as a Harn builtin |
 | `roots/list` | Unsupported; Harn does not advertise roots |
-| `sampling/createMessage` | Unsupported; Harn does not advertise sampling |
+| `sampling/createMessage` | Supported; Harn advertises sampling and dispatches inbound requests to the host bridge (`capability="mcp"`, `operation="sample"`). Approved requests route to Harn's `llm_call` and return `{role, content, model, stopReason}` to the originating server. Without an installed bridge, requests are declined with a structured `mcp.samplingDeclined` error so servers can fall back gracefully. |
 | `elicitation/create` | Supported; Harn advertises elicitation and dispatches inbound requests to the host bridge (`capability="mcp"`, `operation="elicit"`) |
 | MCP task methods and task-augmented requests | Unsupported; Harn does not advertise task support |
 
@@ -370,7 +371,7 @@ JSON-RPC error containing `error.data.type = "mcp.unsupportedFeature"`.
 | `completion/complete` | Explicitly unsupported |
 | `resources/subscribe`, `resources/unsubscribe` | Explicitly unsupported |
 | `roots/list` | Explicitly unsupported; client-side roots are not served by Harn |
-| `sampling/createMessage` | Explicitly unsupported; Harn does not let connected servers invoke sampling |
+| `sampling/createMessage` | Server-initiated sampling against the connected client is not currently emitted by the orchestrator-mode catalog; Harn declares the `sampling` capability when acting as a client (see the [client matrix](#mcp-client-support-matrix)). |
 | `elicitation/create` | Supported outbound from script-driven handlers via `mcp_elicit(...)`; inbound client requests to the server are still rejected as normal unknown methods |
 | `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Explicitly unsupported |
 | `tools/call` with `params.task` | Rejected with `-32602`; task-augmented execution is not advertised |

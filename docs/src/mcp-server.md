@@ -292,7 +292,10 @@ messages when watched manifest, prompt, lockfile, or package metadata changes.
 control-plane server for Harn orchestration state, so it supports tools,
 resources, prompts, logging, cancellation, progress, and streamable HTTP
 sessions. It does not expose completions, resource subscriptions, roots,
-sampling, or MCP tasks.
+or MCP tasks. The orchestrator-mode catalog does not currently issue
+`sampling/createMessage` against connected clients (Harn's outbound MCP
+clients accept inbound sampling — see the
+[client docs](mcp-and-acp.html#mcp-client-support-matrix)).
 
 | Method or feature | Status |
 |---|---|
@@ -308,7 +311,7 @@ sampling, or MCP tasks.
 | `completion/complete` | Explicitly unsupported |
 | `resources/subscribe`, `resources/unsubscribe` | Explicitly unsupported |
 | `roots/list` | Explicitly unsupported |
-| `sampling/createMessage` | Explicitly unsupported |
+| `sampling/createMessage` | Server-initiated sampling against the connected client is not emitted by the orchestrator catalog. Harn-as-MCP-client *does* accept inbound `sampling/createMessage` (routed to `llm_call` via the host bridge) — see the [client matrix](mcp-and-acp.html#mcp-client-support-matrix). |
 | `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Explicitly unsupported |
 | `tools/call` with `params.task` | Rejected; task-augmented execution is not advertised |
 
