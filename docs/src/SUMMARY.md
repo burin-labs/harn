@@ -20,7 +20,8 @@
 - [Streams](./streams.md)
 - [Runtime context](./runtime-context.md)
 - [Language specification](./language-spec.md)
-- [ADRs](./adr/0001-pipe-operator.md)
+- [ADR 0001: Pipe operator](./adr/0001-pipe-operator.md)
+- [ADR 0002: Compile-time capability invariants](./adr/0002-compile-time-capability-invariants.md)
 
 # Agent Runtime
 
