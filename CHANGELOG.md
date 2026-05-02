@@ -33,6 +33,24 @@ condensed series summaries instead of full per-patch history.
   scheduler routes `local_repair` and `dirty` to the worker only
   when the policy enables the matching bundle kind.
 
+- **A2A `input-required` / `auth-required` / `rejected` task states (#889).**
+  The A2A adapter's `TaskStatus` enum now covers all six A2A 0.3.0
+  non-final/final state strings. `input-required` is wired into the
+  existing HITL primitives (`ask_user`, `request_approval`,
+  `dual_control`, `escalate_to`): each pause emits a canonical
+  `AgentEvent::HitlRequested` (with a paired `HitlResolved` once the
+  waitpoint resolves), and the `A2aWorkerSink` translates those into
+  `status.state = input-required` transitions plus a structured `hitl`
+  task event so SSE subscribers see the request payload alongside the
+  pause. The ACP adapter advertises matching `hitl_request` /
+  `hitl_resolved` session-update extensions under `_meta.harn`.
+  Synchronous policy denial (`AuthPolicy.authorize` returning
+  `Rejected`) now lands the task in the terminal `rejected` state
+  instead of `failed`, and any `auth`-classified error raised mid-task
+  (HTTP 401 / `invalid_api_key` / `authentication_error`) flips the
+  task into the non-terminal `auth-required` state so clients can
+  re-authenticate and resubscribe.
+
 ## v0.7.54
 
 ### Added
@@ -99,7 +117,6 @@ condensed series summaries instead of full per-patch history.
   `modelPreferences` / `stopSequences` / `metadata` are all forwarded
   through to `llm_call`'s typed boundary so the existing ThinkingConfig
   (#849) and structured-output paths apply unchanged.
-
 - **ACP session modes (#897).** The ACP adapter now implements the
   [session-modes](https://agentclientprotocol.com/protocol/session-modes)
   spec: `session/new` and `session/load` return a `SessionModeState`

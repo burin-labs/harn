@@ -752,8 +752,22 @@ Content-Type: application/json
 {"jsonrpc":"2.0","id":"get-1","method":"tasks/get","params":{"id":"<task-id>"}}
 ```
 
-Task states follow the A2A protocol lifecycle: `submitted`, `working`,
-`completed`, `failed`, `cancelled`.
+Task states follow the A2A 0.3.0 lifecycle:
+
+- **Active**: `submitted`, `working`.
+- **Pause states (non-terminal)**: `input-required` is set while a HITL
+  primitive (`ask_user`, `request_approval`, `dual_control`,
+  `escalate_to`) is suspended on a waitpoint; the SSE stream carries a
+  paired `hitl` event with the request payload, then flips back to
+  `working` when the response arrives. `auth-required` is set when a
+  downstream call inside the script raises an auth-classified error
+  (e.g. an HTTP 401 from an LLM provider); the client is expected to
+  re-authenticate and resubscribe.
+- **Terminal**: `completed`, `failed`, `cancelled`, `rejected`.
+  `rejected` is returned synchronously when the dispatch core's
+  `AuthPolicy` denies the caller before any script work runs (the
+  caller cannot recover by retrying with the same credentials —
+  policy/credentials must change).
 
 Completed task payloads also include `metadata.handoff_ids` and
 `metadata.handoffs` when the served function returned typed handoff artifacts,

@@ -411,9 +411,16 @@ async fn ask_user_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     create_request_waitpoint(&log, &request).await?;
     append_request(&log, &request).await?;
     maybe_notify_host(&request);
+    emit_hitl_requested(&request);
     maybe_apply_mock_response(HitlRequestKind::Question, &request_id, &request.payload).await?;
 
-    match wait_for_request_waitpoint(&request_id, options.timeout).await? {
+    match wait_for_request_waitpoint_with_events(
+        &request_id,
+        HitlRequestKind::Question,
+        options.timeout,
+    )
+    .await?
+    {
         WaitpointOutcome::Completed(record) => {
             let answer = record
                 .value
@@ -521,9 +528,16 @@ async fn request_approval_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     create_request_waitpoint(&log, &request).await?;
     append_request(&log, &request).await?;
     maybe_notify_host(&request);
+    emit_hitl_requested(&request);
     maybe_apply_mock_response(HitlRequestKind::Approval, &request_id, &request.payload).await?;
 
-    match wait_for_request_waitpoint(&request_id, Some(options.deadline)).await? {
+    match wait_for_request_waitpoint_with_events(
+        &request_id,
+        HitlRequestKind::Approval,
+        Some(options.deadline),
+    )
+    .await?
+    {
         WaitpointOutcome::Completed(record) => {
             approval_record_from_waitpoint(&record, "request_approval")
         }
@@ -627,10 +641,12 @@ async fn dual_control_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     create_request_waitpoint(&log, &request).await?;
     append_request(&log, &request).await?;
     maybe_notify_host(&request);
+    emit_hitl_requested(&request);
     maybe_apply_mock_response(HitlRequestKind::DualControl, &request_id, &request.payload).await?;
 
-    match wait_for_request_waitpoint(
+    match wait_for_request_waitpoint_with_events(
         &request_id,
+        HitlRequestKind::DualControl,
         Some(StdDuration::from_millis(HITL_APPROVAL_TIMEOUT_MS)),
     )
     .await?
@@ -696,9 +712,12 @@ async fn escalate_to_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     create_request_waitpoint(&log, &request).await?;
     append_request(&log, &request).await?;
     maybe_notify_host(&request);
+    emit_hitl_requested(&request);
     maybe_apply_mock_response(HitlRequestKind::Escalation, &request_id, &request.payload).await?;
 
-    match wait_for_request_waitpoint(&request_id, None).await? {
+    match wait_for_request_waitpoint_with_events(&request_id, HitlRequestKind::Escalation, None)
+        .await?
+    {
         WaitpointOutcome::Completed(record) => {
             let accepted_at = record.completed_at.clone();
             let reviewer = record.completed_by.clone();
@@ -1333,6 +1352,62 @@ fn maybe_notify_host(request: &HitlRequestEnvelope) {
     );
 }
 
+/// Emit a `HitlRequested` `AgentEvent` so transport adapters
+/// (currently the A2A `A2aWorkerSink`) can flip a task into
+/// `input-required` while the script is suspended on the waitpoint.
+/// No-op when there is no current agent session — the bridge-level
+/// `harn.hitl.requested` notification still fires for hosts that drive
+/// HITL UX through the bridge.
+fn emit_hitl_requested(request: &HitlRequestEnvelope) {
+    let Some(session_id) = crate::agent_sessions::current_session_id() else {
+        return;
+    };
+    crate::agent_events::emit_event(&crate::agent_events::AgentEvent::HitlRequested {
+        session_id,
+        request_id: request.request_id.clone(),
+        kind: request.kind.as_str().to_string(),
+        payload: request.payload.clone(),
+    });
+}
+
+/// Companion to `emit_hitl_requested`: notifies sinks that the
+/// suspended waitpoint has resolved so a paused task can flip back
+/// out of `input-required`. `outcome` is one of `"answered"`,
+/// `"timeout"`, `"cancelled"`, or `"error"`.
+fn emit_hitl_resolved(request_id: &str, kind: HitlRequestKind, outcome: &str) {
+    let Some(session_id) = crate::agent_sessions::current_session_id() else {
+        return;
+    };
+    crate::agent_events::emit_event(&crate::agent_events::AgentEvent::HitlResolved {
+        session_id,
+        request_id: request_id.to_string(),
+        kind: kind.as_str().to_string(),
+        outcome: outcome.to_string(),
+    });
+}
+
+/// Wrapper around `wait_for_request_waitpoint` that emits the
+/// canonical `HitlResolved` `AgentEvent` regardless of which terminal
+/// branch the waitpoint takes (response / timeout / cancellation /
+/// error). Pair-emitted with `emit_hitl_requested` so transport
+/// adapters can bracket the `input-required` pause cleanly without
+/// each `*_impl` having to duplicate the emission at every match arm.
+async fn wait_for_request_waitpoint_with_events(
+    request_id: &str,
+    kind: HitlRequestKind,
+    timeout: Option<StdDuration>,
+) -> Result<WaitpointOutcome, VmError> {
+    let outcome = wait_for_request_waitpoint(request_id, timeout).await;
+    let label = match &outcome {
+        Ok(WaitpointOutcome::Completed(_)) => "answered",
+        Ok(WaitpointOutcome::Timeout) => "timeout",
+        Ok(WaitpointOutcome::Cancelled { .. }) => "cancelled",
+        Err(_) => "error",
+    };
+    emit_hitl_resolved(request_id, kind, label);
+    outcome
+}
+
 fn parse_ask_user_options(value: Option<&VmValue>) -> Result<AskUserOptions, VmError> {
     let Some(value) = value else {
         return Ok(AskUserOptions {
@@ -1963,6 +2038,104 @@ pipeline test(task) {
                         "hitl.escalation_accepted".to_string(),
                     ]
                 );
+            })
+            .await;
+    }
+
+    /// `harn-serve` adapters (A2A `input-required`, ACP `hitl_request`)
+    /// rely on the canonical `AgentEvent::HitlRequested` /
+    /// `AgentEvent::HitlResolved` pair to bracket every HITL pause.
+    /// Pin the contract here so future HITL primitives keep emitting
+    /// the event around their waitpoint blocks.
+    #[tokio::test(flavor = "current_thread")]
+    async fn ask_user_emits_hitl_request_and_resolution_to_agent_event_sinks() {
+        use std::sync::Mutex as StdMutex;
+
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let dir = tempfile::tempdir().expect("tempdir");
+                let session_id = "hitl-session".to_string();
+                let captured: std::sync::Arc<StdMutex<Vec<crate::agent_events::AgentEvent>>> =
+                    std::sync::Arc::new(StdMutex::new(Vec::new()));
+
+                struct CaptureSink(std::sync::Arc<StdMutex<Vec<crate::agent_events::AgentEvent>>>);
+                impl crate::agent_events::AgentEventSink for CaptureSink {
+                    fn handle_event(&self, event: &crate::agent_events::AgentEvent) {
+                        self.0.lock().expect("captured").push(event.clone());
+                    }
+                }
+
+                // Inline the script setup rather than using the
+                // `execute_hitl_script` helper: that helper calls
+                // `reset_thread_local_state` (which wipes the session
+                // store), so any session pushed before it would be
+                // gone by the time `ask_user` runs.
+                crate::reset_thread_local_state();
+                crate::event_log::install_default_for_base_dir(dir.path())
+                    .expect("install event log");
+
+                crate::agent_events::reset_all_sinks();
+                let sink: std::sync::Arc<dyn crate::agent_events::AgentEventSink> =
+                    std::sync::Arc::new(CaptureSink(captured.clone()));
+                crate::agent_events::register_sink(session_id.clone(), sink);
+                crate::agent_sessions::open_or_create(Some(session_id.clone()));
+                let _guard = crate::agent_sessions::enter_current_session(session_id.clone());
+
+                let source = r#"
+pipeline test(task) {
+  host_mock("hitl", "question", {answer: "ok"})
+  let answer: string = ask_user("Are you sure?", {default: "no"})
+  println(answer)
+}
+"#;
+                let chunk = crate::compile_source(source).expect("compile source");
+                let mut vm = Vm::new();
+                register_vm_stdlib(&mut vm);
+                vm.set_source_dir(dir.path());
+                vm.execute(&chunk).await.expect("script runs");
+                assert_eq!(vm.output().trim_end(), "ok");
+
+                let events = captured.lock().expect("captured");
+                let mut iter = events.iter().filter(|event| {
+                    matches!(
+                        event,
+                        crate::agent_events::AgentEvent::HitlRequested { .. }
+                            | crate::agent_events::AgentEvent::HitlResolved { .. }
+                    )
+                });
+                let requested = iter.next().expect("HitlRequested emitted");
+                let resolved = iter.next().expect("HitlResolved emitted");
+                assert!(iter.next().is_none(), "exactly one pair: {events:?}");
+
+                let crate::agent_events::AgentEvent::HitlRequested {
+                    session_id: req_session,
+                    request_id: req_id,
+                    kind: req_kind,
+                    payload,
+                } = requested
+                else {
+                    panic!("expected HitlRequested, got: {requested:?}");
+                };
+                assert_eq!(req_session, &session_id);
+                assert_eq!(req_kind, "question");
+                assert!(req_id.starts_with("hitl_question_"));
+                assert_eq!(payload["prompt"], "Are you sure?");
+
+                let crate::agent_events::AgentEvent::HitlResolved {
+                    request_id: res_id,
+                    kind: res_kind,
+                    outcome,
+                    ..
+                } = resolved
+                else {
+                    panic!("expected HitlResolved, got: {resolved:?}");
+                };
+                assert_eq!(res_id, req_id);
+                assert_eq!(res_kind, "question");
+                assert_eq!(outcome, "answered");
+
+                drop(_guard);
+                crate::agent_events::reset_all_sinks();
             })
             .await;
     }
