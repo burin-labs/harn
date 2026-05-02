@@ -49,4 +49,5 @@ pub(crate) struct CheckArgs {
 pub(crate) enum CheckOutputFormat {
     Text,
     Json,
+    Markdown,
 }

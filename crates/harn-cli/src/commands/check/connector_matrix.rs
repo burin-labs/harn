@@ -32,6 +32,7 @@ pub(crate) fn run(format: CheckOutputFormat, filter: Option<&str>, targets: &[St
     match format {
         CheckOutputFormat::Text => print_text(&rows),
         CheckOutputFormat::Json => print_json(&rows),
+        CheckOutputFormat::Markdown => print!("{}", generate_markdown(&rows)),
     }
 }
 

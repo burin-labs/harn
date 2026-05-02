@@ -874,9 +874,6 @@ async fn async_main() {
         Command::DumpTriggerQuickref(args) => {
             commands::dump_trigger_quickref::run(&args.output, args.check);
         }
-        Command::DumpProviderMatrix(args) => {
-            commands::check::provider_matrix::run_docs(&args.output, args.check);
-        }
         Command::DumpConnectorMatrix(args) => {
             commands::check::connector_matrix::run_docs(&args.output, &args.sources, args.check);
         }

@@ -85,11 +85,13 @@ jobs:
       - run: make fmt-harn
       # Audit gates promoted from release_gate.sh audit so a stale
       # generated artifact (highlight keywords, language-spec mirror,
-      # trigger quickref, docs snippets, release metadata) fails the
+      # trigger quickref, provider/connector matrices, docs snippets,
+      # release metadata) fails the
       # PR instead of waiting until release time.
       - run: make check-highlight
       - run: make check-language-spec
       - run: make check-trigger-quickref
+      - run: make check-provider-matrix
       - run: make check-connector-matrix
       - run: make check-trigger-examples
       - run: make check-docs-snippets

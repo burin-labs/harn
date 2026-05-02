@@ -206,12 +206,21 @@ check-trigger-quickref:
 
 # Regenerate the provider/model capability matrix from capabilities.toml.
 gen-provider-matrix:
-	cargo run --quiet -p harn-cli -- dump-provider-matrix
+	cargo run --quiet -p harn-cli -- check --provider-matrix --format markdown > docs/src/provider-matrix.md
 
 # CI guard: fail if the provider matrix docs drift from capabilities.toml.
 check-provider-matrix:
 	@echo "=== Checking docs/src/provider-matrix.md is up to date ==="
-	@cargo run --quiet -p harn-cli -- dump-provider-matrix --check
+	@set -e; \
+	tmp=$$(mktemp); \
+	trap 'rm -f "$$tmp"' EXIT; \
+	cargo run --quiet -p harn-cli -- check --provider-matrix --format markdown > "$$tmp"; \
+	if ! cmp -s "$$tmp" docs/src/provider-matrix.md; then \
+		echo "error: docs/src/provider-matrix.md is stale relative to capabilities.toml" >&2; \
+		echo "hint: run 'make gen-provider-matrix' and commit the result" >&2; \
+		diff -u docs/src/provider-matrix.md "$$tmp" >&2 || true; \
+		exit 1; \
+	fi
 	@echo "    Harn provider matrix OK."
 
 # Regenerate the connector capability parity matrix from package manifests.
