@@ -706,8 +706,8 @@ The server publishes an A2A AgentCard at
 `GET /.well-known/agent-card.json`, with compatibility aliases at
 `GET /.well-known/a2a-agent`, `GET /.well-known/agent.json`, and
 `GET /agent/card`. The card advertises each exported `pub fn` as an A2A skill
-through `supportedInterfaces`, default input/output modes, capabilities, and
-security declarations. Set
+through `preferredTransport`, `additionalInterfaces`, default input/output
+modes, capabilities, and security declarations. Set
 `--card-signing-secret` or `HARN_SERVE_A2A_CARD_SECRET` to attach an HS256
 signature envelope to the card.
 

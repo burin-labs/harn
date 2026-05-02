@@ -5,13 +5,15 @@
   "expect": "valid",
   "documents": [
     {
+      "protocolVersion": "0.3.0",
       "name": "reviewer",
       "description": "Harn peer agent",
-      "supportedInterfaces": [
+      "url": "https://agent.example.com/a2a",
+      "preferredTransport": "JSONRPC",
+      "additionalInterfaces": [
         {
           "url": "https://agent.example.com/a2a",
-          "protocolBinding": "JSONRPC",
-          "protocolVersion": "0.3.0"
+          "transport": "JSONRPC"
         }
       ],
       "version": "0.7.48",
@@ -25,8 +27,7 @@
       "defaultOutputModes": ["application/json", "text/plain", "application/octet-stream"],
       "capabilities": {
         "streaming": true,
-        "pushNotifications": true,
-        "extendedAgentCard": false
+        "pushNotifications": true
       },
       "skills": [
         {

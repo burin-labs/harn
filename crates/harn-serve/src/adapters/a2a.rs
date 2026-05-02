@@ -283,13 +283,15 @@ impl A2aServer {
             (json!({}), json!([]))
         };
         let mut card = json!({
+            "protocolVersion": A2A_PROTOCOL_VERSION,
             "name": self.agent_name,
             "description": "Harn peer agent",
-            "supportedInterfaces": [
+            "url": public_url,
+            "preferredTransport": "JSONRPC",
+            "additionalInterfaces": [
                 {
                     "url": public_url,
-                    "protocolBinding": "JSONRPC",
-                    "protocolVersion": A2A_PROTOCOL_VERSION,
+                    "transport": "JSONRPC",
                 }
             ],
             "version": env!("CARGO_PKG_VERSION"),
@@ -304,8 +306,7 @@ impl A2aServer {
             "defaultOutputModes": ["application/json", "text/plain", "application/octet-stream"],
             "capabilities": {
                 "streaming": true,
-                "pushNotifications": true,
-                "extendedAgentCard": extended_supported
+                "pushNotifications": true
             },
             "skills": skills
         });
@@ -2556,20 +2557,23 @@ mod tests {
         assert_eq!(card["name"], "server");
         assert_eq!(card["description"], "Harn peer agent");
         assert_eq!(card["version"], env!("CARGO_PKG_VERSION"));
-        assert!(card.get("url").is_none(), "card must not emit legacy url");
+        assert_eq!(card["protocolVersion"], A2A_PROTOCOL_VERSION);
+        assert_eq!(card["url"], public_url);
+        assert_eq!(card["preferredTransport"], "JSONRPC");
         assert!(
-            card.get("protocolVersion").is_none(),
-            "card must not emit legacy top-level protocolVersion"
+            card.get("supportedInterfaces").is_none(),
+            "card must not emit legacy supportedInterfaces"
         );
         assert!(
             card.get("interfaces").is_none(),
             "card must not emit legacy interfaces"
         );
-        assert_eq!(card["supportedInterfaces"][0]["url"], public_url);
-        assert_eq!(card["supportedInterfaces"][0]["protocolBinding"], "JSONRPC");
         assert_eq!(
-            card["supportedInterfaces"][0]["protocolVersion"],
-            A2A_PROTOCOL_VERSION
+            card["additionalInterfaces"],
+            json!([{
+                "url": public_url,
+                "transport": "JSONRPC",
+            }])
         );
         assert_eq!(card["securitySchemes"], json!({}));
         assert_eq!(card["security"], json!([]));
@@ -2583,9 +2587,12 @@ mod tests {
         );
         assert_eq!(card["capabilities"]["streaming"], true);
         assert_eq!(card["capabilities"]["pushNotifications"], true);
+        assert!(
+            card["capabilities"].get("extendedAgentCard").is_none(),
+            "authenticated extended-card support belongs on supportsAuthenticatedExtendedCard"
+        );
         // The default test_server configures no auth methods, so the
         // extended-card capability is advertised as unsupported.
-        assert_eq!(card["capabilities"]["extendedAgentCard"], false);
         assert_eq!(card["supportsAuthenticatedExtendedCard"], false);
         assert_eq!(card["skills"][0]["id"], "triage");
         assert_eq!(card["skills"][0]["tags"], json!(["harn", "function"]));
@@ -3082,14 +3089,15 @@ pub fn triage(task: string) -> string {
 
         let card = &response["result"];
         assert_eq!(card["name"], "server");
+        assert_eq!(card["protocolVersion"], A2A_PROTOCOL_VERSION);
+        assert_eq!(card["url"], "https://agent.example");
+        assert_eq!(card["preferredTransport"], "JSONRPC");
+        assert_eq!(card["additionalInterfaces"][0]["transport"], "JSONRPC");
         assert_eq!(
-            card["supportedInterfaces"][0]["protocolVersion"],
-            A2A_PROTOCOL_VERSION
-        );
-        assert_eq!(
-            card["supportedInterfaces"][0]["url"],
+            card["additionalInterfaces"][0]["url"],
             "https://agent.example"
         );
+        assert!(card.get("supportedInterfaces").is_none());
         assert_eq!(card["metadata"]["extendedAgentCard"], true);
         assert_eq!(card["metadata"]["principal"], "api-key");
         assert_eq!(card["securitySchemes"]["apiKey"]["type"], "apiKey");
@@ -3110,7 +3118,7 @@ pub fn triage(task: string) -> string {
         );
 
         let card = server.agent_card("https://agent.example");
-        assert_eq!(card["capabilities"]["extendedAgentCard"], true);
+        assert!(card["capabilities"].get("extendedAgentCard").is_none());
         assert_eq!(card["supportsAuthenticatedExtendedCard"], true);
         assert_eq!(card["securitySchemes"]["apiKey"]["type"], "apiKey");
         assert_eq!(card["security"][0]["apiKey"], json!([]));
