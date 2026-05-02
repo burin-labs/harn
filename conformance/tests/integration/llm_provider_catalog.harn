@@ -5,7 +5,7 @@ pipeline test(task) {
   let ollama = llm_model_info("ollama:qwen3:30b-a3b")
   assert_eq(ollama.id, "qwen3:30b-a3b")
   assert_eq(ollama.provider, "ollama")
-  assert_eq(ollama.tool_format, "text")
+  assert_eq(ollama.tool_format, "native")
   assert(ollama.auth_available, "ollama should not require API auth")
   let known = llm_known_models()
   assert(len(known.filter({ name -> name == "mid" })) == 1, "known aliases include mid")

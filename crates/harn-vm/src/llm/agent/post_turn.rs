@@ -33,6 +33,7 @@
 //!     (bridge messages, watch paths, timer), inject the wake-reason
 //!     feedback message, Continue
 //!   - `AfterCurrentOperation` host messages → Continue
+//!   - native persistent answer after at least one tool action → Break
 //!   - `consecutive_text_only > max_nudges` → final_status=stuck,
 //!     Break
 //!   - action-turn nudge (or custom nudge) injection, Continue
@@ -703,6 +704,27 @@ pub(super) async fn run_post_turn(
         )
         .await?;
         return Ok(IterationOutcome::Continue);
+    }
+
+    let native_answer_after_action = ctx.tool_format == "native"
+        && ctx.persistent
+        && !ctx.daemon
+        && ctx.has_tools
+        && !state.all_tools_used.is_empty()
+        && !call_result.text.trim().is_empty();
+    if native_answer_after_action {
+        emit_post_agent_turn_hook(
+            ctx.session_id,
+            iteration,
+            serde_json::json!({
+                "iteration": iteration,
+                "failed": false,
+                "status": "answered_after_action",
+                "text": call_result.text.clone(),
+            }),
+        )
+        .await?;
+        return Ok(IterationOutcome::Break);
     }
 
     state.consecutive_text_only += 1;

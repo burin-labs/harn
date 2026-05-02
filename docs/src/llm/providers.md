@@ -89,6 +89,15 @@ if "bm25" in caps.tool_search {
 }
 ```
 
+The same matrix is the source of truth for Harn's default tool-calling
+mode. Alias-level `tool_format` still wins when set explicitly, but
+otherwise a matrix row with `native_tools = true` makes
+`agent_loop()` and `model-info` choose native provider tools for that
+provider/model route. Model-catalog display tags are derived from this
+matrix too; legacy `models.*.capabilities` entries are parsed for
+backwards compatibility but do not override runtime capability
+resolution.
+
 Projects override or extend the shipped table in `harn.toml` — useful
 for flagging a proxied OpenAI-compat endpoint as supporting
 `tool_search` ahead of a Harn release that knows about it natively:

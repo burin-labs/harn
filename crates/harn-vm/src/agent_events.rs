@@ -864,6 +864,46 @@ pub fn reset_all_sinks() {
     }
 }
 
+/// Mirror externally-registered sinks from `source_session_id` onto
+/// `target_session_id` without moving ownership. Transports such as ACP
+/// register sinks on the outer prompt session before a script runs; scripts
+/// may then open a first-class agent transcript and route `agent_loop` events
+/// through that inner id. Mirroring keeps the transport subscribed to the
+/// in-run child transcript while preserving explicit session ids.
+pub fn mirror_session_sinks(source_session_id: &str, target_session_id: &str) {
+    if source_session_id.is_empty() || target_session_id.is_empty() {
+        return;
+    }
+    if source_session_id == target_session_id {
+        return;
+    }
+    let mut reg = external_sinks().write().expect("sink registry poisoned");
+    let Some(source_sinks) = reg.get(source_session_id).cloned() else {
+        return;
+    };
+    let target = reg.entry(target_session_id.to_string()).or_default();
+    #[cfg(test)]
+    {
+        for source in source_sinks {
+            let already_present = target
+                .iter()
+                .any(|existing| Arc::ptr_eq(&existing.sink, &source.sink));
+            if !already_present {
+                target.push(source);
+            }
+        }
+    }
+    #[cfg(not(test))]
+    {
+        for source in source_sinks {
+            let already_present = target.iter().any(|existing| Arc::ptr_eq(existing, &source));
+            if !already_present {
+                target.push(source);
+            }
+        }
+    }
+}
+
 /// Emit an event to external sinks registered for this session. Pipeline
 /// closure subscribers are NOT called by this function — the agent
 /// loop owns that path because it needs its async VM context.
@@ -977,6 +1017,24 @@ mod tests {
         clear_session_sinks("session-a");
         assert_eq!(session_external_sink_count("session-a"), 0);
         assert_eq!(session_external_sink_count("session-b"), 1);
+        reset_all_sinks();
+    }
+
+    #[test]
+    fn newly_opened_child_session_inherits_current_external_sinks() {
+        reset_all_sinks();
+        let delivered = Arc::new(AtomicUsize::new(0));
+        register_sink("outer-session", Arc::new(CountingSink(delivered.clone())));
+        {
+            let _guard = crate::agent_sessions::enter_current_session("outer-session");
+            let inner = crate::agent_sessions::open_or_create(None);
+            assert_ne!(inner, "outer-session");
+            emit_event(&AgentEvent::TurnStart {
+                session_id: inner,
+                iteration: 0,
+            });
+        }
+        assert_eq!(delivered.load(Ordering::SeqCst), 1);
         reset_all_sinks();
     }
 
