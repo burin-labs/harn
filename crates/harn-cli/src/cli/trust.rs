@@ -12,6 +12,8 @@ pub(crate) enum TrustCommand {
     Query(TrustQueryArgs),
     /// Verify the trust graph hash chain.
     VerifyChain(TrustVerifyChainArgs),
+    /// Export the trust graph as an OpenTrustGraph `opentrustgraph-chain/v0` envelope.
+    Export(TrustExportArgs),
     /// Promote an agent to a higher autonomy tier.
     Promote(TrustPromoteArgs),
     /// Demote an agent to a lower autonomy tier.
@@ -95,6 +97,16 @@ pub(crate) struct TrustVerifyChainArgs {
     /// Emit JSON instead of human-readable output.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct TrustExportArgs {
+    /// Optional output path. When omitted, the JSON envelope is written to stdout.
+    #[arg(long, short = 'o')]
+    pub output: Option<std::path::PathBuf>,
+    /// Emit a single-line JSON document instead of pretty-printed output.
+    #[arg(long)]
+    pub compact: bool,
 }
 
 #[derive(Debug, Args)]

@@ -121,7 +121,8 @@ pub(crate) use trigger::{TriggerArgs, TriggerCancelArgs, TriggerCommand, Trigger
 // parser tests only; they're matched via destructuring elsewhere.
 #[allow(unused_imports)]
 pub(crate) use trust::{
-    TrustArgs, TrustCommand, TrustOutcomeArg, TrustQueryArgs, TrustTierArg, TrustVerifyChainArgs,
+    TrustArgs, TrustCommand, TrustExportArgs, TrustOutcomeArg, TrustQueryArgs, TrustTierArg,
+    TrustVerifyChainArgs,
 };
 pub(crate) use verify::VerifyArgs;
 pub(crate) use viz::VizArgs;

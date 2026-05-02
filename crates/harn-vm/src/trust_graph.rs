@@ -13,6 +13,7 @@ use crate::event_log::{
 use crate::orchestration::CapabilityPolicy;
 
 pub const OPENTRUSTGRAPH_SCHEMA_V0: &str = "opentrustgraph/v0";
+pub const OPENTRUSTGRAPH_CHAIN_SCHEMA_V0: &str = "opentrustgraph-chain/v0";
 pub const TRUST_GRAPH_RECORDS_TOPIC: &str = "trust_graph.records";
 pub const TRUST_GRAPH_GLOBAL_TOPIC: &str = "trust_graph";
 pub const TRUST_GRAPH_LEGACY_GLOBAL_TOPIC: &str = "trust.graph";
@@ -201,6 +202,39 @@ pub struct TrustChainReport {
     pub root_hash: Option<String>,
     pub broken_at_event_id: Option<EventId>,
     pub errors: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TrustChainExportProducer {
+    pub name: String,
+    pub version: String,
+}
+
+impl Default for TrustChainExportProducer {
+    fn default() -> Self {
+        Self {
+            name: "harn".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TrustChainExportMetadata {
+    pub topic: String,
+    pub total: u64,
+    pub root_hash: Option<String>,
+    pub verified: bool,
+    #[serde(with = "time::serde::rfc3339")]
+    pub generated_at: OffsetDateTime,
+    pub producer: TrustChainExportProducer,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TrustChainExport {
+    pub schema: String,
+    pub chain: TrustChainExportMetadata,
+    pub records: Vec<TrustRecord>,
 }
 
 fn global_topic() -> Result<Topic, LogError> {
@@ -405,6 +439,24 @@ pub async fn verify_trust_chain(log: &Arc<AnyEventLog>) -> Result<TrustChainRepo
         root_hash: records.last().map(|(_, record)| record.entry_hash.clone()),
         broken_at_event_id,
         errors,
+    })
+}
+
+pub async fn export_trust_chain(log: &Arc<AnyEventLog>) -> Result<TrustChainExport, LogError> {
+    let (topic, records_with_ids) = preferred_chain_records(log).await?;
+    let report = verify_trust_chain(log).await?;
+    let records: Vec<TrustRecord> = records_with_ids.into_iter().map(|(_, r)| r).collect();
+    Ok(TrustChainExport {
+        schema: OPENTRUSTGRAPH_CHAIN_SCHEMA_V0.to_string(),
+        chain: TrustChainExportMetadata {
+            topic: topic.as_str().to_string(),
+            total: records.len() as u64,
+            root_hash: records.last().map(|record| record.entry_hash.clone()),
+            verified: report.verified,
+            generated_at: OffsetDateTime::now_utc(),
+            producer: TrustChainExportProducer::default(),
+        },
+        records,
     })
 }
 
@@ -970,6 +1022,68 @@ mod tests {
             .errors
             .iter()
             .any(|error| error.contains("previous_hash mismatch")));
+    }
+
+    #[tokio::test]
+    async fn export_trust_chain_emits_envelope_matching_chain_schema() {
+        let log: Arc<AnyEventLog> = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(16)));
+        let first = append_trust_record(
+            &log,
+            &TrustRecord::new(
+                "bot",
+                "github.issue.opened",
+                None,
+                TrustOutcome::Success,
+                "trace-1",
+                AutonomyTier::Suggest,
+            ),
+        )
+        .await
+        .unwrap();
+        let second = append_trust_record(
+            &log,
+            &TrustRecord::new(
+                "bot",
+                "trust.promote",
+                Some("maintainer-1".to_string()),
+                TrustOutcome::Success,
+                "trace-2",
+                AutonomyTier::ActAuto,
+            ),
+        )
+        .await
+        .unwrap();
+
+        let export = export_trust_chain(&log).await.unwrap();
+        assert_eq!(export.schema, OPENTRUSTGRAPH_CHAIN_SCHEMA_V0);
+        assert_eq!(export.chain.topic, TRUST_GRAPH_GLOBAL_TOPIC);
+        assert_eq!(export.chain.total, 2);
+        assert!(export.chain.verified);
+        assert_eq!(
+            export.chain.root_hash.as_deref(),
+            Some(second.entry_hash.as_str())
+        );
+        assert_eq!(export.records.len(), 2);
+        assert_eq!(export.records[0].entry_hash, first.entry_hash);
+        assert_eq!(export.records[1].entry_hash, second.entry_hash);
+        assert_eq!(export.chain.producer.name, "harn");
+
+        let envelope_json = serde_json::to_value(&export).unwrap();
+        assert_eq!(envelope_json["schema"], OPENTRUSTGRAPH_CHAIN_SCHEMA_V0);
+        assert_eq!(envelope_json["chain"]["total"], 2);
+        assert_eq!(envelope_json["chain"]["verified"], true);
+        assert!(envelope_json["records"].as_array().unwrap().len() == 2);
+    }
+
+    #[tokio::test]
+    async fn export_trust_chain_handles_empty_log() {
+        let log: Arc<AnyEventLog> = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(16)));
+        let export = export_trust_chain(&log).await.unwrap();
+        assert_eq!(export.schema, OPENTRUSTGRAPH_CHAIN_SCHEMA_V0);
+        assert_eq!(export.chain.total, 0);
+        assert!(export.chain.verified);
+        assert!(export.chain.root_hash.is_none());
+        assert!(export.records.is_empty());
     }
 
     #[tokio::test]

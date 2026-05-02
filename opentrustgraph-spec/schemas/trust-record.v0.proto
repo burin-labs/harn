@@ -1,0 +1,126 @@
+// SPDX-License-Identifier: Apache-2.0
+// OpenTrustGraph v0 wire format (Protocol Buffers).
+//
+// This .proto mirrors the canonical JSON Schema in
+// `trust-record.v0.schema.json` and `trust-chain.v0.schema.json`. It is
+// provided so runtimes that prefer a binary stream encoding (e.g. Kafka,
+// gRPC, Temporal task queues) can adopt the same shape without inventing
+// a parallel record model.
+//
+// JSON remains the canonical interchange and the basis for the SHA-256
+// `entry_hash`. Implementations that ingest Protobuf MUST round-trip a
+// record through canonical JSON before recomputing or comparing
+// `entry_hash` values; see CONFORMANCE.md for the full hash contract.
+
+syntax = "proto3";
+
+package opentrustgraph.v0;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_package = "com.harnlang.opentrustgraph.v0";
+option java_multiple_files = true;
+option go_package = "github.com/burin-labs/opentrustgraph-spec/gen/go/opentrustgraph/v0;opentrustgraphv0";
+
+// Outcome of a single autonomy or control-plane decision.
+enum Outcome {
+  OUTCOME_UNSPECIFIED = 0;
+  OUTCOME_SUCCESS = 1;
+  OUTCOME_FAILURE = 2;
+  OUTCOME_DENIED = 3;
+  OUTCOME_TIMEOUT = 4;
+}
+
+// Autonomy tier in force when the record was emitted.
+enum AutonomyTier {
+  AUTONOMY_TIER_UNSPECIFIED = 0;
+  AUTONOMY_TIER_SHADOW = 1;
+  AUTONOMY_TIER_SUGGEST = 2;
+  AUTONOMY_TIER_ACT_WITH_APPROVAL = 3;
+  AUTONOMY_TIER_ACT_AUTO = 4;
+}
+
+// One autonomy, approval, or control-plane event in an append-only chain.
+//
+// Required fields are marked with [required] in the comments per
+// proto3 convention; the runtime validator enforces them and the JSON
+// Schema is the normative source of truth.
+message TrustRecord {
+  // Schema discriminator, always "opentrustgraph/v0".
+  string schema = 1;
+
+  // Globally unique record id. UUIDv7 is recommended.
+  string record_id = 2;
+
+  // Logical agent identifier or runtime-owned agent name.
+  string agent = 3;
+
+  // Action class evaluated, e.g. "issue.label", "pr.merge", "deploy.prod".
+  string action = 4;
+
+  // Approver actor. Empty string means "no approval gate applied".
+  // (Use the JSON null encoding when transcoding back to JSON.)
+  string approver = 5;
+
+  Outcome outcome = 6;
+
+  // Execution trace id tying the record to the originating run.
+  string trace_id = 7;
+
+  AutonomyTier autonomy_tier = 8;
+
+  google.protobuf.Timestamp timestamp = 9;
+
+  // Marginal cost in USD attributed to the action. Optional; encode as
+  // 0 with `has_cost_usd = false` when unset.
+  double cost_usd = 10;
+  bool has_cost_usd = 11;
+
+  // 1-based position in the append-only trust graph chain.
+  uint64 chain_index = 12;
+
+  // Prior record's entry_hash. Empty string means "first record".
+  // Encoded values use the "sha256:<hex>" form to match the JSON schema.
+  string previous_hash = 13;
+
+  // SHA-256 hash over the canonical JSON record with `entry_hash`
+  // removed. Encoded as "sha256:<hex>".
+  string entry_hash = 14;
+
+  // Runtime-specific metadata bag. Consumers MUST preserve unknown keys.
+  google.protobuf.Struct metadata = 15;
+}
+
+// Producer descriptor for a chain export envelope.
+message TrustChainExportProducer {
+  string name = 1;
+  string version = 2;
+}
+
+// Chain-level metadata wrapping an ordered TrustRecord list.
+message TrustChainExportMetadata {
+  // Canonical event-log topic or exported stream name.
+  string topic = 1;
+
+  // Number of records in this ordered export.
+  uint64 total = 2;
+
+  // Final record's entry_hash. Empty string means the export is empty.
+  string root_hash = 3;
+
+  // Whether the producer verified record contracts, required approval
+  // evidence, record hashes, and hash linkage before export.
+  bool verified = 4;
+
+  google.protobuf.Timestamp generated_at = 5;
+  TrustChainExportProducer producer = 6;
+}
+
+// `opentrustgraph-chain/v0` envelope wrapping ordered TrustRecord events.
+message TrustChainExport {
+  // Schema discriminator, always "opentrustgraph-chain/v0".
+  string schema = 1;
+  TrustChainExportMetadata chain = 2;
+  repeated TrustRecord records = 3;
+}
