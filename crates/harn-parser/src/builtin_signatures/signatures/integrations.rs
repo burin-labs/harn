@@ -8,6 +8,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "connector_shared_verify_jwt_inline",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "egress_policy",
         return_type: Some(BuiltinReturn::Named("dict")),
     },

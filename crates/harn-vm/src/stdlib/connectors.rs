@@ -1,9 +1,13 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use jsonwebtoken::jwk::JwkSet;
+use serde_json::Value as JsonValue;
+
 use crate::bridge::json_result_to_vm_value;
 use crate::connectors::{
-    active_connector_client, harn_module::active_harn_connector_ctx, ClientError,
+    active_connector_client, harn_module::active_harn_connector_ctx, ClientError, JwtKeySource,
+    JwtVerificationOptions,
 };
 use crate::event_log::{EventLog, LogEvent, Topic};
 use crate::llm::vm_value_to_json;
@@ -117,6 +121,39 @@ pub(crate) fn register_connector_builtins(vm: &mut Vm) {
             .record_custom_counter(name.as_str(), amount.max(0) as u64);
         Ok(VmValue::Nil)
     });
+
+    vm.register_async_builtin("connector_shared_verify_jwt_inline", |args| async move {
+        let token = required_string_arg(&args, 0, "connector_shared_verify_jwt_inline", "token")?;
+        let jwks = required_json_arg(&args, 1, "connector_shared_verify_jwt_inline", "jwks")?;
+        let options = optional_json_arg(&args, 2, "connector_shared_verify_jwt_inline")?;
+        let jwks: JwkSet = serde_json::from_value(jwks).map_err(|error| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "connector_shared_verify_jwt_inline: invalid JWKS: {error}"
+            ))))
+        })?;
+        let verify_options = jwt_verify_options(&options)?;
+        let http = reqwest::Client::new();
+        let result = crate::connectors::shared::verify_jwt_json(
+            &http,
+            &token,
+            JwtKeySource::Inline(&jwks),
+            &verify_options,
+        )
+        .await;
+        let value = match result {
+            Ok(claims) => serde_json::json!({
+                "ok": true,
+                "claims": claims,
+                "error": null,
+            }),
+            Err(error) => serde_json::json!({
+                "ok": false,
+                "claims": null,
+                "error": error.to_string(),
+            }),
+        };
+        Ok(json_result_to_vm_value(&value))
+    });
 }
 
 fn required_string_arg(
@@ -155,6 +192,94 @@ fn optional_headers_arg(
         Some(_other) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
             "{builtin}: headers must be a dict when provided"
         ))))),
+    }
+}
+
+fn required_json_arg(
+    args: &[VmValue],
+    index: usize,
+    builtin: &str,
+    label: &str,
+) -> Result<JsonValue, VmError> {
+    match args.get(index) {
+        Some(VmValue::Dict(_)) => Ok(vm_value_to_json(&args[index])),
+        Some(value) if !matches!(value, VmValue::Nil) => {
+            Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "{builtin}: {label} must be a dict, got {}",
+                value.type_name()
+            )))))
+        }
+        _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{builtin}: {label} is required"
+        ))))),
+    }
+}
+
+fn optional_json_arg(args: &[VmValue], index: usize, builtin: &str) -> Result<JsonValue, VmError> {
+    match args.get(index) {
+        Some(VmValue::Dict(_)) => Ok(vm_value_to_json(&args[index])),
+        Some(VmValue::Nil) | None => Ok(JsonValue::Object(Default::default())),
+        Some(value) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{builtin}: options must be a dict, got {}",
+            value.type_name()
+        ))))),
+    }
+}
+
+fn jwt_verify_options(options: &JsonValue) -> Result<JwtVerificationOptions, VmError> {
+    let mut verify_options = JwtVerificationOptions::default();
+    if let Some(issuer) = string_field(options, &["issuer", "iss"])? {
+        verify_options = verify_options.with_issuer(issuer);
+    }
+    if let Some(audience) = string_field(options, &["audience", "aud"])? {
+        verify_options = verify_options.with_audience(audience);
+    }
+    let mut required = Vec::new();
+    if options
+        .get("require_exp")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false)
+    {
+        required.push("exp".to_string());
+    }
+    if verify_options.issuer.is_some() {
+        required.push("iss".to_string());
+    }
+    if verify_options.audience.is_some() {
+        required.push("aud".to_string());
+    }
+    if !required.is_empty() {
+        verify_options = verify_options.require_spec_claims(required);
+    }
+    Ok(verify_options)
+}
+
+fn string_field(options: &JsonValue, names: &[&str]) -> Result<Option<String>, VmError> {
+    for name in names {
+        match options.get(*name) {
+            Some(JsonValue::String(value)) if !value.trim().is_empty() => {
+                return Ok(Some(value.clone()));
+            }
+            Some(JsonValue::Null) | None => {}
+            Some(value) => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "connector_shared_verify_jwt_inline: option `{name}` must be a string, got {}",
+                    json_type_name(value)
+                )))));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn json_type_name(value: &JsonValue) -> &'static str {
+    match value {
+        JsonValue::Null => "nil",
+        JsonValue::Bool(_) => "bool",
+        JsonValue::Number(_) => "number",
+        JsonValue::String(_) => "string",
+        JsonValue::Array(_) => "list",
+        JsonValue::Object(_) => "dict",
     }
 }
 

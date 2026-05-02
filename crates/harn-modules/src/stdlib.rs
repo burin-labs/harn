@@ -53,6 +53,10 @@ pub(crate) const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("acp", include_str!("stdlib/stdlib_acp.harn")),
     ("triggers", include_str!("stdlib/stdlib_triggers.harn")),
     (
+        "connectors/shared",
+        include_str!("stdlib/stdlib_connectors_shared.harn"),
+    ),
+    (
         "connectors/github",
         include_str!("stdlib/stdlib_connectors_github.harn"),
     ),

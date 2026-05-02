@@ -1,0 +1,68 @@
+import {
+  oauth2_token_refresh,
+  paginate_cursor,
+  rate_limit_token_bucket,
+  verify_hmac_signature,
+  verify_jwt,
+} from "std/connectors/shared"
+
+pipeline test(task) {
+  let signature = "sha256=" + hmac_sha256("secret", "payload")
+  println(verify_hmac_signature("payload", signature, "secret", "sha256"))
+  println(verify_hmac_signature("payload", signature, "wrong", "sha256"))
+  let root = project_root() ?? cwd()
+  let private_key = read_file(path_join(root, "conformance/helpers/github_app_test_key.pem"))
+  let token = jwt_sign("RS256", {iss: "issuer", aud: "audience", exp: 4102444800}, private_key)
+  let jwt_result = verify_jwt(
+    token,
+    nil,
+    {
+      issuer: "issuer",
+      audience: "audience",
+      inline_jwks: {
+        keys: [
+          {
+            kty: "RSA",
+            n: "-g_nRee8veA57dDDv-MV0XO3YcFwdhBjZ4Md5Z_V6WpoSRLQRydJ_PXKdOO4Nlv519ugR5RIxYeyqc3kc1gEYTS_ct_TOLEXR8j9vDvOXQRJWkwAJOdtAFxYSxxdr_PuKSUg7O_LaEiaEXxTVpn3hWLBcwJOMvIJ6HGCZYf9WJBjxKFpb7A5arSZbxNJqfLDauQYot_bThGdhEBpVhYBvr6olX5EOONL6h2zAK1n7mT0-zOxCsKh2vO5LRUGKnsfb074Z7fuzbRNsaY8Q1vk75vvNKupd6wYjgbzaLJY7l9GEdWsK_cQrcmyBno9yWvjU-JpEzURJvcRO62Rj6lGew",
+            e: "AQAB",
+          },
+        ],
+      },
+    },
+  )
+  println(jwt_result.ok)
+  println(jwt_result.claims.iss)
+  let config = {capacity: 1, refill_tokens: 1, refill_interval_ms: 1000}
+  let first = rate_limit_token_bucket(nil, config, 1000)
+  let second = rate_limit_token_bucket(first.state, config, 1000)
+  let third = rate_limit_token_bucket(second.state, config, 2000)
+  println(first.allowed)
+  println(second.allowed)
+  println(second.retry_after_ms)
+  println(third.allowed)
+  let pages = [{results: [{id: "a"}], next_cursor: "page-2"}, {results: [{id: "b"}], next_cursor: nil}]
+  let paged = paginate_cursor(
+    "https://api.example/items",
+    { _url, cursor ->
+      if cursor == nil {
+        return pages[0]
+      }
+      return pages[1]
+    },
+    "/next_cursor",
+  )
+  println(len(paged.items))
+  println(paged.items[1].id)
+  println(paged.complete)
+  http_mock(
+    "POST",
+    "https://auth.example/token",
+    {status: 200, body: "{\"access_token\":\"new-token\",\"expires_in\":3600}", headers: {}},
+  )
+  let refreshed = oauth2_token_refresh("client-id", "client-secret", "refresh-token", "https://auth.example/token")
+  println(refreshed.ok)
+  println(refreshed.access_token)
+  let calls = http_mock_calls({include_sensitive: true})
+  println(contains(calls[0].body, "grant_type=refresh_token"))
+  println(calls[0].headers["content-type"])
+}

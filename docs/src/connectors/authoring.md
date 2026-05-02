@@ -527,6 +527,25 @@ compatibility shims and first-party connector packages:
 - Standard Webhooks: `webhook-id`, `webhook-timestamp`, and
   `webhook-signature: v1,<base64>`
 
+Harn-authored connector packages can import `std/connectors/shared` for the
+package-level equivalent helpers:
+
+```harn
+import {
+  oauth2_token_refresh,
+  paginate_cursor,
+  rate_limit_token_bucket,
+  verify_hmac_signature,
+  verify_jwt,
+} from "std/connectors/shared"
+```
+
+Use the Rust `verify_hmac_signed(...)` path for runtime HTTP ingress when you
+need timestamp-window checks, audit events, or a provider-specific signed
+message format. Use `std/connectors/shared` inside Harn package exports for
+local HMAC checks, JWT/JWKS verification, OAuth2 token refresh, package-local
+token buckets, and cursor pagination.
+
 ## Rate limiting
 
 Connector clients should acquire outbound permits through the shared

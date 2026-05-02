@@ -1,0 +1,151 @@
+import { filter_nil } from "std/collections"
+import { merge, safe_parse } from "std/json"
+
+fn __strip_signature_prefix(signature) {
+  let trimmed = trim(signature ?? "")
+  if starts_with(trimmed, "sha256=") {
+    return split(trimmed, "sha256=")[1]
+  }
+  if starts_with(trimmed, "sha1=") {
+    return split(trimmed, "sha1=")[1]
+  }
+  return trimmed
+}
+
+/** verify_hmac_signature. */
+pub fn verify_hmac_signature(body, signature, secret, algorithm = "sha256") {
+  let alg = lowercase(trim(algorithm ?? "sha256"))
+  let provided = __strip_signature_prefix(signature)
+  if alg == "sha1" || alg == "hmac-sha1" {
+    return constant_time_eq(hmac_sha1(secret, body), provided)
+  }
+  if alg != "sha256" && alg != "hmac-sha256" {
+    return false
+  }
+  let expected = hmac_sha256(secret, body)
+  return constant_time_eq(expected, provided)
+}
+
+/** verify_jwt. */
+pub fn verify_jwt(token, jwks_url, options = nil) {
+  let opts = options ?? {}
+  var jwks = opts.inline_jwks
+  if jwks == nil {
+    if jwks_url == nil || trim(jwks_url) == "" {
+      return {ok: false, claims: nil, error: "jwks_url is required unless options.inline_jwks is provided"}
+    }
+    let response = http_get(jwks_url, {headers: {Accept: "application/json"}})
+    if !(response.ok ?? false) {
+      return {ok: false, claims: nil, error: response.body, status: response.status}
+    }
+    jwks = safe_parse(response.body)
+    if jwks == nil {
+      return {ok: false, claims: nil, error: "JWKS response was not valid JSON", status: response.status}
+    }
+  }
+  return connector_shared_verify_jwt_inline(token, jwks, opts)
+}
+
+fn __form_body(params) {
+  var parts = []
+  for entry in params {
+    parts = parts + [url_encode(entry.key) + "=" + url_encode(to_string(entry.value))]
+  }
+  return join(parts, "&")
+}
+
+/** oauth2_token_refresh. */
+pub fn oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, options = nil) {
+  let opts = options ?? {}
+  let params = filter_nil(
+    merge(
+      {
+        grant_type: "refresh_token",
+        client_id: client_id,
+        client_secret: client_secret,
+        refresh_token: refresh_token,
+      },
+      opts.extra_params ?? {},
+    ),
+  )
+  let headers = merge(
+    {Accept: "application/json", ["Content-Type"]: "application/x-www-form-urlencoded"},
+    opts.headers ?? {},
+  )
+  let response = http_post(token_url, __form_body(params), {headers: headers})
+  let parsed = safe_parse(response.body)
+  if !(response.ok ?? false) {
+    return {ok: false, status: response.status, error: parsed ?? response.body}
+  }
+  return merge(parsed ?? {body: response.body}, {ok: true, status: response.status})
+}
+
+/** rate_limit_token_bucket. */
+pub fn rate_limit_token_bucket(state = nil, config = nil, now_ms = nil) {
+  let cfg = config ?? {}
+  var capacity = cfg.capacity ?? 60
+  if capacity < 1 {
+    capacity = 1
+  }
+  var refill_tokens = cfg.refill_tokens ?? 1
+  if refill_tokens <= 0 {
+    refill_tokens = 1
+  }
+  var refill_interval_ms = cfg.refill_interval_ms ?? 1000
+  if refill_interval_ms < 1 {
+    refill_interval_ms = 1
+  }
+  let now = now_ms ?? to_int(timestamp() * 1000)
+  let last_refill_ms = state?.last_refill_ms ?? now
+  let elapsed_ms = now - last_refill_ms
+  var tokens = state?.tokens ?? capacity
+  if elapsed_ms > 0 {
+    tokens = tokens + elapsed_ms / refill_interval_ms * refill_tokens
+    if tokens > capacity {
+      tokens = capacity
+    }
+  }
+  var allowed = false
+  var retry_after_ms = 0
+  if tokens >= 1 {
+    tokens = tokens - 1
+    allowed = true
+  } else {
+    retry_after_ms = to_int((1 - tokens) * refill_interval_ms / refill_tokens)
+    if retry_after_ms < 1 {
+      retry_after_ms = 1
+    }
+  }
+  return {allowed: allowed, retry_after_ms: retry_after_ms, state: {tokens: tokens, last_refill_ms: now}}
+}
+
+fn __page_items(page, items_path) {
+  if items_path != nil {
+    return json_pointer(page, items_path) ?? []
+  }
+  return page.results ?? page.items ?? page.data ?? []
+}
+
+/** paginate_cursor. */
+pub fn paginate_cursor(initial_url, fetch_fn, cursor_path, options = nil) {
+  let opts = options ?? {}
+  let max_pages = opts.max_pages ?? 100
+  let items_path = opts.items_path
+  var cursor = opts.initial_cursor
+  var pages = []
+  var items = []
+  var page_count = 0
+  while page_count < max_pages {
+    let page = fetch_fn(initial_url, cursor)
+    pages = pages + [page]
+    for item in __page_items(page, items_path) {
+      items = items + [item]
+    }
+    page_count = page_count + 1
+    cursor = json_pointer(page, cursor_path)
+    if cursor == nil || cursor == "" {
+      return {complete: true, pages: pages, items: items, next_cursor: nil}
+    }
+  }
+  return {complete: false, pages: pages, items: items, next_cursor: cursor}
+}
