@@ -6,140 +6,72 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## Unreleased
-
-### Changed
-
-- **CHANGELOG retroactive-edit guard.** Added
-  `scripts/check_changelog_no_retroactive_edits.py`, wired into the
-  `Rust (lint + test + conformance)` CI job and the pre-push hook. The
-  check fails the PR when a `## vX.Y.Z` section whose tag already exists
-  is modified, comparing the section body against the PR base (or the
-  push upstream locally). New entries belong under `## Unreleased` (or
-  the in-progress next-version heading on a release PR). Bypass with
-  `ALLOW_CHANGELOG_RETROACTIVE_EDIT=1` for genuine fix-ups.
+## v0.7.55
 
 ### Added
 
-- **Release-harness fixture ingest (#1146).** Added
-  `harn crystallize ingest --from <FIXTURE_DIR> --bundle <BUNDLE_DIR>` to
-  consume a `release_harn.crystallization_input.v1` fixture (emitted by
-  `release_harn.harn` in
-  [harn-bump-fleet](https://github.com/burin-labs/harn-bump-fleet/issues/2))
-  and produce a reviewed crystallization candidate bundle. The synthesis
-  path skips repeated-sequence mining (the trace IS the workflow),
-  partitions actions into deterministic vs. agentic steps from the
-  source `source` field, materializes every model-authored step behind
-  an explicit approval boundary, and surfaces release identity
-  (`current_version`, `next_version`, `base_branch`, …) as workflow
-  parameters. The emitted bundle uses the existing
-  `harn.crystallization.candidate.bundle` schema so
-  `harn crystallize validate` and `harn crystallize shadow` work
-  unchanged. `report.json` for an ingested bundle adds two
-  plain-language blocks: `segment_summary` (what is safe to automate
-  vs. what still requires human review) and `recovery_summary` (how
-  many shell/tool failures were observed, how many `agent_loop`
-  recovery-advice runs ran, and whether failure context was fed back
-  into the model). A tiny checked-in sample fixture lives at
-  [`crates/harn-vm/tests/fixtures/release_harn_sample/`](crates/harn-vm/tests/fixtures/release_harn_sample)
-  so the importer can be exercised without a live release run.
+- **Typed GitHub trigger payloads for the new connector contract (#1158).** Promoted five additional
+  `GitHubEventPayload` variants — `GitHubCheckSuiteEventPayload`, `GitHubStatusEventPayload`,
+  `GitHubMergeGroupEventPayload`, `GitHubInstallationEventPayload`, and
+  `GitHubInstallationRepositoriesEventPayload` — so `harn-github-connector` v0.2.0 deliveries no
+  longer collapse into the catch-all `Other` variant. Every variant exposes the connector's promoted
+  scalars at the top level of `event.provider_payload`. Bumped the connector pin from v0.1.0 to
+  v0.2.0.
 
-- **Typed GitHub trigger payloads for the new connector contract
-  ([#1158](https://github.com/burin-labs/harn/issues/1158)).** Promoted
-  five additional `GitHubEventPayload` variants —
-  `GitHubCheckSuiteEventPayload`, `GitHubStatusEventPayload`,
-  `GitHubMergeGroupEventPayload`, `GitHubInstallationEventPayload`,
-  and `GitHubInstallationRepositoriesEventPayload` — so
-  `harn-github-connector` v0.2.0 deliveries no longer collapse into the
-  catch-all `Other` variant. Every variant exposes the connector's
-  promoted scalars (`check_suite_id`, `merge_group_id`,
-  `repositories_removed`, etc.) at the top level of
-  `event.provider_payload` instead of forcing handlers through
-  `provider_payload.raw`. `GitHubEventCommon` now also carries the
-  connector-promoted `topic`, normalized `repo`, and full `repository`
-  fields across all GitHub events while preserving the original
-  upstream webhook body in `payload.raw`. The `GitHubEventPayload`
-  union now uses an `event`-discriminated `Deserialize` so payloads
-  always round-trip back to the variant the connector emitted. Bumped
-  the connector pin from v0.1.0 to v0.2.0 in the catalog, migration,
-  and trigger quickref docs.
-- **Merge Captain repair-worker checkpoint contract (#1010).**
-  Added a typed contract for the bounded `agent_loop` worker that
-  Merge Captain (and the release-harness consumer in
-  [#1146](https://github.com/burin-labs/harn/issues/1146)) calls at
-  explicit repair checkpoints. New modules under
-  `personas/merge_captain/lib/` cover bundle preparation
-  (`repair_bundle.harn`), per-action approval gates
-  (`approval.harn`), the dispatcher itself (`repair_worker.harn`),
-  and deterministic output validators (`repair_validator.harn`). The
-  bundle pins repo + PR + base/head SHAs, allowed write-scope globs,
-  required verification commands, push target, and the action kinds
-  that need human approval (`semantic_repair`, `force_push`,
-  `admin_merge`, `release_tag`, `branch_delete`). Workers must
-  produce a `merge_captain.repair_output` v1 JSON document; the
-  harness rejects missing tests, unexpected write scope, malformed
-  output, unpushed commits, and (when opted in) dirty worktrees.
-  Every run yields a versioned `merge_captain.repair_run` record
-  that the merge receipt links back to via a compact
-  `merge_captain.repair_run_link` summary. The worker is opt-in per
-  repo via `policy.repair_worker.{enabled, handles_kinds, ...}`; the
-  scheduler routes `local_repair` and `dirty` to the worker only
-  when the policy enables the matching bundle kind.
+- **Release-harness fixture ingest (#1146).** Added `harn crystallize ingest --from <FIXTURE_DIR>
+  --bundle <BUNDLE_DIR>` to consume a `release_harn.crystallization_input.v1` fixture and produce a
+  reviewed crystallization candidate bundle. The emitted bundle uses the existing
+  `harn.crystallization.candidate.bundle` schema. A sample fixture lives at
+  `crates/harn-vm/tests/fixtures/release_harn_sample/`.
 
-- **A2A `input-required` / `auth-required` / `rejected` task states (#889).**
-  The A2A adapter's `TaskStatus` enum now covers all six A2A 0.3.0
-  non-final/final state strings. `input-required` is wired into the
-  existing HITL primitives (`ask_user`, `request_approval`,
-  `dual_control`, `escalate_to`): each pause emits a canonical
-  `AgentEvent::HitlRequested` (with a paired `HitlResolved` once the
-  waitpoint resolves), and the `A2aWorkerSink` translates those into
-  `status.state = input-required` transitions plus a structured `hitl`
-  task event so SSE subscribers see the request payload alongside the
-  pause. The ACP adapter advertises matching `hitl_request` /
-  `hitl_resolved` session-update extensions under `_meta.harn`.
-  Synchronous policy denial (`AuthPolicy.authorize` returning
-  `Rejected`) now lands the task in the terminal `rejected` state
-  instead of `failed`, and any `auth`-classified error raised mid-task
-  (HTTP 401 / `invalid_api_key` / `authentication_error`) flips the
-  task into the non-terminal `auth-required` state so clients can
-  re-authenticate and resubscribe.
+- **Merge Captain repair-worker checkpoint contract (#1010).** Added a typed contract for the
+  bounded `agent_loop` worker with modules under `personas/merge_captain/lib/` covering bundle
+  preparation, per-action approval gates, the dispatcher, and deterministic output validators.
+  Workers produce a versioned `merge_captain.repair_run` record linked back via a compact summary.
 
-- **Per-step model routing + token / cost budgets (#1074).** `@step`
-  now accepts `model: "..."` and `budget: { max_tokens: N, max_usd:
-  N.NN }` so a single persona can mix cheap classification (Haiku),
-  semantic judgment (Sonnet), and frontier escalation (Opus) without
-  hand-rolled routing inside the persona body. While a step's frame is
-  on the call stack `llm_call` defaults to the step's model when the
-  call site doesn't override it, and per-step token / cost spend is
-  tracked separately and short-circuits calls that would exceed the
-  step's ceiling. The thrown error honors the step's `error_boundary`:
-  `fail` (default) propagates as-is, `continue` swallows the throw and
-  returns nil from the step, and `escalate` re-tags the error with
-  `category: "handoff_escalation"` and `escalated: true` so the persona
-  body / handoff receiver can route on it. `harn persona inspect --json`
-  surfaces each step's `model` + `budget`, and the canonical receipt
-  envelope's `model_calls[]` carries the per-step token / cost
-  breakdown via `Receipt::push_step_breakdown`.
+- **A2A `input-required` / `auth-required` / `rejected` task states (#889).** The A2A adapter's
+  `TaskStatus` enum now covers all six A2A 0.3.0 non-final/final state strings. `input-required` is
+  wired into HITL primitives; synchronous policy denial lands the task in `rejected`; auth errors
+  flip to `auth-required`.
 
-- **MCP `sampling/createMessage` server-to-client bridge (#874).** When
-  Harn acts as an MCP client (stdio or Streamable HTTP), it now declares
-  the `sampling` capability on `initialize` and accepts inbound
-  `sampling/createMessage` requests from connected servers. Each request
-  is dispatched through the host-call bridge as
-  `("mcp", "sample", {server, params})` so embedders can run their own
-  approval UX, rate-limit by server, or inject `llm_call` overrides
-  (e.g. force `provider`/`model`). On approval the request flows through
-  Harn's regular `extract_llm_options` + `execute_llm_call` boundary —
-  picking up routing, capability gates, mock interception, and budget
-  plumbing — and the response is returned to the originating server as
-  `{role: "assistant", content: {type: "text", text}, model, stopReason}`.
-  Without an installed bridge, sampling requests are declined with a
-  structured `mcp.samplingDeclined` error (code `-32603`) so servers can
-  fall back to a sensible default rather than driving unattended LLM
-  spend. Sampling-side `tools` / `toolChoice` / `thinking` /
-  `modelPreferences` / `stopSequences` / `metadata` are all forwarded
-  through to `llm_call`'s typed boundary so the existing ThinkingConfig
-  (#849) and structured-output paths apply unchanged.
+- **Per-step model routing + token / cost budgets (#1074).** `@step` now accepts `model: "..."` and
+  `budget: { max_tokens: N, max_usd: N.NN }` so a persona can mix cheap classification (Haiku),
+  semantic judgment (Sonnet), and frontier escalation (Opus). Per-step token/cost spend is tracked
+  separately; errors honor the step's `error_boundary` (`fail`, `continue`, or `escalate`).
+
+- **MCP `sampling/createMessage` server-to-client bridge (#874).** When Harn acts as an MCP client,
+  it now declares the `sampling` capability and accepts inbound `sampling/createMessage` requests
+  from connected servers. Requests flow through `llm_call`'s typed boundary; without a bridge,
+  sampling requests are declined with `mcp.samplingDeclined`.
+
+### Changed
+
+- **CHANGELOG retroactive-edit guard.** Added `scripts/check_changelog_no_retroactive_edits.py`,
+  wired into CI and the pre-push hook. The check fails when a released section is modified; new
+  entries belong under `## Unreleased`. Bypass with `ALLOW_CHANGELOG_RETROACTIVE_EDIT=1`.
+
+### Fixed
+
+- **Stop pre-existing MCP/long-running test flakes (#1162).** Addressed flaky tests in the MCP and
+  long-running test suites.
+
+- **Ensure final prose after text tool actions (#1163).** Ensured that prose output follows text
+  tool actions correctly.
+
+- **Use capability matrix for native tool mode (#1159).** Adopted the capability matrix as the gate
+  for native tool mode decisions.
+
+- **Lock agent sessions to one tool format (#1155).** Constrained agent sessions to a single tool
+  format to prevent cross-format conflicts.
+
+- **fix(tree-sitter): unblock release audit's strict parse sweep (#1149).** Resolved tree-sitter
+  issues that were blocking the release audit's strict parsing.
+
+- **Publish OpenTrustGraph v0 as a portable open spec (#930).** Published the OpenTrustGraph v0
+  specification artifact.
+
+- **docs(adr): record compile-time capability invariants decision (#925).** Documented the
+  compile-time capability invariants decision in the ADR archive.
 
 ## v0.7.54
 
