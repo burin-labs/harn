@@ -153,6 +153,10 @@ pub struct AgentLoopConfig {
     /// - `true`: stop the stage immediately
     /// - `{message, stop}` dict: both (optional `message`, optional `stop`)
     pub post_turn_callback: Option<crate::value::VmValue>,
+    /// Optional per-call directory for the existing Harn
+    /// `llm_transcript.jsonl` sidecar. When unset, the process-level
+    /// `HARN_LLM_TRANSCRIPT_DIR` environment variable is still honored.
+    pub llm_transcript_dir: Option<String>,
     /// Skill registry (from `skill_registry()` / `skill { }` decls)
     /// exposed to the skill-matching phase. `None` disables skills for
     /// this loop.
@@ -540,6 +544,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                         .and_then(|o| o.get("post_turn_callback"))
                         .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
                         .cloned(),
+                    llm_transcript_dir: opt_str(&options, "llm_transcript_dir"),
                     skill_registry,
                     skill_match,
                     working_files,

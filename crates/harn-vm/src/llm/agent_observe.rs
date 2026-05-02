@@ -56,6 +56,42 @@ thread_local! {
     /// call, tool results between iterations). Set at the top of each
     /// iteration and cleared on loop exit.
     static CURRENT_ITERATION: RefCell<Option<usize>> = const { RefCell::new(None) };
+    static TRANSCRIPT_DIR_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+pub(crate) struct LlmTranscriptDirGuard {
+    pushed: bool,
+}
+
+impl Drop for LlmTranscriptDirGuard {
+    fn drop(&mut self) {
+        if self.pushed {
+            TRANSCRIPT_DIR_STACK.with(|stack| {
+                let _ = stack.borrow_mut().pop();
+            });
+        }
+    }
+}
+
+pub(crate) fn push_llm_transcript_dir(dir: Option<String>) -> LlmTranscriptDirGuard {
+    let Some(dir) = dir else {
+        return LlmTranscriptDirGuard { pushed: false };
+    };
+    if dir.trim().is_empty() {
+        return LlmTranscriptDirGuard { pushed: false };
+    }
+    TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow_mut().push(dir));
+    LlmTranscriptDirGuard { pushed: true }
+}
+
+fn current_transcript_dir() -> Option<String> {
+    TRANSCRIPT_DIR_STACK
+        .with(|stack| stack.borrow().last().cloned())
+        .or_else(|| {
+            std::env::var("HARN_LLM_TRANSCRIPT_DIR")
+                .ok()
+                .filter(|d| !d.is_empty())
+        })
 }
 
 fn hash_str(value: &str) -> u64 {
@@ -227,9 +263,8 @@ pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
 /// Write the full LLM request payload to a JSONL transcript file.
 pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) {
     append_llm_transcript_event_log(entry);
-    let dir = match std::env::var("HARN_LLM_TRANSCRIPT_DIR") {
-        Ok(d) if !d.is_empty() => d,
-        _ => return,
+    let Some(dir) = current_transcript_dir() else {
+        return;
     };
     let _ = std::fs::create_dir_all(&dir);
     let path = format!("{dir}/llm_transcript.jsonl");

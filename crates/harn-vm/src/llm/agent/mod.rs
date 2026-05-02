@@ -396,6 +396,8 @@ pub async fn run_agent_loop_internal(
 
     config.mcp_clients =
         agent_mcp::bootstrap_agent_loop_mcp_servers(opts, &config.mcp_servers).await?;
+    let _llm_transcript_dir_guard =
+        crate::llm::agent_observe::push_llm_transcript_dir(config.llm_transcript_dir.clone());
     let mut mcp_cleanup = AgentLoopMcpCleanupGuard::new(config.mcp_clients.clone());
     let mut state = state::AgentLoopState::new(opts, config)?;
     let _session_guard = AgentSessionGuard::install(state.session_id.clone());
