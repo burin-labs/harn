@@ -470,13 +470,16 @@ mod tests {
 
     #[tokio::test]
     async fn probe_distinguishes_unreachable() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind");
-        let addr = listener.local_addr().expect("addr");
-        drop(listener);
+        // The earlier "bind ephemeral, drop, probe the same port"
+        // pattern was racy under nextest fan-out: another concurrent
+        // test using `bind 127.0.0.1:0` could be assigned the freed
+        // port between the drop and the probe, making the connection
+        // succeed and the test report a different category. Port 1
+        // (IANA-reserved tcpmux) is always unprivileged-bind-blocked,
+        // so connecting to it yields a deterministic ECONNREFUSED →
+        // "unreachable", with no listener-handoff race.
         let def = ProviderDef {
-            base_url: format!("http://{addr}"),
+            base_url: "http://127.0.0.1:1".to_string(),
             chat_endpoint: "/v1/chat/completions".to_string(),
             healthcheck: Some(HealthcheckDef {
                 method: "GET".to_string(),

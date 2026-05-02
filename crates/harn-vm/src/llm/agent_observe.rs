@@ -261,6 +261,16 @@ pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
 }
 
 /// Write the full LLM request payload to a JSONL transcript file.
+///
+/// Holds a process-wide mutex around the open + write so concurrent
+/// transcript emitters (parallel tests, multi-tenant agent loops on the
+/// same VM) never produce a torn line. POSIX `O_APPEND` only guarantees
+/// atomicity for writes ≤ `PIPE_BUF` (512 bytes on macOS), and
+/// `provider_call_request` events comfortably exceed that — without
+/// this lock, two simultaneous `writeln!` calls on different `File`
+/// handles for the same path can interleave their bytes mid-line and
+/// produce invalid JSON that downstream readers (and tests) silently
+/// drop.
 pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) {
     append_llm_transcript_event_log(entry);
     let Some(dir) = current_transcript_dir() else {
@@ -268,15 +278,21 @@ pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) {
     };
     let _ = std::fs::create_dir_all(&dir);
     let path = format!("{dir}/llm_transcript.jsonl");
-    if let Ok(line) = serde_json::to_string(&entry) {
+    let Ok(line) = serde_json::to_string(&entry) else {
+        return;
+    };
+    static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-        {
-            let _ = writeln!(f, "{line}");
-        }
+        let _ = f.write_all(line.as_bytes());
+        let _ = f.write_all(b"\n");
     }
 }
 

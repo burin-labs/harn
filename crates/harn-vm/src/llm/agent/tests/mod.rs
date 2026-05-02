@@ -133,12 +133,8 @@ pub(super) fn base_agent_config() -> AgentLoopConfig {
     }
 }
 
-/// Mutex protecting the HARN_LLM_TRANSCRIPT_DIR env var so transcript
-/// tests in this module don't race each other and end up writing to a
-/// neighbour's temp dir.
-pub(super) fn transcript_env_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
+// `transcript_env_lock` was removed once the
+// `observed_llm_call_transcript_*` tests stopped mutating
+// `HARN_LLM_TRANSCRIPT_DIR` and switched to per-thread
+// `push_llm_transcript_dir` guards. The new pattern is in
+// `transcript.rs::TestTranscriptDir`.
