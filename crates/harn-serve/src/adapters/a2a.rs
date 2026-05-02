@@ -14,6 +14,7 @@ use axum::{Json, Router};
 use base64::Engine;
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::StreamExt;
+use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
 use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{json, Value as JsonValue};
 use sha2::Sha256;
@@ -39,6 +40,9 @@ const A2A_TASK_NOT_FOUND: i64 = -32001;
 const A2A_TASK_NOT_CANCELABLE: i64 = -32002;
 const A2A_UNSUPPORTED_OPERATION: i64 = -32003;
 const A2A_EXTENDED_AGENT_CARD_NOT_CONFIGURED: i64 = -32007;
+const A2A_PUSH_CONFIG_TOPIC: &str = "a2a.push_notification_configs";
+const A2A_PUSH_CONFIG_SET_KIND: &str = "a2a.push_notification_config.set";
+const A2A_PUSH_CONFIG_DELETE_KIND: &str = "a2a.push_notification_config.delete";
 
 #[derive(Clone, Debug)]
 pub struct A2aHttpServeOptions {
@@ -81,6 +85,7 @@ pub struct A2aServer {
     core: Arc<DispatchCore>,
     executor: ExecutionRuntime,
     tasks: TaskStore,
+    push_configs: PushConfigStore,
 }
 
 #[derive(Clone)]
@@ -129,13 +134,13 @@ struct TaskState {
     history: Vec<TaskMessage>,
     artifacts: Vec<JsonValue>,
     metadata: BTreeMap<String, JsonValue>,
-    push_configs: Vec<JsonValue>,
     events: Vec<JsonValue>,
     subscribers: Vec<UnboundedSender<JsonValue>>,
     cancel_token: Option<Arc<AtomicBool>>,
 }
 
 type TaskStore = Arc<Mutex<HashMap<String, TaskState>>>;
+type PushConfigStore = Arc<Mutex<HashMap<String, BTreeMap<String, JsonValue>>>>;
 
 struct ExecutionRuntime {
     tx: mpsc::UnboundedSender<ExecutionJob>,
@@ -181,6 +186,7 @@ impl A2aServer {
             .unwrap_or_else(|| derived_agent_name(config.core.catalog()));
         let core = Arc::new(config.core);
         let catalog = core.catalog().clone();
+        let push_configs = Arc::new(Mutex::new(load_push_configs(&core.event_log())));
         Self {
             descriptor: AdapterDescriptor {
                 id: "a2a".to_string(),
@@ -194,6 +200,7 @@ impl A2aServer {
             executor: ExecutionRuntime::start(core.clone()),
             core,
             tasks: Arc::new(Mutex::new(HashMap::new())),
+            push_configs,
         }
     }
 
@@ -365,7 +372,7 @@ impl A2aServer {
                 } else {
                     !return_immediately(&params)
                 };
-                match self.prepare_task(&params, auth) {
+                match self.prepare_task(&params, auth).await {
                     Ok(task) if wait => {
                         self.run_task_to_completion(&task).await;
                         (
@@ -394,7 +401,7 @@ impl A2aServer {
                     }
                     _ => None,
                 };
-                match self.prepare_task(&params, auth) {
+                match self.prepare_task(&params, auth).await {
                     Ok(task) => {
                         let rx = self.subscribe(&task.id).unwrap_or_else(empty_stream);
                         let server = self.clone();
@@ -473,11 +480,17 @@ impl A2aServer {
                     .or_else(|| params.get("config"))
                     .cloned()
                     .unwrap_or(JsonValue::Null);
-                match task_id.and_then(|id| self.add_push_config(id, config).ok()) {
-                    Some(config) => (
-                        RpcOutcome::Json(task_rpc_response(&rpc_id, config)),
-                        deprecation,
-                    ),
+                match task_id {
+                    Some(id) => match self.add_push_config(id, config).await {
+                        Ok(config) => (
+                            RpcOutcome::Json(task_rpc_response(&rpc_id, config)),
+                            deprecation,
+                        ),
+                        Err(error) => (
+                            RpcOutcome::Json(push_config_error_response(rpc_id, &error)),
+                            deprecation,
+                        ),
+                    },
                     None => (
                         RpcOutcome::Json(error_response(
                             rpc_id,
@@ -505,14 +518,10 @@ impl A2aServer {
             }
             "tasks/pushNotificationConfig/list" => {
                 let task_id = task_id_param(&params);
-                match task_id.and_then(|id| self.push_configs(id).ok()) {
-                    Some(configs) => (RpcOutcome::Json(task_rpc_response(&rpc_id, configs)), None),
-                    None => (
-                        RpcOutcome::Json(error_response(
-                            rpc_id,
-                            A2A_TASK_NOT_FOUND,
-                            "Task not found",
-                        )),
+                match self.push_configs(task_id) {
+                    Ok(configs) => (RpcOutcome::Json(task_rpc_response(&rpc_id, configs)), None),
+                    Err(error) => (
+                        RpcOutcome::Json(push_config_error_response(rpc_id, &error)),
                         None,
                     ),
                 }
@@ -520,13 +529,19 @@ impl A2aServer {
             "tasks/pushNotificationConfig/delete" => {
                 let task_id = task_id_param(&params);
                 let config_id = push_config_id_param(&params);
-                match task_id.zip(config_id).and_then(|(task_id, config_id)| {
-                    self.delete_push_config(task_id, config_id).ok()
-                }) {
-                    Some(()) => (
-                        RpcOutcome::Json(task_rpc_response(&rpc_id, JsonValue::Null)),
-                        None,
-                    ),
+                match task_id.zip(config_id) {
+                    Some((task_id, config_id)) => {
+                        match self.delete_push_config(task_id, config_id).await {
+                            Ok(()) => (
+                                RpcOutcome::Json(task_rpc_response(&rpc_id, JsonValue::Null)),
+                                None,
+                            ),
+                            Err(error) => (
+                                RpcOutcome::Json(push_config_error_response(rpc_id, &error)),
+                                None,
+                            ),
+                        }
+                    }
                     None => (
                         RpcOutcome::Json(error_response(
                             rpc_id,
@@ -589,7 +604,7 @@ impl A2aServer {
         }
     }
 
-    fn prepare_task(
+    async fn prepare_task(
         &self,
         params: &JsonValue,
         auth: AuthRequest,
@@ -632,7 +647,6 @@ impl A2aServer {
             }],
             artifacts: a2a_artifacts_from_parts(&parts),
             metadata: BTreeMap::new(),
-            push_configs: push_config.into_iter().collect(),
             events: Vec::new(),
             subscribers: Vec::new(),
             cancel_token: Some(cancel_token.clone()),
@@ -643,6 +657,13 @@ impl A2aServer {
             .lock()
             .expect("tasks poisoned")
             .insert(task_id.clone(), task);
+
+        if let Some(push_config) = push_config {
+            if let Err(error) = self.add_push_config(&task_id, push_config).await {
+                self.tasks.lock().expect("tasks poisoned").remove(&task_id);
+                return Err(A2aPrepareError::new(-32603, error));
+            }
+        }
 
         Ok(PreparedTask {
             id: task_id,
@@ -847,80 +868,161 @@ impl A2aServer {
         json!({ "tasks": tasks })
     }
 
-    fn add_push_config(&self, task_id: &str, mut config: JsonValue) -> Result<JsonValue, String> {
-        let mut tasks = self.tasks.lock().expect("tasks poisoned");
-        let task = tasks
-            .get_mut(task_id)
-            .ok_or_else(|| format!("TaskNotFoundError: {task_id}"))?;
+    async fn add_push_config(
+        &self,
+        task_id: &str,
+        mut config: JsonValue,
+    ) -> Result<JsonValue, String> {
+        if !self.push_config_task_known(task_id) {
+            return Err(format!("TaskNotFoundError: {task_id}"));
+        }
         if config.get("id").and_then(JsonValue::as_str).is_none() {
             config["id"] = JsonValue::String(Uuid::now_v7().to_string());
         }
         config["taskId"] = JsonValue::String(task_id.to_string());
-        let config_id = config["id"].as_str().unwrap_or_default();
-        if let Some(existing) = task.push_configs.iter_mut().find(|candidate| {
-            candidate
-                .get("id")
-                .and_then(JsonValue::as_str)
-                .is_some_and(|id| id == config_id)
-        }) {
-            *existing = config.clone();
-        } else {
-            task.push_configs.push(config.clone());
-        }
+        let config_id = config["id"].as_str().unwrap_or_default().to_string();
+
+        self.append_push_config_event(
+            A2A_PUSH_CONFIG_SET_KIND,
+            json!({
+                "taskId": task_id,
+                "configId": config_id,
+                "config": config,
+            }),
+        )
+        .await?;
+        self.apply_push_config_set(task_id, &config_id, config.clone());
         Ok(config)
     }
 
     fn push_config(&self, task_id: &str, config_id: Option<&str>) -> Result<JsonValue, String> {
-        let tasks = self.tasks.lock().expect("tasks poisoned");
-        let task = tasks
-            .get(task_id)
-            .ok_or_else(|| format!("TaskNotFoundError: {task_id}"))?;
+        let configs = self.push_configs_for_task(task_id)?;
         let config = if let Some(config_id) = config_id {
-            task.push_configs.iter().find(|config| {
+            configs.into_iter().find(|config| {
                 config
                     .get("id")
                     .and_then(JsonValue::as_str)
                     .is_some_and(|id| id == config_id)
             })
         } else {
-            task.push_configs.first()
+            configs.into_iter().next()
         };
-        config
-            .cloned()
-            .ok_or_else(|| format!("TaskPushNotificationConfigNotFoundError: {task_id}"))
+        config.ok_or_else(|| format!("TaskPushNotificationConfigNotFoundError: {task_id}"))
     }
 
-    fn push_configs(&self, task_id: &str) -> Result<JsonValue, String> {
-        let tasks = self.tasks.lock().expect("tasks poisoned");
-        let task = tasks
+    fn push_configs(&self, task_id: Option<&str>) -> Result<JsonValue, String> {
+        let configs = if let Some(task_id) = task_id {
+            self.push_configs_for_task(task_id)?
+        } else {
+            self.push_configs
+                .lock()
+                .expect("push configs poisoned")
+                .values()
+                .flat_map(|configs| configs.values().cloned())
+                .collect::<Vec<_>>()
+        };
+        Ok(JsonValue::Array(configs))
+    }
+
+    async fn delete_push_config(&self, task_id: &str, config_id: &str) -> Result<(), String> {
+        if !self
+            .push_configs
+            .lock()
+            .expect("push configs poisoned")
             .get(task_id)
-            .ok_or_else(|| format!("TaskNotFoundError: {task_id}"))?;
-        Ok(JsonValue::Array(task.push_configs.clone()))
-    }
-
-    fn delete_push_config(&self, task_id: &str, config_id: &str) -> Result<(), String> {
-        let mut tasks = self.tasks.lock().expect("tasks poisoned");
-        let task = tasks
-            .get_mut(task_id)
-            .ok_or_else(|| format!("TaskNotFoundError: {task_id}"))?;
-        let original_len = task.push_configs.len();
-        task.push_configs
-            .retain(|config| config.get("id").and_then(JsonValue::as_str) != Some(config_id));
-        if task.push_configs.len() == original_len {
+            .is_some_and(|configs| configs.contains_key(config_id))
+        {
             return Err(format!(
                 "TaskPushNotificationConfigNotFoundError: {task_id}/{config_id}"
             ));
         }
+        self.append_push_config_event(
+            A2A_PUSH_CONFIG_DELETE_KIND,
+            json!({
+                "taskId": task_id,
+                "configId": config_id,
+            }),
+        )
+        .await?;
+        self.apply_push_config_delete(task_id, config_id);
         Ok(())
     }
 
-    fn deliver_push(&self, task: JsonValue) {
-        let configs = self
+    fn push_config_task_known(&self, task_id: &str) -> bool {
+        self.tasks
+            .lock()
+            .expect("tasks poisoned")
+            .contains_key(task_id)
+            || self
+                .push_configs
+                .lock()
+                .expect("push configs poisoned")
+                .contains_key(task_id)
+    }
+
+    fn push_configs_for_task(&self, task_id: &str) -> Result<Vec<JsonValue>, String> {
+        if let Some(configs) = self
+            .push_configs
+            .lock()
+            .expect("push configs poisoned")
+            .get(task_id)
+        {
+            return Ok(configs.values().cloned().collect());
+        }
+        if self
             .tasks
             .lock()
             .expect("tasks poisoned")
-            .get(task["id"].as_str().unwrap_or_default())
-            .map(|task| task.push_configs.clone())
+            .contains_key(task_id)
+        {
+            return Ok(Vec::new());
+        }
+        Err(format!("TaskNotFoundError: {task_id}"))
+    }
+
+    async fn append_push_config_event(
+        &self,
+        kind: &'static str,
+        payload: JsonValue,
+    ) -> Result<(), String> {
+        let topic = push_config_topic();
+        let log = self.core.event_log();
+        log.append(&topic, LogEvent::new(kind, payload))
+            .await
+            .map_err(|error| format!("EventLogError: {error}"))?;
+        log.flush()
+            .await
+            .map_err(|error| format!("EventLogError: {error}"))
+    }
+
+    fn apply_push_config_set(&self, task_id: &str, config_id: &str, config: JsonValue) {
+        self.push_configs
+            .lock()
+            .expect("push configs poisoned")
+            .entry(task_id.to_string())
+            .or_default()
+            .insert(config_id.to_string(), config);
+    }
+
+    fn apply_push_config_delete(&self, task_id: &str, config_id: &str) {
+        if let Some(configs) = self
+            .push_configs
+            .lock()
+            .expect("push configs poisoned")
+            .get_mut(task_id)
+        {
+            configs.remove(config_id);
+        }
+    }
+
+    fn deliver_push(&self, task: JsonValue) {
+        let task_id = task["id"].as_str().unwrap_or_default();
+        let configs = self
+            .push_configs
+            .lock()
+            .expect("push configs poisoned")
+            .get(task_id)
+            .map(|configs| configs.values().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
         if configs.is_empty() {
             return;
@@ -1292,6 +1394,75 @@ fn task_rpc_response(rpc_id: &JsonValue, task_json: JsonValue) -> JsonValue {
 
 fn error_response(rpc_id: JsonValue, code: i64, message: &str) -> JsonValue {
     harn_vm::jsonrpc::error_response(rpc_id, code, message)
+}
+
+fn push_config_error_response(rpc_id: JsonValue, message: &str) -> JsonValue {
+    if message.starts_with("EventLogError:") {
+        return error_response(rpc_id, -32603, message);
+    }
+    error_response(rpc_id, A2A_TASK_NOT_FOUND, message)
+}
+
+fn push_config_topic() -> Topic {
+    Topic::new(A2A_PUSH_CONFIG_TOPIC).expect("valid A2A push config topic")
+}
+
+fn load_push_configs(log: &Arc<AnyEventLog>) -> HashMap<String, BTreeMap<String, JsonValue>> {
+    futures::executor::block_on(async {
+        let topic = push_config_topic();
+        let mut store = HashMap::<String, BTreeMap<String, JsonValue>>::new();
+        let mut cursor = None;
+        loop {
+            let events = match log.read_range(&topic, cursor, 512).await {
+                Ok(events) => events,
+                Err(error) => {
+                    tracing::warn!(
+                        target: "harn_serve::a2a",
+                        %error,
+                        "failed to replay A2A push notification configs"
+                    );
+                    break;
+                }
+            };
+            if events.is_empty() {
+                break;
+            }
+            for (event_id, event) in events {
+                apply_persisted_push_config_event(&mut store, event);
+                cursor = Some(event_id);
+            }
+        }
+        store
+    })
+}
+
+fn apply_persisted_push_config_event(
+    store: &mut HashMap<String, BTreeMap<String, JsonValue>>,
+    event: LogEvent,
+) {
+    let Some(task_id) = event.payload.get("taskId").and_then(JsonValue::as_str) else {
+        return;
+    };
+    let Some(config_id) = event.payload.get("configId").and_then(JsonValue::as_str) else {
+        return;
+    };
+    match event.kind.as_str() {
+        A2A_PUSH_CONFIG_SET_KIND => {
+            let Some(config) = event.payload.get("config").cloned() else {
+                return;
+            };
+            store
+                .entry(task_id.to_string())
+                .or_default()
+                .insert(config_id.to_string(), config);
+        }
+        A2A_PUSH_CONFIG_DELETE_KIND => {
+            if let Some(configs) = store.get_mut(task_id) {
+                configs.remove(config_id);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Soft-deprecation observer for the legacy `a2a-version` request header.
@@ -2455,7 +2626,10 @@ pub fn triage(task: string) -> string {
             panic!("expected json response");
         };
         assert!(processed.deprecation.is_none());
-        let task_id = response["result"]["id"].as_str().expect("task id");
+        let task_id = response["result"]["id"]
+            .as_str()
+            .expect("task id")
+            .to_string();
 
         let set = harn_vm::jsonrpc::request(
             "push-set",
@@ -2516,6 +2690,103 @@ pub fn triage(task: string) -> string {
             panic!("expected push delete json response");
         };
         assert!(response["result"].is_null());
+    }
+
+    #[tokio::test]
+    async fn push_notification_configs_survive_server_restart() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+        )
+        .expect("write script");
+
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+        let send = harn_vm::jsonrpc::request(
+            "send-1",
+            "message/send",
+            json!({
+                "function": "triage",
+                "configuration": {"returnImmediately": true},
+                "message": {
+                    "parts": [{"type": "text", "text": "pending"}]
+                }
+            }),
+        );
+        let processed = server
+            .clone()
+            .process_rpc(send, AuthRequest::default())
+            .await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected json response");
+        };
+        let task_id = response["result"]["id"].as_str().expect("task id");
+
+        let set = harn_vm::jsonrpc::request(
+            "push-set",
+            "tasks/pushNotificationConfig/set",
+            json!({
+                "id": task_id,
+                "pushNotificationConfig": {
+                    "id": "push-persisted",
+                    "url": "https://client.example/a2a/persisted"
+                }
+            }),
+        );
+        let processed = server.process_rpc(set, AuthRequest::default()).await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected push set json response");
+        };
+        assert_eq!(response["result"]["id"], "push-persisted");
+
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let restarted = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+        let get = harn_vm::jsonrpc::request(
+            "push-get",
+            "tasks/pushNotificationConfig/get",
+            json!({"id": task_id, "pushNotificationConfigId": "push-persisted"}),
+        );
+        let processed = restarted
+            .clone()
+            .process_rpc(get, AuthRequest::default())
+            .await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected push get json response");
+        };
+        assert_eq!(
+            response["result"]["url"],
+            "https://client.example/a2a/persisted"
+        );
+
+        let delete = harn_vm::jsonrpc::request(
+            "push-delete",
+            "tasks/pushNotificationConfig/delete",
+            json!({"id": task_id, "pushNotificationConfigId": "push-persisted"}),
+        );
+        let processed = restarted.process_rpc(delete, AuthRequest::default()).await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected push delete json response");
+        };
+        assert!(response["result"].is_null());
+
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let restarted = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+        let list = harn_vm::jsonrpc::request(
+            "push-list",
+            "tasks/pushNotificationConfig/list",
+            json!({"id": task_id}),
+        );
+        let processed = restarted.process_rpc(list, AuthRequest::default()).await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected push list json response");
+        };
+        assert!(response["result"].as_array().expect("configs").is_empty());
     }
 
     fn server_with_api_key_policy(
@@ -3108,7 +3379,6 @@ pub fn triage(task: string) -> string {
             history: Vec::new(),
             artifacts: Vec::new(),
             metadata: BTreeMap::new(),
-            push_configs: Vec::new(),
             events: Vec::new(),
             subscribers: Vec::new(),
             cancel_token: None,
@@ -3164,7 +3434,6 @@ pub fn triage(task: string) -> string {
             history: Vec::new(),
             artifacts: Vec::new(),
             metadata: BTreeMap::new(),
-            push_configs: Vec::new(),
             events: Vec::new(),
             subscribers: Vec::new(),
             cancel_token: None,
@@ -3236,7 +3505,6 @@ pub fn run(task: string) -> string {
                     history: Vec::new(),
                     artifacts: Vec::new(),
                     metadata: BTreeMap::new(),
-                    push_configs: Vec::new(),
                     events: Vec::new(),
                     subscribers: Vec::new(),
                     cancel_token: None,

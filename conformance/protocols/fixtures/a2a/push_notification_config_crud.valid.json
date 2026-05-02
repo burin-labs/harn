@@ -1,0 +1,80 @@
+{
+  "name": "a2a.push_notification_config.crud",
+  "protocol": "a2a",
+  "schema": "schemas/a2a-0.3.0.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": "push-set",
+      "method": "tasks/pushNotificationConfig/set",
+      "params": {
+        "id": "task-1",
+        "pushNotificationConfig": {
+          "id": "push-1",
+          "url": "https://client.example/a2a/push"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "push-set",
+      "result": {
+        "taskId": "task-1",
+        "id": "push-1",
+        "url": "https://client.example/a2a/push"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "push-get",
+      "method": "tasks/pushNotificationConfig/get",
+      "params": {
+        "id": "task-1",
+        "pushNotificationConfigId": "push-1"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "push-get",
+      "result": {
+        "taskId": "task-1",
+        "id": "push-1",
+        "url": "https://client.example/a2a/push"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "push-list",
+      "method": "tasks/pushNotificationConfig/list",
+      "params": {
+        "id": "task-1"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "push-list",
+      "result": [
+        {
+          "taskId": "task-1",
+          "id": "push-1",
+          "url": "https://client.example/a2a/push"
+        }
+      ]
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "push-delete",
+      "method": "tasks/pushNotificationConfig/delete",
+      "params": {
+        "id": "task-1",
+        "pushNotificationConfigId": "push-1"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "push-delete",
+      "result": null
+    }
+  ]
+}
