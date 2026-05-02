@@ -24,7 +24,7 @@ fn action_turn_nudge_mentions_action_or_yield() {
     };
     let msg = action_turn_nudge("text", true, Some(&policy), true).expect("nudge");
     assert!(
-        msg.contains("either make concrete progress with a well-formed <tool_call> block, switch phase, or emit a <done> block")
+        msg.contains("either make concrete progress with a well-formed <tool_call> block, switch phase, or emit <user_response>final answer</user_response> plus a <done> block")
     );
     assert!(msg.contains("120"));
     assert!(msg.contains("too much budget on prose"));

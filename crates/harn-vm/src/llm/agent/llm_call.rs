@@ -74,6 +74,7 @@ pub(super) struct LlmCallResult {
     pub tool_parse_errors: Vec<String>,
     pub canonical_history: Option<String>,
     pub prose_too_long: bool,
+    pub recoverable_bare_final_response: bool,
     pub sentinel_hit: bool,
     pub input_tokens: i64,
     pub output_tokens: i64,
@@ -401,6 +402,16 @@ pub(super) async fn run_llm_call(
     };
     let prose_too_long = prose_exceeds_budget(&text_prose, ctx.turn_policy);
     let shaped_text_prose = trim_prose_for_history(&text_prose, ctx.turn_policy);
+    let recoverable_bare_final_response = is_recoverable_bare_final_response(
+        &text,
+        ctx.has_tools,
+        ctx.tool_format,
+        &tool_calls,
+        &tool_parse_errors,
+        &protocol_violations,
+        tagged_done_marker.as_deref(),
+        user_response.as_deref(),
+    );
     let interpreted_call_id = format!("iteration-{iteration}");
     dump_llm_interpreted_response(
         iteration,
@@ -427,6 +438,7 @@ pub(super) async fn run_llm_call(
         ctx.has_tools,
         ctx.tool_format,
         tool_calls.len(),
+        recoverable_bare_final_response,
     );
     if !protocol_violations.is_empty()
         && ctx.has_tools
@@ -609,10 +621,38 @@ pub(super) async fn run_llm_call(
         tool_parse_errors,
         canonical_history,
         prose_too_long,
+        recoverable_bare_final_response,
         sentinel_hit,
         input_tokens: result.input_tokens,
         output_tokens: result.output_tokens,
     })
+}
+
+fn is_recoverable_bare_final_response(
+    text: &str,
+    has_tools: bool,
+    tool_format: &str,
+    tool_calls: &[serde_json::Value],
+    tool_parse_errors: &[String],
+    protocol_violations: &[String],
+    tagged_done_marker: Option<&str>,
+    user_response: Option<&str>,
+) -> bool {
+    if !has_tools
+        || tool_format == "native"
+        || !tool_calls.is_empty()
+        || !tool_parse_errors.is_empty()
+        || tagged_done_marker.is_some()
+        || user_response.is_some()
+    {
+        return false;
+    }
+    let trimmed = text.trim();
+    !trimmed.is_empty()
+        && !trimmed.contains('<')
+        && !trimmed.contains('>')
+        && protocol_violations.len() == 1
+        && protocol_violations[0].starts_with("Stray text outside response tags:")
 }
 
 fn should_inject_protocol_feedback(
@@ -620,11 +660,13 @@ fn should_inject_protocol_feedback(
     has_tools: bool,
     tool_format: &str,
     parsed_tool_call_count: usize,
+    recoverable_bare_final_response: bool,
 ) -> bool {
     !protocol_violations.is_empty()
         && has_tools
         && tool_format != "native"
         && parsed_tool_call_count == 0
+        && !recoverable_bare_final_response
 }
 
 /// Per-block translation of provider-native `tool_search_*` content into
@@ -793,13 +835,22 @@ mod tests {
             &violations,
             true,
             "text",
-            1
+            1,
+            false
         ));
         assert!(should_inject_protocol_feedback(
             &violations,
             true,
             "text",
-            0
+            0,
+            false
+        ));
+        assert!(!should_inject_protocol_feedback(
+            &violations,
+            true,
+            "text",
+            0,
+            true
         ));
     }
 
@@ -811,13 +862,15 @@ mod tests {
             &violations,
             false,
             "text",
-            0
+            0,
+            false
         ));
         assert!(!should_inject_protocol_feedback(
             &violations,
             true,
             "native",
-            0
+            0,
+            false
         ));
     }
 

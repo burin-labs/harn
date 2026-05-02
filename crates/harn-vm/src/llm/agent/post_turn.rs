@@ -706,13 +706,13 @@ pub(super) async fn run_post_turn(
         return Ok(IterationOutcome::Continue);
     }
 
-    let native_answer_after_action = ctx.tool_format == "native"
-        && ctx.persistent
+    let can_answer_after_action = ctx.persistent
         && !ctx.daemon
         && ctx.has_tools
         && !state.all_tools_used.is_empty()
-        && !call_result.text.trim().is_empty();
-    if native_answer_after_action {
+        && !call_result.text.trim().is_empty()
+        && (ctx.tool_format == "native" || call_result.recoverable_bare_final_response);
+    if can_answer_after_action {
         emit_post_agent_turn_hook(
             ctx.session_id,
             iteration,

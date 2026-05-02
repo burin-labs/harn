@@ -1172,7 +1172,11 @@ impl AgentLoopState {
         };
         let persistent_system_prompt = if persistent {
             let progress_instruction = if has_tools {
-                "Take action with tool calls — do not stop to explain."
+                if tool_format == "native" {
+                    "Use the provider tool channel until the request is complete; after tool evidence is sufficient, give the final user-facing answer in concise assistant text."
+                } else {
+                    "Use <tool_call> blocks until the request is complete; after tool evidence is sufficient, emit the final user-facing answer in a <user_response> block."
+                }
             } else {
                 "Solve the request directly in assistant text — do not stop early to explain or summarize."
             };
