@@ -268,6 +268,9 @@ async fn handle_inbound_client_request(
     if method == crate::mcp_elicit::ELICITATION_METHOD {
         return Some(crate::mcp_elicit::dispatch_inbound_elicitation(server_name, msg).await);
     }
+    if method == crate::mcp_sampling::SAMPLING_METHOD {
+        return Some(crate::mcp_sampling::dispatch_inbound_sampling(server_name, msg).await);
+    }
     client_request_rejection(msg)
 }
 
@@ -573,6 +576,7 @@ async fn reinitialize_http_client(inner: &mut HttpMcpClientInner) -> Result<(), 
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {
                 "elicitation": {},
+                "sampling": {},
             },
             "clientInfo": {
                 "name": "harn",
@@ -828,6 +832,7 @@ async fn initialize_client(handle: &VmMcpClientHandle) -> Result<(), VmError> {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {
                     "elicitation": {},
+                    "sampling": {},
                 },
                 "clientInfo": {
                     "name": "harn",
@@ -1655,5 +1660,34 @@ mod tests {
         .expect("rejection");
         assert_eq!(unknown["error"]["code"], serde_json::json!(-32601));
         assert!(unknown["error"].get("data").is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn handle_inbound_routes_sampling_to_dispatcher() {
+        // Confirms `sampling/createMessage` is routed to
+        // `mcp_sampling::dispatch_inbound_sampling` rather than the
+        // generic rejection path. With no host bridge installed, the
+        // dispatcher declines with the structured `mcp.samplingDeclined`
+        // error envelope — proving the request reached the right
+        // handler instead of being bounced as `Method not found`.
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": crate::mcp_sampling::SAMPLING_METHOD,
+            "params": {
+                "messages": [
+                    {"role": "user", "content": {"type": "text", "text": "ping"}}
+                ],
+                "maxTokens": 4,
+            },
+        });
+        let response = handle_inbound_client_request("mock", &request)
+            .await
+            .expect("sampling should produce a response");
+        assert_eq!(response["id"], serde_json::json!(42));
+        assert_eq!(
+            response["error"]["data"]["type"],
+            serde_json::json!("mcp.samplingDeclined")
+        );
     }
 }

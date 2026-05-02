@@ -53,6 +53,26 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **MCP `sampling/createMessage` server-to-client bridge (#874).** When
+  Harn acts as an MCP client (stdio or Streamable HTTP), it now declares
+  the `sampling` capability on `initialize` and accepts inbound
+  `sampling/createMessage` requests from connected servers. Each request
+  is dispatched through the host-call bridge as
+  `("mcp", "sample", {server, params})` so embedders can run their own
+  approval UX, rate-limit by server, or inject `llm_call` overrides
+  (e.g. force `provider`/`model`). On approval the request flows through
+  Harn's regular `extract_llm_options` + `execute_llm_call` boundary —
+  picking up routing, capability gates, mock interception, and budget
+  plumbing — and the response is returned to the originating server as
+  `{role: "assistant", content: {type: "text", text}, model, stopReason}`.
+  Without an installed bridge, sampling requests are declined with a
+  structured `mcp.samplingDeclined` error (code `-32603`) so servers can
+  fall back to a sensible default rather than driving unattended LLM
+  spend. Sampling-side `tools` / `toolChoice` / `thinking` /
+  `modelPreferences` / `stopSequences` / `metadata` are all forwarded
+  through to `llm_call`'s typed boundary so the existing ThinkingConfig
+  (#849) and structured-output paths apply unchanged.
+
 - **ACP session modes (#897).** The ACP adapter now implements the
   [session-modes](https://agentclientprotocol.com/protocol/session-modes)
   spec: `session/new` and `session/load` return a `SessionModeState`
