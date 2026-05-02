@@ -193,31 +193,58 @@ impl AcpWebSocketHub {
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
-            let expired: Vec<Arc<AcpWorker>> = {
-                let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                state
-                    .workers_by_id
-                    .values()
-                    .filter(|worker| worker.is_expired(self.retention))
-                    .cloned()
-                    .collect()
-            };
-            for worker in expired {
-                let sessions = worker.session_ids();
-                self.remove_worker(&worker);
-                append_acp_event(
-                    &self.event_log,
-                    &worker.id,
-                    "session_worker_expired",
-                    json!({
-                        "worker_id": worker.id,
-                        "session_ids": sessions,
-                        "retention_ms": self.retention.as_millis(),
-                    }),
-                )
-                .await;
-            }
+            self.sweep_expired_once().await;
         }
+    }
+
+    async fn sweep_expired_once(&self) {
+        let expired: Vec<Arc<AcpWorker>> = {
+            let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            state
+                .workers_by_id
+                .values()
+                .filter(|worker| worker.is_expired(self.retention))
+                .cloned()
+                .collect()
+        };
+        for worker in expired {
+            let sessions = worker.session_ids();
+            self.remove_worker(&worker);
+            append_acp_event(
+                &self.event_log,
+                &worker.id,
+                "session_worker_expired",
+                json!({
+                    "worker_id": worker.id,
+                    "session_ids": sessions,
+                    "retention_ms": self.retention.as_millis(),
+                }),
+            )
+            .await;
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) async fn sweep_expired_once_for_test(&self) {
+        self.sweep_expired_once().await;
+    }
+
+    #[cfg(test)]
+    pub(super) fn session_is_detached_for_test(&self, session_id: &str) -> bool {
+        let worker = self
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .workers_by_session
+            .get(session_id)
+            .cloned();
+        worker.is_some_and(|worker| {
+            worker
+                .detached_at
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_some()
+        })
     }
 }
 
@@ -362,7 +389,6 @@ pub(super) fn acp_retained_session_duration_from_env() -> Duration {
     let seconds = std::env::var(ACP_RETAINED_SESSION_SECS_ENV)
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
-        .filter(|seconds| *seconds > 0)
         .unwrap_or(ACP_DEFAULT_RETAINED_SESSION_SECS);
     Duration::from_secs(seconds)
 }

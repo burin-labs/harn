@@ -318,6 +318,16 @@ async fn start_acp_test_listener() -> (ListenerRuntime, Arc<AnyEventLog>, TempDi
     (listener, log, dir)
 }
 
+async fn wait_for_acp_session_detached(listener: &ListenerRuntime, session_id: &str) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !listener.acp_session_is_detached_for_test(session_id) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("ACP session detached");
+}
+
 async fn pending_events(log: &Arc<AnyEventLog>) -> Vec<(u64, harn_vm::event_log::LogEvent)> {
     log.read_range(&Topic::new(PENDING_TOPIC).expect("pending topic"), None, 16)
         .await
@@ -532,7 +542,7 @@ async fn acp_websocket_reconnect_replays_pending_host_request_and_completes_prom
         .saturating_sub(1);
     socket.close(None).await.expect("close first socket");
     drop(socket);
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    tokio::task::yield_now().await;
 
     let (mut reconnected, _) =
         tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
@@ -588,7 +598,7 @@ async fn acp_websocket_replays_serialized_events_after_worker_expiry() {
     reset_active_event_log();
     std::env::set_var(API_KEYS_ENV, "ws-test-key");
     std::env::remove_var(HMAC_SECRET_ENV);
-    std::env::set_var(ACP_RETAINED_SESSION_SECS_ENV, "1");
+    std::env::set_var(ACP_RETAINED_SESSION_SECS_ENV, "0");
 
     let (listener, _log, _dir) = start_acp_test_listener().await;
     let (mut socket, _) =
@@ -606,7 +616,8 @@ async fn acp_websocket_replays_serialized_events_after_worker_expiry() {
         .saturating_sub(1);
     socket.close(None).await.expect("close socket");
     drop(socket);
-    tokio::time::sleep(Duration::from_millis(2_500)).await;
+    wait_for_acp_session_detached(&listener, &session_id).await;
+    listener.sweep_expired_acp_workers_for_test().await;
 
     let (mut reconnected, _) =
         tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
@@ -648,13 +659,6 @@ async fn acp_websocket_replays_serialized_events_after_worker_expiry() {
     std::env::remove_var(API_KEYS_ENV);
     std::env::remove_var(ACP_RETAINED_SESSION_SECS_ENV);
     reset_active_event_log();
-}
-
-fn unix_now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system time after unix epoch")
-        .as_millis() as i64
 }
 
 #[allow(clippy::await_holding_lock)]
@@ -1027,7 +1031,6 @@ async fn webhook_dedupe_claim_uses_route_retention_days() {
     .expect("start listener");
 
     let body = br#"{"action":"opened","issue":{"number":1}}"#;
-    let before_ms = unix_now_ms();
     let response = reqwest::Client::new()
         .post(format!("http://{}/hooks/github", listener.local_addr()))
         .header("X-GitHub-Event", "issues")
@@ -1038,12 +1041,12 @@ async fn webhook_dedupe_claim_uses_route_retention_days() {
         .send()
         .await
         .expect("send webhook");
-    let after_ms = unix_now_ms();
 
     assert_eq!(response.status(), StatusCode::OK);
     let claims = claim_events(&log).await;
     assert_eq!(claims.len(), 1);
-    let claim = &claims[0].1.payload;
+    let claim_event = &claims[0].1;
+    let claim = &claim_event.payload;
     assert_eq!(
         claim.get("binding_id").and_then(JsonValue::as_str),
         Some("github-webhook")
@@ -1057,8 +1060,9 @@ async fn webhook_dedupe_claim_uses_route_retention_days() {
         .and_then(JsonValue::as_i64)
         .expect("claim expires_at_ms");
     let ttl_ms = 3 * 24 * 60 * 60 * 1000;
+    let expected_upper = claim_event.occurred_at_ms + ttl_ms;
     assert!(
-        (before_ms + ttl_ms..=after_ms + ttl_ms).contains(&expires_at_ms),
+        (expected_upper - 1000..=expected_upper).contains(&expires_at_ms),
         "expires_at_ms {expires_at_ms} should use 3 day route retention"
     );
 

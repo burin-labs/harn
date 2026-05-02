@@ -55,6 +55,8 @@ pub(crate) struct ListenerRuntime {
     server: ServerRuntime,
     routes: Arc<RouteRegistry>,
     readiness: Arc<ListenerReadiness>,
+    #[cfg(test)]
+    acp_hub: Arc<AcpWebSocketHub>,
 }
 
 #[derive(Default)]
@@ -115,7 +117,7 @@ impl ListenerRuntime {
             event_log: config.event_log.clone(),
             auth: auth.clone(),
             pipeline: None,
-            hub: acp_hub,
+            hub: acp_hub.clone(),
         });
         let routes = Arc::new(RouteRegistry::new(
             config.routes,
@@ -176,11 +178,23 @@ impl ListenerRuntime {
             server,
             routes,
             readiness,
+            #[cfg(test)]
+            acp_hub,
         })
     }
 
     pub(crate) fn local_addr(&self) -> std::net::SocketAddr {
         self.server.local_addr()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn acp_session_is_detached_for_test(&self, session_id: &str) -> bool {
+        self.acp_hub.session_is_detached_for_test(session_id)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn sweep_expired_acp_workers_for_test(&self) {
+        self.acp_hub.sweep_expired_once_for_test().await;
     }
 
     pub(crate) fn scheme(&self) -> &'static str {
