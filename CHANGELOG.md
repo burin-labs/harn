@@ -6,7 +6,7 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## v0.7.52
+## v0.7.53
 
 ### Added
 
@@ -86,24 +86,12 @@ condensed series summaries instead of full per-patch history.
   spellings; existing `T | nil` source remains valid and semantically
   identical.
 
-- **Harn-native Merge Captain persona (#1009/#1029).** Replaces the
-  shell-driven Merge Captain MVP with a deterministic Harn package owning
-  multi-repo PR queue scheduling, durable per-PR state, audit-grade merge
-  receipts, and a 12-state machine over each tracked PR with legal-edge
-  enforcement.
+- **Merge Captain end-to-end driver (#1019/#1115).** Adds
+  `harn merge-captain run --backend {mock,replay,live}` with model-route
+  and timeout-tier receipt pins, JSONL transcript streaming, persisted
+  receipts, run summaries, and a checked-in mock smoke scenario.
 
-- **Merge Captain JSONL transcript oracle (#1013/#1030).** New
-  `harn merge-captain audit <transcript>` CLI plus oracle infrastructure
-  for inspecting JSONL artifacts (extra model calls, invalid structured
-  outputs, repeated reads, missing approvals, non-minimal tool usage).
-  Ships five reference goldens.
-
-- **Merge Captain end-to-end driver (#1019).** Adds
-  `harn merge-captain run --backend {mock,replay,live}` with model-route and
-  timeout-tier receipt pins, JSONL transcript streaming, persisted receipts,
-  run summaries, and a checked-in mock smoke scenario.
-
-- **Merge Captain mock-repos playground (#1020).** New
+- **Merge Captain mock-repos playground (#1020/#1137).** New
   `harn merge-captain mock {init,step,status,serve,cleanup,scenarios}`
   subcommand tree materializing a real on-disk sandbox: bare + working git
   repos seeded from a checked-in scenario manifest plus a fake GitHub HTTP
@@ -119,6 +107,219 @@ condensed series summaries instead of full per-patch history.
   `single_green`, `force_push_drill`) and extends `--backend mock` to
   detect the on-disk playground and synthesize a canonical sweep
   transcript from the live state.
+
+- **A2A file and data parts (#1111).** The A2A adapter now accepts and
+  emits the `file` and `data` part variants from the A2A 0.3 spec
+  alongside `text`, with conformance fixtures covering both
+  `task.send`/`task.send_subscribe` ingest and downstream task/stream
+  message rendering.
+
+- **Pipe placeholder chaining (#1050).** New `_` placeholder syntax in
+  pipe expressions lets scripts route the piped value into a non-first
+  argument position (`x |> f(a, _, c)`), with parser, type inference,
+  formatter, tree-sitter, and conformance coverage. Existing
+  no-placeholder pipes preserve their first-argument semantics.
+
+- **Typed git stdlib receipts (#1054).** `git_*` builtins now return
+  structured `GitReceipt` envelopes with audit-grade fields (subprocess
+  args, exit code, stdout/stderr digest, repo HEAD before/after) instead
+  of bare strings, feeding the canonical receipt envelope (#1110).
+
+- **TrustGraph query API (#1051).** Read-side query interface for the
+  trust graph, exposing tier/edge/record lookups via
+  `trust_graph_query(...)` and friends so policy-shaped scripts can
+  reason about prior tier transitions and approvals.
+
+- **PDF and audio file content support (#1046).** `llm_call` content
+  blocks now accept PDF and audio attachments where the provider
+  capability matrix supports them, alongside the existing image/text
+  content blocks.
+
+- **Durable persona annotations (#1055).** Persona definitions can carry
+  annotations that survive transcript compaction, replays, and mode
+  switches, feeding a `@durable_persona` attribute and conformance
+  coverage in `attributes_durable_persona.harn`.
+
+- **Persona step attribute metadata (#1117).** New `@step` attribute
+  (with optional `label`, `owner`, `contract` fields) on pipeline steps
+  surfaces structured metadata to ACP/UI consumers and conformance
+  coverage in `attributes_step.harn`.
+
+- **MCP OAuth resource-server auth (#1114).** Harn's MCP HTTP server can
+  authenticate clients via OAuth resource-server flow with bearer-token
+  validation and per-session capability scoping.
+
+- **Canonical receipt envelope (#1110).** Standardizes the receipt
+  envelope shape across stdlib + bridge + connector receipts and adds a
+  `check_receipt_struct_duplication` script gate to prevent drift.
+
+### Changed
+
+- **A2A `a2a-version` request-header negotiation soft-deprecated (#894).**
+  The A2A 0.3.0 spec encodes protocol version in AgentCard discovery, not
+  request headers. The harn-serve A2A adapter no longer rejects unknown
+  values of the `a2a-version` HTTP header with JSON-RPC `-32009
+  VersionNotSupportedError`; clients should read `protocolVersion` from
+  the AgentCard and choose compatible methods. For one minor cycle, any
+  request that still carries `a2a-version` is logged via
+  `tracing::warn!(target = "harn_serve::a2a", …)` so we can spot
+  residual client usage; the header is then slated for full removal.
+
+- **ACP vendor-extension session-update payloads follow `_meta.harn`
+  (#905).** Harn-specific session-update variants now ride their vendor
+  fields under `update._meta.harn` rather than the update root,
+  completing the namespacing pass started in #904. Affected variants:
+  `progress` (`phase`, `message`, `progress`, `total`, `data`), `log`
+  (`level`, `message`, `fields`), `fs_watch` (`subscriptionId`,
+  `events`), `worker_update` (`workerId`, `workerName`, `workerTask`,
+  `workerMode`, `event`, `status`, `terminal`, `metadata`, `audit`),
+  `transcript_compacted` (`mode`, `strategy`, `archivedMessages`,
+  `estimatedTokensBefore`, `estimatedTokensAfter`, `snapshotAssetId`),
+  `handoff` (`handoffId`, `artifactId`, `handoff`), `skill_activated` /
+  `skill_deactivated` / `skill_scope_tools` (`skillName`, `iteration`,
+  `reason`, `allowedTools`), and `tool_search_query` /
+  `tool_search_result` (`toolUseId`, `name`, `query`, `promoted`,
+  `strategy`, `mode`). Content extensions `visible_text` /
+  `visible_delta` on `agent_message_chunk` move under
+  `content._meta.harn`. The canonical `sessionUpdate` discriminator and
+  the ACP `content` block stay at their top-level locations. Burin Code
+  and other ACP hosts must migrate to the new field locations before
+  consuming this release; pre-#905 fixtures will fail to render. Burin
+  Code consumer migration is tracked in
+  [burin-code#511](https://github.com/burin-labs/burin-code/issues/511).
+
+- **ACP tool-call extension metadata follows `_meta.harn` (#904).**
+  Harn-specific `tool_call` / `tool_call_update` fields (`audit`,
+  `durationMs`, `executionDurationMs`, `error`, `errorCategory`,
+  `executor`, `parsing`, and `rawInputPartial`) now live under
+  `_meta.harn` instead of the ACP update root. Canonical fields such as
+  `toolCallId`, `title`, `kind`, `status`, `rawInput`, and `rawOutput`
+  remain top-level. Burin Code consumers should migrate to the new
+  location before consuming this release.
+
+- **Strip `GIT_*` env from `stdlib.git` subprocess calls (#1121).**
+  `git_*` builtins no longer inherit ambient `GIT_*` environment
+  variables from the parent process; subprocess invocations run with a
+  scrubbed environment to prevent accidental cross-contamination from
+  `GIT_DIR`, `GIT_WORK_TREE`, `GIT_AUTHOR_*`, etc.
+
+- **CI rollup gate renamed: `Check status` → `CI status` (#1124).** The
+  required-check rollup name now matches the org-level branch protection
+  ruleset so PRs reliably enter the merge queue.
+
+- **Pre-0.6 changelog archived (#1047).** Pre-0.6 release notes moved to
+  a separate [`CHANGELOG-pre-0.6.md`](CHANGELOG-pre-0.6.md) archive; the
+  main `CHANGELOG.md` now focuses on 0.6+ history.
+
+- **Split `crates/harn-cli/src/cli.rs` by subcommand group (#942).** The
+  monolithic CLI argument-parsing module is split into per-subcommand
+  files for maintainability; behavior is unchanged.
+
+### Fixed
+
+- **Flaky `file_backed_prompts_list_render_and_notify_changes` test
+  (#1125).** Removes wall-clock dependence in the file-backed prompts
+  test by using deterministic notification ordering.
+
+### Tests
+
+- **`ProcessHandle` trait + `MockProcess` for deterministic
+  process-tool tests (#1062).** `crates/harn-hostlib/src/process/`
+  introduces a `ProcessHandle` / `ProcessSpawner` abstraction with a
+  real implementation that wraps `harn_vm::process_sandbox` and a
+  `MockSpawner` test double that returns scripted `MockProcess`
+  handles. `tools/proc.rs` and `tools/long_running.rs` consume the
+  trait instead of `std::process::Child` directly. The 33 integration
+  tests in `crates/harn-hostlib/tests/process_tools.rs` are rewritten
+  to install `MockSpawner` per test — zero `std::thread::sleep`, zero
+  `Instant::now()` polling, zero real subprocess spawning. Long-running
+  waiter completion is awaited deterministically via a new
+  `register_completion_notifier` API. The full file finishes in 0.01 s
+  and 50× rerun under `cargo nextest` is flake-free. Two real-process
+  smoke tests live in `crates/harn-hostlib/tests/process_tools_e2e.rs`
+  for end-to-end coverage; they keep the `_e2e.rs` suffix so issue
+  #1069's slow-job tagging can pick them up.
+
+- **`OrchestratorHarness` + in-process orchestrator integration tests
+  (#1059/#1060/#1081/#1098).** Every `crates/harn-cli/tests/orchestrator_*`
+  test now runs the orchestrator in-process via the new
+  `OrchestratorHarness` library API and waits on the event log's
+  broadcast channel instead of spawning the `harn` binary and polling
+  SQLite. Wall-clock for the orchestrator HTTP suite drops from minutes
+  (per-test subprocess startup + 25 ms-poll drain) to ~13 s end-to-end
+  at `--test-threads=8`. The few tests that inherently depend on
+  subprocess semantics (raw stderr scraping, `std::process::exit(86)`
+  crash hooks, global tracing-subscriber install) stay `#[ignore]`d and
+  move to the slow E2E/smoke job tracked in #1069. To support this the
+  harn-cli crate gains a thin `lib.rs` that promotes the previous
+  `main.rs` body to public API while keeping `main.rs` a 3-line shim.
+
+- **`FakeLlmProvider` for deterministic LLM tests (#1113).** Replaces
+  ad-hoc HTTP-mock-based LLM provider doubles with a synchronous
+  in-process fake that scripts request/response sequences without
+  binding tests to wall-clock or socket lifecycle.
+
+- **`FakeHttpServer` to replace mock HTTP server (#1112).** Deterministic
+  in-process HTTP server replaces the prior wall-clock-coupled mock,
+  removing flake from connector and webhook tests.
+
+- **Test suite tiering (#1087).** Splits the test suite into a fast
+  push-hook gate and a slow E2E job; routine PRs no longer pay the
+  subprocess-heavy E2E cost on every push.
+
+- **CI determinism gates (#1085).** Adds flake-detection
+  (`.github/workflows/flake-detection.yml`) and thread-parity
+  (`.github/workflows/thread-parity.yml`) workflows that flag wall-clock
+  or thread-count-dependent test behavior as part of merge-queue gates.
+
+- **Lint test patterns (#1090).** New `make lint-test-patterns` gate
+  bans `std::thread::sleep`, `tokio::time::sleep`, `Instant::now()`
+  polling loops, `SystemTime::now()`, and short `recv_timeout` calls in
+  test files; opt-out procedure documented in `docs/dev/testing.md`.
+
+- **Deterministic timing migration.** Sweeping conversion of orchestrator
+  (#1098), workflow (#1105), Slack 3 s-ack (#1102, #1104), A2A dispatcher
+  (#1100), Notion/Linear connectors (#1086), CLI persona/flow ship
+  watch (#1133), CLI in-process (#1116), and remaining Tier 1H CLI
+  tests (#1138) to subscription-based or pause-based timing patterns;
+  remaining wall-clock timing assertions removed (#1088/#1097, #1109).
+
+- **`TimeProvider` for daemon mtime in tests (#1083).** Daemon-side
+  mtime checks now consume an injected `TimeProvider` so tests can pin
+  observed time without sleeping.
+
+- **Connector parity matrix (#1052).** Asserts feature parity across the
+  GitHub / Linear / Notion / Slack connectors so divergence is caught at
+  test time.
+
+- **Split large dispatcher and orchestrator HTTP tests (#1053).** Long
+  monolithic test files broken into focused sub-suites for faster
+  individual reruns and clearer failure attribution.
+
+- **Remove deprecated polling test helpers (#1122).** Cleans up
+  `assert_poll_*`-style helpers superseded by subscription-based
+  patterns.
+
+- **Subprocess-CLI test conversion (#1116/#1133).** Converts CLI tests
+  that previously spawned the `harn` binary to in-process invocation;
+  binary-surface tests are gated as `#[ignore]` and run in the slow E2E
+  job.
+
+## v0.7.52
+
+### Added
+
+- **Harn-native Merge Captain persona (#1009/#1029).** Replaces the
+  shell-driven Merge Captain MVP with a deterministic Harn package owning
+  multi-repo PR queue scheduling, durable per-PR state, audit-grade merge
+  receipts, and a 12-state machine over each tracked PR with legal-edge
+  enforcement.
+
+- **Merge Captain JSONL transcript oracle (#1013/#1030).** New
+  `harn merge-captain audit <transcript>` CLI plus oracle infrastructure
+  for inspecting JSONL artifacts (extra model calls, invalid structured
+  outputs, repeated reads, missing approvals, non-minimal tool usage).
+  Ships five reference goldens.
 
 - **`llm_stream_call` streaming builtin (#1038).** Native LLM streaming
   builtin returning `Stream<...>` with cancellation support; provider
@@ -165,20 +366,6 @@ condensed series summaries instead of full per-patch history.
 - **Virtual-clock test migration (#948/#1027).** Timing-sensitive tests
   migrated to a deterministic virtual clock to reduce flakes.
 
-- **In-process orchestrator integration tests (#1059/#1060).** Every
-  `crates/harn-cli/tests/orchestrator_*` test now runs the orchestrator
-  in-process via the new `OrchestratorHarness` library API and waits on
-  the event log's broadcast channel instead of spawning the `harn`
-  binary and polling SQLite. Wall-clock for the orchestrator HTTP
-  suite drops from minutes (per-test subprocess startup + 25 ms-poll
-  drain) to ~13 s end-to-end at `--test-threads=8`. The few tests that
-  inherently depend on subprocess semantics (raw stderr scraping,
-  `std::process::exit(86)` crash hooks, global tracing-subscriber
-  install) stay `#[ignore]`d and move to the slow E2E/smoke job
-  tracked in #1069. To support this the harn-cli crate gains a thin
-  `lib.rs` that promotes the previous `main.rs` body to public API
-  while keeping `main.rs` a 3-line shim.
-
 - **`cfg(unix)` test gate audit + nightly Windows matrix (#1026).**
   Surfaces and trims tests gated on `cfg(unix)` and adds a nightly
   Windows nextest matrix to keep cross-platform coverage honest.
@@ -187,51 +374,7 @@ condensed series summaries instead of full per-patch history.
   `make build`/`make build-release` targets that ad-hoc sign the harn
   binaries on macOS for local development convenience.
 
-### Changed
-
-- **A2A `a2a-version` request-header negotiation soft-deprecated (#894).**
-  The A2A 0.3.0 spec encodes protocol version in AgentCard discovery, not
-  request headers. The harn-serve A2A adapter no longer rejects unknown
-  values of the `a2a-version` HTTP header with JSON-RPC `-32009
-  VersionNotSupportedError`; clients should read `protocolVersion` from
-  the AgentCard and choose compatible methods. For one minor cycle, any
-  request that still carries `a2a-version` is logged via
-  `tracing::warn!(target = "harn_serve::a2a", …)` so we can spot
-  residual client usage; the header is then slated for full removal.
-
 ### Fixed
-
-- **ACP vendor-extension session-update payloads follow `_meta.harn`
-  (#905).** Harn-specific session-update variants now ride their vendor
-  fields under `update._meta.harn` rather than the update root,
-  completing the namespacing pass started in #904. Affected variants:
-  `progress` (`phase`, `message`, `progress`, `total`, `data`), `log`
-  (`level`, `message`, `fields`), `fs_watch` (`subscriptionId`,
-  `events`), `worker_update` (`workerId`, `workerName`, `workerTask`,
-  `workerMode`, `event`, `status`, `terminal`, `metadata`, `audit`),
-  `transcript_compacted` (`mode`, `strategy`, `archivedMessages`,
-  `estimatedTokensBefore`, `estimatedTokensAfter`, `snapshotAssetId`),
-  `handoff` (`handoffId`, `artifactId`, `handoff`), `skill_activated` /
-  `skill_deactivated` / `skill_scope_tools` (`skillName`, `iteration`,
-  `reason`, `allowedTools`), and `tool_search_query` /
-  `tool_search_result` (`toolUseId`, `name`, `query`, `promoted`,
-  `strategy`, `mode`). Content extensions `visible_text` /
-  `visible_delta` on `agent_message_chunk` move under
-  `content._meta.harn`. The canonical `sessionUpdate` discriminator and
-  the ACP `content` block stay at their top-level locations. Burin Code
-  and other ACP hosts must migrate to the new field locations before
-  consuming this release; pre-#905 fixtures will fail to render. Burin
-  Code consumer migration is tracked in
-  [burin-code#511](https://github.com/burin-labs/burin-code/issues/511).
-
-- **ACP tool-call extension metadata follows `_meta.harn` (#904).**
-  Harn-specific `tool_call` / `tool_call_update` fields (`audit`,
-  `durationMs`, `executionDurationMs`, `error`, `errorCategory`,
-  `executor`, `parsing`, and `rawInputPartial`) now live under
-  `_meta.harn` instead of the ACP update root. Canonical fields such as
-  `toolCallId`, `title`, `kind`, `status`, `rawInput`, and `rawOutput`
-  remain top-level. Burin Code consumers should migrate to the new
-  location before consuming this release.
 
 - **Protocol retry spiral after recovered tool calls (#1039).** Tool-call
   recovery no longer triggers an infinite protocol-retry loop.
@@ -246,25 +389,6 @@ condensed series summaries instead of full per-patch history.
   `serve.rs`, `symlink_path_dependency` in `registry.rs`); both now
   return their typed `OrchestratorError` / `PackageError::Registry`
   variants.
-
-### Tests
-
-- **`ProcessHandle` trait + `MockProcess` for deterministic
-  process-tool tests (#1062).** `crates/harn-hostlib/src/process/`
-  introduces a `ProcessHandle` / `ProcessSpawner` abstraction with a
-  real implementation that wraps `harn_vm::process_sandbox` and a
-  `MockSpawner` test double that returns scripted `MockProcess`
-  handles. `tools/proc.rs` and `tools/long_running.rs` consume the
-  trait instead of `std::process::Child` directly. The 33 integration
-  tests in `crates/harn-hostlib/tests/process_tools.rs` are rewritten
-  to install `MockSpawner` per test — zero `std::thread::sleep`, zero
-  `Instant::now()` polling, zero real subprocess spawning. Long-running
-  waiter completion is awaited deterministically via a new
-  `register_completion_notifier` API. The full file finishes in 0.01 s
-  and 50× rerun under `cargo nextest` is flake-free. Two real-process
-  smoke tests live in `crates/harn-hostlib/tests/process_tools_e2e.rs`
-  for end-to-end coverage; they keep the `_e2e.rs` suffix so issue
-  #1069's slow-job tagging can pick them up.
 
 ## v0.7.51
 
