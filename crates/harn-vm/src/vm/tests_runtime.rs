@@ -115,6 +115,37 @@ fn run_harn_result(source: &str) -> Result<(String, VmValue), VmError> {
     })
 }
 
+#[test]
+fn runtime_error_renderer_normalizes_frame_paths() {
+    let mut vm = Vm::new();
+    vm.set_source_info(
+        "/workspace/pipelines/mode/../mode/auto.harn",
+        "let run = agent_loop(message, system_prompt, opts)\n",
+    );
+    vm.error_stack_trace = vec![
+        (
+            "pipeline".to_string(),
+            39,
+            1,
+            Some("/workspace/pipelines/mode/../mode/auto.harn".to_string()),
+        ),
+        (
+            "agent_loop".to_string(),
+            205,
+            48,
+            Some("/workspace/pipelines/mode/../lib/runtime/loop.harn".to_string()),
+        ),
+    ];
+
+    let rendered = vm.format_runtime_error(&VmError::Runtime(
+        "option `cache` is not supported".to_string(),
+    ));
+
+    assert!(rendered.contains("--> /workspace/pipelines/lib/runtime/loop.harn:205:48"));
+    assert!(rendered.contains("called from pipeline at /workspace/pipelines/mode/auto.harn:39"));
+    assert!(!rendered.contains("/../"));
+}
+
 async fn run_harn_result_async(source: &str) -> Result<(String, VmValue), VmError> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().unwrap();
