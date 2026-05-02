@@ -3,6 +3,13 @@
 use serde_json::{json, Value as JsonValue};
 
 pub const PROTOCOL_VERSION: &str = "2025-11-25";
+pub const METHOD_TASKS_GET: &str = "tasks/get";
+pub const METHOD_TASKS_RESULT: &str = "tasks/result";
+pub const METHOD_TASKS_LIST: &str = "tasks/list";
+pub const METHOD_TASKS_CANCEL: &str = "tasks/cancel";
+pub const METHOD_TASK_STATUS_NOTIFICATION: &str = "notifications/tasks/status";
+pub const RELATED_TASK_META_KEY: &str = "io.modelcontextprotocol/related-task";
+pub const DEFAULT_TASK_POLL_INTERVAL_MS: u64 = 250;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UnsupportedMcpMethod {
@@ -46,31 +53,49 @@ pub const UNSUPPORTED_LATEST_SPEC_METHODS: &[UnsupportedMcpMethod] = &[
     // `elicitation/create` is supported on both roles — handled in
     // `mcp::stdio_call`/`mcp::http_call` (client) and via `mcp_elicit(...)`
     // (server). It is intentionally omitted from this gap list.
-    UnsupportedMcpMethod {
-        method: "tasks/get",
-        feature: "tasks",
-        role: "server",
-        reason: "Harn MCP tools execute inline; MCP task polling is not implemented.",
-    },
-    UnsupportedMcpMethod {
-        method: "tasks/result",
-        feature: "tasks",
-        role: "server",
-        reason: "Harn MCP tools execute inline; MCP task result retrieval is not implemented.",
-    },
-    UnsupportedMcpMethod {
-        method: "tasks/list",
-        feature: "tasks",
-        role: "server",
-        reason: "Harn MCP tools execute inline; MCP task listing is not implemented.",
-    },
-    UnsupportedMcpMethod {
-        method: "tasks/cancel",
-        feature: "tasks",
-        role: "server",
-        reason: "Harn MCP cancellation uses notifications/cancelled instead of MCP tasks.",
-    },
 ];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum McpTaskStatus {
+    Working,
+    InputRequired,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl McpTaskStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Working => "working",
+            Self::InputRequired => "input_required",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum McpToolTaskSupport {
+    Required,
+    Optional,
+    Forbidden,
+}
+
+impl McpToolTaskSupport {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Required => "required",
+            Self::Optional => "optional",
+            Self::Forbidden => "forbidden",
+        }
+    }
+}
 
 pub fn unsupported_latest_spec_method(method: &str) -> Option<&'static UnsupportedMcpMethod> {
     UNSUPPORTED_LATEST_SPEC_METHODS
@@ -93,23 +118,65 @@ pub fn unsupported_latest_spec_method_response(
 }
 
 pub fn unsupported_task_augmentation_response(id: impl Into<JsonValue>, method: &str) -> JsonValue {
-    crate::jsonrpc::error_response_with_data(
+    task_augmentation_error_response(
         id,
+        method,
         -32602,
         "MCP task-augmented execution is not supported",
+        "Harn MCP tools execute inline and do not advertise taskSupport.",
+    )
+}
+
+pub fn task_augmentation_error_response(
+    id: impl Into<JsonValue>,
+    method: &str,
+    code: i64,
+    message: &str,
+    reason: &str,
+) -> JsonValue {
+    crate::jsonrpc::error_response_with_data(
+        id,
+        code,
+        message,
         json!({
             "type": "mcp.unsupportedFeature",
             "protocolVersion": PROTOCOL_VERSION,
             "method": method,
             "feature": "tasks",
             "status": "unsupported",
-            "reason": "Harn MCP tools execute inline and do not advertise taskSupport.",
+            "reason": reason,
         }),
     )
 }
 
 pub fn requests_task_augmentation(params: &JsonValue) -> bool {
     params.get("task").is_some()
+}
+
+pub fn tasks_capability() -> JsonValue {
+    json!({
+        "list": {},
+        "cancel": {},
+        "requests": {
+            "tools": {
+                "call": {}
+            }
+        }
+    })
+}
+
+pub fn tool_execution(task_support: McpToolTaskSupport) -> JsonValue {
+    json!({
+        "taskSupport": task_support.as_str(),
+    })
+}
+
+pub fn related_task_meta(task_id: &str) -> JsonValue {
+    json!({
+        RELATED_TASK_META_KEY: {
+            "taskId": task_id,
+        }
+    })
 }
 
 fn unsupported_method_data(entry: &UnsupportedMcpMethod) -> JsonValue {
@@ -136,10 +203,6 @@ mod tests {
             "resources/unsubscribe",
             "roots/list",
             "sampling/createMessage",
-            "tasks/get",
-            "tasks/result",
-            "tasks/list",
-            "tasks/cancel",
         ] {
             let response = unsupported_latest_spec_method_response(json!(1), method)
                 .expect("expected explicit unsupported method");
@@ -166,5 +229,21 @@ mod tests {
         assert_eq!(response["id"], json!("call-1"));
         assert_eq!(response["error"]["code"], json!(-32602));
         assert_eq!(response["error"]["data"]["feature"], json!("tasks"));
+    }
+
+    #[test]
+    fn task_protocol_shapes_match_latest_spec_names() {
+        assert_eq!(McpTaskStatus::Working.as_str(), "working");
+        assert_eq!(McpTaskStatus::InputRequired.as_str(), "input_required");
+        assert!(McpTaskStatus::Completed.is_terminal());
+        assert_eq!(tasks_capability()["requests"]["tools"]["call"], json!({}));
+        assert_eq!(
+            tool_execution(McpToolTaskSupport::Optional)["taskSupport"],
+            json!("optional")
+        );
+        assert_eq!(
+            related_task_meta("task-1")[RELATED_TASK_META_KEY]["taskId"],
+            json!("task-1")
+        );
     }
 }
