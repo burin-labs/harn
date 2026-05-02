@@ -154,6 +154,10 @@ impl DispatchCore {
         &self.config.auth_policy
     }
 
+    pub(crate) fn event_log(&self) -> Arc<AnyEventLog> {
+        self.event_log.clone()
+    }
+
     pub async fn dispatch(&self, request: CallRequest) -> Result<CallResponse, DispatchError> {
         let authorization = self.config.auth_policy.authorize(&request.auth).await;
         let trace_id = request.trace_id.clone().unwrap_or_default();
