@@ -48,7 +48,6 @@ const MCP_PROTOCOL_HEADER: &str = "mcp-protocol-version";
 const DEPRECATION_HEADER: &str = "deprecation";
 const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
 const TRIGGER_EVENTS_TOPIC: &str = "triggers.events";
-const DEFAULT_RESOURCE_LIMIT: usize = 200;
 const DEFAULT_TASK_TTL_MS: u64 = 10 * 60 * 1000;
 const MAX_TASK_TTL_MS: u64 = 60 * 60 * 1000;
 
@@ -419,7 +418,7 @@ impl McpOrchestratorService {
             "initialized" => JsonValue::Null,
             "ping" => harn_vm::jsonrpc::response(id, json!({})),
             "logging/setLevel" => harn_vm::jsonrpc::response(id, json!({})),
-            "tools/list" => self.handle_tools_list(id),
+            "tools/list" => self.handle_tools_list(id, &params),
             "tools/call" => self.handle_tools_call(id, session, &params).await,
             mcp_protocol::METHOD_TASKS_GET => self.handle_tasks_get(id, session, &params),
             mcp_protocol::METHOD_TASKS_RESULT => {
@@ -427,12 +426,10 @@ impl McpOrchestratorService {
             }
             mcp_protocol::METHOD_TASKS_LIST => self.handle_tasks_list(id, session, &params),
             mcp_protocol::METHOD_TASKS_CANCEL => self.handle_tasks_cancel(id, session, &params),
-            "resources/list" => self.handle_resources_list(id).await,
+            "resources/list" => self.handle_resources_list(id, &params).await,
             "resources/read" => self.handle_resources_read(id, &params).await,
-            "resources/templates/list" => {
-                harn_vm::jsonrpc::response(id, json!({"resourceTemplates": []}))
-            }
-            "prompts/list" => self.handle_prompts_list(id),
+            "resources/templates/list" => self.handle_resource_templates_list(id, &params),
+            "prompts/list" => self.handle_prompts_list(id, &params),
             "prompts/get" => self.handle_prompts_get(id, &params),
             _ if mcp_protocol::unsupported_latest_spec_method(method).is_some() => {
                 mcp_protocol::unsupported_latest_spec_method_response(id, method)
@@ -503,13 +500,13 @@ impl McpOrchestratorService {
         )
     }
 
-    fn handle_prompts_list(&self, id: JsonValue) -> JsonValue {
+    fn handle_prompts_list(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
         let prompts = self
             .prompt_catalog
             .lock()
             .expect("prompt catalog poisoned")
             .list();
-        harn_vm::jsonrpc::response(id, json!({ "prompts": prompts }))
+        paginated_list_response(id, "prompts/list", "prompts", params, prompts)
     }
 
     fn handle_prompts_get(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
@@ -539,184 +536,190 @@ impl McpOrchestratorService {
         }
     }
 
-    fn handle_tools_list(&self, id: JsonValue) -> JsonValue {
-        harn_vm::jsonrpc::response(
+    fn handle_tools_list(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
+        let tools = vec![
+            tool_def(
+                "harn.secret_scan",
+                "Scan content for high-signal secrets before commit or PR-open flows. The `harn::secret_scan` alias is also accepted.",
+                json!({
+                    "type": "object",
+                    "required": ["content"],
+                    "properties": {
+                        "content": { "type": "string" },
+                    },
+                    "additionalProperties": false,
+                }),
+                Some(json!({
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "detector",
+                            "source",
+                            "title",
+                            "line",
+                            "column_start",
+                            "column_end",
+                            "start_offset",
+                            "end_offset",
+                            "redacted",
+                            "fingerprint"
+                        ],
+                        "properties": {
+                            "detector": { "type": "string" },
+                            "source": { "type": "string" },
+                            "title": { "type": "string" },
+                            "line": { "type": "integer" },
+                            "column_start": { "type": "integer" },
+                            "column_end": { "type": "integer" },
+                            "start_offset": { "type": "integer" },
+                            "end_offset": { "type": "integer" },
+                            "redacted": { "type": "string" },
+                            "fingerprint": { "type": "string" },
+                        },
+                    },
+                })),
+                mcp_protocol::McpToolTaskSupport::Forbidden,
+            ),
+            tool_def(
+                "harn.trigger.fire",
+                "Dispatch a trigger inline and return its event id plus terminal status.",
+                json!({
+                    "type": "object",
+                    "required": ["trigger_id", "payload"],
+                    "properties": {
+                        "trigger_id": { "type": "string" },
+                        "payload": {},
+                    },
+                    "additionalProperties": false,
+                }),
+                Some(json!({
+                    "type": "object",
+                    "required": ["event_id", "status"],
+                    "properties": {
+                        "event_id": { "type": "string" },
+                        "status": { "type": "string" },
+                    },
+                })),
+                mcp_protocol::McpToolTaskSupport::Optional,
+            ),
+            tool_def(
+                "harn.trigger.list",
+                "List registered triggers and their kind/provider/when/handler metadata.",
+                json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false,
+                }),
+                None,
+                mcp_protocol::McpToolTaskSupport::Forbidden,
+            ),
+            tool_def(
+                "harn.trigger.replay",
+                "Replay an existing trigger event, optionally resolving bindings as of a historical timestamp.",
+                json!({
+                    "type": "object",
+                    "required": ["event_id"],
+                    "properties": {
+                        "event_id": { "type": "string" },
+                        "as_of": { "type": "string" },
+                    },
+                    "additionalProperties": false,
+                }),
+                None,
+                mcp_protocol::McpToolTaskSupport::Optional,
+            ),
+            tool_def(
+                "harn.orchestrator.queue",
+                "Return inbox/outbox/attempt/DLQ counts plus recent previews.",
+                json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false,
+                }),
+                None,
+                mcp_protocol::McpToolTaskSupport::Forbidden,
+            ),
+            tool_def(
+                "harn.orchestrator.dlq.list",
+                "List pending dead-letter queue entries.",
+                json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false,
+                }),
+                None,
+                mcp_protocol::McpToolTaskSupport::Forbidden,
+            ),
+            tool_def(
+                "harn.orchestrator.dlq.retry",
+                "Replay a pending dead-letter queue entry.",
+                json!({
+                    "type": "object",
+                    "required": ["entry_id"],
+                    "properties": {
+                        "entry_id": { "type": "string" },
+                    },
+                    "additionalProperties": false,
+                }),
+                None,
+                mcp_protocol::McpToolTaskSupport::Optional,
+            ),
+            tool_def(
+                "harn.orchestrator.inspect",
+                "Snapshot dispatcher state, triggers, flow-control state, and recent dispatches.",
+                json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false,
+                }),
+                None,
+                mcp_protocol::McpToolTaskSupport::Forbidden,
+            ),
+            tool_def(
+                "harn.trust.query",
+                "Query trust-graph records with the same filters exposed by trust_query(filters).",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "agent": { "type": "string" },
+                        "action": { "type": "string" },
+                        "since": { "type": "string" },
+                        "until": { "type": "string" },
+                        "tier": {
+                            "type": "string",
+                            "enum": ["shadow", "suggest", "act_with_approval", "act_auto"]
+                        },
+                        "outcome": {
+                            "type": "string",
+                            "enum": ["success", "failure", "denied", "timeout"]
+                        },
+                        "limit": { "type": "integer", "minimum": 0 },
+                        "grouped_by_trace": { "type": "boolean" }
+                    },
+                    "additionalProperties": false,
+                }),
+                Some(json!({
+                    "type": "object",
+                    "required": ["grouped_by_trace", "results"],
+                    "properties": {
+                        "grouped_by_trace": { "type": "boolean" },
+                        "results": { "type": "array" },
+                    },
+                })),
+                mcp_protocol::McpToolTaskSupport::Forbidden,
+            ),
+        ];
+        paginated_list_response(id, "tools/list", "tools", params, tools)
+    }
+
+    fn handle_resource_templates_list(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
+        paginated_list_response(
             id,
-            json!({
-                "tools": [
-                    tool_def(
-                        "harn.secret_scan",
-                        "Scan content for high-signal secrets before commit or PR-open flows. The `harn::secret_scan` alias is also accepted.",
-                        json!({
-                            "type": "object",
-                            "required": ["content"],
-                            "properties": {
-                                "content": { "type": "string" },
-                            },
-                            "additionalProperties": false,
-                        }),
-                        Some(json!({
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "required": [
-                                    "detector",
-                                    "source",
-                                    "title",
-                                    "line",
-                                    "column_start",
-                                    "column_end",
-                                    "start_offset",
-                                    "end_offset",
-                                    "redacted",
-                                    "fingerprint"
-                                ],
-                                "properties": {
-                                    "detector": { "type": "string" },
-                                    "source": { "type": "string" },
-                                    "title": { "type": "string" },
-                                    "line": { "type": "integer" },
-                                    "column_start": { "type": "integer" },
-                                    "column_end": { "type": "integer" },
-                                    "start_offset": { "type": "integer" },
-                                    "end_offset": { "type": "integer" },
-                                    "redacted": { "type": "string" },
-                                    "fingerprint": { "type": "string" },
-                                },
-                            },
-                        })),
-                        mcp_protocol::McpToolTaskSupport::Forbidden,
-                    ),
-                    tool_def(
-                        "harn.trigger.fire",
-                        "Dispatch a trigger inline and return its event id plus terminal status.",
-                        json!({
-                            "type": "object",
-                            "required": ["trigger_id", "payload"],
-                            "properties": {
-                                "trigger_id": { "type": "string" },
-                                "payload": {},
-                            },
-                            "additionalProperties": false,
-                        }),
-                        Some(json!({
-                            "type": "object",
-                            "required": ["event_id", "status"],
-                            "properties": {
-                                "event_id": { "type": "string" },
-                                "status": { "type": "string" },
-                            },
-                        })),
-                        mcp_protocol::McpToolTaskSupport::Optional,
-                    ),
-                    tool_def(
-                        "harn.trigger.list",
-                        "List registered triggers and their kind/provider/when/handler metadata.",
-                        json!({
-                            "type": "object",
-                            "properties": {},
-                            "additionalProperties": false,
-                        }),
-                        None,
-                        mcp_protocol::McpToolTaskSupport::Forbidden,
-                    ),
-                    tool_def(
-                        "harn.trigger.replay",
-                        "Replay an existing trigger event, optionally resolving bindings as of a historical timestamp.",
-                        json!({
-                            "type": "object",
-                            "required": ["event_id"],
-                            "properties": {
-                                "event_id": { "type": "string" },
-                                "as_of": { "type": "string" },
-                            },
-                            "additionalProperties": false,
-                        }),
-                        None,
-                        mcp_protocol::McpToolTaskSupport::Optional,
-                    ),
-                    tool_def(
-                        "harn.orchestrator.queue",
-                        "Return inbox/outbox/attempt/DLQ counts plus recent previews.",
-                        json!({
-                            "type": "object",
-                            "properties": {},
-                            "additionalProperties": false,
-                        }),
-                        None,
-                        mcp_protocol::McpToolTaskSupport::Forbidden,
-                    ),
-                    tool_def(
-                        "harn.orchestrator.dlq.list",
-                        "List pending dead-letter queue entries.",
-                        json!({
-                            "type": "object",
-                            "properties": {},
-                            "additionalProperties": false,
-                        }),
-                        None,
-                        mcp_protocol::McpToolTaskSupport::Forbidden,
-                    ),
-                    tool_def(
-                        "harn.orchestrator.dlq.retry",
-                        "Replay a pending dead-letter queue entry.",
-                        json!({
-                            "type": "object",
-                            "required": ["entry_id"],
-                            "properties": {
-                                "entry_id": { "type": "string" },
-                            },
-                            "additionalProperties": false,
-                        }),
-                        None,
-                        mcp_protocol::McpToolTaskSupport::Optional,
-                    ),
-                    tool_def(
-                        "harn.orchestrator.inspect",
-                        "Snapshot dispatcher state, triggers, flow-control state, and recent dispatches.",
-                        json!({
-                            "type": "object",
-                            "properties": {},
-                            "additionalProperties": false,
-                        }),
-                        None,
-                        mcp_protocol::McpToolTaskSupport::Forbidden,
-                    ),
-                    tool_def(
-                        "harn.trust.query",
-                        "Query trust-graph records with the same filters exposed by trust_query(filters).",
-                        json!({
-                            "type": "object",
-                            "properties": {
-                                "agent": { "type": "string" },
-                                "action": { "type": "string" },
-                                "since": { "type": "string" },
-                                "until": { "type": "string" },
-                                "tier": {
-                                    "type": "string",
-                                    "enum": ["shadow", "suggest", "act_with_approval", "act_auto"]
-                                },
-                                "outcome": {
-                                    "type": "string",
-                                    "enum": ["success", "failure", "denied", "timeout"]
-                                },
-                                "limit": { "type": "integer", "minimum": 0 },
-                                "grouped_by_trace": { "type": "boolean" }
-                            },
-                            "additionalProperties": false,
-                        }),
-                        Some(json!({
-                            "type": "object",
-                            "required": ["grouped_by_trace", "results"],
-                            "properties": {
-                                "grouped_by_trace": { "type": "boolean" },
-                                "results": { "type": "array" },
-                            },
-                        })),
-                        mcp_protocol::McpToolTaskSupport::Forbidden,
-                    ),
-                ]
-            }),
+            "resources/templates/list",
+            "resourceTemplates",
+            params,
+            Vec::new(),
         )
     }
 
@@ -994,10 +997,6 @@ impl McpOrchestratorService {
         session: &ConnectionState,
         params: &JsonValue,
     ) -> JsonValue {
-        let offset = match parse_task_cursor(params) {
-            Ok(offset) => offset,
-            Err(error) => return harn_vm::jsonrpc::error_response(id, -32602, &error),
-        };
         let matching = self
             .tasks
             .lock()
@@ -1006,17 +1005,13 @@ impl McpOrchestratorService {
             .filter(|record| record.task.owner == session.client_identity)
             .map(|record| record.task.to_json())
             .collect::<Vec<_>>();
-        let page_start = offset.min(matching.len());
-        let page_end = offset
-            .saturating_add(DEFAULT_RESOURCE_LIMIT)
-            .min(matching.len());
-        let mut result = json!({
-            "tasks": matching[page_start..page_end].to_vec(),
-        });
-        if page_end < matching.len() {
-            result["nextCursor"] = json!(encode_task_cursor(page_end));
-        }
-        harn_vm::jsonrpc::response(id, result)
+        paginated_list_response(
+            id,
+            mcp_protocol::METHOD_TASKS_LIST,
+            "tasks",
+            params,
+            matching,
+        )
     }
 
     fn handle_tasks_cancel(
@@ -1097,9 +1092,11 @@ impl McpOrchestratorService {
         Ok(record.clone())
     }
 
-    async fn handle_resources_list(&self, id: JsonValue) -> JsonValue {
+    async fn handle_resources_list(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
         match self.list_resources().await {
-            Ok(resources) => harn_vm::jsonrpc::response(id, json!({ "resources": resources })),
+            Ok(resources) => {
+                paginated_list_response(id, "resources/list", "resources", params, resources)
+            }
             Err(error) => harn_vm::jsonrpc::error_response(id, -32603, &error),
         }
     }
@@ -1334,7 +1331,7 @@ impl McpOrchestratorService {
 
         let ctx = load_local_runtime(&self.local_args()).await?;
         let recorded = read_topic(&ctx.event_log, TRIGGER_EVENTS_TOPIC).await?;
-        for (event_id, event) in recorded.into_iter().take(DEFAULT_RESOURCE_LIMIT) {
+        for (event_id, event) in recorded {
             let Ok(record) = serde_json::from_value::<RecordedTriggerEvent>(event.payload) else {
                 continue;
             };
@@ -2436,6 +2433,31 @@ fn initialize_api_key(params: &JsonValue) -> Option<&str> {
         })
 }
 
+fn paginated_list_response(
+    id: JsonValue,
+    method: &str,
+    result_key: &str,
+    params: &JsonValue,
+    items: Vec<JsonValue>,
+) -> JsonValue {
+    let page = match mcp_protocol::mcp_list_page(params, items.len(), method) {
+        Ok(page) => page,
+        Err(error) => return harn_vm::jsonrpc::error_response(id, -32602, &error),
+    };
+    let page_len = page.end - page.start;
+    let page_items = items
+        .into_iter()
+        .skip(page.start)
+        .take(page_len)
+        .collect::<Vec<_>>();
+    let mut result = serde_json::Map::new();
+    result.insert(result_key.to_string(), JsonValue::Array(page_items));
+    if let Some(next_cursor) = page.next_cursor {
+        result.insert("nextCursor".to_string(), JsonValue::String(next_cursor));
+    }
+    harn_vm::jsonrpc::response(id, JsonValue::Object(result))
+}
+
 fn tool_def(
     name: &str,
     description: &str,
@@ -2549,28 +2571,6 @@ fn now_rfc3339() -> String {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
-}
-
-fn parse_task_cursor(params: &JsonValue) -> Result<usize, String> {
-    let Some(cursor) = params.get("cursor") else {
-        return Ok(0);
-    };
-    let Some(cursor) = cursor.as_str() else {
-        return Err("invalid tasks/list cursor".to_string());
-    };
-    use base64::Engine;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(cursor)
-        .map_err(|_| "invalid tasks/list cursor".to_string())?;
-    let decoded = String::from_utf8(bytes).map_err(|_| "invalid tasks/list cursor".to_string())?;
-    decoded
-        .parse::<usize>()
-        .map_err(|_| "invalid tasks/list cursor".to_string())
-}
-
-fn encode_task_cursor(offset: usize) -> String {
-    use base64::Engine;
-    base64::engine::general_purpose::STANDARD.encode(offset.to_string().as_bytes())
 }
 
 fn tool_call_changes_resources(name: &str) -> bool {
@@ -3163,6 +3163,135 @@ version = "0.1.0"
             .unwrap();
         assert_eq!(trigger_fire["execution"]["taskSupport"], json!("optional"));
         assert_eq!(trigger_list["execution"]["taskSupport"], json!("forbidden"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn list_endpoints_page_with_cursor() {
+        let _env_lock = lock_env().lock().await;
+        let _guard = lock_harn_state();
+        let _page_size = ScopedEnvVar::set(mcp_protocol::MCP_LIST_PAGE_SIZE_ENV, "1");
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        write_file(
+            temp.path(),
+            "first.harn.prompt",
+            "---\nid = \"first\"\n---\nFirst",
+        );
+        write_file(
+            temp.path(),
+            "second.harn.prompt",
+            "---\nid = \"second\"\n---\nSecond",
+        );
+        let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+        let mut session = init_session(&service).await;
+        call_tool(
+            &service,
+            &mut session,
+            "harn.trigger.fire",
+            json!({
+                "trigger_id": "cron-ok",
+                "payload": { "headers": { "x-page-test": "1" } }
+            }),
+        )
+        .await;
+
+        let first_tools = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(40, "tools/list", json!({})),
+            )
+            .await;
+        assert_eq!(first_tools["result"]["tools"].as_array().unwrap().len(), 1);
+        let tools_cursor = first_tools["result"]["nextCursor"].as_str().unwrap();
+        let next_tools = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(41, "tools/list", json!({"cursor": tools_cursor})),
+            )
+            .await;
+        assert_eq!(next_tools["result"]["tools"].as_array().unwrap().len(), 1);
+        assert_ne!(
+            first_tools["result"]["tools"][0]["name"],
+            next_tools["result"]["tools"][0]["name"]
+        );
+
+        let first_prompts = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(42, "prompts/list", json!({})),
+            )
+            .await;
+        assert_eq!(
+            first_prompts["result"]["prompts"].as_array().unwrap().len(),
+            1
+        );
+        let prompts_cursor = first_prompts["result"]["nextCursor"].as_str().unwrap();
+        let next_prompts = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(43, "prompts/list", json!({"cursor": prompts_cursor})),
+            )
+            .await;
+        assert_eq!(
+            next_prompts["result"]["prompts"].as_array().unwrap().len(),
+            1
+        );
+        assert_ne!(
+            first_prompts["result"]["prompts"][0]["name"],
+            next_prompts["result"]["prompts"][0]["name"]
+        );
+
+        let first_resources = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(44, "resources/list", json!({})),
+            )
+            .await;
+        assert_eq!(
+            first_resources["result"]["resources"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        let resources_cursor = first_resources["result"]["nextCursor"].as_str().unwrap();
+        let next_resources = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(
+                    45,
+                    "resources/list",
+                    json!({"cursor": resources_cursor}),
+                ),
+            )
+            .await;
+        assert_eq!(
+            next_resources["result"]["resources"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_ne!(
+            first_resources["result"]["resources"][0]["uri"],
+            next_resources["result"]["resources"][0]["uri"]
+        );
+
+        let templates = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(46, "resources/templates/list", json!({})),
+            )
+            .await;
+        assert_eq!(templates["result"]["resourceTemplates"], json!([]));
+
+        let invalid = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(47, "resources/list", json!({"cursor": "nope"})),
+            )
+            .await;
+        assert_eq!(invalid["error"]["code"], json!(-32602));
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -356,6 +356,11 @@ above and serves the appropriate one over stdio or Streamable HTTP. All
 The server supports the `2025-11-25` MCP protocol version on both
 transports.
 
+List endpoints are cursor-paginated. `tools/list`, `resources/list`,
+`resources/templates/list`, and `prompts/list` return up to 100 entries by
+default and include `nextCursor` when another page is available. Set
+`HARN_MCP_LIST_PAGE_SIZE` to a positive integer to change the per-page limit.
+
 ### MCP server support matrix
 
 Harn's MCP servers implement the core tool/resource/prompt path and explicitly

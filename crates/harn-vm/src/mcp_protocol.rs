@@ -12,6 +12,15 @@ pub const METHOD_ROOTS_LIST: &str = "roots/list";
 pub const METHOD_ROOTS_LIST_CHANGED_NOTIFICATION: &str = "notifications/roots/list_changed";
 pub const RELATED_TASK_META_KEY: &str = "io.modelcontextprotocol/related-task";
 pub const DEFAULT_TASK_POLL_INTERVAL_MS: u64 = 250;
+pub const DEFAULT_MCP_LIST_PAGE_SIZE: usize = 100;
+pub const MCP_LIST_PAGE_SIZE_ENV: &str = "HARN_MCP_LIST_PAGE_SIZE";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct McpListPage {
+    pub start: usize,
+    pub end: usize,
+    pub next_cursor: Option<String>,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UnsupportedMcpMethod {
@@ -180,6 +189,38 @@ pub fn related_task_meta(task_id: &str) -> JsonValue {
     })
 }
 
+pub fn mcp_list_page_size() -> usize {
+    mcp_list_page_size_from_env(std::env::var(MCP_LIST_PAGE_SIZE_ENV).ok().as_deref())
+}
+
+fn mcp_list_page_size_from_env(raw: Option<&str>) -> usize {
+    raw.and_then(|value| value.parse::<usize>().ok())
+        .filter(|size| *size > 0)
+        .unwrap_or(DEFAULT_MCP_LIST_PAGE_SIZE)
+}
+
+pub fn encode_mcp_list_cursor(offset: usize) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(offset.to_string().as_bytes())
+}
+
+pub fn mcp_list_page(
+    params: &JsonValue,
+    total_len: usize,
+    method: &str,
+) -> Result<McpListPage, String> {
+    let offset = parse_mcp_list_cursor(params, method)?;
+    let page_size = mcp_list_page_size();
+    let start = offset.min(total_len);
+    let end = start.saturating_add(page_size).min(total_len);
+    let next_cursor = (end < total_len).then(|| encode_mcp_list_cursor(end));
+    Ok(McpListPage {
+        start,
+        end,
+        next_cursor,
+    })
+}
+
 fn unsupported_method_data(entry: &UnsupportedMcpMethod) -> JsonValue {
     json!({
         "type": "mcp.unsupportedFeature",
@@ -190,6 +231,23 @@ fn unsupported_method_data(entry: &UnsupportedMcpMethod) -> JsonValue {
         "status": "unsupported",
         "reason": entry.reason,
     })
+}
+
+fn parse_mcp_list_cursor(params: &JsonValue, method: &str) -> Result<usize, String> {
+    let Some(cursor) = params.get("cursor") else {
+        return Ok(0);
+    };
+    let Some(cursor) = cursor.as_str() else {
+        return Err(format!("invalid {method} cursor"));
+    };
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(cursor)
+        .map_err(|_| format!("invalid {method} cursor"))?;
+    let decoded = String::from_utf8(bytes).map_err(|_| format!("invalid {method} cursor"))?;
+    decoded
+        .parse::<usize>()
+        .map_err(|_| format!("invalid {method} cursor"))
 }
 
 #[cfg(test)]
@@ -259,5 +317,50 @@ mod tests {
             related_task_meta("task-1")[RELATED_TASK_META_KEY]["taskId"],
             json!("task-1")
         );
+    }
+
+    #[test]
+    fn mcp_list_page_uses_default_size_and_next_cursor() {
+        let page = mcp_list_page(&json!({}), 105, "tools/list").unwrap();
+        assert_eq!(page.start, 0);
+        assert_eq!(page.end, DEFAULT_MCP_LIST_PAGE_SIZE);
+        assert_eq!(
+            page.next_cursor,
+            Some(encode_mcp_list_cursor(DEFAULT_MCP_LIST_PAGE_SIZE))
+        );
+
+        let next = mcp_list_page(
+            &json!({"cursor": page.next_cursor.unwrap()}),
+            105,
+            "tools/list",
+        )
+        .unwrap();
+        assert_eq!(next.start, DEFAULT_MCP_LIST_PAGE_SIZE);
+        assert_eq!(next.end, 105);
+        assert_eq!(next.next_cursor, None);
+    }
+
+    #[test]
+    fn mcp_list_page_size_parses_positive_env_override() {
+        assert_eq!(mcp_list_page_size_from_env(Some("2")), 2);
+        assert_eq!(
+            mcp_list_page_size_from_env(Some("0")),
+            DEFAULT_MCP_LIST_PAGE_SIZE
+        );
+        assert_eq!(
+            mcp_list_page_size_from_env(Some("nope")),
+            DEFAULT_MCP_LIST_PAGE_SIZE
+        );
+        assert_eq!(
+            mcp_list_page_size_from_env(None),
+            DEFAULT_MCP_LIST_PAGE_SIZE
+        );
+    }
+
+    #[test]
+    fn mcp_list_page_rejects_malformed_cursor() {
+        let err = mcp_list_page(&json!({"cursor": "not-base64"}), 5, "resources/list")
+            .expect_err("malformed cursor should fail");
+        assert_eq!(err, "invalid resources/list cursor");
     }
 }

@@ -9,7 +9,6 @@
 
 mod convert;
 mod defs;
-mod pagination;
 mod register;
 mod server;
 mod tools_schema;
@@ -19,8 +18,6 @@ mod uri;
 mod tests;
 
 const PROTOCOL_VERSION: &str = "2025-11-25";
-const DEFAULT_PAGE_SIZE: usize = 50;
-
 pub use defs::{McpPromptArgDef, McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpToolDef};
 pub use register::{
     register_mcp_server_builtins, take_mcp_serve_prompts, take_mcp_serve_registry,
