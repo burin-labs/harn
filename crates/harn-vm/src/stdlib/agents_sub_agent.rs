@@ -712,6 +712,7 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
             .and_then(|o| o.get("post_turn_callback"))
             .filter(|v| matches!(v, VmValue::Closure(_)))
             .cloned(),
+        llm_transcript_dir: crate::llm::helpers::opt_str(&options, "llm_transcript_dir"),
         skill_registry,
         skill_match,
         working_files,

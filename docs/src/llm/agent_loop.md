@@ -103,6 +103,7 @@ Same as `llm_call`, plus additional options:
 | `context_callback` | closure | nil | Per-turn hook that can rewrite prompt-visible `messages` and/or the effective `system` prompt before the next LLM call |
 | `context_filter` | closure | nil | Alias for `context_callback` |
 | `post_turn_callback` | closure | nil | Hook called after each tool turn. Receives turn metadata and may inject a message, request an immediate stage stop, or both |
+| `llm_transcript_dir` | string | nil | Per-loop directory for Harn's existing `llm_transcript.jsonl` sidecar. This is equivalent to scoping `HARN_LLM_TRANSCRIPT_DIR` to one agent loop and is preferred when a script needs run-specific auditable model-turn JSONL |
 | `turn_policy` | dict | nil | Turn-shape policy for action stages. Supports `require_action_or_yield: bool`, `allow_done_sentinel: bool` (default `true`; set to `false` in workflow-owned action stages so nudges stop advertising the done sentinel), and `max_prose_chars: int` |
 | `native_tool_fallback` | string | `"allow"` | Native-tool-stage policy when the provider emits text-mode `<tool_call>` content instead of native tool calls. `"allow"` preserves the current recovery path, `"allow_once"` accepts the first fallback turn then rejects later repeats with corrective feedback, and `"reject"` fails closed on the first text fallback |
 | `stop_after_successful_tools` | `list<string>` | nil | Stop after a tool-calling turn whose successful results include one of these tool names. Useful for workflow-owned verify loops such as `["edit", "scaffold"]` |

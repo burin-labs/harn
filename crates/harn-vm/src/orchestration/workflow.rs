@@ -1517,6 +1517,15 @@ pub async fn execute_stage_node(
                         .and_then(|d| d.get("post_turn_callback"))
                         .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
                         .cloned(),
+                    llm_transcript_dir: node
+                        .raw_model_policy
+                        .as_ref()
+                        .and_then(|v| v.as_dict())
+                        .and_then(|d| d.get("llm_transcript_dir"))
+                        .and_then(|v| match v {
+                            crate::value::VmValue::String(s) => Some(s.to_string()),
+                            _ => None,
+                        }),
                     // Inherit the workflow-level skill wiring installed
                     // by `workflow_execute`. Per-node `model_policy.skills`
                     // (optional) overrides, letting authors scope a skill

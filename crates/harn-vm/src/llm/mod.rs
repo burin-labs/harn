@@ -1270,6 +1270,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                     .and_then(|o| o.get("post_turn_callback"))
                     .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
                     .cloned(),
+                llm_transcript_dir: opt_str(&options, "llm_transcript_dir"),
                 skill_registry,
                 skill_match,
                 working_files,

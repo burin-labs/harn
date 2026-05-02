@@ -294,6 +294,39 @@ async fn observed_llm_call_bridge_events_include_non_user_visible() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn agent_loop_option_writes_llm_transcript_jsonl() {
+    reset_llm_mock_state();
+    let dir = std::env::temp_dir().join(format!(
+        "harn-agent-loop-option-transcript-{}",
+        uuid::Uuid::now_v7()
+    ));
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "write a transcript sidecar",
+    })]);
+    let mut config = base_agent_config();
+    config.llm_transcript_dir = Some(dir.to_string_lossy().into_owned());
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    assert_eq!(result["status"], "done");
+
+    let transcript_path = dir.join("llm_transcript.jsonl");
+    let transcript = std::fs::read_to_string(&transcript_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", transcript_path.display()));
+    assert!(
+        transcript.contains("\"provider_call_request\""),
+        "provider call request missing from transcript:\n{transcript}"
+    );
+    assert!(
+        transcript.contains("\"provider_call_response\""),
+        "provider call response missing from transcript:\n{transcript}"
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+    reset_llm_mock_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn daemon_timer_wake_persists_snapshot_and_compacts_on_idle() {
     let dir = std::env::temp_dir().join(format!("harn-agent-daemon-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&dir).unwrap();
