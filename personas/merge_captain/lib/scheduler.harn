@@ -7,6 +7,7 @@
 // because discovery runs every sweep; PRs that disappear from the open
 // list because they were merged or closed receive a final receipt and
 // have their checkpoint dropped.
+import { handles_kind } from "approval"
 import {
   forget_checkpoint,
   list_all_checkpoints,
@@ -27,10 +28,63 @@ import { run_local_verify } from "local_verify"
 import { from_github } from "observation"
 import { load_policy } from "policy"
 import { build_receipt, summarize_sweep } from "receipt"
+import { invoke_for_ci_failure, invoke_for_merge_conflict } from "repair_worker"
 import { is_terminal } from "states"
 
 fn _gen_sweep_id() {
   return "sweep-${to_string(now_ms())}"
+}
+
+/**
+ * Decide whether the deterministic harness should hand this
+ * classification off to the repair worker checkpoint instead of
+ * running the inline action. Returns the bundle kind to dispatch
+ * (`"ci_failure"` / `"merge_conflict"`) or nil to keep the existing
+ * apply_action path.
+ *
+ * Repair worker dispatch is opt-in per repo via
+ * `policy.repair_worker = { enabled: true, handles_kinds: [...] }`.
+ * The classifier stays pure: it never mentions the worker.
+ */
+pub fn repair_worker_kind_for(policy, classification) {
+  if classification.action == "run_local_verification"
+    && handles_kind(policy.repair_worker, "ci_failure") {
+    return "ci_failure"
+  }
+  if classification.state == "dirty" && classification.action == "comment"
+    && handles_kind(policy.repair_worker, "merge_conflict") {
+    return "merge_conflict"
+  }
+  return nil
+}
+
+fn _outcome_from_repair_run(run, dry_run) {
+  if dry_run {
+    return "repair_worker_dry_run"
+  }
+  return "repair_worker_${run.status}"
+}
+
+fn _command_for_repair_run(run) {
+  return {
+    action: "run_repair_worker",
+    bundle_kind: run.bundle?.kind,
+    status: run.status,
+    approval_state: run.approval_state,
+    blocking_actions: run.blocking_actions ?? [],
+    validation_errors: run.validation_errors ?? [],
+    output_summary: if run.output != nil {
+      {
+        diagnosis: run.output.diagnosis,
+        files_changed_count: len(run.output.files_changed ?? []),
+        tests_run_count: len(run.output.tests_run ?? []),
+        commits_created_count: len(run.output.commits_created ?? []),
+        pushed: run.output.push_result?.pushed ?? false,
+      }
+    } else {
+      nil
+    },
+  }
 }
 
 /** Apply the action a classification calls for, returning an outcome string. */
@@ -119,6 +173,35 @@ pub fn apply_action(adapter, policy, observation, classification, dry_run) {
   return {outcome: "noop", commands: []}
 }
 
+fn _dispatch_repair_worker(kind, args) {
+  let observation = args.observation
+  let policy = args.policy
+  let parent_receipt_ref = {
+    sweep_id: args.sweep_id,
+    repo: observation.repo,
+    pr_number: observation.number,
+    prior_state: args.prior,
+    classification_reason: args.classification.reason,
+  }
+  let common = {
+    observation: observation,
+    policy: policy,
+    sweep_id: args.sweep_id,
+    parent_receipt_ref: parent_receipt_ref,
+    prior_state: args.prior,
+    classification_reason: args.classification.reason,
+    dry_run: args.dry_run,
+    executor: args.repair_executor,
+    agent_options: args.repair_agent_options,
+    harness: args.repair_harness,
+    allowed_write_scope: args.allowed_write_scope,
+  }
+  if kind == "merge_conflict" {
+    return invoke_for_merge_conflict(common + {conflict_paths: args.conflict_paths ?? []})
+  }
+  return invoke_for_ci_failure(common + {failing_check_logs: args.failing_check_logs ?? []})
+}
+
 /** Process a single PR: classify, persist, act, build receipt. */
 pub fn process_pr(args) {
   let adapter = args.adapter
@@ -155,6 +238,46 @@ pub fn process_pr(args) {
         commands_run: action_result.commands,
         outcome: action_result.outcome,
         dry_run: dry_run,
+      },
+    )
+  }
+  let repair_kind = repair_worker_kind_for(policy, classification)
+  if repair_kind != nil {
+    let extras = if args.repair_extras_for != nil {
+      args.repair_extras_for(observation) ?? {}
+    } else {
+      {}
+    }
+    let run = _dispatch_repair_worker(
+      repair_kind,
+      {
+        observation: observation,
+        policy: policy,
+        sweep_id: sweep_id,
+        prior: prior,
+        classification: classification,
+        dry_run: dry_run,
+        repair_executor: args.repair_executor,
+        repair_agent_options: args.repair_agent_options,
+        repair_harness: args.repair_harness,
+        conflict_paths: extras.conflict_paths ?? [],
+        failing_check_logs: extras.failing_check_logs ?? [],
+        allowed_write_scope: extras.allowed_write_scope ?? args.allowed_write_scope,
+      },
+    )
+    save_checkpoint(checkpoint_handle, sweep_id, observation, classification)
+    return build_receipt(
+      {
+        sweep_id: sweep_id,
+        observed_at: now_ms(),
+        policy: policy,
+        observation: observation,
+        classification: classification,
+        prior_state: prior,
+        commands_run: [_command_for_repair_run(run)],
+        outcome: _outcome_from_repair_run(run, dry_run),
+        dry_run: dry_run,
+        repair_run: run,
       },
     )
   }
@@ -284,6 +407,10 @@ pub fn sweep(args) {
           checkpoint_handle: checkpoint_handle,
           sweep_id: sweep_id,
           dry_run: dry_run,
+          repair_executor: args.repair_executor,
+          repair_agent_options: args.repair_agent_options,
+          repair_harness: args.repair_harness,
+          repair_extras_for: args.repair_extras_for,
         },
       )
       if receipt != nil {

@@ -25,5 +25,20 @@
   ],
   "bump_after_merge": null,
   "autopilot_states": ["queued", "waiting_checks", "behind"],
-  "require_human_for": ["blocked", "local_repair"]
+  "require_human_for": ["blocked", "local_repair"],
+  "repair_worker": {
+    "enabled": false,
+    "handles_kinds": ["ci_failure"],
+    "require_human_for": [
+      "semantic_repair",
+      "force_push",
+      "admin_merge",
+      "release_tag",
+      "branch_delete"
+    ],
+    "autopilot_action_kinds": [],
+    "model": "claude-sonnet-4-6",
+    "max_iterations": 24,
+    "profile": "tool_using"
+  }
 }

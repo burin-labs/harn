@@ -1,0 +1,304 @@
+// Deterministic validators for repair_worker output.
+//
+// Every validator is pure: it takes a (bundle, output) pair and returns
+// a structured `{ok, errors}` record. The dispatcher composes them so
+// that a worker run only counts as a successful repair when *every*
+// validator passes. The acceptance criteria for harn#1010 calls these
+// out explicitly:
+//
+//   - missing tests
+//   - dirty worktrees
+//   - unexpected write scope
+//   - malformed output
+//   - unpushed commits
+//
+// A separate `harness_validate(...)` runs the post-condition check
+// against the actual local repo state via `process_exec_with_timeout`
+// (e.g. `git status --porcelain`). It is the only validator that does
+// I/O and is opt-in via `enabled = true`.
+import { process_exec_with_timeout } from "std/runtime"
+
+/** Required top-level keys on a repair_output document. */
+pub fn required_keys() {
+  return ["diagnosis", "files_changed", "tests_run", "commits_created", "push_result", "residual_risk"]
+}
+
+fn _err(messages) {
+  return {ok: len(messages) == 0, errors: messages}
+}
+
+/**
+ * Schema-shape validator. Doesn't replace the LLM-side `output_schema`
+ * check — that one runs while the model still has room to retry. This
+ * is the harness-side belt-and-braces pass.
+ */
+pub fn validate_shape(output) {
+  if output == nil {
+    return _err(["output is nil"])
+  }
+  if type_of(output) != "dict" {
+    return _err(["output must be a dict, got ${type_of(output)}"])
+  }
+  var missing = []
+  for key in required_keys() {
+    if output[key] == nil {
+      missing = missing + [key]
+    }
+  }
+  if len(missing) > 0 {
+    return _err(["malformed output: missing required keys ${json_stringify(missing)}"])
+  }
+  if type_of(output.files_changed) != "list" {
+    return _err(["malformed output: files_changed must be a list"])
+  }
+  if type_of(output.tests_run) != "list" {
+    return _err(["malformed output: tests_run must be a list"])
+  }
+  if type_of(output.commits_created) != "list" {
+    return _err(["malformed output: commits_created must be a list"])
+  }
+  if type_of(output.push_result) != "dict" {
+    return _err(["malformed output: push_result must be a dict"])
+  }
+  return _err([])
+}
+
+/**
+ * `tests_run` must be non-empty and every test must report a status.
+ * Any test with status != "ok" counts as a missing/failed test for the
+ * purposes of the harness — we will not push semantic edits if the
+ * worker did not prove they pass locally.
+ */
+pub fn validate_tests(bundle, output) {
+  let tests = output.tests_run ?? []
+  if len(tests) == 0 {
+    return _err(
+      [
+        "missing tests: tests_run is empty (expected ${to_string(len(bundle.required_verification))} verifications)",
+      ],
+    )
+  }
+  if len(bundle.required_verification) > 0 {
+    var missing = []
+    for cmd in bundle.required_verification {
+      let saw = tests.filter({ t -> t.command == cmd.command || t.name == cmd.name })
+      if len(saw) == 0 {
+        missing = missing + [cmd.name ?? cmd.command]
+      }
+    }
+    if len(missing) > 0 {
+      return _err(["missing tests: required_verification entries not run: ${json_stringify(missing)}"])
+    }
+  }
+  var failed = []
+  for t in tests {
+    if t.status != "ok" {
+      failed = failed + [t.name ?? t.command ?? "unnamed"]
+    }
+  }
+  if len(failed) > 0 {
+    return _err(["failing tests: ${json_stringify(failed)}"])
+  }
+  return _err([])
+}
+
+/**
+ * True when `path` matches `glob`. We support a tiny subset that is
+ * adequate for write-scope policies: a plain path prefix; a single-segment
+ * wildcard at the end (one slash followed by a single asterisk, matching
+ * one path component); or a recursive wildcard at the end (one slash
+ * followed by two asterisks, matching any number of components). No
+ * character classes, no negation. Path comparison is exact-prefix with
+ * forward-slash boundaries.
+ */
+pub fn path_matches_glob(path, glob) {
+  if glob == nil || len(to_string(glob)) == 0 {
+    return false
+  }
+  if glob == path {
+    return true
+  }
+  if glob == "**" {
+    return true
+  }
+  if glob.ends_with("/**") {
+    let prefix = glob[0:len(glob) - 3]
+    return path == prefix || path.starts_with(prefix + "/")
+  }
+  if glob.ends_with("/*") {
+    let prefix = glob[0:len(glob) - 2]
+    if !path.starts_with(prefix + "/") {
+      return false
+    }
+    let tail = path[len(prefix) + 1:len(path)]
+    return !tail.contains("/")
+  }
+  if glob.contains("**") {
+    return false
+  }
+  if glob.contains("*") {
+    return false
+  }
+  return path == glob || path.starts_with(glob + "/")
+}
+
+/** True when path matches any glob in the list. */
+pub fn path_matches_any(path, globs) {
+  for g in globs {
+    if path_matches_glob(path, g) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Every entry in `output.files_changed` must fall under at least one
+ * glob in `bundle.allowed_write_scope`. The harness rejects writes
+ * outside that scope even when they are syntactically valid.
+ */
+pub fn validate_write_scope(bundle, output) {
+  let scope = bundle.allowed_write_scope ?? []
+  if len(scope) == 0 {
+    if len(output.files_changed ?? []) > 0 {
+      return _err(
+        [
+          "unexpected write scope: bundle has no allowed_write_scope but worker reports ${to_string(len(output.files_changed))} file change(s)",
+        ],
+      )
+    }
+    return _err([])
+  }
+  var violations = []
+  for entry in output.files_changed ?? [] {
+    let path = entry.path ?? ""
+    if !path_matches_any(path, scope) {
+      violations = violations + [path]
+    }
+  }
+  if len(violations) > 0 {
+    return _err(
+      [
+        "unexpected write scope: ${json_stringify(violations)} not covered by allowed_write_scope ${json_stringify(scope)}",
+      ],
+    )
+  }
+  return _err([])
+}
+
+/**
+ * If commits were created, the push must have succeeded. This is the
+ * "unpushed commits" guard: a worker that committed but did not push
+ * leaves the repo in a state Merge Captain cannot reason about.
+ */
+pub fn validate_pushed(bundle, output) {
+  let commits = output.commits_created ?? []
+  let push = output.push_result ?? {}
+  if len(commits) == 0 {
+    if push.pushed ?? false {
+      return _err(["push without commits: push_result.pushed=true but commits_created is empty"])
+    }
+    return _err([])
+  }
+  if !(push.pushed ?? false) {
+    return _err(
+      [
+        "unpushed commits: ${to_string(len(commits))} commit(s) created but push_result.pushed is not true",
+      ],
+    )
+  }
+  if push.ref == nil || len(to_string(push.ref)) == 0 {
+    return _err(["unpushed commits: push_result.ref is missing"])
+  }
+  let target = bundle.push_target?.branch ?? ""
+  if len(target) > 0 && push.ref != target && !push.ref.ends_with("/" + target) {
+    return _err(
+      [
+        "push target mismatch: pushed ref '${push.ref}' does not match bundle.push_target.branch '${target}'",
+      ],
+    )
+  }
+  return _err([])
+}
+
+/**
+ * Run every pure validator against (bundle, output) and return a
+ * combined record. Validators short-circuit on shape failure since the
+ * downstream checks all assume a well-formed dict.
+ */
+pub fn validate_all(bundle, output) {
+  let shape = validate_shape(output)
+  if !shape.ok {
+    return shape
+  }
+  var errors = []
+  let v_tests = validate_tests(bundle, output)
+  errors = errors + v_tests.errors
+  let v_scope = validate_write_scope(bundle, output)
+  errors = errors + v_scope.errors
+  let v_push = validate_pushed(bundle, output)
+  errors = errors + v_push.errors
+  return _err(errors)
+}
+
+/**
+ * True when `cwd` is safe to splice into a shell command line. We are
+ * conservative: forbid the metacharacters that would let an attacker
+ * pivot from a path string into arbitrary shell. Callers always set
+ * cwd from trusted state, but this is a cheap defence-in-depth.
+ */
+pub fn _cwd_is_shell_safe(cwd) {
+  let banned = ["`", "$", ";", "|", "&", "\n", "\\r", "\"", "'", "<", ">", "(", ")"]
+  for ch in banned {
+    if cwd.contains(ch) {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * Optional post-run harness check. After `agent_loop` returns we ask
+ * git for the working-tree state. If `git status --porcelain` produces
+ * any output, the worker left the tree dirty — fail closed. Skipped
+ * when `enabled` is false (tests, dry-run sweeps).
+ *
+ * `cwd` defaults to `.` and must pass `_cwd_is_shell_safe` — we splice
+ * it into the command line for `git -C`, so a path with shell
+ * metacharacters would be a command-injection risk.
+ */
+pub fn harness_validate(bundle, output, options) {
+  if !(options.enabled ?? false) {
+    return _err([])
+  }
+  let cwd = options.cwd ?? "."
+  if !_cwd_is_shell_safe(cwd) {
+    return _err(["harness check rejected: cwd contains shell metacharacters: ${cwd}"])
+  }
+  let cmd = "git -C ${cwd} status --porcelain"
+  let result = try {
+    process_exec_with_timeout(cmd, options.timeout_ms ?? 30000)
+  }
+  if !is_ok(result) {
+    return _err(["harness check failed: ${to_string(unwrap_err(result))}"])
+  }
+  let value = unwrap(result)
+  let stdout = to_string(value.stdout ?? "")
+  let exit_code = value.exit_code ?? 0
+  if exit_code != 0 {
+    return _err(
+      [
+        "dirty worktree probe failed: exit ${to_string(exit_code)}; stderr=${to_string(value.stderr ?? "")}",
+      ],
+    )
+  }
+  let trimmed = stdout.trim()
+  if len(trimmed) > 0 {
+    return _err(
+      [
+        "dirty worktree: 'git status --porcelain' reports uncommitted changes (${to_string(len(trimmed.split("\n")))} entry/entries)",
+      ],
+    )
+  }
+  return _err([])
+}

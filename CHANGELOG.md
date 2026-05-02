@@ -6,6 +6,33 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Merge Captain repair-worker checkpoint contract (#1010).**
+  Added a typed contract for the bounded `agent_loop` worker that
+  Merge Captain (and the release-harness consumer in
+  [#1146](https://github.com/burin-labs/harn/issues/1146)) calls at
+  explicit repair checkpoints. New modules under
+  `personas/merge_captain/lib/` cover bundle preparation
+  (`repair_bundle.harn`), per-action approval gates
+  (`approval.harn`), the dispatcher itself (`repair_worker.harn`),
+  and deterministic output validators (`repair_validator.harn`). The
+  bundle pins repo + PR + base/head SHAs, allowed write-scope globs,
+  required verification commands, push target, and the action kinds
+  that need human approval (`semantic_repair`, `force_push`,
+  `admin_merge`, `release_tag`, `branch_delete`). Workers must
+  produce a `merge_captain.repair_output` v1 JSON document; the
+  harness rejects missing tests, unexpected write scope, malformed
+  output, unpushed commits, and (when opted in) dirty worktrees.
+  Every run yields a versioned `merge_captain.repair_run` record
+  that the merge receipt links back to via a compact
+  `merge_captain.repair_run_link` summary. The worker is opt-in per
+  repo via `policy.repair_worker.{enabled, handles_kinds, ...}`; the
+  scheduler routes `local_repair` and `dirty` to the worker only
+  when the policy enables the matching bundle kind.
+
 ## v0.7.54
 
 ### Added

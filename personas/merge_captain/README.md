@@ -43,8 +43,12 @@ GitHub adapter that rides the connector contract — no raw
 | [`lib/checkpoint_store.harn`](lib/checkpoint_store.harn) | `std/agent_state`-backed per-PR persistence. |
 | [`lib/github_adapter.harn`](lib/github_adapter.harn) | Live (connector) and fixture-mode GitHub I/O. |
 | [`lib/local_verify.harn`](lib/local_verify.harn) | Runs per-repo local verification commands. |
-| [`lib/receipt.harn`](lib/receipt.harn) | Per-PR + sweep receipt builders. |
-| [`lib/scheduler.harn`](lib/scheduler.harn) | The actual sweep loop. |
+| [`lib/repair_bundle.harn`](lib/repair_bundle.harn) | Pure builders + JSON schema for the repair-worker checkpoint contract. |
+| [`lib/repair_validator.harn`](lib/repair_validator.harn) | Deterministic validators for repair-worker output (missing tests, dirty worktrees, unexpected write scope, malformed output, unpushed commits). |
+| [`lib/approval.harn`](lib/approval.harn) | Approval gate for repair-worker action kinds (semantic_repair / force_push / admin_merge / release_tag / branch_delete). |
+| [`lib/repair_worker.harn`](lib/repair_worker.harn) | The only `agent_loop` caller. Builds the bundle, runs the gate, dispatches the worker, runs the validators, and returns a `merge_captain.repair_run` record. |
+| [`lib/receipt.harn`](lib/receipt.harn) | Per-PR + sweep receipt builders, including the `merge_captain.repair_run_link` summary. |
+| [`lib/scheduler.harn`](lib/scheduler.harn) | The actual sweep loop. Routes `local_repair` / `dirty` to the repair worker when policy enables it. |
 | [`policies/*.json`](policies) | Per-repo policy fixtures for harn / harn-cloud / burin-code. |
 | [`fixtures/github_snapshot.json`](fixtures/github_snapshot.json) | Deterministic GitHub state for evals. |
 | [`tests/`](tests) | Pure-Harn unit + scheduler tests. |
@@ -107,6 +111,95 @@ adapter never shells out to `gh`. Local verification commands are the
 one exception; they run via `process.exec` per the per-repo
 `local_verification` list.
 
+## Repair-worker checkpoint contract
+
+Most Merge Captain steps are deterministic, but a few require coding
+judgment: semantic merge conflicts, CI failure diagnosis, flaky-test
+hardening, release-note audits. Those run through a bounded
+`agent_loop` worker called at explicit repair checkpoints. The
+contract has four pieces:
+
+1. **Typed bundle** (`lib/repair_bundle.harn`). The deterministic
+   harness packages a `merge_captain.repair_bundle` v1 record
+   covering: repo, PR, base/head SHAs, changed files, conflict paths
+   or failing checks, relevant logs, allowed write scope (path
+   globs), required verification commands, push target with
+   `force_with_lease`, and the action kinds that require approval.
+   Bundle kinds are `ci_failure`, `merge_conflict`, `release_audit`,
+   `flaky_test`. The release-audit kind carries the typed
+   `release_facts` and `release_outputs` shape used by
+   [harn#1146](https://github.com/burin-labs/harn/issues/1146).
+2. **Approval gate** (`lib/approval.harn`). Per-repo
+   `policy.repair_worker.{require_human_for, autopilot_action_kinds,
+   pre_approved}` decides whether the worker can proceed without a
+   human for each of `semantic_repair`, `force_push`, `admin_merge`,
+   `release_tag`, `branch_delete`. The default is "human required for
+   everything" — autopilot is opt-in per action kind.
+3. **Worker dispatch** (`lib/repair_worker.harn`). The only
+   `agent_loop` caller in the persona. It validates the bundle, runs
+   the gate, calls `agent_loop` with the prompt + the
+   `repair_bundle.output_schema()` JSON schema, runs every
+   deterministic validator, and returns a versioned
+   `merge_captain.repair_run` record.
+4. **Deterministic validators** (`lib/repair_validator.harn`). Every
+   worker output is checked against five guards:
+   - **missing tests** — `tests_run` is empty or fails to cover every
+     `required_verification` entry, or any test reports `status !=
+     "ok"`.
+   - **unexpected write scope** — any path in `files_changed` falls
+     outside the bundle's `allowed_write_scope` glob list.
+   - **malformed output** — any required key on the `repair_output`
+     schema is missing or has the wrong type.
+   - **unpushed commits** — `commits_created` is non-empty but the
+     `push_result.pushed` flag is not true, the ref is missing, or
+     the ref does not match the bundle's push target.
+   - **dirty worktree** — opt-in `harness_validate(...)` runs `git
+     status --porcelain` after the worker returns and fails closed if
+     the tree is not clean.
+
+The receipt links back to the parent merge-captain PR state through
+the `repair_run` field on `merge_receipt`, which carries a compact
+`merge_captain.repair_run_link` summary (bundle kind, status,
+approval state, output counts, agent_loop telemetry). The full
+`repair_run` record is the audit trail.
+
+## Enabling the repair worker
+
+The repair worker is opt-in per repo. Add a `repair_worker` block to
+the policy JSON:
+
+```json
+{
+  "repair_worker": {
+    "enabled": true,
+    "handles_kinds": ["ci_failure"],
+    "require_human_for": [
+      "semantic_repair",
+      "force_push",
+      "admin_merge",
+      "release_tag",
+      "branch_delete"
+    ],
+    "autopilot_action_kinds": [],
+    "model": "claude-sonnet-4-6",
+    "max_iterations": 24,
+    "profile": "tool_using"
+  }
+}
+```
+
+When the scheduler classifies a PR as `local_repair` (CI failure with
+local verification configured), and the policy enables the worker for
+`ci_failure`, the dispatcher builds a CI-failure bundle and routes
+through `repair_worker.invoke(...)` instead of running
+`run_local_verification` inline. Same for `merge_conflict` when
+`handles_kinds` includes it.
+
+For non-Merge-Captain consumers (release-harness in
+[harn#1146](https://github.com/burin-labs/harn/issues/1146)), call
+`repair_worker.invoke_for_release_audit(...)` directly with the
+typed git/changelog facts.
+
 ## Invariants
 
 - One writer per session. The checkpoint store opens with
@@ -119,6 +212,9 @@ one exception; they run via `process.exec` per the per-repo
 - Mutating actions are gated by either `dry_run`, autopilot allow-list,
   or human approval — the receipt's `approval_state` is the audit
   trail.
+- `agent_loop` is invoked **only** at explicit repair checkpoints
+  inside `lib/repair_worker.harn`. The classifier and scheduler stay
+  pure; no other Merge Captain module calls into the LLM.
 
 ## Customizing for a new repo
 
@@ -133,4 +229,8 @@ one exception; they run via `process.exec` per the per-repo
 ## Provenance
 
 This implementation closes
-[harn#1009](https://github.com/burin-labs/harn/issues/1009).
+[harn#1009](https://github.com/burin-labs/harn/issues/1009). The
+repair-worker checkpoint contract closes
+[harn#1010](https://github.com/burin-labs/harn/issues/1010) and
+shares the typed bundle/output shapes with
+[harn#1146](https://github.com/burin-labs/harn/issues/1146).

@@ -1,0 +1,155 @@
+// Run: harn test personas/merge_captain/tests/repair_bundle_test.harn
+import {
+  all_action_kinds,
+  all_kinds,
+  build,
+  defaults,
+  is_action_kind,
+  is_kind,
+  output_schema,
+  validate_bundle,
+} from "../lib/repair_bundle"
+
+fn _ci_failure_args() {
+  return {
+    kind: "ci_failure",
+    parent: {sweep_id: "s1", repo: "x/y", pr_number: 7, prior_state: "waiting_checks"},
+    repo: "x/y",
+    pr_number: 7,
+    base_sha: "base",
+    head_sha: "head",
+    base_ref: "main",
+    head_ref: "feat",
+    failing_checks: [{name: "ci", conclusion: "failure"}],
+    allowed_write_scope: ["src/**"],
+    required_verification: [{name: "tests", command: "make test"}],
+  }
+}
+
+pipeline test_canonical_kind_set(task) {
+  let kinds = all_kinds()
+  assert_eq(len(kinds), 4)
+  assert(kinds.contains("ci_failure"))
+  assert(kinds.contains("merge_conflict"))
+  assert(kinds.contains("release_audit"))
+  assert(kinds.contains("flaky_test"))
+  assert(is_kind("ci_failure"))
+  assert(!is_kind("not_a_real_kind"))
+}
+
+pipeline test_canonical_action_kinds(task) {
+  let actions = all_action_kinds()
+  assert_eq(len(actions), 5)
+  assert(actions.contains("semantic_repair"))
+  assert(actions.contains("force_push"))
+  assert(actions.contains("admin_merge"))
+  assert(actions.contains("release_tag"))
+  assert(actions.contains("branch_delete"))
+  assert(is_action_kind("force_push"))
+  assert(!is_action_kind("hard_reset"))
+}
+
+pipeline test_defaults_lock_in_safe_values(task) {
+  let d = defaults()
+  // Empty lists are intentional: we make the caller declare intent.
+  assert_eq(len(d.changed_files), 0)
+  assert_eq(len(d.allowed_write_scope), 0)
+  // Default approvals require a human for every mutating action.
+  assert_eq(len(d.approval_required_for), 5)
+  // Push target defaults to force-with-lease — repair workers rewrite history.
+  assert(d.push_target.force_with_lease)
+}
+
+pipeline test_build_assembles_full_shape(task) {
+  let bundle = build(_ci_failure_args())
+  assert_eq(bundle._type, "merge_captain.repair_bundle")
+  assert_eq(bundle.version, 1)
+  assert_eq(bundle.kind, "ci_failure")
+  assert_eq(bundle.repo, "x/y")
+  assert_eq(bundle.pr_number, 7)
+  assert_eq(bundle.parent.sweep_id, "s1")
+  assert_eq(bundle.parent.prior_state, "waiting_checks")
+  assert_eq(bundle.head_sha, "head")
+  assert_eq(bundle.push_target.branch, "feat")
+  assert_eq(bundle.push_target.force_with_lease, true)
+  assert(len(bundle.prompt) > 0)
+  assert(bundle.prompt.contains("repair_output"))
+}
+
+pipeline test_validate_accepts_well_formed(task) {
+  let bundle = build(_ci_failure_args())
+  assert_eq(validate_bundle(bundle), nil)
+}
+
+pipeline test_validate_requires_repo(task) {
+  let bundle = build(_ci_failure_args() + {repo: ""})
+  let err = validate_bundle(bundle)
+  assert(err != nil)
+  assert(err.contains("repo"))
+}
+
+pipeline test_validate_requires_failing_checks_for_ci(task) {
+  let bundle = build(_ci_failure_args() + {failing_checks: []})
+  let err = validate_bundle(bundle)
+  assert(err != nil)
+  assert(err.contains("failing_check"))
+}
+
+pipeline test_validate_requires_conflict_paths_for_merge(task) {
+  let bundle = build(
+    {
+      kind: "merge_conflict",
+      repo: "x/y",
+      pr_number: 1,
+      head_sha: "h",
+      head_ref: "feat",
+      allowed_write_scope: ["src/**"],
+    },
+  )
+  let err = validate_bundle(bundle)
+  assert(err != nil)
+  assert(err.contains("conflict_path"))
+}
+
+pipeline test_validate_requires_release_facts_for_release_audit(task) {
+  let bundle = build(
+    {
+      kind: "release_audit",
+      repo: "x/y",
+      pr_number: 1,
+      head_ref: "main",
+      allowed_write_scope: ["CHANGELOG.md"],
+    },
+  )
+  let err = validate_bundle(bundle)
+  assert(err != nil)
+  assert(err.contains("release_facts"))
+}
+
+pipeline test_validate_requires_write_scope(task) {
+  let bundle = build(_ci_failure_args() + {allowed_write_scope: []})
+  let err = validate_bundle(bundle)
+  assert(err != nil)
+  assert(err.contains("allowed_write_scope"))
+}
+
+pipeline test_validate_rejects_unknown_action(task) {
+  let bundle = build(_ci_failure_args() + {approval_required_for: ["semantic_repair", "drop_db"]})
+  let err = validate_bundle(bundle)
+  assert(err != nil)
+  assert(err.contains("approval_required_for"))
+}
+
+pipeline test_output_schema_advertises_required_fields(task) {
+  let s = output_schema()
+  assert_eq(s.type, "object")
+  assert(s.required.contains("diagnosis"))
+  assert(s.required.contains("files_changed"))
+  assert(s.required.contains("tests_run"))
+  assert(s.required.contains("commits_created"))
+  assert(s.required.contains("push_result"))
+  assert(s.required.contains("residual_risk"))
+  // The release-audit consumer surfaces release_outputs as an optional
+  // alongside the universal repair fields.
+  assert(s.properties.release_outputs != nil)
+}

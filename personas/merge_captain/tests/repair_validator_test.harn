@@ -1,0 +1,208 @@
+// Run: harn test personas/merge_captain/tests/repair_validator_test.harn
+import { build } from "../lib/repair_bundle"
+import {
+  harness_validate,
+  path_matches_any,
+  path_matches_glob,
+  validate_all,
+  validate_pushed,
+  validate_shape,
+  validate_tests,
+  validate_write_scope,
+} from "../lib/repair_validator"
+
+fn _bundle(overrides) {
+  let base = {
+    kind: "ci_failure",
+    repo: "x/y",
+    pr_number: 1,
+    head_sha: "h",
+    head_ref: "feat",
+    failing_checks: [{name: "ci", conclusion: "failure"}],
+    allowed_write_scope: ["src/**", "tests/**"],
+    required_verification: [{name: "tests", command: "make test"}],
+  }
+  return build(base + overrides ?? {})
+}
+
+fn _good_output() {
+  return {
+    diagnosis: "x",
+    files_changed: [{path: "src/foo.rs", action: "modified"}],
+    tests_run: [{name: "tests", command: "make test", status: "ok", exit_code: 0}],
+    commits_created: [{sha: "abc", subject: "fix"}],
+    push_result: {pushed: true, ref: "feat", sha: "abc", force_with_lease: true},
+    residual_risk: "none",
+  }
+}
+
+pipeline test_path_matches_glob_plain_prefix(task) {
+  assert(path_matches_glob("src/foo.rs", "src"))
+  assert(path_matches_glob("src/foo/bar.rs", "src/foo"))
+  assert(!path_matches_glob("srcs/foo.rs", "src"))
+  assert(!path_matches_glob("other/foo.rs", "src"))
+}
+
+pipeline test_path_matches_glob_recursive(task) {
+  assert(path_matches_glob("src/foo.rs", "src/**"))
+  assert(path_matches_glob("src/foo/bar/baz.rs", "src/**"))
+  assert(path_matches_glob("src", "src/**"))
+  assert(!path_matches_glob("other/foo.rs", "src/**"))
+}
+
+pipeline test_path_matches_glob_single_segment(task) {
+  assert(path_matches_glob("src/foo.rs", "src/*"))
+  assert(!path_matches_glob("src/foo/bar.rs", "src/*"))
+  assert(!path_matches_glob("src", "src/*"))
+}
+
+pipeline test_path_matches_any_short_circuits(task) {
+  let globs = ["src/**", "tests/**"]
+  assert(path_matches_any("src/foo.rs", globs))
+  assert(path_matches_any("tests/foo_test.rs", globs))
+  assert(!path_matches_any("docs/foo.md", globs))
+}
+
+pipeline test_validate_shape_catches_missing_keys(task) {
+  let bare = {diagnosis: "x"}
+  let v = validate_shape(bare)
+  assert(!v.ok)
+  assert_eq(len(v.errors), 1)
+  let err = v.errors[0]
+  assert(err.contains("malformed output"))
+  assert(err.contains("files_changed"))
+}
+
+pipeline test_validate_shape_passes_full(task) {
+  let v = validate_shape(_good_output())
+  assert(v.ok)
+  assert_eq(len(v.errors), 0)
+}
+
+pipeline test_validate_tests_rejects_empty_when_required(task) {
+  let bundle = _bundle({})
+  let bad = _good_output() + {tests_run: []}
+  let v = validate_tests(bundle, bad)
+  assert(!v.ok)
+  assert(v.errors[0].contains("missing tests"))
+}
+
+pipeline test_validate_tests_rejects_missing_required_command(task) {
+  let bundle = _bundle({required_verification: [{name: "lint", command: "make lint"}]})
+  let bad = _good_output() + {tests_run: [{name: "tests", command: "make test", status: "ok", exit_code: 0}]}
+  let v = validate_tests(bundle, bad)
+  assert(!v.ok)
+  assert(v.errors[0].contains("missing tests"))
+  assert(v.errors[0].contains("lint"))
+}
+
+pipeline test_validate_tests_rejects_failing(task) {
+  let bundle = _bundle({})
+  let bad = _good_output()
+    + {tests_run: [{name: "tests", command: "make test", status: "failed", exit_code: 1}]}
+  let v = validate_tests(bundle, bad)
+  assert(!v.ok)
+  assert(v.errors[0].contains("failing tests"))
+}
+
+pipeline test_validate_write_scope_blocks_outside(task) {
+  let bundle = _bundle({})
+  let bad = _good_output()
+    + {
+    files_changed: [{path: "src/foo.rs", action: "modified"}, {path: "secrets/key.pem", action: "created"}],
+  }
+  let v = validate_write_scope(bundle, bad)
+  assert(!v.ok)
+  assert(v.errors[0].contains("unexpected write scope"))
+  assert(v.errors[0].contains("secrets/key.pem"))
+}
+
+pipeline test_validate_write_scope_allows_inside(task) {
+  let bundle = _bundle({})
+  let v = validate_write_scope(bundle, _good_output())
+  assert(v.ok)
+}
+
+pipeline test_validate_write_scope_empty_scope_blocks_writes(task) {
+  // build() requires at least one entry, so we forge a raw bundle.
+  let bundle = {_type: "merge_captain.repair_bundle", version: 1, kind: "ci_failure", allowed_write_scope: []}
+  let v = validate_write_scope(bundle, _good_output())
+  assert(!v.ok)
+  assert(v.errors[0].contains("unexpected write scope"))
+}
+
+pipeline test_validate_pushed_requires_push_when_committed(task) {
+  let bundle = _bundle({})
+  let bad = _good_output() + {push_result: {pushed: false, ref: "feat"}}
+  let v = validate_pushed(bundle, bad)
+  assert(!v.ok)
+  assert(v.errors[0].contains("unpushed commits"))
+}
+
+pipeline test_validate_pushed_rejects_push_without_commits(task) {
+  let bundle = _bundle({})
+  let bad = _good_output() + {commits_created: [], push_result: {pushed: true, ref: "feat"}}
+  let v = validate_pushed(bundle, bad)
+  assert(!v.ok)
+  assert(v.errors[0].contains("push without commits"))
+}
+
+pipeline test_validate_pushed_rejects_target_mismatch(task) {
+  let bundle = _bundle({})
+  let bad = _good_output() + {push_result: {pushed: true, ref: "wrong-branch", sha: "abc"}}
+  let v = validate_pushed(bundle, bad)
+  assert(!v.ok)
+  assert(v.errors[0].contains("push target mismatch"))
+}
+
+pipeline test_validate_pushed_accepts_qualified_ref(task) {
+  let bundle = _bundle({})
+  let good = _good_output() + {push_result: {pushed: true, ref: "refs/heads/feat", sha: "abc"}}
+  let v = validate_pushed(bundle, good)
+  assert(v.ok)
+}
+
+pipeline test_validate_all_short_circuits_on_shape_failure(task) {
+  let bundle = _bundle({})
+  let bad = {diagnosis: "x"}
+  let v = validate_all(bundle, bad)
+  assert(!v.ok)
+  // Only the shape error surfaces because downstream checks need a full dict.
+  assert_eq(len(v.errors), 1)
+  assert(v.errors[0].contains("malformed output"))
+}
+
+pipeline test_validate_all_aggregates_errors(task) {
+  let bundle = _bundle({})
+  let bad = _good_output()
+    + {
+    files_changed: [{path: "secrets/key.pem", action: "created"}],
+    tests_run: [{name: "tests", command: "make test", status: "failed", exit_code: 1}],
+    push_result: {pushed: false, ref: "feat"},
+  }
+  let v = validate_all(bundle, bad)
+  assert(!v.ok)
+  // tests + write scope + push together produce 3 distinct errors.
+  assert_eq(len(v.errors), 3)
+}
+
+pipeline test_validate_all_passes_clean(task) {
+  let bundle = _bundle({})
+  let v = validate_all(bundle, _good_output())
+  assert(v.ok)
+  assert_eq(len(v.errors), 0)
+}
+
+pipeline test_harness_validate_skipped_when_disabled(task) {
+  let bundle = _bundle({})
+  let v = harness_validate(bundle, _good_output(), {enabled: false})
+  assert(v.ok)
+  assert_eq(len(v.errors), 0)
+}
+
+pipeline test_harness_validate_rejects_unsafe_cwd(task) {
+  let bundle = _bundle({})
+  let v = harness_validate(bundle, _good_output(), {enabled: true, cwd: "/tmp; rm -rf /"})
+  assert(!v.ok)
+  assert(v.errors[0].contains("shell metacharacters"))
+}
