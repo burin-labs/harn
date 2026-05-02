@@ -59,13 +59,30 @@ The work is in the one release PR. After that, hands off.
    `--skip-audit` / `--skip-dry-run` to trust the merge-queue CI when
    iterating.
 
-9. Commit, push, open the PR titled **`Release vX.Y.Z`**:
+9. Commit, rebase onto latest `origin/main`, push, open the PR titled
+   **`Release vX.Y.Z`**, and enable auto-merge:
 
    ```bash
    git commit -m "Release vX.Y.Z"
+   git fetch origin main && git rebase origin/main
+   # Resolve any CHANGELOG.md conflicts: bullets that landed on main while
+   # --prepare was running may need to move from v(X.Y.Z-1) → vX.Y.Z, or a
+   # bullet may end up duplicated across both sections. Sanity-check with:
+   #   diff <(git show v(X.Y.Z-1):CHANGELOG.md | awk '/^## v(X.Y.Z-1)/,/^## /') \
+   #        <(awk '/^## v(X.Y.Z-1)/,/^## /' CHANGELOG.md)
    git push -u origin release/vX.Y.Z
    gh pr create --title "Release vX.Y.Z" --body "..."
+   gh pr merge --auto         # let the merge queue pick the strategy
    ```
+
+   Rebase right before push because `--prepare` takes 1-15 min depending
+   on cache state, and main may have moved while it ran. Catching drift
+   now (instead of letting the merge queue push back) keeps the PR fresh.
+
+   `gh pr merge --auto` (no `--squash`/`--merge`/`--rebase` flag — branch
+   protection picks the strategy and rejects explicit overrides) lands
+   the PR as soon as CI is green so you don't have to babysit a queue
+   that takes ~10-15 min cold-cache.
 
 That's it. Stop here. The bot takes over once the PR lands.
 

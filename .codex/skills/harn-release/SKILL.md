@@ -111,7 +111,27 @@ default step.
 
    This audits, dry-run-publishes, bumps `Cargo.toml`/`Cargo.lock`/per-crate
    manifests, regenerates derived files, and `git add`s everything.
-9. Commit + push + open the PR titled `Release vX.Y.Z`. Walk away.
+9. Commit, rebase onto latest `origin/main`, push, open the PR titled
+   `Release vX.Y.Z`, then `gh pr merge --auto`. Walk away.
+
+   ```bash
+   git commit -m "Release vX.Y.Z"
+   git fetch origin main && git rebase origin/main
+   # Resolve any CHANGELOG.md conflicts: bullets that landed on main
+   # while --prepare was running may need to move from v(X.Y.Z-1) → vX.Y.Z,
+   # or a bullet may end up duplicated across both sections. Verify with:
+   #   diff <(git show v(X.Y.Z-1):CHANGELOG.md | awk '/^## v(X.Y.Z-1)/,/^## /') \
+   #        <(awk '/^## v(X.Y.Z-1)/,/^## /' CHANGELOG.md)
+   git push -u origin release/vX.Y.Z
+   gh pr create --title "Release vX.Y.Z" --body "..."
+   gh pr merge --auto         # branch protection picks the strategy; do
+                              # NOT pass --squash/--merge/--rebase
+   ```
+
+   Rebase right before push because `--prepare` takes 1-15 min depending
+   on cache state, and main may have moved while it ran. Auto-merge means
+   the PR lands as soon as CI is green so you don't have to babysit the
+   ~10-15 min cold-cache merge-queue CI.
 
 ## Expectations
 
