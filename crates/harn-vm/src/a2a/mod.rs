@@ -14,6 +14,7 @@ const A2A_AGENT_CARD_PATHS: &[&str] = &[
     "agent/card",
 ];
 const A2A_PROTOCOL_VERSION: &str = "0.3.0";
+const A2A_JSONRPC_TRANSPORT: &str = "JSONRPC";
 const A2A_PUSH_URL_ENV: &str = "HARN_A2A_PUSH_URL";
 const A2A_PUSH_TOKEN_ENV: &str = "HARN_A2A_PUSH_TOKEN";
 
@@ -437,99 +438,178 @@ fn endpoint_from_card(
     target_agent: String,
     card: &Value,
 ) -> Result<ResolvedA2aEndpoint, A2aClientError> {
-    if let Some(interfaces) = card.get("supportedInterfaces").and_then(Value::as_array) {
-        let interface = interfaces
-            .iter()
-            .find(|entry| {
-                entry
-                    .get("protocolBinding")
-                    .and_then(Value::as_str)
-                    .is_some_and(|binding| binding.eq_ignore_ascii_case("JSONRPC"))
-            })
-            .ok_or_else(|| {
-                A2aClientError::Discovery(
-                    "A2A agent card does not expose a JSONRPC supportedInterface".to_string(),
-                )
-            })?;
-        let interface_url = interface
-            .get("url")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                A2aClientError::Discovery("A2A JSONRPC supportedInterface missing url".to_string())
-            })?;
-        let rpc_url = Url::parse(interface_url).map_err(|error| {
-            A2aClientError::Discovery(format!(
-                "invalid A2A JSONRPC supportedInterface url '{interface_url}': {error}"
-            ))
-        })?;
-        ensure_cleartext_allowed(&rpc_url, allow_cleartext, "jsonrpc interface")?;
-        let interface_authority = url_authority(&rpc_url)?;
-        if !authorities_equivalent(&interface_authority, requested_authority) {
-            return Err(A2aClientError::Discovery(format!(
-                "A2A JSONRPC interface authority mismatch: requested '{requested_authority}', card returned '{interface_authority}'"
-            )));
-        }
-        return Ok(ResolvedA2aEndpoint {
-            card_url,
-            rpc_url: rpc_url.to_string(),
-            agent_id: card.get("id").and_then(Value::as_str).map(str::to_string),
-            target_agent,
-        });
-    }
+    let rpc_url = if has_current_transport_fields(card) {
+        endpoint_from_current_card(card, allow_cleartext, requested_authority)?
+    } else if let Some(rpc_url) =
+        endpoint_from_legacy_supported_interfaces(card, allow_cleartext, requested_authority)?
+    {
+        rpc_url
+    } else {
+        return Err(A2aClientError::Discovery(
+            "A2A agent card missing preferredTransport/additionalInterfaces".to_string(),
+        ));
+    };
 
-    let base_url = card
-        .get("url")
-        .and_then(Value::as_str)
-        .ok_or_else(|| A2aClientError::Discovery("A2A agent card missing url".to_string()))?;
-    let base_url = Url::parse(base_url).map_err(|error| {
-        A2aClientError::Discovery(format!("invalid A2A card url '{base_url}': {error}"))
-    })?;
-    ensure_cleartext_allowed(&base_url, allow_cleartext, "agent card")?;
-    let card_authority = url_authority(&base_url)?;
-    if !authorities_equivalent(&card_authority, requested_authority) {
-        return Err(A2aClientError::Discovery(format!(
-            "A2A agent card url authority mismatch: requested '{requested_authority}', card returned '{card_authority}'"
-        )));
-    }
-    let interfaces = card
-        .get("interfaces")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            A2aClientError::Discovery("A2A agent card missing interfaces".to_string())
-        })?;
-    let jsonrpc_interfaces: Vec<&Value> = interfaces
-        .iter()
-        .filter(|entry| {
-            entry
-                .get("protocol")
-                .and_then(Value::as_str)
-                .is_some_and(|protocol| protocol.eq_ignore_ascii_case("jsonrpc"))
-        })
-        .collect();
-    if jsonrpc_interfaces.len() != 1 {
-        return Err(A2aClientError::Discovery(format!(
-            "A2A agent card must expose exactly one jsonrpc interface, found {}",
-            jsonrpc_interfaces.len()
-        )));
-    }
-    let interface_url = jsonrpc_interfaces[0]
-        .get("url")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            A2aClientError::Discovery("A2A jsonrpc interface missing url".to_string())
-        })?;
-    let rpc_url = base_url.join(interface_url).map_err(|error| {
-        A2aClientError::Discovery(format!(
-            "invalid A2A interface url '{interface_url}': {error}"
-        ))
-    })?;
-    ensure_cleartext_allowed(&rpc_url, allow_cleartext, "jsonrpc interface")?;
     Ok(ResolvedA2aEndpoint {
         card_url,
         rpc_url: rpc_url.to_string(),
         agent_id: card.get("id").and_then(Value::as_str).map(str::to_string),
         target_agent,
     })
+}
+
+fn has_current_transport_fields(card: &Value) -> bool {
+    card.get("preferredTransport").is_some() || card.get("additionalInterfaces").is_some()
+}
+
+fn endpoint_from_current_card(
+    card: &Value,
+    allow_cleartext: bool,
+    requested_authority: &str,
+) -> Result<Url, A2aClientError> {
+    let protocol_version = card
+        .get("protocolVersion")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            A2aClientError::Discovery("A2A agent card missing protocolVersion".to_string())
+        })?;
+    if protocol_version != A2A_PROTOCOL_VERSION {
+        return Err(A2aClientError::Discovery(format!(
+            "A2A agent card protocolVersion '{protocol_version}' is not supported; expected {A2A_PROTOCOL_VERSION}"
+        )));
+    }
+
+    let base_url = card
+        .get("url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| A2aClientError::Discovery("A2A agent card missing url".to_string()))?;
+    let base_url = resolve_declared_url(
+        base_url,
+        allow_cleartext,
+        requested_authority,
+        "agent card url",
+    )?;
+
+    let preferred_transport = card
+        .get("preferredTransport")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            A2aClientError::Discovery("A2A agent card missing preferredTransport".to_string())
+        })?;
+    if transport_is_jsonrpc(preferred_transport) {
+        return Ok(base_url);
+    }
+
+    if let Some(interface_url) = current_additional_jsonrpc_url(card)? {
+        return resolve_declared_url(
+            interface_url,
+            allow_cleartext,
+            requested_authority,
+            "JSONRPC additionalInterface url",
+        );
+    }
+
+    Err(A2aClientError::Discovery(
+        "A2A agent card does not expose JSONRPC transport".to_string(),
+    ))
+}
+
+fn current_additional_jsonrpc_url(card: &Value) -> Result<Option<&str>, A2aClientError> {
+    let Some(interfaces) = card.get("additionalInterfaces") else {
+        return Ok(None);
+    };
+    let interfaces = interfaces.as_array().ok_or_else(|| {
+        A2aClientError::Discovery("A2A additionalInterfaces must be an array".to_string())
+    })?;
+    for interface in interfaces {
+        if interface
+            .get("transport")
+            .and_then(Value::as_str)
+            .is_some_and(transport_is_jsonrpc)
+        {
+            let interface_url = interface
+                .get("url")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    A2aClientError::Discovery(
+                        "A2A JSONRPC additionalInterface missing url".to_string(),
+                    )
+                })?;
+            return Ok(Some(interface_url));
+        }
+    }
+    Ok(None)
+}
+
+fn endpoint_from_legacy_supported_interfaces(
+    card: &Value,
+    allow_cleartext: bool,
+    requested_authority: &str,
+) -> Result<Option<Url>, A2aClientError> {
+    let Some(interfaces) = card.get("supportedInterfaces") else {
+        return Ok(None);
+    };
+    let interfaces = interfaces.as_array().ok_or_else(|| {
+        A2aClientError::Discovery("A2A supportedInterfaces must be an array".to_string())
+    })?;
+    let mut saw_jsonrpc = false;
+    for interface in interfaces {
+        if !interface
+            .get("protocolBinding")
+            .and_then(Value::as_str)
+            .is_some_and(transport_is_jsonrpc)
+        {
+            continue;
+        }
+        saw_jsonrpc = true;
+        if interface.get("protocolVersion").and_then(Value::as_str) != Some(A2A_PROTOCOL_VERSION) {
+            continue;
+        }
+        let interface_url = interface
+            .get("url")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                A2aClientError::Discovery("A2A JSONRPC supportedInterface missing url".to_string())
+            })?;
+        return resolve_declared_url(
+            interface_url,
+            allow_cleartext,
+            requested_authority,
+            "JSONRPC supportedInterface url",
+        )
+        .map(Some);
+    }
+    if saw_jsonrpc {
+        return Err(A2aClientError::Discovery(format!(
+            "A2A supportedInterfaces does not expose JSONRPC for protocolVersion {A2A_PROTOCOL_VERSION}"
+        )));
+    }
+    Err(A2aClientError::Discovery(
+        "A2A agent card does not expose a JSONRPC supportedInterface".to_string(),
+    ))
+}
+
+fn transport_is_jsonrpc(transport: &str) -> bool {
+    transport.eq_ignore_ascii_case(A2A_JSONRPC_TRANSPORT)
+}
+
+fn resolve_declared_url(
+    raw_url: &str,
+    allow_cleartext: bool,
+    requested_authority: &str,
+    label: &str,
+) -> Result<Url, A2aClientError> {
+    let url = Url::parse(raw_url).map_err(|error| {
+        A2aClientError::Discovery(format!("invalid A2A {label} '{raw_url}': {error}"))
+    })?;
+    ensure_cleartext_allowed(&url, allow_cleartext, label)?;
+    let declared_authority = url_authority(&url)?;
+    if !authorities_equivalent(&declared_authority, requested_authority) {
+        return Err(A2aClientError::Discovery(format!(
+            "A2A {label} authority mismatch: requested '{requested_authority}', card returned '{declared_authority}'"
+        )));
+    }
+    Ok(url)
 }
 
 fn card_resolution_schemes(allow_cleartext: bool) -> &'static [&'static str] {
@@ -789,7 +869,56 @@ mod tests {
     }
 
     #[test]
-    fn endpoint_from_card_accepts_current_supported_interfaces() {
+    fn endpoint_from_card_accepts_current_preferred_transport() {
+        let endpoint = endpoint_from_card(
+            "https://trusted.example/.well-known/agent-card.json".to_string(),
+            false,
+            "trusted.example",
+            "triage".to_string(),
+            &serde_json::json!({
+                "name": "trusted",
+                "protocolVersion": "0.3.0",
+                "url": "https://trusted.example/rpc",
+                "preferredTransport": "JSONRPC",
+                "additionalInterfaces": [{
+                    "url": "https://trusted.example/rpc",
+                    "transport": "JSONRPC"
+                }]
+            }),
+        )
+        .expect("current A2A card should resolve");
+        assert_eq!(endpoint.rpc_url, "https://trusted.example/rpc");
+        assert_eq!(
+            endpoint.card_url,
+            "https://trusted.example/.well-known/agent-card.json"
+        );
+        assert_eq!(endpoint.target_agent, "triage");
+    }
+
+    #[test]
+    fn endpoint_from_card_uses_additional_jsonrpc_interface_when_needed() {
+        let endpoint = endpoint_from_card(
+            "https://trusted.example/.well-known/agent-card.json".to_string(),
+            false,
+            "trusted.example",
+            "triage".to_string(),
+            &serde_json::json!({
+                "name": "trusted",
+                "protocolVersion": "0.3.0",
+                "url": "https://trusted.example/rest",
+                "preferredTransport": "HTTP+JSON",
+                "additionalInterfaces": [{
+                    "url": "https://trusted.example/rpc",
+                    "transport": "JSONRPC"
+                }]
+            }),
+        )
+        .expect("current A2A card should resolve through additionalInterfaces");
+        assert_eq!(endpoint.rpc_url, "https://trusted.example/rpc");
+    }
+
+    #[test]
+    fn endpoint_from_card_accepts_legacy_supported_interfaces() {
         let endpoint = endpoint_from_card(
             "https://trusted.example/.well-known/agent-card.json".to_string(),
             false,
@@ -804,13 +933,27 @@ mod tests {
                 }],
             }),
         )
-        .expect("current A2A card should resolve");
+        .expect("legacy A2A card should resolve during the transition");
         assert_eq!(endpoint.rpc_url, "https://trusted.example/rpc");
+    }
+
+    #[test]
+    fn endpoint_from_card_rejects_removed_interfaces_shape() {
+        let error = endpoint_from_card(
+            "https://trusted.example/.well-known/agent-card.json".to_string(),
+            false,
+            "trusted.example",
+            "triage".to_string(),
+            &serde_json::json!({
+                "url": "https://trusted.example",
+                "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+            }),
+        )
+        .expect_err("pre-0.3 Harn discovery shape should be rejected");
         assert_eq!(
-            endpoint.card_url,
-            "https://trusted.example/.well-known/agent-card.json"
+            error.to_string(),
+            "A2A agent card missing preferredTransport/additionalInterfaces"
         );
-        assert_eq!(endpoint.target_agent, "triage");
     }
 
     #[test]
@@ -920,8 +1063,9 @@ mod tests {
             "trusted.example",
             "triage".to_string(),
             &serde_json::json!({
+                "protocolVersion": "0.3.0",
                 "url": "https://evil.example",
-                "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+                "preferredTransport": "JSONRPC",
             }),
         )
         .unwrap_err();
@@ -939,8 +1083,9 @@ mod tests {
             "127.0.0.1:8080",
             "triage".to_string(),
             &serde_json::json!({
+                "protocolVersion": "0.3.0",
                 "url": "http://localhost:8080",
-                "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+                "preferredTransport": "JSONRPC",
             }),
         )
         .expect_err("cleartext card should require explicit opt-in");
@@ -955,8 +1100,9 @@ mod tests {
         // commonly dial `127.0.0.1:PORT`. Both refer to the same socket, so
         // the authority check must not spuriously reject the pair.
         let card = serde_json::json!({
+            "protocolVersion": "0.3.0",
             "url": "http://localhost:8080",
-            "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+            "preferredTransport": "JSONRPC",
         });
         let endpoint = endpoint_from_card(
             "http://127.0.0.1:8080/.well-known/agent-card.json".to_string(),
@@ -966,12 +1112,13 @@ mod tests {
             &card,
         )
         .expect("loopback alias pair should be accepted");
-        assert_eq!(endpoint.rpc_url, "http://localhost:8080/rpc");
+        assert_eq!(endpoint.rpc_url, "http://localhost:8080/");
 
         // IPv6 loopback `[::1]` also aliases to `127.0.0.1` / `localhost`.
         let card_v6 = serde_json::json!({
+            "protocolVersion": "0.3.0",
             "url": "http://[::1]:8080",
-            "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+            "preferredTransport": "JSONRPC",
         });
         let endpoint_v6 = endpoint_from_card(
             "http://localhost:8080/.well-known/agent-card.json".to_string(),
@@ -981,12 +1128,13 @@ mod tests {
             &card_v6,
         )
         .expect("IPv6 loopback alias should be accepted");
-        assert_eq!(endpoint_v6.rpc_url, "http://[::1]:8080/rpc");
+        assert_eq!(endpoint_v6.rpc_url, "http://[::1]:8080/");
 
         // Port mismatch is still rejected even on loopback.
         let card_wrong_port = serde_json::json!({
+            "protocolVersion": "0.3.0",
             "url": "http://localhost:9000",
-            "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+            "preferredTransport": "JSONRPC",
         });
         let error = endpoint_from_card(
             "http://127.0.0.1:8080/.well-known/agent-card.json".to_string(),

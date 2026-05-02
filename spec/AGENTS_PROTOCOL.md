@@ -268,7 +268,8 @@ Required fields:
 - `name`: display name.
 - `description`: agent description.
 - `protocol_version`: supported Harn Agents Protocol version.
-- `a2a_card`: current A2A AgentCard, including `supportedInterfaces`,
+- `a2a_card`: current A2A AgentCard, including `preferredTransport`,
+  `additionalInterfaces`,
   capabilities, default input/output modes, security declarations, and skills.
 - `skills`: callable skills or exported functions.
 

@@ -57,8 +57,9 @@ For `a2a://host[:port]/path` routes, the dispatcher:
   discovery fallbacks for older Harn A2A servers
 - defaults to HTTPS-only discovery + dispatch; cleartext HTTP is rejected unless
   the trigger binding explicitly sets `allow_cleartext = true`
-- selects the first JSON-RPC entry in `supportedInterfaces` before it will
-  dispatch
+- selects the AgentCard `url` when `preferredTransport` is `JSONRPC`, or a
+  JSON-RPC entry from `additionalInterfaces`; `supportedInterfaces` remains a
+  read-only legacy fallback for peers that have not cut over yet
 - treats the URI path as the `target_agent` label that propagates into the
   outbound envelope and the action graph
 - sends the `TriggerEvent` envelope over `message/send`
