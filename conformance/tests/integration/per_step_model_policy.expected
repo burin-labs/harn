@@ -1,0 +1,5 @@
+classify:low_priority|judge:balanced|decide:merge|nil
+3
+handoff_escalation
+true
+expensive_escalate

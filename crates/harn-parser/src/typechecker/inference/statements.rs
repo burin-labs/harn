@@ -1718,6 +1718,7 @@ impl TypeChecker {
             "receipt",
             "error_boundary",
             "retry",
+            "budget",
         ];
         let mut has_name = false;
         for arg in &attr.args {
@@ -1755,6 +1756,7 @@ impl TypeChecker {
                     &["fail", "continue", "escalate"],
                 ),
                 "retry" => self.expect_step_retry_dict(&arg.value, arg.span),
+                "budget" => self.expect_step_budget_dict(&arg.value, arg.span),
                 _ => {}
             }
         }
@@ -1764,6 +1766,50 @@ impl TypeChecker {
                     .to_string(),
                 attr.span,
             );
+        }
+    }
+
+    fn expect_step_budget_dict(&mut self, value: &SNode, span: Span) {
+        const NUMBER_KEYS: &[&str] = &["max_tokens", "max_usd"];
+        let Node::DictLiteral(entries) = &value.node else {
+            self.warning_at(
+                "`@step(budget: ...)` must be a dict such as `{ max_tokens: 1000, max_usd: 0.05 }`"
+                    .to_string(),
+                span,
+            );
+            return;
+        };
+        for entry in entries {
+            let Some(field_name) = attr_key_name(&entry.key.node) else {
+                self.warning_at(
+                    "`@step(budget: ...)` field names must be strings or identifiers".to_string(),
+                    entry.key.span,
+                );
+                continue;
+            };
+            if !NUMBER_KEYS.contains(&field_name) {
+                self.warning_at(
+                    format!(
+                        "unknown `@step(budget: ...)` field `{field_name}`; expected one of {NUMBER_KEYS:?}"
+                    ),
+                    entry.key.span,
+                );
+                continue;
+            }
+            match (field_name, &entry.value.node) {
+                ("max_tokens", Node::IntLiteral(value)) if *value >= 1 => {}
+                ("max_tokens", _) => self.warning_at(
+                    "`@step(budget: { max_tokens: ... })` must be a positive integer".to_string(),
+                    entry.value.span,
+                ),
+                ("max_usd", Node::IntLiteral(value)) if *value >= 0 => {}
+                ("max_usd", Node::FloatLiteral(value)) if value.is_finite() && *value >= 0.0 => {}
+                ("max_usd", _) => self.warning_at(
+                    "`@step(budget: { max_usd: ... })` must be a non-negative number".to_string(),
+                    entry.value.span,
+                ),
+                _ => {}
+            }
         }
     }
 

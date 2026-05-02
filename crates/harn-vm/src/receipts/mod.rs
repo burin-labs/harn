@@ -110,6 +110,58 @@ impl Receipt {
     pub fn schema_json() -> Result<JsonValue, serde_json::Error> {
         serde_json::from_str(RECEIPT_SCHEMA_JSON)
     }
+
+    /// Append a `model_calls[]` entry that records the per-step model
+    /// + token + cost breakdown produced by `crates/harn-vm/src/step_runtime.rs`.
+    ///   Used by run-receipt builders (harn-cloud-store, burin-code) so a
+    ///   single canonical envelope carries per-step economics without
+    ///   each consumer reinventing the field layout.
+    pub fn push_step_breakdown(&mut self, summary: &crate::step_runtime::CompletedStep) {
+        let mut entry: BTreeMap<String, JsonValue> = BTreeMap::new();
+        entry.insert("step".to_string(), JsonValue::String(summary.name.clone()));
+        entry.insert(
+            "function".to_string(),
+            JsonValue::String(summary.function.clone()),
+        );
+        if let Some(model) = summary.model.as_deref() {
+            entry.insert("model".to_string(), JsonValue::String(model.to_string()));
+        }
+        entry.insert(
+            "input_tokens".to_string(),
+            JsonValue::Number(summary.input_tokens.into()),
+        );
+        entry.insert(
+            "output_tokens".to_string(),
+            JsonValue::Number(summary.output_tokens.into()),
+        );
+        entry.insert(
+            "llm_calls".to_string(),
+            JsonValue::Number(summary.llm_calls.into()),
+        );
+        entry.insert(
+            "status".to_string(),
+            JsonValue::String(summary.status.clone()),
+        );
+        if let Some(error) = summary.error.as_deref() {
+            entry.insert("error".to_string(), JsonValue::String(error.to_string()));
+        }
+        if summary.cost_usd.is_finite() {
+            if let Some(num) = serde_json::Number::from_f64(summary.cost_usd) {
+                entry.insert("cost_usd".to_string(), JsonValue::Number(num));
+            }
+            self.cost_usd += summary.cost_usd;
+        }
+        self.model_calls.push(entry);
+    }
+
+    /// Drain the per-thread step log into this receipt's `model_calls[]`
+    /// in declaration order. Idempotent: a second call after the
+    /// thread-local has been drained appends nothing.
+    pub fn attach_completed_steps(&mut self) {
+        for summary in crate::step_runtime::drain_completed_steps() {
+            self.push_step_breakdown(&summary);
+        }
+    }
 }
 
 #[async_trait]
@@ -242,6 +294,33 @@ mod tests {
             .as_array()
             .unwrap()
             .contains(&json!("receipt_only")));
+    }
+
+    #[test]
+    fn receipt_attaches_per_step_breakdown_with_aggregated_cost() {
+        let summary = crate::step_runtime::CompletedStep {
+            name: "classify".to_string(),
+            function: "classify_step".to_string(),
+            model: Some("claude-haiku-4-5".to_string()),
+            input_tokens: 5,
+            output_tokens: 5,
+            cost_usd: 0.000_05,
+            llm_calls: 1,
+            status: "completed".to_string(),
+            error: None,
+        };
+        let mut receipt = fixture_receipt();
+        let starting_cost = receipt.cost_usd;
+        receipt.push_step_breakdown(&summary);
+        assert_eq!(receipt.model_calls.len(), 1);
+        let entry = &receipt.model_calls[0];
+        assert_eq!(entry["step"], json!("classify"));
+        assert_eq!(entry["function"], json!("classify_step"));
+        assert_eq!(entry["model"], json!("claude-haiku-4-5"));
+        assert_eq!(entry["input_tokens"], json!(5));
+        assert_eq!(entry["output_tokens"], json!(5));
+        assert_eq!(entry["llm_calls"], json!(1));
+        assert!((receipt.cost_usd - starting_cost - 0.000_05).abs() < 1e-9);
     }
 
     #[test]

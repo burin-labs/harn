@@ -77,6 +77,7 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__memory_summarize",
     "__make_struct",
     "__range__",
+    "__register_step",
     "__select_list",
     "__select_timeout",
     "__select_try",

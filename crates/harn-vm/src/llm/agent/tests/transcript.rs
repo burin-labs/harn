@@ -1,28 +1,58 @@
 use super::*;
 
+/// Per-test transcript dir: pushes onto the per-thread
+/// `TRANSCRIPT_DIR_STACK` (race-free) instead of mutating the
+/// process-global `HARN_LLM_TRANSCRIPT_DIR` env var.
+///
+/// The previous env-var-based pattern was racy under cargo test's
+/// parallel scheduler: tests A, B, C running on different libtest
+/// threads each `set_var` to their own temp dir, but the env var is
+/// process-global, so whichever `set_var` ran most recently won. All
+/// three tests' `append_llm_transcript_entry` calls then funneled
+/// into the SAME file, and (a) the JSON lines from neighboring
+/// tests polluted each other's reads while (b) concurrent
+/// `writeln!` calls > PIPE_BUF (512 bytes on macOS) interleaved
+/// mid-line, producing torn JSON that the `serde_json::from_str`
+/// filter silently dropped. The thread-local stack is per-thread,
+/// so each test reads only its own transcript.
+struct TestTranscriptDir {
+    dir: std::path::PathBuf,
+    _guard: crate::llm::agent_observe::LlmTranscriptDirGuard,
+}
+
+impl TestTranscriptDir {
+    fn new(prefix: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!("{prefix}-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).expect("create transcript temp dir");
+        let guard = crate::llm::agent_observe::push_llm_transcript_dir(Some(
+            dir.to_string_lossy().into_owned(),
+        ));
+        Self { dir, _guard: guard }
+    }
+
+    fn path(&self) -> std::path::PathBuf {
+        self.dir.join("llm_transcript.jsonl")
+    }
+}
+
+impl Drop for TestTranscriptDir {
+    fn drop(&mut self) {
+        // The transcript dir guard pops first (Rust drops fields in
+        // reverse declaration order). After pop, no new writes from
+        // this thread go to `dir`, so it's safe to remove.
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
-#[allow(clippy::await_holding_lock)]
 async fn observed_llm_call_transcript_deduplicates_system_and_tool_schemas() {
     // Two back-to-back calls with identical system prompt and tool schema
     // list should emit `system_prompt` and `tool_schemas` events exactly
     // once each, while `provider_call_request` fires on every call. The
     // dedup state is per-agent-loop; for standalone `observed_llm_call`
     // tests we rely on the thread-local seeded in the first dump.
-    //
-    // Guard against parallel tests racing on the shared HARN_LLM_TRANSCRIPT_DIR
-    // env var — other tests in this module set/unset the same variable.
-    let _guard = transcript_env_lock();
     reset_llm_mock_state();
-    let dir = std::env::temp_dir().join(format!(
-        "harn-llm-transcript-dedup-{}",
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    let old_dir = std::env::var("HARN_LLM_TRANSCRIPT_DIR").ok();
-    std::env::set_var(
-        "HARN_LLM_TRANSCRIPT_DIR",
-        dir.to_string_lossy().into_owned(),
-    );
+    let scratch = TestTranscriptDir::new("harn-llm-transcript-dedup");
     crate::llm::agent_observe::reset_transcript_dedup();
 
     let mut opts = base_opts(vec![serde_json::json!({"role": "user", "content": "ping"})]);
@@ -43,12 +73,7 @@ async fn observed_llm_call_transcript_deduplicates_system_and_tool_schemas() {
         .unwrap();
     }
 
-    // Other parallel tests in this binary may briefly point
-    // HARN_LLM_TRANSCRIPT_DIR at the same temp dir via the shared env var,
-    // so our file can pick up stray events. Filter on our marker system
-    // prompt before asserting counts.
-    let transcript =
-        std::fs::read_to_string(dir.join("llm_transcript.jsonl")).expect("transcript file");
+    let transcript = std::fs::read_to_string(scratch.path()).expect("transcript file");
     let system_events_for_us = transcript
         .lines()
         .filter(|l| {
@@ -80,27 +105,13 @@ async fn observed_llm_call_transcript_deduplicates_system_and_tool_schemas() {
         "provider_call_request must not embed the message list; messages are emitted as their own events: {transcript}",
     );
 
-    if let Some(previous) = old_dir {
-        std::env::set_var("HARN_LLM_TRANSCRIPT_DIR", previous);
-    } else {
-        std::env::remove_var("HARN_LLM_TRANSCRIPT_DIR");
-    }
-    let _ = std::fs::remove_dir_all(dir);
     reset_llm_mock_state();
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[allow(clippy::await_holding_lock)]
 async fn observed_llm_call_transcript_uses_explicit_tool_format() {
-    let _guard = transcript_env_lock();
     reset_llm_mock_state();
-    let dir = std::env::temp_dir().join(format!("harn-llm-transcript-{}", uuid::Uuid::now_v7()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let old_dir = std::env::var("HARN_LLM_TRANSCRIPT_DIR").ok();
-    std::env::set_var(
-        "HARN_LLM_TRANSCRIPT_DIR",
-        dir.to_string_lossy().into_owned(),
-    );
+    let scratch = TestTranscriptDir::new("harn-llm-transcript");
 
     let opts = base_opts(vec![serde_json::json!({
         "role": "user",
@@ -119,34 +130,16 @@ async fn observed_llm_call_transcript_uses_explicit_tool_format() {
     .await
     .unwrap();
 
-    let transcript =
-        std::fs::read_to_string(dir.join("llm_transcript.jsonl")).expect("transcript file");
+    let transcript = std::fs::read_to_string(scratch.path()).expect("transcript file");
     assert!(transcript.contains("\"tool_format\":\"native\""));
 
-    if let Some(previous) = old_dir {
-        std::env::set_var("HARN_LLM_TRANSCRIPT_DIR", previous);
-    } else {
-        std::env::remove_var("HARN_LLM_TRANSCRIPT_DIR");
-    }
-    let _ = std::fs::remove_dir_all(dir);
     reset_llm_mock_state();
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[allow(clippy::await_holding_lock)]
 async fn observed_llm_call_transcript_records_thinking_settings() {
-    let _guard = transcript_env_lock();
     reset_llm_mock_state();
-    let dir = std::env::temp_dir().join(format!(
-        "harn-llm-transcript-thinking-{}",
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    let old_dir = std::env::var("HARN_LLM_TRANSCRIPT_DIR").ok();
-    std::env::set_var(
-        "HARN_LLM_TRANSCRIPT_DIR",
-        dir.to_string_lossy().into_owned(),
-    );
+    let scratch = TestTranscriptDir::new("harn-llm-transcript-thinking");
 
     let mut opts = base_opts(vec![serde_json::json!({
         "role": "user",
@@ -171,27 +164,27 @@ async fn observed_llm_call_transcript_records_thinking_settings() {
     .await
     .unwrap();
 
-    let transcript =
-        std::fs::read_to_string(dir.join("llm_transcript.jsonl")).expect("transcript file");
+    let transcript = std::fs::read_to_string(scratch.path()).expect("transcript file");
     let request = transcript
         .lines()
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
         .find(|line| {
             line["type"] == "provider_call_request" && line["model"] == model_marker.as_str()
         })
-        .expect("provider_call_request event");
+        .unwrap_or_else(|| {
+            panic!(
+                "provider_call_request event for model `{model_marker}` not found.\n\
+                 transcript dir: {}\n\
+                 transcript contents:\n{transcript}",
+                scratch.dir.display(),
+            )
+        });
     assert_eq!(request["thinking"]["enabled"], serde_json::json!(true));
     assert_eq!(
         request["thinking"]["budget_tokens"],
         serde_json::json!(2048)
     );
 
-    if let Some(previous) = old_dir {
-        std::env::set_var("HARN_LLM_TRANSCRIPT_DIR", previous);
-    } else {
-        std::env::remove_var("HARN_LLM_TRANSCRIPT_DIR");
-    }
-    let _ = std::fs::remove_dir_all(dir);
     reset_llm_mock_state();
 }
 

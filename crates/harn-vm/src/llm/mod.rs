@@ -530,6 +530,10 @@ pub fn reset_llm_state() {
     trigger_predicate::reset_trigger_predicate_state();
     capabilities::clear_user_overrides();
     autonomy_budget::reset_autonomy_budget_state();
+    // Per-`@step` registry, active stack, and completed-step log are
+    // thread-local; clear them between runs to prevent stale step
+    // metadata from one program leaking into the next.
+    crate::step_runtime::reset_thread_local_state();
 }
 
 /// Shared implementation of `llm_call` / `llm_call_safe`. Runs the

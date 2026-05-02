@@ -124,6 +124,13 @@ impl Vm {
             local_scope_depth: 0,
         });
 
+        // If this fn is `@step`-decorated, push an active-step entry so
+        // `llm_call` and the error-boundary unwind path can attribute
+        // tokens, cost, and budget exhaustion to it. The push is keyed
+        // off the function name registered by compiler-emitted
+        // `__register_step` calls.
+        crate::step_runtime::maybe_push_active_step(&closure.func.name, self.frames.len());
+
         Ok(())
     }
 

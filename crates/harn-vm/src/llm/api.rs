@@ -650,42 +650,50 @@ mod tests {
         assert_eq!(messages[0]["role"].as_str(), Some("user"));
     }
 
-    /// Cooperative accept loop: blocks until a client connects or the
-    /// shared `shutdown` flag is set. The shutdown flag is owned by the
-    /// returned [`LlmStub`] guard and flipped on Drop, so the stub thread
-    /// can never outlive the test (replaces the older fixed-deadline loop
-    /// that flaked under heavy CI fan-out).
+    /// Cooperative accept: blocks the stub thread on a real
+    /// `accept()` call until a client connects, then returns the
+    /// stream. Shutdown wakes the thread by self-connecting to the
+    /// listener (see [`LlmStub::drop`]) — when the resulting `accept`
+    /// returns, the shutdown flag is checked and the synthetic stream
+    /// is discarded.
+    ///
+    /// This replaces a previous nonblocking polling loop with a 5ms
+    /// sleep tick. Polling introduced two flake modes under nextest's
+    /// 50× concurrent flake-detection profile: (1) a real client
+    /// connection could land between two polls and reqwest could time
+    /// out on the SYN-ACK before the stub thread woke; (2) under
+    /// heavy CPU contention the 5ms tick could stretch to tens of
+    /// milliseconds, compounding (1). Blocking accept removes the
+    /// scheduling-latency variable entirely.
     fn accept_with_shutdown(
         listener: &std::net::TcpListener,
         label: &str,
         shutdown: &std::sync::atomic::AtomicBool,
     ) -> Option<std::net::TcpStream> {
-        listener
-            .set_nonblocking(true)
-            .expect("set listener nonblocking");
-        loop {
-            if shutdown.load(std::sync::atomic::Ordering::Acquire) {
-                return None;
-            }
-            match listener.accept() {
-                Ok((stream, _)) => {
-                    stream
-                        .set_nonblocking(false)
-                        .expect("restore blocking mode");
-                    stream
-                        .set_read_timeout(Some(std::time::Duration::from_secs(30)))
-                        .ok();
-                    stream
-                        .set_write_timeout(Some(std::time::Duration::from_secs(30)))
-                        .ok();
-                    return Some(stream);
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-                Err(e) => panic!("{label}: accept failed: {e}"),
-            }
+        let (stream, _peer) = listener
+            .accept()
+            .unwrap_or_else(|e| panic!("{label}: accept failed: {e}"));
+        if shutdown.load(std::sync::atomic::Ordering::Acquire) {
+            drop(stream);
+            return None;
         }
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(30)))
+            .ok();
+        stream
+            .set_write_timeout(Some(std::time::Duration::from_secs(30)))
+            .ok();
+        Some(stream)
+    }
+
+    /// Wake a stub thread blocked in [`accept_with_shutdown`] by
+    /// opening a one-shot self-connection to its listener. The thread
+    /// then observes the shutdown flag and exits without serving the
+    /// connection. The connect uses a short timeout so a deferred
+    /// shutdown (e.g. drop during panic unwind on a saturated CI
+    /// worker) cannot wedge the test process.
+    fn wake_accept_for_shutdown(addr: std::net::SocketAddr) {
+        let _ = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500));
     }
 
     /// RAII guard for an in-process LLM stub. Dropping signals the stub
@@ -695,6 +703,11 @@ mod tests {
         addr: std::net::SocketAddr,
         shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
         handle: Option<std::thread::JoinHandle<()>>,
+        /// Maximum number of `accept()` calls the stub thread can be
+        /// parked on. Single-shot stubs use 1; `spawn_llm_stub_many`
+        /// uses its connection count. Drop fires that many self-
+        /// connections so every parked accept observes shutdown.
+        pending_accepts: usize,
     }
 
     impl LlmStub {
@@ -707,6 +720,13 @@ mod tests {
         fn drop(&mut self) {
             self.shutdown
                 .store(true, std::sync::atomic::Ordering::Release);
+            // Self-connect to unblock any thread parked inside
+            // `accept_with_shutdown`. Multiple stubs in
+            // `spawn_llm_stub_many` may need waking, so issue one
+            // wake per outstanding accept slot.
+            for _ in 0..self.pending_accepts.max(1) {
+                wake_accept_for_shutdown(self.addr);
+            }
             if let Some(handle) = self.handle.take() {
                 let _ = handle.join();
             }
@@ -735,6 +755,7 @@ mod tests {
             addr,
             shutdown,
             handle: Some(handle),
+            pending_accepts: 1,
         }
     }
 
@@ -760,6 +781,7 @@ mod tests {
             addr,
             shutdown,
             handle: Some(handle),
+            pending_accepts: connections,
         }
     }
 
