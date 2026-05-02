@@ -125,15 +125,41 @@ Fields:
 - `chain.producer`: producer name and version.
 - `records`: ordered `TrustRecord` list.
 
-## JSON Schema
+## JSON Schema and Protobuf
 
-The normative JSON Schema files live in the public artifact directory:
+JSON is canonical. The normative wire-format files live in the public
+artifact directory:
 
 - [`opentrustgraph-spec/schemas/trust-record.v0.schema.json`](../opentrustgraph-spec/schemas/trust-record.v0.schema.json)
 - [`opentrustgraph-spec/schemas/trust-chain.v0.schema.json`](../opentrustgraph-spec/schemas/trust-chain.v0.schema.json)
+- [`opentrustgraph-spec/schemas/trust-record.v0.proto`](../opentrustgraph-spec/schemas/trust-record.v0.proto)
+  — Protocol Buffers mirror for runtimes that prefer a binary stream
+  encoding (Kafka, gRPC, Temporal task queues).
 
-Harn tests parse those schema files and all fixtures directly, so the spec
-artifact and runtime hash contract stay in sync.
+Harn tests parse the JSON schema files and all fixtures directly, so the
+spec artifact and runtime hash contract stay in sync.
+
+The conformance contract (RFC 2119 MUST/SHOULD requirements for
+producers, consumers, and verifiers) lives at
+[`opentrustgraph-spec/CONFORMANCE.md`](../opentrustgraph-spec/CONFORMANCE.md).
+A reference verifier in pure Python is provided at
+[`opentrustgraph-spec/examples/python/verify_chain.py`](../opentrustgraph-spec/examples/python/verify_chain.py)
+as a portable, non-Harn implementation of the same hash and linkage
+checks Harn runs internally.
+
+## Producing a chain export
+
+Harn ships `harn trust-graph export` (alias of `harn trust export`),
+which writes a verified `opentrustgraph-chain/v0` envelope to stdout or
+to a file:
+
+```bash
+harn trust-graph export --output chain.json
+harn trust-graph export | python3 opentrustgraph-spec/examples/python/verify_chain.py
+```
+
+The export uses `verify_trust_chain` internally so `chain.verified` is
+authoritative.
 
 ## Sample export
 

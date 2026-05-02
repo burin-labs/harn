@@ -21,9 +21,14 @@ inventing another envelope.
 
 ## Contents
 
+- `CONFORMANCE.md`: RFC 2119 conformance requirements for producers,
+  consumers, and verifiers.
 - `schemas/trust-record.v0.schema.json`: JSON Schema for one v0 trust record.
 - `schemas/trust-chain.v0.schema.json`: JSON Schema for a v0 chain export with
   chain metadata and ordered records.
+- `schemas/trust-record.v0.proto`: Protocol Buffers wire-format mirror for
+  streaming runtimes (Kafka, gRPC, Temporal). JSON remains canonical and is the
+  basis for `entry_hash` computation.
 - `fixtures/valid/decision-chain.json`: a valid two-entry decision chain.
 - `fixtures/valid/tier-transition.json`: a valid chain showing a tier
   transition and approval-backed action.
@@ -31,6 +36,9 @@ inventing another envelope.
   hash but invalid previous-hash linkage.
 - `fixtures/invalid/missing-approval.json`: a record that declares approval was
   required but omits the approver/signature evidence.
+- `examples/python/verify_chain.py`: reference, stdlib-only verifier in pure
+  Python. Validates every fixture and any chain emitted by
+  `harn trust-graph export`.
 
 ## Verification contract
 
@@ -44,8 +52,9 @@ Consumers should:
 5. Compare `chain.total` and `chain.root_hash` to the record list.
 
 Harn computes record hashes by serializing the typed `TrustRecord` with
-`entry_hash` removed and hashing the resulting JSON bytes with SHA-256. The
-stored value uses the `sha256:` prefix.
+`entry_hash` removed, sorting object keys lexicographically at every nesting
+level, and hashing the resulting JSON bytes with SHA-256. The stored value
+uses the `sha256:` prefix. See `CONFORMANCE.md` for the full hash contract.
 
 When `metadata.approval.required` is `true` and a successful record runs at
 `act_with_approval`, the record must include a non-empty `approver` and at least

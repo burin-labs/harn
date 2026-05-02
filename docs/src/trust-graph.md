@@ -76,6 +76,16 @@ harn trust query --agent github-triage-bot
 harn trust query --agent github-triage-bot --outcome denied --json
 harn trust query --summary
 harn trust-graph verify-chain
+harn trust-graph export --output chain.json
+```
+
+`harn trust-graph export` writes the canonical
+[`opentrustgraph-chain/v0`](spec/open-trust-graph/v0.md) envelope. With no
+`--output`, it prints the JSON to stdout. Pipe it through any conformant
+verifier — e.g. the reference Python verifier:
+
+```bash
+harn trust-graph export | python3 opentrustgraph-spec/examples/python/verify_chain.py
 ```
 
 Promote or demote an agent:

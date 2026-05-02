@@ -4,12 +4,13 @@ use std::path::Path;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::cli::{TrustArgs, TrustCommand, TrustQueryArgs, TrustVerifyChainArgs};
+use crate::cli::{TrustArgs, TrustCommand, TrustExportArgs, TrustQueryArgs, TrustVerifyChainArgs};
 
 pub(crate) async fn handle(args: TrustArgs) -> Result<(), String> {
     match args.command {
         TrustCommand::Query(args) => run_query(args).await,
         TrustCommand::VerifyChain(args) => run_verify_chain(args).await,
+        TrustCommand::Export(args) => run_export(args).await,
         TrustCommand::Promote(args) => run_control_change(args.agent, args.to.into(), None).await,
         TrustCommand::Demote(args) => {
             run_control_change(args.agent, args.to.into(), Some(args.reason)).await
@@ -143,6 +144,33 @@ async fn run_verify_chain(args: TrustVerifyChainArgs) -> Result<(), String> {
             println!("  {error}");
         }
         return Err("trust graph chain verification failed".to_string());
+    }
+    Ok(())
+}
+
+async fn run_export(args: TrustExportArgs) -> Result<(), String> {
+    let log = open_trust_log()?;
+    let export = harn_vm::export_trust_chain(&log)
+        .await
+        .map_err(|error| format!("failed to export trust graph chain: {error}"))?;
+    let serialized = if args.compact {
+        serde_json::to_string(&export)
+    } else {
+        serde_json::to_string_pretty(&export)
+    }
+    .map_err(|error| format!("failed to encode trust chain export: {error}"))?;
+    if let Some(path) = args.output {
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent).map_err(|error| {
+                    format!("failed to create parent directory {parent:?}: {error}")
+                })?;
+            }
+        }
+        std::fs::write(&path, serialized.as_bytes())
+            .map_err(|error| format!("failed to write trust chain export to {path:?}: {error}"))?;
+    } else {
+        println!("{serialized}");
     }
     Ok(())
 }
