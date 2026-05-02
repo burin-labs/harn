@@ -449,6 +449,7 @@ The ACP server supports these JSON-RPC methods:
 | `session/prompt` | Send a prompt to the agent for execution |
 | `session/cancel` | Cancel the currently running prompt |
 | `session/set_mode` | Switch the active session mode |
+| `session/set_config_option` | Switch a preferred ACP session config option such as `mode` |
 | `workflow/signal` | Enqueue a workflow signal message in the current session workspace |
 | `workflow/query` | Read a named workflow query value from the current session workspace |
 | `workflow/update` | Send a workflow update request and wait for a response |
@@ -507,20 +508,38 @@ are not copied from the parent.
 
 ### Session Modes
 
-Harn implements ACP
-[session-modes](https://agentclientprotocol.com/protocol/session-modes) so a
-host can clamp the agent's tool ceiling at runtime. The `session/new` and
-`session/load` results carry a spec-shaped `modes` field:
+Harn exposes ACP
+[session config options](https://agentclientprotocol.com/protocol/session-config-options)
+and the legacy
+[session-modes](https://agentclientprotocol.com/protocol/session-modes) field
+from the same mode catalog. Clients that understand `configOptions` should use
+it; Harn keeps `modes` available for clients still on `session/set_mode`.
+`session/new` and `session/load` return both shapes:
 
 ```json
 {
+  "configOptions": [
+    {
+      "id": "mode",
+      "name": "Session Mode",
+      "category": "mode",
+      "type": "select",
+      "currentValue": "ask",
+      "options": [
+        { "value": "ask",       "name": "Ask",       "description": "..." },
+        { "value": "architect", "name": "Architect", "description": "..." },
+        { "value": "code",      "name": "Code",      "description": "..." },
+        { "value": "shadow",    "name": "Shadow",    "description": "..." }
+      ]
+    }
+  ],
   "modes": {
-    "currentModeId": "default",
+    "currentModeId": "ask",
     "availableModes": [
-      { "id": "default",   "name": "Default",   "description": "..." },
+      { "id": "ask",       "name": "Ask",       "description": "..." },
       { "id": "architect", "name": "Architect", "description": "..." },
       { "id": "code",      "name": "Code",      "description": "..." },
-      { "id": "ask",       "name": "Ask",       "description": "..." }
+      { "id": "shadow",    "name": "Shadow",    "description": "..." }
     ]
   }
 }
@@ -528,17 +547,28 @@ host can clamp the agent's tool ceiling at runtime. The `session/new` and
 
 Mode semantics:
 
-- `default` — preserves the pre-modes baseline (no extra capability ceiling).
+- `ask` — conservative default, mapped to Harn's `act_with_approval`
+  autonomy tier.
 - `architect` — read-only planning mode. Builtins that mutate the workspace,
   execute processes, or hit the network are rejected by the VM policy gate
-  before they run. Reads, listings, and analysis stay available.
-- `code` — full tool access; equivalent to `default` for the purposes of the
-  capability ceiling. Surfaces a distinct id so hosts can render the mode
-  the user explicitly opted into.
-- `ask` — read-only by default; destructive operations are gated through the
-  ACP `session/request_permission` flow on the host before executing.
+  before they run. Maps to Harn's `suggest` autonomy tier.
+- `code` — full tool access. Harn leaves host/runtime capability resolution
+  authoritative instead of installing an extra ceiling. Maps to `act_auto`.
+- `shadow` — proposal-only mode mapped to Harn's `shadow` autonomy tier.
+  Side effects are blocked before they touch the workspace.
 
-Switching modes:
+Preferred mode switching:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 17,
+  "method": "session/set_config_option",
+  "params": { "sessionId": "sess_abc", "configId": "mode", "value": "architect" }
+}
+```
+
+Legacy mode switching:
 
 ```json
 {
@@ -549,17 +579,21 @@ Switching modes:
 }
 ```
 
-The agent ack's with an empty result and emits a `session/update`
-notification with `sessionUpdate: "current_mode_update"` carrying the new
-`modeId`. Re-setting the same mode is a no-op (ack only, no notification).
+`session/set_config_option` responds with the complete `configOptions` state.
+Both switching methods emit `session/update` notifications with
+`sessionUpdate: "current_mode_update"` and
+`sessionUpdate: "config_option_update"` when the selected mode changes.
+Re-setting the same mode is a no-op (ack only, no notification).
 `session/fork` carries the parent's active mode over to the new branch and
 echoes it back on the fork response.
 
 The selected mode is enforced for the next `session/prompt`: while the
 prompt runs, the matching capability policy is pushed onto the VM
-execution stack and popped when the prompt completes. The conformance
-case `acp_architect_mode_blocks_destructive_writes_in_prompt` locks this
-behavior end-to-end.
+execution stack and popped when the prompt completes. Harn derives that
+policy from the same `AutonomyTier` machinery used by trigger dispatch, so
+ACP sessions and runtime autonomy stay aligned. The conformance case
+`acp_architect_mode_blocks_destructive_writes_in_prompt` locks this behavior
+end-to-end.
 
 ### Queued user messages during agent execution
 
