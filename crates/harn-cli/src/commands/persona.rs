@@ -203,15 +203,25 @@ pub(crate) fn run_inspect(manifest: Option<&Path>, args: &PersonaInspectArgs) {
     println!("context_packs:  {}", comma_or_dash(&persona.context_packs));
     println!("evals:          {}", comma_or_dash(&persona.evals));
     if !persona.steps.is_empty() {
-        println!(
-            "steps:          {}",
-            persona
-                .steps
-                .iter()
-                .map(|step| format!("{} ({})", step.name, step.function))
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
+        println!("steps:");
+        for step in &persona.steps {
+            let mut detail = format!("  - {} ({})", step.name, step.function);
+            if let Some(model) = step.model.as_deref() {
+                detail.push_str(&format!(" model={model}"));
+            }
+            if let Some(budget) = step.budget.as_ref() {
+                if let Some(max_tokens) = budget.max_tokens {
+                    detail.push_str(&format!(" max_tokens={max_tokens}"));
+                }
+                if let Some(max_usd) = budget.max_usd {
+                    detail.push_str(&format!(" max_usd={max_usd}"));
+                }
+            }
+            if let Some(boundary) = step.error_boundary.as_deref() {
+                detail.push_str(&format!(" error_boundary={boundary}"));
+            }
+            println!("{detail}");
+        }
     }
     if let Some(owner) = &persona.owner {
         println!("owner:          {owner}");

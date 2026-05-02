@@ -50,6 +50,7 @@ impl Vm {
                     self.env = frame.saved_env;
                 }
             }
+            crate::step_runtime::prune_below_frame(self.frames.len());
 
             // Drop deadlines that belonged to unwound frames.
             while self
@@ -150,6 +151,7 @@ impl Vm {
                 if let Some(ref dir) = popped_frame.saved_source_dir {
                     crate::stdlib::set_thread_source_dir(dir);
                 }
+                crate::step_runtime::prune_below_frame(self.frames.len());
 
                 if self.frames.is_empty() {
                     return Ok(val);
@@ -177,6 +179,7 @@ impl Vm {
                         let current_depth = self.frames.len();
                         self.exception_handlers
                             .retain(|h| h.frame_depth <= current_depth);
+                        crate::step_runtime::prune_below_frame(current_depth);
 
                         if self.frames.is_empty() {
                             return Ok(val);
@@ -194,6 +197,20 @@ impl Vm {
                     if self.error_stack_trace.is_empty() {
                         self.error_stack_trace = self.capture_stack_trace();
                     }
+                    // Honor `@step(error_boundary: ...)` if a step-budget
+                    // exhaustion error is propagating out of the step's
+                    // own frame. `continue` swaps the throw for a Nil
+                    // return; `escalate` re-tags the error as a handoff
+                    // escalation and lets the existing exception
+                    // handlers route it.
+                    let e = match self.apply_step_error_boundary(e) {
+                        StepBoundaryOutcome::Returned(val) => {
+                            self.error_stack_trace.clear();
+                            self.stack.push(val);
+                            continue;
+                        }
+                        StepBoundaryOutcome::Throw(err) => err,
+                    };
                     match self.handle_error(e) {
                         Ok(None) => {
                             self.error_stack_trace.clear();
@@ -207,6 +224,102 @@ impl Vm {
         }
     }
 
+    /// Inspect a thrown error against the topmost active step's
+    /// `error_boundary`. Called from the main step loop before
+    /// `handle_error` so that a step's own budget-exhaustion error can be
+    /// short-circuited (`continue`) or annotated (`escalate`) before the
+    /// generic try/catch machinery sees it.
+    pub(crate) fn apply_step_error_boundary(&mut self, error: VmError) -> StepBoundaryOutcome {
+        use crate::step_runtime;
+        if !step_runtime::is_step_budget_exhausted(&error) {
+            return StepBoundaryOutcome::Throw(error);
+        }
+        let Some(step_depth) = step_runtime::active_step_frame_depth() else {
+            return StepBoundaryOutcome::Throw(error);
+        };
+        // The step's frame is the topmost on the call stack iff its
+        // recorded frame_depth equals `frames.len()`. If the throw is
+        // coming from a deeper frame we let it bubble up — the boundary
+        // still applies later when the step's own frame is reached.
+        if step_depth != self.frames.len() {
+            return StepBoundaryOutcome::Throw(error);
+        }
+        let boundary = step_runtime::with_active_step(|step| step.definition.boundary())
+            .unwrap_or(step_runtime::StepErrorBoundary::Fail);
+        match boundary {
+            step_runtime::StepErrorBoundary::Continue => {
+                // Mimic VmError::Return(Nil) for the step's frame: pop
+                // the frame, restore its env/iterators/stack, and feed a
+                // Nil return value back to the caller.
+                if let Some(popped) = self.frames.pop() {
+                    self.release_sync_guards_for_frame(self.frames.len() + 1);
+                    if let Some(ref dir) = popped.saved_source_dir {
+                        crate::stdlib::set_thread_source_dir(dir);
+                    }
+                    let current_depth = self.frames.len();
+                    self.exception_handlers
+                        .retain(|h| h.frame_depth <= current_depth);
+                    step_runtime::pop_and_record(
+                        current_depth + 1,
+                        "skipped",
+                        Some(step_runtime_error_message(&error)),
+                    );
+                    if self.frames.is_empty() {
+                        return StepBoundaryOutcome::Returned(VmValue::Nil);
+                    }
+                    self.iterators.truncate(popped.saved_iterator_depth);
+                    self.env = popped.saved_env;
+                    self.stack.truncate(popped.stack_base);
+                }
+                StepBoundaryOutcome::Returned(VmValue::Nil)
+            }
+            step_runtime::StepErrorBoundary::Escalate => {
+                let identity = step_runtime::with_active_step(|step| {
+                    (
+                        step.definition.name.clone(),
+                        step.definition.function.clone(),
+                    )
+                });
+                step_runtime::pop_and_record(
+                    step_depth,
+                    "escalated",
+                    Some(step_runtime_error_message(&error)),
+                );
+                let (step_name, function) = identity.unzip();
+                StepBoundaryOutcome::Throw(step_runtime::mark_escalated(
+                    error,
+                    step_name.as_deref(),
+                    function.as_deref(),
+                ))
+            }
+            step_runtime::StepErrorBoundary::Fail => {
+                step_runtime::pop_and_record(
+                    step_depth,
+                    "failed",
+                    Some(step_runtime_error_message(&error)),
+                );
+                StepBoundaryOutcome::Throw(error)
+            }
+        }
+    }
+}
+
+fn step_runtime_error_message(error: &VmError) -> String {
+    match error {
+        VmError::Thrown(VmValue::Dict(dict)) => dict
+            .get("message")
+            .map(|v| v.display())
+            .unwrap_or_else(|| error.to_string()),
+        _ => error.to_string(),
+    }
+}
+
+pub(crate) enum StepBoundaryOutcome {
+    Returned(VmValue),
+    Throw(VmError),
+}
+
+impl crate::vm::Vm {
     pub(crate) async fn execute_one_cycle(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
         if let Some(err) = self.pending_scope_interrupt() {
             match self.handle_error(err) {

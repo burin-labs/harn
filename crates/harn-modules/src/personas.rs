@@ -71,12 +71,26 @@ pub struct PersonaStepMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry: Option<PersonaStepRetry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<PersonaStepBudget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PersonaStepRetry {
     pub max_attempts: u64,
+}
+
+/// Per-step token / cost ceiling. Either field is optional; whichever is
+/// set governs that dimension. Surfaced statically by `harn persona
+/// inspect --json` and consumed at runtime by `crates/harn-vm/src/step_runtime.rs`
+/// to short-circuit `llm_call` invocations before they exceed the limit.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PersonaStepBudget {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -361,6 +375,7 @@ fn collect_step_declarations(program: &[SNode]) -> BTreeMap<String, PersonaStepM
                 receipt: attr_string(step_attr, "receipt"),
                 error_boundary: attr_string(step_attr, "error_boundary"),
                 retry: attr_retry(step_attr),
+                budget: attr_step_budget(step_attr),
                 line: Some(inner.span.line),
             },
         );
@@ -408,6 +423,40 @@ fn attr_retry(attr: &Attribute) -> Option<PersonaStepRetry> {
         }
     }
     None
+}
+
+fn attr_step_budget(attr: &Attribute) -> Option<PersonaStepBudget> {
+    let budget = attr.named_arg("budget")?;
+    let Node::DictLiteral(entries) = &budget.node else {
+        return None;
+    };
+    let mut out = PersonaStepBudget::default();
+    let mut any = false;
+    for entry in entries {
+        match entry_key(&entry.key) {
+            Some("max_tokens") => {
+                if let Node::IntLiteral(value) = entry.value.node {
+                    if value >= 1 {
+                        out.max_tokens = Some(value as u64);
+                        any = true;
+                    }
+                }
+            }
+            Some("max_usd") => match entry.value.node {
+                Node::FloatLiteral(value) if value.is_finite() && value >= 0.0 => {
+                    out.max_usd = Some(value);
+                    any = true;
+                }
+                Node::IntLiteral(value) if value >= 0 => {
+                    out.max_usd = Some(value as f64);
+                    any = true;
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    any.then_some(out)
 }
 
 fn entry_key(node: &SNode) -> Option<&str> {

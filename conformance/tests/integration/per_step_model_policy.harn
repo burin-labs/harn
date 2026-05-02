@@ -1,0 +1,118 @@
+// `@step(model: ..., budget: ..., error_boundary: ...)` is consumed by
+// the runtime: each step's `llm_call` defaults to the configured model
+// when the call site doesn't override it; per-step token / cost
+// budgets short-circuit calls that would exceed the ceiling; and the
+// step's `error_boundary` decides whether the budget-exhausted error
+// propagates (`fail`), gets skipped (`continue`), or is bubbled to a
+// handoff (`escalate`).
+@persona(name: "triage_captain", tools: [github], autonomy: suggest, receipts: optional)
+fn triage_captain(ctx) -> string {
+  let cheap = classify_step(ctx)
+  let mid = judge_step(cheap)
+  let expensive = decide_step(mid)
+  let skipped = budget_exhausted_continue_step(expensive)
+  return "${cheap}|${mid}|${expensive}|${skipped}"
+}
+
+@step(name: "classify", model: "claude-haiku-4-5", receipt: audit, error_boundary: fail)
+fn classify_step(ctx) -> string {
+  let r = llm_call("classify ${ctx}", nil, {provider: "mock"})
+  return "classify:${r.text}"
+}
+
+@step(name: "judge", model: "claude-sonnet-4-6", receipt: audit, error_boundary: fail)
+fn judge_step(ctx) -> string {
+  let r = llm_call("judge ${ctx}", nil, {provider: "mock"})
+  return "judge:${r.text}"
+}
+
+@step(name: "decide", model: "claude-opus-4-7", receipt: audit, error_boundary: fail)
+fn decide_step(ctx) -> string {
+  let r = llm_call("decide ${ctx}", nil, {provider: "mock"})
+  return "decide:${r.text}"
+}
+
+@step(name: "expensive_skipped", model: "claude-opus-4-7", budget: {max_tokens: 5}, error_boundary: continue)
+fn budget_exhausted_continue_step(ctx) -> string {
+  let r = llm_call("explode ${ctx}", nil, {provider: "mock"})
+  return "should_not_reach:${r.text}"
+}
+
+@step(name: "expensive_escalate", model: "claude-opus-4-7", budget: {max_tokens: 5}, error_boundary: escalate)
+fn budget_exhausted_escalate_step(ctx) -> string {
+  let r = llm_call("escalate ${ctx}", nil, {provider: "mock"})
+  return "should_not_reach:${r.text}"
+}
+
+pipeline default() {
+  llm_mock_clear()
+  llm_mock(
+    {
+      match: "classify*",
+      consume_match: false,
+      text: "low_priority",
+      input_tokens: 5,
+      output_tokens: 5,
+      model: "claude-haiku-4-5",
+    },
+  )
+  llm_mock(
+    {
+      match: "judge*",
+      consume_match: false,
+      text: "balanced",
+      input_tokens: 12,
+      output_tokens: 18,
+      model: "claude-sonnet-4-6",
+    },
+  )
+  llm_mock(
+    {
+      match: "decide*",
+      consume_match: false,
+      text: "merge",
+      input_tokens: 30,
+      output_tokens: 40,
+      model: "claude-opus-4-7",
+    },
+  )
+  llm_mock(
+    {
+      match: "explode*",
+      consume_match: false,
+      text: "boom",
+      input_tokens: 50,
+      output_tokens: 100,
+      model: "claude-opus-4-7",
+    },
+  )
+  llm_mock(
+    {
+      match: "escalate*",
+      consume_match: false,
+      text: "esc",
+      input_tokens: 50,
+      output_tokens: 100,
+      model: "claude-opus-4-7",
+    },
+  )
+  // Routing: each `@step`'s configured model defaults onto its
+  // `llm_call`, the prompt-glob mocks return per-model fixtures, and
+  // the over-budget step is skipped (continue → nil).
+  let result = triage_captain("PR-42")
+  println(result)
+  // 3 calls succeeded; the 4th was rejected pre-flight by the step's
+  // own max_tokens=5 budget.
+  println(len(llm_mock_calls()))
+  // `escalate` re-tags the budget-exhausted error with category
+  // "handoff_escalation" and `escalated: true`, which the persona body
+  // can route on. The step's frame is unwound, so the throw exits the
+  // step function as a typed handoff escalation.
+  let escalation_caught = try {
+    budget_exhausted_escalate_step("PR-42")
+  }
+  let err = unwrap_err(escalation_caught)
+  println(err.category)
+  println(err.escalated)
+  println(err.step)
+}

@@ -567,6 +567,61 @@ fn validate_output_format_supported(
     }
 }
 
+/// Layer the active step's defaults onto the call options dict before
+/// model/provider resolution and budget parsing run. The model override
+/// is a no-op when the user explicitly passed `model:`. The budget
+/// merge is non-destructive: only fields the call site didn't already
+/// set are filled in, so a tighter explicit ceiling always wins.
+fn apply_active_step_defaults(options: &mut Option<BTreeMap<String, VmValue>>) {
+    let user_supplied_model = options
+        .as_ref()
+        .map(|o| o.contains_key("model"))
+        .unwrap_or(false);
+    let step_default = if user_supplied_model {
+        None
+    } else {
+        crate::step_runtime::active_step_model_default()
+    };
+    let step_budget = crate::step_runtime::with_active_step(|step| step.definition.clone())
+        .map(|definition| (definition.max_tokens, definition.max_usd));
+    if step_default.is_none() && step_budget.is_none() {
+        return;
+    }
+    let opts = options.get_or_insert_with(BTreeMap::new);
+    if let Some(model_name) = step_default {
+        opts.insert(
+            "model".to_string(),
+            VmValue::String(std::rc::Rc::from(model_name)),
+        );
+    }
+    if let Some((max_tokens, max_usd)) = step_budget {
+        if max_tokens.is_some() || max_usd.is_some() {
+            // Project the step budget onto `llm_call`'s preflight
+            // budget envelope so the existing accumulator + projection
+            // machinery short-circuits a call that would obviously
+            // exceed the step's ceiling.
+            let mut step_budget_dict: BTreeMap<String, VmValue> = match opts.get("budget") {
+                Some(VmValue::Dict(existing)) => (**existing).clone(),
+                _ => BTreeMap::new(),
+            };
+            if let Some(max_tokens) = max_tokens {
+                step_budget_dict
+                    .entry("max_output_tokens".to_string())
+                    .or_insert_with(|| VmValue::Int(max_tokens as i64));
+            }
+            if let Some(max_usd) = max_usd {
+                step_budget_dict
+                    .entry("max_cost_usd".to_string())
+                    .or_insert_with(|| VmValue::Float(max_usd));
+            }
+            opts.insert(
+                "budget".to_string(),
+                VmValue::Dict(std::rc::Rc::new(step_budget_dict)),
+            );
+        }
+    }
+}
+
 /// Extract all LLM call options from the standard (prompt, system, options) args.
 pub(crate) fn extract_llm_options(
     args: &[VmValue],
@@ -585,6 +640,13 @@ pub(crate) fn extract_llm_options(
     });
     let explicit_options = args.get(2).and_then(|a| a.as_dict()).cloned();
     let options = crate::llm::cost_route::merge_context_options(explicit_options);
+
+    // If we're inside an `@step`-annotated persona function and the
+    // call site didn't pin a model, inherit the step's declared model
+    // and budget. The persona body stays free of "if step == X use
+    // cheap model" branching.
+    let mut options = options;
+    apply_active_step_defaults(&mut options);
 
     let route_policy = parse_route_policy_option(options.as_ref())?;
     let mut provider = vm_resolve_provider(&options);

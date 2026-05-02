@@ -42,6 +42,7 @@ pub mod shells;
 pub mod skills;
 pub mod stdlib;
 pub mod stdlib_modules;
+pub mod step_runtime;
 pub mod store;
 pub(crate) mod synchronization;
 pub mod tenant;

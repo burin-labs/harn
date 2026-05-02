@@ -222,8 +222,72 @@ impl Compiler {
                 if let Node::FnDecl { name, .. } = &inner.node {
                     self.emit_acp_skill_registration(attr, name)?;
                 }
+            } else if attr.name == "step" {
+                if let Node::FnDecl { name, .. } = &inner.node {
+                    self.emit_step_registration(attr, name)?;
+                }
             }
         }
+        Ok(())
+    }
+
+    /// Emit bytecode equivalent to:
+    ///   __register_step("plan_step", { name: "plan", model: "...",
+    ///                                  error_boundary: "continue",
+    ///                                  budget: { max_tokens: 200, max_usd: 0.05 } })
+    /// Runs at module load so the per-step metadata is in
+    /// `crates/harn-vm/src/step_runtime.rs`'s registry by the time
+    /// any persona body invokes the step's function.
+    pub(super) fn emit_step_registration(
+        &mut self,
+        attr: &harn_parser::Attribute,
+        fn_name: &str,
+    ) -> Result<(), CompileError> {
+        // Push the builtin name.
+        let define_idx = self
+            .chunk
+            .add_constant(Constant::String("__register_step".into()));
+        self.chunk.emit_u16(Op::Constant, define_idx, self.line);
+
+        // Arg 0: function name (the registry key).
+        let fn_const = self.chunk.add_constant(Constant::String(fn_name.into()));
+        self.chunk.emit_u16(Op::Constant, fn_const, self.line);
+
+        // Arg 1: metadata dict — emit only the fields the step
+        // declared, matching the parser's KNOWN_KEYS for @step.
+        const META_KEYS: &[&str] = &["name", "model", "approval", "receipt", "error_boundary"];
+        let mut entries: u16 = 0;
+        for arg in &attr.args {
+            let Some(ref key) = arg.name else {
+                continue;
+            };
+            if !META_KEYS.contains(&key.as_str()) {
+                continue;
+            }
+            let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
+            self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+            self.compile_attribute_value(&arg.value)?;
+            entries += 1;
+        }
+        // Budget is forwarded as a nested dict so the runtime can
+        // distinguish "no budget set" from "budget set with no
+        // fields". The parser already enforces shape; we just plumb
+        // the dict literal through verbatim.
+        if let Some(budget) = attr.named_arg("budget") {
+            if matches!(budget.node, Node::DictLiteral(_)) {
+                let key_idx = self.chunk.add_constant(Constant::String("budget".into()));
+                self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+                self.compile_attribute_value(budget)?;
+                entries += 1;
+            }
+        }
+        self.chunk.emit_u16(Op::BuildDict, entries, self.line);
+
+        // Call __register_step(fn_name, meta_dict). The builtin
+        // returns nil; pop it so we don't leave dead values on the
+        // stack at module top-level.
+        self.chunk.emit_u8(Op::Call, 2, self.line);
+        self.chunk.emit(Op::Pop, self.line);
         Ok(())
     }
 

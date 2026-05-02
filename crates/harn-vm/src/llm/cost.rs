@@ -479,6 +479,10 @@ pub(crate) fn accumulate_cost_for_provider(
     output_tokens: i64,
 ) -> Result<(), VmError> {
     let cost = calculate_cost_for_provider(provider, model, input_tokens, output_tokens);
+    // Always attribute usage to the active `@step` (if any), even when
+    // the per-call cost is zero — token-only step budgets need the
+    // count regardless of pricing.
+    crate::step_runtime::record_step_llm_usage(model, input_tokens, output_tokens, cost)?;
     if cost == 0.0 {
         return Ok(());
     }

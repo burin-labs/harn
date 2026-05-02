@@ -149,6 +149,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     register_llm_builtins(vm);
     register_mcp_builtins(vm);
     register_mcp_server_builtins(vm);
+    crate::step_runtime::register_step_builtins(vm);
 }
 
 /// Register all standard builtins on a VM (core + io + agent).

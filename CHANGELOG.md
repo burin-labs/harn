@@ -51,6 +51,23 @@ condensed series summaries instead of full per-patch history.
   task into the non-terminal `auth-required` state so clients can
   re-authenticate and resubscribe.
 
+- **Per-step model routing + token / cost budgets (#1074).** `@step`
+  now accepts `model: "..."` and `budget: { max_tokens: N, max_usd:
+  N.NN }` so a single persona can mix cheap classification (Haiku),
+  semantic judgment (Sonnet), and frontier escalation (Opus) without
+  hand-rolled routing inside the persona body. While a step's frame is
+  on the call stack `llm_call` defaults to the step's model when the
+  call site doesn't override it, and per-step token / cost spend is
+  tracked separately and short-circuits calls that would exceed the
+  step's ceiling. The thrown error honors the step's `error_boundary`:
+  `fail` (default) propagates as-is, `continue` swallows the throw and
+  returns nil from the step, and `escalate` re-tags the error with
+  `category: "handoff_escalation"` and `escalated: true` so the persona
+  body / handoff receiver can route on it. `harn persona inspect --json`
+  surfaces each step's `model` + `budget`, and the canonical receipt
+  envelope's `model_calls[]` carries the per-step token / cost
+  breakdown via `Receipt::push_step_breakdown`.
+
 ## v0.7.54
 
 ### Added
