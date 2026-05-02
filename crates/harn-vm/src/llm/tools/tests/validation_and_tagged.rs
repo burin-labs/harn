@@ -112,6 +112,30 @@ fn tagged_parser_accepts_well_formed_response() {
 }
 
 #[test]
+fn tagged_parser_accepts_compact_protocol_tag_aliases() {
+    let tools = sample_tool_registry();
+    let text = "<assistantprose>Checking status.</assistantprose>\n\
+                <userresponse>Done.</userresponse>\n\
+                <toolcall>\n\
+                run({ command: \"git status\" })\n\
+                </toolcall>\n\
+                <done>##DONE##</done>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.violations.is_empty(),
+        "compact tag aliases should parse without violations: {:?}",
+        result.violations,
+    );
+    assert!(result.errors.is_empty(), "no errors: {:?}", result.errors);
+    assert_eq!(result.calls.len(), 1);
+    assert_eq!(result.calls[0]["name"], json!("run"));
+    assert_eq!(result.prose, "Done.");
+    assert_eq!(result.user_response.as_deref(), Some("Done."));
+    assert!(result.canonical.contains("<tool_call>"));
+    assert!(result.canonical.contains("<user_response>"));
+}
+
+#[test]
 fn tagged_parser_flags_stray_prose_outside_tags() {
     let tools = sample_tool_registry();
     let text = "def foo():\n    pass\n\n<tool_call>\nedit({ action: \"create\", path: \"a.rs\", content: \"x\" })\n</tool_call>";

@@ -37,7 +37,7 @@ fn internal_block_patterns() -> &'static [Regex] {
             // Tagged response protocol: hide tool-call bodies (executed as
             // structured data, never surfaced as narration) and done
             // blocks (runtime signal, not user-facing).
-            r"(?s)<tool_call>.*?</tool_call>",
+            r"(?s)<tool_?call>.*?</tool_?call>",
             r"(?s)<done>.*?</done>",
             r"(?s)<tool_result[^>]*>.*?</tool_result>",
             r"(?s)\[result of [^\]]+\].*?\[end of [^\]]+\]",
@@ -52,7 +52,7 @@ fn internal_block_patterns() -> &'static [Regex] {
 fn assistant_prose_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(?s)<assistant_prose>\s*(.*?)\s*</assistant_prose>")
+        Regex::new(r"(?s)<assistant_?prose>\s*(.*?)\s*</assistant_?prose>")
             .expect("valid assistant_prose regex")
     })
 }
@@ -60,7 +60,7 @@ fn assistant_prose_regex() -> &'static Regex {
 fn user_response_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(?s)<user_response>\s*(.*?)\s*</user_response>")
+        Regex::new(r"(?s)<user_?response>\s*(.*?)\s*</user_?response>")
             .expect("valid user_response regex")
     })
 }
@@ -203,6 +203,13 @@ fn strip_unclosed_internal_blocks(text: &str) -> String {
         }
     }
 
+    if let Some(open_idx) = text.rfind("<toolcall>") {
+        let close_idx = text.rfind("</toolcall>");
+        if close_idx.is_none_or(|idx| idx < open_idx) {
+            return text[..open_idx].to_string();
+        }
+    }
+
     if let Some(open_idx) = text.rfind("<done>") {
         let close_idx = text.rfind("</done>");
         if close_idx.is_none_or(|idx| idx < open_idx) {
@@ -212,6 +219,13 @@ fn strip_unclosed_internal_blocks(text: &str) -> String {
 
     if let Some(open_idx) = text.rfind("<user_response>") {
         let close_idx = text.rfind("</user_response>");
+        if close_idx.is_none_or(|idx| idx < open_idx) {
+            return text[..open_idx].to_string();
+        }
+    }
+
+    if let Some(open_idx) = text.rfind("<userresponse>") {
+        let close_idx = text.rfind("</userresponse>");
         if close_idx.is_none_or(|idx| idx < open_idx) {
             return text[..open_idx].to_string();
         }
@@ -247,11 +261,14 @@ fn strip_inline_internal_planning_json(text: &str, partial: bool) -> String {
 }
 
 fn strip_partial_marker_suffix(text: &str) -> String {
-    const MARKERS: [&str; 10] = [
+    const MARKERS: [&str; 13] = [
         "<|tool_call|>",
         "<tool_call>",
+        "<toolcall>",
         "<assistant_prose>",
+        "<assistantprose>",
         "<user_response>",
+        "<userresponse>",
         "<done>",
         "<tool_result",
         "[result of ",
@@ -371,6 +388,20 @@ mod tests {
         assert_eq!(
             sanitize_visible_assistant_text(raw, false),
             "Visible answer."
+        );
+    }
+
+    #[test]
+    fn sanitize_accepts_compact_protocol_tag_aliases_without_hiding_plain_words() {
+        let raw = "The phrase tool call is normal prose.\n<assistantprose>hidden</assistantprose>\n<toolcall>\nrun({ command: \"git status\" })\n</toolcall>\n<userresponse>Visible answer.</userresponse>\n<done>##DONE##</done>";
+        assert_eq!(
+            sanitize_visible_assistant_text(raw, false),
+            "Visible answer."
+        );
+
+        assert_eq!(
+            sanitize_visible_assistant_text("A tool call summary is fine.", false),
+            "A tool call summary is fine."
         );
     }
 }
