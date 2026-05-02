@@ -44,4 +44,12 @@ module.exports = [
   "continue",
   "select",
   "impl",
+  // First-class HITL primitives parsed as reserved keywords by the
+  // runtime parser; surfaced here so they may also appear as
+  // keyword_identifiers (dict keys, method names) without confusing
+  // tree-sitter.
+  "ask_user",
+  "dual_control",
+  "escalate_to",
+  "request_approval",
 ];

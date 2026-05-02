@@ -20,7 +20,7 @@ pipeline test(task) {
         type: (type_annotation
           (type_annotation
             (identifier)))
-        value: (call_expression
+        value: (generic_call_expression
           function: (identifier)
           type_arguments: (type_arguments
             (type_annotation
@@ -31,6 +31,72 @@ pipeline test(task) {
             (list_literal
               (integer_literal))
             (identifier)))))))
+
+==================
+Comparison With Identifier LHS
+==================
+
+pipeline test(task) {
+  var i = 0
+  if i < 5 {
+    log(i)
+  }
+  while i < 10 {
+    i = i + 1
+  }
+  log(i.size < 5)
+  log((i) < 5)
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (var_binding
+        name: (identifier)
+        value: (integer_literal))
+      (if_statement
+        condition: (binary_expression
+          (identifier)
+          (integer_literal))
+        consequence: (block
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              (argument_list
+                (identifier))))))
+      (while_statement
+        condition: (binary_expression
+          (identifier)
+          (integer_literal))
+        body: (block
+          (assignment
+            target: (identifier)
+            value: (binary_expression
+              (identifier)
+              (integer_literal)))))
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (argument_list
+            (binary_expression
+              (property_access
+                object: (identifier)
+                property: (identifier))
+              (integer_literal)))))
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (argument_list
+            (binary_expression
+              (parenthesized_expression
+                (identifier))
+              (integer_literal))))))))
 
 ==================
 Exponentiation Precedence

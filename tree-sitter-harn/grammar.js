@@ -92,6 +92,13 @@ module.exports = grammar({
         $._attribute_value
       ),
 
+    // Attribute values mirror the deliberately non-evaluating subset
+    // accepted by `parse_attribute_value` in the runtime parser
+    // (crates/harn-parser/src/parser/decls.rs): scalar literals, lists,
+    // dicts, dotted identifiers used as sentinels (e.g.
+    // `github.pr_opened`), and simple call-shaped sentinels such as
+    // `schedule("*/30 * * * *")`. Negative integers are also allowed
+    // as a single attribute scalar.
     _attribute_value: ($) =>
       choice(
         $.string_literal,
@@ -103,7 +110,31 @@ module.exports = grammar({
         $.nil,
         $.list_literal,
         $.dict_literal,
-        $.identifier
+        $.attribute_call,
+        $.attribute_path,
+        $.identifier,
+        seq("-", $.integer_literal)
+      ),
+
+    // Dotted-identifier sentinel used in attribute values, e.g.
+    // `github.pr_opened`. This intentionally does not extend into
+    // `property_access` (which carries _expression on the LHS) because
+    // attribute values are syntactically restricted to the literal
+    // grammar above.
+    attribute_path: ($) =>
+      seq($.identifier, repeat1(seq(".", $.identifier))),
+
+    // Call-shaped sentinel used in attribute values, e.g.
+    // `schedule("*/30 * * * *")`. Uses a recursive subset of attribute
+    // values for arguments to keep the surface aligned with the runtime
+    // parser's `parse_attribute_value` recursion.
+    attribute_call: ($) =>
+      seq(
+        choice($.attribute_path, $.identifier),
+        "(",
+        optional(commaSep1($.attribute_arg)),
+        optional(","),
+        ")"
       ),
 
     _newline: (_) => "\n",
@@ -527,8 +558,18 @@ module.exports = grammar({
         $.identifier
       ),
 
+    // Type-argument lists in generic call expressions. The leading `<`
+    // uses `token.immediate` so it must directly follow the function
+    // expression without intervening whitespace — this is how generic
+    // calls are written in real Harn corpora (`fold<int,int>(...)`,
+    // never `fold <int,int>(...)`) and serves as a practical
+    // disambiguator from binary `<` comparisons such as `i < 5`. The
+    // runtime parser is more permissive (it backtracks on mismatch
+    // instead of relying on whitespace), so this is a deliberate
+    // tree-sitter-only restriction. Type-annotation generic forms
+    // (`Foo<T>`, `List<int>`) have their own rule and are unaffected.
     type_arguments: ($) =>
-      seq("<", commaSep1($.type_annotation), ">"),
+      seq(alias(token.immediate("<"), "<"), commaSep1($.type_annotation), ">"),
 
     where_clause: ($) =>
       seq(
@@ -594,6 +635,8 @@ module.exports = grammar({
         $.range_expression,
         $.unary_expression,
         $.call_expression,
+        $.generic_call_expression,
+        $.hitl_expression,
         $.method_call,
         $.property_access,
         $.subscript_expression,
@@ -655,13 +698,71 @@ module.exports = grammar({
             $.subscript_expression,
             $.parenthesized_expression
           )),
-          optional(field("type_arguments", $.type_arguments)),
           "(",
           repeat(lineBreak($)),
           optional($.argument_list),
           repeat(lineBreak($)),
           ")"
         )
+      ),
+
+    // Generic-call form `func<T, U>(args)`. Kept distinct from
+    // `call_expression` so that adding generic-type arguments to a callable
+    // does not statically out-prioritise binary `<` comparisons whose LHS
+    // happens to be a callable expression (`i < 5`, `obj.x < 5`, `(i) < 5`).
+    // The leading `<` is captured by the `type_arguments` rule via
+    // `token.immediate("<")`, which means the generic-call form requires
+    // the `<` to immediately follow the function with no whitespace —
+    // matching how generic calls are written in real Harn corpora.
+    generic_call_expression: ($) =>
+      prec.left(
+        11,
+        seq(
+          field("function", choice(
+            $.identifier,
+            $.property_access,
+            $.subscript_expression,
+            $.parenthesized_expression
+          )),
+          field("type_arguments", $.type_arguments),
+          "(",
+          repeat(lineBreak($)),
+          optional($.argument_list),
+          repeat(lineBreak($)),
+          ")"
+        )
+      ),
+
+    // First-class HITL primitives: `ask_user(...)`, `dual_control(...)`,
+    // `escalate_to(...)`, `request_approval(...)`. Each is a reserved
+    // keyword in the runtime lexer and accepts both positional and
+    // named arguments — matching the dispatch in
+    // `parse_hitl_expr` in crates/harn-parser/src/parser/expressions.rs.
+    hitl_expression: ($) =>
+      prec.left(
+        11,
+        seq(
+          field("primitive", choice(
+            "ask_user",
+            "dual_control",
+            "escalate_to",
+            "request_approval"
+          )),
+          "(",
+          repeat(lineBreak($)),
+          optional(seq(
+            $.hitl_arg,
+            repeat(seq(",", repeat(lineBreak($)), $.hitl_arg)),
+            optional(seq(",", repeat(lineBreak($))))
+          )),
+          ")"
+        )
+      ),
+
+    hitl_arg: ($) =>
+      choice(
+        seq(field("name", $.identifier), ":", field("value", $._expression)),
+        $._expression
       ),
 
     method_call: ($) =>
@@ -801,7 +902,15 @@ module.exports = grammar({
           repeat(choice($._block_sep, $._line_sep))
         )),
         statementSeparated($, $._statement),
-        "}"
+        "}",
+        // Optional `as stream` suffix converts the parallel-each result
+        // into a streaming iterator. The runtime parser checks for the
+        // identifier `as` followed by the identifier `stream`; tree-sitter
+        // can't peek at identifier text, so `as` is promoted to a keyword
+        // here (it is unused as an identifier in Harn) and the trailing
+        // word is matched as an arbitrary identifier — the runtime parser
+        // is the source of truth for shape correctness.
+        optional(seq("as", field("stream_marker", $.identifier)))
       ),
 
     parallel_settle_expression: ($) =>

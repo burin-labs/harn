@@ -91,3 +91,102 @@ pipeline main(task) {
           (dict_entry
             key: (identifier)
             value: (identifier)))))))
+
+==================
+HITL First-Class Primitives
+==================
+
+pipeline test(task) {
+  let response = ask_user(prompt: "Pick a number", default: 0)
+  let result = dual_control(n: 2, m: 3, action: destructive_step, approvers: ["alice", "bob"])
+  let handle = escalate_to(role: "oncall", reason: "deploy failed")
+  let record = request_approval(action: "deploy", quorum: 2, reviewers: ["alice"])
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (hitl_expression
+          (hitl_arg
+            name: (identifier)
+            value: (string_literal))
+          (hitl_arg
+            name: (identifier)
+            value: (integer_literal))))
+      (let_binding
+        name: (identifier)
+        value: (hitl_expression
+          (hitl_arg
+            name: (identifier)
+            value: (integer_literal))
+          (hitl_arg
+            name: (identifier)
+            value: (integer_literal))
+          (hitl_arg
+            name: (identifier)
+            value: (identifier))
+          (hitl_arg
+            name: (identifier)
+            value: (list_literal
+              (string_literal)
+              (string_literal)))))
+      (let_binding
+        name: (identifier)
+        value: (hitl_expression
+          (hitl_arg
+            name: (identifier)
+            value: (string_literal))
+          (hitl_arg
+            name: (identifier)
+            value: (string_literal))))
+      (let_binding
+        name: (identifier)
+        value: (hitl_expression
+          (hitl_arg
+            name: (identifier)
+            value: (string_literal))
+          (hitl_arg
+            name: (identifier)
+            value: (integer_literal))
+          (hitl_arg
+            name: (identifier)
+            value: (list_literal
+              (string_literal))))))))
+
+==================
+Parallel Each As Stream
+==================
+
+pipeline default() {
+  let results = parallel each [30, 5] with {max_concurrent: 2} { n ->
+    return n
+  } as stream
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (let_binding
+        name: (identifier)
+        value: (parallel_each_expression
+          list: (list_literal
+            (integer_literal)
+            (integer_literal))
+          options: (parallel_options
+            key: (identifier)
+            value: (integer_literal))
+          variable: (identifier)
+          (return_statement
+            (identifier))
+          stream_marker: (identifier))))))
