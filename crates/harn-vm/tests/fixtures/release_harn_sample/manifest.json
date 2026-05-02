@@ -1,0 +1,37 @@
+{
+  "schema_version": "release_harn.crystallization_input.v1",
+  "kind": "release_harn_crystallization_input",
+  "generated_by": "release_harn.harn",
+  "generated_at": "2026-05-02T18:00:00Z",
+  "run_id": "sample-0.7.52-to-0.7.53",
+  "source_issue": "https://github.com/burin-labs/harn-bump-fleet/issues/2",
+  "consumer_issue": "https://github.com/burin-labs/harn/issues/1146",
+  "source_artifacts": {
+    "release_audit_json": "/tmp/release-audit.json",
+    "release_audit_md": "/tmp/release-audit.md"
+  },
+  "release": {
+    "repo": "/Users/example/projects/harn",
+    "mode": "ship-pr",
+    "mock": true,
+    "current_version": "0.7.52",
+    "next_version": "0.7.53",
+    "starting_branch": "main",
+    "target_release_branch": "release/v0.7.53",
+    "base_branch": "main",
+    "latest_tag": "v0.7.52"
+  },
+  "files": {
+    "manifest_json": "manifest.json",
+    "release_run_json": "release-run.json",
+    "deterministic_events_jsonl": "deterministic-events.jsonl",
+    "agent_events_jsonl": "agent-events.jsonl",
+    "tool_observations_jsonl": "tool-observations.jsonl",
+    "readme_md": "README.md"
+  },
+  "semantics": {
+    "deterministic_events": "Facts and harness decisions emitted by release_harn.harn.",
+    "agent_events": "Model-authored audit, changelog synthesis, and recovery advice. Not deterministic truth.",
+    "tool_observations": "Shell/read/tool observations with stdout/stderr preserved for replay and audit."
+  }
+}

@@ -58,7 +58,8 @@ pub(crate) use contracts::{
     ContractsOutputArgs,
 };
 pub(crate) use crystallize::{
-    CrystallizeArgs, CrystallizeCommand, CrystallizeShadowArgs, CrystallizeValidateArgs,
+    CrystallizeArgs, CrystallizeCommand, CrystallizeIngestArgs, CrystallizeShadowArgs,
+    CrystallizeValidateArgs,
 };
 pub(crate) use doctor::DoctorArgs;
 pub(crate) use dump::{

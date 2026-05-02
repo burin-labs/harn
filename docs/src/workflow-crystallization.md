@@ -284,3 +284,97 @@ self-consistent across Harn upgrades.
 harn crystallize shadow bundles/version-bump
 # Shadow replay: bundle=bundles/version-bump candidate_id=candidate_... compared=5 pass=true
 ```
+
+## Release-harness steel thread
+
+The `crystallize ingest` subcommand is the consumer half of the
+`release_harn.harn` ↔ Harn steel thread tracked in
+[harn-bump-fleet#2](https://github.com/burin-labs/harn-bump-fleet/issues/2)
+(producer) and [harn#1146](https://github.com/burin-labs/harn/issues/1146)
+(this consumer). It turns a single
+`release_harn.crystallization_input.v1` fixture bundle into a reviewed
+crystallization candidate without going through repeated-sequence
+mining: the trace IS the workflow.
+
+The fixture layout the importer consumes is exactly what
+`release_harn.harn` writes at
+`${RUN_ROOT}/<run-id>/crystallization-input/`:
+
+```text
+crystallization-input/
+  manifest.json                # release identity + file map
+  release-run.json             # full release-harness payload
+  deterministic-events.jsonl   # release facts, findings, step records
+  agent-events.jsonl           # model audit + recovery advice
+  tool-observations.jsonl      # shell/read observations
+  README.md                    # human-readable description
+```
+
+A small checked-in sample lives at
+[`crates/harn-vm/tests/fixtures/release_harn_sample/`](https://github.com/burin-labs/harn/tree/main/crates/harn-vm/tests/fixtures/release_harn_sample)
+so the importer can be exercised without a live release run.
+
+```bash
+harn crystallize ingest \
+  --from crates/harn-vm/tests/fixtures/release_harn_sample \
+  --bundle bundles/release-harn-sample \
+  --shadow
+# Ingest: from=… run_id=… version=0.7.52->0.7.53 candidate=candidate_…
+# Bundle: bundles/release-harn-sample (kind=Candidate schema_version=1 fixtures=1)
+# Segments: deterministic=7 agentic=4 (review-required: 4)
+# Recovery: shell_failures=2 recovery_runs=1 fed_into_agent=true
+# Shadow replay: candidate_id=candidate_… compared=1 pass=true
+```
+
+The emitted bundle uses the same `harn.crystallization.candidate.bundle`
+schema as `harn crystallize`, so `harn crystallize validate <BUNDLE_DIR>`
+and `harn crystallize shadow <BUNDLE_DIR>` work unchanged.
+
+### Deterministic vs. agentic split
+
+`report.json` for an ingested release-fixture bundle includes a
+`segment_summary` block that describes the deterministic/agentic split
+in plain English. It groups events into:
+
+- **safe to automate** — deterministic harness events (release analysis,
+  changelog inputs, successful release steps).
+- **requires human review** — agent-authored review attempts, agent
+  recovery advice, deterministic findings, and any failed deterministic
+  steps that need recovery before re-run.
+
+Every agent step is materialized as a candidate step with an explicit
+approval boundary so hosts cannot promote the candidate to fully
+autonomous execution without resolving the review-required entries
+first.
+
+### Recovery feedback summary
+
+`report.json` also includes a `recovery_summary` block that records:
+
+- how many shell/tool failures were observed in the source trace,
+- how many `agent_loop` recovery-advice runs were invoked,
+- whether the failure context was fed back into a model loop, and
+- which deterministic step names failed.
+
+This makes it obvious at a glance whether recovery was advisory only
+(human-resolved) or whether the workflow attempted automated repair.
+The Harn implementation always treats recovery advice as advisory: the
+candidate steps generated for `agent_recovery_advice` events carry an
+`agent_recovery_advice` review note and a `recovery_review` approval
+boundary so hosts must not re-run a failing step without a human
+acknowledging the advice.
+
+### Out of scope here
+
+This subcommand is intentionally a one-shot ingest path. It does not:
+
+- emit additional release-specific telemetry into `release_harn.harn`
+  (that lives in
+  [harn-bump-fleet#2](https://github.com/burin-labs/harn-bump-fleet/issues/2)),
+- introduce a new workflow loader or Burin UI mechanism (Burin local
+  loading lives in
+  [burin-code#516](https://github.com/burin-labs/burin-code/issues/516)),
+- host a tenant candidate inbox (that lives in
+  [harn-cloud#145](https://github.com/burin-labs/harn-cloud/issues/145)),
+- or mine across many production histories (that lives in
+  [harn#1080](https://github.com/burin-labs/harn/issues/1080)).

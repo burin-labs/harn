@@ -260,6 +260,48 @@ pub struct CrystallizationReport {
     pub input_format: CrystallizationInputFormat,
     pub harn_code_path: Option<String>,
     pub eval_pack_path: Option<String>,
+    /// Optional plain-language explanation of which steps are safe to
+    /// automate vs. which still require human/agent review. Populated by
+    /// the release-fixture ingest path so reviewers can inspect a
+    /// candidate without re-deriving the deterministic/agentic split.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub segment_summary: Option<SegmentSummary>,
+    /// Optional summary of how shell/tool failures were represented and
+    /// whether failure context was fed back into a model. Populated by
+    /// the release-fixture ingest path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery_summary: Option<RecoveryFeedbackSummary>,
+}
+
+/// Plain-language summary of the deterministic/agentic split for a
+/// candidate. Designed to be human-readable in `report.json` without a
+/// reviewer needing to walk the step list manually.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SegmentSummary {
+    pub deterministic_count: usize,
+    pub agentic_count: usize,
+    pub safe_to_automate: Vec<String>,
+    pub requires_human_review: Vec<String>,
+    pub plain_language: String,
+}
+
+/// Summary of how shell/tool failures were represented in the source
+/// trace and whether the failure context was fed back into the model.
+/// Lets reviewers see at a glance whether recovery was advisory only or
+/// whether the workflow attempted to repair itself.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RecoveryFeedbackSummary {
+    pub shell_failures_seen: usize,
+    pub recovery_advice_runs: usize,
+    /// `true` when at least one recovery action observed by the source
+    /// trace fed the failing-step context into a model loop (vs. just
+    /// recording the failure for human review).
+    pub failures_fed_into_agent: bool,
+    pub failed_steps: Vec<String>,
+    /// Plain-language explanation of how recovery was represented.
+    pub representation: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -362,6 +404,8 @@ pub fn crystallize_traces(
         },
         harn_code_path: None,
         eval_pack_path: None,
+        segment_summary: None,
+        recovery_summary: None,
     };
 
     Ok(CrystallizationArtifacts {
@@ -369,6 +413,289 @@ pub fn crystallize_traces(
         harn_code,
         eval_pack_toml,
     })
+}
+
+/// Synthesize a single-trace crystallization candidate without going
+/// through repeated-sequence mining. Used by the release-fixture ingest
+/// path where the trace is the workflow: there is exactly one example
+/// and the deterministic/agentic split comes from the source events
+/// directly. The resulting [`CrystallizationArtifacts`] is bundle-ready
+/// (`build_crystallization_bundle`) and validates with the existing
+/// validator.
+///
+/// `extra_parameters` and `extra_metadata` let callers seed parameters
+/// (e.g., release identity fields like `current_version` /
+/// `next_version`) and metadata (segment / recovery summaries) that the
+/// trace alone does not surface.
+pub fn synthesize_candidate_from_trace(
+    trace: CrystallizationTrace,
+    options: CrystallizeOptions,
+    extra_parameters: Vec<WorkflowCandidateParameter>,
+    segment_summary: Option<SegmentSummary>,
+    recovery_summary: Option<RecoveryFeedbackSummary>,
+) -> Result<CrystallizationArtifacts, VmError> {
+    if trace.actions.is_empty() {
+        return Err(VmError::Runtime(
+            "synthesize_candidate_from_trace requires a trace with at least one action".to_string(),
+        ));
+    }
+    let normalized = normalize_trace(trace);
+    let mut candidate = build_single_trace_candidate(&normalized, &options, extra_parameters);
+    candidate.shadow = shadow_candidate(&candidate, std::slice::from_ref(&normalized));
+    if !candidate.shadow.pass {
+        candidate
+            .rejection_reasons
+            .extend(candidate.shadow.failures.clone());
+    }
+    let (accepted, rejected) = if candidate.is_safe_to_propose() {
+        (vec![candidate], Vec::new())
+    } else {
+        (Vec::new(), vec![candidate])
+    };
+
+    let selected = accepted.first();
+    let harn_code = selected
+        .map(generate_harn_code)
+        .unwrap_or_else(|| rejected_workflow_stub(&rejected));
+    let eval_pack_toml = selected.map(generate_eval_pack).unwrap_or_default();
+    let selected_id = selected.map(|candidate| candidate.id.clone());
+
+    let report = CrystallizationReport {
+        version: 1,
+        generated_at: now_rfc3339(),
+        source_trace_count: 1,
+        selected_candidate_id: selected_id,
+        candidates: accepted,
+        rejected_candidates: rejected,
+        warnings: Vec::new(),
+        input_format: CrystallizationInputFormat {
+            name: "harn.crystallization.trace".to_string(),
+            version: TRACE_SCHEMA_VERSION,
+            required_fields: vec!["id".to_string(), "actions".to_string()],
+            preserved_fields: vec![
+                "ordered actions".to_string(),
+                "deterministic events".to_string(),
+                "agentic events".to_string(),
+                "tool/shell observations".to_string(),
+                "recovery advice".to_string(),
+                "release metadata".to_string(),
+                "source hashes".to_string(),
+            ],
+        },
+        harn_code_path: None,
+        eval_pack_path: None,
+        segment_summary,
+        recovery_summary,
+    };
+
+    Ok(CrystallizationArtifacts {
+        report,
+        harn_code,
+        eval_pack_toml,
+    })
+}
+
+/// Build a single-example candidate directly from a normalized trace.
+/// This is the single-trace analog of `mine_candidates`: every action
+/// becomes a step, every action's `fuzzy`/`model_call` flag drives the
+/// segment kind, and parameters are taken from each action's
+/// `parameters` map (plus any caller-supplied `extra_parameters`).
+fn build_single_trace_candidate(
+    trace: &CrystallizationTrace,
+    options: &CrystallizeOptions,
+    extra_parameters: Vec<WorkflowCandidateParameter>,
+) -> WorkflowCandidate {
+    let mut steps = Vec::with_capacity(trace.actions.len());
+    let mut parameter_values: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut parameter_paths: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut warnings = Vec::new();
+    let sequence: Vec<String> = trace.actions.iter().map(action_signature).collect();
+
+    for (idx, action) in trace.actions.iter().enumerate() {
+        let mut parameter_refs = BTreeSet::new();
+        for (name, value) in &action.parameters {
+            if is_scalar(value) {
+                let ident = sanitize_identifier(name);
+                parameter_values
+                    .entry(ident.clone())
+                    .or_default()
+                    .insert(json_scalar_string(value));
+                parameter_paths
+                    .entry(ident.clone())
+                    .or_default()
+                    .insert(format!("steps[{idx}].parameters.{name}"));
+                parameter_refs.insert(ident);
+            }
+        }
+
+        let fuzzy = action.fuzzy.unwrap_or(false) || action.kind == "model_call";
+        if fuzzy {
+            warnings.push(format!(
+                "step {} '{}' remains fuzzy and requires review/LLM handling",
+                idx + 1,
+                action.name
+            ));
+        }
+
+        steps.push(WorkflowCandidateStep {
+            index: idx + 1,
+            kind: action.kind.clone(),
+            name: action.name.clone(),
+            segment: if fuzzy {
+                SegmentKind::Fuzzy
+            } else {
+                SegmentKind::Deterministic
+            },
+            parameter_refs: parameter_refs.into_iter().collect(),
+            constants: constants_for_action(action),
+            preconditions: preconditions_for_action(action),
+            side_effects: action.side_effects.clone(),
+            capabilities: sorted_strings(action.capabilities.iter().cloned()),
+            required_secrets: sorted_strings(action.required_secrets.iter().cloned()),
+            approval: action.approval.clone(),
+            expected_output: action
+                .observed_output
+                .clone()
+                .or_else(|| action.output.clone()),
+            review_notes: review_notes_for_action(action),
+        });
+    }
+
+    let mut parameters: Vec<WorkflowCandidateParameter> = parameter_values
+        .iter()
+        .map(|(name, values)| WorkflowCandidateParameter {
+            name: name.clone(),
+            source_paths: parameter_paths
+                .get(name)
+                .map(|paths| paths.iter().cloned().collect())
+                .unwrap_or_default(),
+            examples: values.iter().take(5).cloned().collect(),
+            required: true,
+        })
+        .collect();
+    // Caller-supplied extras (e.g. release metadata fields) take
+    // precedence and are appended in stable order. De-dupe by name so a
+    // caller-supplied parameter overrides any same-name parameter
+    // discovered from action parameters.
+    let extra_names: BTreeSet<String> = extra_parameters.iter().map(|p| p.name.clone()).collect();
+    parameters.retain(|p| !extra_names.contains(&p.name));
+    parameters.extend(extra_parameters);
+    parameters.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let example_refs = vec![WorkflowCandidateExample {
+        trace_id: trace.id.clone(),
+        source_hash: trace.source_hash.clone().unwrap_or_default(),
+        start_index: 0,
+        action_ids: trace
+            .actions
+            .iter()
+            .map(|action| action.id.clone())
+            .collect(),
+    }];
+
+    let capabilities = sorted_strings(
+        steps
+            .iter()
+            .flat_map(|step| step.capabilities.iter().cloned()),
+    );
+    let required_secrets = sorted_strings(
+        steps
+            .iter()
+            .flat_map(|step| step.required_secrets.iter().cloned()),
+    );
+    let approval_points = steps
+        .iter()
+        .filter_map(|step| step.approval.clone())
+        .collect::<Vec<_>>();
+    let side_effects = sorted_side_effects(
+        steps
+            .iter()
+            .flat_map(|step| step.side_effects.iter().cloned())
+            .collect(),
+    );
+    let expected_outputs = steps
+        .iter()
+        .filter_map(|step| step.expected_output.clone())
+        .collect::<Vec<_>>();
+
+    let savings = estimate_savings(std::slice::from_ref(trace), &[(0, 0)], &steps);
+    let confidence = confidence_for(&[(0, 0)], 1, &steps, true);
+    let name = options
+        .workflow_name
+        .clone()
+        .unwrap_or_else(|| infer_workflow_name(&steps));
+    let package_name = options
+        .package_name
+        .clone()
+        .unwrap_or_else(|| name.replace('_', "-"));
+
+    WorkflowCandidate {
+        id: stable_candidate_id(&sequence, &example_refs),
+        name,
+        confidence,
+        sequence_signature: sequence,
+        parameters,
+        steps,
+        examples: example_refs.clone(),
+        capabilities: capabilities.clone(),
+        required_secrets: required_secrets.clone(),
+        approval_points,
+        side_effects,
+        expected_outputs,
+        warnings,
+        rejection_reasons: Vec::new(),
+        promotion: PromotionMetadata {
+            source_trace_hashes: example_refs
+                .iter()
+                .map(|example| example.source_hash.clone())
+                .collect(),
+            author: options.author.clone(),
+            approver: options.approver.clone(),
+            created_at: now_rfc3339(),
+            version: "0.1.0".to_string(),
+            package_name,
+            capability_set: capabilities,
+            secrets_required: required_secrets,
+            rollback_target: Some("keep source trace and previous package version".to_string()),
+            eval_pack_link: options.eval_pack_link.clone(),
+        },
+        savings,
+        shadow: ShadowRunReport::default(),
+    }
+}
+
+fn review_notes_for_action(action: &CrystallizationAction) -> Vec<String> {
+    let mut notes = Vec::new();
+    if action.kind == "shell_failure"
+        || matches!(
+            action
+                .metadata
+                .get("success")
+                .and_then(|value| value.as_bool()),
+            Some(false)
+        )
+    {
+        notes.push(format!(
+            "shell/tool step '{}' failed in the source trace; reviewer should confirm \
+             whether deterministic recovery is possible before promotion.",
+            action.name
+        ));
+    }
+    if let Some(hint) = action
+        .metadata
+        .get("recovery_hint")
+        .and_then(|value| value.as_str())
+        .filter(|hint| !hint.trim().is_empty())
+    {
+        notes.push(format!("recovery hint from source trace: {hint}"));
+    }
+    if action.kind == "agent_recovery_advice" {
+        notes.push(
+            "agent-authored recovery advice; treat as advisory, never as deterministic truth."
+                .to_string(),
+        );
+    }
+    notes
 }
 
 pub fn load_crystallization_traces_from_dir(
