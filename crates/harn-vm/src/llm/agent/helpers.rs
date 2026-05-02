@@ -166,7 +166,7 @@ pub(crate) fn action_turn_nudge(
     let completion_clause = if has_tools && policy.allow_done_sentinel && tool_format == "native" {
         "either make concrete progress with the provider tool channel, switch phase, or include `##DONE##` exactly once if the task is genuinely complete."
     } else if has_tools && policy.allow_done_sentinel {
-        "either make concrete progress with a well-formed <tool_call> block, switch phase, or emit a <done> block if the task is genuinely complete."
+        "either make concrete progress with a well-formed <tool_call> block, switch phase, or emit <user_response>final answer</user_response> plus a <done> block if the task is genuinely complete."
     } else if has_tools {
         "either make concrete progress with a well-formed <tool_call> block or switch phase if the workflow allows it."
     } else if policy.allow_done_sentinel {

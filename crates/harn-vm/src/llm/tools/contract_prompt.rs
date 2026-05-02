@@ -180,7 +180,7 @@ Short narration. Optional.
 </assistant_prose>
 
 <user_response>
-Final user-facing answer. Optional.
+Final user-facing answer. Required when no more tool calls are needed.
 </user_response>
 
 <done>##DONE##</done>
@@ -190,10 +190,10 @@ Rules the runtime enforces:
 - No text, code, diffs, JSON, or reasoning outside these tags. Any stray content is rejected with structured feedback.
 - `<tool_call>` wraps exactly one bare call `name({ key: value })`. Do not quote or JSON-encode the call. Use heredoc `<<TAG` ... `TAG` for multiline string fields — raw content, no escaping. Place TAG at the start of the closing line; closing punctuation like `},` may follow on that same line.
 - `<assistant_prose>` is optional and must be brief. Never paste source code, file contents, command transcripts, or long plans here — wrap those in the relevant tool call instead.
-- `<user_response>` is optional and reserved for the final user-facing answer that hosts should surface. When present, keep it concise and grounded.
+- `<user_response>` is reserved for the final user-facing answer that hosts should surface. Emit it when the user should see a wrap-up or answer, and keep it concise and grounded.
 - `<done>##DONE##</done>` signals task completion. Emit it only after a successful verifying tool call; the runtime rejects it otherwise.
 - Do not prefix calls with labels like `tool_code:`, `python:`, `shell:`, or any language tag, and do not wrap tool calls in Markdown fences.
-- Prefer `<tool_call>` over `<assistant_prose>`. If you have nothing concrete to say, omit prose entirely.
+- Prefer `<tool_call>` over `<assistant_prose>` while work remains. Once no more tool calls are needed, emit `<user_response>...</user_response>`.
 
 Example of a well-formed response:
 

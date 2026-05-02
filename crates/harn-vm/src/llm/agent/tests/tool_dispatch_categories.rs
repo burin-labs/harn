@@ -171,6 +171,26 @@ fn native_read_file_schema() -> serde_json::Value {
     })
 }
 
+fn text_read_file_registry() -> VmValue {
+    let mut path_param = BTreeMap::new();
+    path_param.insert("type".to_string(), VmValue::String(Rc::from("string")));
+    let mut params = BTreeMap::new();
+    params.insert("path".to_string(), VmValue::Dict(Rc::new(path_param)));
+    let tool = VmValue::Dict(Rc::new(BTreeMap::from([
+        ("name".to_string(), VmValue::String(Rc::from("read_file"))),
+        (
+            "description".to_string(),
+            VmValue::String(Rc::from("Read a file.")),
+        ),
+        ("parameters".to_string(), VmValue::Dict(Rc::new(params))),
+        ("executor".to_string(), VmValue::String(Rc::from("harn"))),
+    ])));
+    VmValue::Dict(Rc::new(BTreeMap::from([(
+        "tools".to_string(),
+        VmValue::List(Rc::new(vec![tool])),
+    )])))
+}
+
 fn assert_tool_execution_with_category(
     result: &serde_json::Value,
     expected_tool: &str,
@@ -249,6 +269,49 @@ async fn native_persistent_answer_after_successful_tool_does_not_require_done_se
     let calls = get_llm_mock_calls();
     assert_eq!(calls.len(), 2, "native final answer should stop the loop");
     assert_eq!(result["text"].as_str(), Some("@burin/tui"));
+
+    let _ = std::fs::remove_file(path);
+    reset_llm_mock_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn text_persistent_bare_answer_after_successful_tool_is_final_response() {
+    let _guard = serialize_tests();
+    drain_thread_local_state();
+    reset_llm_mock_state();
+    let temp_file = tempfile::NamedTempFile::new().expect("create temp file");
+    let path = temp_file.path().to_path_buf();
+    std::fs::write(&path, "@burin/tui\n").expect("write temp file");
+    let escaped_path = path
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+
+    crate::llm::mock::push_llm_mock(text_mock(&format!(
+        "<tool_call>\nread_file({{ path: \"{escaped_path}\" }})\n</tool_call>"
+    )));
+    crate::llm::mock::push_llm_mock(text_mock("@burin/tui"));
+    crate::llm::mock::push_llm_mock(text_mock("unexpected extra turn"));
+
+    let mut opts = base_opts(vec![
+        json!({"role": "user", "content": "read package name"}),
+    ]);
+    opts.tools = Some(text_read_file_registry());
+    let mut config = base_agent_config();
+    config.persistent = true;
+    config.max_iterations = 3;
+    config.tool_format = "text".to_string();
+    config.turn_policy = Some(TurnPolicy {
+        require_action_or_yield: true,
+        allow_done_sentinel: true,
+        max_prose_chars: None,
+    });
+    config.session_id = "test-text-final-after-tool".to_string();
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    let calls = get_llm_mock_calls();
+    assert_eq!(calls.len(), 2, "text final answer should stop the loop");
+    assert_eq!(result["visible_text"].as_str(), Some("@burin/tui"));
 
     let _ = std::fs::remove_file(path);
     reset_llm_mock_state();
