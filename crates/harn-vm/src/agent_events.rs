@@ -473,6 +473,30 @@ pub enum AgentEvent {
         metadata: serde_json::Value,
         audit: Option<serde_json::Value>,
     },
+    /// A human-in-the-loop primitive (`ask_user`, `request_approval`,
+    /// `dual_control`, `escalate`) has just suspended the script and is
+    /// waiting on a response. Hosts that bridge the VM onto a remote
+    /// transport (ACP, A2A) translate this into a "paused / awaiting
+    /// input" wire signal so the client knows the task isn't stuck —
+    /// it's blocked on the human side. Pair-emitted with `HitlResolved`
+    /// when the waitpoint completes/cancels/times out.
+    HitlRequested {
+        session_id: String,
+        request_id: String,
+        kind: String,
+        payload: serde_json::Value,
+    },
+    /// Companion to `HitlRequested`: the waitpoint has resolved (either
+    /// a response arrived, the deadline elapsed, or the request was
+    /// cancelled). `outcome` is one of `"answered"`, `"timeout"`,
+    /// `"cancelled"`. Hosts use this to flip task state back to
+    /// `working` after an `input-required` pause.
+    HitlResolved {
+        session_id: String,
+        request_id: String,
+        kind: String,
+        outcome: String,
+    },
 }
 
 impl AgentEvent {
@@ -497,7 +521,9 @@ impl AgentEvent {
             | Self::TranscriptCompacted { session_id, .. }
             | Self::Handoff { session_id, .. }
             | Self::FsWatch { session_id, .. }
-            | Self::WorkerUpdate { session_id, .. } => session_id,
+            | Self::WorkerUpdate { session_id, .. }
+            | Self::HitlRequested { session_id, .. }
+            | Self::HitlResolved { session_id, .. } => session_id,
         }
     }
 }

@@ -207,5 +207,41 @@
         "sessionUpdate": "worker_update"
       }
     }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "kind": "question",
+            "payload": {
+              "prompt": "Approve deploy?"
+            },
+            "requestId": "hitl_question_session-1_1"
+          }
+        },
+        "sessionUpdate": "hitl_request"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "kind": "question",
+            "outcome": "answered",
+            "requestId": "hitl_question_session-1_1"
+          }
+        },
+        "sessionUpdate": "hitl_resolved"
+      }
+    }
   }
 ]

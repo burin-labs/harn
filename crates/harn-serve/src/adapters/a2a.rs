@@ -98,9 +98,25 @@ struct HttpState {
 enum TaskStatus {
     Submitted,
     Working,
+    /// The agent has paused execution and is waiting on the client to
+    /// supply input that the script asked for via a HITL primitive
+    /// (`ask_user`, `request_approval`, `dual_control`, `escalate`).
+    /// Non-terminal: the task transitions back to `Working` once the
+    /// HITL response arrives and the waitpoint resumes.
+    InputRequired,
+    /// The agent's execution requires fresh credentials before it can
+    /// continue. Surfaced when a downstream call fails with an auth
+    /// classification mid-task. Non-terminal per A2A 0.3.0: the client
+    /// is expected to re-authenticate and resubscribe.
+    AuthRequired,
     Completed,
     Failed,
     Cancelled,
+    /// The server declined to accept the task. Surfaced synchronously
+    /// when the dispatch core's `AuthPolicy` denies the caller before
+    /// any work runs. Terminal — the client must adjust its request
+    /// (or its credentials at the policy layer) and submit a new task.
+    Rejected,
 }
 
 impl TaskStatus {
@@ -108,14 +124,20 @@ impl TaskStatus {
         match self {
             Self::Submitted => "submitted",
             Self::Working => "working",
+            Self::InputRequired => "input-required",
+            Self::AuthRequired => "auth-required",
             Self::Completed => "completed",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
+            Self::Rejected => "rejected",
         }
     }
 
     fn is_terminal(&self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Rejected
+        )
     }
 }
 
@@ -717,6 +739,24 @@ impl A2aServer {
 
         match result {
             Ok(response) => self.complete_task(&task.id, response),
+            // The dispatch core's `AuthPolicy.authorize` is what produces
+            // `DispatchError::Unauthorized`. It runs synchronously at the
+            // start of `core.dispatch` before any script work, so the
+            // policy denial is "the server declined this task" — A2A
+            // 0.3.0's `rejected` terminal state. Any post-policy auth
+            // failure (e.g. an LLM/HTTP 401 raised by the script itself)
+            // surfaces through `Execution(...)` with an `auth`-classified
+            // message and maps to non-terminal `auth-required` so the
+            // client can resupply credentials and resubscribe.
+            Err(DispatchError::Unauthorized(message)) => self.reject_task(&task.id, &message),
+            Err(DispatchError::Execution(message))
+                if matches!(
+                    harn_vm::value::classify_error_message(&message),
+                    harn_vm::value::ErrorCategory::Auth
+                ) =>
+            {
+                self.auth_required_task(&task.id, &message);
+            }
             Err(error) => self.fail_task(&task.id, &error.to_string()),
         }
     }
@@ -772,10 +812,27 @@ impl A2aServer {
     }
 
     fn fail_task(&self, task_id: &str, message: &str) {
+        self.terminate_task(task_id, TaskStatus::Failed, message);
+    }
+
+    /// Terminal — the dispatch core's `AuthPolicy` synchronously denied
+    /// the caller before any script work could run. The A2A spec calls
+    /// this `rejected`: the client cannot resume by re-authing or
+    /// retrying, it has to adjust its request (or the server-side
+    /// policy) and send a new task.
+    fn reject_task(&self, task_id: &str, message: &str) {
+        self.terminate_task(task_id, TaskStatus::Rejected, message);
+    }
+
+    fn terminate_task(&self, task_id: &str, status: TaskStatus, message: &str) {
+        debug_assert!(
+            status.is_terminal(),
+            "terminate_task expects a terminal status"
+        );
         let event = json!({
             "type": "status",
             "taskId": task_id,
-            "status": {"state": "failed"},
+            "status": {"state": status.as_str()},
             "error": message,
         });
         let task_for_push = {
@@ -783,7 +840,37 @@ impl A2aServer {
             let Some(task) = tasks.get_mut(task_id) else {
                 return;
             };
-            task.status = TaskStatus::Failed;
+            task.status = status;
+            task.history.push(TaskMessage {
+                id: Uuid::now_v7().to_string(),
+                role: "agent".to_string(),
+                parts: vec![json!({"type": "text", "text": message})],
+            });
+            publish_locked(task, event);
+            task.cancel_token = None;
+            task_to_json(task)
+        };
+        self.deliver_push(task_for_push);
+    }
+
+    /// Non-terminal — a downstream auth check failed mid-task (the
+    /// script itself raised an `auth`-classified error). The client is
+    /// expected to refresh its credentials and resubscribe; the task
+    /// remains in the store so a follow-up `tasks/resubscribe` finds it.
+    /// Subscribers are kept attached because the state is non-terminal.
+    fn auth_required_task(&self, task_id: &str, message: &str) {
+        let event = json!({
+            "type": "status",
+            "taskId": task_id,
+            "status": {"state": TaskStatus::AuthRequired.as_str()},
+            "error": message,
+        });
+        let task_for_push = {
+            let mut tasks = self.tasks.lock().expect("tasks poisoned");
+            let Some(task) = tasks.get_mut(task_id) else {
+                return;
+            };
+            task.status = TaskStatus::AuthRequired;
             task.history.push(TaskMessage {
                 id: Uuid::now_v7().to_string(),
                 role: "agent".to_string(),
@@ -2330,6 +2417,24 @@ impl harn_vm::agent_events::AgentEventSink for A2aWorkerSink {
                     "plan": plan,
                 })
             }
+            harn_vm::agent_events::AgentEvent::HitlRequested {
+                request_id,
+                kind,
+                payload,
+                ..
+            } => {
+                self.transition_input_required(request_id, kind, payload);
+                return;
+            }
+            harn_vm::agent_events::AgentEvent::HitlResolved {
+                request_id,
+                kind,
+                outcome,
+                ..
+            } => {
+                self.resolve_input_required(request_id, kind, outcome);
+                return;
+            }
             _ => return,
         };
         let task_for_push = {
@@ -2346,6 +2451,70 @@ impl harn_vm::agent_events::AgentEventSink for A2aWorkerSink {
         // transitions so high-volume worker traffic doesn't flood
         // outbound HTTP endpoints.
         let _ = task_for_push;
+    }
+}
+
+impl A2aWorkerSink {
+    /// Flip the task into `input-required` while a HITL primitive is
+    /// blocked waiting for a response. The script remains suspended on
+    /// a waitpoint; subscribers see two events — a structured `hitl`
+    /// extension event carrying the request payload, then the canonical
+    /// `status` transition. Idempotent for repeat HITL requests inside
+    /// the same task: only the first transitions the status.
+    ///
+    /// No push-config webhook delivery here, mirroring the
+    /// `worker_update` policy: HITL transitions stream live to active
+    /// SSE subscribers and surface on `tasks/get`, but high-frequency
+    /// status flips don't fan out to outbound webhook endpoints.
+    fn transition_input_required(&self, request_id: &str, kind: &str, payload: &JsonValue) {
+        let mut tasks = self.tasks.lock().expect("tasks poisoned");
+        let Some(task) = tasks.get_mut(&self.task_id) else {
+            return;
+        };
+        // Don't override a terminal/cancelled task: the waitpoint
+        // emit can race the cancel path. Once the task is dead it
+        // must stay dead.
+        if task.status.is_terminal() {
+            return;
+        }
+        let hitl_event = json!({
+            "type": "hitl",
+            "taskId": self.task_id,
+            "phase": "requested",
+            "requestId": request_id,
+            "kind": kind,
+            "payload": payload,
+        });
+        publish_locked(task, hitl_event);
+        if task.status != TaskStatus::InputRequired {
+            task.status = TaskStatus::InputRequired;
+            publish_locked(task, status_event(&self.task_id, TaskStatus::InputRequired));
+        }
+    }
+
+    /// Companion to `transition_input_required`. Flip back to `working`
+    /// once the waitpoint resolves so subscribers see the task resume
+    /// (or terminate naturally on the next tick if the script returned
+    /// from the HITL call). Only flips out of `input-required`; if a
+    /// later `auth-required` / cancellation snuck in, leave it.
+    fn resolve_input_required(&self, request_id: &str, kind: &str, outcome: &str) {
+        let mut tasks = self.tasks.lock().expect("tasks poisoned");
+        let Some(task) = tasks.get_mut(&self.task_id) else {
+            return;
+        };
+        let hitl_event = json!({
+            "type": "hitl",
+            "taskId": self.task_id,
+            "phase": "resolved",
+            "requestId": request_id,
+            "kind": kind,
+            "outcome": outcome,
+        });
+        publish_locked(task, hitl_event);
+        if task.status == TaskStatus::InputRequired {
+            task.status = TaskStatus::Working;
+            publish_locked(task, status_event(&self.task_id, TaskStatus::Working));
+        }
     }
 }
 
@@ -3561,5 +3730,269 @@ pub fn run(task: string) -> string {
         );
 
         harn_vm::agent_events::clear_session_sinks(&session_id);
+    }
+
+    #[test]
+    fn task_status_renders_a2a_0_3_0_state_strings() {
+        // The wire-level state names follow A2A 0.3.0's hyphenated
+        // schema. Pin them so a typo can't silently regress the public
+        // surface of the SSE / push-config payloads.
+        assert_eq!(TaskStatus::Submitted.as_str(), "submitted");
+        assert_eq!(TaskStatus::Working.as_str(), "working");
+        assert_eq!(TaskStatus::InputRequired.as_str(), "input-required");
+        assert_eq!(TaskStatus::AuthRequired.as_str(), "auth-required");
+        assert_eq!(TaskStatus::Completed.as_str(), "completed");
+        assert_eq!(TaskStatus::Failed.as_str(), "failed");
+        assert_eq!(TaskStatus::Cancelled.as_str(), "cancelled");
+        assert_eq!(TaskStatus::Rejected.as_str(), "rejected");
+
+        // Terminal states cannot be cancelled or transitioned out of.
+        // `input-required` and `auth-required` are pause states — the
+        // task is alive and the client is expected to act on it.
+        assert!(TaskStatus::Completed.is_terminal());
+        assert!(TaskStatus::Failed.is_terminal());
+        assert!(TaskStatus::Cancelled.is_terminal());
+        assert!(TaskStatus::Rejected.is_terminal());
+        assert!(!TaskStatus::Submitted.is_terminal());
+        assert!(!TaskStatus::Working.is_terminal());
+        assert!(!TaskStatus::InputRequired.is_terminal());
+        assert!(!TaskStatus::AuthRequired.is_terminal());
+    }
+
+    #[test]
+    fn hitl_requested_event_transitions_task_into_input_required() {
+        // A2A 0.3.0 `input-required` is the wire signal a client uses
+        // to know the task is paused on a HITL waitpoint. Our sink
+        // listens for the canonical `AgentEvent::HitlRequested` emitted
+        // by the HITL primitives in `harn-vm` and flips task status
+        // accordingly. `HitlResolved` flips it back to `working` so
+        // subscribers can observe the resume before the task ultimately
+        // completes / fails.
+        let task_id = "task-hitl".to_string();
+        let task = TaskState {
+            id: task_id.clone(),
+            context_id: None,
+            status: TaskStatus::Working,
+            history: Vec::new(),
+            artifacts: Vec::new(),
+            metadata: BTreeMap::new(),
+            events: Vec::new(),
+            subscribers: Vec::new(),
+            cancel_token: None,
+        };
+        let tasks: TaskStore = Arc::new(Mutex::new(HashMap::from([(task_id.clone(), task)])));
+        let sink = super::A2aWorkerSink {
+            task_id: task_id.clone(),
+            tasks: tasks.clone(),
+        };
+
+        sink.handle_event(&harn_vm::agent_events::AgentEvent::HitlRequested {
+            session_id: super::a2a_worker_session_id(&task_id),
+            request_id: "hitl_question_t1_1".into(),
+            kind: "question".into(),
+            payload: serde_json::json!({"prompt": "Approve?"}),
+        });
+
+        {
+            let tasks = tasks.lock().expect("tasks");
+            let task = tasks.get(&task_id).expect("task");
+            assert_eq!(task.status, TaskStatus::InputRequired);
+            let hitl_event = task
+                .events
+                .iter()
+                .find(|event| event.get("type").and_then(JsonValue::as_str) == Some("hitl"))
+                .expect("hitl event");
+            assert_eq!(hitl_event["phase"], "requested");
+            assert_eq!(hitl_event["kind"], "question");
+            assert_eq!(hitl_event["requestId"], "hitl_question_t1_1");
+            assert_eq!(hitl_event["payload"]["prompt"], "Approve?");
+            let status_event = task
+                .events
+                .iter()
+                .filter_map(|event| {
+                    if event.get("type").and_then(JsonValue::as_str) == Some("status") {
+                        event.pointer("/status/state").and_then(JsonValue::as_str)
+                    } else {
+                        None
+                    }
+                })
+                .next_back()
+                .expect("status event");
+            assert_eq!(status_event, "input-required");
+        }
+
+        sink.handle_event(&harn_vm::agent_events::AgentEvent::HitlResolved {
+            session_id: super::a2a_worker_session_id(&task_id),
+            request_id: "hitl_question_t1_1".into(),
+            kind: "question".into(),
+            outcome: "answered".into(),
+        });
+
+        let tasks = tasks.lock().expect("tasks");
+        let task = tasks.get(&task_id).expect("task");
+        assert_eq!(task.status, TaskStatus::Working);
+        let resolved_event = task
+            .events
+            .iter()
+            .rfind(|event| event.get("type").and_then(JsonValue::as_str) == Some("hitl"))
+            .expect("resolved hitl event");
+        assert_eq!(resolved_event["phase"], "resolved");
+        assert_eq!(resolved_event["outcome"], "answered");
+    }
+
+    #[test]
+    fn hitl_requested_event_does_not_override_terminal_task() {
+        // The waitpoint emit can race with cancellation/completion.
+        // Once a task is terminal, a stray `HitlRequested` must not
+        // reanimate it into `input-required`.
+        let task_id = "task-terminal".to_string();
+        let task = TaskState {
+            id: task_id.clone(),
+            context_id: None,
+            status: TaskStatus::Cancelled,
+            history: Vec::new(),
+            artifacts: Vec::new(),
+            metadata: BTreeMap::new(),
+            events: Vec::new(),
+            subscribers: Vec::new(),
+            cancel_token: None,
+        };
+        let tasks: TaskStore = Arc::new(Mutex::new(HashMap::from([(task_id.clone(), task)])));
+        let sink = super::A2aWorkerSink {
+            task_id: task_id.clone(),
+            tasks: tasks.clone(),
+        };
+
+        sink.handle_event(&harn_vm::agent_events::AgentEvent::HitlRequested {
+            session_id: super::a2a_worker_session_id(&task_id),
+            request_id: "late".into(),
+            kind: "question".into(),
+            payload: serde_json::json!({}),
+        });
+
+        let tasks = tasks.lock().expect("tasks");
+        let task = tasks.get(&task_id).expect("task");
+        assert_eq!(task.status, TaskStatus::Cancelled);
+        // No HITL event is published either — the late emission is
+        // dropped wholesale rather than partially recorded.
+        assert!(
+            task.events
+                .iter()
+                .all(|event| event.get("type").and_then(JsonValue::as_str) != Some("hitl")),
+            "events: {:?}",
+            task.events
+        );
+    }
+
+    #[tokio::test]
+    async fn rejected_state_surfaces_when_auth_policy_denies_dispatch() {
+        // Synchronous policy denial: `AuthPolicy.authorize` returns
+        // `Rejected` before any script work runs, so the task lands in
+        // the terminal `rejected` state per A2A 0.3.0. The client sees
+        // the `rejected` status alongside the policy's reason in the
+        // task history; subsequent `tasks/cancel` is rejected because
+        // the task is already terminal.
+        let (_dir, server) = server_with_api_key_policy(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+            "secret-key",
+        );
+        let request = harn_vm::jsonrpc::request(
+            "rej-1",
+            "message/send",
+            json!({
+                "message": {
+                    "metadata": {"target_agent": "triage"},
+                    "parts": [{"type": "text", "text": "hello"}]
+                },
+                "configuration": {"blocking": true}
+            }),
+        );
+
+        // No bearer token — the API-key policy will deny the dispatch.
+        let processed = server.process_rpc(request, AuthRequest::default()).await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!(
+                "expected json response, got: {processed:?}",
+                processed = match processed.outcome {
+                    RpcOutcome::Json(_) => "json",
+                    RpcOutcome::Sse(_) => "sse",
+                }
+            );
+        };
+
+        assert_eq!(
+            response["result"]["status"]["state"], "rejected",
+            "got: {response}"
+        );
+        // The denial reason lands in the task history as the agent
+        // turn so callers can render it without cracking error fields.
+        let history = response["result"]["history"]
+            .as_array()
+            .expect("history array");
+        let agent_message = history
+            .iter()
+            .find(|message| message["role"] == "agent")
+            .expect("agent reply");
+        let text = agent_message["parts"][0]["text"]
+            .as_str()
+            .expect("text part")
+            .to_lowercase();
+        assert!(
+            text.contains("auth") || text.contains("missing") || text.contains("invalid"),
+            "expected denial reason in history, got: {agent_message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_required_state_surfaces_when_script_raises_auth_error() {
+        // Mid-task downstream auth failure: the script raises an
+        // auth-classified error (e.g. an LLM/HTTP 401 surfaces through
+        // `error_to_category`). The dispatch returns `Execution(...)`
+        // wrapping the message; the adapter classifies it via
+        // `harn_vm::value::classify_error_message` and flips the task
+        // into the non-terminal `auth-required` state so the client
+        // can refresh credentials and resubscribe.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r#"
+pub fn triage(task: string) -> string {
+  // The auth classifier matches "401" (HTTP status code) and well-
+  // known error identifier substrings. This message hits both so the
+  // path is exercised regardless of which heuristic fires first.
+  throw "downstream HTTP 401: invalid_api_key"
+  return task
+}
+"#,
+        )
+        .expect("write script");
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+        let request = harn_vm::jsonrpc::request(
+            "auth-1",
+            "message/send",
+            json!({
+                "message": {
+                    "metadata": {"target_agent": "triage"},
+                    "parts": [{"type": "text", "text": "hello"}]
+                },
+                "configuration": {"blocking": true}
+            }),
+        );
+
+        let processed = server.process_rpc(request, AuthRequest::default()).await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected json response");
+        };
+
+        assert_eq!(
+            response["result"]["status"]["state"], "auth-required",
+            "got: {response}"
+        );
     }
 }

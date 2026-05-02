@@ -545,6 +545,53 @@ impl AgentEventSink for AcpAgentEventSink {
                     "update": update,
                 }));
             }
+            AgentEvent::HitlRequested {
+                session_id,
+                request_id,
+                kind,
+                payload,
+            } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "hitl_request",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "requestId".to_string(),
+                    serde_json::Value::String(request_id.clone()),
+                );
+                harn_meta.insert("kind".to_string(), serde_json::Value::String(kind.clone()));
+                harn_meta.insert("payload".to_string(), payload.clone());
+                merge_harn_meta(&mut update, harn_meta);
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": update,
+                }));
+            }
+            AgentEvent::HitlResolved {
+                session_id,
+                request_id,
+                kind,
+                outcome,
+            } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "hitl_resolved",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "requestId".to_string(),
+                    serde_json::Value::String(request_id.clone()),
+                );
+                harn_meta.insert("kind".to_string(), serde_json::Value::String(kind.clone()));
+                harn_meta.insert(
+                    "outcome".to_string(),
+                    serde_json::Value::String(outcome.clone()),
+                );
+                merge_harn_meta(&mut update, harn_meta);
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": update,
+                }));
+            }
             // Pipeline-loop milestones with no canonical ACP session/update
             // mapping; deliberately not forwarded.
             AgentEvent::TurnStart { .. }
@@ -739,6 +786,18 @@ mod tests {
                     "child_run_path": ".harn-runs/run_x",
                 }),
                 audit: Some(serde_json::json!({"run_id": "run_x"})),
+            },
+            AgentEvent::HitlRequested {
+                session_id: "session-1".into(),
+                request_id: "hitl_question_session-1_1".into(),
+                kind: "question".into(),
+                payload: serde_json::json!({"prompt": "Approve deploy?"}),
+            },
+            AgentEvent::HitlResolved {
+                session_id: "session-1".into(),
+                request_id: "hitl_question_session-1_1".into(),
+                kind: "question".into(),
+                outcome: "answered".into(),
             },
         ]
     }
@@ -1575,6 +1634,8 @@ mod tests {
                     "audit",
                 ],
             ),
+            ("hitl_request", &["requestId", "kind", "payload"]),
+            ("hitl_resolved", &["requestId", "kind", "outcome"]),
         ];
 
         assert_eq!(

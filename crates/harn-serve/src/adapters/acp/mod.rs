@@ -39,6 +39,8 @@ pub(super) const ACP_SCHEMA_COMPATIBILITY: &str =
 pub(super) const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "fs_watch",
     "handoff",
+    "hitl_request",
+    "hitl_resolved",
     "log",
     "progress",
     "skill_activated",
