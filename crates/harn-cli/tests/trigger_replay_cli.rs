@@ -187,6 +187,7 @@ async fn replay_event(
         &event_id,
         as_of.as_deref(),
         diff,
+        None,
     )
     .await
     .expect("replay report")

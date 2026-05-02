@@ -7,6 +7,9 @@ use super::BuiltinGenericSig;
 pub(crate) fn lookup_generic_builtin_sig(name: &str) -> Option<BuiltinGenericSig> {
     match name {
         "ask_user" => Some(ask_user_generic_sig()),
+        "correction_query" | "corrections.query" => Some(correction_query_builtin_sig()),
+        "correction_record" => Some(correction_record_builtin_sig()),
+        "corrections.record" => Some(corrections_record_builtin_sig()),
         "dual_control" => Some(dual_control_generic_sig()),
         "escalate_to" => Some(escalate_to_builtin_sig()),
         "hitl_pending" => Some(hitl_pending_builtin_sig()),
@@ -658,6 +661,33 @@ fn handler_context_builtin_sig() -> BuiltinGenericSig {
             TypeExpr::Named("HandlerContext".into()),
             TypeExpr::Named("nil".into()),
         ]),
+    }
+}
+
+fn correction_record_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![TypeExpr::Named("dict".into())],
+        return_type: TypeExpr::Named("CorrectionRecord".into()),
+    }
+}
+
+fn corrections_record_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![TypeExpr::Named("dict".into())],
+        return_type: TypeExpr::Named("CorrectionId".into()),
+    }
+}
+
+fn correction_query_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![TypeExpr::Union(vec![
+            TypeExpr::Named("CorrectionQueryFilters".into()),
+            TypeExpr::Named("nil".into()),
+        ])],
+        return_type: TypeExpr::Named("list".into()),
     }
 }
 

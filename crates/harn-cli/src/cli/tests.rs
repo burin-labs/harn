@@ -493,6 +493,42 @@ fn test_parses_trigger_replay_flags() {
 }
 
 #[test]
+fn test_parses_trigger_replay_steering_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "trigger",
+        "replay",
+        "trigger_evt_123",
+        "--steer-from",
+        "outcome",
+        "--to-decision",
+        r#"{"status":"skipped"}"#,
+        "--reason",
+        "human corrected routing",
+        "--applied-by",
+        "alice",
+        "--scope",
+        "this_persona",
+    ]);
+
+    let Command::Trigger(args) = cli.command.unwrap() else {
+        panic!("expected trigger command");
+    };
+    let TriggerCommand::Replay(replay) = args.command else {
+        panic!("expected trigger replay");
+    };
+    assert_eq!(replay.event_id.as_deref(), Some("trigger_evt_123"));
+    assert_eq!(replay.steer_from.as_deref(), Some("outcome"));
+    assert_eq!(
+        replay.to_decision.as_deref(),
+        Some(r#"{"status":"skipped"}"#)
+    );
+    assert_eq!(replay.reason.as_deref(), Some("human corrected routing"));
+    assert_eq!(replay.applied_by.as_deref(), Some("alice"));
+    assert_eq!(replay.scope.as_deref(), Some("this_persona"));
+}
+
+#[test]
 fn test_parses_flow_replay_audit_flags() {
     let cli = Cli::parse_from([
         "harn",

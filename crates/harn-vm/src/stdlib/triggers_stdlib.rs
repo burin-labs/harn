@@ -97,6 +97,7 @@ struct ActionGraphEventRecord {
 
 pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
     register_trust_namespace(vm);
+    register_corrections_namespace(vm);
 
     vm.register_builtin("handler_context", |_args, _out| {
         let Some(context) = current_dispatch_context() else {
@@ -318,6 +319,66 @@ pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
         Ok(value_from_serde(&report))
     });
 
+    vm.register_async_builtin("correction_record", |args| async move {
+        let value = args.first().ok_or_else(|| {
+            VmError::Runtime("correction_record: expected correction dict".to_string())
+        })?;
+        let record = correction_record_from_value("correction_record", value)?;
+        let log = ensure_trigger_event_log();
+        let record = crate::append_correction_record(&log, &record)
+            .await
+            .map_err(|error| VmError::Runtime(format!("correction_record: {error}")))?;
+        Ok(value_from_serde(&record))
+    });
+
+    vm.register_async_builtin("correction_query", |args| async move {
+        let filters = args
+            .first()
+            .map(|value| correction_query_filters_from_value("correction_query", value))
+            .transpose()?
+            .unwrap_or_default();
+        let log = ensure_trigger_event_log();
+        let records = crate::query_correction_records(&log, &filters)
+            .await
+            .map_err(|error| VmError::Runtime(format!("correction_query: {error}")))?;
+        Ok(VmValue::List(Rc::new(
+            records
+                .into_iter()
+                .map(|record| value_from_serde(&record))
+                .collect(),
+        )))
+    });
+
+    vm.register_async_builtin("corrections.record", |args| async move {
+        let value = args.first().ok_or_else(|| {
+            VmError::Runtime("corrections.record: expected correction dict".to_string())
+        })?;
+        let record = correction_record_from_value("corrections.record", value)?;
+        let log = ensure_trigger_event_log();
+        let record = crate::append_correction_record(&log, &record)
+            .await
+            .map_err(|error| VmError::Runtime(format!("corrections.record: {error}")))?;
+        Ok(VmValue::String(Rc::from(record.correction_id)))
+    });
+
+    vm.register_async_builtin("corrections.query", |args| async move {
+        let filters = args
+            .first()
+            .map(|value| correction_query_filters_from_value("corrections.query", value))
+            .transpose()?
+            .unwrap_or_default();
+        let log = ensure_trigger_event_log();
+        let records = crate::query_correction_records(&log, &filters)
+            .await
+            .map_err(|error| VmError::Runtime(format!("corrections.query: {error}")))?;
+        Ok(VmValue::List(Rc::new(
+            records
+                .into_iter()
+                .map(|record| value_from_serde(&record))
+                .collect(),
+        )))
+    });
+
     vm.register_async_builtin("webhook_intake_register", |args| async move {
         let config = require_dict_arg(&args, 0, "webhook_intake_register")?;
         let parsed = parse_webhook_intake_config(config)?;
@@ -408,6 +469,26 @@ fn register_trust_namespace(vm: &mut Vm) {
                     )
                 }))
                 .collect::<BTreeMap<_, _>>(),
+        )),
+    );
+}
+
+fn register_corrections_namespace(vm: &mut Vm) {
+    let names = ["query", "record"];
+    vm.set_global(
+        "corrections",
+        VmValue::Dict(Rc::new(
+            std::iter::once((
+                "_namespace".to_string(),
+                VmValue::String(Rc::from("corrections")),
+            ))
+            .chain(names.into_iter().map(|name| {
+                (
+                    name.to_string(),
+                    VmValue::BuiltinRef(Rc::from(format!("corrections.{name}"))),
+                )
+            }))
+            .collect::<BTreeMap<_, _>>(),
         )),
     );
 }
@@ -1268,6 +1349,22 @@ async fn append_trust_record_value(
     let log = ensure_trigger_event_log();
     crate::append_trust_record(&log, &record)
         .await
+        .map_err(|error| VmError::Runtime(format!("{builtin}: {error}")))
+}
+
+fn correction_record_from_value(
+    builtin: &str,
+    value: &VmValue,
+) -> Result<crate::CorrectionRecord, VmError> {
+    crate::correction_record_from_json(crate::llm::vm_value_to_json(value))
+        .map_err(|error| VmError::Runtime(format!("{builtin}: {error}")))
+}
+
+fn correction_query_filters_from_value(
+    builtin: &str,
+    value: &VmValue,
+) -> Result<crate::CorrectionQueryFilters, VmError> {
+    crate::correction_query_filters_from_json(crate::llm::vm_value_to_json(value))
         .map_err(|error| VmError::Runtime(format!("{builtin}: {error}")))
 }
 

@@ -1,0 +1,28 @@
+import "std/corrections"
+
+pipeline test(task) {
+  let unique = uuid_v7()
+  let actor_id = "correction-policy-" + unique
+  let action = "github.issue.opened"
+  let correction_id: CorrectionId = record(
+    {
+      actor_id: actor_id,
+      action: action,
+      from_decision: {actor_id: actor_id, action: action, outcome: "success"},
+      to_decision: {outcome: "denied"},
+      reason: "operator corrected unsafe routing",
+      applied_by: "maintainer-1",
+      scope: "this_persona",
+      trace_id: "trace-" + unique,
+      step: "outcome",
+      evidence_refs: [{kind: "trigger_replay", event_id: "evt-" + unique}],
+    },
+  )
+  let records: list<CorrectionRecord> = query({actor_id: actor_id, action: action})
+  let policy: CapabilityPolicy = trust.policy_for(actor_id)
+  println(correction_id != "")
+  println(len(records) == 1)
+  println(records[0].scope == "this_persona" && records[0].from_decision.outcome == "success")
+  println(policy.side_effect_level == "read_only")
+  println(event_log.latest("corrections.records") != nil)
+}

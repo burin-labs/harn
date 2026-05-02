@@ -24,6 +24,11 @@ condensed series summaries instead of full per-patch history.
   accept both `session/set_config_option` and `session/set_mode`. Mode changes emit both
   `current_mode_update` and `config_option_update`, and non-`code` modes derive their prompt-time
   capability ceiling from Harn's `AutonomyTier` policy.
+- **Replay-for-teaching corrections (#932).** `harn trigger replay` now accepts
+  `--steer-from` with a human-provided `--to-decision` and records the divergence
+  as a typed correction. The new `std/corrections` API exposes correction
+  recording/query helpers, and persona/all-scope corrections tighten derived
+  capability policy for the affected actor.
 
 ## v0.7.55
 

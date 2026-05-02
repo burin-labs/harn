@@ -772,6 +772,9 @@ harn trigger replay <event-id> --diff
 # Replay against a historical binding version by timestamp.
 harn trigger replay <event-id> --as-of 2026-04-19T12:00:00Z
 
+# Capture a human replay correction for teaching/policy feedback.
+harn trigger replay <event-id> --steer-from outcome --to-decision '{"status":"skipped"}' --reason "human corrected routing" --applied-by alice --scope this_persona
+
 # Preview a filtered bulk replay without dispatching anything.
 harn trigger replay --where "event.payload.tenant == 'acme' AND attempt.status == 'failed'" --dry-run
 
@@ -781,6 +784,11 @@ harn trigger replay --where "attempt.failed_at > '2026-04-18'" --progress --rate
 
 Sets `HARN_REPLAY=1` during dispatch so nondeterminism in handlers
 can fall back to recorded values when the handler cooperates.
+`--steer-from` records the human's injected decision as a typed correction
+after a successful single-event replay. The step selector accepts `event`,
+`outcome`, or an action-graph node id. `this_persona` and `all` correction
+scopes tighten derived capability policy for the affected actor until the
+matching correction records no longer apply.
 
 Bulk replay selection uses a Harn expression over event-log records with
 top-level `event`, `binding`, `attempt`, `outcome`, and `audit` objects.

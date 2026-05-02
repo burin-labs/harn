@@ -366,6 +366,8 @@ Imports starting with `std/` load embedded stdlib modules:
   (memory_store, memory_recall, memory_summarize, memory_forget)
 - `import "std/trust"` — TrustGraph query and policy helpers
   (query, record, score, policy_for, verify_chain)
+- `import "std/corrections"` — replay-for-teaching correction records
+  (query, record)
 - `import "std/postgres"` — Postgres persistence helpers (pg_pool,
   pg_connect, pg_query, pg_query_one, pg_execute, pg_transaction, pg_close,
   pg_mock_pool, pg_mock_calls)
@@ -3383,6 +3385,13 @@ Replay is event-log-driven. During replay, HITL primitives resolve from the
 previously recorded HITL response events instead of consulting a live host,
 so approval reviewer identities, signed timestamps, and signatures remain
 stable across deterministic replay.
+
+Replay-for-teaching corrections live in `corrections.records`. A
+`CorrectionRecord` captures `{ from_decision, to_decision, reason, applied_by,
+scope }`, with optional actor/action/trace/step metadata. `this_persona` and
+`all` scopes feed `CapabilityPolicy` derivation by tightening the affected
+actor to a read-only side-effect ceiling while matching correction records
+remain applicable.
 
 ### Function type annotations
 
