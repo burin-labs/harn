@@ -163,6 +163,10 @@ impl McpServer {
             "harn.hitl.respond" => self.handle_hitl_respond(&id, &params).await,
             "tools/list" => self.handle_tools_list(&id, &params),
             "tools/call" => self.handle_tools_call(&id, &params, vm).await,
+            crate::mcp_protocol::METHOD_TASKS_GET => self.handle_task_lookup(&id, &params),
+            crate::mcp_protocol::METHOD_TASKS_RESULT => self.handle_task_lookup(&id, &params),
+            crate::mcp_protocol::METHOD_TASKS_LIST => self.handle_tasks_list(&id, &params),
+            crate::mcp_protocol::METHOD_TASKS_CANCEL => self.handle_task_lookup(&id, &params),
             "resources/list" => self.handle_resources_list(&id, &params),
             "resources/read" => self.handle_resources_read(&id, &params, vm).await,
             "resources/templates/list" => self.handle_resource_templates_list(&id, &params),
@@ -201,6 +205,7 @@ impl McpServer {
             capabilities.insert("prompts".into(), serde_json::json!({ "listChanged": true }));
         }
         capabilities.insert("logging".into(), serde_json::json!({}));
+        capabilities.insert("tasks".into(), crate::mcp_protocol::tasks_capability());
         // Always advertise elicitation: any registered tool may decide
         // at runtime whether to call `mcp_elicit(...)`, so capability
         // negotiation can't be tied to a static check.
@@ -249,6 +254,9 @@ impl McpServer {
                 if let Some(ref annotations) = t.annotations {
                     entry["annotations"] = annotations.clone();
                 }
+                entry["execution"] = crate::mcp_protocol::tool_execution(
+                    crate::mcp_protocol::McpToolTaskSupport::Forbidden,
+                );
                 entry
             })
             .collect();
@@ -273,9 +281,12 @@ impl McpServer {
     ) -> serde_json::Value {
         let tool_name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
         if crate::mcp_protocol::requests_task_augmentation(params) {
-            return crate::mcp_protocol::unsupported_task_augmentation_response(
+            return crate::mcp_protocol::task_augmentation_error_response(
                 id.clone(),
                 "tools/call",
+                -32602,
+                "Tool does not support MCP task-augmented execution",
+                "This Harn MCP server executes registered Harn closures inline, so every tool advertises execution.taskSupport=\"forbidden\".",
             );
         }
 
@@ -328,6 +339,37 @@ impl McpServer {
                 }
             }),
         }
+    }
+
+    fn handle_task_lookup(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) -> serde_json::Value {
+        let task_id = params
+            .get("taskId")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": -32602,
+                "message": format!("Failed to retrieve task: task not found '{task_id}'")
+            }
+        })
+    }
+
+    fn handle_tasks_list(
+        &self,
+        id: &serde_json::Value,
+        _params: &serde_json::Value,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": { "tasks": [] }
+        })
     }
 
     async fn handle_hitl_respond(

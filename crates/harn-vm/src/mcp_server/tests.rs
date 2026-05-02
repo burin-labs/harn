@@ -220,6 +220,10 @@ async fn server_advertises_resource_list_changed_capability() {
         response["result"]["capabilities"]["resources"]["listChanged"],
         serde_json::json!(true)
     );
+    assert_eq!(
+        response["result"]["capabilities"]["tasks"]["requests"]["tools"]["call"],
+        serde_json::json!({})
+    );
 }
 
 #[tokio::test]
@@ -314,4 +318,33 @@ async fn server_tool_call_rejects_task_augmentation() {
         response["error"]["data"]["feature"],
         serde_json::json!("tasks")
     );
+}
+
+#[tokio::test]
+async fn server_task_endpoints_are_protocol_shaped_without_inline_tasks() {
+    let server = McpServer::new(
+        "test".to_string(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut vm = crate::Vm::new();
+    let listed = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(1, "tasks/list", serde_json::json!({})),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(listed["result"]["tasks"], serde_json::json!([]));
+
+    let missing = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(2, "tasks/get", serde_json::json!({"taskId": "missing"})),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(missing["error"]["code"], serde_json::json!(-32602));
 }

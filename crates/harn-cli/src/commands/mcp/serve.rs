@@ -16,9 +16,10 @@ use futures::{stream, StreamExt};
 use notify::Watcher;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
+use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, Notify};
 use uuid::Uuid;
 
 use harn_vm::event_log::{EventLog, LogEvent, Topic};
@@ -48,6 +49,8 @@ const DEPRECATION_HEADER: &str = "deprecation";
 const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
 const TRIGGER_EVENTS_TOPIC: &str = "triggers.events";
 const DEFAULT_RESOURCE_LIMIT: usize = 200;
+const DEFAULT_TASK_TTL_MS: u64 = 10 * 60 * 1000;
+const MAX_TASK_TTL_MS: u64 = 60 * 60 * 1000;
 
 #[derive(Clone)]
 pub(crate) struct McpOrchestratorService {
@@ -58,7 +61,64 @@ pub(crate) struct McpOrchestratorService {
     oauth: Option<OAuthResourceServer>,
     prompt_catalog: Arc<Mutex<FilePromptCatalog>>,
     list_notify_tx: broadcast::Sender<JsonValue>,
+    task_notify_tx: broadcast::Sender<McpTaskNotification>,
+    tasks: Arc<Mutex<BTreeMap<String, McpTaskRecord>>>,
     _list_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
+}
+
+#[derive(Clone, Debug)]
+struct McpTaskNotification {
+    owner: String,
+    message: JsonValue,
+}
+
+#[derive(Clone, Debug)]
+struct McpTaskRecord {
+    task: McpTaskState,
+    result: Option<JsonValue>,
+    notify: Arc<Notify>,
+}
+
+#[derive(Clone, Debug)]
+struct McpTaskState {
+    task_id: String,
+    owner: String,
+    status: mcp_protocol::McpTaskStatus,
+    status_message: Option<String>,
+    created_at: String,
+    last_updated_at: String,
+    ttl: Option<u64>,
+    poll_interval: Option<u64>,
+}
+
+impl McpTaskState {
+    fn to_json(&self) -> JsonValue {
+        let mut value = json!({
+            "taskId": self.task_id,
+            "status": self.status.as_str(),
+            "createdAt": self.created_at,
+            "lastUpdatedAt": self.last_updated_at,
+            "ttl": self.ttl,
+        });
+        if let Some(message) = &self.status_message {
+            value["statusMessage"] = json!(message);
+        }
+        if let Some(poll_interval) = self.poll_interval {
+            value["pollInterval"] = json!(poll_interval);
+        }
+        value
+    }
+
+    fn notification(&self) -> McpTaskNotification {
+        McpTaskNotification {
+            owner: self.owner.clone(),
+            message: json!({
+                "jsonrpc": "2.0",
+                "method": mcp_protocol::METHOD_TASK_STATUS_NOTIFICATION,
+                "params": self.to_json(),
+            }),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -267,6 +327,7 @@ impl McpOrchestratorService {
         )));
         let manifest_source = Arc::new(Mutex::new(manifest_source));
         let (list_notify_tx, _) = broadcast::channel(64);
+        let (task_notify_tx, _) = broadcast::channel(64);
         let list_watcher = start_list_change_watcher(
             project_root,
             local.config.clone(),
@@ -282,6 +343,8 @@ impl McpOrchestratorService {
             oauth,
             prompt_catalog,
             list_notify_tx,
+            task_notify_tx,
+            tasks: Arc::new(Mutex::new(BTreeMap::new())),
             _list_watcher: Arc::new(Mutex::new(list_watcher)),
         })
     }
@@ -328,6 +391,10 @@ impl McpOrchestratorService {
         self.list_notify_tx.subscribe()
     }
 
+    fn subscribe_task_notifications(&self) -> broadcast::Receiver<McpTaskNotification> {
+        self.task_notify_tx.subscribe()
+    }
+
     async fn handle_request(&self, session: &mut ConnectionState, request: JsonValue) -> JsonValue {
         let id = request.get("id").cloned().unwrap_or(JsonValue::Null);
         let method = request
@@ -354,6 +421,12 @@ impl McpOrchestratorService {
             "logging/setLevel" => harn_vm::jsonrpc::response(id, json!({})),
             "tools/list" => self.handle_tools_list(id),
             "tools/call" => self.handle_tools_call(id, session, &params).await,
+            mcp_protocol::METHOD_TASKS_GET => self.handle_tasks_get(id, session, &params),
+            mcp_protocol::METHOD_TASKS_RESULT => {
+                self.handle_tasks_result(id, session, &params).await
+            }
+            mcp_protocol::METHOD_TASKS_LIST => self.handle_tasks_list(id, session, &params),
+            mcp_protocol::METHOD_TASKS_CANCEL => self.handle_tasks_cancel(id, session, &params),
             "resources/list" => self.handle_resources_list(id).await,
             "resources/read" => self.handle_resources_read(id, &params).await,
             "resources/templates/list" => {
@@ -418,6 +491,7 @@ impl McpOrchestratorService {
                     "resources": { "listChanged": true },
                     "prompts": { "listChanged": true },
                     "logging": {},
+                    "tasks": mcp_protocol::tasks_capability(),
                 },
                 "serverInfo": {
                     "name": "harn-orchestrator",
@@ -511,6 +585,7 @@ impl McpOrchestratorService {
                                 },
                             },
                         })),
+                        mcp_protocol::McpToolTaskSupport::Forbidden,
                     ),
                     tool_def(
                         "harn.trigger.fire",
@@ -532,6 +607,7 @@ impl McpOrchestratorService {
                                 "status": { "type": "string" },
                             },
                         })),
+                        mcp_protocol::McpToolTaskSupport::Optional,
                     ),
                     tool_def(
                         "harn.trigger.list",
@@ -542,6 +618,7 @@ impl McpOrchestratorService {
                             "additionalProperties": false,
                         }),
                         None,
+                        mcp_protocol::McpToolTaskSupport::Forbidden,
                     ),
                     tool_def(
                         "harn.trigger.replay",
@@ -556,6 +633,7 @@ impl McpOrchestratorService {
                             "additionalProperties": false,
                         }),
                         None,
+                        mcp_protocol::McpToolTaskSupport::Optional,
                     ),
                     tool_def(
                         "harn.orchestrator.queue",
@@ -566,6 +644,7 @@ impl McpOrchestratorService {
                             "additionalProperties": false,
                         }),
                         None,
+                        mcp_protocol::McpToolTaskSupport::Forbidden,
                     ),
                     tool_def(
                         "harn.orchestrator.dlq.list",
@@ -576,6 +655,7 @@ impl McpOrchestratorService {
                             "additionalProperties": false,
                         }),
                         None,
+                        mcp_protocol::McpToolTaskSupport::Forbidden,
                     ),
                     tool_def(
                         "harn.orchestrator.dlq.retry",
@@ -589,6 +669,7 @@ impl McpOrchestratorService {
                             "additionalProperties": false,
                         }),
                         None,
+                        mcp_protocol::McpToolTaskSupport::Optional,
                     ),
                     tool_def(
                         "harn.orchestrator.inspect",
@@ -599,6 +680,7 @@ impl McpOrchestratorService {
                             "additionalProperties": false,
                         }),
                         None,
+                        mcp_protocol::McpToolTaskSupport::Forbidden,
                     ),
                     tool_def(
                         "harn.trust.query",
@@ -631,6 +713,7 @@ impl McpOrchestratorService {
                                 "results": { "type": "array" },
                             },
                         })),
+                        mcp_protocol::McpToolTaskSupport::Forbidden,
                     ),
                 ]
             }),
@@ -652,7 +735,14 @@ impl McpOrchestratorService {
             .and_then(JsonValue::as_str)
             .unwrap_or_default();
         if mcp_protocol::requests_task_augmentation(params) {
-            return mcp_protocol::unsupported_task_augmentation_response(id, "tools/call");
+            if let Err(response) = validate_taskable_tool(id.clone(), name) {
+                return response;
+            }
+            let task_ttl = match parse_task_ttl(params) {
+                Ok(ttl) => ttl,
+                Err(error) => return harn_vm::jsonrpc::error_response(id, -32602, &error),
+            };
+            return self.create_tool_task(id, session, name.to_string(), params.clone(), task_ttl);
         }
         let arguments = params
             .get("arguments")
@@ -660,18 +750,9 @@ impl McpOrchestratorService {
             .unwrap_or_else(|| json!({}));
         let trace_id = format!("mcp_{}", Uuid::now_v7().simple());
 
-        let result = match name {
-            "harn.secret_scan" | "harn::secret_scan" => self.tool_secret_scan(arguments).await,
-            "harn.trigger.fire" => self.tool_trigger_fire(session, &trace_id, arguments).await,
-            "harn.trigger.list" => self.tool_trigger_list(arguments).await,
-            "harn.trigger.replay" => self.tool_trigger_replay(arguments).await,
-            "harn.orchestrator.queue" => self.tool_orchestrator_queue(arguments).await,
-            "harn.orchestrator.dlq.list" => self.tool_orchestrator_dlq_list(arguments).await,
-            "harn.orchestrator.dlq.retry" => self.tool_orchestrator_dlq_retry(arguments).await,
-            "harn.orchestrator.inspect" => self.tool_orchestrator_inspect(arguments).await,
-            "harn.trust.query" => self.tool_trust_query(arguments).await,
-            _ => Err(format!("unknown tool '{name}'")),
-        };
+        let result = self
+            .execute_tool_call(name, session, &trace_id, arguments)
+            .await;
 
         let _ = self
             .record_tool_call(name, &trace_id, &session.client_identity, &result)
@@ -701,6 +782,319 @@ impl McpOrchestratorService {
                 }),
             ),
         }
+    }
+
+    async fn execute_tool_call(
+        &self,
+        name: &str,
+        session: &ConnectionState,
+        trace_id: &str,
+        arguments: JsonValue,
+    ) -> Result<JsonValue, String> {
+        match name {
+            "harn.secret_scan" | "harn::secret_scan" => self.tool_secret_scan(arguments).await,
+            "harn.trigger.fire" => self.tool_trigger_fire(session, trace_id, arguments).await,
+            "harn.trigger.list" => self.tool_trigger_list(arguments).await,
+            "harn.trigger.replay" => self.tool_trigger_replay(arguments).await,
+            "harn.orchestrator.queue" => self.tool_orchestrator_queue(arguments).await,
+            "harn.orchestrator.dlq.list" => self.tool_orchestrator_dlq_list(arguments).await,
+            "harn.orchestrator.dlq.retry" => self.tool_orchestrator_dlq_retry(arguments).await,
+            "harn.orchestrator.inspect" => self.tool_orchestrator_inspect(arguments).await,
+            "harn.trust.query" => self.tool_trust_query(arguments).await,
+            _ => Err(format!("unknown tool '{name}'")),
+        }
+    }
+
+    fn create_tool_task(
+        &self,
+        id: JsonValue,
+        session: &ConnectionState,
+        name: String,
+        params: JsonValue,
+        ttl: Option<u64>,
+    ) -> JsonValue {
+        let task_id = Uuid::now_v7().to_string();
+        let now = now_rfc3339();
+        let task = McpTaskState {
+            task_id: task_id.clone(),
+            owner: session.client_identity.clone(),
+            status: mcp_protocol::McpTaskStatus::Working,
+            status_message: Some("The operation is now in progress.".to_string()),
+            created_at: now.clone(),
+            last_updated_at: now,
+            ttl,
+            poll_interval: Some(mcp_protocol::DEFAULT_TASK_POLL_INTERVAL_MS),
+        };
+        let notify = Arc::new(Notify::new());
+        self.tasks.lock().expect("MCP tasks poisoned").insert(
+            task_id.clone(),
+            McpTaskRecord {
+                task: task.clone(),
+                result: None,
+                notify,
+            },
+        );
+        let _ = self.task_notify_tx.send(task.notification());
+
+        let service = self.clone();
+        let task_session = session.clone();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build MCP task runtime");
+            runtime.block_on(async move {
+                service
+                    .run_tool_task(task_id, task_session, name, params)
+                    .await;
+            });
+        });
+
+        harn_vm::jsonrpc::response(
+            id,
+            json!({
+                "task": task.to_json(),
+                "_meta": {
+                    "io.modelcontextprotocol/model-immediate-response": "The requested Harn tool is running as an MCP task.",
+                }
+            }),
+        )
+    }
+
+    async fn run_tool_task(
+        &self,
+        task_id: String,
+        session: ConnectionState,
+        name: String,
+        params: JsonValue,
+    ) {
+        let arguments = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let trace_id = format!("mcp_{}", Uuid::now_v7().simple());
+        let result = self
+            .execute_tool_call(&name, &session, &trace_id, arguments)
+            .await;
+        let _ = self
+            .record_tool_call(&name, &trace_id, &session.client_identity, &result)
+            .await;
+        if result.is_ok() && tool_call_changes_resources(&name) {
+            self.notify_list_changed(&[McpListChangeKind::Resources]);
+        }
+        self.complete_task(&task_id, result);
+    }
+
+    fn complete_task(&self, task_id: &str, result: Result<JsonValue, String>) {
+        let Some((notification, wake)) = ({
+            let mut tasks = self.tasks.lock().expect("MCP tasks poisoned");
+            let Some(record) = tasks.get_mut(task_id) else {
+                return;
+            };
+            if record.task.status == mcp_protocol::McpTaskStatus::Cancelled {
+                return;
+            }
+            let wake = record.notify.clone();
+            let now = now_rfc3339();
+            record.task.last_updated_at = now;
+            match result {
+                Ok(value) => {
+                    record.task.status = mcp_protocol::McpTaskStatus::Completed;
+                    record.task.status_message =
+                        Some("The task completed successfully.".to_string());
+                    record.result = Some(tool_call_result_json(value, false));
+                }
+                Err(error) => {
+                    record.task.status = mcp_protocol::McpTaskStatus::Failed;
+                    record.task.status_message = Some(format!("Tool execution failed: {error}"));
+                    record.result = Some(tool_call_result_json(json!(error), true));
+                }
+            }
+            Some((record.task.notification(), wake))
+        }) else {
+            return;
+        };
+        let _ = self.task_notify_tx.send(notification);
+        wake.notify_waiters();
+    }
+
+    fn handle_tasks_get(
+        &self,
+        id: JsonValue,
+        session: &ConnectionState,
+        params: &JsonValue,
+    ) -> JsonValue {
+        match self.task_record_for_session(session, params) {
+            Ok(record) => harn_vm::jsonrpc::response(id, record.task.to_json()),
+            Err(error) => harn_vm::jsonrpc::error_response(id, -32602, &error),
+        }
+    }
+
+    async fn handle_tasks_result(
+        &self,
+        id: JsonValue,
+        session: &ConnectionState,
+        params: &JsonValue,
+    ) -> JsonValue {
+        let task_id = match params.get("taskId").and_then(JsonValue::as_str) {
+            Some(task_id) if !task_id.is_empty() => task_id.to_string(),
+            _ => {
+                return harn_vm::jsonrpc::error_response(
+                    id,
+                    -32602,
+                    "Failed to retrieve task: missing taskId",
+                )
+            }
+        };
+
+        loop {
+            let notify = {
+                let tasks = self.tasks.lock().expect("MCP tasks poisoned");
+                let Some(record) = tasks.get(&task_id) else {
+                    return harn_vm::jsonrpc::error_response(
+                        id,
+                        -32602,
+                        "Failed to retrieve task: task not found",
+                    );
+                };
+                if record.task.owner != session.client_identity {
+                    return harn_vm::jsonrpc::error_response(
+                        id,
+                        -32602,
+                        "Failed to retrieve task: task not found",
+                    );
+                }
+                if record.task.status.is_terminal() {
+                    let Some(result) = record.result.clone() else {
+                        return harn_vm::jsonrpc::error_response(
+                            id,
+                            -32603,
+                            "Failed to retrieve task: terminal task has no result",
+                        );
+                    };
+                    return harn_vm::jsonrpc::response(
+                        id,
+                        attach_related_task_meta(result, &task_id),
+                    );
+                }
+                record.notify.clone()
+            };
+            tokio::select! {
+                _ = notify.notified() => {}
+                _ = tokio::time::sleep(std::time::Duration::from_millis(
+                    mcp_protocol::DEFAULT_TASK_POLL_INTERVAL_MS,
+                )) => {}
+            }
+        }
+    }
+
+    fn handle_tasks_list(
+        &self,
+        id: JsonValue,
+        session: &ConnectionState,
+        params: &JsonValue,
+    ) -> JsonValue {
+        let offset = match parse_task_cursor(params) {
+            Ok(offset) => offset,
+            Err(error) => return harn_vm::jsonrpc::error_response(id, -32602, &error),
+        };
+        let matching = self
+            .tasks
+            .lock()
+            .expect("MCP tasks poisoned")
+            .values()
+            .filter(|record| record.task.owner == session.client_identity)
+            .map(|record| record.task.to_json())
+            .collect::<Vec<_>>();
+        let page_start = offset.min(matching.len());
+        let page_end = offset
+            .saturating_add(DEFAULT_RESOURCE_LIMIT)
+            .min(matching.len());
+        let mut result = json!({
+            "tasks": matching[page_start..page_end].to_vec(),
+        });
+        if page_end < matching.len() {
+            result["nextCursor"] = json!(encode_task_cursor(page_end));
+        }
+        harn_vm::jsonrpc::response(id, result)
+    }
+
+    fn handle_tasks_cancel(
+        &self,
+        id: JsonValue,
+        session: &ConnectionState,
+        params: &JsonValue,
+    ) -> JsonValue {
+        let task_id = match params.get("taskId").and_then(JsonValue::as_str) {
+            Some(task_id) if !task_id.is_empty() => task_id,
+            _ => {
+                return harn_vm::jsonrpc::error_response(
+                    id,
+                    -32602,
+                    "Cannot cancel task: missing taskId",
+                )
+            }
+        };
+        let (task, notify) = {
+            let mut tasks = self.tasks.lock().expect("MCP tasks poisoned");
+            let Some(record) = tasks.get_mut(task_id) else {
+                return harn_vm::jsonrpc::error_response(
+                    id,
+                    -32602,
+                    "Cannot cancel task: task not found",
+                );
+            };
+            if record.task.owner != session.client_identity {
+                return harn_vm::jsonrpc::error_response(
+                    id,
+                    -32602,
+                    "Cannot cancel task: task not found",
+                );
+            }
+            if record.task.status.is_terminal() {
+                return harn_vm::jsonrpc::error_response(
+                    id,
+                    -32602,
+                    &format!(
+                        "Cannot cancel task: already in terminal status '{}'",
+                        record.task.status.as_str()
+                    ),
+                );
+            }
+            record.task.status = mcp_protocol::McpTaskStatus::Cancelled;
+            record.task.status_message = Some("The task was cancelled by request.".to_string());
+            record.task.last_updated_at = now_rfc3339();
+            record.result = Some(json!({
+                "content": [{
+                    "type": "text",
+                    "text": "Task was cancelled by request.",
+                }],
+                "isError": true,
+            }));
+            (record.task.clone(), record.notify.clone())
+        };
+        let _ = self.task_notify_tx.send(task.notification());
+        notify.notify_waiters();
+        harn_vm::jsonrpc::response(id, task.to_json())
+    }
+
+    fn task_record_for_session(
+        &self,
+        session: &ConnectionState,
+        params: &JsonValue,
+    ) -> Result<McpTaskRecord, String> {
+        let task_id = params
+            .get("taskId")
+            .and_then(JsonValue::as_str)
+            .ok_or_else(|| "Failed to retrieve task: missing taskId".to_string())?;
+        let tasks = self.tasks.lock().expect("MCP tasks poisoned");
+        let record = tasks
+            .get(task_id)
+            .ok_or_else(|| "Failed to retrieve task: task not found".to_string())?;
+        if record.task.owner != session.client_identity {
+            return Err("Failed to retrieve task: task not found".to_string());
+        }
+        Ok(record.clone())
     }
 
     async fn handle_resources_list(&self, id: JsonValue) -> JsonValue {
@@ -1136,6 +1530,7 @@ async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
     let mut lines = stdin.lines();
     let mut session = ConnectionState::default();
     let mut list_notifications = service.subscribe_list_notifications();
+    let mut task_notifications = service.subscribe_task_notifications();
 
     eprintln!("[harn] MCP stdio server ready");
 
@@ -1161,6 +1556,16 @@ async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
             notification = list_notifications.recv() => {
                 match notification {
                     Ok(notification) => write_stdio_json(&mut stdout, &notification).await?,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            notification = task_notifications.recv() => {
+                match notification {
+                    Ok(notification) if notification.owner == session.client_identity => {
+                        write_stdio_json(&mut stdout, &notification.message).await?;
+                    }
+                    Ok(_) => continue,
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
@@ -1490,6 +1895,15 @@ async fn http_get_stream(State(state): State<HttpState>, headers: HeaderMap) -> 
     {
         spawn_list_notification_forwarder(state.service.clone(), sender);
     }
+    if let Some(sender) = session
+        .sse_tx
+        .lock()
+        .expect("SSE sender poisoned")
+        .as_ref()
+        .cloned()
+    {
+        spawn_task_notification_forwarder(state.service.clone(), sender, session.clone());
+    }
     let mut response = sse_response(rx).into_response();
     attach_streamable_headers(&mut response, None, MCP_PROTOCOL_VERSION);
     response
@@ -1566,6 +1980,15 @@ async fn legacy_sse_stream(State(state): State<HttpState>, headers: HeaderMap) -
         .cloned();
     if let Some(list_tx) = list_tx {
         spawn_list_notification_forwarder(state.service.clone(), list_tx);
+    }
+    let task_tx = session
+        .sse_tx
+        .lock()
+        .expect("legacy SSE sender poisoned")
+        .as_ref()
+        .cloned();
+    if let Some(task_tx) = task_tx {
+        spawn_task_notification_forwarder(state.service.clone(), task_tx, session.clone());
     }
     state
         .sessions
@@ -1797,6 +2220,36 @@ fn spawn_list_notification_forwarder(
     });
 }
 
+fn spawn_task_notification_forwarder(
+    service: Arc<McpOrchestratorService>,
+    sender: UnboundedSender<JsonValue>,
+    session: Arc<HttpSession>,
+) {
+    let mut notifications = service.subscribe_task_notifications();
+    tokio::spawn(async move {
+        loop {
+            match notifications.recv().await {
+                Ok(notification) => {
+                    let owner = session
+                        .state
+                        .lock()
+                        .expect("MCP session poisoned")
+                        .client_identity
+                        .clone();
+                    if notification.owner != owner {
+                        continue;
+                    }
+                    if sender.unbounded_send(notification.message).is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
 fn attach_streamable_headers(response: &mut Response, session_id: Option<&str>, protocol: &str) {
     if let Some(session_id) = session_id {
         if let Ok(value) = HeaderValue::from_str(session_id) {
@@ -1988,16 +2441,136 @@ fn tool_def(
     description: &str,
     input_schema: JsonValue,
     output_schema: Option<JsonValue>,
+    task_support: mcp_protocol::McpToolTaskSupport,
 ) -> JsonValue {
     let mut value = json!({
         "name": name,
         "description": description,
         "inputSchema": input_schema,
+        "execution": mcp_protocol::tool_execution(task_support),
     });
     if let Some(output_schema) = output_schema {
         value["outputSchema"] = output_schema;
     }
     value
+}
+
+fn task_support_for_tool(name: &str) -> Option<mcp_protocol::McpToolTaskSupport> {
+    match name {
+        "harn.trigger.fire" | "harn.trigger.replay" | "harn.orchestrator.dlq.retry" => {
+            Some(mcp_protocol::McpToolTaskSupport::Optional)
+        }
+        "harn.secret_scan"
+        | "harn::secret_scan"
+        | "harn.trigger.list"
+        | "harn.orchestrator.queue"
+        | "harn.orchestrator.dlq.list"
+        | "harn.orchestrator.inspect"
+        | "harn.trust.query" => Some(mcp_protocol::McpToolTaskSupport::Forbidden),
+        _ => None,
+    }
+}
+
+fn validate_taskable_tool(id: JsonValue, name: &str) -> Result<(), JsonValue> {
+    match task_support_for_tool(name) {
+        Some(mcp_protocol::McpToolTaskSupport::Optional)
+        | Some(mcp_protocol::McpToolTaskSupport::Required) => Ok(()),
+        Some(mcp_protocol::McpToolTaskSupport::Forbidden) => {
+            Err(mcp_protocol::task_augmentation_error_response(
+                id,
+                "tools/call",
+                -32602,
+                "Tool does not support MCP task-augmented execution",
+                &format!("Tool '{name}' advertises execution.taskSupport=\"forbidden\"."),
+            ))
+        }
+        None => Err(harn_vm::jsonrpc::error_response(
+            id,
+            -32602,
+            &format!("unknown tool '{name}'"),
+        )),
+    }
+}
+
+fn parse_task_ttl(params: &JsonValue) -> Result<Option<u64>, String> {
+    let task = params
+        .get("task")
+        .ok_or_else(|| "missing task params".to_string())?;
+    let Some(object) = task.as_object() else {
+        return Err("task must be an object".to_string());
+    };
+    let Some(ttl) = object.get("ttl") else {
+        return Ok(Some(DEFAULT_TASK_TTL_MS));
+    };
+    let Some(ttl) = ttl.as_u64() else {
+        return Err("task.ttl must be an unsigned integer number of milliseconds".to_string());
+    };
+    Ok(Some(ttl.min(MAX_TASK_TTL_MS)))
+}
+
+fn tool_call_result_json(value: JsonValue, is_error: bool) -> JsonValue {
+    if is_error {
+        return json!({
+            "content": [{
+                "type": "text",
+                "text": value.as_str().unwrap_or("Tool execution failed"),
+            }],
+            "isError": true,
+        });
+    }
+    json!({
+        "content": [{
+            "type": "text",
+            "text": serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string()),
+        }],
+        "structuredContent": value,
+        "isError": false,
+    })
+}
+
+fn attach_related_task_meta(mut result: JsonValue, task_id: &str) -> JsonValue {
+    let related = mcp_protocol::related_task_meta(task_id);
+    if let Some(result_object) = result.as_object_mut() {
+        let meta = result_object.entry("_meta").or_insert_with(|| json!({}));
+        if let Some(meta_object) = meta.as_object_mut() {
+            if let Some(related_object) = related.as_object() {
+                for (key, value) in related_object {
+                    meta_object.insert(key.clone(), value.clone());
+                }
+            }
+        } else {
+            result_object.insert("_meta".to_string(), related);
+        }
+    }
+    result
+}
+
+fn now_rfc3339() -> String {
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
+fn parse_task_cursor(params: &JsonValue) -> Result<usize, String> {
+    let Some(cursor) = params.get("cursor") else {
+        return Ok(0);
+    };
+    let Some(cursor) = cursor.as_str() else {
+        return Err("invalid tasks/list cursor".to_string());
+    };
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(cursor)
+        .map_err(|_| "invalid tasks/list cursor".to_string())?;
+    let decoded = String::from_utf8(bytes).map_err(|_| "invalid tasks/list cursor".to_string())?;
+    decoded
+        .parse::<usize>()
+        .map_err(|_| "invalid tasks/list cursor".to_string())
+}
+
+fn encode_task_cursor(offset: usize) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(offset.to_string().as_bytes())
 }
 
 fn tool_call_changes_resources(name: &str) -> bool {
@@ -2265,6 +2838,10 @@ pub fn on_fail(event: TriggerEvent) -> any {
             response["result"]["capabilities"]["prompts"]["listChanged"],
             json!(true)
         );
+        assert_eq!(
+            response["result"]["capabilities"]["tasks"]["requests"]["tools"]["call"],
+            json!({})
+        );
         session
     }
 
@@ -2356,6 +2933,29 @@ pub fn on_fail(event: TriggerEvent) -> any {
             }
         }
         seen
+    }
+
+    async fn recv_next_task_notification(
+        notifications: &mut broadcast::Receiver<McpTaskNotification>,
+    ) -> McpTaskNotification {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "timed out waiting for task notification"
+            );
+            match tokio::time::timeout(remaining, notifications.recv())
+                .await
+                .expect("timed out waiting for task notification")
+            {
+                Ok(msg) => return msg,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => {
+                    panic!("task notification channel closed")
+                }
+            }
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2539,6 +3139,33 @@ version = "0.1.0"
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn tools_list_advertises_task_support_per_tool() {
+        let _guard = lock_harn_state();
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+        let mut session = init_session(&service).await;
+
+        let response = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(30, "tools/list", json!({})),
+            )
+            .await;
+        let tools = response["result"]["tools"].as_array().unwrap();
+        let trigger_fire = tools
+            .iter()
+            .find(|tool| tool["name"] == "harn.trigger.fire")
+            .unwrap();
+        let trigger_list = tools
+            .iter()
+            .find(|tool| tool["name"] == "harn.trigger.list")
+            .unwrap();
+        assert_eq!(trigger_fire["execution"]["taskSupport"], json!("optional"));
+        assert_eq!(trigger_list["execution"]["taskSupport"], json!("forbidden"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn tool_call_rejects_task_augmentation() {
         let _guard = lock_harn_state();
         let temp = TempDir::new().unwrap();
@@ -2562,6 +3189,80 @@ version = "0.1.0"
             .await;
         assert_eq!(response["error"]["code"], json!(-32602));
         assert_eq!(response["error"]["data"]["feature"], json!("tasks"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn trigger_fire_task_roundtrip_polls_and_retrieves_result() {
+        let _guard = lock_harn_state();
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+        let mut session = init_session(&service).await;
+        let mut task_notifications = service.subscribe_task_notifications();
+
+        let created = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(
+                    101,
+                    "tools/call",
+                    json!({
+                        "name": "harn.trigger.fire",
+                        "arguments": {
+                            "trigger_id": "cron-ok",
+                            "payload": {}
+                        },
+                        "task": {"ttl": 60_000}
+                    }),
+                ),
+            )
+            .await;
+        assert_eq!(created["result"]["task"]["status"], json!("working"));
+        assert_eq!(created["result"]["task"]["ttl"], json!(60_000));
+        let task_id = created["result"]["task"]["taskId"].as_str().unwrap();
+
+        let listed = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(102, "tasks/list", json!({})),
+            )
+            .await;
+        assert_eq!(listed["result"]["tasks"][0]["taskId"], json!(task_id));
+
+        let result = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(103, "tasks/result", json!({ "taskId": task_id })),
+            )
+            .await;
+        assert_eq!(result["result"]["isError"], json!(false), "result={result}");
+        assert_eq!(
+            result["result"]["_meta"][mcp_protocol::RELATED_TASK_META_KEY]["taskId"],
+            json!(task_id)
+        );
+        assert_eq!(
+            result["result"]["structuredContent"]["status"],
+            json!("dispatched")
+        );
+
+        let task = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(104, "tasks/get", json!({ "taskId": task_id })),
+            )
+            .await;
+        assert_eq!(task["result"]["status"], json!("completed"));
+
+        let mut statuses = std::collections::BTreeSet::new();
+        while !statuses.contains("completed") {
+            let notification = recv_next_task_notification(&mut task_notifications).await;
+            if notification.owner == session.client_identity {
+                let status = notification.message["params"]["status"].as_str().unwrap();
+                statuses.insert(status.to_string());
+            }
+        }
+        assert!(statuses.contains("working"));
+        assert!(statuses.contains("completed"));
     }
 
     #[tokio::test(flavor = "current_thread")]
