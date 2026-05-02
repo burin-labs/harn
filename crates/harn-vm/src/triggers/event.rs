@@ -125,6 +125,12 @@ pub struct GitHubEventCommon {
     pub action: Option<String>,
     pub delivery_id: Option<String>,
     pub installation_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<JsonValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<JsonValue>,
     pub raw: JsonValue,
 }
 
@@ -190,6 +196,110 @@ pub struct GitHubCheckRunEventPayload {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GitHubCheckSuiteEventPayload {
+    #[serde(flatten)]
+    pub common: GitHubEventCommon,
+    pub check_suite: JsonValue,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_suite_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_request_number: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conclusion: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GitHubStatusEventPayload {
+    #[serde(flatten)]
+    pub common: GitHubEventCommon,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_status: Option<JsonValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_url: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GitHubMergeGroupEventPayload {
+    #[serde(flatten)]
+    pub common: GitHubEventCommon,
+    pub merge_group: JsonValue,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_group_id: Option<JsonValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_ref: Option<String>,
+    #[serde(default)]
+    pub pull_requests: Vec<JsonValue>,
+    #[serde(default)]
+    pub pull_request_numbers: Vec<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GitHubInstallationEventPayload {
+    #[serde(flatten)]
+    pub common: GitHubEventCommon,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installation: Option<JsonValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<JsonValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installation_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suspended: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked: Option<bool>,
+    #[serde(default)]
+    pub repositories: Vec<JsonValue>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GitHubInstallationRepositoriesEventPayload {
+    #[serde(flatten)]
+    pub common: GitHubEventCommon,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installation: Option<JsonValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<JsonValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installation_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suspended: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_selection: Option<String>,
+    #[serde(default)]
+    pub repositories_added: Vec<JsonValue>,
+    #[serde(default)]
+    pub repositories_removed: Vec<JsonValue>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum GitHubEventPayload {
     Issues(GitHubIssuesEventPayload),
@@ -200,7 +310,78 @@ pub enum GitHubEventPayload {
     WorkflowRun(GitHubWorkflowRunEventPayload),
     DeploymentStatus(GitHubDeploymentStatusEventPayload),
     CheckRun(GitHubCheckRunEventPayload),
+    CheckSuite(GitHubCheckSuiteEventPayload),
+    Status(GitHubStatusEventPayload),
+    MergeGroup(GitHubMergeGroupEventPayload),
+    Installation(GitHubInstallationEventPayload),
+    InstallationRepositories(GitHubInstallationRepositoriesEventPayload),
     Other(GitHubEventCommon),
+}
+
+// Manual `Deserialize` that dispatches on the `event` field. An untagged
+// enum cannot reliably round-trip these variants because `Push` and the
+// all-optional installation/status variants will accept payloads that
+// belong to a different event kind.
+impl<'de> Deserialize<'de> for GitHubEventPayload {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = JsonValue::deserialize(deserializer)?;
+        let kind = value
+            .get("event")
+            .and_then(JsonValue::as_str)
+            .unwrap_or("")
+            .to_string();
+        let from_value = |v: JsonValue| -> Result<GitHubEventPayload, D::Error> {
+            let payload = match kind.as_str() {
+                "issues" => GitHubEventPayload::Issues(
+                    serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+                ),
+                "pull_request" => GitHubEventPayload::PullRequest(
+                    serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+                ),
+                "issue_comment" => GitHubEventPayload::IssueComment(
+                    serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+                ),
+                "pull_request_review" => GitHubEventPayload::PullRequestReview(
+                    serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+                ),
+                "push" => GitHubEventPayload::Push(
+                    serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+                ),
+                "workflow_run" => GitHubEventPayload::WorkflowRun(
+                    serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+                ),
+                "deployment_status" => GitHubEventPayload::DeploymentStatus(
+                    serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+                ),
+                "check_run" => GitHubEventPayload::CheckRun(
+                    serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+                ),
+                "check_suite" => GitHubEventPayload::CheckSuite(
+                    serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+                ),
+                "status" => GitHubEventPayload::Status(
+                    serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+                ),
+                "merge_group" => GitHubEventPayload::MergeGroup(
+                    serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+                ),
+                "installation" => GitHubEventPayload::Installation(
+                    serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+                ),
+                "installation_repositories" => GitHubEventPayload::InstallationRepositories(
+                    serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+                ),
+                _ => GitHubEventPayload::Other(
+                    serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+                ),
+            };
+            Ok(payload)
+        };
+        from_value(value)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1374,18 +1555,41 @@ fn github_payload(
     headers: &BTreeMap<String, String>,
     raw: JsonValue,
 ) -> ProviderPayload {
+    // The connector emits a normalized payload that wraps the original
+    // GitHub webhook body inside its own `raw` field. When we see that
+    // wrapper shape, prefer it as the escape-hatch raw so callers don't
+    // have to traverse two levels of `raw` to reach the upstream payload.
+    let original_raw = raw
+        .get("raw")
+        .filter(|value| value.is_object())
+        .cloned()
+        .unwrap_or_else(|| raw.clone());
     let common = GitHubEventCommon {
         event: kind.to_string(),
         action: raw
             .get("action")
             .and_then(JsonValue::as_str)
             .map(ToString::to_string),
-        delivery_id: headers.get("X-GitHub-Delivery").cloned(),
+        delivery_id: raw
+            .get("delivery_id")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string)
+            .or_else(|| headers.get("X-GitHub-Delivery").cloned()),
         installation_id: raw
-            .get("installation")
-            .and_then(|value| value.get("id"))
-            .and_then(JsonValue::as_i64),
-        raw: raw.clone(),
+            .get("installation_id")
+            .and_then(JsonValue::as_i64)
+            .or_else(|| {
+                raw.get("installation")
+                    .and_then(|value| value.get("id"))
+                    .and_then(JsonValue::as_i64)
+            }),
+        topic: raw
+            .get("topic")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        repository: raw.get("repository").cloned(),
+        repo: raw.get("repo").cloned(),
+        raw: original_raw,
     };
     let payload = match kind {
         "issues" => GitHubEventPayload::Issues(GitHubIssuesEventPayload {
@@ -1435,9 +1639,139 @@ fn github_payload(
             common,
             check_run: raw.get("check_run").cloned().unwrap_or(JsonValue::Null),
         }),
+        "check_suite" => {
+            let check_suite = raw.get("check_suite").cloned().unwrap_or(JsonValue::Null);
+            GitHubEventPayload::CheckSuite(GitHubCheckSuiteEventPayload {
+                check_suite_id: github_promoted_i64(&raw, "check_suite_id")
+                    .or_else(|| check_suite.get("id").and_then(JsonValue::as_i64)),
+                pull_request_number: github_promoted_i64(&raw, "pull_request_number"),
+                head_sha: github_promoted_string(&raw, "head_sha"),
+                head_ref: github_promoted_string(&raw, "head_ref"),
+                base_ref: github_promoted_string(&raw, "base_ref"),
+                status: github_promoted_string(&raw, "status"),
+                conclusion: github_promoted_string(&raw, "conclusion"),
+                common,
+                check_suite,
+            })
+        }
+        "status" => GitHubEventPayload::Status(GitHubStatusEventPayload {
+            commit_status: raw
+                .get("commit_status")
+                .cloned()
+                .or_else(|| Some(common.raw.clone())),
+            status_id: github_promoted_i64(&raw, "status_id")
+                .or_else(|| common.raw.get("id").and_then(JsonValue::as_i64)),
+            head_sha: github_promoted_string(&raw, "head_sha").or_else(|| {
+                common
+                    .raw
+                    .get("sha")
+                    .and_then(JsonValue::as_str)
+                    .map(ToString::to_string)
+            }),
+            head_ref: github_promoted_string(&raw, "head_ref"),
+            base_ref: github_promoted_string(&raw, "base_ref"),
+            state: github_promoted_string(&raw, "state"),
+            context: github_promoted_string(&raw, "context"),
+            target_url: github_promoted_string(&raw, "target_url"),
+            common,
+        }),
+        "merge_group" => {
+            let merge_group = raw.get("merge_group").cloned().unwrap_or(JsonValue::Null);
+            GitHubEventPayload::MergeGroup(GitHubMergeGroupEventPayload {
+                merge_group_id: raw
+                    .get("merge_group_id")
+                    .cloned()
+                    .or_else(|| merge_group.get("id").cloned()),
+                head_sha: github_promoted_string(&raw, "head_sha").or_else(|| {
+                    merge_group
+                        .get("head_sha")
+                        .and_then(JsonValue::as_str)
+                        .map(ToString::to_string)
+                }),
+                head_ref: github_promoted_string(&raw, "head_ref").or_else(|| {
+                    merge_group
+                        .get("head_ref")
+                        .and_then(JsonValue::as_str)
+                        .map(ToString::to_string)
+                }),
+                base_sha: github_promoted_string(&raw, "base_sha").or_else(|| {
+                    merge_group
+                        .get("base_sha")
+                        .and_then(JsonValue::as_str)
+                        .map(ToString::to_string)
+                }),
+                base_ref: github_promoted_string(&raw, "base_ref").or_else(|| {
+                    merge_group
+                        .get("base_ref")
+                        .and_then(JsonValue::as_str)
+                        .map(ToString::to_string)
+                }),
+                pull_requests: raw
+                    .get("pull_requests")
+                    .and_then(JsonValue::as_array)
+                    .cloned()
+                    .unwrap_or_default(),
+                pull_request_numbers: raw
+                    .get("pull_request_numbers")
+                    .and_then(JsonValue::as_array)
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(JsonValue::as_i64)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
+                common,
+                merge_group,
+            })
+        }
+        "installation" => GitHubEventPayload::Installation(GitHubInstallationEventPayload {
+            installation: raw.get("installation").cloned(),
+            account: raw.get("account").cloned(),
+            installation_state: github_promoted_string(&raw, "installation_state"),
+            suspended: raw.get("suspended").and_then(JsonValue::as_bool),
+            revoked: raw.get("revoked").and_then(JsonValue::as_bool),
+            repositories: raw
+                .get("repositories")
+                .and_then(JsonValue::as_array)
+                .cloned()
+                .unwrap_or_default(),
+            common,
+        }),
+        "installation_repositories" => GitHubEventPayload::InstallationRepositories(
+            GitHubInstallationRepositoriesEventPayload {
+                installation: raw.get("installation").cloned(),
+                account: raw.get("account").cloned(),
+                installation_state: github_promoted_string(&raw, "installation_state"),
+                suspended: raw.get("suspended").and_then(JsonValue::as_bool),
+                revoked: raw.get("revoked").and_then(JsonValue::as_bool),
+                repository_selection: github_promoted_string(&raw, "repository_selection"),
+                repositories_added: raw
+                    .get("repositories_added")
+                    .and_then(JsonValue::as_array)
+                    .cloned()
+                    .unwrap_or_default(),
+                repositories_removed: raw
+                    .get("repositories_removed")
+                    .and_then(JsonValue::as_array)
+                    .cloned()
+                    .unwrap_or_default(),
+                common,
+            },
+        ),
         _ => GitHubEventPayload::Other(common),
     };
     ProviderPayload::Known(KnownProviderPayload::GitHub(payload))
+}
+
+fn github_promoted_string(raw: &JsonValue, field: &str) -> Option<String> {
+    raw.get(field)
+        .and_then(JsonValue::as_str)
+        .map(ToString::to_string)
+}
+
+fn github_promoted_i64(raw: &JsonValue, field: &str) -> Option<i64> {
+    raw.get(field).and_then(JsonValue::as_i64)
 }
 
 fn slack_payload(
@@ -2195,6 +2529,459 @@ mod tests {
             error,
             ProviderCatalogError::UnknownProvider("custom-provider".to_string())
         );
+    }
+
+    fn github_headers(event: &str, delivery: &str) -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("X-GitHub-Event".to_string(), event.to_string()),
+            ("X-GitHub-Delivery".to_string(), delivery.to_string()),
+        ])
+    }
+
+    fn unwrap_github(payload: ProviderPayload) -> GitHubEventPayload {
+        match payload {
+            ProviderPayload::Known(KnownProviderPayload::GitHub(p)) => p,
+            other => panic!("expected GitHub payload, got {other:?}"),
+        }
+    }
+
+    /// Mirror of the connector's normalized webhook payload shape: the
+    /// connector wraps the original GitHub body as `raw` and promotes
+    /// stable common + event-specific fields.
+    fn connector_normalized(
+        event: &str,
+        delivery: &str,
+        installation_id: i64,
+        action: Option<&str>,
+        original: serde_json::Value,
+        promoted: serde_json::Value,
+    ) -> serde_json::Value {
+        let mut common = serde_json::json!({
+            "provider": "github",
+            "event": event,
+            "topic": match action {
+                Some(a) => format!("github.{event}.{a}"),
+                None => format!("github.{event}"),
+            },
+            "delivery_id": delivery,
+            "installation_id": installation_id,
+            "repository": original.get("repository").cloned().unwrap_or(JsonValue::Null),
+            "repo": serde_json::json!({"owner": "octo-org", "name": "octo-repo", "full_name": "octo-org/octo-repo"}),
+            "raw": original,
+        });
+        if let Some(a) = action {
+            common["action"] = serde_json::json!(a);
+        }
+        let common_obj = common.as_object_mut().unwrap();
+        if let Some(promoted_obj) = promoted.as_object() {
+            for (k, v) in promoted_obj {
+                common_obj.insert(k.clone(), v.clone());
+            }
+        }
+        common
+    }
+
+    #[test]
+    fn github_check_suite_event_promotes_typed_fields() {
+        let original = serde_json::json!({
+            "action": "requested",
+            "check_suite": {
+                "id": 8101,
+                "status": "queued",
+                "conclusion": null,
+                "head_sha": "ccccccccccccccccccccccccccccccccccccccc1",
+                "head_branch": "feature/x",
+            },
+            "repository": {"full_name": "octo-org/octo-repo"},
+            "installation": {"id": 3001},
+        });
+        let normalized = connector_normalized(
+            "check_suite",
+            "delivery-cs",
+            3001,
+            Some("requested"),
+            original.clone(),
+            serde_json::json!({
+                "check_suite": original["check_suite"].clone(),
+                "check_suite_id": 8101,
+                "head_sha": "ccccccccccccccccccccccccccccccccccccccc1",
+                "head_ref": "feature/x",
+                "status": "queued",
+            }),
+        );
+        let provider = ProviderId::from("github");
+        let payload = ProviderPayload::normalize(
+            &provider,
+            "check_suite",
+            &github_headers("check_suite", "delivery-cs"),
+            normalized,
+        )
+        .expect("check_suite payload");
+        let GitHubEventPayload::CheckSuite(check_suite) = unwrap_github(payload) else {
+            panic!("expected CheckSuite variant");
+        };
+        assert_eq!(check_suite.common.event, "check_suite");
+        assert_eq!(check_suite.common.action.as_deref(), Some("requested"));
+        assert_eq!(
+            check_suite.common.delivery_id.as_deref(),
+            Some("delivery-cs")
+        );
+        assert_eq!(check_suite.common.installation_id, Some(3001));
+        assert_eq!(
+            check_suite.common.topic.as_deref(),
+            Some("github.check_suite.requested")
+        );
+        assert!(check_suite.common.repository.is_some());
+        assert!(check_suite.common.repo.is_some());
+        assert_eq!(check_suite.check_suite_id, Some(8101));
+        assert_eq!(
+            check_suite.head_sha.as_deref(),
+            Some("ccccccccccccccccccccccccccccccccccccccc1")
+        );
+        assert_eq!(check_suite.head_ref.as_deref(), Some("feature/x"));
+        assert_eq!(check_suite.status.as_deref(), Some("queued"));
+        // Original body is preserved as the escape-hatch raw.
+        assert_eq!(check_suite.common.raw, original);
+    }
+
+    #[test]
+    fn github_status_event_promotes_typed_fields() {
+        let original = serde_json::json!({
+            "id": 9101,
+            "sha": "ccccccccccccccccccccccccccccccccccccccc1",
+            "state": "success",
+            "context": "legacy/status",
+            "target_url": "https://ci.example.test/octo-repo/9101",
+            "branches": [{"name": "main"}],
+            "repository": {"full_name": "octo-org/octo-repo"},
+            "installation": {"id": 3001},
+        });
+        let normalized = connector_normalized(
+            "status",
+            "delivery-status",
+            3001,
+            None,
+            original.clone(),
+            serde_json::json!({
+                "commit_status": original.clone(),
+                "status_id": 9101,
+                "head_sha": "ccccccccccccccccccccccccccccccccccccccc1",
+                "head_ref": "main",
+                "base_ref": "main",
+                "state": "success",
+                "context": "legacy/status",
+                "target_url": "https://ci.example.test/octo-repo/9101",
+            }),
+        );
+        let provider = ProviderId::from("github");
+        let payload = ProviderPayload::normalize(
+            &provider,
+            "status",
+            &github_headers("status", "delivery-status"),
+            normalized,
+        )
+        .expect("status payload");
+        let GitHubEventPayload::Status(status) = unwrap_github(payload) else {
+            panic!("expected Status variant");
+        };
+        assert_eq!(status.common.event, "status");
+        assert_eq!(status.common.installation_id, Some(3001));
+        assert_eq!(status.status_id, Some(9101));
+        assert_eq!(status.state.as_deref(), Some("success"));
+        assert_eq!(status.context.as_deref(), Some("legacy/status"));
+        assert_eq!(
+            status.target_url.as_deref(),
+            Some("https://ci.example.test/octo-repo/9101")
+        );
+        assert_eq!(
+            status.head_sha.as_deref(),
+            Some("ccccccccccccccccccccccccccccccccccccccc1")
+        );
+        assert!(status.commit_status.is_some());
+    }
+
+    #[test]
+    fn github_merge_group_event_promotes_typed_fields() {
+        let original = serde_json::json!({
+            "action": "checks_requested",
+            "merge_group": {
+                "id": 9201,
+                "head_ref": "gh-readonly-queue/main/pr-42",
+                "head_sha": "ddddddddddddddddddddddddddddddddddddddd1",
+                "base_ref": "main",
+                "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+                "pull_requests": [{"number": 42}, {"number": 43}],
+            },
+            "repository": {"full_name": "octo-org/octo-repo"},
+            "installation": {"id": 3001},
+        });
+        let normalized = connector_normalized(
+            "merge_group",
+            "delivery-mg",
+            3001,
+            Some("checks_requested"),
+            original.clone(),
+            serde_json::json!({
+                "merge_group": original["merge_group"].clone(),
+                "merge_group_id": 9201,
+                "head_sha": "ddddddddddddddddddddddddddddddddddddddd1",
+                "head_ref": "gh-readonly-queue/main/pr-42",
+                "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+                "base_ref": "main",
+                "pull_requests": [{"number": 42}, {"number": 43}],
+                "pull_request_numbers": [42, 43],
+            }),
+        );
+        let provider = ProviderId::from("github");
+        let payload = ProviderPayload::normalize(
+            &provider,
+            "merge_group",
+            &github_headers("merge_group", "delivery-mg"),
+            normalized,
+        )
+        .expect("merge_group payload");
+        let GitHubEventPayload::MergeGroup(mg) = unwrap_github(payload) else {
+            panic!("expected MergeGroup variant");
+        };
+        assert_eq!(mg.common.event, "merge_group");
+        assert_eq!(mg.common.action.as_deref(), Some("checks_requested"));
+        assert_eq!(mg.merge_group_id, Some(serde_json::json!(9201)));
+        assert_eq!(mg.head_ref.as_deref(), Some("gh-readonly-queue/main/pr-42"));
+        assert_eq!(
+            mg.base_sha.as_deref(),
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1")
+        );
+        assert_eq!(mg.base_ref.as_deref(), Some("main"));
+        assert_eq!(mg.pull_request_numbers, vec![42i64, 43i64]);
+        assert_eq!(mg.pull_requests.len(), 2);
+    }
+
+    #[test]
+    fn github_installation_event_promotes_typed_fields() {
+        let original = serde_json::json!({
+            "action": "suspend",
+            "installation": {
+                "id": 3001,
+                "account": {"login": "octo-org"},
+                "repository_selection": "selected",
+                "suspended_at": "2026-04-20T18:00:00Z",
+            },
+            "repositories": [{"full_name": "octo-org/octo-repo"}],
+        });
+        let normalized = connector_normalized(
+            "installation",
+            "delivery-inst",
+            3001,
+            Some("suspend"),
+            original.clone(),
+            serde_json::json!({
+                "installation": original["installation"].clone(),
+                "account": {"login": "octo-org"},
+                "installation_state": "suspended",
+                "suspended": true,
+                "revoked": false,
+                "repositories": original["repositories"].clone(),
+            }),
+        );
+        let provider = ProviderId::from("github");
+        let payload = ProviderPayload::normalize(
+            &provider,
+            "installation",
+            &github_headers("installation", "delivery-inst"),
+            normalized,
+        )
+        .expect("installation payload");
+        let GitHubEventPayload::Installation(inst) = unwrap_github(payload) else {
+            panic!("expected Installation variant");
+        };
+        assert_eq!(inst.common.event, "installation");
+        assert_eq!(inst.common.action.as_deref(), Some("suspend"));
+        assert_eq!(inst.installation_state.as_deref(), Some("suspended"));
+        assert_eq!(inst.suspended, Some(true));
+        assert_eq!(inst.revoked, Some(false));
+        assert_eq!(inst.repositories.len(), 1);
+        assert!(inst.account.is_some());
+    }
+
+    #[test]
+    fn github_installation_repositories_event_promotes_typed_fields() {
+        let original = serde_json::json!({
+            "action": "removed",
+            "installation": {"id": 3001, "account": {"login": "octo-org"}},
+            "repository_selection": "selected",
+            "repositories_added": [],
+            "repositories_removed": [
+                {"id": 4001, "full_name": "octo-org/octo-repo"},
+            ],
+        });
+        let normalized = connector_normalized(
+            "installation_repositories",
+            "delivery-inst-repos",
+            3001,
+            Some("removed"),
+            original.clone(),
+            serde_json::json!({
+                "installation": original["installation"].clone(),
+                "account": {"login": "octo-org"},
+                "installation_state": "revoked",
+                "suspended": false,
+                "revoked": true,
+                "repository_selection": "selected",
+                "repositories_added": [],
+                "repositories_removed": original["repositories_removed"].clone(),
+            }),
+        );
+        let provider = ProviderId::from("github");
+        let payload = ProviderPayload::normalize(
+            &provider,
+            "installation_repositories",
+            &github_headers("installation_repositories", "delivery-inst-repos"),
+            normalized,
+        )
+        .expect("installation_repositories payload");
+        let GitHubEventPayload::InstallationRepositories(repos) = unwrap_github(payload) else {
+            panic!("expected InstallationRepositories variant");
+        };
+        assert_eq!(repos.common.event, "installation_repositories");
+        assert_eq!(repos.common.action.as_deref(), Some("removed"));
+        assert_eq!(repos.repository_selection.as_deref(), Some("selected"));
+        assert!(repos.repositories_added.is_empty());
+        assert_eq!(repos.repositories_removed.len(), 1);
+        assert_eq!(
+            repos.repositories_removed[0]
+                .get("full_name")
+                .and_then(|v| v.as_str()),
+            Some("octo-org/octo-repo"),
+        );
+        assert_eq!(repos.installation_state.as_deref(), Some("revoked"));
+        assert_eq!(repos.revoked, Some(true));
+    }
+
+    #[test]
+    fn github_legacy_direct_webhook_still_normalizes() {
+        // Direct GitHub webhook bodies (no connector wrapper) should
+        // continue to populate installation_id from `installation.id` and
+        // leave the new common fields unset.
+        let provider = ProviderId::from("github");
+        let payload = ProviderPayload::normalize(
+            &provider,
+            "issues",
+            &github_headers("issues", "delivery-legacy"),
+            serde_json::json!({
+                "action": "opened",
+                "installation": {"id": 99},
+                "issue": {"number": 7},
+            }),
+        )
+        .expect("legacy issues payload");
+        let GitHubEventPayload::Issues(issues) = unwrap_github(payload) else {
+            panic!("expected Issues variant");
+        };
+        assert_eq!(issues.common.installation_id, Some(99));
+        assert_eq!(
+            issues.common.delivery_id.as_deref(),
+            Some("delivery-legacy")
+        );
+        assert!(issues.common.topic.is_none());
+        assert!(issues.common.repo.is_none());
+        assert_eq!(issues.issue.get("number").and_then(|v| v.as_i64()), Some(7));
+    }
+
+    #[test]
+    fn github_new_event_variants_round_trip_through_serde() {
+        // Untagged enums match in declaration order. Make sure each new
+        // event kind serializes and deserializes back to the same variant
+        // — i.e. it is not silently absorbed into an earlier variant such
+        // as `Push` (whose only required field is defaulted) or `Other`.
+        let provider = ProviderId::from("github");
+        let cases: &[(&str, serde_json::Value, &str)] = &[
+            (
+                "check_suite",
+                serde_json::json!({
+                    "event": "check_suite",
+                    "check_suite": {"id": 1},
+                    "check_suite_id": 1,
+                    "raw": {"check_suite": {"id": 1}},
+                }),
+                "CheckSuite",
+            ),
+            (
+                "status",
+                serde_json::json!({
+                    "event": "status",
+                    "commit_status": {"id": 9},
+                    "status_id": 9,
+                    "state": "success",
+                    "raw": {"id": 9, "state": "success"},
+                }),
+                "Status",
+            ),
+            (
+                "merge_group",
+                serde_json::json!({
+                    "event": "merge_group",
+                    "merge_group": {"id": 1},
+                    "merge_group_id": 1,
+                    "raw": {"merge_group": {"id": 1}},
+                }),
+                "MergeGroup",
+            ),
+            (
+                "installation",
+                serde_json::json!({
+                    "event": "installation",
+                    "installation": {"id": 1},
+                    "installation_state": "active",
+                    "suspended": false,
+                    "raw": {"installation": {"id": 1}},
+                }),
+                "Installation",
+            ),
+            (
+                "installation_repositories",
+                serde_json::json!({
+                    "event": "installation_repositories",
+                    "installation": {"id": 1},
+                    "repository_selection": "selected",
+                    "repositories_added": [],
+                    "repositories_removed": [{"id": 7}],
+                    "raw": {"installation": {"id": 1}},
+                }),
+                "InstallationRepositories",
+            ),
+        ];
+        for (kind, raw, want_variant) in cases {
+            let payload = ProviderPayload::normalize(
+                &provider,
+                kind,
+                &github_headers(kind, "delivery"),
+                raw.clone(),
+            )
+            .unwrap_or_else(|_| panic!("normalize {kind}"));
+            let serialized = serde_json::to_value(&payload).expect("serialize");
+            let deserialized: ProviderPayload =
+                serde_json::from_value(serialized.clone()).expect("deserialize");
+            let actual_variant = match unwrap_github(deserialized) {
+                GitHubEventPayload::Issues(_) => "Issues",
+                GitHubEventPayload::PullRequest(_) => "PullRequest",
+                GitHubEventPayload::IssueComment(_) => "IssueComment",
+                GitHubEventPayload::PullRequestReview(_) => "PullRequestReview",
+                GitHubEventPayload::Push(_) => "Push",
+                GitHubEventPayload::WorkflowRun(_) => "WorkflowRun",
+                GitHubEventPayload::DeploymentStatus(_) => "DeploymentStatus",
+                GitHubEventPayload::CheckRun(_) => "CheckRun",
+                GitHubEventPayload::CheckSuite(_) => "CheckSuite",
+                GitHubEventPayload::Status(_) => "Status",
+                GitHubEventPayload::MergeGroup(_) => "MergeGroup",
+                GitHubEventPayload::Installation(_) => "Installation",
+                GitHubEventPayload::InstallationRepositories(_) => "InstallationRepositories",
+                GitHubEventPayload::Other(_) => "Other",
+            };
+            assert_eq!(
+                actual_variant, *want_variant,
+                "{kind} round-tripped as {actual_variant}, expected {want_variant}; serialized form: {serialized}"
+            );
+        }
     }
 
     #[test]

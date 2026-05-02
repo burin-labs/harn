@@ -23,7 +23,7 @@ const FIRST_PARTY_CONNECTOR_PACKAGES: &[FirstPartyConnectorPackage] = &[
     FirstPartyConnectorPackage {
         provider: "GitHub",
         package_url: "https://github.com/burin-labs/harn-github-connector",
-        install: "harn add github.com/burin-labs/harn-github-connector@v0.1.0",
+        install: "harn add github.com/burin-labs/harn-github-connector@v0.2.0",
         package_gate: "harn connector test . --provider github",
     },
     FirstPartyConnectorPackage {

@@ -93,7 +93,7 @@ Each first-party connector repo should publish:
 
 | Provider | Package repo | Install | Package gate | Required secrets/scopes | Supported trigger/event types |
 |---|---|---|---|---|---|
-| GitHub | <https://github.com/burin-labs/harn-github-connector> | `harn add github.com/burin-labs/harn-github-connector@v0.1.0` | `harn connector test . --provider github` | Webhook secret; for outbound, GitHub App id, installation id, and private key. App permissions depend on methods: issues, pull requests, contents/metadata, checks, deployments. | `issues`, `pull_request`, `issue_comment`, `pull_request_review`, `push`, `workflow_run`, `deployment_status`, `check_run`; outbound REST/GraphQL escape hatches. |
+| GitHub | <https://github.com/burin-labs/harn-github-connector> | `harn add github.com/burin-labs/harn-github-connector@v0.2.0` | `harn connector test . --provider github` | Webhook secret; for outbound, GitHub App id, installation id, and private key. App permissions depend on methods: issues, pull requests, contents/metadata, checks, deployments. | `issues`, `pull_request`, `issue_comment`, `pull_request_review`, `push`, `workflow_run`, `deployment_status`, `check_run`, `check_suite`, `status`, `merge_group`, `installation`, `installation_repositories`; outbound REST/GraphQL escape hatches. Each event also exposes the connector's stable `github.<event>[.<action>]` topic plus normalized `repo`/`repository` fields. |
 | Slack | <https://github.com/burin-labs/harn-slack-connector> | `harn add github.com/burin-labs/harn-slack-connector@v0.1.0` | `harn connector test . --provider slack` | Signing secret; for outbound, bot token. Typical scopes: `app_mentions:read`, `channels:history`, `reactions:read`, `chat:write`, `reactions:write`, `users:read`, `files:write`. | URL verification, `message`, `app_mention`, `reaction_added`, `app_home_opened`, `assistant_thread_started`; outbound Web API calls. |
 | Linear | <https://github.com/burin-labs/harn-linear-connector> | `harn add github.com/burin-labs/harn-linear-connector@v0.1.0` | `harn connector test . --provider linear` | Webhook signing secret; optional API key/access token for outbound GraphQL. | `Issue`, `Comment`, `IssueLabel`, `Project`, `Cycle`, `Customer`, `CustomerRequest`; outbound GraphQL. |
 | Notion | <https://github.com/burin-labs/harn-notion-connector> | `harn add github.com/burin-labs/harn-notion-connector@v0.1.0` | `harn connector test . --provider notion --run-poll-tick` | Webhook verification token; outbound API token. Notion integration capabilities depend on pages/databases/comments used. | Webhook events such as subscription verification, page updates, comments, data source schema updates; `poll_tick` database/page watchers; outbound Notion API via `notion-sdk-harn`. |
@@ -170,7 +170,7 @@ inside its pure-Harn connector package:
 
 ```toml
 [dependencies]
-harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", rev = "v0.1.0" }
+harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", rev = "v0.2.0" }
 harn-gitlab-connector = { git = "https://github.com/burin-labs/harn-gitlab-connector", rev = "v0.1.0" }
 harn-forgejo-connector = { git = "https://github.com/burin-labs/harn-forgejo-connector", rev = "v0.1.0" }
 

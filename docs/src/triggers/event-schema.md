@@ -52,10 +52,16 @@ still be logged for audit purposes even if the dispatcher rejects them.
 
 The initial `std/triggers` payload aliases are intentionally small. Each
 provider variant exposes a stable normalized surface plus `raw: dict`. GitHub's
-payload is already narrowed into the six MVP event families (`issues`,
-`pull_request`, `issue_comment`, `pull_request_review`, `push`, and
-`workflow_run`) with event-specific top-level fields such as `issue`,
-`pull_request`, `comment`, `review`, `commits`, and `workflow_run`. Slack's
+payload is narrowed into thirteen event families covering the
+[`harn-github-connector`](https://github.com/burin-labs/harn-github-connector)
+v0.2.0 webhook contract — `issues`, `pull_request`, `issue_comment`,
+`pull_request_review`, `push`, `workflow_run`, `deployment_status`,
+`check_run`, `check_suite`, `status`, `merge_group`, `installation`,
+and `installation_repositories` — with event-specific top-level fields
+such as `issue`, `pull_request`, `comment`, `review`, `commits`,
+`workflow_run`, `check_suite_id`, `merge_group_id`,
+`repositories_removed`, plus the connector-promoted `topic`,
+`repository`, and `repo` shared across every variant. Slack's
 payload is narrowed into `Message` (`message.*`), `AppMention`,
 `ReactionAdded`, `AppHomeOpened`, and `AssistantThreadStarted`. Notion's
 payload is narrowed around the current connector landing:

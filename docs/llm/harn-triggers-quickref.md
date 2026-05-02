@@ -67,7 +67,7 @@ Prefer pure-Harn packages for provider business logic. The Rust providers remain
 
 | Provider | Package | Install | Package gate |
 |---|---|---|---|
-| GitHub | <https://github.com/burin-labs/harn-github-connector> | `harn add github.com/burin-labs/harn-github-connector@v0.1.0` | `harn connector test . --provider github` |
+| GitHub | <https://github.com/burin-labs/harn-github-connector> | `harn add github.com/burin-labs/harn-github-connector@v0.2.0` | `harn connector test . --provider github` |
 | Slack | <https://github.com/burin-labs/harn-slack-connector> | `harn add github.com/burin-labs/harn-slack-connector@v0.1.0` | `harn connector test . --provider slack` |
 | Linear | <https://github.com/burin-labs/harn-linear-connector> | `harn add github.com/burin-labs/harn-linear-connector@v0.1.0` | `harn connector test . --provider linear` |
 | Notion | <https://github.com/burin-labs/harn-notion-connector> | `harn add github.com/burin-labs/harn-notion-connector@v0.1.0` | `harn connector test . --provider notion --run-poll-tick` |
