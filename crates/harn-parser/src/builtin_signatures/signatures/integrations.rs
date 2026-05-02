@@ -60,6 +60,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "harn.mcp.roots",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "host_call",
         return_type: None,
     },
@@ -314,6 +318,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "mcp_release",
         return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "mcp_roots",
+        return_type: Some(BuiltinReturn::Named("list")),
     },
     BuiltinSig {
         name: "mcp_resource",

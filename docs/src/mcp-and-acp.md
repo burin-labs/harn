@@ -55,9 +55,11 @@ let prompt = mcp_get_prompt(client, "review", {code: "fn main() {}"})
 ### MCP client support matrix
 
 Harn's MCP client negotiates protocol version `2025-11-25` and advertises
-the `elicitation` and `sampling` client capabilities. It does not advertise
-client-side roots or task capabilities. Servers should therefore treat
-roots and tasks as unavailable when connected to Harn.
+the `elicitation`, `sampling`, and `roots` client capabilities. It answers
+server `roots/list` requests with the resolved project roots for the active
+script and emits `notifications/roots/list_changed` when that root snapshot
+changes. It does not advertise task capabilities, so servers should treat MCP
+tasks as unavailable when connected to Harn.
 
 | Method or feature | Harn as MCP client |
 |---|---|
@@ -67,7 +69,7 @@ roots and tasks as unavailable when connected to Harn.
 | `resources/list`, `resources/read`, `resources/templates/list` | Supported through resource builtins |
 | `prompts/list`, `prompts/get` | Supported through prompt builtins |
 | `completion/complete` | Not exposed as a Harn builtin |
-| `roots/list` | Unsupported; Harn does not advertise roots |
+| `roots/list` | Supported; Harn advertises `roots.listChanged`, serves resolved script/project roots, and exposes the same data through `harn.mcp.roots()` / `mcp_roots()` |
 | `sampling/createMessage` | Supported; Harn advertises sampling and dispatches inbound requests to the host bridge (`capability="mcp"`, `operation="sample"`). Approved requests route to Harn's `llm_call` and return `{role, content, model, stopReason}` to the originating server. Without an installed bridge, requests are declined with a structured `mcp.samplingDeclined` error so servers can fall back gracefully. |
 | `elicitation/create` | Supported; Harn advertises elicitation and dispatches inbound requests to the host bridge (`capability="mcp"`, `operation="elicit"`) |
 | MCP task methods and task-augmented requests | Unsupported; Harn does not advertise task support |

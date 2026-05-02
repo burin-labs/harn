@@ -8,6 +8,8 @@ pub const METHOD_TASKS_RESULT: &str = "tasks/result";
 pub const METHOD_TASKS_LIST: &str = "tasks/list";
 pub const METHOD_TASKS_CANCEL: &str = "tasks/cancel";
 pub const METHOD_TASK_STATUS_NOTIFICATION: &str = "notifications/tasks/status";
+pub const METHOD_ROOTS_LIST: &str = "roots/list";
+pub const METHOD_ROOTS_LIST_CHANGED_NOTIFICATION: &str = "notifications/roots/list_changed";
 pub const RELATED_TASK_META_KEY: &str = "io.modelcontextprotocol/related-task";
 pub const DEFAULT_TASK_POLL_INTERVAL_MS: u64 = 250;
 
@@ -38,12 +40,6 @@ pub const UNSUPPORTED_LATEST_SPEC_METHODS: &[UnsupportedMcpMethod] = &[
         role: "server",
         reason: "Harn resources are read on demand and are not backed by subscription state.",
     },
-    UnsupportedMcpMethod {
-        method: "roots/list",
-        feature: "roots",
-        role: "client",
-        reason: "Harn does not currently expose host root discovery to MCP servers.",
-    },
     // `sampling/createMessage` (client) is supported — handled in
     // `mcp::handle_inbound_client_request` via
     // `mcp_sampling::dispatch_inbound_sampling`, which routes the
@@ -54,6 +50,10 @@ pub const UNSUPPORTED_LATEST_SPEC_METHODS: &[UnsupportedMcpMethod] = &[
     // `elicitation/create` is supported on both roles — handled in
     // `mcp::stdio_call`/`mcp::http_call` (client) and via `mcp_elicit(...)`
     // (server). It is intentionally omitted from this gap list.
+    //
+    // `roots/list` is supported when Harn acts as an MCP client and answers
+    // inbound server-to-client root discovery requests. It is intentionally
+    // omitted from this gap list.
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -202,7 +202,6 @@ mod tests {
             "completion/complete",
             "resources/subscribe",
             "resources/unsubscribe",
-            "roots/list",
         ] {
             let response = unsupported_latest_spec_method_response(json!(1), method)
                 .expect("expected explicit unsupported method");
@@ -220,6 +219,11 @@ mod tests {
         // through the elicitation bus (server) or the host bridge
         // (client) instead of the auto-rejection path.
         assert!(unsupported_latest_spec_method("elicitation/create").is_none());
+    }
+
+    #[test]
+    fn roots_list_is_no_longer_in_the_unsupported_gap_list() {
+        assert!(unsupported_latest_spec_method(METHOD_ROOTS_LIST).is_none());
     }
 
     #[test]

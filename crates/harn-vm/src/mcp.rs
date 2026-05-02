@@ -3,6 +3,7 @@
 //! Supports stdio transport and streamable HTTP-style request/response transport.
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -79,6 +80,30 @@ struct HttpMcpClientInner {
     get_stream_task: Option<tokio::task::JoinHandle<()>>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct McpRoot {
+    path: String,
+    uri: String,
+    name: String,
+}
+
+impl McpRoot {
+    fn protocol_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "uri": self.uri,
+            "name": self.name,
+        })
+    }
+
+    fn script_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "uri": self.uri,
+            "name": self.name,
+            "path": self.path,
+        })
+    }
+}
+
 impl HttpMcpClientInner {
     fn abort_get_stream(&mut self) {
         if let Some(task) = self.get_stream_task.take() {
@@ -92,6 +117,7 @@ impl HttpMcpClientInner {
 pub struct VmMcpClientHandle {
     pub name: String,
     inner: Arc<Mutex<Option<McpClientInner>>>,
+    last_roots: Arc<Mutex<Vec<McpRoot>>>,
 }
 
 impl std::fmt::Debug for VmMcpClientHandle {
@@ -106,6 +132,9 @@ impl VmMcpClientHandle {
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, VmError> {
+        if method != "initialize" {
+            self.notify_roots_list_changed_if_needed().await?;
+        }
         let mut guard = self.inner.lock().await;
         let inner = guard
             .as_mut()
@@ -158,6 +187,22 @@ impl VmMcpClientHandle {
                 }
             }
         }
+    }
+
+    async fn notify_roots_list_changed_if_needed(&self) -> Result<(), VmError> {
+        let roots = current_mcp_roots();
+        let mut last_roots = self.last_roots.lock().await;
+        if *last_roots == roots {
+            return Ok(());
+        }
+
+        self.notify(
+            crate::mcp_protocol::METHOD_ROOTS_LIST_CHANGED_NOTIFICATION,
+            serde_json::json!({}),
+        )
+        .await?;
+        *last_roots = roots;
+        Ok(())
     }
 }
 
@@ -270,6 +315,10 @@ async fn handle_inbound_client_request(
     }
     if method == crate::mcp_sampling::SAMPLING_METHOD {
         return Some(crate::mcp_sampling::dispatch_inbound_sampling(server_name, msg).await);
+    }
+    if method == crate::mcp_protocol::METHOD_ROOTS_LIST {
+        let id = msg.get("id")?.clone();
+        return Some(harn_roots_list_response(id));
     }
     client_request_rejection(msg)
 }
@@ -576,6 +625,9 @@ async fn reinitialize_http_client(inner: &mut HttpMcpClientInner) -> Result<(), 
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {
                 "elicitation": {},
+                "roots": {
+                    "listChanged": true,
+                },
                 "sampling": {},
             },
             "clientInfo": {
@@ -755,6 +807,109 @@ fn client_request_rejection(msg: &serde_json::Value) -> Option<serde_json::Value
         })
 }
 
+fn harn_roots_list_response(id: serde_json::Value) -> serde_json::Value {
+    crate::jsonrpc::response(
+        id,
+        serde_json::json!({
+            "roots": current_mcp_roots()
+                .iter()
+                .map(McpRoot::protocol_json)
+                .collect::<Vec<_>>()
+        }),
+    )
+}
+
+pub(crate) fn current_mcp_roots() -> Vec<McpRoot> {
+    compact_root_paths(current_mcp_root_candidates())
+        .into_iter()
+        .filter_map(|path| {
+            let uri = url::Url::from_file_path(&path).ok()?.to_string();
+            Some(McpRoot {
+                name: root_display_name(&path),
+                path: path.to_string_lossy().into_owned(),
+                uri,
+            })
+        })
+        .collect()
+}
+
+fn current_mcp_root_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(context) = crate::stdlib::process::current_execution_context() {
+        if let Some(path) = non_empty_path(context.worktree_path.as_deref()) {
+            candidates.push(path);
+        }
+        if let Some(cwd) = non_empty_path(context.cwd.as_deref()) {
+            push_project_root_or_path(&mut candidates, cwd);
+        }
+        if let Some(source_dir) = non_empty_path(context.source_dir.as_deref()) {
+            push_project_root_or_path(&mut candidates, source_dir);
+        }
+    } else {
+        push_project_root_or_path(
+            &mut candidates,
+            crate::stdlib::process::execution_root_path(),
+        );
+        push_project_root_or_path(&mut candidates, crate::stdlib::process::source_root_path());
+    }
+
+    if candidates.is_empty() {
+        candidates.push(crate::stdlib::process::execution_root_path());
+    }
+    candidates
+}
+
+fn non_empty_path(raw: Option<&str>) -> Option<PathBuf> {
+    raw.filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from)
+}
+
+fn push_project_root_or_path(candidates: &mut Vec<PathBuf>, path: PathBuf) {
+    let normalized = crate::stdlib::process::normalize_context_path(&path);
+    match crate::stdlib::process::find_project_root(&normalized) {
+        Some(root) => candidates.push(root),
+        None => candidates.push(normalized),
+    }
+}
+
+fn compact_root_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut normalized = paths
+        .into_iter()
+        .map(normalize_root_path)
+        .collect::<Vec<_>>();
+    normalized.sort_by_key(|path| {
+        (
+            path.components().count(),
+            path.to_string_lossy().to_string(),
+        )
+    });
+
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for path in normalized {
+        if roots
+            .iter()
+            .any(|existing| path == *existing || path.starts_with(existing))
+        {
+            continue;
+        }
+        roots.push(path);
+    }
+    roots
+}
+
+fn normalize_root_path(path: PathBuf) -> PathBuf {
+    let absolute = crate::stdlib::process::normalize_context_path(&path);
+    std::fs::canonicalize(&absolute).unwrap_or(absolute)
+}
+
+fn root_display_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| path.display().to_string())
+}
+
 async fn mcp_connect_stdio_impl(
     command: &str,
     args: &[String],
@@ -792,6 +947,7 @@ async fn mcp_connect_stdio_impl(
                 next_id: 1,
             },
         )))),
+        last_roots: Arc::new(Mutex::new(Vec::new())),
     };
 
     initialize_client(&handle).await?;
@@ -818,6 +974,7 @@ async fn mcp_connect_http_impl(spec: &McpServerSpec) -> Result<VmMcpClientHandle
             proxy_server_name: spec.proxy_server_name.clone(),
             get_stream_task: None,
         })))),
+        last_roots: Arc::new(Mutex::new(Vec::new())),
     };
 
     initialize_client(&handle).await?;
@@ -832,6 +989,9 @@ async fn initialize_client(handle: &VmMcpClientHandle) -> Result<(), VmError> {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {
                     "elicitation": {},
+                    "roots": {
+                        "listChanged": true,
+                    },
                     "sampling": {},
                 },
                 "clientInfo": {
@@ -961,6 +1121,10 @@ pub async fn connect_mcp_server_from_json(
 }
 
 pub fn register_mcp_builtins(vm: &mut Vm) {
+    vm.register_builtin("mcp_roots", mcp_roots_builtin);
+    vm.register_builtin("harn.mcp.roots", mcp_roots_builtin);
+    register_harn_mcp_namespace(vm);
+
     vm.register_async_builtin("mcp_connect", |args| async move {
         let command = args.first().map(|a| a.display()).unwrap_or_default();
         if command.is_empty() {
@@ -1350,6 +1514,39 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
     });
 }
 
+fn mcp_roots_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::List(Rc::new(
+        current_mcp_roots()
+            .iter()
+            .map(|root| json_to_vm_value(&root.script_json()))
+            .collect(),
+    )))
+}
+
+fn register_harn_mcp_namespace(vm: &mut Vm) {
+    let mcp_namespace = VmValue::Dict(Rc::new(BTreeMap::from([
+        (
+            "_namespace".to_string(),
+            VmValue::String(Rc::from("harn.mcp")),
+        ),
+        (
+            "roots".to_string(),
+            VmValue::BuiltinRef(Rc::from("harn.mcp.roots")),
+        ),
+    ])));
+    vm.set_global(
+        "harn",
+        VmValue::Dict(Rc::new(BTreeMap::from([
+            ("_namespace".to_string(), VmValue::String(Rc::from("harn"))),
+            (
+                "mcp_roots".to_string(),
+                VmValue::BuiltinRef(Rc::from("harn.mcp.roots")),
+            ),
+            ("mcp".to_string(), mcp_namespace),
+        ]))),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1410,6 +1607,34 @@ mod tests {
         });
 
         (format!("http://{addr}"), response_rx)
+    }
+
+    async fn spawn_recording_http_mcp_server(
+    ) -> (String, mpsc::UnboundedReceiver<serde_json::Value>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let request_tx = request_tx.clone();
+                tokio::spawn(async move {
+                    let Ok((_request_line, _headers, body)) = read_http_request(&mut stream).await
+                    else {
+                        return;
+                    };
+                    if let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) {
+                        let _ = request_tx.send(request);
+                    }
+                    let _ = write_http_empty(&mut stream, "202 Accepted").await;
+                });
+            }
+        });
+
+        (format!("http://{addr}"), request_rx)
     }
 
     async fn handle_mock_http_mcp_connection(
@@ -1638,19 +1863,6 @@ mod tests {
 
     #[test]
     fn client_rejects_unadvertised_server_to_client_requests() {
-        let roots = client_request_rejection(&serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": "roots-1",
-            "method": "roots/list",
-            "params": {}
-        }))
-        .expect("rejection");
-        assert_eq!(roots["error"]["code"], serde_json::json!(-32601));
-        assert_eq!(
-            roots["error"]["data"]["feature"],
-            serde_json::json!("roots")
-        );
-
         let unknown = client_request_rejection(&serde_json::json!({
             "jsonrpc": "2.0",
             "id": "custom-1",
@@ -1660,6 +1872,109 @@ mod tests {
         .expect("rejection");
         assert_eq!(unknown["error"]["code"], serde_json::json!(-32601));
         assert!(unknown["error"].get("data").is_none());
+    }
+
+    #[test]
+    fn current_mcp_roots_prefers_project_root_over_child_cwd() {
+        let root = std::env::temp_dir().join(format!("harn-mcp-roots-{}", uuid::Uuid::now_v7()));
+        let child = root.join("nested");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(root.join("harn.toml"), "[package]\nname = \"roots\"\n").unwrap();
+
+        crate::stdlib::process::set_thread_execution_context(Some(
+            crate::orchestration::RunExecutionRecord {
+                cwd: Some(child.to_string_lossy().into_owned()),
+                source_dir: Some(child.to_string_lossy().into_owned()),
+                ..Default::default()
+            },
+        ));
+
+        let roots = current_mcp_roots();
+        let expected_root = std::fs::canonicalize(&root).unwrap();
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].path, expected_root.to_string_lossy());
+        assert!(roots[0].uri.starts_with("file://"));
+        assert_eq!(
+            roots[0].name,
+            expected_root.file_name().unwrap().to_string_lossy()
+        );
+
+        crate::stdlib::process::reset_process_state();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn handle_inbound_routes_roots_list() {
+        let root = std::env::temp_dir().join(format!("harn-mcp-roots-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&root).unwrap();
+        crate::stdlib::process::set_thread_execution_context(Some(
+            crate::orchestration::RunExecutionRecord {
+                cwd: Some(root.to_string_lossy().into_owned()),
+                ..Default::default()
+            },
+        ));
+
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "roots-1",
+            "method": crate::mcp_protocol::METHOD_ROOTS_LIST,
+        });
+        let response = handle_inbound_client_request("mock", &request)
+            .await
+            .expect("roots/list should produce a response");
+        let expected_root = std::fs::canonicalize(&root).unwrap();
+        assert_eq!(response["id"], serde_json::json!("roots-1"));
+        assert_eq!(response["result"]["roots"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            response["result"]["roots"][0]["uri"],
+            serde_json::json!(url::Url::from_file_path(&expected_root)
+                .unwrap()
+                .to_string())
+        );
+
+        crate::stdlib::process::reset_process_state();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn roots_list_changed_notification_is_sent_once_per_snapshot() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (base_url, mut requests) = spawn_recording_http_mcp_server().await;
+                let handle = VmMcpClientHandle {
+                    name: "mock-http".to_string(),
+                    inner: Arc::new(Mutex::new(Some(McpClientInner::Http(HttpMcpClientInner {
+                        client: reqwest::Client::new(),
+                        url: format!("{base_url}/mcp"),
+                        auth_token: None,
+                        protocol_version: PROTOCOL_VERSION.to_string(),
+                        session_id: None,
+                        next_id: 1,
+                        proxy_server_name: None,
+                        get_stream_task: None,
+                    })))),
+                    last_roots: Arc::new(Mutex::new(Vec::new())),
+                };
+
+                handle.notify_roots_list_changed_if_needed().await.unwrap();
+                let notification = tokio::time::timeout(MCP_TIMEOUT, requests.recv())
+                    .await
+                    .expect("timed out waiting for roots notification")
+                    .expect("mock server closed before notification");
+                assert_eq!(
+                    notification["method"],
+                    serde_json::json!(crate::mcp_protocol::METHOD_ROOTS_LIST_CHANGED_NOTIFICATION)
+                );
+
+                handle.notify_roots_list_changed_if_needed().await.unwrap();
+                assert!(
+                    tokio::time::timeout(std::time::Duration::from_millis(50), requests.recv())
+                        .await
+                        .is_err(),
+                    "unchanged roots should not send another notification"
+                );
+            })
+            .await;
     }
 
     #[tokio::test(flavor = "current_thread")]
