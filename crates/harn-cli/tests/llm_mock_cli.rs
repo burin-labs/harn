@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! In-process coverage of `harn run --llm-mock` / `harn playground --llm-mock`
 //! / `harn eval --llm-mock` LLM-mock fixture wiring.
 //!

@@ -1830,6 +1830,7 @@ MCP servers.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
+| `mcp_roots()` / `harn.mcp.roots()` | none | list | Return the MCP roots Harn exposes to connected servers (`uri`, `name`, `path`) |
 | `mcp_connect(command, args?)` | command: string, args: list | mcp\_client | Spawn an MCP server and perform the initialize handshake |
 | `mcp_list_tools(client)` | client: mcp\_client | list | List available tools from the server |
 | `mcp_call(client, name, arguments?)` | client: mcp\_client, name: string, arguments: dict | string or list | Call a tool and return the result |

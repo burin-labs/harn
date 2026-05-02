@@ -1,0 +1,17 @@
+pipeline default() {
+  let local_roots = harn.mcp.roots()
+  require local_roots.count > 0, "harn.mcp.roots should expose at least one root"
+  require local_roots[0].uri.starts_with("file://"), "root URI should be a file URI"
+  require local_roots[0].path.count > 0, "script root should include a local path"
+  let root = project_root() ?? cwd()
+  let server_path = path_join(root, "conformance/helpers/mcp_roots_server.py")
+  let client = mcp_connect("python3", [server_path])
+  let tools = mcp_list_tools(client)
+  require tools.count == 1, "roots server should expose one report tool"
+  let report = json_parse(mcp_call(client, "roots_report", {}))
+  println(report.roots_capability)
+  println(report.roots_count > 0)
+  println(report.roots[0].uri.starts_with("file://"))
+  println(report.list_changed_count > 0)
+  mcp_disconnect(client)
+}

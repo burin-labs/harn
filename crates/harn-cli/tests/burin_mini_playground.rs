@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! In-process coverage of the `experiments/burin-mini` playground pipelines.
 //!
 //! Tier 1H follow-up (#1130, parent #1106) of the de-flake epic (#1057):
