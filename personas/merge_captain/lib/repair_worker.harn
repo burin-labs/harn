@@ -1,0 +1,371 @@
+// Repair-worker checkpoint dispatcher.
+//
+// This module is the only place in Merge Captain that calls
+// `agent_loop`. The deterministic harness builds a typed
+// `repair_bundle`, the approval gate decides whether the run can
+// proceed without a human, and the post-run validators reject any
+// output that does not satisfy the contract (missing tests, dirty
+// worktree, unexpected write scope, malformed output, unpushed
+// commits). The result is a `repair_run` record that the merge
+// receipt links back to.
+//
+// The dispatcher accepts an optional `executor` closure so tests can
+// stub out the LLM call without touching agent_loop. Callers in
+// production omit it and the default executor uses agent_loop with
+// the bundle prompt + repair_bundle.output_schema().
+import { gate, validate_repair_policy } from "approval"
+import { build, output_schema, validate_bundle } from "repair_bundle"
+import { harness_validate, validate_all } from "repair_validator"
+
+/** Default agent_loop options for a repair worker turn. */
+pub fn default_agent_options() {
+  return {
+    profile: "tool_using",
+    max_iterations: 24,
+    max_nudges: 3,
+    output_validation: "error",
+    schema_retries: 2,
+    output_format: {kind: "json_schema", strict: true},
+  }
+}
+
+/**
+ * Default executor: invoke `agent_loop` with the bundle prompt + a
+ * strict json_schema output format, then parse the JSON. Returns a
+ * record with `{ok, output, raw, agent_loop}` where `output` is the
+ * parsed JSON dict.
+ */
+pub fn default_executor(bundle, options) {
+  let merged = default_agent_options() + options ?? {}
+  let schema = output_schema()
+  let agent_options = merged
+    + {output_schema: schema, output_format: {kind: "json_schema", schema: schema, strict: true}}
+  let result = agent_loop(bundle.prompt, options?.system, agent_options)
+  let raw = result?.text ?? ""
+  let parsed = try {
+    json_parse(raw)
+  }
+  let agent_meta = {
+    status: result?.status,
+    iterations: result?.llm?.iterations,
+    input_tokens: result?.llm?.input_tokens,
+    output_tokens: result?.llm?.output_tokens,
+    transcript_session_id: options?.session_id,
+  }
+  if !is_ok(parsed) {
+    return {
+      ok: false,
+      output: nil,
+      raw: raw,
+      agent_loop: agent_meta,
+      error: "json parse failed: ${to_string(unwrap_err(parsed))}",
+    }
+  }
+  return {ok: true, output: unwrap(parsed), raw: raw, agent_loop: agent_meta}
+}
+
+fn _started() {
+  return now_ms()
+}
+
+fn _empty_output_run(args) {
+  return {
+    _type: "merge_captain.repair_run",
+    version: 1,
+    parent_receipt_ref: args.parent_receipt_ref,
+    bundle: args.bundle,
+    status: args.status,
+    approval_state: args.approval_state,
+    blocking_actions: args.blocking_actions ?? [],
+    agent_loop: args.agent_loop ?? nil,
+    output: nil,
+    validation_errors: args.errors ?? [],
+    raw_text: args.raw_text ?? "",
+    started_at: args.started_at,
+    finished_at: args.finished_at ?? now_ms(),
+  }
+}
+
+/**
+ * Single-checkpoint dispatch. `args` carries:
+ *
+ *   bundle               — the repair bundle (pre-built)
+ *   policy.repair_worker — repo policy block (already with_defaults'd)
+ *   parent_receipt_ref   — link back to the merge receipt
+ *   dry_run              — bool; when true, no LLM call, no validators ran
+ *   executor             — optional closure(bundle, options) -> {ok, output, raw, agent_loop}
+ *   agent_options        — passthrough to executor (model, profile, etc.)
+ *   harness              — optional {enabled, cwd, timeout_ms} for git status check
+ */
+pub fn invoke(args) {
+  let bundle = args.bundle
+  let parent_receipt_ref = args.parent_receipt_ref
+    ?? {sweep_id: "", repo: bundle.repo, pr_number: bundle.pr_number, prior_state: "discovered"}
+  let started_at = _started()
+  let bundle_err = validate_bundle(bundle)
+  if bundle_err != nil {
+    return _empty_output_run(
+      {
+        parent_receipt_ref: parent_receipt_ref,
+        bundle: bundle,
+        status: "bundle_invalid",
+        approval_state: "no_run",
+        errors: [bundle_err],
+        started_at: started_at,
+      },
+    )
+  }
+  let dry_run = args.dry_run ?? true
+  let repair_policy = args.policy?.repair_worker
+  let policy_err = validate_repair_policy(repair_policy)
+  if policy_err != nil {
+    return _empty_output_run(
+      {
+        parent_receipt_ref: parent_receipt_ref,
+        bundle: bundle,
+        status: "policy_invalid",
+        approval_state: "no_run",
+        errors: [policy_err],
+        started_at: started_at,
+      },
+    )
+  }
+  let decision = gate(repair_policy, bundle, dry_run)
+  if !decision.allowed && !dry_run {
+    return _empty_output_run(
+      {
+        parent_receipt_ref: parent_receipt_ref,
+        bundle: bundle,
+        status: "blocked_pending_approval",
+        approval_state: decision.approval_state,
+        blocking_actions: decision.blocking_actions,
+        errors: ["repair worker requires human approval for: ${json_stringify(decision.blocking_actions)}"],
+        started_at: started_at,
+      },
+    )
+  }
+  if dry_run {
+    return _empty_output_run(
+      {
+        parent_receipt_ref: parent_receipt_ref,
+        bundle: bundle,
+        status: "skipped_dry_run",
+        approval_state: "dry_run",
+        started_at: started_at,
+      },
+    )
+  }
+  let executor = args.executor ?? default_executor
+  let exec_result = executor(bundle, args.agent_options ?? {})
+  if !exec_result.ok {
+    return _empty_output_run(
+      {
+        parent_receipt_ref: parent_receipt_ref,
+        bundle: bundle,
+        status: "schema_invalid",
+        approval_state: decision.approval_state,
+        agent_loop: exec_result?.agent_loop,
+        errors: [exec_result?.error ?? "executor returned ok=false"],
+        raw_text: exec_result?.raw ?? "",
+        started_at: started_at,
+      },
+    )
+  }
+  let output = exec_result.output
+  let v = validate_all(bundle, output)
+  if !v.ok {
+    return {
+      _type: "merge_captain.repair_run",
+      version: 1,
+      parent_receipt_ref: parent_receipt_ref,
+      bundle: bundle,
+      status: "validators_failed",
+      approval_state: decision.approval_state,
+      blocking_actions: decision.blocking_actions,
+      agent_loop: exec_result.agent_loop,
+      output: output,
+      validation_errors: v.errors,
+      raw_text: exec_result.raw,
+      started_at: started_at,
+      finished_at: now_ms(),
+    }
+  }
+  let harness_options = args.harness ?? {enabled: false}
+  let h = harness_validate(bundle, output, harness_options)
+  if !h.ok {
+    return {
+      _type: "merge_captain.repair_run",
+      version: 1,
+      parent_receipt_ref: parent_receipt_ref,
+      bundle: bundle,
+      status: "harness_failed",
+      approval_state: decision.approval_state,
+      blocking_actions: decision.blocking_actions,
+      agent_loop: exec_result.agent_loop,
+      output: output,
+      validation_errors: h.errors,
+      raw_text: exec_result.raw,
+      started_at: started_at,
+      finished_at: now_ms(),
+    }
+  }
+  return {
+    _type: "merge_captain.repair_run",
+    version: 1,
+    parent_receipt_ref: parent_receipt_ref,
+    bundle: bundle,
+    status: "completed",
+    approval_state: decision.approval_state,
+    blocking_actions: [],
+    agent_loop: exec_result.agent_loop,
+    output: output,
+    validation_errors: [],
+    raw_text: exec_result.raw,
+    started_at: started_at,
+    finished_at: now_ms(),
+  }
+}
+
+/**
+ * Convenience: build a CI-failure bundle from the merge-captain
+ * observation + policy and dispatch the worker. Used by the
+ * scheduler when it lands on `local_repair`. The bundle's
+ * `approval_required_for` defaults to `["semantic_repair"]` because
+ * the worker's deliverable here is a code change + commit + push
+ * (not a force push, admin merge, release tag, or branch delete).
+ */
+pub fn invoke_for_ci_failure(args) {
+  let observation = args.observation
+  let policy = args.policy
+  let parent = args.parent_receipt_ref
+    ?? {
+    sweep_id: args.sweep_id ?? "",
+    repo: observation.repo,
+    pr_number: observation.number,
+    prior_state: args.prior_state ?? "discovered",
+    classification_reason: args.classification_reason ?? "",
+  }
+  let failing = (observation.failed_required_checks ?? [])
+    .map({ name -> {name: name, conclusion: "failure"} })
+  let bundle = build(
+    {
+      kind: "ci_failure",
+      parent: parent,
+      repo: observation.repo,
+      pr_number: observation.number,
+      base_sha: observation.base_sha ?? "",
+      head_sha: observation.head_sha,
+      base_ref: observation.base_ref,
+      head_ref: observation.head_ref,
+      changed_files: args.changed_files ?? [],
+      failing_checks: failing,
+      failing_check_logs: args.failing_check_logs ?? [],
+      allowed_write_scope: policy?.repair_worker?.allowed_write_scope ?? args.allowed_write_scope ?? [],
+      required_verification: policy.local_verification ?? [],
+      push_target: {remote: "origin", branch: observation.head_ref, force_with_lease: true},
+      approval_required_for: ["semantic_repair"],
+    },
+  )
+  return invoke(
+    {
+      bundle: bundle,
+      policy: policy,
+      parent_receipt_ref: parent,
+      dry_run: args.dry_run ?? true,
+      executor: args.executor,
+      agent_options: args.agent_options,
+      harness: args.harness,
+    },
+  )
+}
+
+/**
+ * Convenience: build a merge-conflict bundle from the merge-captain
+ * observation + policy. The worker's deliverable is a semantic
+ * resolution + commit + push, so `approval_required_for` is
+ * `["semantic_repair", "force_push"]` (force-with-lease is the typical
+ * push for a rewritten conflict).
+ */
+pub fn invoke_for_merge_conflict(args) {
+  let observation = args.observation
+  let policy = args.policy
+  let parent = args.parent_receipt_ref
+    ?? {
+    sweep_id: args.sweep_id ?? "",
+    repo: observation.repo,
+    pr_number: observation.number,
+    prior_state: args.prior_state ?? "discovered",
+    classification_reason: args.classification_reason ?? "",
+  }
+  let bundle = build(
+    {
+      kind: "merge_conflict",
+      parent: parent,
+      repo: observation.repo,
+      pr_number: observation.number,
+      base_sha: observation.base_sha ?? "",
+      head_sha: observation.head_sha,
+      base_ref: observation.base_ref,
+      head_ref: observation.head_ref,
+      changed_files: args.changed_files ?? [],
+      conflict_paths: args.conflict_paths ?? [],
+      allowed_write_scope: policy?.repair_worker?.allowed_write_scope ?? args.allowed_write_scope ?? [],
+      required_verification: policy.local_verification ?? [],
+      push_target: {remote: "origin", branch: observation.head_ref, force_with_lease: true},
+      approval_required_for: ["semantic_repair", "force_push"],
+    },
+  )
+  return invoke(
+    {
+      bundle: bundle,
+      policy: policy,
+      parent_receipt_ref: parent,
+      dry_run: args.dry_run ?? true,
+      executor: args.executor,
+      agent_options: args.agent_options,
+      harness: args.harness,
+    },
+  )
+}
+
+/**
+ * Convenience: build a release-audit bundle (consumer for harn#1146).
+ * The release-harness driver prepares git/changelog facts and asks
+ * for a typed audit. The bundle never pushes (`pushed: false` is
+ * acceptable); approvals default to release_tag + semantic_repair
+ * because the audit can both edit release notes and request a tag.
+ */
+pub fn invoke_for_release_audit(args) {
+  let release_facts = args.release_facts
+  let policy = args.policy
+  let bundle = build(
+    {
+      kind: "release_audit",
+      parent: args.parent_receipt_ref
+        ?? {sweep_id: "", repo: args.repo, pr_number: 0, prior_state: "discovered"},
+      repo: args.repo,
+      pr_number: args.pr_number ?? 0,
+      base_sha: args.base_sha ?? "",
+      head_sha: args.head_sha ?? "",
+      base_ref: args.base_ref ?? "main",
+      head_ref: args.head_ref ?? "",
+      changed_files: args.changed_files ?? [],
+      release_facts: release_facts,
+      allowed_write_scope: policy?.repair_worker?.allowed_write_scope ?? args.allowed_write_scope ?? [],
+      required_verification: policy?.local_verification ?? [],
+      push_target: args.push_target ?? {remote: "origin", branch: args.head_ref ?? "", force_with_lease: false},
+      approval_required_for: args.approval_required_for ?? ["semantic_repair", "release_tag"],
+    },
+  )
+  return invoke(
+    {
+      bundle: bundle,
+      policy: policy,
+      parent_receipt_ref: bundle.parent,
+      dry_run: args.dry_run ?? true,
+      executor: args.executor,
+      agent_options: args.agent_options,
+      harness: args.harness,
+    },
+  )
+}

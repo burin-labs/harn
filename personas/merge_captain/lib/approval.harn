@@ -1,0 +1,121 @@
+// Approval policy gate for repair-worker actions.
+//
+// Repair workers can take a small set of high-blast-radius actions
+// (`semantic_repair`, `force_push`, `admin_merge`, `release_tag`,
+// `branch_delete`). Per-repo policy declares which of those a sweep is
+// allowed to take without first asking a human. This module is pure:
+// it answers `requires_human_for(policy, action_kind, ...)` and
+// surfaces a single `gate(...)` decision the worker dispatcher consumes.
+import { all_action_kinds, is_action_kind } from "repair_bundle"
+
+/** Default approval requirements when policy.repair_worker is missing. */
+pub fn defaults() {
+  return {
+    enabled: false,
+    require_human_for: all_action_kinds(),
+    autopilot_action_kinds: [],
+    pre_approved: false,
+  }
+}
+
+/** Merge per-repo policy.repair_worker on top of the defaults. */
+pub fn with_defaults(repair_policy) {
+  let d = defaults()
+  if repair_policy == nil {
+    return d
+  }
+  return {
+    enabled: repair_policy.enabled ?? d.enabled,
+    require_human_for: repair_policy.require_human_for ?? d.require_human_for,
+    autopilot_action_kinds: repair_policy.autopilot_action_kinds ?? d.autopilot_action_kinds,
+    pre_approved: repair_policy.pre_approved ?? d.pre_approved,
+    model: repair_policy.model,
+    max_iterations: repair_policy.max_iterations,
+    profile: repair_policy.profile,
+    handles_kinds: repair_policy.handles_kinds ?? ["ci_failure"],
+  }
+}
+
+/** True when the per-repo policy allows the worker to handle this kind at all. */
+pub fn handles_kind(repair_policy, kind) {
+  let policy = with_defaults(repair_policy)
+  if !policy.enabled {
+    return false
+  }
+  return policy.handles_kinds.contains(kind)
+}
+
+/** True when human approval is required for the given action_kind. */
+pub fn requires_human_for(repair_policy, action_kind) {
+  if !is_action_kind(action_kind) {
+    return true
+  }
+  let policy = with_defaults(repair_policy)
+  if policy.pre_approved {
+    return false
+  }
+  if policy.autopilot_action_kinds.contains(action_kind) {
+    return false
+  }
+  return policy.require_human_for.contains(action_kind)
+}
+
+/**
+ * Compute the gate decision for a repair bundle. The bundle's
+ * `approval_required_for` lists the actions the bundle expects to
+ * perform (filled in by the dispatcher based on the bundle kind);
+ * we cross-reference that against the repo policy and return:
+ *
+ *   {
+ *     allowed: bool,
+ *     blocking_actions: [string],
+ *     approval_state: "needs_human" | "autopilot" | "pre_approved",
+ *   }
+ */
+pub fn gate(repair_policy, bundle, dry_run) {
+  let policy = with_defaults(repair_policy)
+  if dry_run {
+    return {allowed: true, blocking_actions: [], approval_state: "dry_run"}
+  }
+  if !policy.enabled {
+    return {allowed: false, blocking_actions: bundle.approval_required_for, approval_state: "needs_human"}
+  }
+  if policy.pre_approved {
+    return {allowed: true, blocking_actions: [], approval_state: "pre_approved"}
+  }
+  var blockers = []
+  for action_kind in bundle.approval_required_for {
+    if requires_human_for(repair_policy, action_kind) {
+      blockers = blockers + [action_kind]
+    }
+  }
+  if len(blockers) == 0 {
+    return {allowed: true, blocking_actions: [], approval_state: "autopilot"}
+  }
+  return {allowed: false, blocking_actions: blockers, approval_state: "needs_human"}
+}
+
+/** Validate a repair_worker policy block. Returns nil on success or a string error. */
+pub fn validate_repair_policy(repair_policy) {
+  if repair_policy == nil {
+    return nil
+  }
+  let policy = with_defaults(repair_policy)
+  for kind in policy.require_human_for {
+    if !is_action_kind(kind) {
+      return "repair_worker.require_human_for contains unknown action '${kind}'"
+    }
+  }
+  for kind in policy.autopilot_action_kinds {
+    if !is_action_kind(kind) {
+      return "repair_worker.autopilot_action_kinds contains unknown action '${kind}'"
+    }
+  }
+  for kind in policy.handles_kinds {
+    let canonical = ["ci_failure", "merge_conflict", "release_audit", "flaky_test"]
+    if !canonical.contains(kind) {
+      return "repair_worker.handles_kinds contains unknown bundle kind '${kind}'"
+    }
+  }
+  return nil
+}

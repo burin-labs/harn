@@ -1,0 +1,130 @@
+// Run: harn test personas/merge_captain/tests/approval_test.harn
+import {
+  defaults,
+  gate,
+  handles_kind,
+  requires_human_for,
+  validate_repair_policy,
+  with_defaults,
+} from "../lib/approval"
+
+fn _bundle(approval_required) {
+  return {
+    _type: "merge_captain.repair_bundle",
+    version: 1,
+    kind: "ci_failure",
+    approval_required_for: approval_required,
+  }
+}
+
+pipeline test_defaults_disabled(task) {
+  let d = defaults()
+  assert_eq(d.enabled, false)
+  // require_human_for is the full action-kinds list by default.
+  assert_eq(len(d.require_human_for), 5)
+  assert_eq(len(d.autopilot_action_kinds), 0)
+  assert_eq(d.pre_approved, false)
+}
+
+pipeline test_handles_kind_respects_enabled(task) {
+  assert(!handles_kind(nil, "ci_failure"))
+  assert(!handles_kind({enabled: false, handles_kinds: ["ci_failure"]}, "ci_failure"))
+  assert(handles_kind({enabled: true, handles_kinds: ["ci_failure"]}, "ci_failure"))
+  assert(!handles_kind({enabled: true, handles_kinds: ["merge_conflict"]}, "ci_failure"))
+}
+
+pipeline test_requires_human_pre_approved_short_circuits(task) {
+  let policy = {enabled: true, pre_approved: true}
+  assert(!requires_human_for(policy, "semantic_repair"))
+  assert(!requires_human_for(policy, "force_push"))
+}
+
+pipeline test_requires_human_autopilot_overrides_human_list(task) {
+  let policy = {
+    enabled: true,
+    require_human_for: ["semantic_repair", "force_push"],
+    autopilot_action_kinds: ["semantic_repair"],
+  }
+  // semantic_repair is overridden into autopilot.
+  assert(!requires_human_for(policy, "semantic_repair"))
+  // force_push remains gated.
+  assert(requires_human_for(policy, "force_push"))
+}
+
+pipeline test_requires_human_unknown_action_fails_closed(task) {
+  let policy = {enabled: true}
+  assert(requires_human_for(policy, "drop_table"))
+}
+
+pipeline test_gate_dry_run_short_circuits(task) {
+  let policy = {enabled: false}
+  let bundle = _bundle(["semantic_repair"])
+  let decision = gate(policy, bundle, true)
+  assert(decision.allowed)
+  assert_eq(decision.approval_state, "dry_run")
+}
+
+pipeline test_gate_disabled_blocks_with_human(task) {
+  let bundle = _bundle(["semantic_repair", "force_push"])
+  let decision = gate(nil, bundle, false)
+  assert(!decision.allowed)
+  assert_eq(decision.approval_state, "needs_human")
+  assert_eq(len(decision.blocking_actions), 2)
+}
+
+pipeline test_gate_pre_approved_allows(task) {
+  let policy = {enabled: true, pre_approved: true}
+  let bundle = _bundle(["semantic_repair", "force_push"])
+  let decision = gate(policy, bundle, false)
+  assert(decision.allowed)
+  assert_eq(decision.approval_state, "pre_approved")
+  assert_eq(len(decision.blocking_actions), 0)
+}
+
+pipeline test_gate_autopilot_partial_blocks(task) {
+  let policy = {
+    enabled: true,
+    require_human_for: ["semantic_repair", "force_push"],
+    autopilot_action_kinds: ["semantic_repair"],
+  }
+  let bundle = _bundle(["semantic_repair", "force_push"])
+  let decision = gate(policy, bundle, false)
+  // semantic_repair is autopilot but force_push still blocks.
+  assert(!decision.allowed)
+  assert_eq(decision.approval_state, "needs_human")
+  assert(decision.blocking_actions.contains("force_push"))
+  assert(!decision.blocking_actions.contains("semantic_repair"))
+}
+
+pipeline test_gate_autopilot_full_passes(task) {
+  let policy = {enabled: true, require_human_for: ["force_push"], autopilot_action_kinds: ["semantic_repair"]}
+  let bundle = _bundle(["semantic_repair"])
+  let decision = gate(policy, bundle, false)
+  assert(decision.allowed)
+  assert_eq(decision.approval_state, "autopilot")
+}
+
+pipeline test_validate_rejects_unknown_action_kind(task) {
+  let err = validate_repair_policy({enabled: true, require_human_for: ["force_push", "drop_db"]})
+  assert(err != nil)
+  assert(err.contains("require_human_for"))
+}
+
+pipeline test_validate_rejects_unknown_handles_kind(task) {
+  let err = validate_repair_policy({enabled: true, handles_kinds: ["wat"]})
+  assert(err != nil)
+  assert(err.contains("handles_kinds"))
+}
+
+pipeline test_validate_accepts_nil(task) {
+  assert_eq(validate_repair_policy(nil), nil)
+}
+
+pipeline test_with_defaults_preserves_fields(task) {
+  let merged = with_defaults({enabled: true, pre_approved: true, model: "gpt-4o"})
+  assert_eq(merged.enabled, true)
+  assert_eq(merged.pre_approved, true)
+  assert_eq(merged.model, "gpt-4o")
+  // handles_kinds defaults to ci_failure when omitted.
+  assert(merged.handles_kinds.contains("ci_failure"))
+}

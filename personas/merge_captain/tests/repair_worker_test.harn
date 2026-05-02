@@ -1,0 +1,282 @@
+// Run: harn test personas/merge_captain/tests/repair_worker_test.harn
+//
+// Exercises the dispatcher's branches without ever calling agent_loop:
+// every test passes a stub `executor` closure so the worker contract is
+// validated end-to-end (build bundle → gate → executor → validators →
+// run record) on pure Harn.
+import { build } from "../lib/repair_bundle"
+import {
+  invoke,
+  invoke_for_ci_failure,
+  invoke_for_merge_conflict,
+  invoke_for_release_audit,
+} from "../lib/repair_worker"
+
+fn _ok_output() {
+  return {
+    diagnosis: "fixed",
+    files_changed: [{path: "src/foo.rs", action: "modified"}],
+    tests_run: [{name: "tests", command: "make test", status: "ok", exit_code: 0}],
+    commits_created: [{sha: "abc", subject: "fix"}],
+    push_result: {pushed: true, ref: "feat", sha: "abc", force_with_lease: true},
+    residual_risk: "none",
+  }
+}
+
+fn _stub_executor(output) {
+  return { _bundle, _options -> {
+    ok: true,
+    output: output,
+    raw: "stub",
+    agent_loop: {status: "completed", iterations: 1, input_tokens: 100, output_tokens: 50},
+  } }
+}
+
+fn _failing_executor(error) {
+  return { _bundle, _options -> {ok: false, output: nil, raw: "garbage", error: error, agent_loop: {status: "error"}} }
+}
+
+fn _ci_bundle() {
+  return build(
+    {
+      kind: "ci_failure",
+      repo: "x/y",
+      pr_number: 7,
+      head_sha: "head",
+      head_ref: "feat",
+      failing_checks: [{name: "ci", conclusion: "failure"}],
+      allowed_write_scope: ["src/**"],
+      required_verification: [{name: "tests", command: "make test"}],
+      approval_required_for: ["semantic_repair"],
+    },
+  )
+}
+
+fn _autopilot_policy() {
+  return {
+    repair_worker: {
+      enabled: true,
+      handles_kinds: ["ci_failure", "merge_conflict"],
+      autopilot_action_kinds: ["semantic_repair", "force_push"],
+      require_human_for: [],
+    },
+  }
+}
+
+fn _human_required_policy() {
+  return {
+    repair_worker: {enabled: true, handles_kinds: ["ci_failure"], require_human_for: ["semantic_repair"]},
+  }
+}
+
+pipeline test_dry_run_skips_executor(task) {
+  var calls = 0
+  let executor = { _b, _o ->
+    calls = calls + 1
+    {ok: true, output: _ok_output(), raw: "should_not_run"}
+  }
+  let run = invoke(
+    {
+      bundle: _ci_bundle(),
+      policy: _autopilot_policy(),
+      parent_receipt_ref: {sweep_id: "s", repo: "x/y", pr_number: 7, prior_state: "discovered"},
+      dry_run: true,
+      executor: executor,
+    },
+  )
+  assert_eq(run.status, "skipped_dry_run")
+  assert_eq(run.approval_state, "dry_run")
+  assert_eq(run.output, nil)
+  assert_eq(calls, 0)
+}
+
+pipeline test_blocked_when_human_approval_required(task) {
+  let run = invoke(
+    {
+      bundle: _ci_bundle(),
+      policy: _human_required_policy(),
+      parent_receipt_ref: {sweep_id: "s", repo: "x/y", pr_number: 7, prior_state: "discovered"},
+      dry_run: false,
+      executor: _stub_executor(_ok_output()),
+    },
+  )
+  assert_eq(run.status, "blocked_pending_approval")
+  assert_eq(run.approval_state, "needs_human")
+  assert(run.blocking_actions.contains("semantic_repair"))
+  // Executor never ran, so output is nil.
+  assert_eq(run.output, nil)
+}
+
+pipeline test_completed_run_attaches_output(task) {
+  let run = invoke(
+    {
+      bundle: _ci_bundle(),
+      policy: _autopilot_policy(),
+      parent_receipt_ref: {sweep_id: "s", repo: "x/y", pr_number: 7, prior_state: "discovered"},
+      dry_run: false,
+      executor: _stub_executor(_ok_output()),
+    },
+  )
+  assert_eq(run.status, "completed")
+  assert_eq(run.approval_state, "autopilot")
+  assert_eq(len(run.validation_errors), 0)
+  assert_eq(run.output.diagnosis, "fixed")
+  assert_eq(run.agent_loop.status, "completed")
+  assert_eq(run.agent_loop.iterations, 1)
+}
+
+pipeline test_schema_invalid_when_executor_fails(task) {
+  let run = invoke(
+    {
+      bundle: _ci_bundle(),
+      policy: _autopilot_policy(),
+      parent_receipt_ref: {sweep_id: "s", repo: "x/y", pr_number: 7, prior_state: "discovered"},
+      dry_run: false,
+      executor: _failing_executor("syntax error"),
+    },
+  )
+  assert_eq(run.status, "schema_invalid")
+  assert_eq(run.output, nil)
+  assert(run.validation_errors[0].contains("syntax error"))
+  assert_eq(run.raw_text, "garbage")
+}
+
+pipeline test_validators_failed_when_output_violates_contract(task) {
+  let bad_output = _ok_output() + {files_changed: [{path: "secrets/key.pem", action: "created"}]}
+  let run = invoke(
+    {
+      bundle: _ci_bundle(),
+      policy: _autopilot_policy(),
+      parent_receipt_ref: {sweep_id: "s", repo: "x/y", pr_number: 7, prior_state: "discovered"},
+      dry_run: false,
+      executor: _stub_executor(bad_output),
+    },
+  )
+  assert_eq(run.status, "validators_failed")
+  assert(run.validation_errors[0].contains("unexpected write scope"))
+  // Output is preserved so a reviewer can inspect what the worker tried.
+  assert_eq(run.output.diagnosis, "fixed")
+}
+
+pipeline test_bundle_invalid_short_circuits(task) {
+  let bad_bundle = build(
+    {
+      kind: "ci_failure",
+      repo: "",
+      failing_checks: [{name: "ci", conclusion: "failure"}],
+      allowed_write_scope: ["src/**"],
+    },
+  )
+  let run = invoke(
+    {
+      bundle: bad_bundle,
+      policy: _autopilot_policy(),
+      dry_run: false,
+      executor: _stub_executor(_ok_output()),
+    },
+  )
+  assert_eq(run.status, "bundle_invalid")
+  assert(run.validation_errors[0].contains("repo"))
+}
+
+pipeline test_invoke_for_ci_failure_builds_correct_bundle(task) {
+  let observation = {
+    repo: "x/y",
+    number: 7,
+    head_sha: "head",
+    head_ref: "feat",
+    base_ref: "main",
+    failed_required_checks: ["ci / rust", "ci / portal"],
+  }
+  let policy = _autopilot_policy() + {local_verification: [{name: "tests", command: "make test"}]}
+  let run = invoke_for_ci_failure(
+    {
+      observation: observation,
+      policy: policy,
+      sweep_id: "s",
+      dry_run: true,
+      allowed_write_scope: ["src/**", "tests/**"],
+    },
+  )
+  assert_eq(run.status, "skipped_dry_run")
+  let b = run.bundle
+  assert_eq(b.kind, "ci_failure")
+  assert_eq(b.repo, "x/y")
+  assert_eq(b.pr_number, 7)
+  assert_eq(len(b.failing_checks), 2)
+  assert_eq(b.required_verification[0].command, "make test")
+  assert(b.approval_required_for.contains("semantic_repair"))
+  assert(!b.approval_required_for.contains("force_push"))
+  assert_eq(b.push_target.branch, "feat")
+}
+
+pipeline test_invoke_for_merge_conflict_marks_force_push(task) {
+  let observation = {
+    repo: "x/y",
+    number: 8,
+    head_sha: "h",
+    head_ref: "feat",
+    base_ref: "main",
+    failed_required_checks: [],
+  }
+  let policy = _autopilot_policy() + {local_verification: [{name: "tests", command: "make test"}]}
+  let run = invoke_for_merge_conflict(
+    {
+      observation: observation,
+      policy: policy,
+      sweep_id: "s",
+      dry_run: true,
+      conflict_paths: ["src/lib.rs"],
+      allowed_write_scope: ["src/**"],
+    },
+  )
+  assert_eq(run.status, "skipped_dry_run")
+  let b = run.bundle
+  assert_eq(b.kind, "merge_conflict")
+  assert(b.conflict_paths.contains("src/lib.rs"))
+  assert(b.approval_required_for.contains("semantic_repair"))
+  assert(b.approval_required_for.contains("force_push"))
+}
+
+pipeline test_invoke_for_release_audit_builds_bundle(task) {
+  let release_facts = {
+    tag: "v0.7.54",
+    commits_in_range: [{sha: "abc", subject: "feat: foo", author: "x"}],
+    changelog_path: "CHANGELOG.md",
+    changelog_excerpt: "## Unreleased",
+  }
+  let run = invoke_for_release_audit(
+    {
+      repo: "burin-labs/harn",
+      head_ref: "main",
+      release_facts: release_facts,
+      policy: _autopilot_policy() + {local_verification: []},
+      dry_run: true,
+      allowed_write_scope: ["CHANGELOG.md"],
+    },
+  )
+  assert_eq(run.status, "skipped_dry_run")
+  let b = run.bundle
+  assert_eq(b.kind, "release_audit")
+  assert_eq(b.release_facts.tag, "v0.7.54")
+  assert(b.approval_required_for.contains("release_tag"))
+  // Release audits do not force-push by default.
+  assert_eq(b.push_target.force_with_lease, false)
+}
+
+pipeline test_run_record_is_versioned(task) {
+  let run = invoke(
+    {
+      bundle: _ci_bundle(),
+      policy: _autopilot_policy(),
+      parent_receipt_ref: {sweep_id: "s", repo: "x/y", pr_number: 7, prior_state: "discovered"},
+      dry_run: false,
+      executor: _stub_executor(_ok_output()),
+    },
+  )
+  assert_eq(run._type, "merge_captain.repair_run")
+  assert_eq(run.version, 1)
+  assert(run.started_at <= run.finished_at)
+  assert_eq(run.parent_receipt_ref.sweep_id, "s")
+  assert_eq(run.parent_receipt_ref.repo, "x/y")
+}

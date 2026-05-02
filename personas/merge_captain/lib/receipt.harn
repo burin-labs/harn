@@ -19,6 +19,11 @@ pub fn build_receipt(args) {
   let dry_run = args.dry_run ?? true
   let approval = approval_state(policy, classification, dry_run)
   let evidence = evidence_payload(observation, classification)
+  let repair_run_summary = if args.repair_run != nil {
+    summarize_repair_run(args.repair_run)
+  } else {
+    nil
+  }
   return {
     _type: "merge_receipt",
     version: 1,
@@ -36,6 +41,7 @@ pub fn build_receipt(args) {
     commands_run: commands,
     checks_observed: observation.checks,
     final_outcome: outcome,
+    repair_run: repair_run_summary,
     policy_summary: {
       merge_method: policy.merge_method,
       merge_queue_enabled: policy.merge_queue_enabled,
@@ -43,6 +49,46 @@ pub fn build_receipt(args) {
       blocking_labels: policy.blocking_labels,
       required_checks: policy.required_checks,
     },
+  }
+}
+
+/**
+ * Compress a `merge_captain.repair_run` record into the linkage shape
+ * carried inside a merge receipt. We keep the bundle metadata, the
+ * agent_loop summary, and the validation outcome — enough for an
+ * auditor to retrace the checkpoint without dumping the whole prompt.
+ */
+pub fn summarize_repair_run(run) {
+  if run == nil {
+    return nil
+  }
+  let output = run.output
+  return {
+    _type: "merge_captain.repair_run_link",
+    version: 1,
+    parent_receipt_ref: run.parent_receipt_ref,
+    bundle_kind: run.bundle?.kind,
+    bundle_repo: run.bundle?.repo,
+    bundle_pr_number: run.bundle?.pr_number,
+    approval_state: run.approval_state,
+    blocking_actions: run.blocking_actions ?? [],
+    status: run.status,
+    validation_errors: run.validation_errors ?? [],
+    agent_loop: run.agent_loop,
+    output_summary: if output != nil {
+      {
+        diagnosis: output.diagnosis,
+        files_changed_count: len(output.files_changed ?? []),
+        tests_run_count: len(output.tests_run ?? []),
+        commits_created_count: len(output.commits_created ?? []),
+        pushed: output.push_result?.pushed ?? false,
+        residual_risk: output.residual_risk,
+      }
+    } else {
+      nil
+    },
+    started_at: run.started_at,
+    finished_at: run.finished_at,
   }
 }
 

@@ -189,3 +189,174 @@ pipeline test_failing_ci_with_local_verify_runs_dry(task) {
   let local_results = cmd.results
   assert_eq(local_results[0].status, "skipped_dry_run")
 }
+
+fn _stub_repair_executor(output) {
+  return { _bundle, _options -> {
+    ok: true,
+    output: output,
+    raw: "stub",
+    agent_loop: {status: "completed", iterations: 1, input_tokens: 50, output_tokens: 25},
+  } }
+}
+
+fn _ok_repair_output() {
+  return {
+    diagnosis: "ci flake repaired",
+    files_changed: [{path: "src/foo.rs", action: "modified"}],
+    tests_run: [{name: "tests", command: "true", status: "ok", exit_code: 0}],
+    commits_created: [{sha: "abc", subject: "fix flake"}],
+    push_result: {pushed: true, ref: "feat-1", sha: "abc", force_with_lease: true},
+    residual_risk: "none",
+  }
+}
+
+pipeline test_repair_worker_dispatch_attaches_run_to_receipt(task) {
+  let policy_with_worker = with_defaults(
+    {
+      repo: _default_repo(),
+      merge_queue_enabled: true,
+      required_checks: ["ci"],
+      local_verification: [{name: "tests", command: "true"}],
+      repair_worker: {
+        enabled: true,
+        handles_kinds: ["ci_failure"],
+        autopilot_action_kinds: ["semantic_repair"],
+        require_human_for: [],
+      },
+    },
+  )
+  let snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {["1"]: _fail_check()})
+  let handle = _open_handle("repair-worker-attach")
+  let summary = sweep(
+    {
+      adapter: fixture_adapter(snapshot),
+      policies: [policy_with_worker],
+      checkpoint_handle: handle,
+      dry_run: false,
+      sweep_id: "test-repair-attach",
+      repair_executor: _stub_repair_executor(_ok_repair_output()),
+      repair_extras_for: { _obs -> {allowed_write_scope: ["src/**"]} },
+    },
+  )
+  assert_eq(summary.pr_count, 1)
+  let receipt = summary.receipts[0]
+  // The classifier still says local_repair / run_local_verification —
+  // the scheduler upgrades the action transparently and records it as
+  // run_repair_worker in the commands list.
+  assert_eq(receipt.classification.state, "local_repair")
+  assert_eq(receipt.classification.action, "run_local_verification")
+  assert_eq(len(receipt.commands_run), 1)
+  let cmd = receipt.commands_run[0]
+  assert_eq(cmd.action, "run_repair_worker")
+  assert_eq(cmd.bundle_kind, "ci_failure")
+  assert_eq(cmd.status, "completed")
+  assert_eq(cmd.approval_state, "autopilot")
+  assert_eq(cmd.output_summary.pushed, true)
+  // The repair_run linkage is on the receipt itself for auditability.
+  assert(receipt.repair_run != nil)
+  assert_eq(receipt.repair_run._type, "merge_captain.repair_run_link")
+  assert_eq(receipt.repair_run.bundle_kind, "ci_failure")
+  assert_eq(receipt.repair_run.bundle_pr_number, 1)
+  assert_eq(receipt.repair_run.status, "completed")
+  assert_eq(receipt.final_outcome, "repair_worker_completed")
+}
+
+pipeline test_repair_worker_blocked_when_human_required(task) {
+  let policy = with_defaults(
+    {
+      repo: _default_repo(),
+      merge_queue_enabled: true,
+      required_checks: ["ci"],
+      local_verification: [{name: "tests", command: "true"}],
+      repair_worker: {enabled: true, handles_kinds: ["ci_failure"], require_human_for: ["semantic_repair"]},
+    },
+  )
+  let snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {["1"]: _fail_check()})
+  let handle = _open_handle("repair-worker-blocked")
+  var executor_calls = 0
+  let executor = { _bundle, _options ->
+    executor_calls = executor_calls + 1
+    {ok: true, output: _ok_repair_output(), raw: "should_not_run"}
+  }
+  let summary = sweep(
+    {
+      adapter: fixture_adapter(snapshot),
+      policies: [policy],
+      checkpoint_handle: handle,
+      dry_run: false,
+      sweep_id: "test-repair-blocked",
+      repair_executor: executor,
+      repair_extras_for: { _obs -> {allowed_write_scope: ["src/**"]} },
+    },
+  )
+  let receipt = summary.receipts[0]
+  let cmd = receipt.commands_run[0]
+  assert_eq(cmd.status, "blocked_pending_approval")
+  assert(cmd.blocking_actions.contains("semantic_repair"))
+  assert_eq(executor_calls, 0)
+  assert_eq(receipt.repair_run.status, "blocked_pending_approval")
+}
+
+pipeline test_repair_worker_disabled_falls_back_to_local_verify(task) {
+  // Policy without repair_worker block keeps the existing path working.
+  let policy = with_defaults(
+    {
+      repo: _default_repo(),
+      merge_queue_enabled: true,
+      required_checks: ["ci"],
+      local_verification: [{name: "tests", command: "true"}],
+    },
+  )
+  let snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {["1"]: _fail_check()})
+  let handle = _open_handle("repair-worker-disabled")
+  let summary = sweep(
+    {
+      adapter: fixture_adapter(snapshot),
+      policies: [policy],
+      checkpoint_handle: handle,
+      dry_run: true,
+      sweep_id: "test-repair-disabled",
+    },
+  )
+  let receipt = summary.receipts[0]
+  let cmd = receipt.commands_run[0]
+  assert_eq(cmd.action, "run_local_verification")
+  assert_eq(receipt.repair_run, nil)
+}
+
+pipeline test_repair_worker_validators_fail_writes_outside_scope(task) {
+  let policy = with_defaults(
+    {
+      repo: _default_repo(),
+      merge_queue_enabled: true,
+      required_checks: ["ci"],
+      local_verification: [{name: "tests", command: "true"}],
+      repair_worker: {
+        enabled: true,
+        handles_kinds: ["ci_failure"],
+        autopilot_action_kinds: ["semantic_repair"],
+        require_human_for: [],
+      },
+    },
+  )
+  let snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {["1"]: _fail_check()})
+  let handle = _open_handle("repair-worker-violations")
+  let bad_output = _ok_repair_output() + {files_changed: [{path: "secrets/key.pem", action: "created"}]}
+  let summary = sweep(
+    {
+      adapter: fixture_adapter(snapshot),
+      policies: [policy],
+      checkpoint_handle: handle,
+      dry_run: false,
+      sweep_id: "test-repair-violations",
+      repair_executor: _stub_repair_executor(bad_output),
+      repair_extras_for: { _obs -> {allowed_write_scope: ["src/**"]} },
+    },
+  )
+  let receipt = summary.receipts[0]
+  let cmd = receipt.commands_run[0]
+  assert_eq(cmd.status, "validators_failed")
+  assert_eq(receipt.repair_run.status, "validators_failed")
+  assert(receipt.repair_run.validation_errors[0].contains("unexpected write scope"))
+  assert_eq(receipt.final_outcome, "repair_worker_validators_failed")
+}

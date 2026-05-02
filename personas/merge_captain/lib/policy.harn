@@ -2,6 +2,8 @@
 //
 // Policies are simple JSON documents loaded from disk. This module
 // validates the shape, applies defaults, and exposes typed accessors.
+import { validate_repair_policy } from "approval"
+
 /** Default policy values for fields the user can omit. */
 pub fn defaults() {
   return {
@@ -17,6 +19,7 @@ pub fn defaults() {
     bump_after_merge: nil,
     autopilot_states: ["queued", "waiting_checks"],
     require_human_for: ["blocked", "local_repair"],
+    repair_worker: nil,
   }
 }
 
@@ -38,6 +41,7 @@ pub fn with_defaults(policy) {
     bump_after_merge: policy.bump_after_merge ?? base.bump_after_merge,
     autopilot_states: policy.autopilot_states ?? base.autopilot_states,
     require_human_for: policy.require_human_for ?? base.require_human_for,
+    repair_worker: policy.repair_worker ?? base.repair_worker,
   }
 }
 
@@ -60,6 +64,10 @@ pub fn validate(policy) {
     if cmd.command == nil || len(to_string(cmd.command)) == 0 {
       return "policy.local_verification[].command is required"
     }
+  }
+  let repair_err = validate_repair_policy(policy.repair_worker)
+  if repair_err != nil {
+    return "policy.${repair_err}"
   }
   return nil
 }
