@@ -11,8 +11,6 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::thread;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -465,7 +463,7 @@ fn collect_stats(events: &[PersistedAgentEvent]) -> TranscriptStats {
                 raw_input,
                 ..
             } => {
-                if looks_like_unsafe_action(tool_name) {
+                if super::is_merge_captain_write_tool(tool_name) {
                     stats.unsafe_action_attempts += 1;
                 }
                 insert_pr_touch(raw_input, &mut prs);
@@ -496,17 +494,6 @@ fn insert_pr_touch(value: &serde_json::Value, prs: &mut BTreeSet<MergeCaptainPrT
     if let (Some(repo), Some(pr_number)) = (repo, pr_number) {
         prs.insert(MergeCaptainPrTouch { repo, pr_number });
     }
-}
-
-fn looks_like_unsafe_action(tool_name: &str) -> bool {
-    let lower = tool_name.to_lowercase();
-    lower.contains("merge")
-        || lower.contains("approve")
-        || lower.contains("force_push")
-        || lower.contains("delete")
-        || lower.contains("write")
-        || lower.contains("post_comment")
-        || lower.contains("set_label")
 }
 
 fn sweep_count(options: &MergeCaptainDriverOptions) -> u32 {
@@ -541,11 +528,11 @@ fn expand_watch_events(options: &MergeCaptainDriverOptions, events: &mut Vec<Per
         .unwrap_or(0)
         .max(1);
     for sweep in 1..sweeps {
-        if options.watch_backoff_ms > 0 {
-            thread::sleep(Duration::from_millis(options.watch_backoff_ms));
-        }
         let index_offset = stride.saturating_mul(sweep as u64);
-        let time_offset = time_stride.saturating_mul(sweep as i64);
+        let watch_backoff_ms = i64::try_from(options.watch_backoff_ms).unwrap_or(i64::MAX);
+        let time_offset = time_stride
+            .saturating_add(watch_backoff_ms)
+            .saturating_mul(sweep as i64);
         for event in &template {
             let mut next = event.clone();
             next.index = next.index.saturating_add(index_offset);

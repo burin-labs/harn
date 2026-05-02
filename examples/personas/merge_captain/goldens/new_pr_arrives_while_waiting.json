@@ -1,0 +1,49 @@
+{
+  "_type": "merge_captain_golden",
+  "scenario": "new_pr_arrives_while_waiting",
+  "description": "A new PR arrives while another PR is checkpointed waiting for checks. Merge Captain preserves the waiting checkpoint and triages the new PR once.",
+  "max_model_calls": 1,
+  "max_tool_calls": 3,
+  "max_repeat": 1,
+  "require_approval_for": [
+    {"glob": "*merge*"},
+    {"glob": "*force_push*"}
+  ],
+  "forbidden_actions": [
+    {"glob": "*merge_pull_request*"}
+  ],
+  "expected_state_transitions": [
+    "load_waiting_checkpoint",
+    "observe_new_pr_event",
+    "intake_new_pr",
+    "preserve_waiting_checkpoint",
+    "wait_for_new_pr_checks"
+  ],
+  "state_steps": [
+    {
+      "step": "load_waiting_checkpoint",
+      "tools": [{"glob": "*checkpoint_load_waiting_pr*"}],
+      "required": true
+    },
+    {
+      "step": "observe_new_pr_event",
+      "tools": [{"glob": "*events_drain*"}],
+      "required": true
+    },
+    {
+      "step": "intake_new_pr",
+      "tools": [{"glob": "*pull_request_get*"}],
+      "required": true
+    },
+    {
+      "step": "preserve_waiting_checkpoint",
+      "plan_fields": ["preserve_waiting_checkpoint"],
+      "required": true
+    },
+    {
+      "step": "wait_for_new_pr_checks",
+      "plan_fields": ["wait_reason"],
+      "required": true
+    }
+  ]
+}

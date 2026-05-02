@@ -10,6 +10,12 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Merge Captain fake GitHub/fake git conformance suite (#1012).** Expanded the deterministic
+  Merge Captain fixture pack with pending-check, clean-rebase, merge-queue entry, merge-group
+  failure, failing-CI repair, new-PR-arrival, downstream version-bump, force-with-lease mismatch,
+  and release-harness crystallization scenarios. Goldens can now pin exact state-transition
+  sequences so CI catches drift before a captain touches live repos.
+
 - **ACP mode config options follow the current protocol (#897).** The ACP adapter now exposes
   session modes through preferred
   [session config options](https://agentclientprotocol.com/protocol/session-config-options) while

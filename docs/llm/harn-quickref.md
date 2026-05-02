@@ -63,6 +63,9 @@ harn merge-captain run --backend mock examples/merge_captain/playground_3repos \
 harn merge-captain run --backend replay \
   examples/personas/merge_captain/transcripts/green_pr.jsonl \
   --once --no-stdout
+
+# Run the in-process fake GitHub/fake git golden-transition suite.
+cargo test -p harn-cli --test merge_captain_cli issue_1012
 ```
 
 Backends:
