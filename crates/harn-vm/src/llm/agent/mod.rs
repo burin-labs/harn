@@ -1,5 +1,6 @@
 use std::rc::Rc;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, Condvar, LazyLock, Mutex};
+use std::time::Duration;
 
 use crate::agent_events::{self, AgentEvent, AgentEventSink};
 use crate::value::{VmError, VmValue};
@@ -56,6 +57,12 @@ type SessionEndHook = Arc<dyn Fn(&str) + Send + Sync>;
 /// and the thread-local `PENDING_FEEDBACK` at each preflight boundary.
 static GLOBAL_PENDING_FEEDBACK: LazyLock<Mutex<Vec<(String, String, String)>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
+/// Paired notifier so test helpers can wait for new entries without
+/// polling `Instant::now()` + `thread::sleep`. `push_pending_feedback_global`
+/// notifies after pushing; `wait_for_global_pending_feedback` parks on
+/// this condvar with a timeout. Production drain paths don't observe it
+/// because the turn-loop already runs at every preflight boundary.
+static GLOBAL_PENDING_FEEDBACK_CV: LazyLock<Condvar> = LazyLock::new(Condvar::new);
 
 /// Registry of hooks called when an agent-loop session ends (normally or via
 /// budget exhaustion). Each hook receives the session_id so it can release
@@ -188,6 +195,46 @@ pub fn push_pending_feedback_global(session_id: &str, kind: &str, content: &str)
             kind.to_string(),
             content.to_string(),
         ));
+    }
+    GLOBAL_PENDING_FEEDBACK_CV.notify_all();
+}
+
+/// Test/integration helper: block (with timeout) until at least one
+/// item with `session_id` is queued in the global pending-feedback
+/// queue, then return without draining. Designed to replace
+/// `Instant::now()` + `thread::sleep` polling loops in tests that
+/// observe background-thread feedback. Returns `true` if an item with
+/// the matching session_id appeared before the timeout, `false` on
+/// timeout. Spurious wake-ups are absorbed by re-checking the queue
+/// inside the wait loop.
+pub fn wait_for_global_pending_feedback(session_id: &str, timeout: Duration) -> bool {
+    let Ok(mut guard) = GLOBAL_PENDING_FEEDBACK.lock() else {
+        return false;
+    };
+    if guard.iter().any(|(sid, _, _)| sid == session_id) {
+        return true;
+    }
+    let start = std::time::Instant::now();
+    loop {
+        let remaining = match timeout.checked_sub(start.elapsed()) {
+            Some(remaining) if !remaining.is_zero() => remaining,
+            _ => return guard.iter().any(|(sid, _, _)| sid == session_id),
+        };
+        let (next_guard, wait_result) =
+            match GLOBAL_PENDING_FEEDBACK_CV.wait_timeout(guard, remaining) {
+                Ok(pair) => pair,
+                Err(poison) => {
+                    let pair = poison.into_inner();
+                    (pair.0, pair.1)
+                }
+            };
+        guard = next_guard;
+        if guard.iter().any(|(sid, _, _)| sid == session_id) {
+            return true;
+        }
+        if wait_result.timed_out() {
+            return false;
+        }
     }
 }
 

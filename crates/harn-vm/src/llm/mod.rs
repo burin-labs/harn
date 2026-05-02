@@ -482,7 +482,7 @@ pub(crate) use self::agent::parse_skill_match_config_public as parse_skill_match
 pub(crate) use self::agent::SkillMatchConfig;
 pub use self::agent::{
     current_agent_session_id, drain_global_pending_feedback, push_pending_feedback_global,
-    register_session_end_hook,
+    register_session_end_hook, wait_for_global_pending_feedback,
 };
 pub(crate) use self::agent::{
     current_host_bridge, emit_agent_event as emit_live_agent_event, parse_mcp_server_specs,

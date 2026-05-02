@@ -188,6 +188,17 @@ pub fn stdlib_builtin_names() -> Vec<String> {
 }
 
 /// Reset thread-local stdlib state. Call between test runs.
+///
+/// Note: `long_running::reset_state()` is intentionally NOT called here
+/// because that store is process-global, not thread-local. Wiping it
+/// from a per-test reset hook lets one test cancel another test's
+/// in-flight worker thread (and lose its `push_pending_feedback_global`
+/// notification), which surfaces as `walk_dir_long_running` /
+/// `glob_long_running` timing out under parallel test load. The two
+/// call sites that genuinely need a clean handle store —
+/// `stdlib::fs::tests::{walk_dir_long_running,glob_long_running}` — call
+/// `long_running::reset_state()` explicitly while holding
+/// `LONG_RUNNING_TEST_LOCK`.
 pub fn reset_stdlib_state() {
     logging::reset_logging_state();
     process::reset_process_state();
@@ -195,7 +206,6 @@ pub fn reset_stdlib_state() {
     io::reset_io_state();
     sandbox::reset_sandbox_state();
     fs::reset_fs_state();
-    long_running::reset_state();
     json::reset_json_state();
     host::reset_host_state();
     crate::egress::reset_egress_policy_for_host();

@@ -751,9 +751,15 @@ mod tests {
     }
 
     fn drain_feedback(handle_id: &str) -> serde_json::Value {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        // Cap total wait at 10s; each iteration parks on the
+        // condvar paired with `GLOBAL_PENDING_FEEDBACK` so we wake the
+        // moment a background thread pushes, instead of polling
+        // `Instant::now()` + sleeping. The outer loop accounts for items
+        // that arrive for *other* handles (we requeue them via the
+        // `seen_handles` log; long-running ops use session_id="" today).
+        let overall_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let mut seen_handles = Vec::new();
-        while std::time::Instant::now() < deadline {
+        loop {
             for (kind, content) in crate::llm::drain_global_pending_feedback("") {
                 assert_eq!(kind, "tool_result");
                 let payload: serde_json::Value = serde_json::from_str(&content).unwrap();
@@ -764,9 +770,34 @@ mod tests {
                     seen_handles.push(seen.to_string());
                 }
             }
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            let remaining = overall_deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                panic!(
+                    "timed out waiting for feedback for {handle_id}; saw handles {seen_handles:?}"
+                );
+            }
+            // Block until a producer notifies a push, or we hit the
+            // remaining deadline. `wait_for_global_pending_feedback`
+            // returns `false` only when nothing matched within the
+            // window; we still loop once more to drain any stragglers
+            // that arrived just before the timeout.
+            if !crate::llm::wait_for_global_pending_feedback("", remaining) {
+                let leftover = crate::llm::drain_global_pending_feedback("");
+                for (kind, content) in leftover {
+                    assert_eq!(kind, "tool_result");
+                    let payload: serde_json::Value = serde_json::from_str(&content).unwrap();
+                    if payload["handle_id"] == handle_id {
+                        return payload;
+                    }
+                    if let Some(seen) = payload["handle_id"].as_str() {
+                        seen_handles.push(seen.to_string());
+                    }
+                }
+                panic!(
+                    "timed out waiting for feedback for {handle_id}; saw handles {seen_handles:?}"
+                );
+            }
         }
-        panic!("timed out waiting for feedback for {handle_id}; saw handles {seen_handles:?}");
     }
 
     #[test]

@@ -87,7 +87,7 @@ pub use llm::register_llm_builtins;
 pub use llm::trigger_predicate::TriggerPredicateBudget;
 pub use llm::{
     current_agent_session_id, drain_global_pending_feedback, push_pending_feedback_global,
-    register_session_end_hook,
+    register_session_end_hook, wait_for_global_pending_feedback,
 };
 pub use mcp::{
     connect_mcp_server, connect_mcp_server_from_json, connect_mcp_server_from_spec,
