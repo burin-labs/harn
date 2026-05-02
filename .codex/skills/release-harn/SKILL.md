@@ -45,8 +45,10 @@ Commit pattern for a real release:
 
 1. **`Release vX.Y.Z`** — code + docs + `CHANGELOG.md` + Cargo.toml /
    Cargo.lock + per-crate manifest bumps + regenerated mirrors. Authored
-   by you via `release_ship.sh --prepare --bump <type>`, landed through
-   PR/merge queue.
+   by you via `release_ship.sh --prepare --bump <type>`, then **rebased
+   onto latest `origin/main` before push** (because `--prepare` takes
+   1-15 min and main may have moved), landed through PR/merge queue
+   with `gh pr merge --auto` enabled so it lands as soon as CI is green.
 
 That's it. The bot takes over once it lands.
 

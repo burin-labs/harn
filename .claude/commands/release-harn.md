@@ -73,12 +73,21 @@ Steps 1-9 are the only steps that need judgment. After step 9 you are done
    merge-queue CI when iterating fast; use `--skip-dry-run` for the same
    reason on the publish dry-run.
 
-9. Commit, push, open the PR titled **`Release vX.Y.Z`**:
+9. Commit, rebase onto latest `origin/main`, push, open the PR titled
+   **`Release vX.Y.Z`**, and enable auto-merge:
 
    ```bash
    git commit -m "Release vX.Y.Z"
+   git fetch origin main && git rebase origin/main
+   # Resolve any CHANGELOG.md conflicts: bullets that landed on main while
+   # --prepare was running may need to move from v0.7.52 → v0.7.53, or a
+   # Merge Captain-style bullet may end up duplicated across both
+   # sections. Verify v(X.Y.Z-1) section still matches the previous tag:
+   #   diff <(git show v(X.Y.Z-1):CHANGELOG.md | awk '/^## v(X.Y.Z-1)/,/^## /') \
+   #        <(awk '/^## v(X.Y.Z-1)/,/^## /' CHANGELOG.md)
    git push -u origin release/vX.Y.Z
    gh pr create --title "Release vX.Y.Z" --body "..."
+   gh pr merge --auto         # merge-queue picks the strategy
    ```
 
    Then walk away. The merge queue runs the full CI gate (`make lint`,
@@ -86,7 +95,19 @@ Steps 1-9 are the only steps that need judgment. After step 9 you are done
    `make check-highlight`, `make check-language-spec`,
    `make check-trigger-quickref`, `make check-trigger-examples`,
    `make check-docs-snippets`, `verify_release_metadata.py`, portal
-   lint+build, Windows smoke). Once it lands, Publish release fires.
+   lint+build, Windows smoke). Auto-merge fires it as soon as CI is
+   green; once it lands, Publish release fires on tag drift.
+
+   **Why rebase before push:** `--prepare` takes ~1-15 min depending on
+   cache state; main may have moved while it ran. Rebasing now (instead
+   of waiting for the merge queue to push back) catches CHANGELOG drift
+   while the context is fresh and avoids a stale PR sitting in queue.
+
+   **Why `--auto`:** the merge queue gates a substantial CI suite, so
+   the release sits in queue for ~10-15 min cold-cache. Auto-merge means
+   you don't have to babysit it; it lands when CI goes green. Don't pass
+   `--squash`/`--merge`/`--rebase` — the merge queue's branch protection
+   rules pick the strategy and `gh` will reject explicit overrides.
 
 ## New-crate first-release pre-flight (harn#609)
 
