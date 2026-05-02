@@ -6,6 +6,49 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## v0.7.54
+
+### Added
+
+- **Per-call `agent_loop` transcript directories (#1145).** New `llm_transcript_dir`
+  option on `agent_loop`, `sub_agent_run`, and workflow model-policy paths lets
+  individual Harn workflows write auditable LLM JSONL transcripts without relying
+  solely on the global `HARN_LLM_TRANSCRIPT_DIR` environment variable. When
+  `nil`, the environment variable remains the fallback.
+
+- **Compact text-tool protocol tag support (#1144).** Harn now accepts compact
+  text-tool aliases such as `<toolcall>`, `<assistantprose>`, and `<userresponse>`
+  emitted by local models (e.g. llama.cpp, Qwen). These are canonicalized back to
+  the standard underscore-prefixed tags for stored history, and the streaming
+  detection correctly emits normal tool-call lifecycle events.
+
+- **MCP tool tasks (#1143).** Harn MCP servers now advertise and handle the MCP
+  2025-11-25 experimental tasks surface: `tasks/get`, `tasks/result`,
+  `tasks/list`, `tasks/cancel`, and `notifications/tasks/status`. Task-augmented
+  `tools/call` is supported for `harn.trigger.fire`, `harn.trigger.replay`, and
+  `harn.orchestrator.dlq.retry` with inline execution for non-task-capable tools.
+  Task IDs are server-side UUID v7; the task store is in-memory per server process.
+
+- **Durable A2A push notification config CRUD (#1142).** The A2A adapter now
+  persists push notification endpoint configuration (`set`, `get`, `list`,
+  `delete`) on the shared EventLog, with replay at server start so configs
+  survive restarts independently of live in-memory task state. Protocol
+  conformance fixtures cover the canonical CRUD shapes.
+
+### Changed
+
+- **Diagnostic paths normalized in error output (#1141).** Parser and runtime
+  error messages now cancel `.` and `..` path components in file references,
+  so errors like `mode/../lib/runtime/loop.harn` render as `lib/runtime/loop.harn`.
+  Source metadata for debugging is preserved.
+
+### Fixed
+
+- **Compact protocol tags no longer leak into visible text (#1144).** Models
+  emitting compact text-tool tags (e.g. `<toolcall>`) without underscores no
+  longer cause visible-text sanitization to expose raw protocol text or suppress
+  tool-call events.
+
 ## v0.7.53
 
 ### Added
