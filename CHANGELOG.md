@@ -8,6 +8,17 @@ condensed series summaries instead of full per-patch history.
 
 ## Unreleased
 
+### Changed
+
+- **CHANGELOG retroactive-edit guard.** Added
+  `scripts/check_changelog_no_retroactive_edits.py`, wired into the
+  `Rust (lint + test + conformance)` CI job and the pre-push hook. The
+  check fails the PR when a `## vX.Y.Z` section whose tag already exists
+  is modified, comparing the section body against the PR base (or the
+  push upstream locally). New entries belong under `## Unreleased` (or
+  the in-progress next-version heading on a release PR). Bypass with
+  `ALLOW_CHANGELOG_RETROACTIVE_EDIT=1` for genuine fix-ups.
+
 ### Added
 
 - **Merge Captain repair-worker checkpoint contract (#1010).**
@@ -67,6 +78,26 @@ condensed series summaries instead of full per-patch history.
   surfaces each step's `model` + `budget`, and the canonical receipt
   envelope's `model_calls[]` carries the per-step token / cost
   breakdown via `Receipt::push_step_breakdown`.
+
+- **MCP `sampling/createMessage` server-to-client bridge (#874).** When
+  Harn acts as an MCP client (stdio or Streamable HTTP), it now declares
+  the `sampling` capability on `initialize` and accepts inbound
+  `sampling/createMessage` requests from connected servers. Each request
+  is dispatched through the host-call bridge as
+  `("mcp", "sample", {server, params})` so embedders can run their own
+  approval UX, rate-limit by server, or inject `llm_call` overrides
+  (e.g. force `provider`/`model`). On approval the request flows through
+  Harn's regular `extract_llm_options` + `execute_llm_call` boundary —
+  picking up routing, capability gates, mock interception, and budget
+  plumbing — and the response is returned to the originating server as
+  `{role: "assistant", content: {type: "text", text}, model, stopReason}`.
+  Without an installed bridge, sampling requests are declined with a
+  structured `mcp.samplingDeclined` error (code `-32603`) so servers can
+  fall back to a sensible default rather than driving unattended LLM
+  spend. Sampling-side `tools` / `toolChoice` / `thinking` /
+  `modelPreferences` / `stopSequences` / `metadata` are all forwarded
+  through to `llm_call`'s typed boundary so the existing ThinkingConfig
+  (#849) and structured-output paths apply unchanged.
 
 ## v0.7.54
 
