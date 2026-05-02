@@ -1,0 +1,27 @@
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "first ##DONE##"})
+  let session = agent_session_open("tool-format-contract-conformance")
+  let first = agent_loop(
+    "first turn",
+    nil,
+    {provider: "mock", model: "mock", session_id: session, max_iterations: 1, tool_format: "text"},
+  )
+  assert(first?.tools?.mode == "text", "first loop uses requested text tool format")
+  assert(agent_session_tool_format(session) == "text", "session records the tool format contract")
+  let switched = try {
+    agent_loop(
+      "second turn",
+      nil,
+      {provider: "mock", model: "mock", session_id: session, max_iterations: 1, tool_format: "native"},
+    )
+  }
+  assert(is_err(switched), "same transcript cannot switch tool format")
+  assert(contains(json_stringify(unwrap_err(switched)), "tool_format"), "error names tool_format")
+  let forked = agent_session_fork(session, "tool-format-contract-fork")
+  assert(agent_session_tool_format(forked) == "text", "forked transcript inherits the contract")
+  let child = agent_session_open("tool-format-contract-child")
+  agent_session_claim_tool_format(child, "native")
+  assert(agent_session_tool_format(child) == "native", "new transcripts can choose their contract")
+  println("agent_session_tool_format_contract passed")
+}

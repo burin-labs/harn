@@ -307,9 +307,9 @@ impl Default for TurnPolicy {
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum NativeToolFallbackPolicy {
-    #[default]
     Allow,
     AllowOnce,
+    #[default]
     Reject,
 }
 

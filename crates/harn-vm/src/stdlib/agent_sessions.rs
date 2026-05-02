@@ -19,6 +19,8 @@ pub fn register_agent_session_builtins(vm: &mut Vm) {
     register_snapshot(vm);
     register_ancestry(vm);
     register_current_id(vm);
+    register_tool_format(vm);
+    register_claim_tool_format(vm);
     register_reset(vm);
     register_fork(vm);
     register_fork_at(vm);
@@ -143,6 +145,31 @@ fn register_current_id(vm: &mut Vm) {
         Ok(agent_sessions::current_session_id()
             .map(|id| VmValue::String(Rc::from(id)))
             .unwrap_or(VmValue::Nil))
+    });
+}
+
+fn register_tool_format(vm: &mut Vm) {
+    vm.register_builtin("agent_session_tool_format", |args, _out| {
+        let id = arg_string_required(args, 0, "agent_session_tool_format", "id")?;
+        if !agent_sessions::exists(&id) {
+            return Err(err(format!(
+                "agent_session_tool_format: unknown session id '{id}'"
+            )));
+        }
+        Ok(agent_sessions::tool_format(&id)
+            .map(|value| VmValue::String(Rc::from(value)))
+            .unwrap_or(VmValue::Nil))
+    });
+}
+
+fn register_claim_tool_format(vm: &mut Vm) {
+    vm.register_builtin("agent_session_claim_tool_format", |args, _out| {
+        let id = arg_string_required(args, 0, "agent_session_claim_tool_format", "id")?;
+        let tool_format =
+            arg_string_required(args, 1, "agent_session_claim_tool_format", "tool_format")?;
+        agent_sessions::claim_tool_format(&id, &tool_format)
+            .map_err(|message| err(format!("agent_session_claim_tool_format: {message}")))?;
+        Ok(VmValue::Nil)
     });
 }
 
