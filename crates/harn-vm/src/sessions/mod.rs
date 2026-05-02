@@ -592,21 +592,22 @@ mod tests {
     #[tokio::test]
     async fn store_projection_replays_persisted_event_log() {
         let dir = tempdir().expect("tempdir");
-        let event_log = Arc::new(AnyEventLog::File(
-            FileEventLog::open(dir.path().join("events"), 32).expect("open event log"),
-        ));
-        let first = SessionStore::new(event_log.clone());
-        first
-            .create(CreateSession {
-                id: Some(SESSION_ID.to_string()),
-                principal: "user-1".to_string(),
-                created_at: Some(at("2026-05-02T12:00:00Z")),
-                expires_at: at("2026-05-02T13:00:00Z"),
-                attributes: BTreeMap::new(),
-            })
-            .await
-            .expect("create session");
-        event_log.flush().await.expect("flush event log");
+        {
+            let event_log = Arc::new(AnyEventLog::File(
+                FileEventLog::open(dir.path().join("events"), 32).expect("open event log"),
+            ));
+            let first = SessionStore::new(event_log.clone());
+            first
+                .create(CreateSession {
+                    id: Some(SESSION_ID.to_string()),
+                    principal: "user-1".to_string(),
+                    created_at: Some(at("2026-05-02T12:00:00Z")),
+                    expires_at: at("2026-05-02T13:00:00Z"),
+                    attributes: BTreeMap::new(),
+                })
+                .await
+                .expect("create session");
+        }
 
         let reopened_log = Arc::new(AnyEventLog::File(
             FileEventLog::open(dir.path().join("events"), 32).expect("reopen event log"),
