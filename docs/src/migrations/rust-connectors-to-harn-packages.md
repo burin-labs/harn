@@ -43,7 +43,7 @@ one provider on the pure-Harn implementation before moving the rest.
    `harn install --locked`.
 
    ```sh
-   harn add github.com/burin-labs/harn-github-connector@v0.1.0
+   harn add github.com/burin-labs/harn-github-connector@v0.2.0
    harn install --locked
    ```
 

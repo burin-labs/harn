@@ -51,12 +51,40 @@ does not duplicate HMAC logic. Successful deliveries normalize into
 - `signature_status = { state: "verified" }`
 - `provider_payload = GitHubEventPayload`
 
-`GitHubEventPayload` is narrowed into eight monitor-relevant event families.
-For example, an `issues` delivery exposes `payload.issue`,
+`GitHubEventPayload` is narrowed into thirteen monitor-relevant event
+families. For example, an `issues` delivery exposes `payload.issue`,
 `pull_request_review` exposes both `payload.review` and
 `payload.pull_request`, `deployment_status` exposes
 `payload.deployment_status` plus `payload.deployment`, and `check_run`
 exposes `payload.check_run`.
+
+The remaining five families align with the
+[`harn-github-connector`](https://github.com/burin-labs/harn-github-connector)
+v0.2.0 normalized webhook contract:
+
+- `check_suite` exposes `payload.check_suite` plus promoted
+  `check_suite_id`, `pull_request_number`, `head_sha`, `head_ref`,
+  `base_ref`, `status`, and `conclusion`.
+- `status` exposes `payload.commit_status` plus promoted `status_id`,
+  `head_sha`, `head_ref`, `base_ref`, `state`, `context`, and
+  `target_url`.
+- `merge_group` exposes `payload.merge_group` plus promoted
+  `merge_group_id`, `head_sha`, `head_ref`, `base_sha`, `base_ref`,
+  `pull_requests`, and `pull_request_numbers`.
+- `installation` exposes `payload.installation` plus promoted
+  `account`, `installation_state`, `suspended`, `revoked`, and
+  `repositories`.
+- `installation_repositories` exposes `payload.installation`,
+  `account`, `installation_state`, `suspended`, `revoked`,
+  `repository_selection`, `repositories_added`, and
+  `repositories_removed`.
+
+Every variant also surfaces `payload.topic` (the connector's stable
+`github.<event>[.<action>]` topic), `payload.repository` (the raw GitHub
+repository object), and `payload.repo` (the connector's normalized
+`{owner, name, full_name}` shape) as common fields. The original
+upstream webhook body is always available via `payload.raw` as the
+escape hatch.
 
 ## Outbound configuration
 

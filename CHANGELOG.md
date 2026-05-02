@@ -44,6 +44,25 @@ condensed series summaries instead of full per-patch history.
   [`crates/harn-vm/tests/fixtures/release_harn_sample/`](crates/harn-vm/tests/fixtures/release_harn_sample)
   so the importer can be exercised without a live release run.
 
+- **Typed GitHub trigger payloads for the new connector contract
+  ([#1158](https://github.com/burin-labs/harn/issues/1158)).** Promoted
+  five additional `GitHubEventPayload` variants —
+  `GitHubCheckSuiteEventPayload`, `GitHubStatusEventPayload`,
+  `GitHubMergeGroupEventPayload`, `GitHubInstallationEventPayload`,
+  and `GitHubInstallationRepositoriesEventPayload` — so
+  `harn-github-connector` v0.2.0 deliveries no longer collapse into the
+  catch-all `Other` variant. Every variant exposes the connector's
+  promoted scalars (`check_suite_id`, `merge_group_id`,
+  `repositories_removed`, etc.) at the top level of
+  `event.provider_payload` instead of forcing handlers through
+  `provider_payload.raw`. `GitHubEventCommon` now also carries the
+  connector-promoted `topic`, normalized `repo`, and full `repository`
+  fields across all GitHub events while preserving the original
+  upstream webhook body in `payload.raw`. The `GitHubEventPayload`
+  union now uses an `event`-discriminated `Deserialize` so payloads
+  always round-trip back to the variant the connector emitted. Bumped
+  the connector pin from v0.1.0 to v0.2.0 in the catalog, migration,
+  and trigger quickref docs.
 - **Merge Captain repair-worker checkpoint contract (#1010).**
   Added a typed contract for the bounded `agent_loop` worker that
   Merge Captain (and the release-harness consumer in
