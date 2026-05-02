@@ -989,10 +989,14 @@ fn parse_secret_id(raw: Option<&str>) -> Option<SecretId> {
 pub(crate) struct ListenerAuth {
     api_keys: Vec<String>,
     hmac_secret: Option<String>,
+    session_store: Option<Arc<harn_vm::SessionStore>>,
 }
 
 impl ListenerAuth {
-    pub(crate) fn from_env(required: bool) -> Result<Self, OrchestratorError> {
+    pub(crate) fn from_env(
+        required: bool,
+        session_store: Option<Arc<harn_vm::SessionStore>>,
+    ) -> Result<Self, OrchestratorError> {
         let api_keys = std::env::var(API_KEYS_ENV)
             .ok()
             .map(|value| {
@@ -1009,14 +1013,14 @@ impl ListenerAuth {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
 
-        if required && api_keys.is_empty() {
+        if required && api_keys.is_empty() && session_store.is_none() {
             return Err(format!(
-                "{API_KEYS_ENV} must contain at least one API key when a2a-push routes are configured"
+                "{API_KEYS_ENV} must contain at least one API key or a session store must be configured when authenticated routes are configured"
             ).into());
         }
-        if required && hmac_secret.is_none() {
+        if required && hmac_secret.is_none() && session_store.is_none() {
             return Err(format!(
-                "{HMAC_SECRET_ENV} must be set when a2a-push routes are configured"
+                "{HMAC_SECRET_ENV} must be set or a session store must be configured when authenticated routes are configured"
             )
             .into());
         }
@@ -1024,6 +1028,7 @@ impl ListenerAuth {
         Ok(Self {
             api_keys,
             hmac_secret,
+            session_store,
         })
     }
 
@@ -1032,7 +1037,7 @@ impl ListenerAuth {
     }
 
     pub(crate) fn has_credentials(&self) -> bool {
-        self.has_api_keys() || self.hmac_secret.is_some()
+        self.has_api_keys() || self.hmac_secret.is_some() || self.session_store.is_some()
     }
 
     pub(crate) async fn authorize(
@@ -1062,6 +1067,12 @@ impl ListenerAuth {
         if scheme.eq_ignore_ascii_case("Bearer") {
             if self.matches_api_key(value) {
                 return Ok(());
+            }
+            if let Some(store) = &self.session_store {
+                let touch = harn_vm::TouchSession::new(value, OffsetDateTime::now_utc());
+                if matches!(store.touch(touch).await, Ok(Some(_))) {
+                    return Ok(());
+                }
             }
             return Err(());
         }

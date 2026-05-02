@@ -37,6 +37,7 @@ pub mod runtime_context;
 pub mod runtime_paths;
 pub mod schema;
 pub mod secrets;
+pub mod sessions;
 pub(crate) mod shared_state;
 pub mod shells;
 pub mod skills;
@@ -125,6 +126,10 @@ pub use receipts::{
 };
 pub use record_filter::{normalize_record_filter_expression, CompiledRecordFilter};
 pub use schema::json_to_vm_value;
+pub use sessions::{
+    CreateSession, ExpireSession, Session, SessionAttributes, SessionError, SessionStore,
+    TouchSession, SESSIONS_TOPIC,
+};
 pub use stdlib::hitl::{
     append_hitl_response, ApprovalRequest, HitlHostResponse, HITL_APPROVALS_TOPIC,
     HITL_DUAL_CONTROL_TOPIC, HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,

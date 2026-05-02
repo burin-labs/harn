@@ -122,6 +122,93 @@ This lineage stays VM-local. It is meant for host UIs and replay tools
 that want to render branching conversation trees without re-deriving
 parentage from workflow state or external logs.
 
+## Durable orchestrator sessions
+
+The VM-local session builtins above own transcript state. Long-running
+orchestrator deployments often need a second, transport-facing primitive:
+an opaque bearer session that records who is calling the service and when
+the token expires. That store lives in `harn_vm::sessions` and is backed
+by the same crash-safe EventLog as trigger queues and orchestrator state.
+The raw bearer token is returned only from `create`; the EventLog stores a
+one-way token handle so logs and backups are not bearer credentials.
+
+The durable record shape is:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | string | Opaque bearer token. It is present in API results, not persisted in raw form. |
+| `principal` | string | Stable user, tenant, service, or client identity. |
+| `created_at` | RFC 3339 timestamp | Creation time. |
+| `last_seen_at` | RFC 3339 timestamp | Last successful touch/authentication time. |
+| `expires_at` | RFC 3339 timestamp | Absolute expiration time. |
+| `attributes` | JSON object | Small caller-owned metadata such as role, tenant, or client labels. |
+
+The public Rust API is `harn_vm::sessions::{create, get, touch,
+expire}` plus the equivalent `SessionStore` methods. `get` and `touch`
+return `None` for unknown or expired sessions, so HTTP middleware can map
+that result directly to `401`. Caller-supplied session ids must be high
+entropy; omitting `id` lets Harn generate a token suitable for bearer
+auth.
+
+```rust,ignore
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use time::{Duration, OffsetDateTime};
+
+let store = Arc::new(harn_vm::SessionStore::new(event_log.clone()));
+let attributes = BTreeMap::from([
+    ("role".to_string(), serde_json::json!("operator")),
+    ("tenant".to_string(), serde_json::json!("acme")),
+]);
+let session = harn_vm::sessions::create(
+    &store,
+    harn_vm::CreateSession {
+        id: None,
+        principal: "user_123".to_string(),
+        created_at: None,
+        expires_at: OffsetDateTime::now_utc() + Duration::days(7),
+        attributes,
+    },
+)
+.await?;
+
+// Send this to clients as `Authorization: Bearer <id>`.
+let bearer = session.id;
+```
+
+### Middleware integration
+
+An HTTP service can compose authentication by trying its local API-key
+or OAuth verifier first, then falling back to a durable Harn session id:
+
+```rust,ignore
+struct AuthPrincipal(String);
+struct AuthSessionId(String);
+
+let token = authorization_header
+    .strip_prefix("Bearer ")
+    .ok_or(AuthError::Unauthorized)?;
+
+let Some(session) = harn_vm::sessions::touch(
+    &store,
+    harn_vm::TouchSession::new(token, OffsetDateTime::now_utc()),
+)
+.await?
+else {
+    return Err(AuthError::Unauthorized);
+};
+
+request.extensions_mut().insert(AuthPrincipal(session.principal));
+request.extensions_mut().insert(AuthSessionId(session.id));
+```
+
+`harn orchestrator serve` uses the same composition point internally:
+listener bearer auth accepts configured static API keys first and then
+checks the attached `SessionStore`. A successful durable-session auth
+touches `last_seen_at`; expired sessions are rejected without extending
+their lifetime. Call `expire` to revoke a session explicitly.
+
 ## Interaction with workflows
 
 Workflow stages pick up a session id from

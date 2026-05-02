@@ -314,7 +314,7 @@ impl McpOrchestratorService {
                 local.config.display()
             )
         })?;
-        let auth = ListenerAuth::from_env(false)?;
+        let auth = ListenerAuth::from_env(false, None)?;
         let oauth = OAuthResourceServer::from_env()?;
         let project_root = local
             .config
