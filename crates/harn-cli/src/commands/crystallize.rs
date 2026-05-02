@@ -1,13 +1,15 @@
 use std::path::{Path, PathBuf};
 
 use crate::cli::{
-    CrystallizeArgs, CrystallizeCommand, CrystallizeShadowArgs, CrystallizeValidateArgs,
+    CrystallizeArgs, CrystallizeCommand, CrystallizeIngestArgs, CrystallizeShadowArgs,
+    CrystallizeValidateArgs,
 };
 
 pub(crate) fn run(args: CrystallizeArgs) -> Result<(), String> {
     match args.command {
         Some(CrystallizeCommand::Validate(validate)) => run_validate(validate),
         Some(CrystallizeCommand::Shadow(shadow)) => run_shadow(shadow),
+        Some(CrystallizeCommand::Ingest(ingest)) => run_ingest(*ingest),
         None => run_mine(args),
     }
 }
@@ -175,4 +177,130 @@ fn ok_label(value: bool) -> &'static str {
     } else {
         "fail"
     }
+}
+
+fn run_ingest(args: CrystallizeIngestArgs) -> Result<(), String> {
+    let from = PathBuf::from(&args.from);
+    let bundle_dir = PathBuf::from(&args.bundle);
+    let workflow_name = args
+        .workflow_name
+        .clone()
+        .or_else(|| Some("release_harn".to_string()));
+    let package_name = args
+        .package_name
+        .clone()
+        .or_else(|| Some("release-harn".to_string()));
+
+    let (artifacts, fixture, trace) = harn_vm::orchestration::ingest_release_fixture(
+        &from,
+        harn_vm::orchestration::CrystallizeOptions {
+            min_examples: 1,
+            workflow_name,
+            package_name,
+            author: args.author.clone(),
+            approver: args.approver.clone(),
+            eval_pack_link: args.eval_pack.clone(),
+        },
+    )
+    .map_err(|error| error.to_string())?;
+
+    let bundle = harn_vm::orchestration::build_crystallization_bundle(
+        artifacts.clone(),
+        std::slice::from_ref(&trace),
+        harn_vm::orchestration::BundleOptions {
+            external_key: args.bundle_external_key.clone(),
+            title: args.bundle_title.clone(),
+            team: args.bundle_team.clone(),
+            // `release.repo` is a local filesystem path, not a github-style
+            // identifier. Leave `repo` unset unless the caller explicitly
+            // provides one via --bundle-repo.
+            repo: args.bundle_repo.clone(),
+            risk_level: args.bundle_risk_level.clone(),
+            rollout_policy: args.bundle_rollout_policy.clone(),
+        },
+    )
+    .map_err(|error| error.to_string())?;
+
+    if let Some(out) = args.out.as_deref() {
+        let report_path = args.report.clone().unwrap_or_else(|| {
+            // Default: place report.json next to the standalone workflow.
+            Path::new(out)
+                .with_file_name("release-candidate-report.json")
+                .display()
+                .to_string()
+        });
+        harn_vm::orchestration::write_crystallization_artifacts(
+            artifacts.clone(),
+            Path::new(out),
+            Path::new(&report_path),
+            args.eval_pack.as_deref().map(Path::new),
+        )
+        .map_err(|error| error.to_string())?;
+        println!("Workflow: {out}");
+        println!("Report: {report_path}");
+        if let Some(eval_path) = args.eval_pack.as_deref() {
+            println!("Eval pack: {eval_path}");
+        }
+    }
+
+    let manifest = harn_vm::orchestration::write_crystallization_bundle(&bundle, &bundle_dir)
+        .map_err(|error| error.to_string())?;
+
+    let report = &artifacts.report;
+    let candidate_id = report.selected_candidate_id.as_deref().unwrap_or("(none)");
+    println!(
+        "Ingest: from={} run_id={} version={}->{} candidate={}",
+        args.from,
+        fixture.manifest.run_id,
+        fixture.manifest.release.current_version,
+        fixture.manifest.release.next_version,
+        candidate_id
+    );
+    println!(
+        "Bundle: {} (kind={:?} schema_version={} fixtures={})",
+        args.bundle,
+        manifest.kind,
+        manifest.schema_version,
+        manifest.fixtures.len()
+    );
+    if let Some(summary) = &report.segment_summary {
+        println!(
+            "Segments: deterministic={} agentic={} (review-required: {})",
+            summary.deterministic_count,
+            summary.agentic_count,
+            summary.requires_human_review.len()
+        );
+    }
+    if let Some(recovery) = &report.recovery_summary {
+        println!(
+            "Recovery: shell_failures={} recovery_runs={} fed_into_agent={}",
+            recovery.shell_failures_seen,
+            recovery.recovery_advice_runs,
+            recovery.failures_fed_into_agent
+        );
+    }
+
+    if report.selected_candidate_id.is_none() {
+        return Err("ingest produced no safe crystallization candidate".to_string());
+    }
+
+    if args.shadow {
+        let (shadow_manifest, shadow) = harn_vm::orchestration::shadow_replay_bundle(&bundle_dir)
+            .map_err(|error| error.to_string())?;
+        println!(
+            "Shadow replay: candidate_id={} compared={} pass={}",
+            shadow_manifest.candidate_id, shadow.compared_traces, shadow.pass
+        );
+        if !shadow.pass {
+            for failure in &shadow.failures {
+                eprintln!("- {failure}");
+            }
+            return Err(format!(
+                "shadow replay failed with {} failure(s)",
+                shadow.failures.len()
+            ));
+        }
+    }
+
+    Ok(())
 }

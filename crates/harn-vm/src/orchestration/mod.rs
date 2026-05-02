@@ -48,6 +48,9 @@ pub use friction::*;
 mod crystallize;
 pub use crystallize::*;
 
+mod release_fixture;
+pub use release_fixture::*;
+
 mod policy;
 pub use policy::*;
 

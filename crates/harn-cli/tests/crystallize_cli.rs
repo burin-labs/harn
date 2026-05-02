@@ -15,9 +15,10 @@ use std::fs;
 use std::path::Path;
 
 use harn_vm::orchestration::{
-    build_crystallization_bundle, crystallize_traces, load_crystallization_traces_from_dir,
-    shadow_replay_bundle, validate_crystallization_bundle, write_crystallization_artifacts,
-    write_crystallization_bundle, BundleOptions, CrystallizeOptions,
+    build_crystallization_bundle, crystallize_traces, ingest_release_fixture,
+    load_crystallization_traces_from_dir, shadow_replay_bundle, validate_crystallization_bundle,
+    write_crystallization_artifacts, write_crystallization_bundle, BundleOptions,
+    CrystallizeOptions,
 };
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -262,4 +263,137 @@ fn crystallize_plan_only_bundle_keeps_plan_only_kind() {
         "validation reported problems: {:#?}",
         validation.problems
     );
+}
+
+#[test]
+fn ingest_release_fixture_emits_validatable_bundle_with_segment_and_recovery_summary() {
+    // Sample fixture lives in harn-vm. Resolve relative to harn-cli's
+    // manifest dir so the test works from any cwd.
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fixture_dir = manifest_dir
+        .parent()
+        .unwrap()
+        .join("harn-vm/tests/fixtures/release_harn_sample");
+    assert!(
+        fixture_dir.exists(),
+        "expected sample fixture at {}",
+        fixture_dir.display()
+    );
+
+    let temp = TempDir::new().unwrap();
+    let bundle_dir = temp.path().join("bundle");
+
+    let (artifacts, fixture, trace) = ingest_release_fixture(
+        &fixture_dir,
+        CrystallizeOptions {
+            min_examples: 1,
+            workflow_name: Some("release_harn".to_string()),
+            package_name: Some("release-harn".to_string()),
+            ..CrystallizeOptions::default()
+        },
+    )
+    .expect("ingest");
+
+    // Manifest decoded with the right release identity.
+    assert_eq!(fixture.manifest.release.current_version, "0.7.52");
+    assert_eq!(fixture.manifest.release.next_version, "0.7.53");
+
+    // Trace contains every event-derived action and is sorted by timestamp.
+    assert!(trace.actions.len() >= 8);
+
+    // Candidate is selected and safe to propose.
+    let candidate_id = artifacts
+        .report
+        .selected_candidate_id
+        .clone()
+        .expect("selected candidate");
+    let candidate = &artifacts.report.candidates[0];
+    assert!(candidate.shadow.pass);
+
+    // Plain-language splits are populated and surface review-required items.
+    let segment = artifacts
+        .report
+        .segment_summary
+        .as_ref()
+        .expect("segment summary");
+    assert!(segment.deterministic_count >= 4);
+    assert!(segment.agentic_count >= 2);
+    assert!(segment.plain_language.contains("Safe to automate"));
+    assert!(segment
+        .requires_human_review
+        .iter()
+        .any(|item| item.contains("failed step:push")));
+    assert!(segment
+        .requires_human_review
+        .iter()
+        .any(|item| item.contains("agent review")));
+    assert!(segment
+        .requires_human_review
+        .iter()
+        .any(|item| item.contains("agent recovery advice")));
+
+    let recovery = artifacts
+        .report
+        .recovery_summary
+        .as_ref()
+        .expect("recovery summary");
+    assert!(recovery.shell_failures_seen >= 1);
+    assert!(recovery.recovery_advice_runs >= 1);
+    assert!(recovery.failures_fed_into_agent);
+    assert!(recovery.failed_steps.contains(&"push".to_string()));
+    assert!(recovery.representation.contains("agent_loop"));
+
+    // Build + write bundle, then validate + shadow-replay it.
+    let bundle = build_crystallization_bundle(
+        artifacts,
+        std::slice::from_ref(&trace),
+        BundleOptions {
+            external_key: None,
+            title: None,
+            team: Some("merge_captain".to_string()),
+            repo: Some("burin-labs/harn".to_string()),
+            risk_level: None,
+            rollout_policy: None,
+        },
+    )
+    .expect("build bundle");
+    let manifest = write_crystallization_bundle(&bundle, &bundle_dir).expect("write bundle");
+    assert_eq!(manifest.candidate_id, candidate_id);
+    assert_eq!(manifest.fixtures.len(), 1);
+    assert!(manifest.fixtures[0].redacted);
+
+    // Manifest schema marker is correct.
+    let manifest_json: Value =
+        serde_json::from_slice(&fs::read(bundle_dir.join("candidate.json")).unwrap()).unwrap();
+    assert_eq!(
+        manifest_json["schema"],
+        Value::String("harn.crystallization.candidate.bundle".to_string())
+    );
+
+    // Existing validator accepts the bundle.
+    let validation = validate_crystallization_bundle(&bundle_dir).expect("validate");
+    assert!(
+        validation.problems.is_empty(),
+        "validation reported problems: {:#?}",
+        validation.problems
+    );
+
+    // Shadow replay against the bundle's own redacted fixture passes.
+    let (shadow_manifest, shadow) = shadow_replay_bundle(&bundle_dir).expect("shadow replay");
+    assert_eq!(shadow_manifest.candidate_id, candidate_id);
+    assert!(shadow.pass, "shadow replay failed: {:#?}", shadow.failures);
+    assert!(shadow.compared_traces > 0);
+
+    // Report on disk includes the segment + recovery summaries (i.e.,
+    // the plain-language deterministic/agentic split is preserved
+    // round-trip via the bundle, not just in-memory).
+    let report_json: Value =
+        serde_json::from_slice(&fs::read(bundle_dir.join("report.json")).unwrap()).unwrap();
+    assert!(report_json["segment_summary"]["plain_language"]
+        .as_str()
+        .unwrap_or("")
+        .contains("Safe to automate"));
+    assert!(report_json["recovery_summary"]["failures_fed_into_agent"]
+        .as_bool()
+        .unwrap_or(false));
 }

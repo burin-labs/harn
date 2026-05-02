@@ -21,6 +21,29 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Release-harness fixture ingest (#1146).** Added
+  `harn crystallize ingest --from <FIXTURE_DIR> --bundle <BUNDLE_DIR>` to
+  consume a `release_harn.crystallization_input.v1` fixture (emitted by
+  `release_harn.harn` in
+  [harn-bump-fleet](https://github.com/burin-labs/harn-bump-fleet/issues/2))
+  and produce a reviewed crystallization candidate bundle. The synthesis
+  path skips repeated-sequence mining (the trace IS the workflow),
+  partitions actions into deterministic vs. agentic steps from the
+  source `source` field, materializes every model-authored step behind
+  an explicit approval boundary, and surfaces release identity
+  (`current_version`, `next_version`, `base_branch`, …) as workflow
+  parameters. The emitted bundle uses the existing
+  `harn.crystallization.candidate.bundle` schema so
+  `harn crystallize validate` and `harn crystallize shadow` work
+  unchanged. `report.json` for an ingested bundle adds two
+  plain-language blocks: `segment_summary` (what is safe to automate
+  vs. what still requires human review) and `recovery_summary` (how
+  many shell/tool failures were observed, how many `agent_loop`
+  recovery-advice runs ran, and whether failure context was fed back
+  into the model). A tiny checked-in sample fixture lives at
+  [`crates/harn-vm/tests/fixtures/release_harn_sample/`](crates/harn-vm/tests/fixtures/release_harn_sample)
+  so the importer can be exercised without a live release run.
+
 - **Merge Captain repair-worker checkpoint contract (#1010).**
   Added a typed contract for the bounded `agent_loop` worker that
   Merge Captain (and the release-harness consumer in
