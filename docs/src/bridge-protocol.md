@@ -27,7 +27,9 @@ registers per session.
 
 ### ACP Compatibility Contract
 
-Harn tracks the upstream Agent Client Protocol schema and pins its
+Harn-owned ACP/MCP extension fields are specified in
+[Harn ACP/MCP extensions v1](./spec/harn-extensions/v1.md). Harn tracks the
+upstream Agent Client Protocol schema and pins its
 wire contract against `agentclientprotocol/agent-client-protocol` schema
 `v0.12.2`. The adapter treats these `session/update` values as standard
 ACP variants:
@@ -46,6 +48,8 @@ are advertised during `initialize` under
 
 - `fs_watch`
 - `handoff`
+- `hitl_request`
+- `hitl_resolved`
 - `log`
 - `progress`
 - `skill_activated`
@@ -106,6 +110,8 @@ that route on it keep working unchanged. Concretely:
 | `skill_scope_tools`    | `skillName`, `allowedTools`                                                                                                            |
 | `tool_search_query`    | `toolUseId`, `name`, `query`, `strategy`, `mode`                                                                                       |
 | `tool_search_result`   | `toolUseId`, `promoted`, `strategy`, `mode`                                                                                            |
+| `hitl_request`         | `requestId`, `kind`, `payload`                                                                                                         |
+| `hitl_resolved`        | `requestId`, `kind`, `outcome`                                                                                                         |
 
 Hosts migrating from pre-#905 builds must read these fields from
 `_meta.harn.<field>` instead of the update root. The fixture
@@ -180,8 +186,9 @@ contract):
 
 The `_meta.harn.audit` field is omitted when no mutation session is installed (read-only
 `harn run` invocations, conformance fixtures, scripts that don't enter
-a workflow). `worker_update.audit` remains top-level because
-`worker_update` itself is a Harn extension update.
+a workflow). Worker lifecycle audit data is carried as
+`worker_update._meta.harn.audit`, matching the Harn extension namespacing
+contract.
 
 ### `executor` tag
 

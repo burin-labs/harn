@@ -64,6 +64,7 @@
 - [Bridge protocol](./bridge-protocol.md)
 - [Host tools over the bridge](./bridge/host-tools.md)
 - [ACP over WebSocket](./acp/websocket.md)
+- [Harn ACP/MCP extensions v1](./spec/harn-extensions/v1.md)
 - [Agents Protocol v1](./spec/agents-protocol/v1.md)
 - [Agents Protocol Receipt Format](./spec/agents-protocol/receipt-format-v1.md)
 - [Agents Protocol Replay Contract](./spec/agents-protocol/replay-v1.md)
