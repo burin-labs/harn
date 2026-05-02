@@ -6,6 +6,19 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **ACP mode config options follow the current protocol (#897).** The ACP adapter now exposes
+  session modes through preferred
+  [session config options](https://agentclientprotocol.com/protocol/session-config-options) while
+  keeping legacy [session-modes](https://agentclientprotocol.com/protocol/session-modes) in sync.
+  Sessions default to conservative `ask`, advertise `ask`, `architect`, `code`, and `shadow`, and
+  accept both `session/set_config_option` and `session/set_mode`. Mode changes emit both
+  `current_mode_update` and `config_option_update`, and non-`code` modes derive their prompt-time
+  capability ceiling from Harn's `AutonomyTier` policy.
+
 ## v0.7.55
 
 ### Added

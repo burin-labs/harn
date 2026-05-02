@@ -154,6 +154,14 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
         init["result"]["agentCapabilities"]["sessionCapabilities"]["fork"],
         json!({})
     );
+    assert_eq!(
+        init["result"]["agentCapabilities"]["sessionCapabilities"]["setMode"],
+        json!({})
+    );
+    assert_eq!(
+        init["result"]["agentCapabilities"]["sessionCapabilities"]["setConfigOption"],
+        json!({})
+    );
 
     let (_, created) = send_request(
         &mut stdin,

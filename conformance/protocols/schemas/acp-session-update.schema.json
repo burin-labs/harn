@@ -29,6 +29,8 @@
         { "$ref": "#/$defs/ToolCall" },
         { "$ref": "#/$defs/ToolCallUpdate" },
         { "$ref": "#/$defs/Plan" },
+        { "$ref": "#/$defs/CurrentModeUpdate" },
+        { "$ref": "#/$defs/ConfigOptionUpdate" },
         { "$ref": "#/$defs/SessionInfoUpdate" },
         { "$ref": "#/$defs/SkillActivated" },
         { "$ref": "#/$defs/SkillDeactivated" },
@@ -148,6 +150,54 @@
       "properties": {
         "sessionUpdate": { "const": "plan" },
         "entries": { "type": "array" }
+      }
+    },
+    "CurrentModeUpdate": {
+      "type": "object",
+      "required": ["sessionUpdate", "modeId"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "current_mode_update" },
+        "modeId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ConfigOptionUpdate": {
+      "type": "object",
+      "required": ["sessionUpdate", "configOptions"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "config_option_update" },
+        "configOptions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConfigOption" }
+        }
+      }
+    },
+    "ConfigOption": {
+      "type": "object",
+      "required": ["id", "name", "type", "currentValue", "options"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "type": { "const": "select" },
+        "currentValue": { "type": "string", "minLength": 1 },
+        "options": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConfigOptionValue" }
+        }
+      }
+    },
+    "ConfigOptionValue": {
+      "type": "object",
+      "required": ["value", "name"],
+      "additionalProperties": true,
+      "properties": {
+        "value": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" }
       }
     },
     "SessionInfoUpdate": {
