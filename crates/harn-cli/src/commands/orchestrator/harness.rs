@@ -582,6 +582,7 @@ async fn orchestrator_lifecycle(
         mcp_router,
         routes: route_configs,
         tenant_store: tenant_store.clone(),
+        session_store: Some(Arc::new(harn_vm::SessionStore::new(event_log.clone()))),
     })
     .await?;
     let local_bind = listener.local_addr();

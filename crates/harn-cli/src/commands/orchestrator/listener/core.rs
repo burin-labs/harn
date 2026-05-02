@@ -43,6 +43,7 @@ pub(crate) struct ListenerConfig {
     pub(crate) mcp_router: Option<Router>,
     pub(crate) routes: Vec<RouteConfig>,
     pub(crate) tenant_store: Option<Arc<harn_vm::TenantStore>>,
+    pub(crate) session_store: Option<Arc<harn_vm::SessionStore>>,
 }
 
 impl ListenerConfig {
@@ -92,7 +93,10 @@ impl ListenerRuntime {
             .routes
             .iter()
             .any(|route| route.auth_mode.requires_credentials());
-        let auth = Arc::new(ListenerAuth::from_env(requires_auth)?);
+        let auth = Arc::new(ListenerAuth::from_env(
+            requires_auth,
+            config.session_store.clone(),
+        )?);
         let request_gate = TestRequestGate {
             entered_file: test_file_from_env(REQUEST_ENTERED_FILE_ENV),
             release_file: test_file_from_env(REQUEST_RELEASE_FILE_ENV),

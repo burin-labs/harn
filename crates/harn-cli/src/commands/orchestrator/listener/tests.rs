@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -312,6 +313,7 @@ async fn start_acp_test_listener() -> (ListenerRuntime, Arc<AnyEventLog>, TempDi
         mcp_router: None,
         routes: Vec::new(),
         tenant_store: None,
+        session_store: None,
     })
     .await
     .expect("start listener");
@@ -371,6 +373,52 @@ async fn readyz_tracks_listener_readiness_gate() {
         .shutdown(Duration::from_secs(5))
         .await
         .expect("shutdown listener");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn listener_auth_accepts_durable_session_bearer() {
+    let _guard = lock_harn_state();
+    std::env::remove_var(API_KEYS_ENV);
+    std::env::remove_var(HMAC_SECRET_ENV);
+    let session_id = "harn_sess_listener_abcdefghijklmnopqrstuvwxyz0123456789";
+    let log = Arc::new(AnyEventLog::Memory(
+        harn_vm::event_log::MemoryEventLog::new(32),
+    ));
+    let session_store = Arc::new(harn_vm::SessionStore::new(log.clone()));
+    let created_at = time::OffsetDateTime::from_unix_timestamp(0).expect("unix epoch");
+    let expires_at = time::OffsetDateTime::parse(
+        "9999-01-01T00:00:00Z",
+        &time::format_description::well_known::Rfc3339,
+    )
+    .expect("far future expiry");
+    session_store
+        .create(harn_vm::CreateSession {
+            id: Some(session_id.to_string()),
+            principal: "user-1".to_string(),
+            created_at: Some(created_at),
+            expires_at,
+            attributes: BTreeMap::new(),
+        })
+        .await
+        .expect("create durable session");
+
+    let auth =
+        ListenerAuth::from_env(true, Some(session_store.clone())).expect("session auth config");
+    assert!(auth.has_credentials());
+    let mut headers = BTreeMap::new();
+    headers.insert("authorization".to_string(), format!("Bearer {session_id}"));
+
+    auth.authorize(log.as_ref(), "POST", "/hooks/a2a", &headers, &[])
+        .await
+        .expect("session bearer authorizes");
+    let touched = session_store
+        .get(session_id, created_at)
+        .await
+        .expect("get touched session")
+        .expect("session remains active");
+    assert!(touched.last_seen_at > created_at);
+    std::env::remove_var(API_KEYS_ENV);
+    std::env::remove_var(HMAC_SECRET_ENV);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -692,6 +740,7 @@ async fn reload_swaps_routes_without_losing_inflight_request() {
         mcp_router: None,
         routes: vec![route("/a2a/v1", 1)],
         tenant_store: None,
+        session_store: None,
     })
     .await
     .expect("start listener");
@@ -809,6 +858,7 @@ async fn webhook_first_delivery_is_appended() {
         mcp_router: None,
         routes: vec![webhook_route("/hooks/github")],
         tenant_store: None,
+        session_store: None,
     })
     .await
     .expect("start listener");
@@ -877,6 +927,7 @@ async fn webhook_ingest_saturation_returns_retry_after() {
         mcp_router: None,
         routes: vec![webhook_route("/hooks/github")],
         tenant_store: None,
+        session_store: None,
     })
     .await
     .expect("start listener");
@@ -954,6 +1005,7 @@ async fn webhook_duplicate_delivery_is_dropped() {
         mcp_router: None,
         routes: vec![webhook_route("/hooks/github")],
         tenant_store: None,
+        session_store: None,
     })
     .await
     .expect("start listener");
@@ -1026,6 +1078,7 @@ async fn webhook_dedupe_claim_uses_route_retention_days() {
         mcp_router: None,
         routes: vec![route],
         tenant_store: None,
+        session_store: None,
     })
     .await
     .expect("start listener");
