@@ -16,7 +16,8 @@ package manifests and checked in CI so docs drift fails the build.
 
 Harn core owns the primitives that every connector implementation needs:
 
-- the `Connector` trait, registry, provider catalog, and Harn module adapter
+- the `Connector` trait, `ConnectorBase` base-contract name, registry,
+  provider catalog, and Harn module adapter
 - raw HTTP ingress into `RawInbound`, including original body bytes and headers
 - `TriggerEvent` normalization, raw-body exposure, dispatcher handoff, and
   inbox/outbox dedupe
@@ -27,8 +28,10 @@ Harn core owns the primitives that every connector implementation needs:
 - `poll_tick` scheduling for Harn connector packages
 - connector hot-path effect policy for deterministic `normalize_inbound`
   exports
-- shared HTTP, encoding, OAuth/connect, package-manager, and testkit surfaces
-  that provider packages compose
+- `std/connectors/shared` helpers for package-side HMAC checks, JWT/JWKS
+  verification, OAuth refresh, token buckets, and cursor pagination
+- shared HTTP, encoding, package-manager, and testkit surfaces that provider
+  packages compose
 
 Provider-specific business logic should not be added to Harn core unless the
 ticket is explicitly about compatibility or removal of an existing Rust shim.
@@ -80,12 +83,12 @@ surfaces exist and are tested:
 
 | Surface | Current home |
 |---|---|
-| Connector trait, registry, and provider metadata | `crates/harn-vm/src/connectors/mod.rs`, `std/triggers::list_providers()` |
+| Connector trait/base name, registry, and provider metadata | `crates/harn-vm/src/connectors/mod.rs`, `std/triggers::list_providers()` |
 | Raw webhook substrate and signed generic webhook receiver | `crates/harn-vm/src/connectors/webhook/`, `crates/harn-cli/src/commands/orchestrator/listener.rs` |
 | Cron scheduler primitive | `crates/harn-vm/src/connectors/cron/` |
-| Raw body, bytes, HMAC, encoding, and constant-time helpers | `TriggerEvent.raw_body`, stdlib crypto/encoding builtins, `connectors::hmac` |
+| Raw body, bytes, HMAC, encoding, JWT/JWKS, OAuth refresh, and constant-time helpers | `TriggerEvent.raw_body`, stdlib crypto/encoding builtins, `connectors::{hmac, shared}`, `std/connectors/shared` |
 | Durable inbox dedupe and dispatcher handoff | `crates/harn-vm/src/triggers/inbox.rs`, `triggers/dispatcher/` |
-| Rate-limit and `Retry-After` behavior | connector clients plus shared HTTP retry/backoff builtins |
+| Rate-limit and cursor pagination behavior | connector clients, `RateLimiterFactory`, `connectors::shared::paginate_cursor`, `std/connectors/shared` |
 | Harn connector contract, `NormalizeResult`, `poll_tick`, and effect policy | `crates/harn-vm/src/connectors/harn_module.rs`, `crates/harn-lint/src/tests/connector_effect_policy.rs` |
 | Connector package conformance harness | `harn connector test`, `harn connector check`, and connector contract fixtures |
 | Catalog, examples, and migration guidance | `docs/src/connectors/catalog.md`, `examples/triggers/`, `docs/src/migrations/rust-connectors-to-harn-packages.md` |

@@ -81,8 +81,9 @@ code or inside any pipeline.
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/path`, `std/vision`, `std/context`, `std/agent_state`, `std/agents`,
 `std/runtime`, `std/review`, `std/experiments`, `std/project`, `std/memory`,
-`std/prompt_library`, `std/monitors`, `std/worktree`,
-`std/checkpoint`). These add layered
+`std/prompt_library`, `std/monitors`, `std/worktree`, `std/checkpoint`,
+`std/connectors/shared`, and provider-specific `std/connectors/...` modules).
+These add layered
 utilities on top of the core builtins; the core builtins themselves are
 always available.
 
@@ -105,7 +106,20 @@ import "std/prompt_library"
 import "std/review"
 import "std/experiments"
 import "std/monitors"
+import "std/connectors/shared"
 ```
+
+### std/connectors/shared
+
+Connector package helpers for common provider plumbing:
+
+| Function | Description |
+|---|---|
+| `verify_hmac_signature(body, signature, secret, algorithm?)` | Constant-time check for bare or `sha256=`/`sha1=` HMAC signatures |
+| `verify_jwt(token, jwks_url, options?)` | Verify a compact JWT against a JWKS URL, or `options.inline_jwks`, returning `{ok, claims, error}` |
+| `oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, options?)` | Refresh an OAuth2 access token with form-encoded `grant_type=refresh_token` |
+| `rate_limit_token_bucket(state?, config?, now_ms?)` | Pure token-bucket transition for package-local quota decisions |
+| `paginate_cursor(initial_url, fetch_fn, cursor_path, options?)` | Collect cursor-paginated pages from a package-supplied fetch closure |
 
 ### std/monitors
 

@@ -1,17 +1,17 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, RwLock};
-use std::time::{Duration as StdDuration, Instant};
+use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
 use jsonwebtoken::jwk::JwkSet;
-use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use time::OffsetDateTime;
 
 use crate::connectors::{
     ActivationHandle, ClientError, Connector, ConnectorClient, ConnectorCtx, ConnectorError,
-    ProviderPayloadSchema, RawInbound, TriggerBinding, TriggerKind,
+    JwtKeySource, JwtVerificationOptions, ProviderPayloadSchema, RawInbound, TriggerBinding,
+    TriggerKind,
 };
 use crate::triggers::event::KnownProviderPayload;
 use crate::triggers::{
@@ -20,7 +20,6 @@ use crate::triggers::{
 };
 
 const PROVIDER_ID: &str = "a2a-push";
-const JWKS_REFRESH: StdDuration = StdDuration::from_secs(24 * 60 * 60);
 
 pub struct A2aPushConnector {
     provider_id: ProviderId,
@@ -57,12 +56,6 @@ enum A2aPushAuthScheme {
 
 #[derive(Default)]
 struct A2aPushClient;
-
-#[derive(Clone, Debug)]
-struct CachedJwks {
-    fetched_at: Instant,
-    jwks: JwkSet,
-}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct A2aPushJwtClaims {
@@ -224,68 +217,33 @@ impl A2aPushConnector {
         binding: &ActivatedA2aPushBinding,
         token: &str,
     ) -> Result<A2aPushJwtClaims, ConnectorError> {
-        let header = decode_header(token)
-            .map_err(|error| ConnectorError::invalid_signature(error.to_string()))?;
-        let jwks = self.jwks(binding).await?;
-        let jwk = match header.kid.as_deref() {
-            Some(kid) => jwks.find(kid).ok_or_else(|| {
-                ConnectorError::invalid_signature(format!(
-                    "a2a-push JWT kid `{kid}` was not found in JWKS"
-                ))
-            })?,
-            None if jwks.keys.len() == 1 => &jwks.keys[0],
-            None => {
-                return Err(ConnectorError::invalid_signature(
-                    "a2a-push JWT missing kid and JWKS contains multiple keys",
-                ))
+        let source = match (&binding.inline_jwks, binding.jwks_url.as_deref()) {
+            (Some(jwks), _) => JwtKeySource::Inline(jwks),
+            (None, Some(jwks_url)) => JwtKeySource::Url(jwks_url),
+            (None, None) => {
+                return Err(ConnectorError::Activation(format!(
+                    "a2a-push binding `{}` requires jwks_url for JWT auth",
+                    binding.binding_id
+                )))
             }
         };
-        let key = DecodingKey::from_jwk(jwk)
-            .map_err(|error| ConnectorError::invalid_signature(error.to_string()))?;
-        let mut validation = Validation::new(header.alg);
-        validation.set_required_spec_claims(&["exp", "iss", "aud"]);
-        validation.set_issuer(&[required(binding.expected_iss.as_deref(), "expected_iss")?]);
-        validation.set_audience(&[required(binding.expected_aud.as_deref(), "expected_aud")?]);
-        let token = decode::<A2aPushJwtClaims>(token, &key, &validation)
-            .map_err(|error| ConnectorError::invalid_signature(error.to_string()))?;
-        if token.claims.jti.trim().is_empty() {
+        let claims = crate::connectors::shared::verify_jwt_claims::<A2aPushJwtClaims>(
+            &self.http,
+            token,
+            source,
+            &JwtVerificationOptions::default()
+                .with_issuer(required(binding.expected_iss.as_deref(), "expected_iss")?)
+                .with_audience(required(binding.expected_aud.as_deref(), "expected_aud")?)
+                .require_spec_claims(["exp", "iss", "aud"])
+                .with_egress_label("connector:a2a-push"),
+        )
+        .await?;
+        if claims.jti.trim().is_empty() {
             return Err(ConnectorError::invalid_signature(
                 "a2a-push JWT missing jti",
             ));
         }
-        Ok(token.claims)
-    }
-
-    async fn jwks(&self, binding: &ActivatedA2aPushBinding) -> Result<JwkSet, ConnectorError> {
-        if let Some(jwks) = &binding.inline_jwks {
-            return Ok(jwks.clone());
-        }
-        let Some(jwks_url) = binding.jwks_url.as_deref() else {
-            return Err(ConnectorError::Activation(format!(
-                "a2a-push binding `{}` requires jwks_url for JWT auth",
-                binding.binding_id
-            )));
-        };
-        if let Some(cached) = cached_jwks(jwks_url) {
-            return Ok(cached);
-        }
-        if let Some(error) = crate::egress::connector_error_for_url("connector:a2a-push", jwks_url)
-        {
-            return Err(error);
-        }
-        let jwks = self
-            .http
-            .get(jwks_url)
-            .send()
-            .await
-            .map_err(|error| ConnectorError::Activation(format!("fetch JWKS: {error}")))?
-            .error_for_status()
-            .map_err(|error| ConnectorError::Activation(format!("fetch JWKS: {error}")))?
-            .json::<JwkSet>()
-            .await
-            .map_err(|error| ConnectorError::Activation(format!("decode JWKS: {error}")))?;
-        store_cached_jwks(jwks_url, jwks.clone());
-        Ok(jwks)
+        Ok(claims)
     }
 }
 
@@ -586,27 +544,6 @@ fn fallback_dedupe_key(raw_body: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(raw_body);
     format!("sha256:{}", hex::encode(digest))
-}
-
-static JWKS_CACHE: std::sync::OnceLock<RwLock<HashMap<String, CachedJwks>>> =
-    std::sync::OnceLock::new();
-
-fn cached_jwks(url: &str) -> Option<JwkSet> {
-    let cache = JWKS_CACHE.get_or_init(|| RwLock::new(HashMap::new()));
-    let cache = cache.read().expect("a2a-push JWKS cache poisoned");
-    let cached = cache.get(url)?;
-    (cached.fetched_at.elapsed() < JWKS_REFRESH).then(|| cached.jwks.clone())
-}
-
-fn store_cached_jwks(url: &str, jwks: JwkSet) {
-    let cache = JWKS_CACHE.get_or_init(|| RwLock::new(HashMap::new()));
-    cache.write().expect("a2a-push JWKS cache poisoned").insert(
-        url.to_string(),
-        CachedJwks {
-            fetched_at: Instant::now(),
-            jwks,
-        },
-    );
 }
 
 #[cfg(test)]

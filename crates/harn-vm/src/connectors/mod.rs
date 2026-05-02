@@ -34,6 +34,7 @@ pub mod harn_module;
 pub mod hmac;
 pub mod linear;
 pub mod notion;
+pub mod shared;
 pub mod slack;
 pub mod stream;
 #[cfg(test)]
@@ -63,6 +64,10 @@ pub use hmac::{
 pub use linear::LinearConnector;
 pub use notion::{
     load_pending_webhook_handshakes, NotionConnector, PersistedNotionWebhookHandshake,
+};
+pub use shared::{
+    paginate_cursor, resolve_jwks, verify_hmac_signature, verify_jwt_claims, verify_jwt_json,
+    ConnectorBase, CursorPage, HmacSignatureAlgorithm, JwtKeySource, JwtVerificationOptions,
 };
 pub use slack::SlackConnector;
 pub use stream::StreamConnector;

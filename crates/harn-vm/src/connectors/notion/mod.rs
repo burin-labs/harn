@@ -17,7 +17,7 @@ use tokio::task::JoinHandle;
 use crate::connectors::hmac::HmacSignatureStyle;
 use crate::connectors::{
     ActivationHandle, ClientError, Connector, ConnectorClient, ConnectorCtx, ConnectorError,
-    ProviderPayloadSchema, RawInbound, TriggerBinding, TriggerKind,
+    CursorPage, ProviderPayloadSchema, RawInbound, TriggerBinding, TriggerKind,
 };
 use crate::event_log::{EventLog, LogEvent, Topic};
 use crate::secrets::{SecretId, SecretVersion};
@@ -1116,9 +1116,7 @@ async fn query_pages_since(
     binding: &ActivatedNotionPollBinding,
     high_water: Option<OffsetDateTime>,
 ) -> Result<Vec<JsonValue>, ConnectorError> {
-    let mut start_cursor = None;
-    let mut results = Vec::new();
-    loop {
+    crate::connectors::shared::paginate_cursor(None, None, |start_cursor| async move {
         let mut filters = Vec::new();
         if let Some(user_filter) = binding.filter.clone() {
             filters.push(user_filter);
@@ -1162,7 +1160,7 @@ async fn query_pages_since(
         if let Some(filter) = filter {
             body.insert("filter".to_string(), filter);
         }
-        if let Some(cursor) = start_cursor.clone() {
+        if let Some(cursor) = start_cursor {
             body.insert("start_cursor".to_string(), JsonValue::String(cursor));
         }
         let payload = client
@@ -1171,16 +1169,13 @@ async fn query_pages_since(
             .map_err(ConnectorError::from)?;
         let response: NotionListResponse =
             serde_json::from_value(payload).map_err(ConnectorError::from)?;
-        results.extend(response.results);
-        if !response.has_more {
-            break;
-        }
-        start_cursor = response.next_cursor;
-        if start_cursor.is_none() {
-            break;
-        }
-    }
-    Ok(results)
+        Ok(CursorPage {
+            items: response.results,
+            next_cursor: response.next_cursor,
+            has_more: response.has_more,
+        })
+    })
+    .await
 }
 
 fn polled_event(
