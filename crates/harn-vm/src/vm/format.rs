@@ -33,6 +33,7 @@ impl super::Vm {
             let line = *line;
             let col = *col;
             let filename = frame_file.as_deref().unwrap_or(entry_file);
+            let display_filename = harn_parser::diagnostic::normalize_diagnostic_path(filename);
             // Read the frame's own source so the caret line is meaningful;
             // fall back to entry-point source (e.g. for stdlib modules).
             let owned_source: Option<String> = frame_file
@@ -48,7 +49,7 @@ impl super::Vm {
                 let display_col = if col > 0 { col } else { 1 };
                 let gutter_width = line.to_string().len();
                 out.push_str(&format!(
-                    "{:>width$}--> {filename}:{line}:{display_col}\n",
+                    "{:>width$}--> {display_filename}:{line}:{display_col}\n",
                     " ",
                     width = gutter_width + 1,
                 ));
@@ -92,8 +93,10 @@ impl super::Vm {
                 let display_name = if name.is_empty() { "pipeline" } else { name };
                 if *line > 0 {
                     let filename = frame_file.as_deref().unwrap_or(entry_file);
+                    let display_filename =
+                        harn_parser::diagnostic::normalize_diagnostic_path(filename);
                     out.push_str(&format!(
-                        "  = note: called from {display_name} at {filename}:{line}\n"
+                        "  = note: called from {display_name} at {display_filename}:{line}\n"
                     ));
                 }
             }

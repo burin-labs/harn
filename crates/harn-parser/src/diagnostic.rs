@@ -10,6 +10,58 @@ pub struct RelatedSpanLabel<'a> {
     pub label: &'a str,
 }
 
+/// Normalize diagnostic filenames lexically for display.
+///
+/// This deliberately does not touch the filesystem: diagnostics should cancel
+/// `.` and `..` path components even when the path points at a file that no
+/// longer exists, without resolving symlinks.
+pub fn normalize_diagnostic_path(path: &str) -> String {
+    let posix = path.replace('\\', "/");
+    if posix.is_empty() {
+        return String::new();
+    }
+
+    let bytes = posix.as_bytes();
+    let mut drive = "";
+    let mut rest = posix.as_str();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        drive = &posix[..2];
+        rest = &posix[2..];
+    }
+
+    let absolute = rest.starts_with('/');
+    let mut stack: Vec<&str> = Vec::new();
+    for segment in rest.split('/').filter(|segment| !segment.is_empty()) {
+        match segment {
+            "." => {}
+            ".." => {
+                if let Some(top) = stack.last() {
+                    if *top != ".." {
+                        stack.pop();
+                        continue;
+                    }
+                }
+                if !absolute {
+                    stack.push("..");
+                }
+            }
+            _ => stack.push(segment),
+        }
+    }
+
+    let mut normalized = String::new();
+    normalized.push_str(drive);
+    if absolute {
+        normalized.push('/');
+    }
+    normalized.push_str(&stack.join("/"));
+    if normalized.is_empty() {
+        ".".to_string()
+    } else {
+        normalized
+    }
+}
+
 /// Compute the Levenshtein edit distance between two strings.
 pub fn edit_distance(a: &str, b: &str) -> usize {
     let a_chars: Vec<char> = a.chars().collect();
@@ -73,6 +125,7 @@ pub fn render_diagnostic_with_related(
     related: &[RelatedSpanLabel<'_>],
 ) -> String {
     let mut out = String::new();
+    let filename = normalize_diagnostic_path(filename);
     let severity_color = severity_color(severity);
     let gutter = style_fragment("|", Color::Blue, false);
     let arrow = style_fragment("-->", Color::Blue, true);
@@ -146,7 +199,7 @@ pub fn render_diagnostic_with_related(
         render_related_span(
             &mut out,
             source,
-            filename,
+            &filename,
             item.span,
             item.label,
             gutter_width,
@@ -214,6 +267,7 @@ fn render_related_span(
     label: &str,
     primary_gutter_width: usize,
 ) {
+    let filename = normalize_diagnostic_path(filename);
     let severity_color = Color::Magenta;
     let gutter = style_fragment("|", Color::Blue, false);
     let arrow = style_fragment("-->", Color::Blue, true);
@@ -364,6 +418,30 @@ mod tests {
         assert!(output.contains("--> example.harn:2:13"));
         assert!(output.contains("let y = x + 1"));
         assert!(output.contains("^ not found in this scope"));
+    }
+
+    #[test]
+    fn test_diagnostic_normalizes_filename() {
+        disable_colors();
+        let source = "let value = thing";
+        let span = Span {
+            start: 12,
+            end: 17,
+            line: 1,
+            column: 13,
+            end_line: 1,
+        };
+        let output = render_diagnostic(
+            source,
+            "/workspace/pipelines/mode/../lib/runtime/loop.harn",
+            &span,
+            "error",
+            "bad value",
+            Some("here"),
+            None,
+        );
+        assert!(output.contains("--> /workspace/pipelines/lib/runtime/loop.harn:1:13"));
+        assert!(!output.contains("/../"));
     }
 
     #[test]
