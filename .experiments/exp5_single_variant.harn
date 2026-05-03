@@ -1,0 +1,90 @@
+/**
+ * EXP5: Single variant of the multi-step investigation, run once with
+ * HARN_LLM_TRANSCRIPT_DIR set so we can inspect the full conversation
+ * the model sees iteration-by-iteration.
+ */
+fn build_tools() -> dict {
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "list_dir",
+    "List files in a directory",
+    {
+      parameters: {path: {type: "string"}},
+      handler: { args ->
+        if args.path == "." {
+          return "src/\nCargo.toml\nREADME.md"
+        }
+        if args.path == "src" {
+          return "main.rs\nlib.rs\nutils.rs"
+        }
+        return "(empty)"
+      },
+    },
+  )
+  registry = tool_define(
+    registry,
+    "read_file",
+    "Read the contents of a file",
+    {
+      parameters: {path: {type: "string"}},
+      handler: { args ->
+        if args.path == "src/main.rs" {
+          return "fn main() {\n    let x = compute(5);\n    println!(\"{}\", x);\n}"
+        }
+        if args.path == "src/utils.rs" {
+          return "pub fn compute(n: i32) -> i32 { n * 2 + 1 }"
+        }
+        if args.path == "src/lib.rs" {
+          return "pub mod utils;\npub use utils::*;"
+        }
+        if args.path == "Cargo.toml" {
+          return "[package]\nname = \"demo\"\nversion = \"0.1.0\""
+        }
+        return "(file not found: ${args.path})"
+      },
+    },
+  )
+  registry = tool_define(
+    registry,
+    "grep",
+    "Grep a pattern in files",
+    {
+      parameters: {pattern: {type: "string"}, path: {type: "string"}},
+      handler: { args ->
+        if args.pattern == "compute" {
+          return "src/main.rs:2:    let x = compute(5);\nsrc/utils.rs:1:pub fn compute(n: i32) -> i32 {"
+        }
+        return "(no matches)"
+      },
+    },
+  )
+  return registry
+}
+
+pipeline main(task) {
+  let registry = build_tools()
+  let task_text = "Investigate this small repo and tell me what the compute function does and how it is used in main."
+  let system_prompt = "/no_think You are a coding agent. Use the available tools to investigate the repo step by step, then return a concise final answer to the user."
+  let cb = { info ->
+    let names = info?.tool_names ?? []
+    let count = info?.tool_count ?? 0
+    let iter = info?.iteration ?? 0
+    log("[exp5] iter=${iter} tools=${count} names=${names}")
+    nil
+  }
+  let result = agent_loop(
+    task_text,
+    system_prompt,
+    {
+      provider: "llamacpp",
+      model: "qwen3.6",
+      tool_format: "native",
+      persistent: false,
+      max_iterations: 6,
+      tools: registry,
+      post_turn_callback: cb,
+    },
+  )
+  log("[exp5] DONE status=${result.status} iters=${result.llm.iterations}")
+}

@@ -1,0 +1,129 @@
+/**
+ * EXP2: Sentinel on/off matrix with per-iteration logging.
+ *
+ * Goal: figure out empirically what `done_sentinel` does for non-persistent
+ * agent_loop on local Qwen3.6 in both native and text tool_format modes.
+ *
+ * post_turn_callback fires once per tool-call turn. We log the tool_count
+ * and tool_names so we can see exactly when (if ever) the model stops
+ * calling tools.
+ *
+ * Variants:
+ *   A: native + default sentinel (##DONE##)
+ *   B: native + done_sentinel: ""
+ *   C: text   + default sentinel
+ *   D: text   + done_sentinel: ""
+ *
+ * max_iterations is small (8) to bound cost.
+ */
+fn build_tools() -> dict {
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "list_dir",
+    "List files in a directory",
+    {
+      parameters: {path: {type: "string"}},
+      handler: { args ->
+        if args.path == "." {
+          return "src/\nCargo.toml\nREADME.md"
+        }
+        if args.path == "src" {
+          return "main.rs\nlib.rs\nutils.rs"
+        }
+        return "(empty)"
+      },
+    },
+  )
+  registry = tool_define(
+    registry,
+    "read_file",
+    "Read the contents of a file",
+    {
+      parameters: {path: {type: "string"}},
+      handler: { args ->
+        if args.path == "src/main.rs" {
+          return "fn main() {\n    let x = compute(5);\n    println!(\"{}\", x);\n}"
+        }
+        if args.path == "src/utils.rs" {
+          return "pub fn compute(n: i32) -> i32 { n * 2 + 1 }"
+        }
+        if args.path == "src/lib.rs" {
+          return "pub mod utils;\npub use utils::*;"
+        }
+        if args.path == "Cargo.toml" {
+          return "[package]\nname = \"demo\"\nversion = \"0.1.0\""
+        }
+        return "(file not found: ${args.path})"
+      },
+    },
+  )
+  registry = tool_define(
+    registry,
+    "grep",
+    "Grep a pattern in files",
+    {
+      parameters: {pattern: {type: "string"}, path: {type: "string"}},
+      handler: { args ->
+        if args.pattern == "compute" {
+          return "src/main.rs:2:    let x = compute(5);\nsrc/utils.rs:1:pub fn compute(n: i32) -> i32 {"
+        }
+        return "(no matches)"
+      },
+    },
+  )
+  return registry
+}
+
+fn run_variant(label: string, mode: string, sentinel: string, registry: dict) -> dict {
+  log("\n--- ${label} (mode=${mode}, sentinel=\"${sentinel}\") ---")
+  let task = "Investigate this small repo and tell me what the compute function does and how it is used in main."
+  let system_prompt = "/no_think You are a coding agent. Use the available tools to investigate the repo step by step, then return a concise final answer to the user."
+  let cb = { info ->
+    let names = info?.tool_names ?? []
+    let count = info?.tool_count ?? 0
+    let iter = info?.iteration ?? 0
+    log("  [${label}] iter=${iter} tools=${count} names=${names}")
+    nil
+  }
+  var opts = {
+    provider: "llamacpp",
+    model: "qwen3.6",
+    tool_format: mode,
+    persistent: false,
+    max_iterations: 8,
+    tools: registry,
+    post_turn_callback: cb,
+  }
+  if sentinel != "(default)" {
+    opts = opts + {done_sentinel: sentinel}
+  }
+  let result = agent_loop(task, system_prompt, opts)
+  log("  [${label}] DONE status=${result.status} iters=${result.llm.iterations}")
+  let visible = result?.visible_text ?? ""
+  let visible_len = len(visible)
+  log("  [${label}] visible_len=${visible_len}")
+  if visible_len > 0 {
+    let head_len = if visible_len < 200 {
+      visible_len
+    } else {
+      200
+    }
+    log("  [${label}] visible[0..${head_len}]=${visible[:head_len]}")
+  }
+  return {label: label, status: result.status, iters: result.llm.iterations, visible_len: visible_len}
+}
+
+pipeline main(task) {
+  let registry = build_tools()
+  let results = [
+    run_variant("A:native+default", "native", "(default)", registry),
+    run_variant("B:native+empty", "native", "", registry),
+    run_variant("C:text+default", "text", "(default)", registry),
+    run_variant("D:text+empty", "text", "", registry),
+  ]
+  log("\n========== EXP2 SUMMARY ==========")
+  for r in results {
+    log("${r.label}: status=${r.status} iters=${r.iters} visible_len=${r.visible_len}")
+  }
+}
