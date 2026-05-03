@@ -72,8 +72,10 @@ pipeline main(task) {
   var tools = tool_registry()
   tools = tool_define(tools, "echo", "Echo input", {
     parameters: {text: "string"},
+    returns: {type: "string"},
     handler: { args -> args.text },
-    annotations: {title: "Echo Tool", readOnlyHint: true}
+    annotations: {title: "Echo Tool", readOnlyHint: true, idempotentHint: true, openWorldHint: false},
+    icons: [{src: "https://example.com/echo.png", mimeType: "image/png", sizes: ["48x48"]}]
   })
   mcp_tools(tools)
 
@@ -401,6 +403,23 @@ fn serve_mcp_stdio_exposes_script_registered_surface() {
         json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}),
     );
     assert_eq!(tools["result"]["tools"][0]["name"], "echo");
+    assert_eq!(
+        tools["result"]["tools"][0]["outputSchema"]["type"],
+        "string"
+    );
+    assert_eq!(
+        tools["result"]["tools"][0]["annotations"],
+        json!({
+            "title": "Echo Tool",
+            "readOnlyHint": true,
+            "idempotentHint": true,
+            "openWorldHint": false,
+        })
+    );
+    assert_eq!(
+        tools["result"]["tools"][0]["icons"][0]["src"],
+        "https://example.com/echo.png"
+    );
 
     let resources = send_stdio_request(
         &mut stdin,

@@ -256,6 +256,9 @@ impl McpServer {
                 if let Some(ref annotations) = t.annotations {
                     entry["annotations"] = annotations.clone();
                 }
+                if let Some(ref icons) = t.icons {
+                    entry["icons"] = icons.clone();
+                }
                 entry["execution"] = crate::mcp_protocol::tool_execution(
                     crate::mcp_protocol::McpToolTaskSupport::Forbidden,
                 );

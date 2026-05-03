@@ -1111,7 +1111,15 @@ fn parse_cursor(params: &JsonValue) -> (usize, usize) {
 fn tool_entry(function: &crate::ExportedFunction) -> JsonValue {
     let mut entry = json!({
         "name": function.name,
+        "title": function.name,
         "description": format!("Invoke exported Harn function '{}'.", function.name),
+        "annotations": {
+            "title": function.name,
+            "readOnlyHint": false,
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": true,
+        },
         "inputSchema": function.input_schema,
     });
     if let Some(output_schema) = function.output_schema.clone() {
@@ -1325,6 +1333,8 @@ pub fn greet(name: string) -> string {
         let server = McpServer::new(McpServerConfig::new(core));
         let tools = server.tools_list_result(&json!({}));
         assert_eq!(tools["tools"][0]["name"], "greet");
+        assert_eq!(tools["tools"][0]["annotations"]["readOnlyHint"], false);
+        assert_eq!(tools["tools"][0]["annotations"]["destructiveHint"], true);
         assert_eq!(tools["tools"][0]["inputSchema"]["type"], "object");
         assert_eq!(tools["tools"][0]["outputSchema"]["type"], "string");
     }

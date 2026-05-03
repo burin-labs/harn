@@ -8,6 +8,7 @@ pub struct McpToolDef {
     pub input_schema: serde_json::Value,
     pub output_schema: Option<serde_json::Value>,
     pub annotations: Option<serde_json::Value>,
+    pub icons: Option<serde_json::Value>,
     pub handler: VmClosure,
 }
 

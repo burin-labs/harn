@@ -581,6 +581,7 @@ impl McpOrchestratorService {
             tool_def(
                 "harn.secret_scan",
                 "Scan content for high-signal secrets before commit or PR-open flows. The `harn::secret_scan` alias is also accepted.",
+                read_only_tool_annotations("Secret Scan"),
                 json!({
                     "type": "object",
                     "required": ["content"],
@@ -624,6 +625,7 @@ impl McpOrchestratorService {
             tool_def(
                 "harn.trigger.fire",
                 "Dispatch a trigger inline and return its event id plus terminal status.",
+                mutating_open_world_tool_annotations("Fire Trigger"),
                 json!({
                     "type": "object",
                     "required": ["trigger_id", "payload"],
@@ -646,6 +648,7 @@ impl McpOrchestratorService {
             tool_def(
                 "harn.trigger.list",
                 "List registered triggers and their kind/provider/when/handler metadata.",
+                read_only_tool_annotations("List Triggers"),
                 json!({
                     "type": "object",
                     "properties": {},
@@ -657,6 +660,7 @@ impl McpOrchestratorService {
             tool_def(
                 "harn.trigger.replay",
                 "Replay an existing trigger event, optionally resolving bindings as of a historical timestamp or recording a teaching correction.",
+                mutating_open_world_tool_annotations("Replay Trigger"),
                 json!({
                     "type": "object",
                     "required": ["event_id"],
@@ -680,6 +684,7 @@ impl McpOrchestratorService {
             tool_def(
                 "harn.orchestrator.queue",
                 "Return inbox/outbox/attempt/DLQ counts plus recent previews.",
+                read_only_tool_annotations("Inspect Orchestrator Queue"),
                 json!({
                     "type": "object",
                     "properties": {},
@@ -691,6 +696,7 @@ impl McpOrchestratorService {
             tool_def(
                 "harn.orchestrator.dlq.list",
                 "List pending dead-letter queue entries.",
+                read_only_tool_annotations("List Dead Letter Queue"),
                 json!({
                     "type": "object",
                     "properties": {},
@@ -702,6 +708,7 @@ impl McpOrchestratorService {
             tool_def(
                 "harn.orchestrator.dlq.retry",
                 "Replay a pending dead-letter queue entry.",
+                mutating_open_world_tool_annotations("Retry Dead Letter Queue Entry"),
                 json!({
                     "type": "object",
                     "required": ["entry_id"],
@@ -716,6 +723,7 @@ impl McpOrchestratorService {
             tool_def(
                 "harn.orchestrator.inspect",
                 "Snapshot dispatcher state, triggers, flow-control state, and recent dispatches.",
+                read_only_tool_annotations("Inspect Orchestrator"),
                 json!({
                     "type": "object",
                     "properties": {},
@@ -727,6 +735,7 @@ impl McpOrchestratorService {
             tool_def(
                 "harn.trust.query",
                 "Query trust-graph records with the same filters exposed by trust_query(filters).",
+                read_only_tool_annotations("Query Trust Records"),
                 json!({
                     "type": "object",
                     "properties": {
@@ -2511,6 +2520,7 @@ fn paginated_list_response(
 fn tool_def(
     name: &str,
     description: &str,
+    annotations: JsonValue,
     input_schema: JsonValue,
     output_schema: Option<JsonValue>,
     task_support: mcp_protocol::McpToolTaskSupport,
@@ -2518,13 +2528,37 @@ fn tool_def(
     let mut value = json!({
         "name": name,
         "description": description,
+        "annotations": annotations,
         "inputSchema": input_schema,
         "execution": mcp_protocol::tool_execution(task_support),
     });
+    if let Some(title) = value["annotations"].get("title").cloned() {
+        value["title"] = title;
+    }
     if let Some(output_schema) = output_schema {
         value["outputSchema"] = output_schema;
     }
     value
+}
+
+fn read_only_tool_annotations(title: &str) -> JsonValue {
+    json!({
+        "title": title,
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+    })
+}
+
+fn mutating_open_world_tool_annotations(title: &str) -> JsonValue {
+    json!({
+        "title": title,
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+    })
 }
 
 fn task_support_for_tool(name: &str) -> Option<mcp_protocol::McpToolTaskSupport> {
@@ -3214,7 +3248,7 @@ version = "0.1.0"
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn tools_list_advertises_task_support_per_tool() {
+    async fn tools_list_advertises_tool_metadata_per_tool() {
         let _guard = lock_harn_state();
         let temp = TempDir::new().unwrap();
         write_fixture(&temp);
@@ -3237,7 +3271,13 @@ version = "0.1.0"
             .find(|tool| tool["name"] == "harn.trigger.list")
             .unwrap();
         assert_eq!(trigger_fire["execution"]["taskSupport"], json!("optional"));
+        assert_eq!(trigger_fire["annotations"]["readOnlyHint"], json!(false));
+        assert_eq!(trigger_fire["annotations"]["destructiveHint"], json!(true));
+        assert_eq!(trigger_fire["annotations"]["openWorldHint"], json!(true));
         assert_eq!(trigger_list["execution"]["taskSupport"], json!("forbidden"));
+        assert_eq!(trigger_list["annotations"]["readOnlyHint"], json!(true));
+        assert_eq!(trigger_list["annotations"]["idempotentHint"], json!(true));
+        assert_eq!(trigger_list["annotations"]["openWorldHint"], json!(false));
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -48,7 +48,7 @@ pub fn tool_registry_to_mcp_tools(registry: &VmValue) -> Result<Vec<McpToolDef>,
             };
 
             let input_schema = params_to_json_schema(entry.get("parameters"));
-            let output_schema = entry.get("output_schema").and_then(|v| {
+            let output_schema = entry.get("outputSchema").and_then(|v| {
                 if let VmValue::Dict(_) = v {
                     Some(vm_value_to_json(v))
                 } else {
@@ -56,6 +56,13 @@ pub fn tool_registry_to_mcp_tools(registry: &VmValue) -> Result<Vec<McpToolDef>,
                 }
             });
             let annotations = entry.get("annotations").and_then(annotations_to_json);
+            let icons = entry.get("icons").and_then(|v| {
+                if let VmValue::List(_) = v {
+                    Some(vm_value_to_json(v))
+                } else {
+                    None
+                }
+            });
 
             mcp_tools.push(McpToolDef {
                 name,
@@ -64,6 +71,7 @@ pub fn tool_registry_to_mcp_tools(registry: &VmValue) -> Result<Vec<McpToolDef>,
                 input_schema,
                 output_schema,
                 annotations,
+                icons,
                 handler,
             });
         }

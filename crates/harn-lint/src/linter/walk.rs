@@ -235,6 +235,9 @@ impl<'a> Linter<'a> {
                 type_ann,
                 value,
             } => {
+                if let Some(name) = Self::simple_binding_name(pattern) {
+                    self.record_mcp_registry_binding(name, value);
+                }
                 self.lint_node(value);
                 if let Some(ann) = type_ann {
                     self.check_eager_collection_conversion(ann, value);
@@ -247,6 +250,9 @@ impl<'a> Linter<'a> {
                 type_ann,
                 value,
             } => {
+                if let Some(name) = Self::simple_binding_name(pattern) {
+                    self.record_mcp_registry_binding(name, value);
+                }
                 self.lint_node(value);
                 if let Some(ann) = type_ann {
                     self.check_eager_collection_conversion(ann, value);
@@ -256,6 +262,7 @@ impl<'a> Linter<'a> {
 
             Node::Assignment { target, value, .. } => {
                 if let Some(name) = Self::root_var_name(target) {
+                    self.record_mcp_registry_binding(&name, value);
                     self.assignments.insert(name);
                 }
                 self.lint_node(target);
@@ -271,6 +278,11 @@ impl<'a> Linter<'a> {
                 self.references.insert(name.clone());
                 self.function_references.insert(name.clone());
                 self.function_calls.push((name.clone(), snode.span));
+                if name == "mcp_tools" {
+                    if let Some(registry) = args.first() {
+                        self.warn_mcp_tools_missing_annotations(registry);
+                    }
+                }
                 if Self::is_assert_builtin(name) && !self.in_test_pipeline() {
                     self.diagnostics.push(LintDiagnostic {
                         rule: "assert-outside-test",
