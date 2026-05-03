@@ -21,12 +21,16 @@ name: Publish release
 # version to '" trigger) means this workflow auto-recovers when an
 # earlier finalize run failed BEFORE pushing the tag. Any subsequent
 # push to main will see drift still present and re-run publish. Once
-# the tag exists at HEAD, drift goes away and the job no-ops.
+# the latest tag matches Cargo.toml's workspace version, drift goes
+# away and push-triggered runs no-op.
 #
 # workflow_dispatch is the recovery path for the one residual case:
 # failure AFTER tag push but BEFORE crates.io publish completed (drift
-# is gone but publish state is partial). release_ship.sh's per-crate
-# fallback skips already-published, so manual re-fire is idempotent.
+# is gone but publish state is partial). Manual recovery checks out the
+# existing release tag when there is no drift, so crates.io, release
+# notes, and the git tag all stay tied to the same commit even if main
+# has moved on. release_ship.sh's per-crate fallback skips
+# already-published, so manual re-fire is idempotent.
 on:
   push:
     branches: [main]
@@ -78,6 +82,7 @@ jobs:
       drift: ${{ steps.check.outputs.drift }}
       cargo_version: ${{ steps.check.outputs.cargo_version }}
       latest_tag: ${{ steps.check.outputs.latest_tag }}
+      publish_ref: ${{ steps.check.outputs.publish_ref }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -103,10 +108,16 @@ jobs:
             DRIFT=false
             echo "::notice::Cargo.toml=$CARGO_VERSION matches latest tag $LATEST_TAG → no-op."
           fi
+          PUBLISH_REF=main
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "$DRIFT" == "false" && -n "$LATEST_TAG" ]]; then
+            PUBLISH_REF="$LATEST_TAG"
+            echo "::notice::Manual recovery has no tag drift; publishing from existing tag $LATEST_TAG instead of current main."
+          fi
           {
             echo "drift=$DRIFT"
             echo "cargo_version=$CARGO_VERSION"
             echo "latest_tag=$LATEST_TAG"
+            echo "publish_ref=$PUBLISH_REF"
           } >> "$GITHUB_OUTPUT"
 
   publish:
@@ -136,6 +147,17 @@ jobs:
           # Persist the App token in .git/config so the later `git push`
           # in release_ship.sh --finalize uses it for the tag push.
           token: ${{ steps.app-token.outputs.token }}
+
+      - name: Select publish ref
+        run: |
+          set -euo pipefail
+          cp scripts/release_ship.sh "$RUNNER_TEMP/release_ship.sh"
+          publish_ref="${{ needs.detect-drift.outputs.publish_ref }}"
+          if [[ "$publish_ref" != "main" ]]; then
+            git fetch --force --tags origin
+            git switch --detach "$publish_ref"
+          fi
+          echo "Publishing from $(git rev-parse --short HEAD) ($publish_ref)"
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
@@ -209,4 +231,4 @@ jobs:
           if [[ "${{ inputs.skip_dry_run }}" == "true" ]]; then
             args+=(--skip-dry-run)
           fi
-          ./scripts/release_ship.sh "${args[@]}"
+          HARN_RELEASE_ROOT="$PWD" bash "$RUNNER_TEMP/release_ship.sh" "${args[@]}"
