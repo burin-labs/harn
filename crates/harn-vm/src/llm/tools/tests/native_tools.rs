@@ -1,6 +1,6 @@
 use super::{
     apply_tool_search_native_injection, defer_loading_registry, extract_deferred_tool_names, json,
-    vm_bool, vm_dict, vm_list, vm_str, vm_tools_to_native,
+    sample_tool_registry, vm_bool, vm_dict, vm_list, vm_str, vm_tools_to_native,
 };
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -80,6 +80,123 @@ fn vm_tools_to_native_emits_defer_loading_for_openai_compat() {
             .get("defer_loading")
             .and_then(|value| value.as_bool()),
         Some(true)
+    );
+}
+
+#[test]
+fn vm_tools_to_native_preserves_rich_parameter_schema_for_openai_compat() {
+    let registry = sample_tool_registry();
+    let tools = vm_tools_to_native(&registry, "openai").expect("openai native tools");
+    let edit = tools
+        .iter()
+        .find(|tool| {
+            tool.get("function")
+                .and_then(|function| function.get("name"))
+                .and_then(|value| value.as_str())
+                == Some("edit")
+        })
+        .expect("edit tool present");
+
+    let parameters = &edit["function"]["parameters"];
+    let properties = parameters["properties"]
+        .as_object()
+        .expect("properties object");
+
+    assert_eq!(properties["action"]["type"].as_str(), Some("string"));
+    assert_eq!(
+        properties["action"]["enum"],
+        json!(["create", "patch", "replace_body"])
+    );
+    assert_eq!(
+        properties["path"]["description"].as_str(),
+        Some("Repo-relative path.")
+    );
+    assert_eq!(properties["ops"]["type"].as_str(), Some("array"));
+    assert_eq!(properties["content"]["type"].as_str(), Some("string"));
+    assert!(
+        properties["content"].get("required").is_none(),
+        "per-property Harn `required` marker must not leak into JSON Schema"
+    );
+    assert_eq!(parameters["required"], json!(["action", "path"]));
+}
+
+#[test]
+fn vm_tools_to_native_normalizes_nested_harn_type_aliases() {
+    let mut params = BTreeMap::new();
+    params.insert(
+        "filters".to_string(),
+        vm_dict(&[
+            ("type", vm_str("dict")),
+            (
+                "properties",
+                vm_dict(&[
+                    ("enabled", vm_dict(&[("type", vm_str("bool"))])),
+                    (
+                        "scores",
+                        vm_dict(&[
+                            ("type", vm_str("list")),
+                            ("items", vm_dict(&[("type", vm_str("int"))])),
+                        ]),
+                    ),
+                ]),
+            ),
+        ]),
+    );
+    let tool = vm_dict(&[
+        ("name", vm_str("rank")),
+        ("description", vm_str("Rank results")),
+        ("parameters", super::VmValue::Dict(Rc::new(params))),
+    ]);
+    let registry = vm_list(vec![tool]);
+
+    let tools = vm_tools_to_native(&registry, "openai").expect("openai native tools");
+    let filters = &tools[0]["function"]["parameters"]["properties"]["filters"];
+    assert_eq!(filters["type"].as_str(), Some("object"));
+    assert_eq!(
+        filters["properties"]["enabled"]["type"].as_str(),
+        Some("boolean")
+    );
+    assert_eq!(
+        filters["properties"]["scores"]["type"].as_str(),
+        Some("array")
+    );
+    assert_eq!(
+        filters["properties"]["scores"]["items"]["type"].as_str(),
+        Some("integer")
+    );
+}
+
+#[test]
+fn vm_tools_to_native_preserves_json_schema_required_arrays() {
+    let mut params = BTreeMap::new();
+    params.insert(
+        "payload".to_string(),
+        vm_dict(&[
+            ("type", vm_str("dict")),
+            (
+                "properties",
+                vm_dict(&[
+                    ("id", vm_dict(&[("type", vm_str("str"))])),
+                    ("count", vm_dict(&[("type", vm_str("int"))])),
+                ]),
+            ),
+            ("required", vm_list(vec![vm_str("id")])),
+        ]),
+    );
+    let tool = vm_dict(&[
+        ("name", vm_str("submit")),
+        ("description", vm_str("Submit payload")),
+        ("parameters", super::VmValue::Dict(Rc::new(params))),
+    ]);
+    let registry = vm_list(vec![tool]);
+
+    let tools = vm_tools_to_native(&registry, "openai").expect("openai native tools");
+    let payload = &tools[0]["function"]["parameters"]["properties"]["payload"];
+    assert_eq!(payload["type"].as_str(), Some("object"));
+    assert_eq!(payload["required"], json!(["id"]));
+    assert_eq!(
+        payload["properties"]["count"]["type"].as_str(),
+        Some("integer")
     );
 }
 
