@@ -4,12 +4,11 @@ use std::path::{Path, PathBuf};
 use harn_modules::resolve_import_path;
 use harn_parser::{Node, SNode};
 
-use crate::package::CheckConfig;
-use crate::parse_source_file;
-
 use super::host_capabilities::{is_known_host_operation, load_host_capabilities};
 use super::imports::{scan_import_collisions, scan_re_export_conflicts};
 use super::mock_host::collect_mock_host_capabilities;
+use super::source::parse_resolved_module;
+use crate::package::CheckConfig;
 
 pub(super) struct PreflightDiagnostic {
     pub(super) path: String,
@@ -728,22 +727,21 @@ fn scan_node_preflight(
 ) {
     match &node.node {
         Node::ImportDecl { path, .. } | Node::SelectiveImport { path, .. } => {
-            if path.starts_with("std/") {
-                return;
-            }
             match resolve_import_path(file_path, path) {
                 Some(import_path) => {
-                    let import_str = import_path.to_string_lossy().into_owned();
-                    let (import_source, import_program) = parse_source_file(&import_str);
-                    scan_program_preflight(
-                        &import_path,
-                        &import_source,
-                        &import_program,
-                        config,
-                        host_capabilities,
-                        visited,
-                        diagnostics,
-                    );
+                    if let Some((import_source, import_program)) =
+                        parse_resolved_module(&import_path)
+                    {
+                        scan_program_preflight(
+                            &import_path,
+                            &import_source,
+                            &import_program,
+                            config,
+                            host_capabilities,
+                            visited,
+                            diagnostics,
+                        );
+                    }
                 }
                 None => diagnostics.push(PreflightDiagnostic {
                     path: file_path.display().to_string(),

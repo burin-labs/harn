@@ -315,6 +315,8 @@ attr_value         ::= STRING_LITERAL | RAW_STRING | INT_LITERAL
 import_decl        ::= ['pub'] 'import' STRING_LITERAL
                      | ['pub'] 'import' '{' IDENTIFIER (',' IDENTIFIER)* '}'
                        'from' STRING_LITERAL
+                     | ['pub'] 'import' IDENTIFIER ('::' IDENTIFIER)* '::'
+                       '{' IDENTIFIER (',' IDENTIFIER)* '}'
 
 pipeline_decl      ::= ['pub'] 'pipeline' IDENTIFIER '(' param_list ')'
                        ['->' type_expr]
@@ -369,6 +371,10 @@ Imports starting with `std/` load embedded stdlib modules:
 - `import "std/postgres"` — Postgres persistence helpers (pg_pool,
   pg_connect, pg_query, pg_query_one, pg_execute, pg_transaction, pg_close,
   pg_mock_pool, pg_mock_calls)
+- `import "std/personas/prelude"` — reusable persona orchestration helpers
+  (verify_then_act, bounded_loop, cheap_classify_then_escalate,
+  parallel_sweep_with_circuit_breaker, with_audit_receipt,
+  with_approval_gate)
 
 These modules are compiled into the interpreter binary and require no
 filesystem access.
@@ -925,6 +931,10 @@ declared file inside the installed `acme` package.
 Selective imports: `import { name1, name2 } from "module"` imports only
 the specified functions. Functions marked `pub` are exported by default;
 if no `pub` functions exist, all functions are exported.
+
+Scoped selective imports are shorthand for slash-delimited module paths:
+`import std::personas::prelude::{verify_then_act}` is equivalent to
+`import { verify_then_act } from "std/personas/prelude"`.
 
 Public re-exports: prefixing any `import` with `pub` re-exports the
 imported symbols as part of the importing module's public surface, so

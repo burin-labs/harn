@@ -13,10 +13,9 @@
 //   - unpushed commits
 //
 // A separate `harness_validate(...)` runs the post-condition check
-// against the actual local repo state via `process_exec_with_timeout`
-// (e.g. `git status --porcelain`). It is the only validator that does
+// against the actual local repo state. It is the only validator that does
 // I/O and is opt-in via `enabled = true`.
-import { process_exec_with_timeout } from "std/runtime"
+import { process_run } from "std/runtime"
 
 /** Required top-level keys on a repair_output document. */
 pub fn required_keys() {
@@ -247,37 +246,19 @@ pub fn validate_all(bundle, output) {
  * pivot from a path string into arbitrary shell. Callers always set
  * cwd from trusted state, but this is a cheap defence-in-depth.
  */
-pub fn _cwd_is_shell_safe(cwd) {
-  let banned = ["`", "$", ";", "|", "&", "\n", "\\r", "\"", "'", "<", ">", "(", ")"]
-  for ch in banned {
-    if cwd.contains(ch) {
-      return false
-    }
-  }
-  return true
-}
-
 /**
  * Optional post-run harness check. After `agent_loop` returns we ask
  * git for the working-tree state. If `git status --porcelain` produces
  * any output, the worker left the tree dirty — fail closed. Skipped
  * when `enabled` is false (tests, dry-run sweeps).
- *
- * `cwd` defaults to `.` and must pass `_cwd_is_shell_safe` — we splice
- * it into the command line for `git -C`, so a path with shell
- * metacharacters would be a command-injection risk.
  */
 pub fn harness_validate(bundle, output, options) {
   if !(options.enabled ?? false) {
     return _err([])
   }
-  let cwd = options.cwd ?? "."
-  if !_cwd_is_shell_safe(cwd) {
-    return _err(["harness check rejected: cwd contains shell metacharacters: ${cwd}"])
-  }
-  let cmd = "git -C ${cwd} status --porcelain"
+  let cwd = to_string(options.cwd ?? ".")
   let result = try {
-    process_exec_with_timeout(cmd, options.timeout_ms ?? 30000)
+    process_run(["git", "-C", cwd, "status", "--porcelain"], {timeout_ms: options.timeout_ms ?? 30000})
   }
   if !is_ok(result) {
     return _err(["harness check failed: ${to_string(unwrap_err(result))}"])

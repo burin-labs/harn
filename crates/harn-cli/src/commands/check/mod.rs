@@ -10,6 +10,7 @@ mod mock_host;
 mod outcome;
 mod preflight;
 pub(crate) mod provider_matrix;
+mod source;
 
 #[cfg(test)]
 mod tests;

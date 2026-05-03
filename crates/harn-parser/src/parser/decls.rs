@@ -89,6 +89,19 @@ impl Parser {
         let start = self.current_span();
         self.consume(&TokenKind::Import, "import")?;
 
+        // Scoped selective import sugar:
+        // `import std::personas::prelude::{ foo, bar }`.
+        //
+        // The module graph already speaks in slash-delimited import paths, so
+        // the parser lowers this surface into the same SelectiveImport node
+        // used by `import { foo, bar } from "std/..."`.
+        if matches!(self.current_kind(), Some(TokenKind::Identifier(_)))
+            && self.peek_kind() == Some(&TokenKind::Colon)
+            && self.peek_kind_at(2) == Some(&TokenKind::Colon)
+        {
+            return self.parse_scoped_selective_import(start, is_pub);
+        }
+
         // Selective import: `import { foo, bar } from "module"`.
         if self.check(&TokenKind::LBrace) {
             self.advance();
@@ -133,6 +146,51 @@ impl Parser {
             }
         }
         Err(self.error("import path string"))
+    }
+
+    fn parse_scoped_selective_import(
+        &mut self,
+        start: Span,
+        is_pub: bool,
+    ) -> Result<SNode, ParserError> {
+        let mut segments = vec![self.consume_identifier("scoped import path segment")?];
+
+        loop {
+            self.consume_double_colon("::")?;
+            if self.check(&TokenKind::LBrace) {
+                break;
+            }
+            segments.push(self.consume_identifier("scoped import path segment")?);
+        }
+
+        self.consume(&TokenKind::LBrace, "{")?;
+        self.skip_newlines();
+        let mut names = Vec::new();
+        while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            let name = self.consume_identifier("import name")?;
+            names.push(name);
+            self.skip_newlines();
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+        self.consume(&TokenKind::RBrace, "}")?;
+
+        Ok(spanned(
+            Node::SelectiveImport {
+                names,
+                path: segments.join("/"),
+                is_pub,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    fn consume_double_colon(&mut self, expected: &str) -> Result<(), ParserError> {
+        self.consume(&TokenKind::Colon, expected)?;
+        self.consume(&TokenKind::Colon, expected)?;
+        Ok(())
     }
 
     /// Parse one or more `@attr` / `@attr(args)` attributes followed by a

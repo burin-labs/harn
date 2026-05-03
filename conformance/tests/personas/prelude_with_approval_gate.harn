@@ -1,0 +1,34 @@
+import { with_approval_gate } from "std/personas/prelude"
+
+pipeline test(task) {
+  let opts = {
+    persona: "approval_captain",
+    step: "merge",
+    trace_id: "trace-approval",
+    started_at: "2026-05-03T00:00:00Z",
+    completed_at: "2026-05-03T00:00:00Z",
+  }
+  let suspended_gate = with_approval_gate("merge", fn() { return "ran" }, opts)
+  let suspended = suspended_gate()
+  println(suspended.status)
+  println(suspended.approval_required)
+  let approved_gate = with_approval_gate(
+    "merge",
+    fn() { return "ran" },
+    opts + {approval: {approved: true, reviewers: ["alice"], reason: "ok"}},
+  )
+  let approved = approved_gate()
+  println(approved.status)
+  println(approved.result)
+  println(len(approved.receipt.approvals))
+  println(approved.receipt.status)
+  let denied_gate = with_approval_gate(
+    "merge",
+    fn() { return "should-not-run" },
+    opts + {approval: {approved: false, reviewers: ["alice"], reason: "unsafe"}},
+  )
+  let denied = denied_gate()
+  println(denied.status)
+  println(denied.result == nil)
+  println(denied.error.message)
+}

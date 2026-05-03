@@ -17,6 +17,11 @@ fn body_basic_host_scope() {
   return {v: v, inner_count: host_call_count(), inner_calls: host_calls()}
 }
 
+fn body_context_host_scope(_context) {
+  let v = host_call("inner.op", {})
+  return {v: v, context: _context, inner_count: host_call_count()}
+}
+
 fn body_thrown_inner() {
   host_call("inner.op", {})
   throw "boom"
@@ -77,6 +82,15 @@ pipeline test_with_mocks(task) {
   // Outer state restored.
   assert_eq(host_call_count(), 1)
   assert_eq(host_call("outer.op", {}), "outer_result")
+  // === one-arg fixture bodies receive a nil context ===
+  clear_host_mocks()
+  let context_body = with_host_mocks(
+    [{capability: "inner", operation: "op", result: "context_result"}],
+    body_context_host_scope,
+  )
+  assert_eq(context_body.v, "context_result")
+  assert_eq(context_body.context, nil)
+  assert_eq(context_body.inner_count, 1)
   // === thrown body still cleans up ===
   clear_host_mocks()
   mock_host_result("outer", "op", "outer_result", nil)

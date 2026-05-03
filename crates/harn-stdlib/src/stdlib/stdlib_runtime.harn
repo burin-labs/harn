@@ -1,3 +1,5 @@
+import { filter_nil } from "std/collections"
+
 /** runtime_task. */
 pub fn runtime_task() -> string {
   return host_call("runtime.task", {}) ?? ""
@@ -18,19 +20,56 @@ pub fn runtime_approved_plan() -> string {
   return host_call("runtime.approved_plan", {}) ?? ""
 }
 
-/** process_exec. */
-pub fn process_exec(command) {
+fn __process_shell_options(options) {
+  let opts = options ?? {}
+  if opts?.shell != nil || opts?.shell_id != nil {
+    return opts
+  }
   let shell = host_call("process.get_default_shell", {})
-  return host_call("process.exec", {mode: "shell", command: command, shell_id: shell?.id})
+  return opts + {shell_id: shell?.id}
 }
 
-/** process_exec_with_timeout. */
-pub fn process_exec_with_timeout(command, timeout_ms) {
-  let shell = host_call("process.get_default_shell", {})
-  return host_call(
-    "process.exec",
-    {mode: "shell", command: command, timeout: timeout_ms, shell_id: shell?.id},
-  )
+/** process_run. */
+pub fn process_run(argv: list<string>, options = nil) {
+  let opts = options ?? {}
+  return host_call("process.exec", filter_nil(opts + {mode: "argv", argv: argv})) ?? {}
+}
+
+/** process_shell. */
+pub fn process_shell(command: string, options = nil) {
+  let opts = __process_shell_options(options)
+  return host_call("process.exec", filter_nil(opts + {mode: "shell", command: command})) ?? {}
+}
+
+/** process_result_text. */
+pub fn process_result_text(result: dict) -> string {
+  let stdout = result?.stdout ?? ""
+  let stderr = result?.stderr ?? ""
+  if stdout && stderr {
+    return "${stdout}\n${stderr}"
+  }
+  if stdout {
+    return stdout
+  }
+  if stderr {
+    return stderr
+  }
+  return result?.combined ?? result?.inline_output ?? ""
+}
+
+/** process_result_success. */
+pub fn process_result_success(result: dict) -> bool {
+  if result?.success != nil {
+    return result?.success ? true : false
+  }
+  let status = result?.status ?? "completed"
+  let exit_code = result?.exit_code ?? -1
+  return status == "completed" && exit_code == 0
+}
+
+/** shell_quote. */
+pub fn shell_quote(value) -> string {
+  return "'" + to_string(value ?? "").replace("'", "'\"'\"'") + "'"
 }
 
 /** interaction_ask. */

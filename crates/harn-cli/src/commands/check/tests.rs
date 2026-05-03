@@ -1079,6 +1079,54 @@ pipeline main() {
 }
 
 #[test]
+fn bundle_manifest_tracks_reachable_stdlib_imports() {
+    let dir = unique_temp_dir("harn-check-bundle-stdlib");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("main.harn"),
+        r#"
+import { process_run } from "std/runtime"
+
+pipeline main() {
+  process_run(["echo", "ok"], {timeout_ms: 1000})
+}
+"#,
+    )
+    .unwrap();
+
+    let manifest = build_bundle_manifest(&[dir.join("main.harn")], &CheckConfig::default());
+    let import_modules = manifest["import_modules"]
+        .as_array()
+        .expect("import modules");
+    assert!(import_modules
+        .iter()
+        .any(|module| module.as_str() == Some("<std>/runtime")));
+    assert!(import_modules
+        .iter()
+        .any(|module| module.as_str() == Some("<std>/collections")));
+
+    let dependencies = manifest["module_dependencies"]
+        .as_array()
+        .expect("module dependencies");
+    assert!(dependencies.iter().any(|edge| {
+        edge["from"]
+            .as_str()
+            .is_some_and(|value| value.ends_with("/main.harn"))
+            && edge["to"].as_str() == Some("<std>/runtime")
+    }));
+    assert!(dependencies.iter().any(|edge| {
+        edge["from"].as_str() == Some("<std>/runtime")
+            && edge["to"].as_str() == Some("<std>/collections")
+    }));
+    assert!(manifest["required_host_capabilities"]["process"]
+        .as_array()
+        .expect("process capabilities")
+        .iter()
+        .any(|op| op.as_str() == Some("exec")));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn unknown_host_capability_diagnostic_carries_tag() {
     let dir = unique_temp_dir("harn-check-host-tag");
     std::fs::create_dir_all(&dir).unwrap();

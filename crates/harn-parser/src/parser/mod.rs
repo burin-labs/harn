@@ -23,6 +23,28 @@ mod tests {
     }
 
     #[test]
+    fn parses_scoped_selective_import_as_slash_path() {
+        let nodes =
+            parse_source("pub import std::personas::prelude::{verify_then_act, bounded_loop}")
+                .expect("scoped selective import parses");
+
+        match &nodes[0].node {
+            Node::SelectiveImport {
+                path,
+                names,
+                is_pub,
+            } => {
+                assert_eq!(path, "std/personas/prelude");
+                assert_eq!(names.len(), 2);
+                assert_eq!(names[0], "verify_then_act");
+                assert_eq!(names[1], "bounded_loop");
+                assert!(*is_pub);
+            }
+            other => panic!("expected selective import, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parses_match_expression_with_let_in_arm_body() {
         let source = r#"
 pipeline p() {

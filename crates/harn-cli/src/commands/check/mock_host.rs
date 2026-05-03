@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use harn_modules::resolve_import_path;
 use harn_parser::{Node, SNode};
 
-use crate::parse_source_file;
+use super::source::parse_resolved_module;
 
 pub(super) fn collect_mock_host_capabilities(
     file_path: &Path,
@@ -100,21 +100,18 @@ fn collect_mock_host_capabilities_from_node(
             }
         }
         Node::ImportDecl { path, .. } | Node::SelectiveImport { path, .. } => {
-            if path.starts_with("std/") {
-                return;
-            }
             let Some(import_path) = resolve_import_path(file_path, path) else {
                 return;
             };
-            let import_str = import_path.to_string_lossy().into_owned();
-            let (import_source, import_program) = parse_source_file(&import_str);
-            collect_mock_host_capabilities(
-                &import_path,
-                &import_source,
-                &import_program,
-                visited,
-                capabilities,
-            );
+            if let Some((import_source, import_program)) = parse_resolved_module(&import_path) {
+                collect_mock_host_capabilities(
+                    &import_path,
+                    &import_source,
+                    &import_program,
+                    visited,
+                    capabilities,
+                );
+            }
         }
         Node::IfElse {
             condition,

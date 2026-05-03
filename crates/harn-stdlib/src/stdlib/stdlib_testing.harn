@@ -132,7 +132,7 @@ pub fn with_host_mocks(mocks, body) {
     for entry in mocks ?? [] {
       apply_host_mock_entry(entry)
     }
-    let result = body()
+    let result = __testing_call_body(body)
     host_mock_pop_scope()
     return result
   } catch (e) {
@@ -170,7 +170,7 @@ pub fn with_llm_mocks(mocks, body) {
       }
       llm_mock(entry)
     }
-    let result = body()
+    let result = __testing_call_body(body)
     llm_mock_pop_scope()
     return result
   } catch (e) {
@@ -205,7 +205,7 @@ pub fn with_mocks(config, body) {
       }
       llm_mock(entry)
     }
-    let result = body()
+    let result = __testing_call_body(body)
     llm_mock_pop_scope()
     host_mock_pop_scope()
     return result

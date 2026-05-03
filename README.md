@@ -138,6 +138,10 @@ enforcement.
   and `action_graph_run(...)` normalize planner schema variants into a shared
   executable schedule instead of leaving dependency repair and batch grouping
   to leaf pipelines.
+- Persona orchestration primitives via `import "std/personas/prelude"`:
+  verifier-then-actor gates, bounded loops, cheap-classifier escalation,
+  circuit-broken parallel sweeps, audit receipt wrappers, and approval gates
+  give durable personas reusable control flow without host-specific glue.
 - Delegated worker lifecycle builtins via `spawn_agent(...)`, `send_input(...)`,
   `resume_agent(...)`, `wait_agent(...)`, `close_agent(...)`, and `list_agents()`,
   with child run lineage, persisted worker snapshots, and host-visible worker
