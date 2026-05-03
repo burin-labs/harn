@@ -1,0 +1,20 @@
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "<user_response>Too thin.</user_response>\n<done>##DONE##</done>"})
+  llm_mock(
+    {
+      text: "{\"verdict\":\"continue\",\"reasoning\":\"answer lacks detail\",\"next_step\":\"Answer with the concrete result.\"}",
+    },
+  )
+  llm_mock({text: "<user_response>The concrete result is 4.</user_response>\n<done>##DONE##</done>"})
+  llm_mock({text: "{\"verdict\":\"done\",\"reasoning\":\"the result is explicit\"}"})
+  let result = agent_loop(
+    "What is 2 + 2?",
+    nil,
+    {provider: "mock", persistent: true, max_iterations: 4, done_judge: true},
+  )
+  println(result.status)
+  println(result.visible_text)
+  println(result.llm.iterations)
+  println(len(llm_mock_calls()))
+}

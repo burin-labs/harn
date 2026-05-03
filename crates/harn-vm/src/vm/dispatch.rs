@@ -175,7 +175,7 @@ impl Vm {
         let builtin = self.builtins.get(name).cloned()?;
 
         let span_kind = match name {
-            "llm_call" | "llm_stream" | "llm_stream_call" | "agent_loop" => {
+            "llm_call" | "llm_stream" | "llm_stream_call" | "agent_loop" | "agent_turn" => {
                 Some(crate::tracing::SpanKind::LlmCall)
             }
             "mcp_call" => Some(crate::tracing::SpanKind::ToolCall),

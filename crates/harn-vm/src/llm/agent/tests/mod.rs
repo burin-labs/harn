@@ -125,6 +125,7 @@ pub(super) fn base_agent_config() -> AgentLoopConfig {
         post_turn_callback: None,
         verify_completion: None,
         verify_completion_judge: None,
+        done_judge: None,
         max_verify_attempts: crate::llm::agent_config::DEFAULT_MAX_VERIFY_ATTEMPTS,
         llm_transcript_dir: None,
         skill_registry: None,

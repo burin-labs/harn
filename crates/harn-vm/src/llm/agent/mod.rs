@@ -504,6 +504,7 @@ pub async fn run_agent_loop_internal(
     let post_turn_callback = state.config.post_turn_callback.clone();
     let verify_completion = state.config.verify_completion.clone();
     let verify_completion_judge = state.config.verify_completion_judge.clone();
+    let done_judge = state.config.done_judge.clone();
     let max_verify_attempts = state.config.max_verify_attempts;
     let bridge = state.bridge.clone();
     let max_iterations = state.max_iterations;
@@ -727,13 +728,17 @@ pub async fn run_agent_loop_internal(
 
         match iteration_outcome {
             post_turn::IterationOutcome::Continue => continue,
-            post_turn::IterationOutcome::Break => {
+            post_turn::IterationOutcome::Break { stop_reason } => {
                 // verify_completion stop hooks: when set, run at every
                 // natural break and may veto with feedback so a "false
                 // done" gets one more turn instead of yielding to the
                 // caller. Bounded by max_verify_attempts to prevent a
                 // buggy judge from holding the loop open.
-                if verify_completion.is_some() || verify_completion_judge.is_some() {
+                let done_judge_applies = stop_reason == "sentinel" && done_judge.is_some();
+                if verify_completion.is_some()
+                    || verify_completion_judge.is_some()
+                    || done_judge_applies
+                {
                     if verify_attempts >= max_verify_attempts {
                         crate::events::log_warn(
                             "agent.verify_completion",
@@ -746,11 +751,6 @@ pub async fn run_agent_loop_internal(
                         iteration_exited_via_break = true;
                         break;
                     }
-                    let stop_reason = match state.final_status {
-                        "stuck" => "loop_stuck",
-                        "" => "natural",
-                        other => other,
-                    };
                     let mut veto = false;
                     if let Some(closure_value) = verify_completion.as_ref() {
                         veto = post_turn::run_verify_completion(
@@ -773,6 +773,22 @@ pub async fn run_agent_loop_internal(
                                 iteration,
                                 stop_reason,
                                 &call_result.text,
+                                "verify_completion_judge",
+                            )
+                            .await?;
+                        }
+                    }
+                    if !veto && stop_reason == "sentinel" {
+                        if let Some(judge) = done_judge.as_ref() {
+                            veto = completion_judge::run_completion_judge(
+                                &mut state,
+                                judge,
+                                opts,
+                                &session_id,
+                                iteration,
+                                stop_reason,
+                                &call_result.text,
+                                "done_judge",
                             )
                             .await?;
                         }

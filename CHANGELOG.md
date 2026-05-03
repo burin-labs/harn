@@ -6,6 +6,17 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Generic `agent_turn` wrapper and sentinel judge.** New
+  `agent_turn(prompt, opts?)` wraps the common single-request agent shape with
+  generic progress guidance, a persistent completion sentinel, mandatory
+  sentinel judging, and compact `iterations` / `judge_decisions` summaries.
+  `agent_loop` also accepts `done_judge: true` or a policy dict to run the
+  same structured judge only after the done sentinel is emitted.
+
 ## v0.7.56
 
 ### Added

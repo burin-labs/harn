@@ -1531,6 +1531,13 @@ pub async fn execute_stage_node(
                             .and_then(|value| value.as_dict())
                             .cloned(),
                     )?,
+                    done_judge: crate::llm::parse_done_judge_option(
+                        &node
+                            .raw_model_policy
+                            .as_ref()
+                            .and_then(|value| value.as_dict())
+                            .cloned(),
+                    )?,
                     max_verify_attempts: crate::llm::helpers::opt_int(
                         &node
                             .raw_model_policy

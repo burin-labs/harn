@@ -25,6 +25,19 @@
     "jsonrpc": "2.0",
     "method": "_harn/agentEvent",
     "params": {
+      "iteration": 0,
+      "judgeDurationMs": 42,
+      "kind": "judge_decision",
+      "nextStep": "run the verifier",
+      "reasoning": "needs one more concrete action",
+      "sessionId": "session-1",
+      "verdict": "continue"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
       "content": "missed required tool call; reissuing",
       "feedbackKind": "protocol_violation",
       "kind": "feedback_injected",

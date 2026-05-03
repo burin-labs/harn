@@ -722,6 +722,7 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
             .filter(|v| matches!(v, VmValue::Closure(_)))
             .cloned(),
         verify_completion_judge: crate::llm::parse_completion_judge_option(&options)?,
+        done_judge: crate::llm::parse_done_judge_option(&options)?,
         max_verify_attempts: crate::llm::helpers::opt_int(&options, "max_verify_attempts")
             .filter(|n| *n >= 0)
             .map(|n| n as usize)

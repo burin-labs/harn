@@ -1,5 +1,27 @@
 # Agent loops
 
+## agent_turn
+
+Use `agent_turn(prompt, opts?)` for the common "make one agent complete this
+request" case. It wraps `agent_loop`, puts `opts.system` into the system prompt
+alongside generic progress guidance, defaults to a persistent `##DONE##`
+sentinel loop, and requires a sentinel completion judge. Pass `judge: {...}` or
+`done_judge: {...}` to customize that judge; omit it to use the default judge.
+
+The return value is the normal `agent_loop` result with two extra summaries:
+`iterations` (`[{iteration, started, ended?, tool_count?, prose_chars?}]`) and `judge_decisions`
+(`[{iteration, verdict, reasoning, next_step, judge_duration_ms}]`).
+
+```harn
+let result = agent_turn("Summarize the current project risks.", {
+  system: "Be concise and cite concrete evidence.",
+  provider: "openai",
+  model: "gpt-5-mini",
+})
+println(result.visible_text)
+println(result.judge_decisions[0].verdict)
+```
+
 ## agent_loop
 
 Run an agent that keeps working until it's done. The agent maintains
@@ -103,6 +125,9 @@ Same as `llm_call`, plus additional options:
 | `context_callback` | closure | nil | Per-turn hook that can rewrite prompt-visible `messages` and/or the effective `system` prompt before the next LLM call |
 | `context_filter` | closure | nil | Alias for `context_callback` |
 | `post_turn_callback` | closure | nil | Hook called after each tool turn. Receives turn metadata and may inject a message, request an immediate stage stop, or both |
+| `verify_completion` | closure | nil | Hook called when the loop is about to stop naturally. Return `nil`/`true` to accept the stop or feedback text to veto and continue |
+| `verify_completion_judge` | bool/dict | nil | Built-in structured judge for any natural stop. `true` uses defaults; a dict may set `provider`, `model`, `system`, `max_tokens`, `temperature`, `feedback_fallback`, and final-response options |
+| `done_judge` | bool/dict | nil | Sentinel-specific structured judge. It runs only when the model emits the done sentinel and may veto by returning `verdict: "continue"`/`pass: false` plus feedback |
 | `llm_transcript_dir` | string | nil | Per-loop directory for Harn's existing `llm_transcript.jsonl` sidecar. This is equivalent to scoping `HARN_LLM_TRANSCRIPT_DIR` to one agent loop and is preferred when a script needs run-specific auditable model-turn JSONL |
 | `turn_policy` | dict | nil | Turn-shape policy for action stages. Supports `require_action_or_yield: bool`, `allow_done_sentinel: bool` (default `true`; set to `false` in workflow-owned action stages so nudges stop advertising the done sentinel), and `max_prose_chars: int` |
 | `native_tool_fallback` | string | `"allow"` | Native-tool-stage policy when the provider emits text-mode `<tool_call>` content instead of native tool calls. `"allow"` preserves the current recovery path, `"allow_once"` accepts the first fallback turn then rejects later repeats with corrective feedback, and `"reject"` fails closed on the first text fallback |
@@ -185,6 +210,14 @@ When `persistent: true`, the system prompt is automatically extended with:
 > IMPORTANT: You MUST keep working until the task is complete.
 > The completion instruction is mode-aware:
 > tagged text-tool stages use `<done>##DONE##</done>`, while no-tool and native-tool stages use bare `##DONE##`.
+
+`done_judge` adds a second gate after the sentinel is emitted. The loop renders
+the transcript for a structured judge call and expects either `pass: bool` or
+`verdict: "done" | "continue"` plus optional `reasoning`, `feedback`,
+`next_step`, and `final_response`. A veto injects runtime feedback and the loop
+continues until the judge accepts or `max_verify_attempts` is exhausted.
+Every judge call emits `JudgeDecision` with `session_id`, `iteration`,
+`verdict`, `reasoning`, `next_step`, and `judge_duration_ms`.
 
 ## Daemon stdlib wrappers
 
