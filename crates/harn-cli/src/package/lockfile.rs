@@ -1142,6 +1142,12 @@ mod tests {
                 "path dependencies should be live-linked on Unix"
             );
 
+            #[cfg(windows)]
+            let materialized_is_link = fs::symlink_metadata(&materialized)
+                .unwrap()
+                .file_type()
+                .is_symlink();
+
             fs::write(
                 dependency_root.join("lib.harn"),
                 "pub fn version() -> string { return \"v2\" }\n",
@@ -1154,6 +1160,22 @@ mod tests {
                     live_source.contains("v2"),
                     "materialized path dependency should reflect sibling repo edits"
                 );
+            }
+            #[cfg(windows)]
+            {
+                let materialized_source =
+                    fs::read_to_string(materialized.join("lib.harn")).unwrap();
+                if materialized_is_link {
+                    assert!(
+                        materialized_source.contains("v2"),
+                        "Windows path dependency symlink should reflect sibling repo edits"
+                    );
+                } else {
+                    assert!(
+                        materialized_source.contains("v1"),
+                        "Windows path dependency copy fallback should keep the copied contents"
+                    );
+                }
             }
 
             remove_package("openapi");

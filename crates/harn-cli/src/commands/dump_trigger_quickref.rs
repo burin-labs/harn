@@ -95,7 +95,7 @@ pub(crate) fn run(output_path: &str, check_only: bool) {
                 process::exit(1);
             }
         };
-        if existing != generated {
+        if normalize_line_endings(&existing) != normalize_line_endings(&generated) {
             eprintln!(
                 "error: {} is stale relative to the trigger provider catalog.",
                 path.display()
@@ -250,6 +250,10 @@ return { status: outcome.status == \"rejected\" ? 401 : 202 }\n\
     out
 }
 
+fn normalize_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 fn provider_row(provider: &ProviderMetadata) -> String {
     format!(
         "| `{}` | {} | `{}` | {} | {} | {} | {} |\n",
@@ -384,9 +388,21 @@ mod tests {
         });
         let generated = generate_file();
         assert_eq!(
-            on_disk, generated,
+            normalize_line_endings(&on_disk),
+            normalize_line_endings(&generated),
             "docs/llm/harn-triggers-quickref.md is stale relative to the trigger provider catalog.\n\
              Run `make gen-trigger-quickref` to regenerate."
+        );
+    }
+
+    #[test]
+    fn generated_quickref_comparison_ignores_platform_line_endings() {
+        let generated = "# Harn Trigger Quick Reference\n\n| Provider |\n";
+        let on_disk = generated.replace('\n', "\r\n");
+
+        assert_eq!(
+            normalize_line_endings(&on_disk),
+            normalize_line_endings(generated)
         );
     }
 }

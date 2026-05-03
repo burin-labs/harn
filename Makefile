@@ -190,13 +190,7 @@ sync-language-spec:
 # spec/HARN_SPEC.md. `make sync-language-spec` fixes it.
 check-language-spec:
 	@echo "=== Checking docs/src/language-spec.md is up to date ==="
-	@./scripts/sync_language_spec.sh
-	@if ! git diff --quiet --exit-code -- docs/src/language-spec.md; then \
-		echo "error: docs/src/language-spec.md is stale relative to spec/HARN_SPEC.md" >&2; \
-		echo "hint: run 'make sync-language-spec' and commit the result" >&2; \
-		git diff --stat -- docs/src/language-spec.md >&2; \
-		exit 1; \
-	fi
+	@./scripts/sync_language_spec.sh --check
 	@echo "    Language spec mirror OK."
 
 # Regenerate the LLM trigger quickref from the live ProviderCatalog metadata.
@@ -220,7 +214,7 @@ check-provider-matrix:
 	tmp=$$(mktemp); \
 	trap 'rm -f "$$tmp"' EXIT; \
 	cargo run --quiet -p harn-cli -- check --provider-matrix --format markdown > "$$tmp"; \
-	if ! cmp -s "$$tmp" docs/src/provider-matrix.md; then \
+	if ! python3 scripts/compare_generated_text.py docs/src/provider-matrix.md "$$tmp"; then \
 		echo "error: docs/src/provider-matrix.md is stale relative to capabilities.toml" >&2; \
 		echo "hint: run 'make gen-provider-matrix' and commit the result" >&2; \
 		diff -u docs/src/provider-matrix.md "$$tmp" >&2 || true; \

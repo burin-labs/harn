@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process;
 
 use regex::Regex;
@@ -35,6 +35,20 @@ fn normalize_output_line(line: &str) -> String {
         }
     }
     line.to_string()
+}
+
+fn logical_path(path: &Path) -> String {
+    path.components()
+        .filter_map(|component| match component {
+            Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+            Component::CurDir => None,
+            Component::ParentDir => Some("..".to_string()),
+            Component::RootDir | Component::Prefix(_) => {
+                Some(component.as_os_str().to_string_lossy().into_owned())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// Produce a simple line diff between expected and actual.
@@ -242,11 +256,8 @@ pub(crate) async fn run_conformance_tests(
         let expected_file = harn_file.with_extension("expected");
         let error_file = harn_file.with_extension("error");
 
-        let rel_path = harn_file
-            .strip_prefix(&suite_root)
-            .unwrap_or(harn_file)
-            .display()
-            .to_string();
+        let rel_path = harn_file.strip_prefix(&suite_root).unwrap_or(harn_file);
+        let rel_path = logical_path(rel_path);
 
         // Filter syntax: `re:<regex>`, `foo|bar` (OR), `*_runtime*` (glob),
         // or plain substring match.
@@ -859,11 +870,8 @@ pub(crate) async fn run_conformance_determinism_tests(
     let mut errors = Vec::new();
 
     for path in files {
-        let rel_path = path
-            .strip_prefix(&suite_root)
-            .unwrap_or(&path)
-            .display()
-            .to_string();
+        let rel_path = path.strip_prefix(&suite_root).unwrap_or(&path);
+        let rel_path = logical_path(rel_path);
         if let Some(pattern) = filter {
             let matched = if let Some(re_pat) = pattern.strip_prefix("re:") {
                 Regex::new(re_pat).is_ok_and(|re| re.is_match(&rel_path))
@@ -967,7 +975,7 @@ pub(crate) async fn run_watch_tests(
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_harn_files_sorted, resolve_conformance_selection};
+    use super::{collect_harn_files_sorted, logical_path, resolve_conformance_selection};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1024,12 +1032,7 @@ mod tests {
         let files = collect_harn_files_sorted(&temp.path().join("suite"));
         let relative: Vec<String> = files
             .iter()
-            .map(|path| {
-                path.strip_prefix(temp.path())
-                    .unwrap()
-                    .display()
-                    .to_string()
-            })
+            .map(|path| logical_path(path.strip_prefix(temp.path()).unwrap()))
             .collect();
 
         assert_eq!(
@@ -1040,6 +1043,13 @@ mod tests {
                 "suite/zeta.harn"
             ]
         );
+    }
+
+    #[test]
+    fn logical_path_uses_slashes_for_native_test_paths() {
+        let path = Path::new("suite").join("nested").join("beta.harn");
+
+        assert_eq!(logical_path(&path), "suite/nested/beta.harn");
     }
 
     #[test]

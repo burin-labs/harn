@@ -50,7 +50,7 @@ pub(crate) fn run_docs(output_path: &str, sources: &[String], check_only: bool) 
                 process::exit(1);
             }
         };
-        if existing != generated {
+        if normalize_line_endings(&existing) != normalize_line_endings(&generated) {
             eprintln!(
                 "error: {} is stale relative to the connector capability matrix.",
                 path.display()
@@ -102,6 +102,10 @@ pub(crate) fn generate_markdown(rows: &[ConnectorCapabilityMatrixRow]) -> String
         ));
     }
     out
+}
+
+fn normalize_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 fn load_rows_for_cli(targets: &[String]) -> Vec<ConnectorCapabilityMatrixRow> {
@@ -459,6 +463,17 @@ capabilities = { webhook = true, oauth = true, rate_limit = true }
         ));
         assert!(
             markdown.contains("| `acme` | `harn-acme-connector` | yes | no | yes | no | no | no |")
+        );
+    }
+
+    #[test]
+    fn generated_markdown_comparison_ignores_platform_line_endings() {
+        let generated = "# Connector Parity Matrix\n\n| Provider |\n";
+        let on_disk = generated.replace('\n', "\r\n");
+
+        assert_eq!(
+            normalize_line_endings(&on_disk),
+            normalize_line_endings(generated)
         );
     }
 }

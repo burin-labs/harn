@@ -1,4 +1,5 @@
 use super::*;
+use std::path::Component;
 
 /// Resolved `[skills]` section plus the directory the manifest came
 /// from. Paths in `skills.paths` are joined against `manifest_dir`;
@@ -72,45 +73,52 @@ pub fn resolve_skills_paths(cfg: &ResolvedSkillsConfig) -> Vec<PathBuf> {
 }
 
 pub(crate) fn expand_single_star_glob(path: &Path) -> Vec<PathBuf> {
-    let as_str = path.to_string_lossy().to_string();
-    if !as_str.contains('*') {
+    if !path
+        .components()
+        .any(|component| matches!(component, Component::Normal(name) if name == OsStr::new("*")))
+    {
         return vec![path.to_path_buf()];
     }
-    let components: Vec<&str> = as_str.split('/').collect();
+
     let mut results: Vec<PathBuf> = vec![PathBuf::new()];
-    for comp in components {
+    for component in path.components() {
         let mut next: Vec<PathBuf> = Vec::new();
-        if comp == "*" {
-            for parent in &results {
-                if let Ok(entries) = fs::read_dir(parent) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.is_dir() {
-                            next.push(path);
+        match component {
+            Component::Normal(name) if name == OsStr::new("*") => {
+                for parent in &results {
+                    if let Ok(entries) = fs::read_dir(parent) {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.is_dir() {
+                                next.push(path);
+                            }
                         }
                     }
                 }
             }
-        } else if comp.is_empty() {
-            for parent in &results {
-                if parent.as_os_str().is_empty() {
-                    next.push(PathBuf::from("/"));
-                } else {
-                    next.push(parent.clone());
-                }
-            }
-        } else {
-            for parent in &results {
-                let joined = parent.join(comp);
-                // Filter branches whose literal suffix does not exist on
-                // disk so downstream FS sources don't iterate over phantom
-                // directories (one Rust round-trip cheaper than discovering
-                // them at load time).
-                if joined.exists() || parent.as_os_str().is_empty() {
-                    next.push(joined);
+            _ => {
+                for parent in &results {
+                    let mut joined = parent.clone();
+                    joined.push(component.as_os_str());
+                    // Filter branches whose literal suffix does not exist on
+                    // disk so downstream FS sources don't iterate over phantom
+                    // directories (one Rust round-trip cheaper than discovering
+                    // them at load time). Roots and prefixes are kept even
+                    // though existence checks on incomplete Windows paths such
+                    // as `C:` are not meaningful.
+                    if joined.exists()
+                        || parent.as_os_str().is_empty()
+                        || matches!(
+                            component,
+                            Component::Prefix(_) | Component::RootDir | Component::CurDir
+                        )
+                    {
+                        next.push(joined);
+                    }
                 }
             }
         }
+        next.sort();
         results = next;
     }
     results
@@ -201,6 +209,29 @@ mod tests {
 
         let raw = root.join("packages").join("*").join("skills");
         let expanded = expand_single_star_glob(&raw);
-        assert_eq!(expanded.len(), 2);
+        let expanded: Vec<_> = expanded
+            .iter()
+            .map(|path| {
+                path.strip_prefix(root)
+                    .unwrap()
+                    .components()
+                    .map(|component| component.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/")
+            })
+            .collect();
+
+        assert_eq!(
+            expanded,
+            vec!["packages/pkg-a/skills", "packages/pkg-b/skills"]
+        );
+    }
+
+    #[test]
+    fn expand_single_star_glob_leaves_non_glob_paths_unchanged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("packages").join("pkg-a").join("skills");
+
+        assert_eq!(expand_single_star_glob(&path), vec![path]);
     }
 }

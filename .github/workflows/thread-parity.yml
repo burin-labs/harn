@@ -1,8 +1,12 @@
 name: Thread-count parity
 
 on:
-  pull_request:
-  merge_group:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always

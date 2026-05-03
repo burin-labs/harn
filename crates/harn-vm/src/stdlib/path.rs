@@ -383,6 +383,10 @@ mod tests {
         assert_eq!(normalize("/"), "/");
         assert_eq!(normalize("/a/b/../c"), "/a/c");
         assert_eq!(normalize("a\\b\\c"), "a/b/c");
+        assert_eq!(
+            normalize("C:\\repo\\pkg\\..\\main.harn"),
+            "C:/repo/main.harn"
+        );
     }
 
     #[test]

@@ -44,7 +44,7 @@ pub(crate) fn run(output_path: &str, check_only: bool) {
                 process::exit(1);
             }
         };
-        if existing != generated {
+        if normalize_line_endings(&existing) != normalize_line_endings(&generated) {
             eprintln!(
                 "error: {} is stale relative to the lexer/stdlib.",
                 path.display()
@@ -114,6 +114,10 @@ fn generate_file() -> String {
     )
 }
 
+fn normalize_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,9 +162,21 @@ mod tests {
         });
         let generated = generate_file();
         assert_eq!(
-            on_disk, generated,
+            normalize_line_endings(&on_disk),
+            normalize_line_endings(&generated),
             "docs/theme/harn-keywords.js is stale relative to the lexer/stdlib.\n\
              Run `make gen-highlight` to regenerate."
+        );
+    }
+
+    #[test]
+    fn generated_file_comparison_ignores_platform_line_endings() {
+        let generated = "window.__HARN_KEYWORDS = {};\n";
+        let on_disk = generated.replace('\n', "\r\n");
+
+        assert_eq!(
+            normalize_line_endings(&on_disk),
+            normalize_line_endings(generated)
         );
     }
 
