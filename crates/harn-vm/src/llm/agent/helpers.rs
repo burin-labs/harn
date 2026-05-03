@@ -402,29 +402,59 @@ pub(crate) fn maybe_persist_daemon_snapshot(
     persist_snapshot(path, snapshot).map(Some)
 }
 
-/// Interpret the value returned by a `post_turn_callback` closure.
+/// Typed message a `post_turn_callback` can request the loop to inject
+/// before the next turn. Unlike the legacy `message: string` path
+/// (which always wraps as a `<runtime_feedback>` user note), `inject`
+/// entries pass through verbatim so judges can write `assistant`,
+/// `system`, or `tool_result` rows when the audit trail benefits from
+/// the explicit role.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PostTurnInject {
+    pub(crate) role: String,
+    pub(crate) content: String,
+}
+
+/// Full parsed verdict from a `post_turn_callback` return value.
+/// `message` and `stop` preserve the legacy contract; `injects` is the
+/// new judge-pattern surface that lets a callback push typed messages
+/// onto the next turn without going through the
+/// `<runtime_feedback>`-wrapped `message` slot.
 ///
-/// Returns `(message, stop)`:
-/// - `message`: if `Some`, the caller should inject this as a user
-///   message into the transcript (empty strings are filtered upstream).
-/// - `stop`: whether the stage should break out of the loop.
+/// `injects` is intentionally `Vec` rather than `Option<Vec>` — an
+/// empty vector means "no inject," which folds the no-op case into the
+/// happy path.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct PostTurnVerdict {
+    pub(crate) message: Option<String>,
+    pub(crate) stop: bool,
+    pub(crate) injects: Vec<PostTurnInject>,
+}
+
+/// Parse a `post_turn_callback` return value into the full verdict
+/// (message + stop + typed inject list). Backward-compatible with the
+/// historical legacy shapes (string / bool / `{message, stop}` dict):
 ///
-/// Accepted return shapes:
-/// - `nil` / empty string → `(None, false)` (no-op)
-/// - string → inject as user message
-/// - `true` / `false` → stop flag (no message)
-/// - dict with optional `message` (string) and `stop` (bool) keys
-pub(crate) fn interpret_post_turn_callback_result(value: &VmValue) -> (Option<String>, bool) {
+/// - `nil` / empty string → empty verdict
+/// - string → `{message: <s>}`
+/// - `true` / `false` → `{stop: <b>}`
+/// - dict with `message`, `stop`, and the new optional `inject` key —
+///   `inject` accepts either a single message dict or a list of
+///   message dicts, each with `{role: string, content: string}`. Roles
+///   outside the canonical set (`user`, `assistant`, `system`,
+///   `tool_result`) are silently dropped, matching
+///   `agent_session_inject`'s contract — judges should never sneak
+///   undocumented roles past the message log.
+pub(crate) fn interpret_post_turn_callback_verdict(value: &VmValue) -> PostTurnVerdict {
     match value {
-        VmValue::Nil => (None, false),
-        VmValue::Bool(b) => (None, *b),
-        VmValue::String(s) => {
-            if s.is_empty() {
-                (None, false)
-            } else {
-                (Some(s.to_string()), false)
-            }
-        }
+        VmValue::Nil => PostTurnVerdict::default(),
+        VmValue::Bool(b) => PostTurnVerdict {
+            stop: *b,
+            ..PostTurnVerdict::default()
+        },
+        VmValue::String(s) => PostTurnVerdict {
+            message: (!s.is_empty()).then(|| s.to_string()),
+            ..PostTurnVerdict::default()
+        },
         VmValue::Dict(dict) => {
             let message = dict.get("message").and_then(|v| match v {
                 VmValue::String(s) if !s.is_empty() => Some(s.to_string()),
@@ -437,8 +467,328 @@ pub(crate) fn interpret_post_turn_callback_result(value: &VmValue) -> (Option<St
                     _ => None,
                 })
                 .unwrap_or(false);
-            (message, stop)
+            let injects = dict
+                .get("inject")
+                .map(parse_post_turn_injects)
+                .unwrap_or_default();
+            PostTurnVerdict {
+                message,
+                stop,
+                injects,
+            }
         }
-        _ => (None, false),
+        _ => PostTurnVerdict::default(),
+    }
+}
+
+fn parse_post_turn_injects(value: &VmValue) -> Vec<PostTurnInject> {
+    match value {
+        VmValue::Dict(_) => parse_post_turn_inject_one(value).into_iter().collect(),
+        VmValue::List(list) => list.iter().filter_map(parse_post_turn_inject_one).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn parse_post_turn_inject_one(value: &VmValue) -> Option<PostTurnInject> {
+    let dict = match value {
+        VmValue::Dict(d) => d,
+        _ => return None,
+    };
+    let role = match dict.get("role")? {
+        VmValue::String(s) => s.to_string(),
+        _ => return None,
+    };
+    if !matches!(
+        role.as_str(),
+        "user" | "assistant" | "system" | "tool_result"
+    ) {
+        return None;
+    }
+    let content = match dict.get("content")? {
+        VmValue::String(s) if !s.is_empty() => s.to_string(),
+        _ => return None,
+    };
+    Some(PostTurnInject { role, content })
+}
+
+/// Decision returned by a `verify_completion` closure. The hook fires
+/// once at every natural break path (sentinel, terminal tool,
+/// post_turn `{stop: true}`, loop_stuck) and gets to either confirm
+/// the stop (loop yields to caller) or veto with feedback (loop runs
+/// one more turn). `Vetoed` carries the feedback the loop should push
+/// onto messages before the next turn.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum VerifyDecision {
+    Confirmed,
+    Vetoed {
+        message: Option<String>,
+        injects: Vec<PostTurnInject>,
+    },
+}
+
+/// Parse the value returned by a `verify_completion` closure into a
+/// stop / veto decision. Accepted shapes (loose by design — judges
+/// shouldn't crash the loop on a malformed return):
+///
+/// - `nil` / `true` / `{confirm: true}` → confirm the stop.
+/// - `false` → veto without feedback.
+/// - `string s` (non-empty) → veto + inject `s` as a runtime_feedback note.
+/// - dict with `confirm: true` (any other keys ignored) → confirm.
+/// - dict with `message?` (string) and/or `inject?` (dict | list of
+///   dicts, same shape as `post_turn_callback`'s `inject` key) →
+///   veto with the provided feedback.
+/// - any other shape → confirm (safe default — the loop's existing
+///   stop decision is honored).
+pub(crate) fn interpret_verify_completion_verdict(value: &VmValue) -> VerifyDecision {
+    match value {
+        VmValue::Nil => VerifyDecision::Confirmed,
+        VmValue::Bool(true) => VerifyDecision::Confirmed,
+        VmValue::Bool(false) => VerifyDecision::Vetoed {
+            message: None,
+            injects: Vec::new(),
+        },
+        VmValue::String(s) => {
+            if s.is_empty() {
+                VerifyDecision::Confirmed
+            } else {
+                VerifyDecision::Vetoed {
+                    message: Some(s.to_string()),
+                    injects: Vec::new(),
+                }
+            }
+        }
+        VmValue::Dict(dict) => {
+            let confirm = dict
+                .get("confirm")
+                .and_then(|v| match v {
+                    VmValue::Bool(b) => Some(*b),
+                    _ => None,
+                })
+                .unwrap_or(false);
+            if confirm {
+                return VerifyDecision::Confirmed;
+            }
+            let message = dict.get("message").and_then(|v| match v {
+                VmValue::String(s) if !s.is_empty() => Some(s.to_string()),
+                _ => None,
+            });
+            let injects = dict
+                .get("inject")
+                .map(parse_post_turn_injects)
+                .unwrap_or_default();
+            VerifyDecision::Vetoed { message, injects }
+        }
+        _ => VerifyDecision::Confirmed,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {
+        let mut map = BTreeMap::new();
+        for (k, v) in entries {
+            map.insert(k.to_string(), v);
+        }
+        VmValue::Dict(Rc::new(map))
+    }
+
+    fn vm_string(s: &str) -> VmValue {
+        VmValue::String(Rc::from(s))
+    }
+
+    #[test]
+    fn legacy_nil_and_empty_string_are_no_ops() {
+        assert_eq!(
+            interpret_post_turn_callback_verdict(&VmValue::Nil),
+            PostTurnVerdict::default()
+        );
+        assert_eq!(
+            interpret_post_turn_callback_verdict(&vm_string("")),
+            PostTurnVerdict::default()
+        );
+    }
+
+    #[test]
+    fn legacy_string_becomes_message() {
+        let v = interpret_post_turn_callback_verdict(&vm_string("redo: missing tests"));
+        assert_eq!(v.message.as_deref(), Some("redo: missing tests"));
+        assert!(!v.stop);
+        assert!(v.injects.is_empty());
+    }
+
+    #[test]
+    fn legacy_bool_controls_stop() {
+        let stop = interpret_post_turn_callback_verdict(&VmValue::Bool(true));
+        assert!(stop.stop);
+        assert!(stop.message.is_none());
+        let go = interpret_post_turn_callback_verdict(&VmValue::Bool(false));
+        assert!(!go.stop);
+    }
+
+    #[test]
+    fn legacy_dict_message_and_stop_round_trip() {
+        let v = interpret_post_turn_callback_verdict(&dict(vec![
+            ("message", vm_string("looks good")),
+            ("stop", VmValue::Bool(true)),
+        ]));
+        assert_eq!(v.message.as_deref(), Some("looks good"));
+        assert!(v.stop);
+    }
+
+    #[test]
+    fn inject_accepts_single_dict() {
+        let v = interpret_post_turn_callback_verdict(&dict(vec![(
+            "inject",
+            dict(vec![
+                ("role", vm_string("system")),
+                ("content", vm_string("you have 1 turn left")),
+            ]),
+        )]));
+        assert_eq!(v.injects.len(), 1);
+        assert_eq!(v.injects[0].role, "system");
+        assert_eq!(v.injects[0].content, "you have 1 turn left");
+    }
+
+    #[test]
+    fn inject_accepts_list_of_dicts_and_filters_invalid() {
+        let v = interpret_post_turn_callback_verdict(&dict(vec![(
+            "inject",
+            VmValue::List(Rc::new(vec![
+                dict(vec![
+                    ("role", vm_string("user")),
+                    ("content", vm_string("a")),
+                ]),
+                // Unknown role — drop silently per agent_session_inject contract.
+                dict(vec![
+                    ("role", vm_string("evil")),
+                    ("content", vm_string("b")),
+                ]),
+                // Missing content — drop.
+                dict(vec![("role", vm_string("user"))]),
+                // Empty content — drop (trim happens here, not later).
+                dict(vec![
+                    ("role", vm_string("user")),
+                    ("content", vm_string("")),
+                ]),
+                dict(vec![
+                    ("role", vm_string("assistant")),
+                    ("content", vm_string("c")),
+                ]),
+            ])),
+        )]));
+        let kept: Vec<_> = v
+            .injects
+            .iter()
+            .map(|i| (i.role.as_str(), i.content.as_str()))
+            .collect();
+        assert_eq!(kept, vec![("user", "a"), ("assistant", "c")]);
+    }
+
+    #[test]
+    fn inject_message_and_stop_compose() {
+        let v = interpret_post_turn_callback_verdict(&dict(vec![
+            (
+                "inject",
+                dict(vec![
+                    ("role", vm_string("system")),
+                    ("content", vm_string("graded: redo step 2")),
+                ]),
+            ),
+            ("message", vm_string("nudge")),
+            ("stop", VmValue::Bool(false)),
+        ]));
+        assert_eq!(v.injects.len(), 1);
+        assert_eq!(v.message.as_deref(), Some("nudge"));
+        assert!(!v.stop);
+    }
+
+    #[test]
+    fn inject_with_unrecognized_top_value_is_silent_no_op() {
+        let v = interpret_post_turn_callback_verdict(&dict(vec![("inject", VmValue::Int(7))]));
+        assert!(v.injects.is_empty());
+    }
+
+    #[test]
+    fn verify_nil_and_true_confirm_the_stop() {
+        assert_eq!(
+            interpret_verify_completion_verdict(&VmValue::Nil),
+            VerifyDecision::Confirmed
+        );
+        assert_eq!(
+            interpret_verify_completion_verdict(&VmValue::Bool(true)),
+            VerifyDecision::Confirmed
+        );
+        assert_eq!(
+            interpret_verify_completion_verdict(&dict(vec![("confirm", VmValue::Bool(true))])),
+            VerifyDecision::Confirmed
+        );
+    }
+
+    #[test]
+    fn verify_false_vetoes_without_feedback() {
+        let d = interpret_verify_completion_verdict(&VmValue::Bool(false));
+        match d {
+            VerifyDecision::Vetoed { message, injects } => {
+                assert!(message.is_none());
+                assert!(injects.is_empty());
+            }
+            _ => panic!("expected Vetoed, got {d:?}"),
+        }
+    }
+
+    #[test]
+    fn verify_string_vetoes_with_feedback() {
+        let d = interpret_verify_completion_verdict(&vm_string("not yet — call grep first"));
+        match d {
+            VerifyDecision::Vetoed { message, injects } => {
+                assert_eq!(message.as_deref(), Some("not yet — call grep first"));
+                assert!(injects.is_empty());
+            }
+            _ => panic!("expected Vetoed, got {d:?}"),
+        }
+    }
+
+    #[test]
+    fn verify_dict_with_message_and_inject_vetoes() {
+        let d = interpret_verify_completion_verdict(&dict(vec![
+            ("message", vm_string("redo")),
+            (
+                "inject",
+                dict(vec![
+                    ("role", vm_string("system")),
+                    ("content", vm_string("you missed step 3")),
+                ]),
+            ),
+        ]));
+        match d {
+            VerifyDecision::Vetoed { message, injects } => {
+                assert_eq!(message.as_deref(), Some("redo"));
+                assert_eq!(injects.len(), 1);
+                assert_eq!(injects[0].role, "system");
+                assert_eq!(injects[0].content, "you missed step 3");
+            }
+            _ => panic!("expected Vetoed, got {d:?}"),
+        }
+    }
+
+    #[test]
+    fn verify_explicit_confirm_wins_over_message() {
+        // `confirm: true` short-circuits — message/inject are ignored.
+        let d = interpret_verify_completion_verdict(&dict(vec![
+            ("confirm", VmValue::Bool(true)),
+            ("message", vm_string("ignored")),
+        ]));
+        assert_eq!(d, VerifyDecision::Confirmed);
+    }
+
+    #[test]
+    fn verify_unrecognized_shape_falls_back_to_confirm() {
+        // Safe default: keep the loop's existing stop decision rather
+        // than vetoing on a malformed return.
+        let d = interpret_verify_completion_verdict(&VmValue::Int(42));
+        assert_eq!(d, VerifyDecision::Confirmed);
     }
 }

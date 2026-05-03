@@ -789,7 +789,7 @@ println(response.output_tokens)
 | `max_tokens` | int | 4096 | |
 | `temperature` | float | provider default | |
 | `tools` | list | nil | Registered tool schemas. |
-| `thinking` | bool \| dict | nil | Typed provider reasoning. `true` / `{mode: "enabled"}` automatically sends Anthropic's `interleaved-thinking-2025-05-14` beta header on supported Claude Opus models. |
+| `thinking` | bool \| dict | nil | Typed provider reasoning. `true` / `{mode: "enabled"}` automatically sends Anthropic's `interleaved-thinking-2025-05-14` beta header on supported Claude Opus models. `thinking: false` on Qwen3 routes auto-prepends `/no_think` to the system message (capability-driven; no per-template knowledge needed in scripts). |
 | `interleaved_thinking` | bool | false | Force the Anthropic interleaved-thinking beta header for the call/loop. |
 | `anthropic_beta_features` | string \| list | nil | Extra Anthropic beta feature names for the comma-separated `anthropic-beta` header. |
 | `tool_search` | bool \| string \| dict | nil | Engage progressive tool disclosure. Shorthand `"bm25"` / `"regex"` (variant, mode auto). Dict: `{variant: "bm25" \| "regex", mode: "auto" \| "native" \| "client", strategy: "bm25" \| "regex" \| "semantic" \| "host", always_loaded: [string], budget_tokens: int, name: string, include_stub_listing: bool}`. See "Tool loading & search" below. |
@@ -1024,6 +1024,7 @@ Rule schema (per `[[provider.<name>]]` entry):
 | `reasoning_effort_supported` | bool | Provider/model accepts OpenAI `reasoning_effort`. |
 | `interleaved_thinking_supported` | bool | `thinking: true` can request Anthropic's interleaved-thinking beta header. |
 | `anthropic_beta_features` | `[string]` | Anthropic beta feature names always requested for this route. |
+| `thinking_disable_directive` | string | In-prompt directive (e.g. `"/no_think"` for Qwen3) auto-prepended to system when `thinking: false`. Idempotent. |
 
 First match wins within a provider's rule list. `[provider_family]`
 declares siblings that inherit a canonical family's rules
@@ -1368,6 +1369,134 @@ persona name) when each call mints a fresh session. `reviewer` defaults
 to `"operator"`. Setting both `per_hour` and `per_day` to `nil` disables
 the budget. See `docs/src/triggers/budgets.md` for the matching
 trigger-side cap and audit trail shape.
+
+### `post_turn_callback` (judge / reflection pattern)
+
+Every `agent_loop` turn fires the optional `post_turn_callback` closure
+*after* tool dispatch and before the next LLM call. It is the canonical
+hook for judges, reflection passes, and graders — no second
+`agent_loop`-flavored builtin required.
+
+The closure receives one dict argument with these keys (stable wire
+shape; new keys are additive):
+
+```harn
+{
+  session_id: string,                // live agent_session id (use this with agent_session_*)
+  iteration: int,                    // 0-based turn index
+  tool_count: int,                   // calls dispatched this turn
+  tool_names: list<string>,          // names dispatched this turn
+  tool_results: list<dict>,          // structured per-call results
+  successful_tool_names: list<string>,
+  failed: bool,                      // any tool result not "ok", or parse error
+  consecutive_single_tool_turns: int,
+  session_tools_used: list<string>,
+  session_successful_tools: list<string>,
+}
+```
+
+The return value drives the loop. Accepted shapes:
+
+- `nil` / `""` — no-op, loop continues
+- `string s` — wrap as `<runtime_feedback>` user note (legacy convenience)
+- `bool b` — set the stop flag
+- dict with any combination of:
+  - `message: string` — same as the bare-string shape
+  - `stop: bool` — terminate the loop after this turn
+  - `inject: dict | list<dict>` — typed messages with explicit
+    `{role, content}` to push onto the next turn (no `<runtime_feedback>`
+    wrapping). Roles outside `user|assistant|system|tool_result` are
+    silently dropped.
+
+Because `session_id` is exposed, the closure can call any
+`agent_session_*` builtin against the live transcript. The minimal
+"every-N-turns judge" pattern:
+
+```harn
+let judge = { info ->
+  if info.iteration % 3 != 0 { return nil }       // skip 2/3 turns
+  let snapshot = agent_session_snapshot(info.session_id)
+  let verdict = llm_call("...grade this transcript...", {
+    provider: "openai", model: "gpt-5-mini",      // cheaper reflection model
+    messages: [{role: "user", content: json_encode(snapshot)}],
+    schema: {approved: "bool", feedback: "string"},
+  })
+  if !verdict.approved {
+    return {inject: [{role: "system", content: "judge: " + verdict.feedback}]}
+  }
+  if verdict.approved && info.iteration > 5 { return {stop: true} }
+  nil
+}
+
+agent_loop(task, system, {tools: registry, post_turn_callback: judge})
+```
+
+Other strategies compose from existing primitives — no new runtime
+mechanics required:
+
+- **Terminal-only review** — gate the body on `info.iteration ==
+  expected_max - 1`, or check `info.session_successful_tools` for a
+  terminal tool name. Skip the early turns and judge once at the end.
+- **Branch-and-replay** — call `agent_session_fork_at(info.session_id,
+  k)` to checkpoint at a known-good turn, then return `{stop: true}`
+  to halt the live loop. The enclosing pipeline rebuilds with the
+  branch (see snippet below). The runtime intentionally does *not*
+  swap the live loop's session mid-run — that would race with
+  in-flight tool dispatches.
+
+  ```harn
+  let s = agent_session_open()
+  let main = agent_loop(task, sys, {session_id: s, tools: registry,
+    post_turn_callback: { info ->
+      if judge_says_redo_from(info) {
+        let branch = agent_session_fork_at(info.session_id, judged_k)
+        agent_session_inject(branch, {role: "system",
+          content: "Redo from turn ${judged_k} with: ${redirection}"})
+        // Stash the branch id so the caller can pick it up.
+        save_branch_id(branch)
+        return {stop: true}
+      }
+      nil
+    },
+  })
+  if main.status == "stopped" {
+    agent_loop(task, sys, {session_id: load_branch_id(), tools: registry})
+  }
+  ```
+
+- **Fork-and-race** — fork at the start (or any turn) and race two
+  variants. Reuse the existing concurrency primitives — no race
+  scaffolding lives in `agent_loop`:
+
+  ```harn
+  let base = agent_session_open()
+  let branch = agent_session_fork(base)
+  agent_session_inject(branch, {role: "system",
+    content: "Try the brute-force approach."})
+
+  let outcomes = parallel settle [base, branch]
+    with { max_concurrent: 2 } { sess ->
+      agent_loop(task, sys, {
+        session_id: sess, tools: registry, max_iterations: 10,
+      })
+    }
+  let winner = pick_first_done(outcomes.results)
+  ```
+
+  Use `parallel settle` (vs. `parallel each`) so a failure on one
+  branch doesn't cancel the other. `max_concurrent: 2` keeps both
+  branches running concurrently without unbounded fan-out if you
+  generalize the list.
+
+The closure runs in a child VM (separate `output` buffer) and its
+return is parsed by `interpret_post_turn_callback_verdict`. Any
+captured `log()` / `print()` output flows back to the parent VM
+unchanged. The callback is awaited synchronously per turn, so it can
+be a heavy LLM call without races. For an explicit non-goal: there is
+no `judge:` config field on `agent_loop` itself — every Codex-style
+strategy listed above falls out from the existing surface, and
+folding it into the loop would conflate strategy (when/which model)
+with mechanism (post-turn hook).
 
 ### Sessions (persistent conversations)
 

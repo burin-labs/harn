@@ -123,6 +123,8 @@ pub(super) fn base_agent_config() -> AgentLoopConfig {
         event_sink: None,
         task_ledger: Default::default(),
         post_turn_callback: None,
+        verify_completion: None,
+        max_verify_attempts: 3,
         llm_transcript_dir: None,
         skill_registry: None,
         skill_match: Default::default(),

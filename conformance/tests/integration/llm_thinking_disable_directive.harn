@@ -1,0 +1,56 @@
+/* Verifies that capability-declared `thinking_disable_directive`
+   (e.g. `/no_think` for Qwen3 chat templates) is auto-prepended to the
+   system message when `thinking: false`, and is a no-op otherwise.
+   This is the abstraction that lets script authors say `thinking: false`
+   uniformly without learning per-template prompt directives. */
+pipeline test(task) {
+  llm_mock_clear()
+  llm_mock({text: "ok"})
+  llm_call(
+    "say hi",
+    "you are an agent.",
+    {provider: "ollama", model: "qwen3:30b", thinking: {mode: "disabled"}},
+  )
+  let qwen_disabled = llm_mock_calls()[0]
+  assert(
+    qwen_disabled.system == "/no_think\nyou are an agent.",
+    "Qwen3-on-Ollama with thinking:false should prepend /no_think to system",
+  )
+  llm_mock_clear()
+  llm_mock({text: "ok"})
+  llm_call(
+    "say hi",
+    "you are an agent.",
+    {provider: "ollama", model: "qwen3:30b", thinking: {mode: "enabled"}},
+  )
+  let qwen_enabled = llm_mock_calls()[0]
+  assert(
+    qwen_enabled.system == "you are an agent.",
+    "thinking: enabled should leave system untouched",
+  )
+  llm_mock_clear()
+  llm_mock({text: "ok"})
+  llm_call(
+    "say hi",
+    "/no_think\nyou are an agent.",
+    {provider: "ollama", model: "qwen3:30b", thinking: {mode: "disabled"}},
+  )
+  let qwen_idempotent = llm_mock_calls()[0]
+  assert(
+    qwen_idempotent.system == "/no_think\nyou are an agent.",
+    "directive injection should be idempotent when already at head of system",
+  )
+  llm_mock_clear()
+  llm_mock({text: "ok"})
+  llm_call(
+    "say hi",
+    "you are an agent.",
+    {provider: "anthropic", model: "claude-haiku-4-7", thinking: {mode: "disabled"}},
+  )
+  let anthropic_call = llm_mock_calls()[0]
+  assert(
+    anthropic_call.system == "you are an agent.",
+    "providers without a directive capability should leave system untouched",
+  )
+  log("llm_thinking_disable_directive tests passed")
+}

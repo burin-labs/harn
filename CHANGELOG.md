@@ -10,6 +10,66 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **ACP wire-format coverage for the agent-event tail.** Previously six
+  `AgentEvent` variants (`TurnStart`, `TurnEnd`, `FeedbackInjected`,
+  `BudgetExhausted`, `LoopStuck`, `DaemonWatchdogTripped`) silently fell off
+  the bridge because they had no matching `SessionUpdate` discriminator and
+  the strict deserializer would reject custom kinds. The ACP adapter now
+  emits them as spec-blessed `_harn/agentEvent` `ExtNotification`s with
+  pinned wire fixtures, and the `agentCapabilities._meta.harn` block
+  advertises the method + the six event kinds so external consumers can
+  feature-detect.
+- **`verify_completion` agent-loop stop hook.** New `agent_loop` option
+  takes a closure `{ info -> nil | "feedback" }` that runs the moment the
+  loop wants to yield. Returning `nil` / `true` confirms the stop;
+  returning a string vetoes it, injects the feedback as a runtime
+  message, emits a `FeedbackInjected` event, and continues the loop.
+  Capped by `max_verify_attempts` (default 3) which surfaces as
+  `status: "verify_exhausted"` when reached. The `info` payload includes
+  `session_id`, `iteration`, `stop_reason`, `last_text`, and per-session
+  tool-use counts so judge logic can fork transcripts via
+  `agent_session_fork_at` + `parallel settle` without any new runtime
+  primitives.
+- **`post_turn_callback` enriched payload.** The post-turn callback now
+  receives `session_id` so callbacks can address the live session, and
+  the verdict shape was extended with an `injects: [{role, content}]`
+  list for typed message injection alongside the legacy `message: "..."`
+  feedback nudge.
+- **Capability-driven `thinking_disable_directive`.** A new
+  `[[provider.<name>]]` capability (`thinking_disable_directive`) lets
+  the matrix declare an in-prompt thinking-off directive (e.g.
+  `"/no_think"` for Qwen3 chat templates). When `thinking: false` is
+  requested for a model whose capabilities row sets it, Harn auto-prepends
+  the directive to the system message, idempotently. Scripts now write
+  `thinking: false` once and have it work uniformly across Anthropic /
+  OpenAI / Qwen3 without per-template prompt knowledge. Shipped on every
+  Qwen3 row: ollama, llamacpp, local, mlx, dashscope, fireworks,
+  openrouter, huggingface, together.
+
+### Changed
+
+- **`done_sentinel` accepts a first-class `bool` and defaults are
+  `tool_format`-aware.** Old contract forced users to write
+  `done_sentinel: ""` everywhere — even on native-tool models that
+  signal completion by simply not calling a tool — to suppress a
+  `##DONE##` injection that didn't belong there. New contract:
+  - `done_sentinel: true` → explicit `##DONE##` (legacy default).
+  - `done_sentinel: false` → explicit disable.
+  - `done_sentinel: "..."` → custom sentinel.
+  - omitted → defaults to disabled when `tool_format == "native"`,
+    otherwise `##DONE##`.
+  Both `agent_loop` parser paths (`agent_config.rs` and `mod.rs`) route
+  through the same shared parser; previously only one accepted the bool
+  shape, which silently drained `done_sentinel: true` to `None` in
+  paths that hit the legacy `mod.rs` path. Wrong-type values
+  (`done_sentinel: 42`) now error loudly at parse time.
+- **`post_turn_callback` / `verify_completion` parse strictly.** Both
+  options previously used `.filter(|v| matches!(v, Closure(_)))` which
+  silently dropped non-closure values to `None` — typos in option keys
+  or value types went unnoticed. They now error
+  (`'<name>' must be a closure or nil; got <type>`) so foot-guns surface
+  immediately.
+
 - **Merge Captain timeout ladder evals (#1014).** Added a reusable persona eval ladder runner for
   Merge Captain, exposed through `harn merge-captain ladder`, `harn eval`, `harn test package
   --evals`, and `persona_eval_ladder_*` Harn builtins. Ladder reports capture per-tier transcripts,

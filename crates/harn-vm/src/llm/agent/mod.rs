@@ -501,6 +501,8 @@ pub async fn run_agent_loop_internal(
     let turn_policy = state.config.turn_policy.clone();
     let stop_after_successful_tools = state.config.stop_after_successful_tools.clone();
     let post_turn_callback = state.config.post_turn_callback.clone();
+    let verify_completion = state.config.verify_completion.clone();
+    let max_verify_attempts = state.config.max_verify_attempts;
     let bridge = state.bridge.clone();
     let max_iterations = state.max_iterations;
     let max_nudges = state.max_nudges;
@@ -552,6 +554,11 @@ pub async fn run_agent_loop_internal(
     let mut iteration_exited_via_break = false;
     let mut loop_tokens_used = 0i64;
     let mut loop_cost_used = 0.0f64;
+    // Tracks how many times `verify_completion` has vetoed a stop in
+    // this loop. Once this hits `max_verify_attempts` the next break
+    // is forced (status = "verify_exhausted") so a buggy judge can't
+    // hold the loop open indefinitely.
+    let mut verify_attempts: usize = 0;
     for iteration in 0..max_iterations {
         // Skill matching runs at the head of iteration 0 (always) and,
         // when sticky=false, again before each subsequent iteration.
@@ -717,6 +724,55 @@ pub async fn run_agent_loop_internal(
         match iteration_outcome {
             post_turn::IterationOutcome::Continue => continue,
             post_turn::IterationOutcome::Break => {
+                // verify_completion stop hook: when set, runs at every
+                // natural break and may veto with feedback so a "false
+                // done" gets one more turn instead of yielding to the
+                // caller. Bounded by max_verify_attempts to prevent a
+                // buggy judge from holding the loop open.
+                if let Some(closure_value) = verify_completion.as_ref() {
+                    if verify_attempts >= max_verify_attempts {
+                        crate::events::log_warn(
+                            "agent.verify_completion",
+                            &format!(
+                                "iter={iteration} verify_completion exhausted \
+                                 ({verify_attempts}/{max_verify_attempts}); forcing break"
+                            ),
+                        );
+                        state.final_status = "verify_exhausted";
+                        iteration_exited_via_break = true;
+                        break;
+                    }
+                    let stop_reason = match state.final_status {
+                        "stuck" => "loop_stuck",
+                        "" => "natural",
+                        other => other,
+                    };
+                    let veto = post_turn::run_verify_completion(
+                        &mut state,
+                        closure_value,
+                        &session_id,
+                        iteration,
+                        stop_reason,
+                        &call_result.text,
+                    )
+                    .await?;
+                    if veto {
+                        verify_attempts += 1;
+                        crate::events::log_debug(
+                            "agent.verify_completion",
+                            &format!(
+                                "iter={iteration} verify_completion vetoed stop \
+                                 (attempt {verify_attempts}/{max_verify_attempts}, reason={stop_reason})"
+                            ),
+                        );
+                        // Reset the stuck-status if the hook is reviving the loop;
+                        // otherwise the post-loop finalize would still mark it stuck.
+                        if state.final_status == "stuck" {
+                            state.final_status = "";
+                        }
+                        continue;
+                    }
+                }
                 iteration_exited_via_break = true;
                 break;
             }

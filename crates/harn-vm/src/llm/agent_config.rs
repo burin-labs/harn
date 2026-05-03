@@ -153,6 +153,31 @@ pub struct AgentLoopConfig {
     /// - `true`: stop the stage immediately
     /// - `{message, stop}` dict: both (optional `message`, optional `stop`)
     pub post_turn_callback: Option<crate::value::VmValue>,
+    /// Optional Harn closure that fires JUST BEFORE the loop yields
+    /// control to the caller — i.e. when a natural stop is about to
+    /// happen (sentinel hit, terminal tool, post_turn `{stop: true}`,
+    /// max_nudges loop-stuck). The closure receives a dict shaped like
+    /// `post_turn_callback`'s payload plus a `stop_reason: string`
+    /// field (e.g. `"sentinel"`, `"terminal_tool"`, `"post_turn_stop"`,
+    /// `"loop_stuck"`).
+    ///
+    /// Return values:
+    /// - `nil` / `true` / `{confirm: true}` — confirm the stop, loop yields.
+    /// - `false` — veto without feedback, loop continues with one more turn.
+    /// - `string s` — veto + inject `s` as a `<runtime_feedback>` user note.
+    /// - `{message?, inject?, confirm?}` — veto (unless `confirm: true`)
+    ///   and inject typed messages and/or a feedback string. Same `inject`
+    ///   shape as `post_turn_callback` (list of `{role, content}` dicts).
+    ///
+    /// Bounded by `max_verify_attempts` to prevent infinite veto loops.
+    /// Does NOT fire on budget-exhaustion paths — those represent hard
+    /// resource limits, not "is the work actually done" decisions.
+    pub verify_completion: Option<crate::value::VmValue>,
+    /// Cap on how many times `verify_completion` may veto a stop in a
+    /// single loop. Once exceeded, the next break is forced and the
+    /// loop exits with `final_status = "verify_exhausted"`. Defaults to
+    /// `3` when `verify_completion` is set; ignored otherwise.
+    pub max_verify_attempts: usize,
     /// Optional per-call directory for the existing Harn
     /// `llm_transcript.jsonl` sidecar. When unset, the process-level
     /// `HARN_LLM_TRANSCRIPT_DIR` environment variable is still honored.
@@ -174,6 +199,68 @@ pub struct AgentLoopConfig {
     /// HITL approval request before doing any LLM work. VM-enforced —
     /// scripts cannot bypass.
     pub autonomy_budget: Option<crate::llm::autonomy_budget::AgentAutonomyBudget>,
+}
+
+/// Parse the `done_sentinel` option into the `Option<String>` shape
+/// `AgentLoopConfig` carries. See the call site for the accepted
+/// shapes — this helper exists so the `bool` discriminator can be
+/// distinguished from the legacy `string` path (a `display()`-based
+/// parse would wrongly coerce `false` to `"false"`).
+///
+/// Returns:
+/// - `Ok(None)` — option missing or `nil`; state.rs picks the
+///   tool_format-aware default.
+/// - `Ok(Some("##DONE##"))` — `true` (explicit default).
+/// - `Ok(Some(""))` — `false` (explicit disable). Detection sites
+///   guard with `!is_empty()`, so empty == disabled.
+/// - `Ok(Some(s))` — any other string (custom sentinel).
+pub(crate) fn parse_done_sentinel_option(
+    options: &Option<std::collections::BTreeMap<String, VmValue>>,
+) -> Result<Option<String>, crate::value::VmError> {
+    let raw = match options.as_ref().and_then(|o| o.get("done_sentinel")) {
+        Some(value) => value,
+        None => return Ok(None),
+    };
+    match raw {
+        VmValue::Nil => Ok(None),
+        VmValue::Bool(true) => Ok(Some("##DONE##".to_string())),
+        VmValue::Bool(false) => Ok(Some(String::new())),
+        VmValue::String(s) => Ok(Some(s.to_string())),
+        other => Err(crate::value::VmError::Thrown(VmValue::String(Rc::from(
+            format!(
+                "agent_loop: `done_sentinel` must be a string, bool, or nil; \
+                 got {}",
+                other.type_name()
+            )
+            .as_str(),
+        )))),
+    }
+}
+
+/// Parse a closure-shaped option (e.g. `post_turn_callback`,
+/// `verify_completion`). Missing / `nil` returns `Ok(None)`. A closure
+/// returns `Ok(Some(value))`. Any other shape errors out instead of
+/// silently dropping — agent_loop callbacks are too easy to typo for a
+/// permissive parse.
+pub(crate) fn parse_closure_option(
+    options: &Option<std::collections::BTreeMap<String, VmValue>>,
+    name: &str,
+) -> Result<Option<VmValue>, crate::value::VmError> {
+    let raw = match options.as_ref().and_then(|o| o.get(name)) {
+        Some(value) => value,
+        None => return Ok(None),
+    };
+    match raw {
+        VmValue::Nil => Ok(None),
+        VmValue::Closure(_) => Ok(Some(raw.clone())),
+        other => Err(crate::value::VmError::Thrown(VmValue::String(Rc::from(
+            format!(
+                "agent_loop: `{name}` must be a closure or nil; got {}",
+                other.type_name()
+            )
+            .as_str(),
+        )))),
+    }
 }
 
 pub(crate) fn parse_command_policy_from_options(
@@ -449,7 +536,15 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 })
                 .transpose()?
                 .unwrap_or_default();
-            let done_sentinel = opt_str(&options, "done_sentinel");
+            // `done_sentinel` accepts:
+            //   - missing / `nil`     → use tool_format-aware default (state.rs)
+            //   - `false`             → explicit disable (no injection, no detection)
+            //   - `true`              → explicit default sentinel (`##DONE##`)
+            //   - `string s`          → custom sentinel (empty `""` still means
+            //                           disabled for legacy back-compat)
+            // The first-class `bool` shape replaces the empty-string opt-out
+            // foot-gun where users had to remember `done_sentinel: ""`.
+            let done_sentinel = parse_done_sentinel_option(&options)?;
             let break_unless_phase = opt_str(&options, "break_unless_phase");
             let session_id = opt_str(&options, "session_id")
                 .or_else(crate::agent_sessions::current_session_id)
@@ -539,11 +634,12 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     session_id,
                     event_sink: None,
                     task_ledger: parse_task_ledger_from_options(&options),
-                    post_turn_callback: options
-                        .as_ref()
-                        .and_then(|o| o.get("post_turn_callback"))
-                        .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
-                        .cloned(),
+                    post_turn_callback: parse_closure_option(&options, "post_turn_callback")?,
+                    verify_completion: parse_closure_option(&options, "verify_completion")?,
+                    max_verify_attempts: opt_int(&options, "max_verify_attempts")
+                        .filter(|n| *n >= 0)
+                        .map(|n| n as usize)
+                        .unwrap_or(3),
                     llm_transcript_dir: opt_str(&options, "llm_transcript_dir"),
                     skill_registry,
                     skill_match,

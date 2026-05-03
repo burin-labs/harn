@@ -19,14 +19,45 @@ impl AcpAgentEventSink {
     }
 
     fn write_notification(&self, params: serde_json::Value) {
+        self.write_jsonrpc_notification("session/update", params);
+    }
+
+    /// Emit an arbitrary JSON-RPC notification through the same transport
+    /// as `session/update`. Used for ACP `ExtNotification` envelopes
+    /// (methods prefixed with `_`, per the ACP extensibility spec) when
+    /// the canonical `session/update` discriminator has no slot for the
+    /// event being surfaced — currently the pipeline-loop milestones
+    /// emitted via `_harn/agentEvent`.
+    fn write_jsonrpc_notification(&self, method: &str, params: serde_json::Value) {
         let notification = serde_json::json!({
             "jsonrpc": "2.0",
-            "method": "session/update",
+            "method": method,
             "params": params,
         });
         if let Ok(line) = serde_json::to_string(&notification) {
             self.output.write_line(&line);
         }
+    }
+
+    /// Emit a pipeline-loop milestone as an ACP `ExtNotification` under
+    /// the `_harn/agentEvent` method. The schema is the per-`kind`
+    /// payload defined in `HARN_AGENT_EVENT_KINDS` — `sessionId` + `kind`
+    /// are required at the top level, and kind-specific fields ride
+    /// directly under `params` (no nested `_meta` wrapper, since the
+    /// whole notification is already vendor-prefixed).
+    fn emit_agent_event_ext(&self, kind: &str, session_id: &str, mut payload: serde_json::Value) {
+        let obj = payload
+            .as_object_mut()
+            .expect("emit_agent_event_ext: payload must be a JSON object");
+        obj.insert(
+            "sessionId".to_string(),
+            serde_json::Value::String(session_id.to_string()),
+        );
+        obj.insert(
+            "kind".to_string(),
+            serde_json::Value::String(kind.to_string()),
+        );
+        self.write_jsonrpc_notification(super::HARN_AGENT_EVENT_METHOD, payload);
     }
 
     fn status_str(status: harn_vm::agent_events::ToolCallStatus) -> &'static str {
@@ -592,14 +623,84 @@ impl AgentEventSink for AcpAgentEventSink {
                     "update": update,
                 }));
             }
-            // Pipeline-loop milestones with no canonical ACP session/update
-            // mapping; deliberately not forwarded.
-            AgentEvent::TurnStart { .. }
-            | AgentEvent::TurnEnd { .. }
-            | AgentEvent::FeedbackInjected { .. }
-            | AgentEvent::BudgetExhausted { .. }
-            | AgentEvent::LoopStuck { .. }
-            | AgentEvent::DaemonWatchdogTripped { .. } => {}
+            // Pipeline-loop milestones — surfaced as ACP `ExtNotification`
+            // envelopes under the `_harn/agentEvent` method per the
+            // extensibility spec (https://agentclientprotocol.com/protocol/extensibility).
+            // ACP defines no `session/update` discriminator for these,
+            // and inventing a new one would crash strict client decoders;
+            // a `_`-prefixed JSON-RPC method is the spec-blessed path
+            // for genuinely new events. Clients that don't know the method
+            // SHOULD ignore it (per the spec); burin-code subscribes via
+            // the `extensionMethods` advertisement in `agentCapabilities._meta.harn`.
+            AgentEvent::TurnStart {
+                session_id,
+                iteration,
+            } => {
+                self.emit_agent_event_ext(
+                    "turn_start",
+                    session_id,
+                    serde_json::json!({"iteration": iteration}),
+                );
+            }
+            AgentEvent::TurnEnd {
+                session_id,
+                iteration,
+                turn_info,
+            } => {
+                self.emit_agent_event_ext(
+                    "turn_end",
+                    session_id,
+                    serde_json::json!({"iteration": iteration, "turnInfo": turn_info}),
+                );
+            }
+            AgentEvent::FeedbackInjected {
+                session_id,
+                kind,
+                content,
+            } => {
+                self.emit_agent_event_ext(
+                    "feedback_injected",
+                    session_id,
+                    serde_json::json!({"feedbackKind": kind, "content": content}),
+                );
+            }
+            AgentEvent::BudgetExhausted {
+                session_id,
+                max_iterations,
+            } => {
+                self.emit_agent_event_ext(
+                    "budget_exhausted",
+                    session_id,
+                    serde_json::json!({"maxIterations": max_iterations}),
+                );
+            }
+            AgentEvent::LoopStuck {
+                session_id,
+                max_nudges,
+                last_iteration,
+                tail_excerpt,
+            } => {
+                self.emit_agent_event_ext(
+                    "loop_stuck",
+                    session_id,
+                    serde_json::json!({
+                        "maxNudges": max_nudges,
+                        "lastIteration": last_iteration,
+                        "tailExcerpt": tail_excerpt,
+                    }),
+                );
+            }
+            AgentEvent::DaemonWatchdogTripped {
+                session_id,
+                attempts,
+                elapsed_ms,
+            } => {
+                self.emit_agent_event_ext(
+                    "daemon_watchdog_tripped",
+                    session_id,
+                    serde_json::json!({"attempts": attempts, "elapsedMs": elapsed_ms}),
+                );
+            }
         }
     }
 }
@@ -616,7 +717,9 @@ mod tests {
     use harn_vm::tool_annotations::ToolKind;
     use tokio::sync::mpsc;
 
-    use super::super::HARN_SESSION_UPDATE_EXTENSIONS;
+    use super::super::{
+        HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
+    };
     use super::{AcpAgentEventSink, AcpOutput};
 
     const ACP_V0_12_2_SESSION_UPDATES: &[&str] = &[
@@ -823,6 +926,81 @@ mod tests {
                 assert!(notification["params"]["update"].get("entries").is_some());
                 assert!(notification["params"]["update"].get("plan").is_none());
             }
+        }
+    }
+
+    fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
+        vec![
+            AgentEvent::TurnStart {
+                session_id: "session-1".to_string(),
+                iteration: 0,
+            },
+            AgentEvent::TurnEnd {
+                session_id: "session-1".to_string(),
+                iteration: 0,
+                turn_info: serde_json::json!({
+                    "tool_calls": 2,
+                    "tool_names": ["read_file", "grep"]
+                }),
+            },
+            AgentEvent::FeedbackInjected {
+                session_id: "session-1".to_string(),
+                kind: "protocol_violation".to_string(),
+                content: "missed required tool call; reissuing".to_string(),
+            },
+            AgentEvent::BudgetExhausted {
+                session_id: "session-1".to_string(),
+                max_iterations: 8,
+            },
+            AgentEvent::LoopStuck {
+                session_id: "session-1".to_string(),
+                max_nudges: 3,
+                last_iteration: 4,
+                tail_excerpt: "still thinking...".to_string(),
+            },
+            AgentEvent::DaemonWatchdogTripped {
+                session_id: "session-1".to_string(),
+                attempts: 5,
+                elapsed_ms: 12_000,
+            },
+        ]
+    }
+
+    /// Pipeline-loop milestone events ride on the ACP `ExtNotification`
+    /// channel via `_harn/agentEvent`. The fixture pins the wire shape
+    /// per kind so any drift in field names (e.g. snake_case vs.
+    /// camelCase) or payload structure trips a build-time failure
+    /// rather than silently breaking burin-code's decoder. Every kind
+    /// in the fixture must also appear in `HARN_AGENT_EVENT_KINDS` so
+    /// the capability advertisement stays honest.
+    #[tokio::test(flavor = "current_thread")]
+    async fn agent_event_ext_notification_fixtures_are_pinned() {
+        let actual = collect_notifications(agent_event_ext_fixture_events()).await;
+        let expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/acp/agent_event_ext_notifications.json"
+        ))
+        .expect("fixture json");
+        assert_eq!(serde_json::Value::Array(actual.clone()), expected);
+
+        for notification in actual {
+            assert_eq!(
+                notification["method"].as_str().expect("method"),
+                HARN_AGENT_EVENT_METHOD,
+                "every pipeline-loop milestone notification must use the \
+                 advertised _harn/agentEvent method"
+            );
+            assert!(
+                notification["params"]["sessionId"].is_string(),
+                "sessionId must be a top-level string on every agent event"
+            );
+            let kind = notification["params"]["kind"]
+                .as_str()
+                .expect("kind discriminator");
+            assert!(
+                HARN_AGENT_EVENT_KINDS.contains(&kind),
+                "{kind} is not advertised in HARN_AGENT_EVENT_KINDS — clients \
+                 cannot subscribe to undocumented kinds"
+            );
         }
     }
 
@@ -1789,8 +1967,15 @@ mod tests {
         assert!(content.get("visible_delta").is_none());
     }
 
+    /// Pipeline-loop milestones used to be silently dropped by the ACP
+    /// adapter (no canonical `session/update` slot). They now ride on
+    /// the `_harn/agentEvent` `ExtNotification` channel — never on
+    /// `session/update`. This test pins the negative half of that
+    /// contract: even though the events are surfaced, they MUST NOT
+    /// pollute the canonical `session/update` stream that strict ACP
+    /// clients consume by closed enum.
     #[test]
-    fn internal_agent_events_do_not_emit_session_updates() {
+    fn internal_agent_events_never_emit_session_updates() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
 
@@ -1824,6 +2009,26 @@ mod tests {
             elapsed_ms: 10,
         });
 
-        assert!(rx.try_recv().is_err());
+        let mut count = 0;
+        while let Ok(line) = rx.try_recv() {
+            count += 1;
+            let payload: serde_json::Value =
+                serde_json::from_str(&line).expect("notification json");
+            assert_ne!(
+                payload["method"], "session/update",
+                "pipeline-loop milestones must NOT ride on session/update — \
+                 strict ACP clients use a closed enum and would reject any \
+                 vendor-invented sessionUpdate kind. Got: {payload}"
+            );
+            assert_eq!(
+                payload["method"], HARN_AGENT_EVENT_METHOD,
+                "pipeline-loop milestones MUST ride on the advertised \
+                 _harn/agentEvent ExtNotification method"
+            );
+        }
+        assert_eq!(
+            count, 6,
+            "expected one ExtNotification per fed AgentEvent, got {count}"
+        );
     }
 }

@@ -502,7 +502,7 @@ impl LlmRequestPayload {
 
 impl From<&LlmCallOptions> for LlmRequestPayload {
     fn from(opts: &LlmCallOptions) -> Self {
-        Self {
+        let mut payload = Self {
             provider: opts.provider.clone(),
             model: opts.model.clone(),
             api_key: opts.api_key.clone(),
@@ -532,8 +532,48 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             provider_overrides: opts.provider_overrides.clone(),
             prefill: opts.prefill.clone(),
             session_id: opts.session_id.clone(),
-        }
+        };
+        apply_thinking_disable_directive(&mut payload);
+        payload
     }
+}
+
+/// When the resolved capabilities for `(provider, model)` declare a
+/// `thinking_disable_directive` (e.g. `/no_think` for Qwen3 chat
+/// templates) and the requested `thinking` mode is `Disabled`, prepend
+/// the directive to the system message. This lets script authors write
+/// `thinking: false` once and have it work uniformly across providers
+/// without learning per-template prompt directives.
+///
+/// Idempotent: if the directive (as the first non-blank token of the
+/// system message) is already present, no change is made.
+fn apply_thinking_disable_directive(payload: &mut LlmRequestPayload) {
+    if !payload.thinking.is_disabled() {
+        return;
+    }
+    let caps = crate::llm::capabilities::lookup(&payload.provider, &payload.model);
+    let Some(directive) = caps.thinking_disable_directive.as_deref() else {
+        return;
+    };
+    let directive = directive.trim();
+    if directive.is_empty() {
+        return;
+    }
+
+    let already_present = payload
+        .system
+        .as_deref()
+        .map(|sys| sys.trim_start().starts_with(directive))
+        .unwrap_or(false);
+    if already_present {
+        return;
+    }
+
+    let new_system = match payload.system.as_deref().filter(|s| !s.is_empty()) {
+        Some(existing) => format!("{directive}\n{existing}"),
+        None => directive.to_string(),
+    };
+    payload.system = Some(new_system);
 }
 
 #[cfg(test)]
@@ -593,7 +633,7 @@ pub(super) fn base_opts(provider: &str) -> LlmCallOptions {
 
 #[cfg(test)]
 mod tests {
-    use super::{base_opts, LlmRequestPayload};
+    use super::{base_opts, LlmRequestPayload, ThinkingConfig};
 
     fn assert_send<T: Send>() {}
 
@@ -608,6 +648,70 @@ mod tests {
         assert_eq!(
             payload.provider_overrides,
             Some(serde_json::json!({"custom_flag": true}))
+        );
+    }
+
+    #[test]
+    fn thinking_disable_directive_prepended_for_qwen3_when_disabled() {
+        let mut opts = base_opts("ollama");
+        opts.model = "qwen3.5:30b".to_string();
+        opts.system = Some("you are an agent.".to_string());
+        opts.thinking = ThinkingConfig::Disabled;
+        let payload = LlmRequestPayload::from(&opts);
+        assert_eq!(
+            payload.system.as_deref(),
+            Some("/no_think\nyou are an agent."),
+            "Qwen3-on-Ollama with thinking: false should auto-prepend /no_think to system",
+        );
+    }
+
+    #[test]
+    fn thinking_disable_directive_skipped_when_thinking_enabled() {
+        let mut opts = base_opts("ollama");
+        opts.model = "qwen3.5:30b".to_string();
+        opts.system = Some("you are an agent.".to_string());
+        opts.thinking = ThinkingConfig::Enabled {
+            budget_tokens: None,
+        };
+        let payload = LlmRequestPayload::from(&opts);
+        assert_eq!(payload.system.as_deref(), Some("you are an agent."));
+    }
+
+    #[test]
+    fn thinking_disable_directive_idempotent_when_already_present() {
+        let mut opts = base_opts("ollama");
+        opts.model = "qwen3.5:30b".to_string();
+        opts.system = Some("/no_think\nyou are an agent.".to_string());
+        opts.thinking = ThinkingConfig::Disabled;
+        let payload = LlmRequestPayload::from(&opts);
+        assert_eq!(
+            payload.system.as_deref(),
+            Some("/no_think\nyou are an agent."),
+            "Should not double-prepend /no_think when already at the head of system",
+        );
+    }
+
+    #[test]
+    fn thinking_disable_directive_creates_system_when_none() {
+        let mut opts = base_opts("ollama");
+        opts.model = "qwen3.5:30b".to_string();
+        opts.system = None;
+        opts.thinking = ThinkingConfig::Disabled;
+        let payload = LlmRequestPayload::from(&opts);
+        assert_eq!(payload.system.as_deref(), Some("/no_think"));
+    }
+
+    #[test]
+    fn thinking_disable_directive_noop_for_provider_without_capability() {
+        let mut opts = base_opts("anthropic");
+        opts.model = "claude-haiku-4-7".to_string();
+        opts.system = Some("you are an agent.".to_string());
+        opts.thinking = ThinkingConfig::Disabled;
+        let payload = LlmRequestPayload::from(&opts);
+        assert_eq!(
+            payload.system.as_deref(),
+            Some("you are an agent."),
+            "Anthropic has no thinking_disable_directive — system should be untouched",
         );
     }
 }
