@@ -164,6 +164,10 @@ pipeline t(task) {
   log(maybe?.name)
   let n: int = 42
   log(n?.missing)
+  let broad: dict = {}
+  log(broad?.dynamic_field)
+  let union_value: dict | list = broad
+  log(union_value?.dynamic_field)
 }
 "#,
     );
@@ -210,6 +214,23 @@ pipeline t(task) {
         fixes,
         vec![".", "", "."],
         "got diagnostics: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_optional_access_on_dynamic_dict_union_stays_unknown() {
+    let errs = errors(
+        r#"
+pipeline t(task) {
+  fn needs_string(target: string) {}
+  let worker_summary: dict | list = {}
+  needs_string(worker_summary?.snapshot_path)
+}
+"#,
+    );
+    assert!(
+        errs.is_empty(),
+        "dynamic dict access should not collapse to nil: {errs:?}"
     );
 }
 

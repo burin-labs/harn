@@ -827,6 +827,12 @@ impl TypeChecker {
             TypeExpr::Named(name) if name == "nil" => {
                 optional.then(|| TypeExpr::Named("nil".into()))
             }
+            TypeExpr::Named(name)
+                if matches!(name.as_str(), "any" | "unknown" | "_")
+                    || scope.is_generic_type_param(name) =>
+            {
+                None
+            }
             TypeExpr::Named(name) if name == "list" => {
                 Self::list_property_type(None, property, optional)
             }
@@ -843,12 +849,18 @@ impl TypeChecker {
             TypeExpr::Union(members) => {
                 let mut inferred = Vec::new();
                 for member in members {
-                    if let Some(member_type) =
+                    if self.type_is_nil(member, scope) {
+                        if optional {
+                            inferred.push(TypeExpr::Named("nil".into()));
+                        } else {
+                            return None;
+                        }
+                    } else if let Some(member_type) =
                         self.infer_property_type_from_type(member, property, scope, optional)
                     {
                         inferred.push(member_type);
-                    } else if optional {
-                        inferred.push(TypeExpr::Named("nil".into()));
+                    } else {
+                        return None;
                     }
                 }
                 (!inferred.is_empty()).then(|| simplify_union(inferred))
@@ -909,13 +921,27 @@ impl TypeChecker {
             TypeExpr::Named(name) if name == "nil" => {
                 optional.then(|| TypeExpr::Named("nil".into()))
             }
+            TypeExpr::Named(name)
+                if matches!(name.as_str(), "any" | "unknown" | "_")
+                    || scope.is_generic_type_param(name) =>
+            {
+                None
+            }
             TypeExpr::Union(members) => {
                 let mut inferred = Vec::new();
                 for member in members {
-                    if let Some(member_type) =
+                    if self.type_is_nil(member, scope) {
+                        if optional {
+                            inferred.push(TypeExpr::Named("nil".into()));
+                        } else {
+                            return None;
+                        }
+                    } else if let Some(member_type) =
                         self.infer_subscript_type_from_type(member, index, scope, optional)
                     {
                         inferred.push(member_type);
+                    } else {
+                        return None;
                     }
                 }
                 (!inferred.is_empty()).then(|| simplify_union(inferred))
@@ -1129,6 +1155,10 @@ impl TypeChecker {
         }
     }
 
+    fn type_is_nil(&self, ty: &TypeExpr, scope: &TypeScope) -> bool {
+        matches!(self.resolve_alias(ty, scope), TypeExpr::Named(name) if name == "nil")
+    }
+
     fn type_may_include_nil(&self, ty: &TypeExpr, scope: &TypeScope) -> bool {
         let ty = self.resolve_alias(ty, scope);
         match &ty {
@@ -1169,17 +1199,35 @@ impl TypeChecker {
             TypeExpr::Intersection(members) => members
                 .iter()
                 .any(|member| self.regular_property_access_is_safe(member, property, scope)),
-            TypeExpr::Shape(_) | TypeExpr::DictType(_, _) | TypeExpr::List(_) => true,
-            TypeExpr::Named(name) if name == "list" || name == "dict" || name == "string" => true,
+            TypeExpr::Shape(fields) => fields.iter().any(|field| field.name == property),
+            TypeExpr::DictType(_, _) => false,
+            TypeExpr::List(inner) => {
+                Self::list_property_type(Some(inner), property, false).is_some()
+            }
+            TypeExpr::Named(name) if name == "list" => {
+                Self::list_property_type(None, property, false).is_some()
+            }
+            TypeExpr::Named(name) if name == "dict" => false,
+            TypeExpr::Named(name) if name == "string" => {
+                Self::string_property_type(property, false).is_some()
+            }
             TypeExpr::Named(name) if name == "Pair" => matches!(property, "first" | "second"),
             TypeExpr::Named(name) => {
-                scope.get_struct(name).is_some() || scope.get_enum(name).is_some()
+                scope
+                    .get_struct(name)
+                    .is_some_and(|info| info.fields.iter().any(|field| field.name == property))
+                    || (scope.get_enum(name).is_some()
+                        && Self::enum_property_type(property, false).is_some())
             }
             TypeExpr::Applied { name, .. } if name == "Pair" => {
                 matches!(property, "first" | "second")
             }
             TypeExpr::Applied { name, .. } => {
-                scope.get_struct(name).is_some() || scope.get_enum(name).is_some()
+                scope
+                    .get_struct(name)
+                    .is_some_and(|info| info.fields.iter().any(|field| field.name == property))
+                    || (scope.get_enum(name).is_some()
+                        && Self::enum_property_type(property, false).is_some())
             }
             _ => false,
         }
