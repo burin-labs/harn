@@ -19,6 +19,7 @@ use crate::rules::blank_lines::check_blank_line_between_items;
 use crate::rules::import_order::check_import_order;
 use crate::rules::optional_shorthand::check_prefer_optional_shorthand;
 use crate::rules::trailing_comma::check_trailing_comma;
+use crate::rules::unnecessary_parentheses::check_unnecessary_parentheses;
 
 mod walk;
 
@@ -1131,6 +1132,7 @@ impl<'a> Linter<'a> {
             check_trailing_comma(src, &mut self.diagnostics);
             check_import_order(src, nodes, &mut self.diagnostics);
             check_prefer_optional_shorthand(src, nodes, &mut self.diagnostics);
+            check_unnecessary_parentheses(src, nodes, &mut self.diagnostics);
         }
         for node in nodes {
             self.lint_node(node);

@@ -33,6 +33,40 @@ pipeline test(task) {
             (identifier)))))))
 
 ==================
+Ternary List Branches
+==================
+
+pipeline test() {
+  let args = repo ? ["--repo", repo] : []
+  let selected = repo ? ["--repo", repo][0] : "none"
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (let_binding
+        name: (identifier)
+        value: (ternary_expression
+          (identifier)
+          (list_literal
+            (string_literal)
+            (identifier))
+          (list_literal)))
+      (let_binding
+        name: (identifier)
+        value: (ternary_expression
+          (identifier)
+          (subscript_expression
+            object: (list_literal
+              (string_literal)
+              (identifier))
+            (integer_literal))
+          (string_literal))))))
+
+==================
 Comparison With Identifier LHS
 ==================
 

@@ -104,6 +104,54 @@ pipeline p() {
     }
 
     #[test]
+    fn parses_list_literals_as_ternary_branches_without_breaking_optional_subscript() {
+        let source = r#"
+let repo_args = repo ? ["--repo", repo] : []
+let selected = repo ? ["--repo", repo][0] : "none"
+let nested = true ? [1, true ? [2] : []] : []
+let first = xs?[0]
+"#;
+
+        let program = parse_source(source).expect("should parse");
+        let Node::LetBinding { value, .. } = &program[0].node else {
+            panic!("expected let binding");
+        };
+        let Node::Ternary {
+            true_expr,
+            false_expr,
+            ..
+        } = &value.node
+        else {
+            panic!("expected ternary");
+        };
+        assert!(matches!(&true_expr.node, Node::ListLiteral(items) if items.len() == 2));
+        assert!(matches!(&false_expr.node, Node::ListLiteral(items) if items.is_empty()));
+
+        let Node::LetBinding { value, .. } = &program[1].node else {
+            panic!("expected let binding");
+        };
+        assert!(matches!(&value.node, Node::Ternary { true_expr, .. }
+            if matches!(&true_expr.node, Node::SubscriptAccess { object, .. }
+                if matches!(&object.node, Node::ListLiteral(_)))));
+
+        let Node::LetBinding { value, .. } = &program[2].node else {
+            panic!("expected let binding");
+        };
+        assert!(matches!(&value.node, Node::Ternary { true_expr, .. }
+            if matches!(&true_expr.node, Node::ListLiteral(_))));
+
+        let Node::LetBinding { value, .. } = &program[3].node else {
+            panic!("expected let binding");
+        };
+        assert!(matches!(
+            &value.node,
+            Node::OptionalSubscriptAccess { object, index }
+                if matches!(&object.node, Node::Identifier(name) if name == "xs")
+                    && matches!(&index.node, Node::IntLiteral(0))
+        ));
+    }
+
+    #[test]
     fn parses_public_declarations_and_generic_interfaces() {
         let source = r#"
 pub pipeline build(task) extends base {

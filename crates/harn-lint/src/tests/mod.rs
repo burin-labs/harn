@@ -96,6 +96,7 @@ mod redundant_nil_ternary;
 mod secret_scan_rules;
 mod shadowing;
 mod unnecessary_cast;
+mod unnecessary_parentheses;
 mod unreachable;
 mod unused;
 mod unused_function;

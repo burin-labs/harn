@@ -4,8 +4,10 @@
 //! [`Linter::lint_program`][crate::linter::Linter::lint_program] stays
 //! legible.
 
+pub(crate) mod ast_walk;
 pub(crate) mod blank_lines;
 pub(crate) mod file_header;
 pub(crate) mod import_order;
 pub(crate) mod optional_shorthand;
 pub(crate) mod trailing_comma;
+pub(crate) mod unnecessary_parentheses;

@@ -148,6 +148,18 @@ fn test_format_binary_ops() {
 }
 
 #[test]
+fn test_format_ternary_list_branch() {
+    let source = r#"pipeline default() {
+  let args = repo ? ["--repo", repo] : []
+  let first = xs?[0]
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(result.contains(r#"repo ? ["--repo", repo] : []"#));
+    assert!(result.contains("xs?[0]"));
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_format_pipe_placeholder_patterns() {
     let source = r#"pipeline default(task) {
   let words = "hello world" |> split(_, " ")
