@@ -66,9 +66,9 @@ impl Parser {
         }
         let start = condition.span;
         self.advance(); // skip ?
-        let true_val = self.parse_logical_or()?;
+        let true_val = self.parse_ternary()?;
         self.consume(&TokenKind::Colon, ":")?;
-        let false_val = self.parse_logical_or()?;
+        let false_val = self.parse_ternary()?;
         Ok(spanned(
             Node::Ternary {
                 condition: Box::new(condition),
@@ -503,14 +503,10 @@ impl Parser {
             } else if self.check(&TokenKind::Question) {
                 // Disambiguate `?[index]` (optional subscript), `expr?`
                 // (postfix try), and `expr ? a : b` (ternary).
-                //
-                // Optional subscript wins eagerly when the next token is `[`
-                // because `cond ? [a, b, c] : ...` is rare and writing it as
-                // `cond ? ([a, b, c]) : ...` is a fine workaround, while
-                // `obj?[k]` is the natural way to chain into a list/dict.
-                let next_pos = self.pos + 1;
-                let next_kind = self.tokens.get(next_pos).map(|t| &t.kind);
-                if matches!(next_kind, Some(TokenKind::LBracket)) {
+                if self.question_starts_ternary_branch() {
+                    break;
+                }
+                if matches!(self.peek_kind_at(1), Some(TokenKind::LBracket)) {
                     let start = expr.span;
                     self.advance(); // consume ?
                     self.advance(); // consume [
@@ -524,30 +520,6 @@ impl Parser {
                         Span::merge(start, self.prev_span()),
                     );
                     continue;
-                }
-                // Postfix try `expr?` vs ternary `expr ? a : b`: if the next
-                // token could start a ternary branch, let parse_ternary
-                // handle the `?`.
-                let is_ternary = next_kind.is_some_and(|kind| {
-                    matches!(
-                        kind,
-                        TokenKind::Identifier(_)
-                            | TokenKind::IntLiteral(_)
-                            | TokenKind::FloatLiteral(_)
-                            | TokenKind::StringLiteral(_)
-                            | TokenKind::InterpolatedString(_)
-                            | TokenKind::True
-                            | TokenKind::False
-                            | TokenKind::Nil
-                            | TokenKind::LParen
-                            | TokenKind::LBrace
-                            | TokenKind::Not
-                            | TokenKind::Minus
-                            | TokenKind::Fn
-                    )
-                });
-                if is_ternary {
-                    break;
                 }
                 let start = expr.span;
                 self.advance();
@@ -563,6 +535,114 @@ impl Parser {
         }
 
         Ok(expr)
+    }
+
+    fn question_starts_ternary_branch(&self) -> bool {
+        self.peek_kind_at(1)
+            .is_some_and(Self::token_starts_ternary_branch)
+            && self.question_has_top_level_ternary_colon()
+    }
+
+    fn token_starts_ternary_branch(kind: &TokenKind) -> bool {
+        matches!(
+            kind,
+            TokenKind::Identifier(_)
+                | TokenKind::IntLiteral(_)
+                | TokenKind::FloatLiteral(_)
+                | TokenKind::StringLiteral(_)
+                | TokenKind::RawStringLiteral(_)
+                | TokenKind::InterpolatedString(_)
+                | TokenKind::True
+                | TokenKind::False
+                | TokenKind::Nil
+                | TokenKind::LParen
+                | TokenKind::LBracket
+                | TokenKind::LBrace
+                | TokenKind::Not
+                | TokenKind::Minus
+                | TokenKind::Fn
+                | TokenKind::If
+                | TokenKind::Match
+                | TokenKind::Try
+                | TokenKind::Spawn
+                | TokenKind::Parallel
+                | TokenKind::Retry
+                | TokenKind::Deadline
+                | TokenKind::RequestApproval
+                | TokenKind::DualControl
+                | TokenKind::AskUser
+                | TokenKind::EscalateTo
+                | TokenKind::DurationLiteral(_)
+        )
+    }
+
+    fn question_has_top_level_ternary_colon(&self) -> bool {
+        let mut delimiter_depth = 0usize;
+        for (pos, token) in self.tokens.iter().enumerate().skip(self.pos + 1) {
+            if delimiter_depth == 0 {
+                match token.kind {
+                    TokenKind::Colon => return true,
+                    TokenKind::Newline => {
+                        if self.next_non_newline_continues_ternary_branch(pos + 1) {
+                            continue;
+                        }
+                        return false;
+                    }
+                    TokenKind::RParen
+                    | TokenKind::RBracket
+                    | TokenKind::RBrace
+                    | TokenKind::Eof => {
+                        return false;
+                    }
+                    _ => {}
+                }
+            }
+
+            match token.kind {
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => {
+                    delimiter_depth += 1;
+                }
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                    delimiter_depth = delimiter_depth.saturating_sub(1);
+                }
+                TokenKind::Eof => return false,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    fn next_non_newline_continues_ternary_branch(&self, start_pos: usize) -> bool {
+        let Some(kind) = self
+            .tokens
+            .iter()
+            .skip(start_pos)
+            .find(|token| token.kind != TokenKind::Newline)
+            .map(|token| &token.kind)
+        else {
+            return false;
+        };
+        matches!(
+            kind,
+            TokenKind::Colon
+                | TokenKind::Plus
+                | TokenKind::Star
+                | TokenKind::Slash
+                | TokenKind::Percent
+                | TokenKind::Pow
+                | TokenKind::And
+                | TokenKind::Or
+                | TokenKind::Eq
+                | TokenKind::Neq
+                | TokenKind::Lt
+                | TokenKind::Gt
+                | TokenKind::Lte
+                | TokenKind::Gte
+                | TokenKind::NilCoal
+                | TokenKind::Pipe
+                | TokenKind::Dot
+                | TokenKind::QuestionDot
+        )
     }
 
     pub(super) fn parse_primary(&mut self) -> Result<SNode, ParserError> {

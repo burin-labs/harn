@@ -527,7 +527,7 @@ followed by `=`.
 expression         ::= pipe_expr
 pipe_expr          ::= range_expr ('|>' range_expr)*
 range_expr         ::= ternary_expr ['to' ternary_expr ['exclusive']]
-ternary_expr       ::= logical_or ['?' logical_or ':' logical_or]
+ternary_expr       ::= logical_or ['?' ternary_expr ':' ternary_expr]
 logical_or         ::= logical_and ('||' logical_and)*
 logical_and        ::= equality ('&&' equality)*
 equality           ::= comparison (('==' | '!=') comparison)*
@@ -2375,6 +2375,9 @@ to a non-Result value produces a type error at runtime.
 Disambiguation: when the parser sees `expr?`, it distinguishes between the
 postfix `?` (Result propagation) and the ternary `? :` operator by checking
 whether the token following `?` could start a ternary branch expression.
+For `expr?[...]`, optional subscript is used unless the `?` is followed by a
+valid branch expression and a top-level ternary `:`. For example,
+`repo ? ["--repo", repo] : []` parses as a ternary without extra parentheses.
 
 ### Pattern matching on Result
 

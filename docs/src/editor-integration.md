@@ -55,7 +55,7 @@ over stdin/stdout using the Language Server Protocol.
 | **Document symbols** | Outline view of pipelines, functions, structs, enums |
 | **Workspace symbols** | Cross-file search for pipelines and functions |
 | **Semantic tokens** | Fine-grained syntax highlighting for keywords, types, functions, parameters, enums, and more |
-| **Code actions** | Per-diagnostic quick fixes for lint warnings (`var`→`let`, boolean simplification, unused-import removal, string-interpolation conversion, unnecessary-cast removal) and type errors. A bulk `source.fixAll.harn` action applies every available autofix in the document at once — wire it into `editor.codeActionsOnSave` to autofix on save. |
+| **Code actions** | Per-diagnostic quick fixes for lint warnings (`var`→`let`, boolean simplification, unused-import removal, string-interpolation conversion, unnecessary-cast removal, unnecessary-parentheses removal) and type errors. A bulk `source.fixAll.harn` action applies every available autofix in the document at once — wire it into `editor.codeActionsOnSave` to autofix on save. |
 | **Rename** | Rename symbols across the document |
 | **Document formatting** | Delegates to `harn-fmt` for format-on-save support |
 | **On-type formatting** | Reuses `harn-fmt` after semicolons and closing braces for format-as-you-type |
@@ -146,7 +146,8 @@ interpolated `llm_call` system prompts, and unnecessary conversion calls
 (`to_string("hi")`, `to_int(42)`, etc.). With `--fix`, the linter
 automatically rewrites fixable issues (e.g., `var` → `let`, boolean
 comparison simplification, `let`-then-`return` simplification, redundant
-clone removal, unused import removal, unnecessary-cast removal). The same fixes
+clone removal, unused import removal, unnecessary-cast removal, unnecessary
+parentheses removal). The same fixes
 are surfaced through the LSP as both
 per-diagnostic quick-fixes and a bulk `source.fixAll.harn` code action
 suitable for `editor.codeActionsOnSave`.

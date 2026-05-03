@@ -1,0 +1,17 @@
+pipeline default() {
+  let repo = "burin-labs/harn"
+  let repo_args = repo ? ["--repo", repo] : []
+  println(len(repo_args))
+  println(repo_args[0])
+  println(repo_args[1])
+  let selected = repo ? ["steel", "thread"][1] : "none"
+  println(selected)
+  let missing = nil
+  let missing_args = missing ? ["--repo", missing] : []
+  println(len(missing_args))
+  let nested = true ? [1, true ? [2] : []] : []
+  println(len(nested))
+  println(nested[1][0])
+  let xs = [10, 20]
+  println(xs?[0])
+}

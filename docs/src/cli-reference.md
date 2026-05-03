@@ -281,7 +281,7 @@ Pass `--fix` to automatically apply safe fixes (e.g., `var` → `let` for
 never-reassigned bindings, boolean comparison simplification, unused import
 removal, string interpolation conversion, `let`-then-`return` simplification,
 and removing redundant `clone()`/`to_string(...)`/`to_int(...)`/`to_list(...)`
-wrappers):
+wrappers or unnecessary parentheses around single values):
 
 ```bash
 harn lint --fix main.harn
