@@ -1864,7 +1864,7 @@ mod tests {
     async fn bridge_progress_and_log_session_updates_namespace_vendor_fields() {
         use std::collections::HashMap;
         use std::rc::Rc;
-        use std::sync::atomic::{AtomicBool, AtomicU64};
+        use std::sync::atomic::AtomicU64;
         use std::sync::Arc;
         use tokio::sync::Mutex as TokioMutex;
 
@@ -1877,7 +1877,7 @@ mod tests {
                     output: AcpOutput::Channel(tx),
                     pending: Arc::new(TokioMutex::new(HashMap::new())),
                     next_id_counter: AtomicU64::new(1),
-                    cancelled: Arc::new(AtomicBool::new(false)),
+                    cancellation: super::super::SessionCancellation::default(),
                     script_name: std::sync::Mutex::new(String::new()),
                     assistant_state: std::sync::Mutex::new(
                         harn_vm::visible_text::VisibleTextState::default(),

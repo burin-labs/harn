@@ -24,7 +24,7 @@ use async_trait::async_trait;
 use harn_vm::agent_events::{clear_session_sinks, register_sink};
 use harn_vm::visible_text::{sanitize_visible_assistant_text, VisibleTextState};
 use tokio::io::AsyncBufReadExt;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
 use crate::{AdapterDescriptor, AuthPolicy, AuthRequest, AuthorizationDecision};
 use commands::{
@@ -174,10 +174,52 @@ struct SessionInfo {
     meta: serde_json::Map<String, serde_json::Value>,
 }
 
+#[derive(Clone)]
+pub(super) struct SessionCancellation {
+    pub(super) cancelled: Arc<AtomicBool>,
+    pub(super) notify: Arc<Notify>,
+    /// Set by the transport reader after it resets cancellation for a
+    /// prompt, so the prompt handler does not erase a cancel notification
+    /// that arrived while the prompt was queued.
+    prepared_prompt: Arc<AtomicBool>,
+}
+
+impl Default for SessionCancellation {
+    fn default() -> Self {
+        Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+            notify: Arc::new(Notify::new()),
+            prepared_prompt: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+impl SessionCancellation {
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+        self.notify.notify_waiters();
+    }
+
+    fn reset(&self) {
+        self.cancelled.store(false, Ordering::SeqCst);
+    }
+
+    fn prepare_prompt(&self) {
+        self.reset();
+        self.prepared_prompt.store(true, Ordering::SeqCst);
+    }
+
+    fn begin_prompt(&self) {
+        if !self.prepared_prompt.swap(false, Ordering::SeqCst) {
+            self.reset();
+        }
+    }
+}
+
 struct Session {
     cwd: PathBuf,
     /// If a cancel was requested for the current prompt execution.
-    cancelled: Arc<AtomicBool>,
+    cancellation: SessionCancellation,
     /// Active host bridge for queued input / daemon resume while a prompt runs.
     host_bridge: Option<Rc<harn_vm::bridge::HostBridge>>,
     info: SessionInfo,
@@ -268,6 +310,62 @@ impl AcpOutput {
     }
 }
 
+fn mark_cancelled_session(
+    cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
+    params: &serde_json::Value,
+) -> bool {
+    let Some(session_id) = params.get("sessionId").and_then(|value| value.as_str()) else {
+        return false;
+    };
+    let Some(cancellation) = lookup_session_cancellation(cancellations, session_id) else {
+        return false;
+    };
+    cancellation.cancel();
+    true
+}
+
+fn lookup_session_cancellation(
+    cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
+    session_id: &str,
+) -> Option<SessionCancellation> {
+    cancellations
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(session_id)
+        .cloned()
+}
+
+fn preempt_session_cancel(
+    cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
+    msg: &serde_json::Value,
+) -> bool {
+    if msg.get("method").and_then(|value| value.as_str()) != Some("session/cancel") {
+        return false;
+    }
+    let params = msg.get("params").unwrap_or(&serde_json::Value::Null);
+    mark_cancelled_session(cancellations, params);
+    msg.get("id").is_none()
+}
+
+fn prepare_session_prompt(
+    cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
+    msg: &serde_json::Value,
+) {
+    if msg.get("method").and_then(|value| value.as_str()) != Some("session/prompt") {
+        return;
+    }
+    let Some(session_id) = msg
+        .get("params")
+        .and_then(|params| params.get("sessionId"))
+        .and_then(|value| value.as_str())
+    else {
+        return;
+    };
+    if let Some(cancellation) = lookup_session_cancellation(cancellations, session_id) {
+        cancellation.prepare_prompt();
+    }
+}
+
 /// ACP server that reads JSON-RPC requests from a transport and writes
 /// responses / notifications back to that same transport.
 pub struct AcpServer {
@@ -284,6 +382,9 @@ pub struct AcpServer {
     next_id: AtomicU64,
     /// Pending outgoing request waiters, keyed by JSON-RPC id.
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
+    /// Cancel flags are shared with the transport reader so
+    /// `session/cancel` can interrupt a blocked `session/prompt` turn.
+    session_cancellations: Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
     /// Transport output sink.
     output: AcpOutput,
 }
@@ -307,6 +408,7 @@ impl AcpServer {
             sessions: HashMap::new(),
             next_id: AtomicU64::new(1),
             pending: Arc::new(Mutex::new(HashMap::new())),
+            session_cancellations: Arc::new(std::sync::Mutex::new(HashMap::new())),
             output,
         }
     }
@@ -382,6 +484,15 @@ impl AcpServer {
         uuid::Uuid::new_v4().to_string()
     }
 
+    fn register_session_cancellation(&mut self, session_id: &str) -> SessionCancellation {
+        let cancellation = SessionCancellation::default();
+        self.session_cancellations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(session_id.to_string(), cancellation.clone());
+        cancellation
+    }
+
     fn handle_initialize(&self, id: &serde_json::Value) {
         self.send_response(
             id,
@@ -410,11 +521,12 @@ impl AcpServer {
     }
 
     fn insert_session(&mut self, session_id: String, cwd: PathBuf, info: SessionInfo) {
+        let cancellation = self.register_session_cancellation(&session_id);
         self.sessions.insert(
             session_id.clone(),
             Session {
                 cwd,
-                cancelled: Arc::new(AtomicBool::new(false)),
+                cancellation,
                 host_bridge: None,
                 info,
                 advertised_commands: Vec::new(),
@@ -598,11 +710,12 @@ impl AcpServer {
             .get(&src_id)
             .map(|session| session.current_mode_id.clone())
             .unwrap_or_else(|| modes::DEFAULT_MODE_ID.to_string());
+        let cancellation = self.register_session_cancellation(&new_session_id);
         self.sessions.insert(
             new_session_id.clone(),
             Session {
                 cwd: src_cwd,
-                cancelled: Arc::new(AtomicBool::new(false)),
+                cancellation,
                 host_bridge: None,
                 info: info.clone(),
                 advertised_commands: Vec::new(),
@@ -651,13 +764,13 @@ impl AcpServer {
             })
             .unwrap_or_default();
 
-        let (cwd, cancelled, current_mode_id) = match self.sessions.get_mut(&session_id) {
+        let (cwd, cancellation, current_mode_id) = match self.sessions.get_mut(&session_id) {
             Some(s) => {
-                s.cancelled.store(false, Ordering::SeqCst);
+                s.cancellation.begin_prompt();
                 s.host_bridge = None;
                 (
                     s.cwd.clone(),
-                    s.cancelled.clone(),
+                    s.cancellation.clone(),
                     s.current_mode_id.clone(),
                 )
             }
@@ -766,7 +879,7 @@ impl AcpServer {
             output: output.clone(),
             pending: pending.clone(),
             next_id_counter: AtomicU64::new(next_id.fetch_add(1000, Ordering::SeqCst)),
-            cancelled: cancelled.clone(),
+            cancellation: cancellation.clone(),
             script_name: std::sync::Mutex::new(String::new()),
             assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
         });
@@ -844,7 +957,7 @@ impl AcpServer {
                 );
             }
             Err(e) => {
-                if cancelled.load(Ordering::SeqCst) {
+                if cancellation.cancelled.load(Ordering::SeqCst) {
                     send_json_response(
                         &send_output,
                         &id_owned,
@@ -858,11 +971,7 @@ impl AcpServer {
     }
 
     fn handle_session_cancel(&mut self, params: &serde_json::Value) {
-        if let Some(session_id) = params.get("sessionId").and_then(|v| v.as_str()) {
-            if let Some(session) = self.sessions.get(session_id) {
-                session.cancelled.store(true, Ordering::SeqCst);
-            }
-        }
+        mark_cancelled_session(&self.session_cancellations, params);
     }
 
     async fn handle_session_input(&self, params: &serde_json::Value) {
@@ -1316,6 +1425,7 @@ pub async fn run_acp_channel_server(
         .run_until(async move {
             let mut server = AcpServer::new_with_output(config, AcpOutput::Channel(response_tx));
             let pending_clone = server.pending.clone();
+            let cancellations = server.session_cancellations.clone();
             let (routed_tx, mut routed_rx) =
                 tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
 
@@ -1328,6 +1438,11 @@ pub async fn run_acp_channel_server(
                                 let _ = sender.send(msg);
                             }
                         }
+                        continue;
+                    }
+
+                    prepare_session_prompt(&cancellations, &msg);
+                    if preempt_session_cancel(&cancellations, &msg) {
                         continue;
                     }
 
@@ -1352,7 +1467,7 @@ pub(super) struct AcpBridge {
     pub(super) output: AcpOutput,
     pub(super) pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
     pub(super) next_id_counter: AtomicU64,
-    pub(super) cancelled: Arc<AtomicBool>,
+    pub(super) cancellation: SessionCancellation,
     /// Name of the currently executing Harn script (without .harn suffix).
     pub(super) script_name: std::sync::Mutex<String>,
     pub(super) assistant_state: std::sync::Mutex<VisibleTextState>,
@@ -1501,7 +1616,24 @@ impl AcpBridge {
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, harn_vm::VmError> {
-        if self.cancelled.load(Ordering::SeqCst) {
+        self.call_client_inner(method, params, true).await
+    }
+
+    pub(super) async fn call_client_for_cleanup(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, harn_vm::VmError> {
+        self.call_client_inner(method, params, false).await
+    }
+
+    async fn call_client_inner(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+        abort_on_cancel: bool,
+    ) -> Result<serde_json::Value, harn_vm::VmError> {
+        if abort_on_cancel && self.cancellation.cancelled.load(Ordering::SeqCst) {
             return Err(harn_vm::VmError::Runtime("Cancelled".into()));
         }
 
@@ -1525,8 +1657,21 @@ impl AcpBridge {
         }
 
         let timeout = host_call_timeout(method);
-        match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(msg)) => {
+        let cancellation = self.cancellation.clone();
+        let wait_cancelled = async move {
+            loop {
+                if cancellation.cancelled.load(Ordering::SeqCst) {
+                    return;
+                }
+                cancellation.notify.notified().await;
+            }
+        };
+        tokio::pin!(wait_cancelled);
+
+        tokio::select! {
+            result = rx => {
+                let msg = result
+                    .map_err(|_| harn_vm::VmError::Runtime("Client closed connection".into()))?;
                 if let Some(error) = msg.get("error") {
                     let message = error["message"].as_str().unwrap_or("Unknown client error");
                     Err(harn_vm::VmError::Runtime(format!(
@@ -1536,8 +1681,12 @@ impl AcpBridge {
                     Ok(msg["result"].clone())
                 }
             }
-            Ok(Err(_)) => Err(harn_vm::VmError::Runtime("Client closed connection".into())),
-            Err(_) => {
+            _ = &mut wait_cancelled, if abort_on_cancel => {
+                let mut pending = self.pending.lock().await;
+                pending.remove(&id);
+                Err(harn_vm::VmError::Runtime("Cancelled".into()))
+            }
+            _ = tokio::time::sleep(timeout) => {
                 let mut pending = self.pending.lock().await;
                 pending.remove(&id);
                 Err(harn_vm::VmError::Runtime(format!(
@@ -1559,6 +1708,7 @@ pub async fn run_acp_server(config: AcpServerConfig) {
             // stdin dispatcher: routes responses to pending waiters, and
             // requests/notifications onto the request channel.
             let pending_clone = server.pending.clone();
+            let cancellations = server.session_cancellations.clone();
             let (request_tx, mut request_rx) =
                 tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
 
@@ -1590,6 +1740,11 @@ pub async fn run_acp_server(config: AcpServerConfig) {
                         continue;
                     }
 
+                    prepare_session_prompt(&cancellations, &msg);
+                    if preempt_session_cancel(&cancellations, &msg) {
+                        continue;
+                    }
+
                     let _ = request_tx.send(msg);
                 }
 
@@ -1610,16 +1765,17 @@ mod tests {
     use super::builtins::normalize_host_capability_manifest;
     use super::{
         sanitize_visible_assistant_text, AcpBridge, AcpOutput, AcpServer, AcpServerConfig,
-        ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
-        HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+        SessionCancellation, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
+        HARN_AGENT_EVENT_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
+        HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
     };
     use crate::{ApiKeyAuthConfig, AuthMethodConfig, AuthPolicy};
     use harn_vm::visible_text::VisibleTextState;
     use harn_vm::VmValue;
     use std::collections::{BTreeMap, BTreeSet};
     use std::rc::Rc;
-    use std::sync::atomic::{AtomicBool, AtomicU64};
-    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Mutex;
     use tokio::sync::mpsc;
 
     async fn recv_json(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Value {
@@ -1628,6 +1784,37 @@ mod tests {
             .expect("timed out waiting for ACP response")
             .expect("ACP response channel closed");
         serde_json::from_str(&line).expect("ACP JSON line")
+    }
+
+    async fn start_acp_channel_session() -> (
+        mpsc::UnboundedSender<serde_json::Value>,
+        mpsc::UnboundedReceiver<String>,
+        tokio::task::JoinHandle<()>,
+        String,
+    ) {
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
+        let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+        let server = tokio::task::spawn_local(super::run_acp_channel_server(
+            AcpServerConfig::new(None),
+            request_rx,
+            response_tx,
+        ));
+
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "session/new",
+                "params": {"cwd": "."},
+            }))
+            .expect("send session/new");
+        let created = recv_json(&mut response_rx).await;
+        let session_id = created["result"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+
+        (request_tx, response_rx, server, session_id)
     }
 
     #[test]
@@ -1872,7 +2059,7 @@ mod tests {
             output: AcpOutput::Channel(tx),
             pending: server.pending.clone(),
             next_id_counter: AtomicU64::new(77),
-            cancelled: Arc::new(AtomicBool::new(false)),
+            cancellation: SessionCancellation::default(),
             script_name: Mutex::new(String::new()),
             assistant_state: Mutex::new(VisibleTextState::default()),
         });
@@ -1904,6 +2091,245 @@ mod tests {
             .await;
         let result = call.await.expect("permission response");
         assert_eq!(result["outcome"], "approved");
+    }
+
+    #[test]
+    fn prepared_session_prompt_preserves_queued_cancel() {
+        let cancellation = SessionCancellation::default();
+        cancellation.cancel();
+        cancellation.begin_prompt();
+        assert!(
+            !cancellation.cancelled.load(Ordering::SeqCst),
+            "stale cancellation should not leak into a later prompt"
+        );
+
+        cancellation.prepare_prompt();
+        cancellation.cancel();
+        cancellation.begin_prompt();
+        assert!(
+            cancellation.cancelled.load(Ordering::SeqCst),
+            "cancellation observed after a prompt was routed must not be reset at prompt start"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_session_cancel_kills_active_terminal() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let (request_tx, mut response_rx, server, session_id) =
+                    start_acp_channel_session().await;
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": session_id,
+                            // `run_command` is rebound to the same ACP terminal path as
+                            // `exec`, without exercising unrelated mode-policy checks.
+                            "prompt": [{"type": "text", "text": "run_command(\"sleep 999\")"}],
+                        },
+                    }))
+                    .expect("send session/prompt");
+
+                let terminal_id = "term-cancel-demo";
+                let mut saw_wait = false;
+                let mut saw_kill = false;
+                let mut saw_release = false;
+                let mut saw_cancelled_response = false;
+                for _ in 0..24 {
+                    let message = recv_json(&mut response_rx).await;
+                    match message.get("method").and_then(|value| value.as_str()) {
+                        Some("host/capabilities") => {
+                            request_tx
+                                .send(serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "id": message["id"].clone(),
+                                    "result": {},
+                                }))
+                                .expect("send host capabilities response");
+                        }
+                        Some("terminal/create") => {
+                            request_tx
+                                .send(serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "id": message["id"].clone(),
+                                    "result": {"terminalId": terminal_id},
+                                }))
+                                .expect("send terminal/create response");
+                        }
+                        Some("terminal/wait_for_exit") => {
+                            assert_eq!(message["params"]["terminalId"], terminal_id);
+                            saw_wait = true;
+                            request_tx
+                                .send(serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "method": "session/cancel",
+                                    "params": {"sessionId": session_id},
+                                }))
+                                .expect("send session/cancel");
+                        }
+                        Some("terminal/kill") => {
+                            assert_eq!(message["params"]["terminalId"], terminal_id);
+                            saw_kill = true;
+                            request_tx
+                                .send(serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "id": message["id"].clone(),
+                                    "result": {},
+                                }))
+                                .expect("send terminal/kill response");
+                        }
+                        Some("terminal/release") => {
+                            assert_eq!(message["params"]["terminalId"], terminal_id);
+                            saw_release = true;
+                            request_tx
+                                .send(serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "id": message["id"].clone(),
+                                    "result": {},
+                                }))
+                                .expect("send terminal/release response");
+                        }
+                        _ if message["id"] == 2 => {
+                            assert_eq!(message["result"]["stopReason"], "cancelled");
+                            saw_cancelled_response = true;
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+
+                assert!(saw_wait, "prompt should block on terminal/wait_for_exit");
+                assert!(saw_kill, "session/cancel should issue terminal/kill");
+                assert!(
+                    saw_release,
+                    "cancelled terminal execution should still release the terminal"
+                );
+                assert!(
+                    saw_cancelled_response,
+                    "prompt should finish with stopReason=cancelled"
+                );
+
+                drop(request_tx);
+                server.await.expect("ACP channel server task");
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_session_cancel_kills_terminal_created_during_cancel() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let (request_tx, mut response_rx, server, session_id) =
+                    start_acp_channel_session().await;
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": session_id,
+                            "prompt": [{"type": "text", "text": "run_command(\"sleep 999\")"}],
+                        },
+                    }))
+                    .expect("send session/prompt");
+
+                let terminal_id = "term-created-during-cancel";
+                let mut saw_create = false;
+                let mut saw_wait = false;
+                let mut saw_kill = false;
+                let mut saw_release = false;
+                let mut saw_cancelled_response = false;
+                for _ in 0..24 {
+                    let message = recv_json(&mut response_rx).await;
+                    match message.get("method").and_then(|value| value.as_str()) {
+                        Some("host/capabilities") => {
+                            request_tx
+                                .send(serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "id": message["id"].clone(),
+                                    "result": {},
+                                }))
+                                .expect("send host capabilities response");
+                        }
+                        Some("terminal/create") => {
+                            saw_create = true;
+                            request_tx
+                                .send(serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "method": "session/cancel",
+                                    "params": {"sessionId": session_id},
+                                }))
+                                .expect("send session/cancel");
+                            request_tx
+                                .send(serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "id": message["id"].clone(),
+                                    "result": {"terminalId": terminal_id},
+                                }))
+                                .expect("send terminal/create response");
+                        }
+                        Some("terminal/wait_for_exit") => {
+                            saw_wait = true;
+                        }
+                        Some("terminal/kill") => {
+                            assert_eq!(message["params"]["terminalId"], terminal_id);
+                            saw_kill = true;
+                            request_tx
+                                .send(serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "id": message["id"].clone(),
+                                    "result": {},
+                                }))
+                                .expect("send terminal/kill response");
+                        }
+                        Some("terminal/release") => {
+                            assert_eq!(message["params"]["terminalId"], terminal_id);
+                            saw_release = true;
+                            request_tx
+                                .send(serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "id": message["id"].clone(),
+                                    "result": {},
+                                }))
+                                .expect("send terminal/release response");
+                        }
+                        _ if message["id"] == 2 => {
+                            assert_eq!(message["result"]["stopReason"], "cancelled");
+                            saw_cancelled_response = true;
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+
+                assert!(saw_create, "prompt should request terminal/create");
+                assert!(
+                    !saw_wait,
+                    "cancellation after terminal/create should not wait for process exit"
+                );
+                assert!(
+                    saw_kill,
+                    "created terminal should be killed when create races cancellation"
+                );
+                assert!(
+                    saw_release,
+                    "created terminal should be released when create races cancellation"
+                );
+                assert!(
+                    saw_cancelled_response,
+                    "prompt should finish with stopReason=cancelled"
+                );
+
+                drop(request_tx);
+                server.await.expect("ACP channel server task");
+            })
+            .await;
     }
 
     #[tokio::test(flavor = "current_thread")]
