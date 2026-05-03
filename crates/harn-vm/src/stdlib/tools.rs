@@ -2,10 +2,10 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use crate::llm::tools::{TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_OPEN};
+use crate::schema::json_to_vm_value;
 use crate::value::{VmClosure, VmEnv, VmError, VmValue};
 use crate::vm::Vm;
-
-use crate::schema::json_to_vm_value;
 
 thread_local! {
     /// The tool registry bound to the current execution scope. Populated
@@ -713,14 +713,14 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         let mut results = Vec::new();
         let mut search_from = 0;
 
-        while let Some(start) = text[search_from..].find("<tool_call>") {
-            let abs_start = search_from + start + "<tool_call>".len();
-            if let Some(end) = text[abs_start..].find("</tool_call>") {
+        while let Some(start) = text[search_from..].find(TEXT_TOOL_CALL_OPEN) {
+            let abs_start = search_from + start + TEXT_TOOL_CALL_OPEN.len();
+            if let Some(end) = text[abs_start..].find(TEXT_TOOL_CALL_CLOSE) {
                 let json_str = text[abs_start..abs_start + end].trim();
                 if let Ok(jv) = serde_json::from_str::<serde_json::Value>(json_str) {
                     results.push(json_to_vm_value(&jv));
                 }
-                search_from = abs_start + end + "</tool_call>".len();
+                search_from = abs_start + end + TEXT_TOOL_CALL_CLOSE.len();
             } else {
                 break;
             }
@@ -774,7 +774,9 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
 
         let mut prompt = String::from("# Available Tools\n\n");
         prompt.push_str("You have access to the following tools. To use a tool, output a tool call in this exact format:\n\n");
-        prompt.push_str("<tool_call>{\"name\": \"tool_name\", \"arguments\": {\"param\": \"value\"}}</tool_call>\n\n");
+        prompt.push_str(&format!(
+            "{TEXT_TOOL_CALL_OPEN}{{\"name\": \"tool_name\", \"arguments\": {{\"param\": \"value\"}}}}{TEXT_TOOL_CALL_CLOSE}\n\n"
+        ));
         prompt.push_str("You may make multiple tool calls in a single response. Wait for tool results before proceeding.\n\n");
         prompt.push_str("## Tools\n\n");
 

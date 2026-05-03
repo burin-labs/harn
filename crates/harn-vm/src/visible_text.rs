@@ -1,6 +1,10 @@
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
+use crate::llm::tools::{
+    TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_CLOSE_COMPACT, TEXT_TOOL_CALL_OPEN,
+    TEXT_TOOL_CALL_OPEN_COMPACT,
+};
 use regex::Regex;
 
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
@@ -196,15 +200,15 @@ fn strip_unclosed_internal_blocks(text: &str) -> String {
         }
     }
 
-    if let Some(open_idx) = text.rfind("<tool_call>") {
-        let close_idx = text.rfind("</tool_call>");
+    if let Some(open_idx) = text.rfind(TEXT_TOOL_CALL_OPEN) {
+        let close_idx = text.rfind(TEXT_TOOL_CALL_CLOSE);
         if close_idx.is_none_or(|idx| idx < open_idx) {
             return text[..open_idx].to_string();
         }
     }
 
-    if let Some(open_idx) = text.rfind("<toolcall>") {
-        let close_idx = text.rfind("</toolcall>");
+    if let Some(open_idx) = text.rfind(TEXT_TOOL_CALL_OPEN_COMPACT) {
+        let close_idx = text.rfind(TEXT_TOOL_CALL_CLOSE_COMPACT);
         if close_idx.is_none_or(|idx| idx < open_idx) {
             return text[..open_idx].to_string();
         }
@@ -263,8 +267,8 @@ fn strip_inline_internal_planning_json(text: &str, partial: bool) -> String {
 fn strip_partial_marker_suffix(text: &str) -> String {
     const MARKERS: [&str; 13] = [
         "<|tool_call|>",
-        "<tool_call>",
-        "<toolcall>",
+        TEXT_TOOL_CALL_OPEN,
+        TEXT_TOOL_CALL_OPEN_COMPACT,
         "<assistant_prose>",
         "<assistantprose>",
         "<user_response>",

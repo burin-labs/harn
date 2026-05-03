@@ -1,6 +1,7 @@
 use super::collect::{collect_tool_schemas_with_registry, ToolSchema};
 use super::params::ToolParamSchema;
 use super::type_expr::{ObjectField, TypeExpr};
+use super::{TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_OPEN};
 use crate::value::VmValue;
 
 /// Build a runtime-owned tool-calling contract prompt.
@@ -183,9 +184,9 @@ pub(crate) fn text_response_protocol_help(done_sentinel: &str) -> String {
 
 Every response must be a sequence of these tags, with only whitespace between them:
 
-<tool_call>
+{TEXT_TOOL_CALL_OPEN}
 name({{ key: value }})
-</tool_call>
+{TEXT_TOOL_CALL_CLOSE}
 
 <assistant_prose>
 Short narration. Optional.
@@ -198,7 +199,7 @@ Final user-facing answer. Required when no more tool calls are needed.
 {done_block_line}Rules the runtime enforces:
 
 - No text, code, diffs, JSON, or reasoning outside these tags. Any stray content is rejected with structured feedback.
-- `<tool_call>` wraps exactly one bare call `name({{ key: value }})`. Do not quote or JSON-encode the call. Use heredoc `<<TAG` ... `TAG` for multiline string fields — raw content, no escaping. Place TAG at the start of the closing line; closing punctuation like `}},` may follow on that same line.
+- `{TEXT_TOOL_CALL_OPEN}` wraps exactly one bare call `name({{ key: value }})`. Do not quote or JSON-encode the call. Use heredoc `<<TAG` ... `TAG` for multiline string fields — raw content, no escaping. Place TAG at the start of the closing line; closing punctuation like `}},` may follow on that same line.
 - `<assistant_prose>` is optional and must be brief. Never paste source code, file contents, command transcripts, or long plans here — wrap those in the relevant tool call instead.
 - `<user_response>` is reserved for the final user-facing answer that hosts should surface. Emit it when the user should see a wrap-up or answer, and keep it concise and grounded.
 {done_rule_line}- Do not prefix calls with labels like `tool_code:`, `python:`, `shell:`, or any language tag, and do not wrap tool calls in Markdown fences.
@@ -208,13 +209,13 @@ Example of a well-formed response:
 
 <assistant_prose>Creating the test file.</assistant_prose>
 <user_response>Created the test file.</user_response>
-<tool_call>
+{TEXT_TOOL_CALL_OPEN}
 edit({{ action: \"create\", path: \"tests/test_foo.py\", content: <<EOF
 def test_foo():
     assert foo() == 42
 EOF
 }})
-</tool_call>
+{TEXT_TOOL_CALL_CLOSE}
 "
     )
 }
@@ -269,7 +270,7 @@ pub(crate) fn text_action_gated_clause(done_sentinel: &str) -> String {
     };
     format!(
         "\nThis turn is action-gated. If tools are available, open your response \
-         with a tool call (`<tool_call>...</tool_call>`), not prose. Do not emit \
+         with a tool call (`{TEXT_TOOL_CALL_OPEN}...{TEXT_TOOL_CALL_CLOSE}`), not prose. Do not emit \
          raw source code, diffs, JSON{sentinel_clause} before the first tool call.\n"
     )
 }
