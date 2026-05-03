@@ -1333,6 +1333,20 @@ fn agent_primitive_tool_name(call: &serde_json::Value) -> Result<String, VmError
         })
 }
 
+fn agent_primitive_call_name(call: &VmValue) -> Option<String> {
+    let dict = call.as_dict()?;
+    let name = dict.get("name")?.display();
+    (!name.trim().is_empty()).then_some(name)
+}
+
+fn agent_primitive_call_is_read_only(call: &VmValue) -> bool {
+    agent_primitive_call_name(call)
+        .as_deref()
+        .and_then(crate::orchestration::current_tool_annotations)
+        .map(|annotations| annotations.kind.is_read_only())
+        .unwrap_or(false)
+}
+
 async fn host_agent_parse_tool_calls_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let text = match args.first() {
         Some(VmValue::String(text)) => text.to_string(),
@@ -1360,6 +1374,64 @@ async fn host_agent_parse_tool_calls_impl(args: Vec<VmValue>) -> Result<VmValue,
         "done_marker": parsed.done_marker,
         "canonical_text": parsed.canonical,
     })))
+}
+
+async fn host_agent_dispatch_tool_batch_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let calls = match args.first() {
+        Some(VmValue::List(calls)) => calls.as_ref().clone(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "__host_agent_dispatch_tool_batch(calls, tools?, options?): calls must be a list; got {}",
+                other.type_name()
+            )))
+        }
+        None => {
+            return Err(VmError::Runtime(
+                "__host_agent_dispatch_tool_batch(calls, tools?, options?): missing calls"
+                    .to_string(),
+            ))
+        }
+    };
+    let tools = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let options = VmValue::Dict(Rc::new(agent_primitive_options_arg(
+        &args,
+        2,
+        "__host_agent_dispatch_tool_batch",
+    )?));
+    let ro_prefix_len = calls
+        .iter()
+        .position(|call| !agent_primitive_call_is_read_only(call))
+        .unwrap_or(calls.len());
+
+    let mut results: Vec<Option<VmValue>> = vec![None; calls.len()];
+    if ro_prefix_len >= 2 {
+        let futures = calls[..ro_prefix_len].iter().cloned().map(|call| {
+            host_agent_dispatch_tool_call_impl(vec![call, tools.clone(), options.clone()])
+        });
+        for (index, result) in futures::future::join_all(futures)
+            .await
+            .into_iter()
+            .enumerate()
+        {
+            results[index] = Some(result?);
+        }
+    }
+
+    for (index, call) in calls.into_iter().enumerate() {
+        if results[index].is_some() {
+            continue;
+        }
+        results[index] = Some(
+            host_agent_dispatch_tool_call_impl(vec![call, tools.clone(), options.clone()]).await?,
+        );
+    }
+
+    Ok(VmValue::List(Rc::new(
+        results
+            .into_iter()
+            .map(|value| value.unwrap_or(VmValue::Nil))
+            .collect(),
+    )))
 }
 
 async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
@@ -1619,6 +1691,9 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     });
     vm.register_async_builtin("__host_agent_dispatch_tool_call", |args| async move {
         host_agent_dispatch_tool_call_impl(args).await
+    });
+    vm.register_async_builtin("__host_agent_dispatch_tool_batch", |args| async move {
+        host_agent_dispatch_tool_batch_impl(args).await
     });
     vm.register_async_builtin("__cost_route", |args| async move {
         cost_route::cost_route_impl(args).await

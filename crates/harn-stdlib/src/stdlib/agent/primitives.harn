@@ -15,9 +15,5 @@ pub fn agent_dispatch_tool_call(call, tools = nil, options = nil) {
 
 /** agent_dispatch_tool_batch. */
 pub fn agent_dispatch_tool_batch(calls, tools = nil, options = nil) {
-  var results = []
-  for call in calls {
-    results = results.push(agent_dispatch_tool_call(call, tools, options))
-  }
-  return results
+  return __host_agent_dispatch_tool_batch(calls, tools, options ?? {})
 }
