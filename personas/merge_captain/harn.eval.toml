@@ -1,0 +1,44 @@
+version = 1
+id = "merge-captain-timeout-ladders"
+name = "Merge Captain timeout ladders"
+description = "Replay the same Merge Captain fixture across value-model timeout and budget tiers."
+
+[[ladders]]
+id = "green-pr-value-model"
+persona = "merge_captain"
+severity = "blocking"
+artifact-root = ".harn-runs/merge-captain-timeout-ladder"
+
+[ladders.backend]
+kind = "replay"
+path = "../../examples/personas/merge_captain/transcripts/green_pr.jsonl"
+
+[[ladders.model-routes]]
+id = "gemma-value"
+route = "local/gemma-value"
+provider = "llama.cpp"
+model = "gemma"
+profile = "value"
+max-model-calls = 1
+max-cost-usd = 0.0
+
+[[ladders.timeout-tiers]]
+id = "tiny"
+timeout-ms = 100
+max-tool-calls = 1
+max-model-calls = 1
+max-cost-usd = 0.0
+
+[[ladders.timeout-tiers]]
+id = "balanced"
+timeout-ms = 500
+max-tool-calls = 4
+max-model-calls = 1
+max-cost-usd = 0.0
+
+[[ladders.timeout-tiers]]
+id = "generous"
+timeout-ms = 2000
+max-tool-calls = 8
+max-model-calls = 2
+max-cost-usd = 0.0

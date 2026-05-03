@@ -87,6 +87,21 @@ Flags:
 | `--receipt-out PATH` | Write receipt JSON to an explicit path. |
 | `--summary-out PATH` | Write run summary JSON to a file. |
 
+Use `harn merge-captain ladder <manifest>` to run the same backend fixture
+across a matrix of model routes and timeout tiers. The report records the first
+route/tier that completed correctly, every degraded or looping tier, and paths
+to each tier's JSONL transcript, receipt, and summary.
+
+```bash
+harn merge-captain ladder personas/merge_captain/harn.eval.toml \
+  --report-out .harn-runs/merge-captain-ladder/report.json \
+  --format json
+```
+
+The same ladder manifests can live inside eval packs, so `harn eval
+personas/merge_captain/harn.eval.toml` and `harn test package --evals` use the
+same runner and JSON artifact contract as host TUI/CLI surfaces.
+
 ### Mock-repos playground (#1020)
 
 `harn merge-captain mock` materializes a real on-disk sandbox — temp

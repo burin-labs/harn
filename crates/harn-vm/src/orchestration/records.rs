@@ -8,8 +8,10 @@ use serde::{Deserialize, Serialize};
 use super::{
     default_run_dir, evaluate_context_pack_suggestion_expectations,
     generate_context_pack_suggestions, new_id, normalize_friction_events_json, now_rfc3339,
-    parse_json_payload, parse_json_value, sync_run_handoffs, ArtifactRecord, CapabilityPolicy,
-    ContextPackSuggestionExpectation, ContextPackSuggestionOptions, FrictionEvent, HandoffArtifact,
+    parse_json_payload, parse_json_value, run_persona_eval_ladder, sync_run_handoffs,
+    ArtifactRecord, CapabilityPolicy, ContextPackSuggestionExpectation,
+    ContextPackSuggestionOptions, FrictionEvent, HandoffArtifact, PersonaEvalLadderManifest,
+    PersonaEvalLadderReport,
 };
 use crate::event_log::{
     active_event_log, AnyEventLog, EventLog, LogEvent as EventLogRecord, Topic,
@@ -418,6 +420,7 @@ pub struct EvalPackManifest {
     pub rubrics: Vec<EvalPackRubric>,
     pub judge: Option<EvalPackJudgeConfig>,
     pub cases: Vec<EvalPackCase>,
+    pub ladders: Vec<PersonaEvalLadderManifest>,
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
@@ -544,7 +547,7 @@ pub struct EvalPackCase {
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct EvalPackReport {
     pub pack_id: String,
@@ -556,6 +559,7 @@ pub struct EvalPackReport {
     pub warning_failed: usize,
     pub informational_failed: usize,
     pub cases: Vec<EvalPackCaseReport>,
+    pub ladders: Vec<PersonaEvalLadderReport>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1804,6 +1808,9 @@ fn normalize_eval_pack_manifest(manifest: &mut EvalPackManifest) {
             .filter(|name| !name.trim().is_empty())
             .unwrap_or_else(|| new_id("eval_pack"));
     }
+    for ladder in &mut manifest.ladders {
+        super::normalize_persona_eval_ladder_manifest(ladder);
+    }
 }
 
 fn load_replay_fixture(path: &Path) -> Result<ReplayFixture, VmError> {
@@ -2036,20 +2043,45 @@ pub fn evaluate_eval_pack_manifest(manifest: &EvalPackManifest) -> Result<EvalPa
         });
     }
 
-    let total = reports.len();
-    let blocking_failed = reports
+    let mut ladder_reports = Vec::new();
+    for ladder in &manifest.ladders {
+        let mut ladder = ladder.clone();
+        if ladder.base_dir.is_none() {
+            ladder.base_dir = manifest.base_dir.clone();
+        }
+        ladder_reports.push(run_persona_eval_ladder(&ladder)?);
+    }
+
+    let case_total = reports.len();
+    let ladder_total = ladder_reports.len();
+    let total = case_total + ladder_total;
+    let case_blocking_failed = reports
         .iter()
         .filter(|report| report.blocking && !report.failures.is_empty())
         .count();
+    let ladder_blocking_failed = ladder_reports
+        .iter()
+        .filter(|report| report.blocking && !report.pass)
+        .count();
+    let blocking_failed = case_blocking_failed + ladder_blocking_failed;
     let warning_failed = reports
         .iter()
         .filter(|report| !report.warnings.is_empty())
-        .count();
+        .count()
+        + ladder_reports
+            .iter()
+            .filter(|report| !report.pass && report.severity == "warning")
+            .count();
     let informational_failed = reports
         .iter()
         .filter(|report| !report.informational.is_empty())
-        .count();
-    let passed = reports.iter().filter(|report| report.pass).count();
+        .count()
+        + ladder_reports
+            .iter()
+            .filter(|report| !report.pass && report.severity == "informational")
+            .count();
+    let passed = reports.iter().filter(|report| report.pass).count()
+        + ladder_reports.iter().filter(|report| report.pass).count();
     Ok(EvalPackReport {
         pack_id: manifest.id.clone(),
         pass: blocking_failed == 0,
@@ -2060,6 +2092,7 @@ pub fn evaluate_eval_pack_manifest(manifest: &EvalPackManifest) -> Result<EvalPa
         warning_failed,
         informational_failed,
         cases: reports,
+        ladders: ladder_reports,
     })
 }
 
@@ -3518,6 +3551,15 @@ mod tests {
     use super::*;
     use std::fs;
 
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf()
+    }
+
     fn minimal_run(status: &str) -> RunRecord {
         RunRecord {
             type_name: "workflow_run".to_string(),
@@ -3616,6 +3658,64 @@ max-latency-ms = 1
         assert!(report.pass);
         assert_eq!(report.warning_failed, 1);
         assert!(report.cases[0].warnings[0].contains("latency"));
+    }
+
+    #[test]
+    fn eval_pack_manifest_runs_persona_ladder() {
+        let temp = tempfile::tempdir().unwrap();
+        let pack_path = temp.path().join("harn.eval.toml");
+        let base_dir = format!("{:?}", repo_root().display().to_string());
+        let artifact_root = format!("{:?}", temp.path().join("artifacts").display().to_string());
+        fs::write(
+            &pack_path,
+            format!(
+                r#"
+version = 1
+id = "merge-captain-ladders"
+base_dir = {}
+
+[[ladders]]
+id = "merge-captain-timeout"
+persona = "merge_captain"
+artifact-root = {}
+
+[ladders.backend]
+kind = "replay"
+path = "examples/personas/merge_captain/transcripts/green_pr.jsonl"
+
+[[ladders.model-routes]]
+id = "gemma-value"
+route = "local/gemma-value"
+provider = "llama.cpp"
+model = "gemma"
+profile = "value"
+
+[[ladders.timeout-tiers]]
+id = "tiny"
+max-tool-calls = 1
+
+[[ladders.timeout-tiers]]
+id = "balanced"
+max-tool-calls = 4
+max-model-calls = 1
+"#,
+                base_dir, artifact_root
+            ),
+        )
+        .unwrap();
+
+        let manifest = load_eval_pack_manifest(&pack_path).unwrap();
+        let report = evaluate_eval_pack_manifest(&manifest).unwrap();
+
+        assert!(report.pass);
+        assert_eq!(report.total, 1);
+        assert_eq!(report.ladders.len(), 1);
+        assert_eq!(
+            report.ladders[0].first_correct_tier.as_deref(),
+            Some("balanced")
+        );
+        assert_eq!(report.ladders[0].tiers[0].outcome, "degraded");
+        assert_eq!(report.ladders[0].tiers[1].outcome, "correct");
     }
 
     #[test]

@@ -10,6 +10,13 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Merge Captain timeout ladder evals (#1014).** Added a reusable persona eval ladder runner for
+  Merge Captain, exposed through `harn merge-captain ladder`, `harn eval`, `harn test package
+  --evals`, and `persona_eval_ladder_*` Harn builtins. Ladder reports capture per-tier transcripts,
+  receipts, cost, latency, tool/model counts, state-machine coverage, first correct tier, and
+  degraded or looping tiers; `personas/merge_captain/harn.eval.toml` ships a Gemma value-model
+  profile.
+
 - **Merge Captain fake GitHub/fake git conformance suite (#1012).** Expanded the deterministic
   Merge Captain fixture pack with pending-check, clean-rebase, merge-queue entry, merge-group
   failure, failing-CI repair, new-PR-arrival, downstream version-bump, force-with-lease mismatch,

@@ -75,9 +75,10 @@ pub(crate) use lint_fmt::{FmtArgs, PathTargetsArgs};
 pub(crate) use mcp::{McpArgs, McpCommand, McpLoginArgs, McpServeArgs, McpServerRefArgs};
 pub(crate) use merge_captain::{
     MergeCaptainArgs, MergeCaptainAuditArgs, MergeCaptainAuditFormat, MergeCaptainBackendKind,
-    MergeCaptainCommand, MergeCaptainMockCleanupArgs, MergeCaptainMockCommand,
-    MergeCaptainMockInitArgs, MergeCaptainMockServeArgs, MergeCaptainMockStatusArgs,
-    MergeCaptainMockStepArgs, MergeCaptainRunArgs,
+    MergeCaptainCommand, MergeCaptainLadderArgs, MergeCaptainLadderFormat,
+    MergeCaptainMockCleanupArgs, MergeCaptainMockCommand, MergeCaptainMockInitArgs,
+    MergeCaptainMockServeArgs, MergeCaptainMockStatusArgs, MergeCaptainMockStepArgs,
+    MergeCaptainRunArgs,
 };
 pub(crate) use orchestrator::{
     OrchestratorArgs, OrchestratorCommand, OrchestratorDeployArgs, OrchestratorDeployProvider,

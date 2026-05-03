@@ -725,6 +725,12 @@ async fn async_main() {
                     process::exit(code);
                 }
             }
+            MergeCaptainCommand::Ladder(ladder) => {
+                let code = commands::merge_captain::run_ladder(&ladder);
+                if code != 0 {
+                    process::exit(code);
+                }
+            }
             MergeCaptainCommand::Audit(audit) => {
                 let code = commands::merge_captain::run_audit(&audit);
                 if code != 0 {
@@ -1171,6 +1177,18 @@ fn load_eval_pack_manifest_or_exit(path: &Path) -> harn_vm::orchestration::EvalP
     })
 }
 
+fn load_persona_eval_ladder_manifest_or_exit(
+    path: &Path,
+) -> harn_vm::orchestration::PersonaEvalLadderManifest {
+    harn_vm::orchestration::load_persona_eval_ladder_manifest(path).unwrap_or_else(|error| {
+        eprintln!(
+            "Failed to load persona eval ladder {}: {error}",
+            path.display()
+        );
+        process::exit(1);
+    })
+}
+
 fn file_looks_like_eval_manifest(path: &Path) -> bool {
     if path.file_name().and_then(|name| name.to_str()) == Some("harn.eval.toml") {
         return true;
@@ -1180,7 +1198,7 @@ fn file_looks_like_eval_manifest(path: &Path) -> bool {
             return false;
         };
         return toml::from_str::<harn_vm::orchestration::EvalPackManifest>(&content)
-            .is_ok_and(|manifest| !manifest.cases.is_empty());
+            .is_ok_and(|manifest| !manifest.cases.is_empty() || !manifest.ladders.is_empty());
     }
     let Ok(content) = fs::read_to_string(path) else {
         return false;
@@ -1206,8 +1224,31 @@ fn file_looks_like_eval_pack_manifest(path: &Path) -> bool {
         return false;
     };
     json.get("version").is_some()
-        && json.get("cases").is_some()
+        && (json.get("cases").is_some() || json.get("ladders").is_some())
         && json.get("_type").and_then(|value| value.as_str()) != Some("eval_suite_manifest")
+}
+
+fn file_looks_like_persona_eval_ladder_manifest(path: &Path) -> bool {
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
+            return false;
+        };
+        return json.get("_type").and_then(|value| value.as_str())
+            == Some("persona_eval_ladder_manifest")
+            || json.get("timeout_tiers").is_some()
+            || json.get("timeout-tiers").is_some();
+    }
+    toml::from_str::<harn_vm::orchestration::PersonaEvalLadderManifest>(&content).is_ok_and(
+        |manifest| {
+            manifest
+                .type_name
+                .eq_ignore_ascii_case("persona_eval_ladder_manifest")
+                || (!manifest.timeout_tiers.is_empty() && manifest.backend.path.is_some())
+        },
+    )
 }
 
 fn collect_run_record_paths(path: &str) -> Vec<PathBuf> {
@@ -1492,6 +1533,27 @@ fn eval_run_record(
     }
 
     let path_buf = PathBuf::from(path);
+    if path_buf.is_file() && file_looks_like_persona_eval_ladder_manifest(&path_buf) {
+        if compare.is_some() {
+            eprintln!("--compare is not supported with persona eval ladder manifests");
+            process::exit(1);
+        }
+        let manifest = load_persona_eval_ladder_manifest_or_exit(&path_buf);
+        let report =
+            harn_vm::orchestration::run_persona_eval_ladder(&manifest).unwrap_or_else(|error| {
+                eprintln!(
+                    "Failed to evaluate persona eval ladder {}: {error}",
+                    path_buf.display()
+                );
+                process::exit(1);
+            });
+        print_persona_ladder_report(&report);
+        if !report.pass {
+            process::exit(1);
+        }
+        return;
+    }
+
     if path_buf.is_file() && file_looks_like_eval_pack_manifest(&path_buf) {
         if compare.is_some() {
             eprintln!("--compare is not supported with eval pack manifests");
@@ -1667,6 +1729,64 @@ fn print_eval_pack_report(report: &harn_vm::orchestration::EvalPackReport) {
         }
         for item in &case.informational {
             println!("  info: {}", item);
+        }
+    }
+    for ladder in &report.ladders {
+        println!(
+            "- ladder {} [{}] {} ({}) first_correct={}/{}",
+            ladder.id,
+            ladder.persona,
+            if ladder.pass { "PASS" } else { "FAIL" },
+            ladder.severity,
+            ladder.first_correct_route.as_deref().unwrap_or("<none>"),
+            ladder.first_correct_tier.as_deref().unwrap_or("<none>")
+        );
+        println!("  artifacts: {}", ladder.artifact_root);
+        for tier in &ladder.tiers {
+            println!(
+                "  - {} [{}] {} tools={} models={} latency={}ms cost=${:.6}",
+                tier.timeout_tier,
+                tier.route_id,
+                tier.outcome,
+                tier.tool_calls,
+                tier.model_calls,
+                tier.latency_ms,
+                tier.cost_usd
+            );
+            for reason in &tier.degradation_reasons {
+                println!("    {}", reason);
+            }
+        }
+    }
+}
+
+fn print_persona_ladder_report(report: &harn_vm::orchestration::PersonaEvalLadderReport) {
+    println!(
+        "{} ladder {} passed, {} degraded/looped, {} total",
+        if report.pass { "PASS" } else { "FAIL" },
+        report.passed,
+        report.failed,
+        report.total
+    );
+    println!(
+        "first_correct: {}/{}",
+        report.first_correct_route.as_deref().unwrap_or("<none>"),
+        report.first_correct_tier.as_deref().unwrap_or("<none>")
+    );
+    println!("artifacts: {}", report.artifact_root);
+    for tier in &report.tiers {
+        println!(
+            "- {} [{}] {} tools={} models={} latency={}ms cost=${:.6}",
+            tier.timeout_tier,
+            tier.route_id,
+            tier.outcome,
+            tier.tool_calls,
+            tier.model_calls,
+            tier.latency_ms,
+            tier.cost_usd
+        );
+        for reason in &tier.degradation_reasons {
+            println!("  {}", reason);
         }
     }
 }

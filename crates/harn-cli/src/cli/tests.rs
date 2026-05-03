@@ -469,6 +469,33 @@ fn test_parses_package_evals_flag() {
 }
 
 #[test]
+fn test_parses_merge_captain_ladder_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "merge-captain",
+        "ladder",
+        "personas/merge_captain/harn.eval.toml",
+        "--report-out",
+        "ladder-report.json",
+        "--format",
+        "json",
+    ]);
+
+    let Command::MergeCaptain(args) = cli.command.unwrap() else {
+        panic!("expected merge-captain command");
+    };
+    let super::MergeCaptainCommand::Ladder(ladder) = args.command else {
+        panic!("expected merge-captain ladder command");
+    };
+    assert_eq!(ladder.manifest, "personas/merge_captain/harn.eval.toml");
+    assert_eq!(ladder.report_out.as_deref(), Some("ladder-report.json"));
+    assert!(matches!(
+        ladder.format,
+        crate::cli::MergeCaptainLadderFormat::Json
+    ));
+}
+
+#[test]
 fn test_parses_trigger_replay_flags() {
     let cli = Cli::parse_from([
         "harn",

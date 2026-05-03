@@ -215,10 +215,10 @@ enforcement.
   matching against prompts.
 - Eval suite manifests and portable eval packs via `eval_pack { ... }`,
   `eval_pack_manifest(...)`, `eval_pack_run(...)`, `eval_suite_manifest(...)`,
-  `eval_suite_run(...)`, `harn eval <manifest.json|harn.eval.toml>`, and
-  `harn test package --evals`, so grouped replay, rubric, threshold, and
-  package-shipped connector evals are first-class runtime data instead of
-  external scripts.
+  `eval_suite_run(...)`, `persona_eval_ladder_run(...)`, `harn eval
+  <manifest.json|harn.eval.toml>`, and `harn test package --evals`, so grouped
+  replay, rubric, threshold, timeout-ladder, and package-shipped connector evals
+  are first-class runtime data instead of external scripts.
 - Typed artifacts and resources as the real context boundary. Context
   selection is artifact-aware, budget-aware, and policy-driven rather than
   raw prompt concatenation.
