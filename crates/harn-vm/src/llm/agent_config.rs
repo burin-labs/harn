@@ -181,6 +181,10 @@ pub struct AgentLoopConfig {
     /// integration hook, so hosts do not need to hand-roll side
     /// transcript mechanics.
     pub verify_completion_judge: Option<super::agent::completion_judge::CompletionJudgeConfig>,
+    /// Sentinel-specific completion judge. Unlike `verify_completion_judge`,
+    /// this side-call only runs when the loop is about to exit because
+    /// the model emitted the configured done sentinel.
+    pub done_judge: Option<super::agent::completion_judge::CompletionJudgeConfig>,
     /// Cap on how many times `verify_completion` may veto a stop in a
     /// single loop. Once exceeded, the next break is forced and the
     /// loop exits with `final_status = "verify_exhausted"`. Defaults to
@@ -646,6 +650,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     verify_completion: parse_closure_option(&options, "verify_completion")?,
                     verify_completion_judge:
                         super::agent::completion_judge::parse_completion_judge_option(&options)?,
+                    done_judge: super::agent::completion_judge::parse_done_judge_option(&options)?,
                     max_verify_attempts: opt_int(&options, "max_verify_attempts")
                         .filter(|n| *n >= 0)
                         .map(|n| n as usize)

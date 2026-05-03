@@ -1976,6 +1976,23 @@ logged; error diagnostics abort the loop before the first model call.
 `workflow_validate` and `workflow_policy_report` include the same
 diagnostics for workflow and stage surfaces.
 
+#### Agent loop completion gates
+
+`agent_loop` may gate a pending stop with `verify_completion`,
+`verify_completion_judge`, or `done_judge`. `verify_completion` is a Harn
+closure hook. `verify_completion_judge` runs the built-in structured judge for
+any natural stop. `done_judge` is sentinel-specific: it runs only after the
+model emits the configured done sentinel, expects either `pass: bool` or
+`verdict: "done" | "continue"`, and injects judge feedback before continuing
+when the verdict rejects completion. Each built-in judge call emits
+`JudgeDecision {session_id, iteration, verdict, reasoning, next_step,
+judge_duration_ms}`.
+
+`agent_turn(prompt, options?)` is the high-level wrapper for a single complete
+agent request. It uses `agent_loop`, folds `options.system` into the system
+prompt with generic progress guidance, defaults to a persistent sentinel loop,
+and requires `done_judge` (omitted means the default judge).
+
 Execute tools that can emit large result artifacts declare this in
 `ToolAnnotations`:
 

@@ -791,6 +791,142 @@ async fn built_in_completion_judge_can_veto_then_confirm() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn done_judge_runs_only_on_sentinel_and_can_veto_then_confirm() {
+    use crate::agent_events::{AgentEvent, AgentEventSink};
+
+    #[derive(Clone)]
+    struct CapturingSink(Arc<Mutex<Vec<AgentEvent>>>);
+    impl AgentEventSink for CapturingSink {
+        fn handle_event(&self, event: &AgentEvent) {
+            self.0.lock().unwrap().push(event.clone());
+        }
+    }
+
+    reset_llm_mock_state();
+    for text in [
+        "<user_response>Done.</user_response>\n<done>##DONE##</done>",
+        "{\"verdict\":\"continue\",\"reasoning\":\"answer is too thin\",\"next_step\":\"Give the actual answer before yielding.\"}",
+        "<user_response>The answer is 4.</user_response>\n<done>##DONE##</done>",
+        "{\"verdict\":\"done\",\"reasoning\":\"the answer is now explicit\"}",
+    ] {
+        crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+            text: text.to_string(),
+            tool_calls: Vec::new(),
+            match_pattern: None,
+            consume_on_match: true,
+            input_tokens: None,
+            output_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            thinking: None,
+            thinking_summary: None,
+            stop_reason: None,
+            model: "mock".to_string(),
+            provider: None,
+            blocks: None,
+            error: None,
+        });
+    }
+
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "What is 2 + 2?",
+    })]);
+    let mut config = base_agent_config();
+    config.persistent = true;
+    config.max_iterations = 3;
+    config.max_verify_attempts = 3;
+    config.done_judge = Some(crate::llm::agent::completion_judge::CompletionJudgeConfig::default());
+    config.event_sink = Some(Arc::new(CapturingSink(captured.clone())));
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    assert_eq!(result["status"], "done");
+    assert_eq!(result["llm"]["iterations"].as_u64(), Some(2));
+    assert_eq!(result["visible_text"].as_str(), Some("The answer is 4."));
+
+    let decisions: Vec<(String, Option<String>)> = captured
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::JudgeDecision {
+                verdict, next_step, ..
+            } => Some((verdict.clone(), next_step.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        decisions,
+        vec![
+            (
+                "continue".to_string(),
+                Some("Give the actual answer before yielding.".to_string())
+            ),
+            ("done".to_string(), None),
+        ]
+    );
+    reset_llm_mock_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn done_judge_does_not_run_on_plain_natural_stop() {
+    reset_llm_mock_state();
+    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+        text: "A plain one-shot answer.".to_string(),
+        tool_calls: Vec::new(),
+        match_pattern: None,
+        consume_on_match: true,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        thinking: None,
+        thinking_summary: None,
+        stop_reason: None,
+        model: "mock".to_string(),
+        provider: None,
+        blocks: None,
+        error: None,
+    });
+    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+        text: "{\"verdict\":\"continue\",\"reasoning\":\"should not run\"}".to_string(),
+        tool_calls: Vec::new(),
+        match_pattern: None,
+        consume_on_match: true,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        thinking: None,
+        thinking_summary: None,
+        stop_reason: None,
+        model: "mock".to_string(),
+        provider: None,
+        blocks: None,
+        error: None,
+    });
+
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "Answer once.",
+    })]);
+    let mut config = base_agent_config();
+    config.persistent = false;
+    config.max_iterations = 5;
+    config.done_judge = Some(crate::llm::agent::completion_judge::CompletionJudgeConfig::default());
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    assert_eq!(result["status"], "done");
+    assert_eq!(
+        result["visible_text"].as_str(),
+        Some("A plain one-shot answer.")
+    );
+    assert_eq!(get_llm_mock_calls().len(), 1);
+    reset_llm_mock_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn default_mock_response_without_tools_still_exhausts_budget() {
     reset_llm_mock_state();
     let mut opts = base_opts(vec![serde_json::json!({

@@ -42,7 +42,7 @@ pub(crate) fn parse_completion_judge_option(
         VmValue::Nil => Ok(None),
         VmValue::Bool(false) => Ok(None),
         VmValue::Bool(true) => Ok(Some(CompletionJudgeConfig::default())),
-        VmValue::Dict(dict) => parse_completion_judge_dict(dict),
+        VmValue::Dict(dict) => parse_completion_judge_dict(dict, "verify_completion_judge"),
         other => Err(VmError::Runtime(format!(
             "verify_completion_judge must be true, false, nil, or a dict; got {}",
             other.display()
@@ -50,31 +50,53 @@ pub(crate) fn parse_completion_judge_option(
     }
 }
 
+pub(crate) fn parse_done_judge_option(
+    options: &Option<BTreeMap<String, VmValue>>,
+) -> Result<Option<CompletionJudgeConfig>, VmError> {
+    let Some(value) = options.as_ref().and_then(|dict| dict.get("done_judge")) else {
+        return Ok(None);
+    };
+    match value {
+        VmValue::Nil => Ok(None),
+        VmValue::Bool(false) => Ok(None),
+        VmValue::Bool(true) => Ok(Some(CompletionJudgeConfig::default())),
+        VmValue::Dict(dict) => parse_completion_judge_dict(dict, "done_judge"),
+        other => Err(VmError::Runtime(format!(
+            "done_judge must be true, false, nil, or a dict; got {}",
+            other.display()
+        ))),
+    }
+}
+
 fn parse_completion_judge_dict(
     dict: &BTreeMap<String, VmValue>,
+    label: &str,
 ) -> Result<Option<CompletionJudgeConfig>, VmError> {
     if matches!(dict.get("enabled"), Some(VmValue::Bool(false))) {
         return Ok(None);
     }
     let mut config = CompletionJudgeConfig::default();
     if let Some(value) = dict.get("system") {
-        config.system = expect_string(value, "verify_completion_judge.system")?;
+        config.system = expect_string(value, &format!("{label}.system"))?;
     }
     if let Some(value) = dict.get("feedback_fallback") {
-        config.feedback_fallback =
-            expect_string(value, "verify_completion_judge.feedback_fallback")?;
+        config.feedback_fallback = expect_string(value, &format!("{label}.feedback_fallback"))?;
     }
     if let Some(value) = dict.get("max_feedback_chars") {
-        config.max_feedback_chars = value.as_int().ok_or_else(|| {
-            VmError::Runtime(
-                "verify_completion_judge.max_feedback_chars must be an integer".to_string(),
-            )
+        let max_feedback_chars = value.as_int().ok_or_else(|| {
+            VmError::Runtime(format!("{label}.max_feedback_chars must be an integer"))
         })?;
+        if max_feedback_chars < 1 {
+            return Err(VmError::Runtime(format!(
+                "{label}.max_feedback_chars must be positive"
+            )));
+        }
+        config.max_feedback_chars = max_feedback_chars;
     }
     if let Some(value) = dict.get("options") {
-        let nested = value.as_dict().ok_or_else(|| {
-            VmError::Runtime("verify_completion_judge.options must be a dict".to_string())
-        })?;
+        let nested = value
+            .as_dict()
+            .ok_or_else(|| VmError::Runtime(format!("{label}.options must be a dict")))?;
         config.options.extend(
             nested
                 .iter()
@@ -108,19 +130,27 @@ pub(super) async fn run_completion_judge(
     iteration: usize,
     stop_reason: &str,
     last_text: &str,
+    feedback_kind: &str,
 ) -> Result<bool, VmError> {
     let prompt = build_judge_prompt(state, session_id, iteration, stop_reason, last_text);
     let schema = serde_json::json!({
         "type": "object",
         "additionalProperties": false,
-        "required": ["pass"],
+        "anyOf": [
+            {"required": ["pass"]},
+            {"required": ["verdict"]}
+        ],
         "properties": {
             "pass": {"type": "boolean"},
+            "verdict": {"type": "string", "enum": ["done", "continue"]},
+            "reasoning": {"type": ["string", "null"], "maxLength": 2000},
             "feedback": {"type": ["string", "null"], "maxLength": config.max_feedback_chars},
+            "next_step": {"type": ["string", "null"], "maxLength": config.max_feedback_chars},
             "final_response": {"type": ["string", "null"], "maxLength": 2000},
         },
     });
     let options = build_judge_options(config, main_opts);
+    let judge_started = std::time::Instant::now();
     let result = crate::llm::structured_envelope::llm_call_structured_result_impl(
         vec![
             VmValue::String(Rc::from(prompt)),
@@ -130,12 +160,22 @@ pub(super) async fn run_completion_judge(
         state.bridge.as_ref(),
     )
     .await?;
+    let judge_duration_ms = judge_started.elapsed().as_millis() as u64;
     let Some(result_dict) = result.as_dict() else {
         crate::events::log_warn(
-            "agent.verify_completion_judge",
+            "agent.completion_judge",
             "structured judge returned a non-dict envelope; vetoing completion with fallback feedback",
         );
-        inject_judge_feedback(state, session_id, &config.feedback_fallback).await;
+        emit_judge_decision(
+            session_id,
+            iteration,
+            "continue",
+            "structured judge returned a non-dict envelope",
+            Some(config.feedback_fallback.clone()),
+            judge_duration_ms,
+        )
+        .await;
+        inject_judge_feedback(state, session_id, feedback_kind, &config.feedback_fallback).await;
         return Ok(true);
     };
     if !result_dict
@@ -143,10 +183,19 @@ pub(super) async fn run_completion_judge(
         .is_some_and(|value| matches!(value, VmValue::Bool(true)))
     {
         crate::events::log_warn(
-            "agent.verify_completion_judge",
+            "agent.completion_judge",
             "structured judge failed; vetoing completion with fallback feedback",
         );
-        inject_judge_feedback(state, session_id, &config.feedback_fallback).await;
+        emit_judge_decision(
+            session_id,
+            iteration,
+            "continue",
+            "structured judge call failed",
+            Some(config.feedback_fallback.clone()),
+            judge_duration_ms,
+        )
+        .await;
+        inject_judge_feedback(state, session_id, feedback_kind, &config.feedback_fallback).await;
         return Ok(true);
     }
     let data = result_dict
@@ -154,10 +203,17 @@ pub(super) async fn run_completion_judge(
         .and_then(VmValue::as_dict)
         .cloned()
         .unwrap_or_default();
-    if data
-        .get("pass")
-        .is_some_and(|value| matches!(value, VmValue::Bool(true)))
-    {
+    let outcome = interpret_judge_data(&data, &config.feedback_fallback);
+    emit_judge_decision(
+        session_id,
+        iteration,
+        if outcome.pass { "done" } else { "continue" },
+        &outcome.reasoning,
+        outcome.next_step.clone(),
+        judge_duration_ms,
+    )
+    .await;
+    if outcome.pass {
         if let Some(final_response) = data
             .get("final_response")
             .and_then(|value| match value {
@@ -170,16 +226,69 @@ pub(super) async fn run_completion_judge(
         }
         return Ok(false);
     }
+    let feedback = outcome
+        .feedback
+        .or(outcome.next_step)
+        .unwrap_or_else(|| config.feedback_fallback.clone());
+    inject_judge_feedback(state, session_id, feedback_kind, &feedback).await;
+    Ok(true)
+}
+
+struct JudgeOutcome {
+    pass: bool,
+    reasoning: String,
+    feedback: Option<String>,
+    next_step: Option<String>,
+}
+
+fn interpret_judge_data(data: &BTreeMap<String, VmValue>, feedback_fallback: &str) -> JudgeOutcome {
+    let verdict = data
+        .get("verdict")
+        .and_then(vm_string)
+        .map(|value| value.trim().to_ascii_lowercase());
+    let pass = match verdict.as_deref() {
+        Some("done") => true,
+        Some("continue") => false,
+        _ => data
+            .get("pass")
+            .is_some_and(|value| matches!(value, VmValue::Bool(true))),
+    };
+    let reasoning = data
+        .get("reasoning")
+        .and_then(vm_string)
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .unwrap_or_else(|| {
+            if pass {
+                "judge confirmed completion".to_string()
+            } else {
+                "judge requested another turn".to_string()
+            }
+        });
+    let next_step = data
+        .get("next_step")
+        .and_then(vm_string)
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty());
     let feedback = data
         .get("feedback")
-        .and_then(|value| match value {
-            VmValue::String(text) => Some(text.trim().to_string()),
-            _ => None,
-        })
+        .and_then(vm_string)
+        .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty())
-        .unwrap_or_else(|| config.feedback_fallback.clone());
-    inject_judge_feedback(state, session_id, &feedback).await;
-    Ok(true)
+        .or_else(|| (!pass && next_step.is_none()).then(|| feedback_fallback.to_string()));
+    JudgeOutcome {
+        pass,
+        reasoning,
+        feedback,
+        next_step,
+    }
+}
+
+fn vm_string(value: &VmValue) -> Option<String> {
+    match value {
+        VmValue::String(text) => Some(text.to_string()),
+        _ => None,
+    }
 }
 
 fn build_judge_prompt(
@@ -382,8 +491,32 @@ fn build_judge_options(
     options
 }
 
-async fn inject_judge_feedback(state: &mut AgentLoopState, session_id: &str, feedback: &str) {
-    let message = runtime_feedback_message("verify_completion", feedback);
+async fn emit_judge_decision(
+    session_id: &str,
+    iteration: usize,
+    verdict: &str,
+    reasoning: &str,
+    next_step: Option<String>,
+    judge_duration_ms: u64,
+) {
+    emit_agent_event(&AgentEvent::JudgeDecision {
+        session_id: session_id.to_string(),
+        iteration,
+        verdict: verdict.to_string(),
+        reasoning: reasoning.to_string(),
+        next_step,
+        judge_duration_ms,
+    })
+    .await;
+}
+
+async fn inject_judge_feedback(
+    state: &mut AgentLoopState,
+    session_id: &str,
+    feedback_kind: &str,
+    feedback: &str,
+) {
+    let message = runtime_feedback_message(feedback_kind, feedback);
     append_message_to_contexts(
         &mut state.visible_messages,
         &mut state.recorded_messages,
@@ -391,7 +524,7 @@ async fn inject_judge_feedback(state: &mut AgentLoopState, session_id: &str, fee
     );
     emit_agent_event(&AgentEvent::FeedbackInjected {
         session_id: session_id.to_string(),
-        kind: "verify_completion_judge".to_string(),
+        kind: feedback_kind.to_string(),
         content: feedback.to_string(),
     })
     .await;

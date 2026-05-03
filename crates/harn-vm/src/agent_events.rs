@@ -350,6 +350,14 @@ pub enum AgentEvent {
         iteration: usize,
         turn_info: serde_json::Value,
     },
+    JudgeDecision {
+        session_id: String,
+        iteration: usize,
+        verdict: String,
+        reasoning: String,
+        next_step: Option<String>,
+        judge_duration_ms: u64,
+    },
     FeedbackInjected {
         session_id: String,
         kind: String,
@@ -509,6 +517,7 @@ impl AgentEvent {
             | Self::Plan { session_id, .. }
             | Self::TurnStart { session_id, .. }
             | Self::TurnEnd { session_id, .. }
+            | Self::JudgeDecision { session_id, .. }
             | Self::FeedbackInjected { session_id, .. }
             | Self::BudgetExhausted { session_id, .. }
             | Self::LoopStuck { session_id, .. }
@@ -1072,6 +1081,51 @@ mod tests {
         }
         assert_eq!(last_idx, 4);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn judge_decision_round_trips_through_jsonl_sink() {
+        use std::io::{BufRead, BufReader};
+        let dir =
+            std::env::temp_dir().join(format!("harn-judge-event-log-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("event_log.jsonl");
+        let sink = JsonlEventSink::open(&path).unwrap();
+        sink.handle_event(&AgentEvent::JudgeDecision {
+            session_id: "s".into(),
+            iteration: 2,
+            verdict: "continue".into(),
+            reasoning: "needs a concrete next step".into(),
+            next_step: Some("run the verifier".into()),
+            judge_duration_ms: 17,
+        });
+        sink.flush().unwrap();
+
+        let file = std::fs::File::open(&path).unwrap();
+        let line = BufReader::new(file).lines().next().unwrap().unwrap();
+        let recovered: PersistedAgentEvent = serde_json::from_str(&line).unwrap();
+        match recovered.event {
+            AgentEvent::JudgeDecision {
+                session_id,
+                iteration,
+                verdict,
+                reasoning,
+                next_step,
+                judge_duration_ms,
+            } => {
+                assert_eq!(session_id, "s");
+                assert_eq!(iteration, 2);
+                assert_eq!(verdict, "continue");
+                assert_eq!(reasoning, "needs a concrete next step");
+                assert_eq!(next_step.as_deref(), Some("run the verifier"));
+                assert_eq!(judge_duration_ms, 17);
+            }
+            other => panic!("expected JudgeDecision, got {other:?}"),
+        }
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["type"], "judge_decision");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
     }
 
     #[test]

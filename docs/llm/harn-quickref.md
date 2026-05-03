@@ -1280,6 +1280,32 @@ the default ranker uses keyword overlap against `query`. Workflow
 nodes may set `context_assembler: {...}` to route the stage's selected
 artifacts through this builtin before the prompt is rendered.
 
+### `agent_turn`
+
+`agent_turn(prompt, options?)` is the high-level wrapper for the common
+"complete this request" shape. It builds on `agent_loop`, moves
+`options.system` into the system prompt, adds generic progress guidance,
+defaults to a persistent `##DONE##` sentinel loop, and requires the
+sentinel completion judge. Pass `judge: {...}` or `done_judge: {...}`
+to customize the judge; omit both to use the default judge.
+
+The result is the normal `agent_loop` dict plus:
+
+- `iterations` — compact per-turn summaries from live loop events.
+- `judge_decisions` — structured sentinel judge decisions with
+  `iteration`, `verdict`, `reasoning`, `next_step`, and
+  `judge_duration_ms`.
+
+```harn
+let result = agent_turn("Review this patch and fix obvious issues.", {
+  system: "Be direct and keep changes narrowly scoped.",
+  provider: "openai",
+  model: "gpt-5-mini",
+})
+println(result.visible_text)
+println(result.judge_decisions[0].verdict)
+```
+
 ### `agent_loop`
 
 `agent_loop(prompt, system?, options?)` runs a multi-turn loop with
@@ -1331,6 +1357,16 @@ The check fires after each iteration's tool dispatch, so any other
 tool calls in the same iteration still run; only subsequent
 iterations are skipped. The loop exits with `status = "done"` and
 the tool name appears in `tools.successful`.
+
+Pass `done_judge: true` or `done_judge: {...}` to run a structured
+sentinel-only completion judge after the model emits `##DONE##`.
+The judge accepts either `pass: bool` or
+`verdict: "done" | "continue"` plus optional `reasoning`, `feedback`,
+`next_step`, and `final_response`. A veto injects feedback and the loop
+continues until the judge accepts or `max_verify_attempts` is exhausted.
+Each judge call emits a `JudgeDecision` agent event. Use
+`verify_completion_judge` instead when every natural stop, not only the
+sentinel, should be judged.
 
 Pass `permissions` to scope one agent below the ambient `policy` ceiling:
 
@@ -1492,11 +1528,10 @@ The closure runs in a child VM (separate `output` buffer) and its
 return is parsed by `interpret_post_turn_callback_verdict`. Any
 captured `log()` / `print()` output flows back to the parent VM
 unchanged. The callback is awaited synchronously per turn, so it can
-be a heavy LLM call without races. For an explicit non-goal: there is
-no `judge:` config field on `agent_loop` itself — every Codex-style
-strategy listed above falls out from the existing surface, and
-folding it into the loop would conflate strategy (when/which model)
-with mechanism (post-turn hook).
+be a heavy LLM call without races. Keep broad review strategies in
+`post_turn_callback` when the policy needs custom timing, branching, or
+multiple competing judges; use `done_judge` for the built-in
+sentinel-only completion gate.
 
 ### Sessions (persistent conversations)
 

@@ -653,6 +653,26 @@ impl AgentEventSink for AcpAgentEventSink {
                     serde_json::json!({"iteration": iteration, "turnInfo": turn_info}),
                 );
             }
+            AgentEvent::JudgeDecision {
+                session_id,
+                iteration,
+                verdict,
+                reasoning,
+                next_step,
+                judge_duration_ms,
+            } => {
+                self.emit_agent_event_ext(
+                    "judge_decision",
+                    session_id,
+                    serde_json::json!({
+                        "iteration": iteration,
+                        "verdict": verdict,
+                        "reasoning": reasoning,
+                        "nextStep": next_step,
+                        "judgeDurationMs": judge_duration_ms,
+                    }),
+                );
+            }
             AgentEvent::FeedbackInjected {
                 session_id,
                 kind,
@@ -942,6 +962,14 @@ mod tests {
                     "tool_calls": 2,
                     "tool_names": ["read_file", "grep"]
                 }),
+            },
+            AgentEvent::JudgeDecision {
+                session_id: "session-1".to_string(),
+                iteration: 0,
+                verdict: "continue".to_string(),
+                reasoning: "needs one more concrete action".to_string(),
+                next_step: Some("run the verifier".to_string()),
+                judge_duration_ms: 42,
             },
             AgentEvent::FeedbackInjected {
                 session_id: "session-1".to_string(),

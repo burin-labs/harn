@@ -70,6 +70,7 @@ pub(super) const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "budget_exhausted",
     "daemon_watchdog_tripped",
     "feedback_injected",
+    "judge_decision",
     "loop_stuck",
     "turn_end",
     "turn_start",

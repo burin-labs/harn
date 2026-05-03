@@ -62,7 +62,7 @@ const MAX_FINAL_TOOL_RESULT_CHARS: usize = 4_000;
 
 pub(super) enum IterationOutcome {
     Continue,
-    Break,
+    Break { stop_reason: &'static str },
 }
 
 pub(super) struct PostTurnContext<'a> {
@@ -202,7 +202,9 @@ pub(super) async fn run_post_turn(
                     "agent.stop_after_successful_tools",
                     &format!("iter={iteration} requested stage stop after successful tool turn"),
                 );
-                return Ok(IterationOutcome::Break);
+                return Ok(IterationOutcome::Break {
+                    stop_reason: "terminal_tool",
+                });
             }
         }
         // post_turn_callback returns: ""/nil (no-op), string (inject as
@@ -251,7 +253,9 @@ pub(super) async fn run_post_turn(
                     "agent.post_turn_callback",
                     &format!("iter={iteration} post_turn_callback requested stage stop"),
                 );
-                return Ok(IterationOutcome::Break);
+                return Ok(IterationOutcome::Break {
+                    stop_reason: "post_turn_stop",
+                });
             }
         }
 
@@ -280,7 +284,9 @@ pub(super) async fn run_post_turn(
                 "agent.verify_completion",
                 &format!("iter={iteration} checking successful tool turn as an exit candidate"),
             );
-            return Ok(IterationOutcome::Break);
+            return Ok(IterationOutcome::Break {
+                stop_reason: "natural",
+            });
         }
 
         // Include system prompt + tool defs in the estimate since they
@@ -375,7 +381,9 @@ pub(super) async fn run_post_turn(
                     ),
                 );
             }
-            return Ok(IterationOutcome::Break);
+            return Ok(IterationOutcome::Break {
+                stop_reason: "sentinel",
+            });
         }
         return Ok(IterationOutcome::Continue);
     }
@@ -406,7 +414,9 @@ pub(super) async fn run_post_turn(
             }),
         )
         .await?;
-        return Ok(IterationOutcome::Break);
+        return Ok(IterationOutcome::Break {
+            stop_reason: "sentinel",
+        });
     }
 
     // Send parse diagnostics so the model fixes its syntax instead of
@@ -470,7 +480,9 @@ pub(super) async fn run_post_turn(
                 }),
             )
             .await?;
-            return Ok(IterationOutcome::Break);
+            return Ok(IterationOutcome::Break {
+                stop_reason: "loop_stuck",
+            });
         }
         let guidance = action_turn_nudge(
             ctx.tool_format,
@@ -537,7 +549,9 @@ pub(super) async fn run_post_turn(
             }),
         )
         .await?;
-        return Ok(IterationOutcome::Break);
+        return Ok(IterationOutcome::Break {
+            stop_reason: "natural",
+        });
     }
 
     // Daemon idle: notify host and wait briefly for user messages.
@@ -590,7 +604,9 @@ pub(super) async fn run_post_turn(
             if let Some(bridge) = ctx.bridge.as_ref() {
                 bridge.set_daemon_idle(false);
             }
-            return Ok(IterationOutcome::Break);
+            return Ok(IterationOutcome::Break {
+                stop_reason: "idle",
+            });
         }
         let watchdog_limit = ctx.daemon_config.idle_watchdog_attempts;
         let watchdog_started = std::time::Instant::now();
@@ -715,7 +731,9 @@ pub(super) async fn run_post_turn(
                     if let Some(bridge) = ctx.bridge.as_ref() {
                         bridge.set_daemon_idle(false);
                     }
-                    return Ok(IterationOutcome::Break);
+                    return Ok(IterationOutcome::Break {
+                        stop_reason: "watchdog",
+                    });
                 }
             }
             ctx.daemon_config
@@ -786,7 +804,9 @@ pub(super) async fn run_post_turn(
             }),
         )
         .await?;
-        return Ok(IterationOutcome::Break);
+        return Ok(IterationOutcome::Break {
+            stop_reason: "natural",
+        });
     }
 
     state.consecutive_text_only += 1;
@@ -819,7 +839,9 @@ pub(super) async fn run_post_turn(
             }),
         )
         .await?;
-        return Ok(IterationOutcome::Break);
+        return Ok(IterationOutcome::Break {
+            stop_reason: "loop_stuck",
+        });
     }
 
     let nudge = action_turn_nudge(
