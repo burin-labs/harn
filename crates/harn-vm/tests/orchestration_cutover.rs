@@ -28,6 +28,10 @@ fn public_orchestration_entrypoints_dispatch_through_harn_stdlib() {
         "the Harn agent loop facade should call only the host LLM session primitive"
     );
     assert!(
+        !AGENT_CONFIG_RS.contains("agent_loop_profile_defaults(&options, \"agent_loop\")"),
+        "public agent_loop profile/default policy belongs in std/agent/options.harn"
+    );
+    assert!(
         LLM_MOD_RS.contains("__host_agent_capture_events")
             && AGENT_TURN_HARN.contains("agent_capture_events"),
         "the Harn agent turn facade should compose the host event-capture primitive"

@@ -21,6 +21,10 @@ use super::tools::build_assistant_response_message;
 
 pub(crate) const DEFAULT_AGENT_LOOP_LLM_RETRIES: usize = 2;
 pub(crate) const DEFAULT_MAX_VERIFY_ATTEMPTS: usize = 20;
+const DEFAULT_AGENT_LOOP_MAX_ITERATIONS: i64 = 50;
+const DEFAULT_AGENT_LOOP_MAX_NUDGES: i64 = 8;
+const DEFAULT_AGENT_LOOP_TOOL_RETRIES: i64 = 0;
+const DEFAULT_AGENT_LOOP_SCHEMA_RETRIES: i64 = 0;
 const HOST_LLM_SESSION_RUN_BUILTIN: &str = "__host_llm_session_run";
 
 const AGENT_STDLIB_ENTRYPOINTS: &[HarnAsyncEntrypoint] = &[
@@ -532,17 +536,18 @@ fn push_structured_output_candidate(candidates: &mut Vec<String>, candidate: Str
 
 async fn run_llm_turn_loop_driver(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-    let profile_defaults = agent_loop_profile_defaults(&options, "agent_loop")?;
+    // Public agent_loop policy defaults are composed by std/agent/options.harn.
+    // The hidden host primitive keeps only defensive fallbacks for direct callers.
     let max_iterations =
-        opt_int(&options, "max_iterations").unwrap_or(profile_defaults.max_iterations) as usize;
+        opt_int(&options, "max_iterations").unwrap_or(DEFAULT_AGENT_LOOP_MAX_ITERATIONS) as usize;
     let persistent = opt_bool(&options, "persistent");
     let max_nudges =
-        opt_int(&options, "max_nudges").unwrap_or(profile_defaults.max_nudges) as usize;
+        opt_int(&options, "max_nudges").unwrap_or(DEFAULT_AGENT_LOOP_MAX_NUDGES) as usize;
     let custom_nudge = opt_str(&options, "nudge");
     let tool_retries =
-        opt_int(&options, "tool_retries").unwrap_or(profile_defaults.tool_retries) as usize;
+        opt_int(&options, "tool_retries").unwrap_or(DEFAULT_AGENT_LOOP_TOOL_RETRIES) as usize;
     let schema_retries =
-        opt_int(&options, "schema_retries").unwrap_or(profile_defaults.schema_retries) as usize;
+        opt_int(&options, "schema_retries").unwrap_or(DEFAULT_AGENT_LOOP_SCHEMA_RETRIES) as usize;
     let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
     let tool_format = opt_str(&options, "tool_format").unwrap_or_else(|| {
         let opts = extract_llm_options(&args).ok();
@@ -623,8 +628,8 @@ async fn run_llm_turn_loop_driver(args: Vec<VmValue>) -> Result<VmValue, VmError
             approval_policy,
             daemon,
             daemon_config,
-            llm_retries: opt_int(&options, "llm_retries").unwrap_or(profile_defaults.llm_retries)
-                as usize,
+            llm_retries: opt_int(&options, "llm_retries")
+                .unwrap_or(DEFAULT_AGENT_LOOP_LLM_RETRIES as i64) as usize,
             llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
             token_budget: opt_int(&options, "token_budget"),
             budget,
