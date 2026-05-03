@@ -146,6 +146,12 @@ server runs without auth.
 
 ## Tool Catalog
 
+MCP list endpoints use cursor pagination. `tools/list`, `resources/list`,
+`resources/templates/list`, `prompts/list`, and `tasks/list` return up to 100
+entries by default and include `nextCursor` when more entries are available.
+Set `HARN_MCP_LIST_PAGE_SIZE` to a positive integer to change the per-page
+limit for large local catalogs.
+
 ### `harn.secret_scan`
 
 Scans arbitrary text or diffs for high-signal leaked credentials and returns a

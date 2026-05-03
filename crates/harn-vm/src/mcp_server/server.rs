@@ -10,7 +10,6 @@ use crate::vm::Vm;
 
 use super::convert::{prompt_value_to_messages, vm_value_to_content};
 use super::defs::{McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpToolDef};
-use super::pagination::{encode_cursor, parse_cursor};
 use super::uri::match_uri_template;
 use super::PROTOCOL_VERSION;
 
@@ -235,9 +234,12 @@ impl McpServer {
         id: &serde_json::Value,
         params: &serde_json::Value,
     ) -> serde_json::Value {
-        let (offset, page_size) = parse_cursor(params);
-        let page_end = (offset + page_size).min(self.tools.len());
-        let tools: Vec<serde_json::Value> = self.tools[offset..page_end]
+        let page = match crate::mcp_protocol::mcp_list_page(params, self.tools.len(), "tools/list")
+        {
+            Ok(page) => page,
+            Err(error) => return crate::jsonrpc::error_response(id.clone(), -32602, &error),
+        };
+        let tools: Vec<serde_json::Value> = self.tools[page.start..page.end]
             .iter()
             .map(|t| {
                 let mut entry = serde_json::json!({
@@ -262,8 +264,8 @@ impl McpServer {
             .collect();
 
         let mut result = serde_json::json!({ "tools": tools });
-        if page_end < self.tools.len() {
-            result["nextCursor"] = serde_json::json!(encode_cursor(page_end));
+        if let Some(next_cursor) = page.next_cursor {
+            result["nextCursor"] = serde_json::json!(next_cursor);
         }
 
         serde_json::json!({
@@ -414,46 +416,40 @@ impl McpServer {
         id: &serde_json::Value,
         params: &serde_json::Value,
     ) -> serde_json::Value {
-        // Virtually prepend the Server Card as a static resource so
-        // clients that browse resources can discover the card without
-        // a separate well-known GET. Kept out of the underlying
-        // `self.resources` vec so cursor paging stays simple.
-        let card_entry = self.server_card.as_ref().map(|_| {
-            serde_json::json!({
+        let mut all_resources = Vec::with_capacity(self.resources.len() + 1);
+        if self.server_card.is_some() {
+            all_resources.push(serde_json::json!({
                 "uri": "well-known://mcp-card",
                 "name": "Server Card",
                 "description": "MCP v2.1 Server Card advertising this server's identity and capabilities",
                 "mimeType": "application/json",
-            })
-        });
-
-        let (offset, page_size) = parse_cursor(params);
-        let page_end = (offset + page_size).min(self.resources.len());
-        let mut resources: Vec<serde_json::Value> = self.resources[offset..page_end]
-            .iter()
-            .map(|r| {
-                let mut entry = serde_json::json!({ "uri": r.uri, "name": r.name });
-                if let Some(ref title) = r.title {
-                    entry["title"] = serde_json::json!(title);
-                }
-                if let Some(ref desc) = r.description {
-                    entry["description"] = serde_json::json!(desc);
-                }
-                if let Some(ref mime) = r.mime_type {
-                    entry["mimeType"] = serde_json::json!(mime);
-                }
-                entry
-            })
-            .collect();
-        if offset == 0 {
-            if let Some(entry) = card_entry {
-                resources.insert(0, entry);
-            }
+            }));
         }
+        all_resources.extend(self.resources.iter().map(|r| {
+            let mut entry = serde_json::json!({ "uri": r.uri, "name": r.name });
+            if let Some(ref title) = r.title {
+                entry["title"] = serde_json::json!(title);
+            }
+            if let Some(ref desc) = r.description {
+                entry["description"] = serde_json::json!(desc);
+            }
+            if let Some(ref mime) = r.mime_type {
+                entry["mimeType"] = serde_json::json!(mime);
+            }
+            entry
+        }));
+
+        let page =
+            match crate::mcp_protocol::mcp_list_page(params, all_resources.len(), "resources/list")
+            {
+                Ok(page) => page,
+                Err(error) => return crate::jsonrpc::error_response(id.clone(), -32602, &error),
+            };
+        let resources = all_resources[page.start..page.end].to_vec();
 
         let mut result = serde_json::json!({ "resources": resources });
-        if page_end < self.resources.len() {
-            result["nextCursor"] = serde_json::json!(encode_cursor(page_end));
+        if let Some(next_cursor) = page.next_cursor {
+            result["nextCursor"] = serde_json::json!(next_cursor);
         }
 
         serde_json::json!({
@@ -542,9 +538,15 @@ impl McpServer {
         id: &serde_json::Value,
         params: &serde_json::Value,
     ) -> serde_json::Value {
-        let (offset, page_size) = parse_cursor(params);
-        let page_end = (offset + page_size).min(self.resource_templates.len());
-        let templates: Vec<serde_json::Value> = self.resource_templates[offset..page_end]
+        let page = match crate::mcp_protocol::mcp_list_page(
+            params,
+            self.resource_templates.len(),
+            "resources/templates/list",
+        ) {
+            Ok(page) => page,
+            Err(error) => return crate::jsonrpc::error_response(id.clone(), -32602, &error),
+        };
+        let templates: Vec<serde_json::Value> = self.resource_templates[page.start..page.end]
             .iter()
             .map(|t| {
                 let mut entry =
@@ -563,8 +565,8 @@ impl McpServer {
             .collect();
 
         let mut result = serde_json::json!({ "resourceTemplates": templates });
-        if page_end < self.resource_templates.len() {
-            result["nextCursor"] = serde_json::json!(encode_cursor(page_end));
+        if let Some(next_cursor) = page.next_cursor {
+            result["nextCursor"] = serde_json::json!(next_cursor);
         }
 
         serde_json::json!({
@@ -579,9 +581,12 @@ impl McpServer {
         id: &serde_json::Value,
         params: &serde_json::Value,
     ) -> serde_json::Value {
-        let (offset, page_size) = parse_cursor(params);
-        let page_end = (offset + page_size).min(self.prompts.len());
-        let prompts: Vec<serde_json::Value> = self.prompts[offset..page_end]
+        let page =
+            match crate::mcp_protocol::mcp_list_page(params, self.prompts.len(), "prompts/list") {
+                Ok(page) => page,
+                Err(error) => return crate::jsonrpc::error_response(id.clone(), -32602, &error),
+            };
+        let prompts: Vec<serde_json::Value> = self.prompts[page.start..page.end]
             .iter()
             .map(|p| {
                 let mut entry = serde_json::json!({ "name": p.name });
@@ -610,8 +615,8 @@ impl McpServer {
             .collect();
 
         let mut result = serde_json::json!({ "prompts": prompts });
-        if page_end < self.prompts.len() {
-            result["nextCursor"] = serde_json::json!(encode_cursor(page_end));
+        if let Some(next_cursor) = page.next_cursor {
+            result["nextCursor"] = serde_json::json!(next_cursor);
         }
 
         serde_json::json!({
