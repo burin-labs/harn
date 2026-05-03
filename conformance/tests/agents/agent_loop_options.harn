@@ -1,0 +1,16 @@
+import { agent_loop_options } from "std/agent/options"
+
+pipeline default() {
+  let no_tools = agent_loop_options({provider: "mock"})
+  println(no_tools.tool_format)
+  println(contains(no_tools.keys(), "done_judge"))
+  println(contains(no_tools.keys(), "verify_completion_judge"))
+  let judged = agent_loop_options({provider: "mock", tools: tool_registry(), done_judge: true})
+  println(judged.done_sentinel)
+  println(type_of(judged.done_judge))
+  let client_search = agent_loop_options({provider: "mock", tools: tool_registry(), tool_search: {mode: "client"}})
+  println(client_search.tool_format)
+  let explicit_native = agent_loop_options({provider: "mock", tools: tool_registry(), tool_format: "native"})
+  println(explicit_native.tool_format)
+  println(contains(explicit_native.keys(), "done_sentinel"))
+}
