@@ -87,6 +87,7 @@ mod imports;
 mod invalid_binop;
 mod llm_rules;
 mod long_running;
+mod mcp_tools;
 mod mutability;
 mod naming_types;
 mod optional_shorthand;

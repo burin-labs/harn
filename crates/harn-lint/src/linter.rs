@@ -3,7 +3,7 @@
 //! (unused/undefined symbols, etc.). The large `lint_node` match lives
 //! in the [`walk`] submodule.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use harn_lexer::{FixEdit, Span};
 use harn_parser::diagnostic::find_closest_match;
@@ -93,6 +93,9 @@ pub(crate) struct Linter<'a> {
     /// Whether the current body contains a defer/finally path that cancels
     /// long-running handles.
     pub(super) long_running_cleanup_stack: Vec<bool>,
+    /// Registry variables mapped to `tool_define` calls that will need MCP
+    /// annotations if the registry is later exposed through `mcp_tools`.
+    pub(super) mcp_registry_missing_annotation_spans: HashMap<String, Vec<Span>>,
 }
 
 impl<'a> Linter<'a> {
@@ -129,6 +132,7 @@ impl<'a> Linter<'a> {
             value_block_depth: 0,
             connector_effect_export_stack: Vec::new(),
             long_running_cleanup_stack: Vec::new(),
+            mcp_registry_missing_annotation_spans: HashMap::new(),
         }
     }
 
@@ -711,6 +715,76 @@ impl<'a> Linter<'a> {
             | Node::RawStringLiteral(value) => Some(value.clone()),
             _ => None,
         }
+    }
+
+    pub(super) fn simple_binding_name(pattern: &BindingPattern) -> Option<&str> {
+        match pattern {
+            BindingPattern::Identifier(name) => Some(name),
+            _ => None,
+        }
+    }
+
+    pub(super) fn record_mcp_registry_binding(&mut self, name: &str, value: &SNode) {
+        let missing = self.mcp_missing_annotation_spans(value);
+        if missing.is_empty() {
+            self.mcp_registry_missing_annotation_spans.remove(name);
+        } else {
+            self.mcp_registry_missing_annotation_spans
+                .insert(name.to_string(), missing);
+        }
+    }
+
+    pub(super) fn warn_mcp_tools_missing_annotations(&mut self, value: &SNode) {
+        for span in self.mcp_missing_annotation_spans(value) {
+            self.warn_missing_mcp_tool_annotations(span);
+        }
+    }
+
+    fn mcp_missing_annotation_spans(&self, node: &SNode) -> Vec<Span> {
+        match &node.node {
+            Node::Identifier(name) => self
+                .mcp_registry_missing_annotation_spans
+                .get(name)
+                .cloned()
+                .unwrap_or_default(),
+            Node::FunctionCall { name, args, .. } if name == "tool_define" => {
+                let mut spans = args
+                    .first()
+                    .map(|arg| self.mcp_missing_annotation_spans(arg))
+                    .unwrap_or_default();
+                if !Self::tool_define_has_annotations(args) {
+                    spans.push(node.span);
+                }
+                spans
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn tool_define_has_annotations(args: &[SNode]) -> bool {
+        let Some(config) = args.get(3) else {
+            return false;
+        };
+        let Node::DictLiteral(entries) = &config.node else {
+            return false;
+        };
+        entries
+            .iter()
+            .any(|entry| Self::dict_key_name(&entry.key).as_deref() == Some("annotations"))
+    }
+
+    fn warn_missing_mcp_tool_annotations(&mut self, span: Span) {
+        self.diagnostics.push(LintDiagnostic {
+            rule: "mcp-tool-annotations",
+            message: "MCP-exposed `tool_define` registration has no `annotations`".to_string(),
+            span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(
+                "add MCP `annotations` such as `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint` before passing the registry to `mcp_tools`"
+                    .to_string(),
+            ),
+            fix: None,
+        });
     }
 
     fn warn_missing_secret_scan(&mut self, span: Span) {

@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use crate::value::VmValue;
+use crate::chunk::{Chunk, CompiledFunction};
+use crate::value::{VmClosure, VmEnv, VmValue};
 
 use super::convert::{annotations_to_json, prompt_value_to_messages};
 use super::defs::McpResourceDef;
@@ -65,6 +66,75 @@ fn test_tool_registry_to_mcp_tools_empty() {
     registry.insert("tools".into(), VmValue::List(Rc::new(Vec::new())));
     let result = tool_registry_to_mcp_tools(&VmValue::Dict(Rc::new(registry)));
     assert!(result.unwrap().is_empty());
+}
+
+#[test]
+fn test_tool_registry_to_mcp_tools_preserves_metadata() {
+    let handler = VmValue::Closure(Rc::new(VmClosure {
+        func: Rc::new(CompiledFunction {
+            name: "echo".to_string(),
+            params: Vec::new(),
+            default_start: None,
+            chunk: Rc::new(Chunk::new()),
+            is_generator: false,
+            is_stream: false,
+            has_rest_param: false,
+        }),
+        env: VmEnv::new(),
+        source_dir: None,
+        module_functions: None,
+        module_state: None,
+    }));
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert("readOnlyHint".into(), VmValue::Bool(true));
+    annotations.insert("idempotentHint".into(), VmValue::Bool(true));
+
+    let icon = VmValue::Dict(Rc::new({
+        let mut icon = BTreeMap::new();
+        icon.insert(
+            "src".into(),
+            VmValue::String(Rc::from("https://example.com/tool.png")),
+        );
+        icon.insert("mimeType".into(), VmValue::String(Rc::from("image/png")));
+        icon
+    }));
+
+    let mut tool = BTreeMap::new();
+    tool.insert("name".into(), VmValue::String(Rc::from("echo")));
+    tool.insert("title".into(), VmValue::String(Rc::from("Echo")));
+    tool.insert(
+        "description".into(),
+        VmValue::String(Rc::from("Echo input")),
+    );
+    tool.insert("handler".into(), handler);
+    tool.insert("parameters".into(), VmValue::Dict(Rc::new(BTreeMap::new())));
+    tool.insert("annotations".into(), VmValue::Dict(Rc::new(annotations)));
+    tool.insert("icons".into(), VmValue::List(Rc::new(vec![icon])));
+    tool.insert(
+        "outputSchema".into(),
+        VmValue::Dict(Rc::new({
+            let mut schema = BTreeMap::new();
+            schema.insert("type".into(), VmValue::String(Rc::from("string")));
+            schema
+        })),
+    );
+
+    let mut registry = BTreeMap::new();
+    registry.insert("_type".into(), VmValue::String(Rc::from("tool_registry")));
+    registry.insert(
+        "tools".into(),
+        VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(tool))])),
+    );
+
+    let tools = tool_registry_to_mcp_tools(&VmValue::Dict(Rc::new(registry))).unwrap();
+    assert_eq!(tools[0].title.as_deref(), Some("Echo"));
+    assert_eq!(tools[0].annotations.as_ref().unwrap()["readOnlyHint"], true);
+    assert_eq!(
+        tools[0].icons.as_ref().unwrap()[0]["src"],
+        "https://example.com/tool.png"
+    );
+    assert_eq!(tools[0].output_schema.as_ref().unwrap()["type"], "string");
 }
 
 #[test]

@@ -1936,6 +1936,30 @@ registry = tool_define(registry, "ask_user", "Ask the user", {
 })
 ```
 
+Registries exposed through `mcp_tools(registry)` should declare MCP
+tool annotations on each `tool_define` entry. The MCP server forwards
+recognized `annotations` fields (`title`, `readOnlyHint`,
+`destructiveHint`, `idempotentHint`, and `openWorldHint`) plus
+top-level `title` and `icons` metadata into the `tools/list` response.
+`harn lint` warns when a registry passed to `mcp_tools` contains a
+`tool_define` entry without annotations.
+
+```harn
+registry = tool_define(registry, "repo.status", "Read repository status", {
+  parameters: {},
+  title: "Repository Status",
+  handler: { _args -> git.status() },
+  annotations: {
+    title: "Repository Status",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+  icons: [{src: "https://example.com/repo-status.png", mimeType: "image/png"}],
+})
+```
+
 #### Tool surface validation
 
 `tool_surface_validate(surface, options?)` validates a tool-calling
