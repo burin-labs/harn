@@ -7,7 +7,8 @@ mod structural;
 pub use core::{struct_fields_to_map, StructLayout, VmAsyncBuiltinFn, VmBuiltinFn, VmValue};
 pub use env::{closest_match, ModuleFunctionRegistry, ModuleState, VmClosure, VmEnv};
 pub use error::{
-    categorized_error, classify_error_message, error_to_category, ErrorCategory, VmError,
+    categorized_error, classify_error_message, error_to_category, ArgTypeMismatchError,
+    ArityExpect, ArityMismatchError, ErrorCategory, VmError,
 };
 pub use handles::{
     VmAtomicHandle, VmChannelHandle, VmGenerator, VmJoinHandle, VmRange, VmRngHandle, VmStream,

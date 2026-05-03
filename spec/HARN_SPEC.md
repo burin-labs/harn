@@ -474,7 +474,10 @@ primary (i.e. it isn't itself a union, intersection, or `fn(...)
 A rest parameter (`...name`) must be the last parameter in the list. At call
 time, any arguments beyond the positional parameters are collected into a list
 and bound to the rest parameter name. If no extra arguments are provided, the
-rest parameter is an empty list.
+rest parameter is an empty list. A type annotation on a rest parameter describes
+each extra argument, and the binding inside the function has the corresponding
+list type: `...nums: int` accepts only integer extras and binds `nums` as
+`list<int>`.
 
 ```harn
 fn sum(...nums) {
@@ -1649,7 +1652,7 @@ corresponding body. Only one case fires per select.
 
 ```harn
 fn handle(msg) { log(msg) }
-let ch1 = channel(1)
+let ch1 = channel("events")
 select {
   msg from ch1 { handle(msg) }
   timeout 5s {
@@ -1664,7 +1667,7 @@ If no channel produces a value within the duration, the timeout body runs.
 
 ```harn
 fn handle(msg) { log(msg) }
-let ch1 = channel(1)
+let ch1 = channel("events")
 select {
   msg from ch1 { handle(msg) }
   default {

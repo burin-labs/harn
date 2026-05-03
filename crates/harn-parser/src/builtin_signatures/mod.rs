@@ -1,34 +1,34 @@
 //! Single source of truth for builtin function signatures used by the parser
-//! and type checker: identifier resolution, typo suggestions, and return-type
-//! inference all consult the registry returned by [`all_signatures`].
+//! and runtime VM: identifier resolution, typo suggestions, return-type
+//! inference, static arity & per-arg type checks, runtime arity & type
+//! enforcement, and lint awareness all consult the registry returned by
+//! [`all_signatures`].
 //!
-//! To add a builtin: register it in the VM stdlib, then add it to the
-//! appropriate namespace file under `builtin_signatures/signatures/`. The
-//! registry is concatenated and sorted centrally so the parser lookup table and
-//! the runtime alignment test stay in lockstep.
+//! To add a builtin: register it in the VM stdlib (the VM panics at
+//! registration time if a builtin's name is missing here), then add an
+//! entry to the appropriate namespace file under `signatures/`. The
+//! registry is concatenated and sorted centrally so the parser lookup
+//! table and the runtime stay in lockstep.
 
-mod generics;
 mod lookup;
 mod signatures;
 mod types;
 
 use std::sync::OnceLock;
 
-pub use types::BuiltinMetadata;
-pub(crate) use types::{
-    BuiltinGenericSig, BuiltinReturn, BuiltinSig, EMPTY_RETURN_TYPES, RETURN_BOOL, RETURN_BYTES,
-    RETURN_DICT, RETURN_FLOAT, RETURN_INT, RETURN_LIST, RETURN_NEVER, RETURN_NIL, RETURN_STRING,
-    UNION_BYTES_NIL, UNION_DICT_NIL, UNION_INT_NIL, UNION_STRING_NIL,
-};
-
-pub(crate) use lookup::{
+pub use lookup::{
     builtin_return_type, is_builtin, is_untyped_boundary_source, iter_builtin_metadata,
-    iter_builtin_names, lookup_generic_builtin_sig,
+    iter_builtin_names, lookup,
+};
+pub use types::{
+    BuiltinMetadata, BuiltinSignature, Param, ShapeFieldDescriptor, Ty, TY_ANY, TY_BOOL, TY_BYTES,
+    TY_BYTES_OR_NIL, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_DURATION, TY_FLOAT, TY_INT,
+    TY_INT_OR_NIL, TY_LIST, TY_NEVER, TY_NIL, TY_NUMBER, TY_STRING, TY_STRING_OR_NIL,
 };
 
 /// Every builtin known to the parser, sorted alphabetically by name.
-pub(crate) fn all_signatures() -> &'static [BuiltinSig] {
-    static ALL_SIGNATURES: OnceLock<Vec<BuiltinSig>> = OnceLock::new();
+pub fn all_signatures() -> &'static [BuiltinSignature] {
+    static ALL_SIGNATURES: OnceLock<Vec<BuiltinSignature>> = OnceLock::new();
 
     ALL_SIGNATURES
         .get_or_init(|| {
@@ -82,14 +82,6 @@ mod tests {
             Some(TypeExpr::Named("nil".into()))
         );
         assert_eq!(
-            builtin_return_type("pi"),
-            Some(TypeExpr::Named("float".into()))
-        );
-        assert_eq!(
-            builtin_return_type("sign"),
-            Some(TypeExpr::Named("int".into()))
-        );
-        assert_eq!(
             builtin_return_type("file_exists"),
             Some(TypeExpr::Named("bool".into()))
         );
@@ -104,21 +96,12 @@ mod tests {
                 TypeExpr::Named("nil".into()),
             ]))
         );
-        assert_eq!(
-            builtin_return_type("transcript_summary"),
-            Some(TypeExpr::Union(vec![
-                TypeExpr::Named("string".into()),
-                TypeExpr::Named("nil".into()),
-            ]))
-        );
     }
 
     #[test]
     fn return_type_unknown_for_dynamic_builtins() {
         assert!(is_builtin("json_parse"));
         assert_eq!(builtin_return_type("json_parse"), None);
-        assert!(is_builtin("schema_parse"));
-        assert_eq!(builtin_return_type("schema_parse"), None);
     }
 
     #[test]

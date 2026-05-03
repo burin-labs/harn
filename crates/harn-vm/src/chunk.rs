@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::rc::Rc;
 
+use harn_parser::TypeExpr;
+
 /// Bytecode opcodes for the Harn VM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -484,11 +486,56 @@ pub struct Chunk {
 pub type ChunkRef = Rc<Chunk>;
 pub type CompiledFunctionRef = Rc<CompiledFunction>;
 
+/// One parameter slot of a compiled user-defined function. Carries the
+/// declared name, the (optional) declared type expression, and a flag
+/// for whether a default value was provided. The runtime consults the
+/// type expression in `bind_param_slots` to enforce declared types
+/// against the values supplied at the call site.
+#[derive(Debug, Clone)]
+pub struct ParamSlot {
+    pub name: String,
+    /// Declared parameter type. `None` for untyped parameters (gradual
+    /// typing); the runtime skips type assertion when absent.
+    pub type_expr: Option<TypeExpr>,
+    /// True when the parameter has a default-value clause. Diagnostic
+    /// only — the canonical authority for arity ranges is
+    /// [`CompiledFunction::default_start`].
+    pub has_default: bool,
+}
+
+impl ParamSlot {
+    /// Build a [`ParamSlot`] from a parser-side [`harn_parser::TypedParam`].
+    /// Centralizes the conversion so every compile path stays in lockstep.
+    pub fn from_typed_param(param: &harn_parser::TypedParam) -> Self {
+        Self {
+            name: param.name.clone(),
+            type_expr: param.type_expr.clone(),
+            has_default: param.default_value.is_some(),
+        }
+    }
+
+    /// Build a `Vec<ParamSlot>` from a slice of parser-side typed
+    /// parameters. Used pervasively at compile sites instead of
+    /// `TypedParam::names` (which discarded the type info we now need
+    /// at runtime).
+    pub fn vec_from_typed(params: &[harn_parser::TypedParam]) -> Vec<Self> {
+        params.iter().map(Self::from_typed_param).collect()
+    }
+}
+
 /// A compiled function (closure body).
 #[derive(Debug, Clone)]
 pub struct CompiledFunction {
     pub name: String,
-    pub params: Vec<String>,
+    /// Generic type parameters declared by this function. Runtime
+    /// validation treats these as static-only constraints because the VM
+    /// does not monomorphize function bodies.
+    pub type_params: Vec<String>,
+    /// User-defined struct and enum names visible when this function was
+    /// compiled. These are the only non-primitive named types with runtime
+    /// nominal identity; aliases and interfaces remain static-only.
+    pub nominal_type_names: Vec<String>,
+    pub params: Vec<ParamSlot>,
     /// Index of the first parameter with a default value, or None if all required.
     pub default_start: Option<usize>,
     pub chunk: ChunkRef,
@@ -498,6 +545,27 @@ pub struct CompiledFunction {
     pub is_stream: bool,
     /// True if the last parameter is a rest parameter (`...name`).
     pub has_rest_param: bool,
+}
+
+impl CompiledFunction {
+    /// Returns just the parameter names — convenience for code paths that
+    /// don't care about types or defaults.
+    pub fn param_names(&self) -> impl Iterator<Item = &str> {
+        self.params.iter().map(|p| p.name.as_str())
+    }
+
+    /// Number of required parameters (those before `default_start`).
+    pub fn required_param_count(&self) -> usize {
+        self.default_start.unwrap_or(self.params.len())
+    }
+
+    pub fn declares_type_param(&self, name: &str) -> bool {
+        self.type_params.iter().any(|param| param == name)
+    }
+
+    pub fn has_nominal_type(&self, name: &str) -> bool {
+        self.nominal_type_names.iter().any(|ty| ty == name)
+    }
 }
 
 impl Chunk {

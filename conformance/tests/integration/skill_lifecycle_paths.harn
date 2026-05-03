@@ -16,7 +16,7 @@ pipeline test(task) {
     description "Documentation polish"
     paths ["docs/**/*.md"]
   }
-  let registry = skill_define(infra_touch, "docs_touch", skill_find(docs_touch, "docs_touch"))
+  let registry = skill_define(infra_touch, "docs_touch", skill_find(docs_touch, "docs_touch") ?? {})
   llm_mock({text: "All done."})
   let result = agent_loop(
     "fix the edge case",

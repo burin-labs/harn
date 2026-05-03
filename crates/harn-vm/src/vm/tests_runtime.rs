@@ -880,6 +880,83 @@ fn test_throw_uncaught() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_runtime_user_call_arg_type_mismatch() {
+    let result = run_harn_result(
+        r#"pipeline t(task) {
+fn add_one(value: int) -> int { return value + 1 }
+add_one("bad")
+}"#,
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("parameter 'value' expected int"), "{err}");
+    assert!(err.contains("got string"), "{err}");
+}
+
+#[test]
+fn test_runtime_user_call_rest_arg_type_mismatch() {
+    let result = run_harn_result(
+        r#"pipeline t(task) {
+fn collect(...values: int) -> int { return values.count() }
+collect(1, "bad")
+}"#,
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("parameter 'values' expected int"), "{err}");
+    assert!(err.contains("got string"), "{err}");
+}
+
+#[test]
+fn test_runtime_user_call_named_struct_type_mismatch() {
+    let result = run_harn_result(
+        r#"pipeline t(task) {
+struct Point { x: int }
+struct User { name: string }
+fn x_of(point: Point) -> int { return point.x }
+x_of(User({name: "Ada"}))
+}"#,
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("parameter `point` expects Point"), "{err}");
+    assert!(err.contains("got struct"), "{err}");
+}
+
+#[test]
+fn test_runtime_user_call_generic_param_is_static_only() {
+    let (_, result) = run_harn_result(
+        r#"pipeline t(task) {
+fn first<T>(xs: list<T>) -> T { return xs[0] }
+return first(["ok"])
+}"#,
+    )
+    .unwrap();
+    assert!(matches!(result, VmValue::String(s) if s.as_ref() == "ok"));
+}
+
+#[test]
+fn test_runtime_user_call_missing_required_arg_rejected() {
+    let result = run_harn_result(
+        r#"pipeline t(task) {
+fn echo(value) { return value }
+echo()
+}"#,
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("Arity mismatch: 'echo'"), "{err}");
+    assert!(err.contains("expects 1 argument(s), got 0"), "{err}");
+}
+
+#[test]
+fn test_runtime_builtin_call_arg_type_mismatch() {
+    let result = run_harn_result(r#"pipeline t(task) { lowercase(42) }"#);
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("'lowercase' parameter `text` expects string"),
+        "{err}"
+    );
+    assert!(err.contains("got int"), "{err}");
+}
+
 // --- Additional test coverage ---
 
 #[test]

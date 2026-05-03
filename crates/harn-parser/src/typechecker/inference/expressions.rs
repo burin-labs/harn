@@ -394,18 +394,20 @@ impl TypeChecker {
                 // bind T by walking each arg node against the param
                 // TypeExpr, then apply bindings to the declared return
                 // type. Falls through to `builtin_return_type` when no T
-                // could be bound (e.g. llm_call without an output_schema
-                // option), preserving the historical `dict` return.
-                if let Some(sig) = builtin_signatures::lookup_generic_builtin_sig(name) {
+                // can be bound (e.g. llm_call without an output_schema
+                // option).
+                if let Some(sig) = builtin_signatures::lookup(name).filter(|s| s.is_generic()) {
+                    let type_param_names = sig.type_param_names();
                     let type_param_set: std::collections::BTreeSet<String> =
-                        sig.type_params.iter().cloned().collect();
+                        type_param_names.iter().cloned().collect();
                     let mut bindings: BTreeMap<String, TypeExpr> = BTreeMap::new();
-                    if type_args.len() == sig.type_params.len() {
-                        for (param_name, type_arg) in sig.type_params.iter().zip(type_args) {
+                    if type_args.len() == type_param_names.len() {
+                        for (param_name, type_arg) in type_param_names.iter().zip(type_args) {
                             bindings.insert(param_name.clone(), type_arg.clone());
                         }
                     }
-                    for (arg, param_ty) in args.iter().zip(sig.params.iter()) {
+                    let param_types = sig.param_type_exprs();
+                    for (arg, param_ty) in args.iter().zip(param_types.iter()) {
                         let _ = self.bind_from_arg_node(
                             param_ty,
                             arg,
@@ -414,9 +416,12 @@ impl TypeChecker {
                             scope,
                         );
                     }
-                    let all_bound = sig.type_params.iter().all(|tp| bindings.contains_key(tp));
+                    let all_bound = type_param_names.iter().all(|tp| bindings.contains_key(tp));
                     if all_bound {
-                        return Some(Self::apply_type_bindings(&sig.return_type, &bindings));
+                        return Some(Self::apply_type_bindings(
+                            &sig.return_type_expr(),
+                            &bindings,
+                        ));
                     }
                 }
                 // Check builtin return types

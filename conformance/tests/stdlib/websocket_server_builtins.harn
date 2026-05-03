@@ -14,12 +14,12 @@ pipeline test(task) {
   }
   assert(is_err(unauthorized), "bearer route rejects missing auth")
   let secure_client = websocket_connect(server.url + "/secure", {timeout_ms: 500, auth: {bearer: "secret"}})
-  let secure_server = websocket_accept(server, 1000)
+  let secure_server = websocket_accept(server, 1000) ?? {}
   assert_eq(secure_server.path, "/secure")
   assert(websocket_close(secure_client))
   assert(websocket_close(secure_server))
   let client = websocket_connect(server.url + "/acp", {timeout_ms: 500})
-  let conn = websocket_accept(server, 1000)
+  let conn = websocket_accept(server, 1000) ?? {}
   assert_eq(conn.path, "/acp")
   assert(conn.headers["sec-websocket-key"] != nil)
   assert(websocket_send(client, "hello", {}))
@@ -44,7 +44,7 @@ pipeline test(task) {
   assert_eq(closed.code, 1000)
   assert_eq(closed.reason, "done")
   let limited_client = websocket_connect(server.url + "/limited", {timeout_ms: 500})
-  let limited_conn = websocket_accept(server, 1000)
+  let limited_conn = websocket_accept(server, 1000) ?? {}
   assert(websocket_send(limited_client, "toolong", {}))
   let limited = try {
     websocket_receive(limited_conn, 1000)
@@ -52,7 +52,7 @@ pipeline test(task) {
   assert(is_err(limited), "server max_message_bytes rejects large frames")
   assert(websocket_close(limited_client))
   let backpressure_client = websocket_connect(server.url + "/backpressure", {timeout_ms: 500})
-  let backpressure_conn = websocket_accept(server, 1000)
+  let backpressure_conn = websocket_accept(server, 1000) ?? {}
   let saturated = try {
     websocket_send(backpressure_conn, "blocked", {})
   }

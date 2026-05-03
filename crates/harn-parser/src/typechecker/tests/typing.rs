@@ -94,6 +94,32 @@ fn test_correct_typed_fn() {
 }
 
 #[test]
+fn test_rest_param_type_checks_each_argument() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn collect(...nums: int) -> list<int> { return nums }
+  collect(1, "bad")
+}"#,
+    );
+    assert_eq!(errs.len(), 1);
+    assert!(errs[0].contains("argument 2 `nums`"), "{errs:?}");
+    assert!(errs[0].contains("expected int"), "{errs:?}");
+    assert!(errs[0].contains("found string"), "{errs:?}");
+}
+
+#[test]
+fn test_rest_param_binding_is_list_of_declared_type() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn collect(...nums: int) {
+    let values: list<int> = nums
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected errors: {errs:?}");
+}
+
+#[test]
 fn test_flow_predicate_mode_attributes_are_recognized_on_functions() {
     let warns = warnings(
         r#"
@@ -689,6 +715,22 @@ fn test_builtin_return_type_inference() {
     assert_eq!(errs.len(), 1);
     assert!(errs[0].contains("string"));
     assert!(errs[0].contains("int"));
+}
+
+#[test]
+fn test_builtin_arg_type_mismatch() {
+    let errs = errors(r#"pipeline t(task) { len(42) }"#);
+    assert_eq!(errs.len(), 1);
+    assert!(errs[0].contains("argument 1 `value`"));
+    assert!(errs[0].contains("expected"));
+    assert!(errs[0].contains("found int"));
+}
+
+#[test]
+fn test_builtin_arity_warning() {
+    let warns = warnings(r#"pipeline t(task) { len("abc", "extra") }"#);
+    assert_eq!(warns.len(), 1);
+    assert!(warns[0].contains("Builtin function 'len' expects 1 arguments, got 2"));
 }
 
 #[test]

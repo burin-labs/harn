@@ -56,7 +56,7 @@ way to structure multi-stage agent workflows:
 pipeline analyze(task) {
   let context = read_file("README.md")
   let plan = llm_call("${task}\n\nContext:\n${context}", "Break this into steps.")
-  let steps = json_parse(plan)
+  let steps = json_parse(plan.text)
 
   let results = parallel each steps { step ->
     agent_loop(step, "You are a coding assistant.", {persistent: true})
@@ -107,7 +107,7 @@ unreliable LLM call in retries is a one-liner:
 ```harn
 retry 3 {
   let result = llm_call(prompt, system)
-  json_parse(result)
+  json_parse(result.text)
 }
 ```
 

@@ -66,7 +66,9 @@ impl Compiler {
         fn_compiler.chunk.emit(Op::Return, self.line);
         let func = CompiledFunction {
             name: fn_name.to_string(),
-            params,
+            type_params: Vec::new(),
+            nominal_type_names: fn_compiler.nominal_type_names(),
+            params: crate::chunk::ParamSlot::vec_from_typed(&typed_params),
             default_start: None,
             chunk: Rc::new(fn_compiler.chunk),
             is_generator: false,
@@ -96,6 +98,8 @@ impl Compiler {
         fn_compiler.chunk.emit(Op::Return, self.line);
         let func = CompiledFunction {
             name: "<spawn>".to_string(),
+            type_params: Vec::new(),
+            nominal_type_names: fn_compiler.nominal_type_names(),
             params: vec![],
             default_start: None,
             chunk: Rc::new(fn_compiler.chunk),

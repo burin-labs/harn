@@ -20,10 +20,211 @@ use harn_lexer::Span;
 
 use super::super::format::format_type;
 use super::super::schema_inference::schema_type_expr_from_node;
-use super::super::scope::{is_builtin, EnumDeclInfo, StructDeclInfo, TypeScope};
+use super::super::scope::{is_builtin, EnumDeclInfo, FnSignature, StructDeclInfo, TypeScope};
 use super::super::TypeChecker;
 
 impl TypeChecker {
+    fn builtin_param_for_arg(
+        sig: &builtin_signatures::BuiltinSignature,
+        index: usize,
+    ) -> Option<&builtin_signatures::Param> {
+        if sig.has_rest && index >= sig.params.len().saturating_sub(1) {
+            sig.params.last()
+        } else {
+            sig.params.get(index)
+        }
+    }
+
+    fn function_param_for_arg(
+        sig: &FnSignature,
+        index: usize,
+    ) -> Option<(&str, Option<&TypeExpr>)> {
+        let entry = if sig.has_rest && index >= sig.params.len().saturating_sub(1) {
+            sig.params.last()
+        } else {
+            sig.params.get(index)
+        }?;
+        Some((entry.0.as_str(), entry.1.as_ref()))
+    }
+
+    fn type_without_nil(ty: &TypeExpr) -> Option<TypeExpr> {
+        match ty {
+            TypeExpr::Named(name) if name == "nil" => None,
+            TypeExpr::Union(members) => {
+                let non_nil: Vec<TypeExpr> =
+                    members.iter().filter_map(Self::type_without_nil).collect();
+                match non_nil.as_slice() {
+                    [] => None,
+                    [only] => Some(only.clone()),
+                    _ => Some(TypeExpr::Union(non_nil)),
+                }
+            }
+            other => Some(other.clone()),
+        }
+    }
+
+    fn check_builtin_signature_call(
+        &mut self,
+        name: &str,
+        sig: &builtin_signatures::BuiltinSignature,
+        type_args: &[TypeExpr],
+        args: &[SNode],
+        has_spread: bool,
+        scope: &mut TypeScope,
+        span: Span,
+    ) {
+        for arg in args {
+            self.check_node(arg, scope);
+        }
+
+        if !type_args.is_empty() {
+            if !sig.is_generic() {
+                self.error_at(
+                    format!(
+                        "Builtin function '{}' does not declare type parameters",
+                        name
+                    ),
+                    span,
+                );
+            } else if type_args.len() != sig.type_params.len() {
+                self.error_at(
+                    format!(
+                        "Builtin function '{}' expects {} type arguments, got {}",
+                        name,
+                        sig.type_params.len(),
+                        type_args.len()
+                    ),
+                    span,
+                );
+            }
+        }
+
+        if !has_spread {
+            let required = sig.required_params();
+            let total = sig.params.len();
+            let arity_ok = if sig.has_rest {
+                args.len() >= total.saturating_sub(1)
+            } else {
+                args.len() >= required && args.len() <= total
+            };
+            if !arity_ok {
+                let expected = if sig.has_rest {
+                    format!("at least {}", total.saturating_sub(1))
+                } else if required == total {
+                    total.to_string()
+                } else {
+                    format!("{required}-{total}")
+                };
+                self.warning_at(
+                    format!(
+                        "Builtin function '{}' expects {} arguments, got {}",
+                        name,
+                        expected,
+                        args.len()
+                    ),
+                    span,
+                );
+            }
+        }
+
+        let call_scope = if sig.type_params.is_empty() {
+            scope.clone()
+        } else {
+            let mut s = scope.child();
+            for tp_name in sig.type_params {
+                s.generic_type_params.insert((*tp_name).to_string());
+            }
+            s
+        };
+
+        let type_param_names = sig.type_param_names();
+        let type_param_set: std::collections::BTreeSet<String> =
+            type_param_names.iter().cloned().collect();
+        let mut type_bindings: BTreeMap<String, TypeExpr> = BTreeMap::new();
+        if type_args.len() == type_param_names.len() {
+            for (param_name, type_arg) in type_param_names.iter().zip(type_args.iter()) {
+                type_bindings.insert(param_name.clone(), type_arg.clone());
+            }
+        }
+
+        for (i, arg) in args.iter().enumerate() {
+            let Some(param) = Self::builtin_param_for_arg(sig, i) else {
+                continue;
+            };
+            if param.ty.is_any() {
+                continue;
+            }
+            let param_ty = param.ty.to_type_expr();
+            if let Err(message) =
+                self.bind_from_arg_node(&param_ty, arg, &type_param_set, &mut type_bindings, scope)
+            {
+                self.error_at(message, arg.span);
+            }
+        }
+
+        for (i, arg) in args.iter().enumerate() {
+            let Some(param) = Self::builtin_param_for_arg(sig, i) else {
+                continue;
+            };
+            if param.ty.is_any() || matches!(param.ty, builtin_signatures::Ty::SchemaOf(_)) {
+                continue;
+            }
+            let actual = self.infer_type(arg, scope);
+            if let Some(actual) = &actual {
+                let expected = Self::apply_type_bindings(&param.ty.to_type_expr(), &type_bindings);
+                let compatible = self.types_compatible(&expected, actual, &call_scope)
+                    || (param.optional
+                        && Self::type_without_nil(actual).is_none_or(|non_nil| {
+                            self.types_compatible(&expected, &non_nil, &call_scope)
+                        }));
+                if !compatible {
+                    self.type_mismatch_at(
+                        format!("argument {} `{}`", i + 1, param.name),
+                        &expected,
+                        actual,
+                        arg.span,
+                        None,
+                        Some(arg.span),
+                        &call_scope,
+                    );
+                }
+            }
+        }
+
+        if !sig.where_clauses.is_empty() {
+            for (type_param, bound) in sig.where_clauses {
+                if let Some(concrete_type) = type_bindings.get(*type_param) {
+                    let concrete_name = format_type(concrete_type);
+                    let Some(base_type_name) = Self::base_type_name(concrete_type) else {
+                        self.error_at(
+                            format!(
+                                "Type '{}' does not satisfy interface '{}': only named types can satisfy interfaces (required by constraint `where {}: {}`)",
+                                concrete_name, bound, type_param, bound
+                            ),
+                            span,
+                        );
+                        continue;
+                    };
+                    if let Some(reason) = self.interface_mismatch_reason(
+                        base_type_name,
+                        bound,
+                        &BTreeMap::new(),
+                        scope,
+                    ) {
+                        self.error_at(
+                            format!(
+                                "Type '{}' does not satisfy interface '{}': {} \
+                                 (required by constraint `where {}: {}`)",
+                                concrete_name, bound, reason, type_param, bound
+                            ),
+                            span,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     pub(in crate::typechecker) fn bind_type_param(
         param_name: &str,
         concrete: &TypeExpr,
@@ -767,25 +968,30 @@ impl TypeChecker {
                     );
                 }
             }
-            if !has_spread
-                && !is_builtin(name)
-                && !sig.has_rest
-                && (args.len() < sig.required_params || args.len() > sig.params.len())
-            {
-                let expected = if sig.required_params == sig.params.len() {
-                    format!("{}", sig.params.len())
+            if !has_spread && !is_builtin(name) {
+                let arity_ok = if sig.has_rest {
+                    args.len() >= sig.params.len().saturating_sub(1)
                 } else {
-                    format!("{}-{}", sig.required_params, sig.params.len())
+                    args.len() >= sig.required_params && args.len() <= sig.params.len()
                 };
-                self.warning_at(
-                    format!(
-                        "Function '{}' expects {} arguments, got {}",
-                        name,
-                        expected,
-                        args.len()
-                    ),
-                    span,
-                );
+                if !arity_ok {
+                    let expected = if sig.has_rest {
+                        format!("at least {}", sig.params.len().saturating_sub(1))
+                    } else if sig.required_params == sig.params.len() {
+                        format!("{}", sig.params.len())
+                    } else {
+                        format!("{}-{}", sig.required_params, sig.params.len())
+                    };
+                    self.warning_at(
+                        format!(
+                            "Function '{}' expects {} arguments, got {}",
+                            name,
+                            expected,
+                            args.len()
+                        ),
+                        span,
+                    );
+                }
             }
             // Build a scope that includes the function's generic type params
             // so they are treated as compatible with any concrete type.
@@ -806,7 +1012,10 @@ impl TypeChecker {
                     type_bindings.insert(param_name.clone(), type_arg.clone());
                 }
             }
-            for (arg, (_param_name, param_type)) in args.iter().zip(sig.params.iter()) {
+            for (i, arg) in args.iter().enumerate() {
+                let Some((_param_name, param_type)) = Self::function_param_for_arg(&sig, i) else {
+                    continue;
+                };
                 if let Some(param_ty) = param_type {
                     if let Err(message) = self.bind_from_arg_node(
                         param_ty,
@@ -819,9 +1028,10 @@ impl TypeChecker {
                     }
                 }
             }
-            for (i, (arg, (param_name, param_type))) in
-                args.iter().zip(sig.params.iter()).enumerate()
-            {
+            for (i, arg) in args.iter().enumerate() {
+                let Some((param_name, param_type)) = Self::function_param_for_arg(&sig, i) else {
+                    continue;
+                };
                 if let Some(expected) = param_type {
                     let actual = self.infer_type(arg, scope);
                     if let Some(actual) = &actual {
@@ -874,32 +1084,12 @@ impl TypeChecker {
                     }
                 }
             }
-        } else if !type_args.is_empty() && is_builtin(name) {
-            if let Some(sig) = builtin_signatures::lookup_generic_builtin_sig(name) {
-                if type_args.len() != sig.type_params.len() {
-                    self.error_at(
-                        format!(
-                            "Builtin function '{}' expects {} type arguments, got {}",
-                            name,
-                            sig.type_params.len(),
-                            type_args.len()
-                        ),
-                        span,
-                    );
-                }
-            } else {
-                self.error_at(
-                    format!(
-                        "Builtin function '{}' does not declare type parameters",
-                        name
-                    ),
-                    span,
-                );
+        } else if let Some(sig) = builtin_signatures::lookup(name) {
+            self.check_builtin_signature_call(name, sig, type_args, args, has_spread, scope, span);
+        } else {
+            for arg in args {
+                self.check_node(arg, scope);
             }
-        }
-        // Check args recursively
-        for arg in args {
-            self.check_node(arg, scope);
         }
     }
 }

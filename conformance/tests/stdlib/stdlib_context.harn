@@ -16,4 +16,8 @@ pipeline default() {
   // The prompt wraps the task in a <workflow_task> / <label> /
   // <instructions> block. Assert both pieces are present.
   println(contains(prompt?.prompt, "<label>Work</label>") && contains(prompt?.prompt, "Fix it"))
+  let raw = context_render({sections: [{name: "raw", content: "Visible"}]})
+  println(raw)
+  let added = context_add(context([section("one", "1")]), section("two", "2"))
+  println(len(added?.sections))
 }

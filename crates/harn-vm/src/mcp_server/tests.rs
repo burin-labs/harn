@@ -73,6 +73,8 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
     let handler = VmValue::Closure(Rc::new(VmClosure {
         func: Rc::new(CompiledFunction {
             name: "echo".to_string(),
+            type_params: Vec::new(),
+            nominal_type_names: Vec::new(),
             params: Vec::new(),
             default_start: None,
             chunk: Rc::new(Chunk::new()),

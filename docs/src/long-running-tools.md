@@ -62,9 +62,8 @@ pipeline main() {
     host_tool_call("cancel_handle", {handle_id: handle.handle_id})
   }
 
-  agent_loop({
-    system: "Summarize the repository while the file walk runs.",
-    tools: ["read_file"]
+  agent_loop("Summarize the repository while the file walk runs.", nil, {
+    tools: ["read_file"],
   })
 }
 ```

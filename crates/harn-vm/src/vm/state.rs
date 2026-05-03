@@ -245,7 +245,6 @@ impl Vm {
         args: &[VmValue],
         synced: bool,
     ) {
-        let default_start = func.default_start.unwrap_or(func.params.len());
         let param_count = func.params.len();
         for (i, _param) in func.params.iter().enumerate() {
             if i >= slots.len() {
@@ -262,10 +261,6 @@ impl Vm {
                 slots[i].synced = synced;
             } else if i < args.len() {
                 slots[i].value = args[i].clone();
-                slots[i].initialized = true;
-                slots[i].synced = synced;
-            } else if i < default_start {
-                slots[i].value = VmValue::Nil;
                 slots[i].initialized = true;
                 slots[i].synced = synced;
             }

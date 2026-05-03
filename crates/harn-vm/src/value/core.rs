@@ -365,7 +365,8 @@ impl VmValue {
                 out.push('}');
             }
             VmValue::Closure(c) => {
-                let _ = write!(out, "<fn({})>", c.func.params.join(", "));
+                let names: Vec<&str> = c.func.param_names().collect();
+                let _ = write!(out, "<fn({})>", names.join(", "));
             }
             VmValue::BuiltinRef(name) => {
                 let _ = write!(out, "<builtin {name}>");

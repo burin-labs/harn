@@ -154,7 +154,15 @@ impl TypeChecker {
                 .insert(wc.type_name.clone(), wc.bound.clone());
         }
         for param in params {
-            fn_scope.define_var(&param.name, param.type_expr.clone());
+            let param_type = if param.rest {
+                param
+                    .type_expr
+                    .clone()
+                    .map(|inner| TypeExpr::List(Box::new(inner)))
+            } else {
+                param.type_expr.clone()
+            };
+            fn_scope.define_var(&param.name, param_type);
             fn_scope.clear_nil_widenable(&param.name);
             if let Some(default) = &param.default_value {
                 self.check_node(default, &mut fn_scope);

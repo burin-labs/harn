@@ -7,7 +7,7 @@ pipeline test(task) {
     description "First skill"
     when_to_use "Use alpha first"
   }
-  let registry = skill_define(beta, "alpha", skill_find(alpha, "alpha"))
+  let registry = skill_define(beta, "alpha", skill_find(alpha, "alpha") ?? {})
   let entries = skills_catalog_entries(registry)
   let rendered = render_always_on_catalog(entries, 500)
   let expected = "## Available skills\n\nThese skills are available. Call `load_skill({ name: \"<skill-id>\" })` to load the full body of a skill when it becomes relevant.\n\n- `alpha`: First skill\n  when: Use alpha first\n- `beta`: Second skill\n  when: Use beta second"

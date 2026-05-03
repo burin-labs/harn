@@ -484,18 +484,9 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
             ))));
         }
 
-        // Resolve and validate the declared executor (harn#743). Every
-        // tool must have exactly one execution backend; the `executor`
-        // field is the source of truth so downstream code (agent_loop,
-        // ACP `tool_call_update.executor`, `harn check`) doesn't have
-        // to guess from `handler` presence.
-        //
-        // Back-compat: when `executor` is absent, infer from `handler`
-        // — present → `"harn"`, missing → reject with a clear error.
-        // The reject path is the foot-gun the issue eliminates: a
-        // handlerless registration that previously slipped through
-        // `tool_define` only to fail at the first model call with
-        // `[builtin_call] unhandled: <name>`.
+        // Every tool must resolve to exactly one execution backend. An
+        // omitted executor means a local Harn handler-backed tool; tools
+        // without handlers must declare their external backend explicitly.
         let executor_value = config.get("executor").cloned();
         let executor = match executor_value.as_ref() {
             Some(VmValue::String(s)) => Some(s.to_string()),
@@ -671,11 +662,8 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         );
         tool_entry.insert("handler".to_string(), handler);
         tool_entry.insert("parameters".to_string(), parameters);
-        // Stash the resolved executor so callers can read the declared
-        // backend without re-parsing config (and so back-compat
-        // `executor: "harn_builtin"` aliases collapse to the canonical
-        // `"harn"` form). Stored as a plain string — wire serialization
-        // is handled by the ACP adapter.
+        // Store the canonical executor as a plain string; wire
+        // serialization is handled by the ACP adapter.
         tool_entry.insert(
             "executor".to_string(),
             VmValue::String(Rc::from(resolved_executor)),
@@ -1021,7 +1009,12 @@ fn compile_synthesized_tool_closure(id: &str) -> Result<VmValue, VmError> {
         VmError::Runtime(format!("tool_synthesize: internal compile failed: {error}"))
     })?;
     let Some(fn_node) = program.iter().find_map(|node| match &node.node {
-        harn_parser::Node::FnDecl { params, body, .. } => Some((params, body)),
+        harn_parser::Node::FnDecl {
+            type_params,
+            params,
+            body,
+            ..
+        } => Some((type_params, params, body)),
         _ => None,
     }) else {
         return Err(VmError::Runtime(
@@ -1030,7 +1023,12 @@ fn compile_synthesized_tool_closure(id: &str) -> Result<VmValue, VmError> {
     };
     let mut compiler = crate::Compiler::new();
     let func = compiler
-        .compile_fn_body(fn_node.0, fn_node.1, Some("<tool_synthesize>".to_string()))
+        .compile_fn_body(
+            fn_node.0,
+            fn_node.1,
+            fn_node.2,
+            Some("<tool_synthesize>".to_string()),
+        )
         .map_err(|error| VmError::Runtime(format!("tool_synthesize: {error}")))?;
     Ok(VmValue::Closure(Rc::new(VmClosure {
         func: Rc::new(func),

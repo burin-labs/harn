@@ -85,7 +85,11 @@ impl Compiler {
         // Lower into a `__impl_TypeName` dict of name -> closure.
         for method_sn in methods {
             if let Node::FnDecl {
-                name, params, body, ..
+                name,
+                type_params,
+                params,
+                body,
+                ..
             } = &method_sn.node
             {
                 let key_idx = self.chunk.add_constant(Constant::String(name.clone()));
@@ -106,7 +110,9 @@ impl Compiler {
 
                 let func = CompiledFunction {
                     name: format!("{}.{}", type_name, name),
-                    params: TypedParam::names(params),
+                    type_params: type_params.iter().map(|param| param.name.clone()).collect(),
+                    nominal_type_names: fn_compiler.nominal_type_names(),
+                    params: crate::chunk::ParamSlot::vec_from_typed(params),
                     default_start: TypedParam::default_start(params),
                     chunk: Rc::new(fn_compiler.chunk),
                     is_generator: false,
@@ -164,7 +170,9 @@ impl Compiler {
 
         let func = CompiledFunction {
             name: name.to_string(),
-            params: TypedParam::names(&params),
+            type_params: Vec::new(),
+            nominal_type_names: fn_compiler.nominal_type_names(),
+            params: crate::chunk::ParamSlot::vec_from_typed(&params),
             default_start: None,
             chunk: Rc::new(fn_compiler.chunk),
             is_generator: false,

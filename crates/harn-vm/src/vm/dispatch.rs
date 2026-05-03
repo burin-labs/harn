@@ -94,6 +94,7 @@ impl Vm {
         args: &'a [VmValue],
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
         Box::pin(async move {
+            crate::typecheck::validate_user_call(&closure.func, args, None)?;
             let saved_env = self.env.clone();
             let mut call_env = self.closure_call_env_for_current_frame(closure);
             let saved_frames = std::mem::take(&mut self.frames);
@@ -191,6 +192,9 @@ impl Vm {
         if let Err(err) = crate::orchestration::enforce_current_policy_for_builtin(name, args) {
             return Some(Err(err));
         }
+        if let Err(err) = crate::typecheck::validate_builtin_call(name, args, None) {
+            return Some(Err(err));
+        }
 
         Some(builtin(args, &mut self.output))
     }
@@ -257,6 +261,7 @@ impl Vm {
             });
         }
         crate::orchestration::enforce_current_policy_for_builtin(name, &args)?;
+        crate::typecheck::validate_builtin_call(name, &args, None)?;
 
         if let Some(result) =
             crate::runtime_context::dispatch_runtime_context_builtin(self, name, &args)

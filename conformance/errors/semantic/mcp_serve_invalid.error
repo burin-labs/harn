@@ -1,1 +1,1 @@
-argument must be a tool registry
+argument 1 `registry`: expected dict, found string

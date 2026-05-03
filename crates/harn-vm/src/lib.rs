@@ -53,6 +53,7 @@ pub mod tool_surface;
 pub mod tracing;
 pub mod triggers;
 pub mod trust_graph;
+pub mod typecheck;
 pub mod value;
 pub mod visible_text;
 mod vm;

@@ -6,67 +6,155 @@
 //! confidence scalar. See issue #581 and the runtime registrations in
 //! `crates/harn-vm/src/stdlib/flow.rs`.
 
-use super::{BuiltinReturn, BuiltinSig};
+use super::{BuiltinSignature, Param, Ty, TY_BOOL, TY_DICT, TY_FLOAT, TY_LIST, TY_STRING};
 
-pub(crate) const SIGNATURES: &[BuiltinSig] = &[
-    BuiltinSig {
+pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
+    BuiltinSignature {
         name: "flow_evidence_atom",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[
+            Param::new("atom_id", TY_STRING),
+            Param::new("diff_start", Ty::Named("int")),
+            Param::new("diff_end", Ty::Named("int")),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "flow_evidence_citation",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[
+            Param::new("url", TY_STRING),
+            Param::new("quote", TY_STRING),
+            Param::new("fetched_at", TY_STRING),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "flow_evidence_metadata",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[
+            Param::new("directory", TY_STRING),
+            Param::new("namespace", TY_STRING),
+            Param::new("key", TY_STRING),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "flow_evidence_transcript",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[
+            Param::new("transcript_id", TY_STRING),
+            Param::new("span_start", Ty::Named("int")),
+            Param::new("span_end", Ty::Named("int")),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "flow_invariant_allow",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "flow_invariant_block",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[
+            Param::new("code", TY_STRING),
+            Param::new("message", TY_STRING),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "flow_invariant_confidence",
-        return_type: Some(BuiltinReturn::Named("float")),
+        params: &[Param::new("result", TY_DICT)],
+        returns: TY_FLOAT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "flow_invariant_is_blocking",
-        return_type: Some(BuiltinReturn::Named("bool")),
+        params: &[Param::new("result", TY_DICT)],
+        returns: TY_BOOL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "flow_invariant_kind",
-        return_type: Some(BuiltinReturn::Named("string")),
+        params: &[Param::new("result", TY_DICT)],
+        returns: TY_STRING,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "flow_invariant_require_approval",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[Param::new("kind", TY_STRING), Param::new("id", TY_STRING)],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "flow_invariant_warn",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[Param::new("reason", TY_STRING)],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "flow_remediation",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[Param::new("description", TY_STRING)],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "flow_with_confidence",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[
+            Param::new("result", TY_DICT),
+            Param::new("confidence", Ty::Union(&[TY_FLOAT, Ty::Named("int")])),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "flow_with_evidence",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[
+            Param::new("result", TY_DICT),
+            Param::new("evidence", TY_LIST),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "flow_with_remediation",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[
+            Param::new("result", TY_DICT),
+            Param::new("remediation", TY_DICT),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
 ];
