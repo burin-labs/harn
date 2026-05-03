@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::llm::tools::text_tool_call_tag_pairs;
 use crate::orchestration::{CapabilityPolicy, ToolApprovalPolicy};
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolKind};
 use crate::value::VmValue;
@@ -591,29 +592,32 @@ fn validate_prompt_references(
         .chain(active_names.iter().cloned())
         .collect::<BTreeSet<_>>();
     for text in &input.prompt_texts {
-        for name in prompt_tool_references(text) {
-            if !known_names.contains(&name) && looks_like_tool_name(&name) {
+        let binding_text = prompt_binding_text(text);
+        let calls = prompt_tool_calls(&binding_text);
+        for call in &calls {
+            let name = call.name;
+            if !known_names.contains(name) && looks_like_tool_name(name) {
                 diagnostics.push(
                     ToolSurfaceDiagnostic::warning(
                         "TOOL_SURFACE_UNKNOWN_PROMPT_TOOL",
                         format!("prompt references tool '{name}' which is not active"),
                     )
-                    .with_tool(name.clone())
+                    .with_tool(name.to_string())
                     .with_field("prompt"),
                 );
                 continue;
             }
-            if known_names.contains(&name) && !active_names.contains(&name) {
+            if known_names.contains(name) && !active_names.contains(name) {
                 diagnostics.push(
                     ToolSurfaceDiagnostic::warning(
                         "TOOL_SURFACE_PROMPT_TOOL_NOT_IN_POLICY",
                         format!("prompt references tool '{name}' outside the active policy"),
                     )
-                    .with_tool(name.clone())
+                    .with_tool(name.to_string())
                     .with_field("prompt"),
                 );
             }
-            if deferred.contains(&name) && !input.tool_search_active {
+            if deferred.contains(name) && !input.tool_search_active {
                 diagnostics.push(
                     ToolSurfaceDiagnostic::warning(
                         "TOOL_SURFACE_DEFERRED_TOOL_PROMPT_REFERENCE",
@@ -621,7 +625,7 @@ fn validate_prompt_references(
                             "prompt references deferred tool '{name}' but tool_search is not active"
                         ),
                     )
-                    .with_tool(name.clone())
+                    .with_tool(name.to_string())
                     .with_field("prompt"),
                 );
             }
@@ -631,7 +635,10 @@ fn validate_prompt_references(
                 continue;
             };
             for (alias, canonical) in &annotations.arg_schema.arg_aliases {
-                if contains_token(text, alias) {
+                if calls
+                    .iter()
+                    .any(|call| call.name == entry.name && contains_token(call.text, alias))
+                {
                     diagnostics.push(
                         ToolSurfaceDiagnostic::warning(
                             "TOOL_SURFACE_DEPRECATED_ARG_ALIAS",
@@ -647,6 +654,107 @@ fn validate_prompt_references(
             }
         }
     }
+}
+
+struct PromptToolCall<'a> {
+    name: &'a str,
+    text: &'a str,
+}
+
+fn prompt_tool_calls(text: &str) -> Vec<PromptToolCall<'_>> {
+    let mut calls = Vec::new();
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if let Some((open_tag, close_tag)) = text_tool_call_tag_pairs()
+            .into_iter()
+            .find(|(open_tag, _)| bytes[i..].starts_with(open_tag.as_bytes()))
+        {
+            let call_start = i;
+            i += open_tag.len();
+            while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            let name_start = i;
+            while i < bytes.len() && is_ident_byte(bytes[i]) {
+                i += 1;
+            }
+            if i > name_start {
+                let call_end = text[i..]
+                    .find(close_tag)
+                    .map(|offset| i + offset + close_tag.len())
+                    .unwrap_or(i);
+                calls.push(PromptToolCall {
+                    name: &text[name_start..i],
+                    text: &text[call_start..call_end],
+                });
+                i = call_end;
+            }
+            continue;
+        }
+
+        if !is_ident_start(bytes[i]) {
+            i += 1;
+            continue;
+        }
+
+        let start = i;
+        i += 1;
+        while i < bytes.len() && is_ident_byte(bytes[i]) {
+            i += 1;
+        }
+
+        let name = &text[start..i];
+        let mut j = i;
+        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if j < bytes.len() && bytes[j] == b'(' && !prompt_ref_stopword(name) {
+            let end = prompt_call_end(bytes, j);
+            calls.push(PromptToolCall {
+                name,
+                text: &text[start..end],
+            });
+            i = end;
+            continue;
+        }
+    }
+    calls
+}
+
+fn prompt_call_end(bytes: &[u8], open_index: usize) -> usize {
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    let mut i = open_index;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        if let Some(quote_byte) = quote {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == quote_byte {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+
+        match byte {
+            b'\'' | b'"' | b'`' => quote = Some(byte),
+            b'(' => depth += 1,
+            b')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    bytes.len()
 }
 
 fn validate_side_effect_ceiling(
@@ -690,43 +798,10 @@ fn validate_side_effect_ceiling(
 
 pub fn prompt_tool_references(text: &str) -> BTreeSet<String> {
     let text = prompt_binding_text(text);
-    let mut names = BTreeSet::new();
-    let bytes = text.as_bytes();
-    let mut i = 0usize;
-    while i < bytes.len() {
-        if bytes[i..].starts_with(b"<tool_call>") {
-            i += "<tool_call>".len();
-            while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            let start = i;
-            while i < bytes.len() && is_ident_byte(bytes[i]) {
-                i += 1;
-            }
-            if i > start {
-                names.insert(text[start..i].to_string());
-            }
-            continue;
-        }
-        if is_ident_start(bytes[i]) {
-            let start = i;
-            i += 1;
-            while i < bytes.len() && is_ident_byte(bytes[i]) {
-                i += 1;
-            }
-            let name = &text[start..i];
-            let mut j = i;
-            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-                j += 1;
-            }
-            if j < bytes.len() && bytes[j] == b'(' && !prompt_ref_stopword(name) {
-                names.insert(name.to_string());
-            }
-            continue;
-        }
-        i += 1;
-    }
-    names
+    prompt_tool_calls(&text)
+        .into_iter()
+        .map(|call| call.name.to_string())
+        .collect()
 }
 
 fn prompt_binding_text(text: &str) -> String {
@@ -1031,9 +1106,102 @@ mod tests {
     }
 
     #[test]
+    fn deprecated_alias_warnings_are_scoped_to_matching_tool_calls() {
+        let mut edit_annotations = ToolAnnotations::default();
+        edit_annotations
+            .arg_schema
+            .arg_aliases
+            .insert("file".into(), "path".into());
+        let mut look_annotations = ToolAnnotations::default();
+        look_annotations
+            .arg_schema
+            .arg_aliases
+            .insert("path".into(), "file".into());
+
+        let report = validate_tool_surface(&ToolSurfaceInput {
+            native_tools: Some(vec![
+                serde_json::json!({
+                    "name": "edit",
+                    "parameters": {"type": "object"},
+                    "annotations": edit_annotations,
+                }),
+                serde_json::json!({
+                    "name": "look",
+                    "parameters": {"type": "object"},
+                    "annotations": look_annotations,
+                }),
+            ]),
+            prompt_texts: vec![
+                "Use edit({ path: \"src/main.rs\", action: \"replace\" }) before look({ file: \"src/main.rs\" }).".into(),
+            ],
+            ..ToolSurfaceInput::default()
+        });
+
+        assert!(!report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "TOOL_SURFACE_DEPRECATED_ARG_ALIAS"));
+    }
+
+    #[test]
+    fn deprecated_alias_warnings_still_report_matching_multiline_calls() {
+        let mut annotations = ToolAnnotations::default();
+        annotations
+            .arg_schema
+            .arg_aliases
+            .insert("file".into(), "path".into());
+
+        let report = validate_tool_surface(&ToolSurfaceInput {
+            native_tools: Some(vec![serde_json::json!({
+                "name": "edit",
+                "parameters": {"type": "object"},
+                "annotations": annotations,
+            })]),
+            prompt_texts: vec!["Use edit({\n  file: \"src/main.rs\"\n}) once.".into()],
+            ..ToolSurfaceInput::default()
+        });
+
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "TOOL_SURFACE_DEPRECATED_ARG_ALIAS"));
+    }
+
+    #[test]
+    fn deprecated_alias_warnings_report_tagged_text_mode_calls() {
+        let mut annotations = ToolAnnotations::default();
+        annotations
+            .arg_schema
+            .arg_aliases
+            .insert("file".into(), "path".into());
+
+        let report = validate_tool_surface(&ToolSurfaceInput {
+            native_tools: Some(vec![serde_json::json!({
+                "name": "edit",
+                "parameters": {"type": "object"},
+                "annotations": annotations,
+            })]),
+            prompt_texts: vec!["<tool_call>\nedit({ file: \"src/main.rs\" })\n</tool_call>".into()],
+            ..ToolSurfaceInput::default()
+        });
+
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "TOOL_SURFACE_DEPRECATED_ARG_ALIAS"));
+    }
+
+    #[test]
     fn prompt_reference_scanner_tolerates_non_ascii_text() {
         let references = prompt_tool_references("Résumé: use run_command({command: \"test\"})");
         assert!(references.contains("run_command"));
+    }
+
+    #[test]
+    fn prompt_reference_scanner_reads_tagged_text_mode_calls() {
+        let references =
+            prompt_tool_references("<tool_call>\nrun({ command: \"cargo test\" })\n</tool_call>");
+        assert!(references.contains("run"));
     }
 
     #[test]

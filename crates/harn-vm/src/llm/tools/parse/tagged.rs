@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use super::super::{text_tool_call_block, TEXT_TOOL_CALL_TAG, TEXT_TOOL_CALL_TAG_COMPACT};
 use super::bare::parse_bare_calls_in_body;
 use super::syntax::{
     ident_length, match_block, parse_ts_call_from, preview_str, render_canonical_call,
@@ -83,8 +84,8 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             continue;
         }
 
-        if let Some((body, after)) =
-            match_block(src, cursor, "tool_call").or_else(|| match_block(src, cursor, "toolcall"))
+        if let Some((body, after)) = match_block(src, cursor, TEXT_TOOL_CALL_TAG)
+            .or_else(|| match_block(src, cursor, TEXT_TOOL_CALL_TAG_COMPACT))
         {
             match parse_single_tool_call(body, tools_val) {
                 Ok(call) => {
@@ -97,10 +98,8 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                         .get("arguments")
                         .cloned()
                         .unwrap_or(serde_json::json!({}));
-                    canonical_parts.push(format!(
-                        "<tool_call>\n{}\n</tool_call>",
-                        render_canonical_call(&name, &args)
-                    ));
+                    canonical_parts
+                        .push(text_tool_call_block(&render_canonical_call(&name, &args)));
                     calls.push(call);
                 }
                 Err(msg) => errors.push(msg),
@@ -152,10 +151,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 .get("arguments")
                 .cloned()
                 .unwrap_or(serde_json::json!({}));
-            canonical_parts.push(format!(
-                "<tool_call>\n{}\n</tool_call>",
-                render_canonical_call(&name, &args)
-            ));
+            canonical_parts.push(text_tool_call_block(&render_canonical_call(&name, &args)));
             calls.push(call);
             violations.push(format!(
                 "Tool call `{name}` was emitted as `<{name}(...)>` instead of \
@@ -316,10 +312,7 @@ fn report_stray(
                 .get("arguments")
                 .cloned()
                 .unwrap_or(serde_json::json!({}));
-            canonical_parts.push(format!(
-                "<tool_call>\n{}\n</tool_call>",
-                render_canonical_call(&name, &args)
-            ));
+            canonical_parts.push(text_tool_call_block(&render_canonical_call(&name, &args)));
             calls.push(call.clone());
         }
         violations.push(format!(

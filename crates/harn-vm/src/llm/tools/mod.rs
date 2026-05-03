@@ -7,6 +7,7 @@ mod messages;
 mod native;
 mod params;
 mod parse;
+mod protocol;
 mod ts_value_parser;
 mod type_expr;
 
@@ -36,6 +37,11 @@ pub(crate) use parse::parse_text_tool_calls_with_tools;
 pub(crate) use parse::StreamingToolCallDetector;
 #[cfg(test)]
 pub(crate) use parse::{parse_bare_calls_in_body, parse_native_json_tool_calls};
+pub(crate) use protocol::{
+    text_tool_call_block, text_tool_call_tag_pairs, TEXT_TOOL_CALL_CLOSE,
+    TEXT_TOOL_CALL_CLOSE_COMPACT, TEXT_TOOL_CALL_OPEN, TEXT_TOOL_CALL_OPEN_COMPACT,
+    TEXT_TOOL_CALL_TAG, TEXT_TOOL_CALL_TAG_COMPACT,
+};
 
 #[cfg(test)]
 mod tests;

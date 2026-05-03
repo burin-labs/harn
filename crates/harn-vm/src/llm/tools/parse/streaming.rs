@@ -37,12 +37,11 @@ use std::collections::BTreeSet;
 
 use crate::agent_events::{AgentEvent, ToolCallErrorCategory, ToolCallStatus};
 
+use super::super::{
+    TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_CLOSE_COMPACT, TEXT_TOOL_CALL_OPEN,
+    TEXT_TOOL_CALL_OPEN_COMPACT,
+};
 use super::syntax::{ident_length, parse_ts_call_from};
-
-const TAGGED_OPEN: &str = "<tool_call>";
-const TAGGED_CLOSE: &str = "</tool_call>";
-const TAGGED_OPEN_COMPACT: &str = "<toolcall>";
-const TAGGED_CLOSE_COMPACT: &str = "</toolcall>";
 
 /// Streaming candidate detector for text-mode tool calls.
 ///
@@ -408,17 +407,17 @@ impl StreamingToolCallDetector {
 }
 
 fn tagged_open_at(rest: &str) -> Option<(&'static str, &'static str)> {
-    if rest.starts_with(TAGGED_OPEN) {
-        Some((TAGGED_OPEN, TAGGED_CLOSE))
-    } else if rest.starts_with(TAGGED_OPEN_COMPACT) {
-        Some((TAGGED_OPEN_COMPACT, TAGGED_CLOSE_COMPACT))
+    if rest.starts_with(TEXT_TOOL_CALL_OPEN) {
+        Some((TEXT_TOOL_CALL_OPEN, TEXT_TOOL_CALL_CLOSE))
+    } else if rest.starts_with(TEXT_TOOL_CALL_OPEN_COMPACT) {
+        Some((TEXT_TOOL_CALL_OPEN_COMPACT, TEXT_TOOL_CALL_CLOSE_COMPACT))
     } else {
         None
     }
 }
 
 fn is_partial_tagged_open(rest: &str) -> bool {
-    TAGGED_OPEN.starts_with(rest) || TAGGED_OPEN_COMPACT.starts_with(rest)
+    TEXT_TOOL_CALL_OPEN.starts_with(rest) || TEXT_TOOL_CALL_OPEN_COMPACT.starts_with(rest)
 }
 
 fn promote_event(
