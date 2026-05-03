@@ -1,3 +1,5 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { agent_loop_options } from "std/agent/options"
 import { agent_turn_preamble_prompt } from "std/agent/prompts"
 
@@ -42,11 +44,86 @@ fn __agent_turn_options(options) {
   if !contains(opts.keys(), "persistent") {
     opts = opts + {persistent: true}
   }
-  return agent_loop_options(opts)
+  let loop_opts = agent_loop_options(opts)
+  if contains(loop_opts.keys(), "session_id") {
+    return loop_opts
+  }
+  return loop_opts + {session_id: "agent_turn_session_" + uuid_v7()}
+}
+
+fn __agent_turn_judge_decisions(events) {
+  var out = []
+  for event in events {
+    if event?.type == "judge_decision" {
+      out = out
+        .push(
+        {
+          iteration: event.iteration,
+          verdict: event.verdict,
+          reasoning: event.reasoning,
+          next_step: event.next_step,
+          judge_duration_ms: event.judge_duration_ms,
+        },
+      )
+    }
+  }
+  return out
+}
+
+fn __agent_turn_iteration_summaries(events) {
+  var turns = {}
+  var order = []
+  for event in events {
+    if event?.type == "turn_start" {
+      let key = to_string(event.iteration)
+      if turns[key] == nil {
+        turns[key] = {iteration: event.iteration}
+        order = order.push(key)
+      }
+      var entry = turns[key]
+      entry["started"] = true
+      turns[key] = entry
+    }
+    if event?.type == "turn_end" {
+      let key = to_string(event.iteration)
+      if turns[key] == nil {
+        turns[key] = {iteration: event.iteration}
+        order = order.push(key)
+      }
+      var entry = turns[key]
+      entry["ended"] = true
+      let info = event?.turn_info ?? {}
+      if info?.tool_count != nil {
+        entry["tool_count"] = info.tool_count
+      }
+      if info?.text != nil {
+        entry["prose_chars"] = len(info.text)
+      }
+      turns[key] = entry
+    }
+  }
+  var out = []
+  for key in order {
+    out = out.push(turns[key])
+  }
+  return out
 }
 
 /** agent_turn. */
 pub fn agent_turn(prompt, options = nil) {
   let opts = options ?? {}
-  return __host_agent_turn_collect(prompt, __agent_turn_system(opts?.system), __agent_turn_options(opts))
+  let loop_opts = __agent_turn_options(opts)
+  let captured = agent_capture_events(
+    loop_opts.session_id,
+    fn() { return agent_loop(prompt, __agent_turn_system(opts?.system), loop_opts) },
+  )
+  let result = captured.result
+  if type_of(result) != "dict" {
+    return result
+  }
+  return result
+    + {
+    iterations: __agent_turn_iteration_summaries(captured.events),
+    judge_decisions: __agent_turn_judge_decisions(captured.events),
+  }
 }
