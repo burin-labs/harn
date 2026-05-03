@@ -291,9 +291,58 @@ async fn server_advertises_resource_list_changed_capability() {
         serde_json::json!(true)
     );
     assert_eq!(
+        response["result"]["capabilities"]["resources"]["subscribe"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
         response["result"]["capabilities"]["tasks"]["requests"]["tools"]["call"],
         serde_json::json!({})
     );
+}
+
+#[tokio::test]
+async fn server_accepts_resource_subscribe_and_unsubscribe_for_registered_uris() {
+    let server = McpServer::new(
+        "test".to_string(),
+        Vec::new(),
+        vec![McpResourceDef {
+            uri: "docs://readme".to_string(),
+            name: "README".to_string(),
+            title: None,
+            description: None,
+            mime_type: Some("text/plain".to_string()),
+            text: "hello".to_string(),
+        }],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut vm = crate::Vm::new();
+
+    let subscribed = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                1,
+                "resources/subscribe",
+                serde_json::json!({ "uri": "docs://readme" }),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(subscribed["result"], serde_json::json!({}));
+
+    let unsubscribed = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                2,
+                "resources/unsubscribe",
+                serde_json::json!({ "uri": "docs://readme" }),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(unsubscribed["result"], serde_json::json!({}));
 }
 
 #[tokio::test]

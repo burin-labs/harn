@@ -262,11 +262,22 @@ Placeholder trust-graph surface. Today it returns:
 The server exposes these MCP resources:
 
 - `harn://manifest`
+- `harn://topic/trigger.inbox`
+- `harn://topic/trigger.outbox`
+- `harn://topic/agent.transcript.<id>`
 - `harn://event/<event_id>`
 - `harn://dlq/<entry_id>`
 
 `harn://event/<event_id>` includes the recorded trigger event plus related
 outbox/attempt/DLQ/action-graph trace entries.
+
+`harn://topic/*` resources expose recent EventLog entries for subscribable
+orchestrator topics. `resources/subscribe` starts a live EventLog watcher for
+the resource URI and the server sends `notifications/resources/updated` when a
+new record is appended. `resources/unsubscribe` stops delivery for that client
+connection. Streamable HTTP clients receive these notifications over `GET
+/mcp`; stdio and legacy SSE clients receive the same JSON-RPC notification on
+their existing server-to-client channel.
 
 ## Prompts
 
@@ -297,8 +308,8 @@ messages when watched manifest, prompt, lockfile, or package metadata changes.
 `harn mcp serve` negotiates MCP protocol version `2025-11-25`. It is a
 control-plane server for Harn orchestration state, so it supports tools,
 resources, prompts, logging, cancellation, progress, and streamable HTTP
-sessions. It does not expose completions, resource subscriptions, roots,
-or MCP tasks. The orchestrator-mode catalog does not currently issue
+sessions. It does not expose completions, roots, or MCP tasks. The
+orchestrator-mode catalog does not currently issue
 `sampling/createMessage` against connected clients (Harn's outbound MCP
 clients accept inbound sampling — see the
 [client docs](mcp-and-acp.html#mcp-client-support-matrix)).
@@ -309,13 +320,13 @@ clients accept inbound sampling — see the
 | `logging/setLevel` | Accepted |
 | `tools/list`, `tools/call` | Supported for the Harn tool catalog above |
 | `notifications/progress`, `notifications/cancelled` | Supported for cancellable work |
-| `resources/list`, `resources/read` | Supported for manifest, event, and DLQ resources |
+| `resources/list`, `resources/read` | Supported for manifest, EventLog topic, event, and DLQ resources |
 | `resources/templates/list` | Supported; returns an empty list |
+| `resources/subscribe`, `resources/unsubscribe` | Supported for EventLog topic resources; updates emit `notifications/resources/updated` |
 | `prompts/list` | Supported for `.harn.prompt` files in the project and prompt-library packages |
 | `prompts/get` | Supported; renders prompt templates with supplied arguments |
 | `elicitation/create` | Supported on script-driven `harn run --serve mcp` surfaces via the `mcp_elicit(...)` builtin (see [Elicitation](#elicitation)). The orchestrator-mode tool catalog does not currently issue elicitations. |
 | `completion/complete` | Explicitly unsupported |
-| `resources/subscribe`, `resources/unsubscribe` | Explicitly unsupported |
 | `roots/list` | Explicitly unsupported |
 | `sampling/createMessage` | Server-initiated sampling against the connected client is not emitted by the orchestrator catalog. Harn-as-MCP-client *does* accept inbound `sampling/createMessage` (routed to `llm_call` via the host bridge) — see the [client matrix](mcp-and-acp.html#mcp-client-support-matrix). |
 | `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Explicitly unsupported |

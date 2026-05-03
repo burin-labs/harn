@@ -37,18 +37,6 @@ pub const UNSUPPORTED_LATEST_SPEC_METHODS: &[UnsupportedMcpMethod] = &[
         role: "server",
         reason: "Harn does not expose prompt or resource-template argument completion.",
     },
-    UnsupportedMcpMethod {
-        method: "resources/subscribe",
-        feature: "resource subscriptions",
-        role: "server",
-        reason: "Harn resources are read on demand and are not backed by subscription state.",
-    },
-    UnsupportedMcpMethod {
-        method: "resources/unsubscribe",
-        feature: "resource subscriptions",
-        role: "server",
-        reason: "Harn resources are read on demand and are not backed by subscription state.",
-    },
     // `sampling/createMessage` (client) is supported — handled in
     // `mcp::handle_inbound_client_request` via
     // `mcp_sampling::dispatch_inbound_sampling`, which routes the
@@ -256,17 +244,12 @@ mod tests {
 
     #[test]
     fn latest_spec_gap_methods_are_explicit() {
-        for method in [
-            "completion/complete",
-            "resources/subscribe",
-            "resources/unsubscribe",
-        ] {
-            let response = unsupported_latest_spec_method_response(json!(1), method)
-                .expect("expected explicit unsupported method");
-            assert_eq!(response["error"]["code"], json!(-32601));
-            assert_eq!(response["error"]["data"]["method"], json!(method));
-            assert_eq!(response["error"]["data"]["status"], json!("unsupported"));
-        }
+        let method = "completion/complete";
+        let response = unsupported_latest_spec_method_response(json!(1), method)
+            .expect("expected explicit unsupported method");
+        assert_eq!(response["error"]["code"], json!(-32601));
+        assert_eq!(response["error"]["data"]["method"], json!(method));
+        assert_eq!(response["error"]["data"]["status"], json!("unsupported"));
     }
 
     #[test]
@@ -282,6 +265,12 @@ mod tests {
     #[test]
     fn roots_list_is_no_longer_in_the_unsupported_gap_list() {
         assert!(unsupported_latest_spec_method(METHOD_ROOTS_LIST).is_none());
+    }
+
+    #[test]
+    fn resource_subscriptions_are_no_longer_in_the_unsupported_gap_list() {
+        assert!(unsupported_latest_spec_method("resources/subscribe").is_none());
+        assert!(unsupported_latest_spec_method("resources/unsubscribe").is_none());
     }
 
     #[test]

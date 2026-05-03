@@ -367,6 +367,10 @@ default and include `nextCursor` when another page is available. Set
 Harn's MCP servers implement the core tool/resource/prompt path and explicitly
 reject latest-spec features that are out of scope for this release with a
 JSON-RPC error containing `error.data.type = "mcp.unsupportedFeature"`.
+Servers advertise `resources.subscribe` when resources are present. The
+orchestrator MCP server wires `harn://topic/*` resources to EventLog-backed
+`notifications/resources/updated`; script-driven servers accept subscriptions
+for registered resource URIs.
 
 | Method or feature | Harn as MCP server |
 |---|---|
@@ -374,10 +378,10 @@ JSON-RPC error containing `error.data.type = "mcp.unsupportedFeature"`.
 | `logging/setLevel` | Accepted |
 | `tools/list`, `tools/call` | Supported |
 | `notifications/progress`, `notifications/cancelled` | Supported for long-running tool calls |
-| `resources/list`, `resources/read`, `resources/templates/list` | Supported for registered entries and cards |
+| `resources/list`, `resources/read`, `resources/templates/list` | Supported for registered entries, cards, and orchestrator EventLog topic resources |
+| `resources/subscribe`, `resources/unsubscribe` | Supported for registered resource URIs; orchestrator topic resources emit update notifications |
 | `prompts/list`, `prompts/get` | Supported for registered prompts |
 | `completion/complete` | Explicitly unsupported |
-| `resources/subscribe`, `resources/unsubscribe` | Explicitly unsupported |
 | `roots/list` | Explicitly unsupported; client-side roots are not served by Harn |
 | `sampling/createMessage` | Server-initiated sampling against the connected client is not currently emitted by the orchestrator-mode catalog; Harn declares the `sampling` capability when acting as a client (see the [client matrix](#mcp-client-support-matrix)). |
 | `elicitation/create` | Supported outbound from script-driven handlers via `mcp_elicit(...)`; inbound client requests to the server are still rejected as normal unknown methods |
