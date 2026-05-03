@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     handoff_artifact_record, handoff_from_json_value, microcompact_tool_output, new_id,
-    normalize_handoff_artifact_json, now_rfc3339, ContextPolicy, VerificationContract,
+    normalize_handoff_artifact_json, now_rfc3339, ContextPolicy, StageContract,
+    VerificationContract,
 };
 
 /// Snip an artifact's text to fit within a token budget.
@@ -347,6 +348,58 @@ pub fn render_artifacts_context(artifacts: &[ArtifactRecord], policy: &ContextPo
     parts.join("\n\n")
 }
 
+async fn call_workflow_stdlib_function(
+    module: &str,
+    function: &str,
+    args: &[crate::value::VmValue],
+) -> Result<crate::value::VmValue, crate::value::VmError> {
+    let mut vm = crate::vm::Vm::new();
+    crate::stdlib::register_core_stdlib(&mut vm);
+    let exports = vm.load_module_exports_from_import(module).await?;
+    let closure = exports.get(function).cloned().ok_or_else(|| {
+        crate::value::VmError::Runtime(format!("{module} missing {function} export"))
+    })?;
+    vm.call_closure_pub(&closure, args).await
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct SelectedWorkflowStageArtifacts {
+    pub artifacts: Vec<ArtifactRecord>,
+    pub context_policy: ContextPolicy,
+}
+
+pub async fn select_workflow_stage_artifacts(
+    artifacts: &[ArtifactRecord],
+    context_policy: &ContextPolicy,
+    input_contract: &StageContract,
+) -> Result<SelectedWorkflowStageArtifacts, crate::value::VmError> {
+    let payload = serde_json::json!({
+        "artifacts": artifacts,
+        "context_policy": context_policy,
+        "input_contract": input_contract,
+    });
+    let config = crate::stdlib::json_to_vm_value(&payload);
+    let selected = call_workflow_stdlib_function(
+        "std/workflow/context",
+        "workflow_select_stage_artifacts",
+        &[config],
+    )
+    .await?;
+    let selected_json = crate::llm::vm_value_to_json(&selected);
+    let mut selected: SelectedWorkflowStageArtifacts = serde_json::from_value(selected_json)
+        .map_err(|error| {
+            crate::value::VmError::Runtime(format!(
+                "workflow_select_stage_artifacts returned invalid shape: {error}"
+            ))
+        })?;
+    selected.artifacts = selected
+        .artifacts
+        .into_iter()
+        .map(ArtifactRecord::normalize)
+        .collect();
+    Ok(selected)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreparedWorkflowStagePrompt {
     pub prompt: String,
@@ -371,20 +424,12 @@ pub async fn prepare_workflow_stage_prompt(
         "verification_contracts": verification_contracts,
     });
     let config = crate::stdlib::json_to_vm_value(&payload);
-    let mut vm = crate::vm::Vm::new();
-    crate::stdlib::register_core_stdlib(&mut vm);
-    let exports = vm
-        .load_module_exports_from_import("std/workflow/prompts")
-        .await?;
-    let prepare = exports
-        .get("workflow_prepare_stage_prompt")
-        .cloned()
-        .ok_or_else(|| {
-            crate::value::VmError::Runtime(
-                "std/workflow/prompts missing workflow_prepare_stage_prompt export".to_string(),
-            )
-        })?;
-    let prepared = vm.call_closure_pub(&prepare, &[config]).await?;
+    let prepared = call_workflow_stdlib_function(
+        "std/workflow/prompts",
+        "workflow_prepare_stage_prompt",
+        &[config],
+    )
+    .await?;
     let prepared = crate::llm::vm_value_to_json(&prepared);
     let prepared = prepared.as_object().ok_or_else(|| {
         crate::value::VmError::Runtime(

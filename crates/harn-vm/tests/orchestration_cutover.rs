@@ -6,6 +6,8 @@ const AGENT_OPTIONS_HARN: &str = include_str!("../../harn-stdlib/src/stdlib/agen
 const AGENT_TURN_HARN: &str = include_str!("../../harn-stdlib/src/stdlib/agent/turn.harn");
 const WORKFLOW_EXECUTE_HARN: &str =
     include_str!("../../harn-stdlib/src/stdlib/workflow/execute.harn");
+const WORKFLOW_CONTEXT_HARN: &str =
+    include_str!("../../harn-stdlib/src/stdlib/workflow/context.harn");
 const WORKFLOW_PROMPTS_HARN: &str =
     include_str!("../../harn-stdlib/src/stdlib/workflow/prompts.harn");
 const CONTRACT_PROMPT_RS: &str = include_str!("../src/llm/tools/contract_prompt.rs");
@@ -60,6 +62,16 @@ fn public_orchestration_entrypoints_dispatch_through_harn_stdlib() {
         !WORKFLOW_ARTIFACTS_RS.contains("pub fn render_workflow_prompt")
             && !WORKFLOW_ARTIFACTS_RS.contains("pub fn render_verification_context"),
         "workflow stage and verification prompt renderers must not move back into Rust"
+    );
+    assert!(
+        WORKFLOW_RS.contains("select_workflow_stage_artifacts(")
+            && WORKFLOW_CONTEXT_HARN.contains("workflow_select_stage_artifacts"),
+        "workflow stage artifact selection policy belongs in std/workflow/context.harn"
+    );
+    assert!(
+        !WORKFLOW_RS.contains("selection_policy.include_kinds")
+            && !WORKFLOW_RS.contains("select_artifacts_adaptive(artifacts.to_vec()"),
+        "workflow.rs should not own stage artifact-selection policy"
     );
 }
 

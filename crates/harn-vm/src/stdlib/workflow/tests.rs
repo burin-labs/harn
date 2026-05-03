@@ -4,9 +4,10 @@ use super::register::execute_workflow;
 use super::stage::{classify_stage_outcome, execute_stage_attempts, replay_stage};
 use crate::orchestration::{
     inject_workflow_verification_contracts, prepare_workflow_stage_prompt,
-    render_artifacts_context, save_run_record, workflow_verification_contracts, ContextPolicy,
-    RunChildRecord, RunExecutionRecord, RunRecord, RunStageRecord, VerificationContract,
-    VerificationRequirement, WorkflowEdge, WorkflowGraph, WorkflowNode,
+    render_artifacts_context, save_run_record, select_workflow_stage_artifacts,
+    workflow_verification_contracts, ContextPolicy, RunChildRecord, RunExecutionRecord, RunRecord,
+    RunStageRecord, VerificationContract, VerificationRequirement, WorkflowEdge, WorkflowGraph,
+    WorkflowNode,
 };
 use crate::tracing::{set_tracing_enabled, span_end, span_start, SpanKind};
 use crate::value::VmValue;
@@ -283,6 +284,60 @@ fn render_artifacts_context_uses_structured_artifact_blocks() {
     assert!(rendered.contains("<artifact>"));
     assert!(rendered.contains("<title>tests/unit/test_example.py</title>"));
     assert!(rendered.contains("<body>\ndef test_example():"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn select_workflow_stage_artifacts_applies_input_kind_fallback_in_harn() {
+    let mut node = WorkflowNode::default();
+    node.input_contract.input_kinds = vec!["summary".to_string()];
+    let artifacts = vec![
+        crate::orchestration::ArtifactRecord {
+            id: "summary".to_string(),
+            kind: "summary".to_string(),
+            text: Some("summary".to_string()),
+            ..Default::default()
+        },
+        crate::orchestration::ArtifactRecord {
+            id: "file".to_string(),
+            kind: "workspace_file".to_string(),
+            text: Some("file".to_string()),
+            ..Default::default()
+        },
+    ];
+    let selected =
+        select_workflow_stage_artifacts(&artifacts, &node.context_policy, &node.input_contract)
+            .await
+            .expect("stage artifact selector runs");
+    assert_eq!(selected.context_policy.include_kinds, vec!["summary"]);
+    assert_eq!(selected.artifacts.len(), 1);
+    assert_eq!(selected.artifacts[0].id, "summary");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn select_workflow_stage_artifacts_keeps_highest_priority_duplicate_text() {
+    let node = WorkflowNode::default();
+    let artifacts = vec![
+        crate::orchestration::ArtifactRecord {
+            id: "low".to_string(),
+            kind: "summary".to_string(),
+            text: Some("same".to_string()),
+            priority: Some(1),
+            ..Default::default()
+        },
+        crate::orchestration::ArtifactRecord {
+            id: "high".to_string(),
+            kind: "summary".to_string(),
+            text: Some("same".to_string()),
+            priority: Some(10),
+            ..Default::default()
+        },
+    ];
+    let selected =
+        select_workflow_stage_artifacts(&artifacts, &node.context_policy, &node.input_contract)
+            .await
+            .expect("stage artifact selector runs");
+    assert_eq!(selected.artifacts.len(), 1);
+    assert_eq!(selected.artifacts[0].id, "high");
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]

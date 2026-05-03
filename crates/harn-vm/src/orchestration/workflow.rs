@@ -1251,11 +1251,14 @@ pub async fn execute_stage_node(
     task: &str,
     artifacts: &[ArtifactRecord],
 ) -> Result<(serde_json::Value, Vec<ArtifactRecord>, Option<VmValue>), VmError> {
-    let mut selection_policy = node.context_policy.clone();
-    if selection_policy.include_kinds.is_empty() && !node.input_contract.input_kinds.is_empty() {
-        selection_policy.include_kinds = node.input_contract.input_kinds.clone();
-    }
-    let selected = super::select_artifacts_adaptive(artifacts.to_vec(), &selection_policy);
+    let selected_stage = super::select_workflow_stage_artifacts(
+        artifacts,
+        &node.context_policy,
+        &node.input_contract,
+    )
+    .await?;
+    let selected = selected_stage.artifacts;
+    let context_policy = selected_stage.context_policy;
     let rendered_context_override = if let Some(assembler) = node.raw_context_assembler.as_ref() {
         let assembled =
             crate::stdlib::assemble::assemble_from_options(&selected, assembler).await?;
@@ -1290,7 +1293,7 @@ pub async fn execute_stage_node(
         task,
         node.task_label.as_deref(),
         &selected,
-        &node.context_policy,
+        &context_policy,
         rendered_context_override.as_deref(),
         &verification_contracts,
     )
