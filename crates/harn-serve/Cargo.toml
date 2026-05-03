@@ -30,5 +30,6 @@ uuid = { version = "1", features = ["v4", "v7"] }
 
 [dev-dependencies]
 hex = "0.4"
+jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }

@@ -155,18 +155,14 @@ where
 {
     let header = decode_header(token)
         .map_err(|error| ConnectorError::invalid_signature(error.to_string()))?;
-    let jwks = resolve_jwks(http, source, options).await?;
-    let jwk = match header.kid.as_deref() {
-        Some(kid) => jwks.find(kid).ok_or_else(|| {
-            ConnectorError::invalid_signature(format!("JWT kid `{kid}` was not found in JWKS"))
-        })?,
-        None if jwks.keys.len() == 1 => &jwks.keys[0],
-        None => {
-            return Err(ConnectorError::invalid_signature(
-                "JWT missing kid and JWKS contains multiple keys",
-            ))
+    let jwks = resolve_jwks(http, source.clone(), options).await?;
+    let jwks = match (source, header.kid.as_deref()) {
+        (JwtKeySource::Url(jwks_url), Some(kid)) if jwks.find(kid).is_none() => {
+            fetch_uncached_jwks(http, jwks_url, options).await?
         }
+        _ => jwks,
     };
+    let jwk = jwk_for_header(&jwks, header.kid.as_deref())?;
     let key = DecodingKey::from_jwk(jwk)
         .map_err(|error| ConnectorError::invalid_signature(error.to_string()))?;
     let mut validation = Validation::new(header.alg);
@@ -189,6 +185,21 @@ where
         .map_err(|error| ConnectorError::invalid_signature(error.to_string()))
 }
 
+fn jwk_for_header<'a>(
+    jwks: &'a JwkSet,
+    kid: Option<&str>,
+) -> Result<&'a jsonwebtoken::jwk::Jwk, ConnectorError> {
+    match kid {
+        Some(kid) => jwks.find(kid).ok_or_else(|| {
+            ConnectorError::invalid_signature(format!("JWT kid `{kid}` was not found in JWKS"))
+        }),
+        None if jwks.keys.len() == 1 => Ok(&jwks.keys[0]),
+        None => Err(ConnectorError::invalid_signature(
+            "JWT missing kid and JWKS contains multiple keys",
+        )),
+    }
+}
+
 pub async fn verify_jwt_json(
     http: &reqwest::Client,
     token: &str,
@@ -206,6 +217,14 @@ async fn fetch_cached_jwks(
     if let Some(cached) = cached_jwks(jwks_url, options.jwks_cache_ttl) {
         return Ok(cached);
     }
+    fetch_uncached_jwks(http, jwks_url, options).await
+}
+
+async fn fetch_uncached_jwks(
+    http: &reqwest::Client,
+    jwks_url: &str,
+    options: &JwtVerificationOptions,
+) -> Result<JwkSet, ConnectorError> {
     if let Some(error) = crate::egress::connector_error_for_url(options.egress_label, jwks_url) {
         return Err(error);
     }
