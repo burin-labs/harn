@@ -2,29 +2,25 @@ name: Build release binaries
 
 on:
   push:
-    branches: [main]
     tags: ['v*']
-    paths:
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - 'crates/**'
-      - '.cargo/**'
-      - 'rust-toolchain.toml'
-      - 'Dockerfile'
-      - '.github/workflows/build-release-binaries.yml'
   workflow_dispatch:
     inputs:
       tag:
         description: 'Tag to (re-)release, e.g. v0.7.31. Required for workflow_dispatch.'
         required: true
         type: string
+      force_rebuild:
+        description: 'Rebuild/re-publish even when release assets and the versioned container image already exist.'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
   packages: write
 
 concurrency:
-  group: build-release-binaries-${{ github.ref }}
+  group: build-release-binaries-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -41,6 +37,8 @@ jobs:
       is_release: ${{ steps.resolve.outputs.is_release }}
       version: ${{ steps.resolve.outputs.version }}
       major_minor: ${{ steps.resolve.outputs.major_minor }}
+      should_build_binaries: ${{ steps.resolve.outputs.should_build_binaries }}
+      should_publish_container: ${{ steps.resolve.outputs.should_publish_container }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -50,11 +48,15 @@ jobs:
         id: resolve
         env:
           INPUT_TAG: ${{ inputs.tag }}
+          FORCE_REBUILD: ${{ inputs.force_rebuild && 'true' || 'false' }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           REF="${INPUT_TAG:-$REF_NAME}"
           IS_RELEASE=false
+          SHOULD_BUILD_BINARIES=false
+          SHOULD_PUBLISH_CONTAINER=false
           if [[ -n "$INPUT_TAG" || "$REF_TYPE" == "tag" ]]; then
             IS_RELEASE=true
             if [[ ! "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -66,16 +68,62 @@ jobs:
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
           fi
           MAJOR_MINOR="$(echo "$VERSION" | awk -F. '{print $1"."$2}')"
+
+          if [[ "$IS_RELEASE" == "true" ]]; then
+            EXPECTED_ASSETS=(
+              "harn-aarch64-apple-darwin.tar.gz"
+              "harn-aarch64-unknown-linux-gnu.tar.gz"
+              "harn-x86_64-apple-darwin.tar.gz"
+              "harn-x86_64-pc-windows-msvc.zip"
+              "harn-x86_64-unknown-linux-gnu.tar.gz"
+            )
+
+            if [[ "$FORCE_REBUILD" == "true" ]]; then
+              SHOULD_BUILD_BINARIES=true
+              SHOULD_PUBLISH_CONTAINER=true
+              echo "::notice::force_rebuild=true; rebuilding release binaries and re-publishing container tags for $REF."
+            else
+              MISSING_ASSETS=()
+              if RELEASE_ASSETS="$(gh release view "$REF" --json assets --jq '.assets[].name' 2>/dev/null)"; then
+                for ASSET in "${EXPECTED_ASSETS[@]}"; do
+                  if ! grep -Fxq "$ASSET" <<<"$RELEASE_ASSETS"; then
+                    MISSING_ASSETS+=("$ASSET")
+                  fi
+                done
+              else
+                MISSING_ASSETS=("${EXPECTED_ASSETS[@]}")
+              fi
+
+              if (( ${#MISSING_ASSETS[@]} == 0 )); then
+                echo "::notice::All expected GitHub release assets already exist for $REF; skipping binary build matrix."
+              else
+                SHOULD_BUILD_BINARIES=true
+                printf '::notice::Missing release assets for %s: %s\n' "$REF" "${MISSING_ASSETS[*]}"
+              fi
+
+              echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null 2>&1 || true
+              if docker manifest inspect "ghcr.io/burin-labs/harn:$VERSION" >/dev/null 2>&1; then
+                echo "::notice::Versioned container image ghcr.io/burin-labs/harn:$VERSION already exists; skipping container publish."
+              else
+                SHOULD_PUBLISH_CONTAINER=true
+                echo "::notice::Versioned container image ghcr.io/burin-labs/harn:$VERSION is missing; publishing container tags."
+              fi
+            fi
+          fi
+
           {
             echo "ref=$REF"
             echo "is_release=$IS_RELEASE"
             echo "version=$VERSION"
             echo "major_minor=$MAJOR_MINOR"
+            echo "should_build_binaries=$SHOULD_BUILD_BINARIES"
+            echo "should_publish_container=$SHOULD_PUBLISH_CONTAINER"
           } >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.target }}
     needs: setup
+    if: needs.setup.outputs.should_build_binaries == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -165,8 +213,8 @@ jobs:
 
   container:
     name: Publish container
-    needs: [setup, build]
-    if: needs.setup.outputs.is_release == 'true'
+    needs: setup
+    if: needs.setup.outputs.should_publish_container == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -217,7 +265,7 @@ jobs:
   release:
     name: Create GitHub release
     needs: [setup, build]
-    if: needs.setup.outputs.is_release == 'true'
+    if: needs.setup.outputs.should_build_binaries == 'true' && !cancelled() && !failure()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
