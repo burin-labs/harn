@@ -157,8 +157,7 @@ use crate::value::{VmChannelHandle, VmError, VmStream, VmStreamCancel, VmValue};
 use crate::vm::Vm;
 
 use self::api::{vm_build_llm_result, vm_call_completion_full};
-use self::daemon::parse_daemon_loop_config;
-use self::helpers::{opt_bool, opt_int, opt_str, opt_str_list};
+use self::helpers::{opt_int, opt_str};
 use self::stream::vm_stream_llm;
 use self::trace::emit_agent_event;
 use self::trace::trace_llm_call;
@@ -185,47 +184,6 @@ pub(crate) fn append_observability_sidecar_entry(
 
 fn output_validation_mode(opts: &api::LlmCallOptions) -> &str {
     opts.output_validation.as_deref().unwrap_or("off")
-}
-
-/// Extract an initial task ledger from agent_loop options. Kept local to the
-/// bridge-less registration path so it can parse VM values without depending
-/// on bridge-only setup code.
-fn parse_task_ledger_from_vm_options(
-    options: &Option<std::collections::BTreeMap<String, VmValue>>,
-) -> ledger::TaskLedger {
-    use ledger::{Deliverable, DeliverableStatus, TaskLedger};
-
-    let Some(opts) = options.as_ref() else {
-        return TaskLedger::default();
-    };
-    if let Some(explicit) = opts.get("task_ledger") {
-        let json = helpers::vm_value_to_json(explicit);
-        if let Ok(parsed) = serde_json::from_value::<TaskLedger>(json) {
-            return parsed;
-        }
-    }
-    let mut builder = TaskLedger::default();
-    if let Some(VmValue::String(s)) = opts.get("root_task") {
-        builder.root_task = s.trim().to_string();
-    }
-    if let Some(deliverables) = opts.get("deliverables").and_then(|v| match v {
-        VmValue::List(items) => Some(items.clone()),
-        _ => None,
-    }) {
-        for (idx, item) in deliverables.iter().enumerate() {
-            let text = item.display().trim().to_string();
-            if text.is_empty() {
-                continue;
-            }
-            builder.deliverables.push(Deliverable {
-                id: format!("deliverable-{}", idx + 1),
-                text,
-                status: DeliverableStatus::Open,
-                note: None,
-            });
-        }
-    }
-    builder
 }
 
 fn schema_validation_errors(result: &VmValue) -> Vec<String> {
@@ -995,266 +953,67 @@ impl crate::agent_events::AgentEventSink for CapturingAgentEventSink {
     }
 }
 
-async fn build_agent_loop_invocation(
-    args: &[VmValue],
-    options: &Option<std::collections::BTreeMap<String, VmValue>>,
-    builtin_name: &str,
-    event_sink: Option<Arc<dyn crate::agent_events::AgentEventSink>>,
-) -> Result<(api::LlmCallOptions, AgentLoopConfig), VmError> {
-    let profile_defaults = agent_config::agent_loop_profile_defaults(options, builtin_name)?;
-    let max_iterations =
-        opt_int(options, "max_iterations").unwrap_or(profile_defaults.max_iterations) as usize;
-    let max_nudges = opt_int(options, "max_nudges").unwrap_or(profile_defaults.max_nudges) as usize;
-    let tool_retries =
-        opt_int(options, "tool_retries").unwrap_or(profile_defaults.tool_retries) as usize;
-    let schema_retries =
-        opt_int(options, "schema_retries").unwrap_or(profile_defaults.schema_retries) as usize;
-    let tool_format = opt_str(options, "tool_format").unwrap_or_else(|| "text".to_string());
-    let native_tool_fallback = opt_str(options, "native_tool_fallback")
-        .map(|value| {
-            crate::orchestration::NativeToolFallbackPolicy::parse(&value).ok_or_else(|| {
-                VmError::Runtime(format!(
-                    "{builtin_name}: native_tool_fallback must be one of allow, allow_once, reject; got `{value}`"
-                ))
-            })
-        })
-        .transpose()?
-        .unwrap_or_default();
-    let turn_policy = options
-        .as_ref()
-        .and_then(|o| o.get("turn_policy"))
-        .map(|v| {
-            let json = crate::llm::helpers::vm_value_to_json(v);
-            serde_json::from_value::<crate::orchestration::TurnPolicy>(json).unwrap_or_default()
-        });
-    let policy = options.as_ref().and_then(|o| o.get("policy")).map(|v| {
-        let json = crate::llm::helpers::vm_value_to_json(v);
-        serde_json::from_value::<crate::orchestration::CapabilityPolicy>(json).unwrap_or_default()
-    });
-    let command_policy = agent_config::parse_command_policy_from_options(options, builtin_name)?;
-    let approval_policy = options
-        .as_ref()
-        .and_then(|o| o.get("approval_policy"))
-        .map(|v| {
-            let json = crate::llm::helpers::vm_value_to_json(v);
-            serde_json::from_value::<crate::orchestration::ToolApprovalPolicy>(json)
-                .unwrap_or_default()
-        });
-    let permissions = crate::llm::permissions::parse_dynamic_permission_policy(
-        options.as_ref().and_then(|o| o.get("permissions")),
-        builtin_name,
-    )?;
-    let session_id = opt_str(options, "session_id").unwrap_or_default();
-    let daemon_config = parse_daemon_loop_config(options.as_ref());
-    let (skill_registry, skill_match, working_files) =
-        crate::llm::agent::parse_skill_config(options);
-    let mcp_servers = crate::llm::agent::parse_mcp_server_specs(options)?;
-    let auto_compact = resolve_agent_loop_auto_compact(args, options).await?;
-    let autonomy_budget = crate::llm::autonomy_budget::parse_autonomy_budget(
-        options.as_ref(),
-        &session_id,
-        builtin_name,
-    )?;
-    let opts = extract_llm_options(args)?;
-    let budget = opts.budget.clone();
-    let config = AgentLoopConfig {
-        persistent: opt_bool(options, "persistent"),
-        max_iterations,
-        max_nudges,
-        nudge: opt_str(options, "nudge"),
-        done_sentinel: agent_config::parse_done_sentinel_option(options)?,
-        break_unless_phase: opt_str(options, "break_unless_phase"),
-        tool_retries,
-        tool_backoff_ms: opt_int(options, "tool_backoff_ms").unwrap_or(1000) as u64,
-        schema_retries,
-        schema_retry_nudge: parse_schema_nudge(options),
-        tool_format,
-        native_tool_fallback,
-        auto_compact,
-        policy,
-        command_policy,
-        permissions,
-        approval_policy,
-        daemon: opt_bool(options, "daemon"),
-        daemon_config,
-        llm_retries: opt_int(options, "llm_retries").unwrap_or(profile_defaults.llm_retries)
-            as usize,
-        llm_backoff_ms: opt_int(options, "llm_backoff_ms").unwrap_or(2000) as u64,
-        token_budget: opt_int(options, "token_budget"),
-        budget,
-        exit_when_verified: opt_bool(options, "exit_when_verified"),
-        loop_detect_warn: opt_int(options, "loop_detect_warn").unwrap_or(2) as usize,
-        loop_detect_block: opt_int(options, "loop_detect_block").unwrap_or(3) as usize,
-        loop_detect_skip: opt_int(options, "loop_detect_skip").unwrap_or(4) as usize,
-        tool_examples: opt_str(options, "tool_examples"),
-        turn_policy,
-        stop_after_successful_tools: opt_str_list(options, "stop_after_successful_tools"),
-        require_successful_tools: opt_str_list(options, "require_successful_tools"),
-        session_id,
-        event_sink,
-        task_ledger: parse_task_ledger_from_vm_options(options),
-        post_turn_callback: agent_config::parse_closure_option(options, "post_turn_callback")?,
-        verify_completion: agent_config::parse_closure_option(options, "verify_completion")?,
-        verify_completion_judge: agent::completion_judge::parse_completion_judge_option(options)?,
-        done_judge: agent::completion_judge::parse_done_judge_option(options)?,
-        max_verify_attempts: opt_int(options, "max_verify_attempts")
-            .filter(|n| *n >= 0)
-            .map(|n| n as usize)
-            .unwrap_or(agent_config::DEFAULT_MAX_VERIFY_ATTEMPTS),
-        llm_transcript_dir: opt_str(options, "llm_transcript_dir"),
-        skill_registry,
-        skill_match,
-        working_files,
-        mcp_servers,
-        mcp_clients: Default::default(),
-        autonomy_budget,
-    };
-    Ok((opts, config))
-}
-
-async fn host_agent_turn_collect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let prompt = match args.first() {
-        Some(VmValue::String(text)) => text.to_string(),
+async fn host_agent_capture_events_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(text)) if !text.is_empty() => text.to_string(),
+        Some(VmValue::String(_)) => {
+            return Err(VmError::Runtime(
+                "__host_agent_capture_events(session_id, body): session_id must be non-empty"
+                    .to_string(),
+            ))
+        }
         Some(other) => {
+            let type_name = other.type_name();
             return Err(VmError::Runtime(format!(
-                "__host_agent_turn_collect(prompt, system, opts): prompt must be a string; got {}",
-                other.type_name()
-            )))
+                "__host_agent_capture_events(session_id, body): session_id must be a string; got {type_name}"
+            )));
         }
         None => {
             return Err(VmError::Runtime(
-                "__host_agent_turn_collect(prompt, system, opts): missing prompt".to_string(),
+                "__host_agent_capture_events(session_id, body): missing session_id".to_string(),
             ))
         }
     };
-    let system_prompt = match args.get(1) {
-        Some(VmValue::String(text)) => text.to_string(),
-        Some(VmValue::Nil) | None => String::new(),
-        Some(other) => {
-            return Err(VmError::Runtime(format!(
-                "__host_agent_turn_collect(prompt, system, opts): system must be a string or nil; got {}",
-                other.type_name()
-            )))
+    let body = match args.get(1) {
+        Some(VmValue::Closure(closure)) => closure.clone(),
+        _ => {
+            return Err(VmError::Runtime(
+                "__host_agent_capture_events(session_id, body): body must be a closure".to_string(),
+            ))
         }
     };
-    let mut options = match args.get(2) {
-        Some(VmValue::Dict(dict)) => dict.as_ref().clone(),
-        Some(VmValue::Nil) | None => std::collections::BTreeMap::new(),
-        Some(other) => {
-            return Err(VmError::Runtime(format!(
-            "__host_agent_turn_collect(prompt, system, opts): opts must be a dict or nil; got {}",
-            other.type_name()
-        )))
-        }
-    };
-    options.entry("session_id".to_string()).or_insert_with(|| {
-        VmValue::String(Rc::from(format!(
-            "agent_turn_session_{}",
-            uuid::Uuid::now_v7()
-        )))
-    });
 
-    let loop_options = Some(options.clone());
-    let loop_args = vec![
-        VmValue::String(Rc::from(prompt)),
-        VmValue::String(Rc::from(system_prompt)),
-        VmValue::Dict(Rc::new(options)),
-    ];
     let captured_events = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let session_id = opt_str(&loop_options, "session_id").unwrap_or_default();
     let sink: Arc<dyn crate::agent_events::AgentEventSink> = Arc::new(CapturingAgentEventSink {
         session_id,
         events: captured_events.clone(),
     });
-    let (mut opts, config) =
-        build_agent_loop_invocation(&loop_args, &loop_options, "agent_turn", Some(sink)).await?;
-    let mut result = run_agent_loop_internal(&mut opts, config).await?;
-    if let Some(object) = result.as_object_mut() {
-        let events = captured_events
-            .lock()
-            .map(|events| events.clone())
-            .unwrap_or_default();
-        object.insert(
-            "iterations".to_string(),
-            serde_json::Value::Array(agent_turn_iteration_summaries(&events)),
-        );
-        object.insert(
-            "judge_decisions".to_string(),
-            serde_json::Value::Array(agent_turn_judge_decisions(&events)),
-        );
-    }
-    Ok(json_to_vm_value(&result))
-}
-
-fn agent_turn_judge_decisions(
-    events: &[crate::agent_events::AgentEvent],
-) -> Vec<serde_json::Value> {
-    events
-        .iter()
-        .filter_map(|event| match event {
-            crate::agent_events::AgentEvent::JudgeDecision {
-                iteration,
-                verdict,
-                reasoning,
-                next_step,
-                judge_duration_ms,
-                ..
-            } => Some(serde_json::json!({
-                "iteration": iteration,
-                "verdict": verdict,
-                "reasoning": reasoning,
-                "next_step": next_step,
-                "judge_duration_ms": judge_duration_ms,
-            })),
-            _ => None,
+    let _guard = agent::LoopSinkGuard::install(Some(sink));
+    let mut child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+        VmError::Runtime(
+            "__host_agent_capture_events requires an async builtin VM context".to_string(),
+        )
+    })?;
+    let result = child_vm.call_closure_pub(&body, &[]).await;
+    let output = child_vm.take_output();
+    crate::vm::forward_child_output_to_parent(&output);
+    let result = result?;
+    let events = captured_events
+        .lock()
+        .map(|events| {
+            events
+                .iter()
+                .map(|event| serde_json::to_value(event).unwrap_or(serde_json::Value::Null))
+                .collect::<Vec<_>>()
         })
-        .collect()
-}
-
-fn agent_turn_iteration_summaries(
-    events: &[crate::agent_events::AgentEvent],
-) -> Vec<serde_json::Value> {
-    let mut turns: std::collections::BTreeMap<usize, serde_json::Map<String, serde_json::Value>> =
-        std::collections::BTreeMap::new();
-    for event in events {
-        match event {
-            crate::agent_events::AgentEvent::TurnStart { iteration, .. } => {
-                turns
-                    .entry(*iteration)
-                    .or_insert_with(|| {
-                        serde_json::Map::from_iter([(
-                            "iteration".to_string(),
-                            serde_json::json!(iteration),
-                        )])
-                    })
-                    .insert("started".to_string(), serde_json::Value::Bool(true));
-            }
-            crate::agent_events::AgentEvent::TurnEnd {
-                iteration,
-                turn_info,
-                ..
-            } => {
-                let entry = turns.entry(*iteration).or_insert_with(|| {
-                    serde_json::Map::from_iter([(
-                        "iteration".to_string(),
-                        serde_json::json!(iteration),
-                    )])
-                });
-                entry.insert("ended".to_string(), serde_json::Value::Bool(true));
-                if let Some(tool_count) = turn_info.get("tool_count").cloned() {
-                    entry.insert("tool_count".to_string(), tool_count);
-                }
-                if let Some(text) = turn_info.get("text").and_then(|value| value.as_str()) {
-                    entry.insert(
-                        "prose_chars".to_string(),
-                        serde_json::json!(text.chars().count()),
-                    );
-                }
-            }
-            _ => {}
-        }
-    }
-    turns.into_values().map(serde_json::Value::Object).collect()
+        .unwrap_or_default();
+    let mut envelope = std::collections::BTreeMap::new();
+    envelope.insert("result".to_string(), result);
+    envelope.insert(
+        "events".to_string(),
+        json_to_vm_value(&serde_json::Value::Array(events)),
+    );
+    Ok(VmValue::Dict(Rc::new(envelope)))
 }
 
 fn agent_primitive_tools_arg(
@@ -1678,29 +1437,27 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
     }
 }
 
+macro_rules! register_async_builtins {
+    ($vm:expr, {$($name:literal => $handler:path),+ $(,)?}) => {
+        $(
+            $vm.register_async_builtin($name, |args| async move { $handler(args).await });
+        )+
+    };
+}
+
 /// Register LLM builtins on a VM.
 pub fn register_llm_builtins(vm: &mut Vm) {
     rate_limit::init_from_config();
     agent_config::register_agent_subscribe(vm);
     agent_config::register_agent_inject_feedback(vm);
-    vm.register_async_builtin("__host_agent_turn_collect", |args| async move {
-        host_agent_turn_collect_impl(args).await
-    });
-    vm.register_async_builtin("__host_agent_parse_tool_calls", |args| async move {
-        host_agent_parse_tool_calls_impl(args).await
-    });
-    vm.register_async_builtin("__host_agent_dispatch_tool_call", |args| async move {
-        host_agent_dispatch_tool_call_impl(args).await
-    });
-    vm.register_async_builtin("__host_agent_dispatch_tool_batch", |args| async move {
-        host_agent_dispatch_tool_batch_impl(args).await
-    });
-    vm.register_async_builtin("__cost_route", |args| async move {
-        cost_route::cost_route_impl(args).await
-    });
-    vm.register_async_builtin("llm_call", |args| async move { llm_call_impl(args).await });
-    vm.register_async_builtin("llm_stream_call", |args| async move {
-        llm_stream_call_impl(args).await
+    register_async_builtins!(vm, {
+        "__host_agent_capture_events" => host_agent_capture_events_impl,
+        "__host_agent_parse_tool_calls" => host_agent_parse_tool_calls_impl,
+        "__host_agent_dispatch_tool_call" => host_agent_dispatch_tool_call_impl,
+        "__host_agent_dispatch_tool_batch" => host_agent_dispatch_tool_batch_impl,
+        "__cost_route" => cost_route::cost_route_impl,
+        "llm_call" => llm_call_impl,
+        "llm_stream_call" => llm_stream_call_impl,
     });
     // `llm_call_safe` shares the exact same execution path as `llm_call`
     // but replaces the throw-on-failure contract with a normalized

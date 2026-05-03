@@ -1,0 +1,19 @@
+import { agent_capture_events } from "std/agent/events"
+
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "Captured."})
+  let session = "capture-" + uuid()
+  let captured = agent_capture_events(
+    session,
+    fn() { return agent_loop(
+      "Say captured",
+      nil,
+      {provider: "mock", max_iterations: 1, session_id: session, done_sentinel: false, done_judge: false},
+    ) },
+  )
+  let types = captured.events.map({ event -> event.type })
+  println(captured.result.status)
+  println(len(captured.events) > 0)
+  println(contains(types, "turn_start"))
+}
