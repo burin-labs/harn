@@ -5,8 +5,8 @@
 
 pub(super) use super::helpers::{
     action_turn_nudge, assistant_history_text, has_successful_tools,
-    loop_state_requests_phase_change, prose_exceeds_budget, sentinel_without_action_nudge,
-    should_stop_after_successful_tools, trim_prose_for_history,
+    loop_state_requests_phase_change, prose_exceeds_budget, should_stop_after_successful_tools,
+    trim_prose_for_history,
 };
 pub(super) use super::run_agent_loop_internal;
 pub(super) use crate::bridge::HostBridge;
@@ -124,7 +124,8 @@ pub(super) fn base_agent_config() -> AgentLoopConfig {
         task_ledger: Default::default(),
         post_turn_callback: None,
         verify_completion: None,
-        max_verify_attempts: 3,
+        verify_completion_judge: None,
+        max_verify_attempts: crate::llm::agent_config::DEFAULT_MAX_VERIFY_ATTEMPTS,
         llm_transcript_dir: None,
         skill_registry: None,
         skill_match: Default::default(),

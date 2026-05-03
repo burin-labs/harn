@@ -19,6 +19,7 @@ use super::helpers::{
 use super::tools::build_assistant_response_message;
 
 pub(crate) const DEFAULT_AGENT_LOOP_LLM_RETRIES: usize = 2;
+pub(crate) const DEFAULT_MAX_VERIFY_ATTEMPTS: usize = 20;
 
 #[derive(Clone, Copy)]
 pub(crate) struct AgentLoopProfileDefaults {
@@ -173,6 +174,13 @@ pub struct AgentLoopConfig {
     /// Does NOT fire on budget-exhaustion paths — those represent hard
     /// resource limits, not "is the work actually done" decisions.
     pub verify_completion: Option<crate::value::VmValue>,
+    /// Built-in completion judge. When enabled, Harn runs a structured
+    /// side-call at natural exit points and interprets `{pass, feedback}`:
+    /// pass confirms, failure vetoes and injects feedback. This is the
+    /// Harn-owned version of the common "is the agent really done?"
+    /// integration hook, so hosts do not need to hand-roll side
+    /// transcript mechanics.
+    pub verify_completion_judge: Option<super::agent::completion_judge::CompletionJudgeConfig>,
     /// Cap on how many times `verify_completion` may veto a stop in a
     /// single loop. Once exceeded, the next break is forced and the
     /// loop exits with `final_status = "verify_exhausted"`. Defaults to
@@ -636,10 +644,12 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     task_ledger: parse_task_ledger_from_options(&options),
                     post_turn_callback: parse_closure_option(&options, "post_turn_callback")?,
                     verify_completion: parse_closure_option(&options, "verify_completion")?,
+                    verify_completion_judge:
+                        super::agent::completion_judge::parse_completion_judge_option(&options)?,
                     max_verify_attempts: opt_int(&options, "max_verify_attempts")
                         .filter(|n| *n >= 0)
                         .map(|n| n as usize)
-                        .unwrap_or(3),
+                        .unwrap_or(DEFAULT_MAX_VERIFY_ATTEMPTS),
                     llm_transcript_dir: opt_str(&options, "llm_transcript_dir"),
                     skill_registry,
                     skill_match,

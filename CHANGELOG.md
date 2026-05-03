@@ -30,6 +30,13 @@ condensed series summaries instead of full per-patch history.
   tool-use counts so judge logic can fork transcripts via
   `agent_session_fork_at` + `parallel settle` without any new runtime
   primitives.
+- **Built-in `verify_completion_judge` stop policy.** Hosts can now pass
+  `verify_completion_judge: true` or a policy dict to have Harn own the
+  structured completion-judge side call, transcript rendering, feedback
+  injection, optional final-response synthesis, and bounded retry loop.
+  The schema requires only `pass`; `feedback` and `final_response` are
+  optional and may be `null`, so weak local models do not need to emit
+  placeholder strings on passes.
 - **`post_turn_callback` enriched payload.** The post-turn callback now
   receives `session_id` so callbacks can address the live session, and
   the verdict shape was extended with an `injects: [{role, content}]`
@@ -69,6 +76,16 @@ condensed series summaries instead of full per-patch history.
   or value types went unnoticed. They now error
   (`'<name>' must be a closure or nil; got <type>`) so foot-guns surface
   immediately.
+- **Completion verification is conservative under judge failure.** The
+  built-in judge now treats malformed or schema-invalid structured
+  output as a veto with fallback feedback instead of confirming
+  completion. `max_verify_attempts` now defaults to 20 so product
+  integrations can safely allow long local-model recovery loops while
+  still capping infinite judge-veto cycles.
+- **Ollama native tool history replay.** Replayed assistant tool-call
+  history now uses the OpenAI-compatible string-encoded
+  `function.arguments` shape that modern Ollama validates, avoiding
+  second-iteration local Qwen failures after a native tool call.
 
 - **Merge Captain timeout ladder evals (#1014).** Added a reusable persona eval ladder runner for
   Merge Captain, exposed through `harn merge-captain ladder`, `harn eval`, `harn test package

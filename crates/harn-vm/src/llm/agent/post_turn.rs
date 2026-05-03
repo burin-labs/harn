@@ -58,6 +58,8 @@ use super::llm_call::LlmCallResult;
 use super::state::AgentLoopState;
 use super::tool_dispatch::ToolDispatchResult;
 
+const MAX_FINAL_TOOL_RESULT_CHARS: usize = 4_000;
+
 pub(super) enum IterationOutcome {
     Continue,
     Break,
@@ -74,6 +76,7 @@ pub(super) struct PostTurnContext<'a> {
     pub turn_policy: Option<&'a TurnPolicy>,
     pub stop_after_successful_tools: &'a Option<Vec<String>>,
     pub post_turn_callback: &'a Option<VmValue>,
+    pub verify_completion_enabled: bool,
     pub auto_compact: &'a Option<AutoCompactConfig>,
     pub daemon_config: &'a DaemonLoopConfig,
     pub custom_nudge: &'a Option<String>,
@@ -250,6 +253,34 @@ pub(super) async fn run_post_turn(
                 );
                 return Ok(IterationOutcome::Break);
             }
+        }
+
+        let tool_turn_has_failure = dispatch
+            .tool_results_this_iter
+            .iter()
+            .any(|result| result["status"].as_str() != Some("ok"))
+            || !call_result.tool_parse_errors.is_empty();
+        let tool_turn_has_success = dispatch
+            .tool_results_this_iter
+            .iter()
+            .any(|result| result["status"].as_str() == Some("ok"));
+        let tool_turn_has_visible_answer = !call_result.text.trim().is_empty();
+        if ctx.verify_completion_enabled
+            && tool_turn_has_success
+            && !tool_turn_has_failure
+            && tool_turn_has_visible_answer
+        {
+            state.last_iteration_text = verified_tool_turn_visible_text(
+                state,
+                call_result,
+                dispatch.tool_results_this_iter.len(),
+                &dispatch.observations,
+            );
+            crate::events::log_debug(
+                "agent.verify_completion",
+                &format!("iter={iteration} checking successful tool turn as an exit candidate"),
+            );
+            return Ok(IterationOutcome::Break);
         }
 
         // Include system prompt + tool defs in the estimate since they
@@ -822,6 +853,65 @@ pub(super) async fn run_post_turn(
     )
     .await?;
     Ok(IterationOutcome::Continue)
+}
+
+fn verified_tool_turn_visible_text(
+    state: &AgentLoopState,
+    call_result: &LlmCallResult,
+    tool_result_count: usize,
+    observations: &str,
+) -> String {
+    let assistant_text = call_result.text.trim();
+    let tool_results = final_tool_result_text(state, tool_result_count, observations);
+    if tool_results.trim().is_empty() {
+        return assistant_text.to_string();
+    }
+    let label = if tool_result_count == 1 {
+        "Tool result"
+    } else {
+        "Tool results"
+    };
+    if assistant_text.is_empty() {
+        return format!("{label}:\n{tool_results}");
+    }
+    format!("{assistant_text}\n\n{label}:\n{tool_results}")
+}
+
+fn final_tool_result_text(
+    state: &AgentLoopState,
+    tool_result_count: usize,
+    observations: &str,
+) -> String {
+    if !observations.trim().is_empty() {
+        return truncate_tool_result_text(observations.trim());
+    }
+    let mut tool_messages: Vec<String> = state
+        .visible_messages
+        .iter()
+        .rev()
+        .filter(|message| message["role"].as_str() == Some("tool"))
+        .take(tool_result_count)
+        .filter_map(|message| message.get("content"))
+        .map(render_tool_message_content)
+        .collect();
+    tool_messages.reverse();
+    truncate_tool_result_text(tool_messages.join("\n\n").trim())
+}
+
+fn render_tool_message_content(content: &serde_json::Value) -> String {
+    match content {
+        serde_json::Value::String(text) => text.clone(),
+        other => serde_json::to_string(other).unwrap_or_else(|_| other.to_string()),
+    }
+}
+
+fn truncate_tool_result_text(text: &str) -> String {
+    if text.chars().count() <= MAX_FINAL_TOOL_RESULT_CHARS {
+        return text.to_string();
+    }
+    let mut truncated: String = text.chars().take(MAX_FINAL_TOOL_RESULT_CHARS).collect();
+    truncated.push_str("\n[... truncated ...]");
+    truncated
 }
 
 /// Run the `verify_completion` closure once and apply its decision.

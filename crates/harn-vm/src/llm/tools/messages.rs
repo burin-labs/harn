@@ -26,8 +26,10 @@ pub(crate) fn build_assistant_tool_message(
         }
         serde_json::json!({"role": "assistant", "content": content})
     } else if is_ollama {
-        // Ollama `/api/chat` expects native tool-call history with
-        // object arguments instead of OpenAI-style JSON strings.
+        // Modern Ollama chat validates replayed tool-call history using
+        // the OpenAI-compatible string-encoded `function.arguments`
+        // shape. Keeping the history shape consistent also prevents
+        // local Qwen runs from failing on the second iteration.
         let calls: Vec<serde_json::Value> = tool_calls
             .iter()
             .enumerate()
@@ -37,7 +39,7 @@ pub(crate) fn build_assistant_tool_message(
                     "function": {
                         "index": idx,
                         "name": tc["name"],
-                        "arguments": tc["arguments"],
+                        "arguments": serde_json::to_string(&tc["arguments"]).unwrap_or_default(),
                     }
                 })
             })

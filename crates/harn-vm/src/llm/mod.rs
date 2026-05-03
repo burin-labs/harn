@@ -478,6 +478,7 @@ fn join_limited_keys(keys: &[String]) -> String {
     )
 }
 
+pub(crate) use self::agent::completion_judge::parse_completion_judge_option;
 pub(crate) use self::agent::parse_skill_match_config_public as parse_skill_match_config_dict;
 pub(crate) use self::agent::SkillMatchConfig;
 pub use self::agent::{
@@ -490,7 +491,7 @@ pub(crate) use self::agent::{
 };
 pub(crate) use self::agent_config::{
     agent_loop_profile_defaults, agent_loop_result_from_llm, parse_command_policy_from_options,
-    AgentLoopConfig,
+    AgentLoopConfig, DEFAULT_MAX_VERIFY_ATTEMPTS,
 };
 pub use self::agent_config::{
     register_agent_loop_with_bridge, register_llm_call_structured_with_bridge,
@@ -1277,10 +1278,12 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                     &options,
                     "verify_completion",
                 )?,
+                verify_completion_judge:
+                    agent::completion_judge::parse_completion_judge_option(&options)?,
                 max_verify_attempts: opt_int(&options, "max_verify_attempts")
                     .filter(|n| *n >= 0)
                     .map(|n| n as usize)
-                    .unwrap_or(3),
+                    .unwrap_or(agent_config::DEFAULT_MAX_VERIFY_ATTEMPTS),
                 llm_transcript_dir: opt_str(&options, "llm_transcript_dir"),
                 skill_registry,
                 skill_match,

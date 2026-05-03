@@ -43,32 +43,6 @@ fn native_action_turn_nudge_mentions_bare_done_sentinel() {
 }
 
 #[test]
-fn sentinel_without_action_nudge_stays_stage_agnostic() {
-    let policy = TurnPolicy {
-        require_action_or_yield: true,
-        allow_done_sentinel: true,
-        max_prose_chars: Some(180),
-    };
-    let msg = sentinel_without_action_nudge("text", Some(&policy));
-    assert!(msg.contains("without taking any tool action"));
-    assert!(msg.contains("Make concrete progress with an available tool now, or switch phase"));
-    assert!(!msg.contains("lookup() or read()"));
-    assert!(msg.contains("Keep prose to at most 180 visible characters"));
-}
-
-#[test]
-fn native_sentinel_without_action_nudge_mentions_bare_done_sentinel() {
-    let policy = TurnPolicy {
-        require_action_or_yield: true,
-        allow_done_sentinel: true,
-        max_prose_chars: Some(180),
-    };
-    let msg = sentinel_without_action_nudge("native", Some(&policy));
-    assert!(msg.contains("`##DONE##` without taking any tool action"));
-    assert!(!msg.contains("<done>"));
-}
-
-#[test]
 fn action_turn_nudge_omits_done_sentinel_when_stage_disallows_it() {
     let policy = TurnPolicy {
         require_action_or_yield: true,
@@ -80,18 +54,6 @@ fn action_turn_nudge_omits_done_sentinel_when_stage_disallows_it() {
     assert!(msg.contains(
         "either make concrete progress with a well-formed <tool_call> block or switch phase"
     ));
-}
-
-#[test]
-fn sentinel_without_action_nudge_explains_workflow_owned_stage_rule() {
-    let policy = TurnPolicy {
-        require_action_or_yield: true,
-        allow_done_sentinel: false,
-        max_prose_chars: Some(90),
-    };
-    let msg = sentinel_without_action_nudge("text", Some(&policy));
-    assert!(msg.contains("workflow-owned action stage"));
-    assert!(msg.contains("Do not output a <done> block in this stage"));
 }
 
 #[test]
