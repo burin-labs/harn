@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::value::{values_equal, VmValue};
@@ -7,7 +6,7 @@ use crate::value::{values_equal, VmValue};
 use super::ast::{BinOp, Expr, Node, PathSeg, UnOp};
 use super::error::TemplateError;
 use super::filters::apply_filter;
-use super::{PromptSourceSpan, PromptSpanKind};
+use super::{PromptSourceSpan, PromptSpanKind, TemplateAsset};
 
 #[derive(Default, Debug, Clone)]
 pub(super) struct Scope<'a> {
@@ -61,10 +60,8 @@ impl<'a> Scope<'a> {
 }
 
 pub(super) struct RenderCtx {
-    pub(super) base: Option<PathBuf>,
-    pub(super) include_root: Option<PathBuf>,
-    pub(super) include_stack: Vec<PathBuf>,
-    pub(super) current_path: Option<PathBuf>,
+    pub(super) current_asset: TemplateAsset,
+    pub(super) include_stack: Vec<String>,
     /// When inside an `{% include %}`, this holds the include-call's
     /// span (in the *parent* template). Every span emitted during the
     /// recursive render points at this as its `parent_span`, so the
@@ -73,14 +70,11 @@ pub(super) struct RenderCtx {
     pub(super) current_include_parent: Option<Box<PromptSourceSpan>>,
 }
 
-/// Template URI reported alongside every span — the absolute path of
-/// the currently-rendering `.harn.prompt` file. Empty string when the
-/// renderer doesn't know (inline template arg or synthetic snippet).
+/// Template URI reported alongside every span. Filesystem templates use
+/// their path string, embedded stdlib templates use `std://...`, and
+/// inline templates without a source path use an empty string.
 fn current_template_uri(rc: &RenderCtx) -> String {
-    rc.current_path
-        .as_deref()
-        .and_then(|p| p.to_str().map(|s| s.to_string()))
-        .unwrap_or_default()
+    rc.current_asset.uri.clone()
 }
 
 pub(super) fn render_nodes(
@@ -260,65 +254,18 @@ fn render_node(
                     ));
                 }
             };
-            let asset_ref_opt = crate::stdlib::asset_paths::parse(&path_str);
-            let resolved: PathBuf = if let Some(asset_ref) = &asset_ref_opt {
-                // `{{ include "@/..." }}` and `{{ include "@alias/..." }}`
-                // anchor at the project root of the *currently-rendering*
-                // template — `rc.current_path` — not the entry pipeline,
-                // so a bundled prompt fragment can pull in sibling
-                // partials by stable name regardless of how it got
-                // included transitively (#742). Fall back to the VM's
-                // thread-local source dir when no current path is set
-                // (the entry-render case for inline templates).
-                let anchor = rc
-                    .current_path
-                    .as_deref()
-                    .and_then(Path::parent)
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(crate::stdlib::process::source_root_path);
-                crate::stdlib::asset_paths::resolve(asset_ref, &anchor)
-                    .map_err(|msg| TemplateError::new(*line, *col, msg))?
-            } else if Path::new(&path_str).is_absolute() {
-                PathBuf::from(&path_str)
-            } else if let Some(base) = &rc.base {
-                base.join(&path_str)
-            } else {
-                crate::stdlib::process::resolve_source_asset_path(&path_str)
-            };
-            let canonical = resolved.canonicalize().unwrap_or(resolved.clone());
-            // Package-root forms have their own safety boundary (the
-            // project root, enforced by `safe_relative` rejecting `..`),
-            // so they're allowed to address siblings outside the
-            // calling template's directory — that's the entire point.
-            if asset_ref_opt.is_none() {
-                if let Some(root) = &rc.include_root {
-                    if !canonical.starts_with(root) {
-                        return Err(TemplateError::new(
-                            *line,
-                            *col,
-                            format!(
-                                "include path {} escapes template root {}",
-                                canonical.display(),
-                                root.display()
-                            ),
-                        ));
-                    }
-                }
-            }
-            if rc.include_stack.iter().any(|p| p == &canonical) {
+            let asset = super::assets::resolve_include(&rc.current_asset, &path_str, *line, *col)?;
+            if rc.include_stack.iter().any(|id| id == &asset.id) {
                 let chain = rc
                     .include_stack
                     .iter()
-                    .map(|p| p.display().to_string())
+                    .map(String::as_str)
                     .collect::<Vec<_>>()
                     .join(" → ");
                 return Err(TemplateError::new(
                     *line,
                     *col,
-                    format!(
-                        "circular include detected: {chain} → {}",
-                        canonical.display()
-                    ),
+                    format!("circular include detected: {chain} → {}", asset.id),
                 ));
             }
             if rc.include_stack.len() >= 32 {
@@ -328,17 +275,6 @@ fn render_node(
                     "include depth exceeded (32 levels)",
                 ));
             }
-            let contents = std::fs::read_to_string(&resolved).map_err(|e| {
-                TemplateError::new(
-                    *line,
-                    *col,
-                    format!(
-                        "failed to read included template {}: {e}",
-                        resolved.display()
-                    ),
-                )
-            })?;
-            let new_base = resolved.parent().map(Path::to_path_buf);
             let mut child_bindings = scope.flatten();
             if let Some(pairs) = with {
                 for (k, e) in pairs {
@@ -346,15 +282,9 @@ fn render_node(
                     child_bindings.insert(k.clone(), v);
                 }
             }
-            let child_nodes = super::parser::parse(&contents).map_err(|mut e| {
-                if e.path.is_none() {
-                    e.path = Some(resolved.clone());
-                }
-                e
-            })?;
+            let child_nodes = super::assets::parse_cached(&asset)?;
             let mut child_scope = Scope::new(Some(&child_bindings));
-            let saved_base = rc.base.clone();
-            let saved_current = rc.current_path.clone();
+            let saved_asset = rc.current_asset.clone();
             let saved_parent = rc.current_include_parent.clone();
             let include_call_span = PromptSourceSpan {
                 template_line: *line,
@@ -366,10 +296,9 @@ fn render_node(
                 parent_span: saved_parent.clone(),
                 template_uri: current_template_uri(rc),
             };
-            rc.base = new_base;
-            rc.current_path = Some(resolved.clone());
+            rc.current_asset = asset.clone();
             rc.current_include_parent = Some(Box::new(include_call_span));
-            rc.include_stack.push(canonical);
+            rc.include_stack.push(asset.id.clone());
             let res = render_nodes(
                 &child_nodes,
                 &mut child_scope,
@@ -378,8 +307,7 @@ fn render_node(
                 spans.as_deref_mut(),
             );
             rc.include_stack.pop();
-            rc.base = saved_base;
-            rc.current_path = saved_current;
+            rc.current_asset = saved_asset;
             rc.current_include_parent = saved_parent;
             res?;
             if let Some(spans) = spans.as_mut() {

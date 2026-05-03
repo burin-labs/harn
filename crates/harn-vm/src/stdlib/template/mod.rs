@@ -27,6 +27,7 @@ use std::path::Path;
 
 use crate::value::VmValue;
 
+mod assets;
 mod ast;
 mod error;
 mod expr_parser;
@@ -38,8 +39,9 @@ mod render;
 #[cfg(test)]
 mod tests;
 
+use assets::parse_cached;
+pub(crate) use assets::TemplateAsset;
 use error::TemplateError;
-use parser::parse;
 use render::{render_nodes, RenderCtx, Scope};
 
 // Thread-local registry of recent prompt renders keyed by `prompt_id`.
@@ -156,14 +158,16 @@ pub fn lookup_prompt_consumers(
     PROMPT_REGISTRY.with(|reg| {
         let reg = reg.borrow();
         reg.iter()
-            .filter(|p| p.template_uri == template_uri)
             .flat_map(|p| {
                 let prompt_id = p.prompt_id.clone();
                 p.spans
                     .iter()
                     .filter(move |s| {
                         let line = s.template_line;
-                        line > 0 && line >= template_line_start && line <= template_line_end
+                        s.template_uri == template_uri
+                            && line > 0
+                            && line >= template_line_start
+                            && line <= template_line_end
                     })
                     .cloned()
                     .map(move |s| (prompt_id.clone(), s))
@@ -219,7 +223,7 @@ pub(crate) fn reset_prompt_registry() {
 /// template would parse. Does not resolve `{{ include }}` targets — those are
 /// validated at render time with their own error reporting.
 pub fn validate_template_syntax(src: &str) -> Result<(), String> {
-    parse(src).map(|_| ()).map_err(|e| e.message())
+    parser::parse(src).map(|_| ()).map_err(|e| e.message())
 }
 
 /// Full-featured entrypoint that preserves errors. `base` is the directory
@@ -295,8 +299,8 @@ pub enum PromptSpanKind {
     If,
     /// One loop iteration's rendered body.
     ForIteration,
-    /// Rendered partial/include expansion. Child spans still carry
-    /// their own template_uri via a future extension (#96).
+    /// Rendered partial/include expansion. Child spans carry the
+    /// included template's own `template_uri`.
     Include,
 }
 
@@ -312,20 +316,29 @@ pub(crate) fn render_template_with_provenance(
     source_path: Option<&Path>,
     collect_provenance: bool,
 ) -> Result<(String, Vec<PromptSourceSpan>), TemplateError> {
-    let nodes = parse(template).map_err(|mut e| {
-        if let Some(p) = source_path {
-            e.path = Some(p.to_path_buf());
-        }
-        e
-    })?;
-    let mut out = String::with_capacity(template.len());
+    let asset = TemplateAsset::inline(template, base, source_path);
+    render_asset_with_provenance_result(&asset, bindings, collect_provenance)
+}
+
+pub(crate) fn render_asset_result(
+    asset: &TemplateAsset,
+    bindings: Option<&BTreeMap<String, VmValue>>,
+) -> Result<String, TemplateError> {
+    let (rendered, _spans) = render_asset_with_provenance_result(asset, bindings, false)?;
+    Ok(rendered)
+}
+
+pub(crate) fn render_asset_with_provenance_result(
+    asset: &TemplateAsset,
+    bindings: Option<&BTreeMap<String, VmValue>>,
+    collect_provenance: bool,
+) -> Result<(String, Vec<PromptSourceSpan>), TemplateError> {
+    let nodes = parse_cached(asset)?;
+    let mut out = String::with_capacity(asset.source.len());
     let mut scope = Scope::new(bindings);
-    let include_root = base.map(|path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
     let mut rc = RenderCtx {
-        base: base.map(Path::to_path_buf),
-        include_root,
+        current_asset: asset.clone(),
         include_stack: Vec::new(),
-        current_path: source_path.map(Path::to_path_buf),
         current_include_parent: None,
     };
     let mut spans = if collect_provenance {
@@ -335,7 +348,10 @@ pub(crate) fn render_template_with_provenance(
     };
     render_nodes(&nodes, &mut scope, &mut rc, &mut out, spans.as_mut()).map_err(|mut e| {
         if e.path.is_none() {
-            e.path = source_path.map(Path::to_path_buf);
+            e.path = asset.error_path();
+        }
+        if e.uri.is_none() {
+            e.uri = asset.error_uri();
         }
         e
     })?;

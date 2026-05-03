@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::rc::Rc;
 
 use super::*;
@@ -280,9 +279,9 @@ fn error_unknown_filter() {
 fn include_with() {
     use std::fs;
     let dir = tempdir();
-    let partial = dir.join("p.prompt");
+    let partial = dir.path().join("p.prompt");
     fs::write(&partial, "[{{name}}]").unwrap();
-    let parent = dir.join("main.prompt");
+    let parent = dir.path().join("main.prompt");
     fs::write(
         &parent,
         r#"hello {{ include "p.prompt" with { name: who } }}!"#,
@@ -290,8 +289,88 @@ fn include_with() {
     .unwrap();
     let b = dict(&[("who", s("world"))]);
     let src = fs::read_to_string(&parent).unwrap();
-    let out = render_template_result(&src, Some(&b), Some(&dir), Some(&parent)).unwrap();
+    let out = render_template_result(&src, Some(&b), Some(dir.path()), Some(&parent)).unwrap();
     assert_eq!(out, "hello [world]!");
+}
+
+#[test]
+fn stdlib_prompt_asset_renders_and_includes_embedded_partial() {
+    let asset =
+        TemplateAsset::render_target("std/agent/prompts/tool_contract_text.harn.prompt").unwrap();
+    let out = render_asset_result(&asset, Some(&dict(&[]))).unwrap();
+    assert!(out.contains("Tool contract:"));
+    assert!(out.contains("Before acting, restate the intended action"));
+}
+
+#[test]
+fn stdlib_prompt_provenance_uses_stable_template_uris() {
+    let asset =
+        TemplateAsset::render_target("std/agent/prompts/tool_contract_text.harn.prompt").unwrap();
+    let (out, spans) = render_asset_with_provenance_result(&asset, Some(&dict(&[])), true).unwrap();
+    assert!(out.contains("Tool contract:"));
+    assert!(spans
+        .iter()
+        .any(|span| span.template_uri == "std://agent/prompts/tool_contract_text.harn.prompt"));
+    assert!(spans
+        .iter()
+        .any(|span| span.template_uri == "std://agent/prompts/action_turn_nudge.harn.prompt"));
+}
+
+#[test]
+fn stdlib_template_cache_reuses_parsed_asset() {
+    super::assets::reset_template_cache();
+    let asset = TemplateAsset::render_target("std/workflow/prompts/stage.harn.prompt").unwrap();
+    let bindings = dict(&[("name", s("triage")), ("goal", s("Sort the queue."))]);
+    let first = render_asset_result(&asset, Some(&bindings)).unwrap();
+    let count_after_first = super::assets::template_cache_len();
+    let second = render_asset_result(&asset, Some(&bindings)).unwrap();
+    assert_eq!(first, second);
+    assert_eq!(count_after_first, super::assets::template_cache_len());
+}
+
+#[test]
+fn filesystem_template_cache_invalidates_when_contents_change() {
+    use std::fs;
+    super::assets::reset_template_cache();
+    let dir = tempdir();
+    let path = dir.path().join("main.prompt");
+    fs::write(&path, "one {{x}}").unwrap();
+    let first = TemplateAsset::render_target(path.to_str().unwrap()).unwrap();
+    assert_eq!(
+        render_asset_result(&first, Some(&dict(&[("x", s("render"))]))).unwrap(),
+        "one render"
+    );
+    fs::write(&path, "two {{x}}").unwrap();
+    let second = TemplateAsset::render_target(path.to_str().unwrap()).unwrap();
+    assert_eq!(
+        render_asset_result(&second, Some(&dict(&[("x", s("render"))]))).unwrap(),
+        "two render"
+    );
+    assert_eq!(super::assets::template_cache_len(), 2);
+}
+
+#[test]
+fn package_root_include_still_resolves() {
+    use std::fs;
+    let dir = tempdir();
+    fs::write(dir.path().join("harn.toml"), "[package]\nname = \"x\"\n").unwrap();
+    fs::create_dir_all(dir.path().join("prompts")).unwrap();
+    fs::write(
+        dir.path().join("prompts/partial.harn.prompt"),
+        "ROOT:{{name}}",
+    )
+    .unwrap();
+    let parent = dir.path().join("main.prompt");
+    fs::write(&parent, r#"{{ include "@/prompts/partial.harn.prompt" }}"#).unwrap();
+    let src = fs::read_to_string(&parent).unwrap();
+    let out = render_template_result(
+        &src,
+        Some(&dict(&[("name", s("ok"))])),
+        Some(dir.path()),
+        Some(&parent),
+    )
+    .unwrap();
+    assert_eq!(out, "ROOT:ok");
 }
 
 #[test]
@@ -316,16 +395,17 @@ fn prompt_render_indices_accumulate_in_order() {
 fn include_propagates_parent_span_chain() {
     use std::fs;
     let dir = tempdir();
-    let leaf = dir.join("leaf.prompt");
+    let leaf = dir.path().join("leaf.prompt");
     fs::write(&leaf, "LEAF:{{v}}").unwrap();
-    let mid = dir.join("mid.prompt");
+    let mid = dir.path().join("mid.prompt");
     fs::write(&mid, r#"MID:{{ include "leaf.prompt" }}"#).unwrap();
-    let top = dir.join("top.prompt");
+    let top = dir.path().join("top.prompt");
     fs::write(&top, r#"TOP:{{ include "mid.prompt" }}"#).unwrap();
     let b = dict(&[("v", s("ok"))]);
     let src = fs::read_to_string(&top).unwrap();
     let (rendered, spans) =
-        render_template_with_provenance(&src, Some(&b), Some(&dir), Some(&top), true).unwrap();
+        render_template_with_provenance(&src, Some(&b), Some(dir.path()), Some(&top), true)
+            .unwrap();
     assert_eq!(rendered, "TOP:MID:LEAF:ok");
 
     let leaf_expr = spans
@@ -358,12 +438,12 @@ fn include_propagates_parent_span_chain() {
 fn include_cycle_detected() {
     use std::fs;
     let dir = tempdir();
-    let a = dir.join("a.prompt");
-    let b = dir.join("b.prompt");
+    let a = dir.path().join("a.prompt");
+    let b = dir.path().join("b.prompt");
     fs::write(&a, r#"A{{ include "b.prompt" }}"#).unwrap();
     fs::write(&b, r#"B{{ include "a.prompt" }}"#).unwrap();
     let src = fs::read_to_string(&a).unwrap();
-    let r = render_template_result(&src, None, Some(&dir), Some(&a));
+    let r = render_template_result(&src, None, Some(dir.path()), Some(&a));
     assert!(r.is_err());
     assert!(r.unwrap_err().kind.contains("circular include"));
 }
@@ -372,36 +452,26 @@ fn include_cycle_detected() {
 fn include_cannot_escape_template_root() {
     use std::fs;
     let dir = tempdir();
-    let sibling_name = format!("{}-outside", dir.file_name().unwrap().to_string_lossy());
-    let outside_dir = dir.parent().unwrap().join(&sibling_name);
+    let sibling_name = format!(
+        "{}-outside",
+        dir.path().file_name().unwrap().to_string_lossy()
+    );
+    let outside_dir = dir.path().parent().unwrap().join(&sibling_name);
     fs::create_dir_all(&outside_dir).unwrap();
     fs::write(outside_dir.join("secret.prompt"), "secret").unwrap();
-    let parent = dir.join("main.prompt");
+    let parent = dir.path().join("main.prompt");
     fs::write(
         &parent,
         format!(r#"{{{{ include "../{sibling_name}/secret.prompt" }}}}"#),
     )
     .unwrap();
     let src = fs::read_to_string(&parent).unwrap();
-    let r = render_template_result(&src, None, Some(&dir), Some(&parent));
+    let r = render_template_result(&src, None, Some(dir.path()), Some(&parent));
     let _ = fs::remove_dir_all(outside_dir);
     assert!(r.is_err());
     assert!(r.unwrap_err().kind.contains("escapes template root"));
 }
 
-fn tempdir() -> PathBuf {
-    let base = std::env::temp_dir().join(format!("harn-tpl-{}", nanoid()));
-    std::fs::create_dir_all(&base).unwrap();
-    base
-}
-
-fn nanoid() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    format!(
-        "{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    )
+fn tempdir() -> tempfile::TempDir {
+    tempfile::tempdir().unwrap()
 }

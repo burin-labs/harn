@@ -14,6 +14,14 @@ Use `render_string(...)` when the template should live inline in source. Use
 separate file relative to the calling module. The template syntax and error
 shape are identical across both entrypoints.
 
+Stdlib-owned model-facing prompt prose lives in embedded `std/...harn.prompt`
+assets. These render without touching the filesystem and report stable
+`std://...` provenance URIs:
+
+```harn,ignore
+let tool_contract = render_prompt("std/agent/prompts/tool_contract_text.harn.prompt", {})
+```
+
 This page is the reference. The one-page [quickref](./docs/llm/harn-quickref.md)
 has a condensed version for agents writing Harn.
 
@@ -135,6 +143,10 @@ file's directory:
 ```text
 {{ include "partials/header.harn.prompt" }}
 ```
+
+Embedded stdlib prompts can include other embedded stdlib prompts with either
+relative paths or explicit `std/...` paths. Relative stdlib includes stay inside
+the embedded stdlib prompt catalog rather than escaping to the filesystem.
 
 The included template inherits the parent's scope by default. Pass explicit
 bindings with `with { ... }` — these are merged into the parent scope for the

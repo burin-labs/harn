@@ -10,6 +10,12 @@ pub struct StdlibSource {
     pub source: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StdlibPromptAsset {
+    pub path: &'static str,
+    pub source: &'static str,
+}
+
 pub const STDLIB_SOURCES: &[StdlibSource] = &[
     StdlibSource {
         module: "text",
@@ -173,17 +179,47 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
     },
 ];
 
+pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
+    StdlibPromptAsset {
+        path: "agent/prompts/tool_contract_text.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/tool_contract_text.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/action_turn_nudge.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/action_turn_nudge.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/completion_judge_default.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/completion_judge_default.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "workflow/prompts/stage.harn.prompt",
+        source: include_str!("stdlib/workflow/prompts/stage.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "orchestration/prompts/compaction_summary.harn.prompt",
+        source: include_str!("stdlib/orchestration/prompts/compaction_summary.harn.prompt"),
+    },
+];
+
 pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
     STDLIB_SOURCES
         .iter()
         .find_map(|entry| (entry.module == module).then_some(entry.source))
 }
 
+pub fn get_stdlib_prompt_asset(path: &str) -> Option<&'static str> {
+    let path = path.strip_prefix("std/").unwrap_or(path);
+    STDLIB_PROMPT_ASSETS
+        .iter()
+        .find_map(|entry| (entry.path == path).then_some(entry.source))
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::{get_stdlib_source, STDLIB_SOURCES};
+    use super::{get_stdlib_prompt_asset, get_stdlib_source, STDLIB_PROMPT_ASSETS, STDLIB_SOURCES};
 
     #[test]
     fn stdlib_sources_are_non_empty() {
@@ -205,6 +241,25 @@ mod tests {
     }
 
     #[test]
+    fn stdlib_prompt_assets_are_non_empty() {
+        for entry in STDLIB_PROMPT_ASSETS {
+            assert!(
+                !entry.source.trim().is_empty(),
+                "{} should have non-empty prompt asset source",
+                entry.path
+            );
+        }
+    }
+
+    #[test]
+    fn stdlib_prompt_asset_paths_are_unique() {
+        let mut paths = BTreeSet::new();
+        for entry in STDLIB_PROMPT_ASSETS {
+            assert!(paths.insert(entry.path), "duplicate {}", entry.path);
+        }
+    }
+
+    #[test]
     fn key_stdlib_modules_resolve() {
         for module in [
             "context",
@@ -219,6 +274,22 @@ mod tests {
             assert!(
                 get_stdlib_source(module).is_some(),
                 "std/{module} should resolve"
+            );
+        }
+    }
+
+    #[test]
+    fn key_stdlib_prompt_assets_resolve() {
+        for path in [
+            "std/agent/prompts/tool_contract_text.harn.prompt",
+            "std/agent/prompts/action_turn_nudge.harn.prompt",
+            "std/agent/prompts/completion_judge_default.harn.prompt",
+            "std/workflow/prompts/stage.harn.prompt",
+            "std/orchestration/prompts/compaction_summary.harn.prompt",
+        ] {
+            assert!(
+                get_stdlib_prompt_asset(path).is_some(),
+                "{path} should resolve"
             );
         }
     }

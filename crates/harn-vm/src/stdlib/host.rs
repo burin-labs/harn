@@ -215,17 +215,12 @@ fn render_template(
     path: &str,
     bindings: Option<&BTreeMap<String, VmValue>>,
 ) -> Result<String, VmError> {
-    let resolved = crate::stdlib::asset_paths::resolve_or_source_relative(path, None)
-        .map_err(|msg| VmError::Thrown(VmValue::String(Rc::from(msg))))?;
-    let template = std::fs::read_to_string(&resolved).map_err(|e| {
+    let asset = crate::stdlib::template::TemplateAsset::render_target(path).map_err(|msg| {
         VmError::Thrown(VmValue::String(Rc::from(format!(
-            "host_call template.render: failed to read template {}: {e}",
-            resolved.display()
+            "host_call template.render: {msg}"
         ))))
     })?;
-    let base = resolved.parent();
-    crate::stdlib::template::render_template_result(&template, bindings, base, Some(&resolved))
-        .map_err(VmError::from)
+    crate::stdlib::template::render_asset_result(&asset, bindings).map_err(VmError::from)
 }
 
 fn params_match(

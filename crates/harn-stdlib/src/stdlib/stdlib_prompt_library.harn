@@ -101,6 +101,10 @@ fn __load_one(path) {
 fn __render_fragment(fragment, bindings = nil) {
   let body = fragment?.body ?? fragment?.prompt ?? fragment?.text
   require body != nil, "prompt_library_inject: fragment has no body"
+  let source_path = fragment?.source_path ?? fragment?.path
+  if source_path != nil && starts_with(source_path, "std/") {
+    return render_prompt(source_path, bindings ?? {})
+  }
   return render_string(body, bindings ?? {})
 }
 
