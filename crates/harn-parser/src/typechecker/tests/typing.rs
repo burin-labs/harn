@@ -1,6 +1,7 @@
 //! Basic typing: literals, fn / pipeline signatures, generics, type aliases, variance.
 
 use super::*;
+use crate::DiagnosticDetails;
 
 #[test]
 fn test_no_errors_for_untyped_code() {
@@ -115,6 +116,136 @@ fn test_rest_param_binding_is_list_of_declared_type() {
     let values: list<int> = nums
   }
 }"#,
+    );
+    assert!(errs.is_empty(), "unexpected errors: {errs:?}");
+}
+
+#[test]
+fn test_unnecessary_safe_navigation_warns_on_non_nil_receiver() {
+    let diagnostics = check_source_with_source(
+        r#"
+type User = {name: string, email: string}
+pipeline t(task) {
+  let user: User = {name: "Ada", email: "ada@example.com"}
+  log(user?.name)
+  log(user?.email)
+}
+"#,
+    );
+    let safe_nav = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.details,
+                Some(DiagnosticDetails::LintRule { rule })
+                    if *rule == "unnecessary-safe-navigation"
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(safe_nav.len(), 2, "got diagnostics: {diagnostics:?}");
+    assert!(
+        safe_nav.iter().all(|diagnostic| {
+            diagnostic
+                .fix
+                .as_ref()
+                .is_some_and(|fix| fix.len() == 1 && fix[0].replacement == ".")
+        }),
+        "expected dot fixes: {safe_nav:?}"
+    );
+}
+
+#[test]
+fn test_unnecessary_safe_navigation_respects_nullable_and_unsupported_property() {
+    let diagnostics = check_source_with_source(
+        r#"
+type User = {name: string}
+pipeline t(task) {
+  let maybe: User? = nil
+  log(maybe?.name)
+  let n: int = 42
+  log(n?.missing)
+  let broad: dict = {}
+  log(broad?.dynamic_field)
+  let union_value: dict | list = broad
+  log(union_value?.dynamic_field)
+}
+"#,
+    );
+    assert!(
+        diagnostics.iter().all(|diagnostic| !matches!(
+            &diagnostic.details,
+            Some(DiagnosticDetails::LintRule { rule })
+                if *rule == "unnecessary-safe-navigation"
+        )),
+        "nullable receivers and unsupported optional property access must not warn: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_unnecessary_safe_navigation_uses_flow_narrowing_and_handles_postfix_forms() {
+    let diagnostics = check_source_with_source(
+        r#"
+type User = {name: string}
+pipeline t(task) {
+  let maybe: User? = {name: "Ada"}
+  if maybe != nil {
+    log(maybe?.name)
+  }
+  let names: list<string> = ["Ada"]
+  log(names?[0])
+  log("Ada"?.lowercase())
+}
+"#,
+    );
+    let fixes = diagnostics
+        .iter()
+        .filter_map(|diagnostic| match &diagnostic.details {
+            Some(DiagnosticDetails::LintRule { rule })
+                if *rule == "unnecessary-safe-navigation" =>
+            {
+                diagnostic.fix.as_ref()
+            }
+            _ => None,
+        })
+        .flatten()
+        .map(|fix| fix.replacement.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        fixes,
+        vec![".", "", "."],
+        "got diagnostics: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_optional_access_on_dynamic_dict_union_stays_unknown() {
+    let errs = errors(
+        r#"
+pipeline t(task) {
+  fn needs_string(target: string) {}
+  let worker_summary: dict | list = {}
+  needs_string(worker_summary?.snapshot_path)
+}
+"#,
+    );
+    assert!(
+        errs.is_empty(),
+        "dynamic dict access should not collapse to nil: {errs:?}"
+    );
+}
+
+#[test]
+fn test_optional_access_infers_nil_when_receiver_is_nullable() {
+    let errs = errors(
+        r#"
+type User = {name: string}
+pipeline t(task) {
+  let maybe: User? = nil
+  let name: string? = maybe?.name
+  let lowered: string? = maybe?.name?.lowercase()
+  let contains_a: bool? = maybe?.name?.contains("a")
+}
+"#,
     );
     assert!(errs.is_empty(), "unexpected errors: {errs:?}");
 }

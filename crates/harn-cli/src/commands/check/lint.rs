@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process;
 
 use harn_lint::LintSeverity;
-use harn_parser::TypeChecker;
+use harn_parser::{TypeChecker, TypeDiagnostic};
 
 use crate::package::CheckConfig;
 use crate::parse_source_file;
@@ -28,7 +28,7 @@ pub(crate) fn lint_file_inner(
         complexity_threshold,
         persona_step_allowlist,
     };
-    let diagnostics = harn_lint::lint_with_module_graph(
+    let mut diagnostics = harn_lint::lint_with_module_graph(
         &program,
         &config.disable_rules,
         Some(&source),
@@ -37,6 +37,11 @@ pub(crate) fn lint_file_inner(
         path,
         &options,
     );
+    let type_diags = type_check_for_lint(path, config, module_graph, &program, &source);
+    diagnostics.extend(harn_lint::lint_diagnostics_from_type_diagnostics(
+        &type_diags,
+        &config.disable_rules,
+    ));
 
     if diagnostics.is_empty() {
         println!("{path_str}: no issues found");
@@ -84,19 +89,17 @@ pub(crate) fn lint_fix_file(
         &options,
     );
 
-    let mut checker = TypeChecker::with_strict_types(config.strict_types);
-    if let Some(imported) = module_graph.imported_names_for_file(path) {
-        checker = checker.with_imported_names(imported);
-    }
-    if let Some(imported) = module_graph.imported_type_declarations_for_file(path) {
-        checker = checker.with_imported_type_decls(imported);
-    }
-    let type_diags = checker.check_with_source(&program, &source);
+    let type_diags = type_check_for_lint(path, config, module_graph, &program, &source);
 
     let mut edits: Vec<&harn_lexer::FixEdit> = lint_diags
         .iter()
         .filter_map(|d| d.fix.as_ref())
-        .chain(type_diags.iter().filter_map(|d| d.fix.as_ref()))
+        .chain(
+            type_diags
+                .iter()
+                .filter(|d| !harn_lint::type_diagnostic_lint_disabled(d, &config.disable_rules))
+                .filter_map(|d| d.fix.as_ref()),
+        )
         .flatten()
         .collect();
 
@@ -134,7 +137,7 @@ pub(crate) fn lint_fix_file(
     println!("{path_str}: applied {applied} fix(es)");
 
     let (source2, program2) = parse_source_file(&path_str);
-    let remaining = harn_lint::lint_with_module_graph(
+    let mut remaining = harn_lint::lint_with_module_graph(
         &program2,
         &config.disable_rules,
         Some(&source2),
@@ -143,9 +146,31 @@ pub(crate) fn lint_fix_file(
         path,
         &options,
     );
+    let type_remaining = type_check_for_lint(path, config, module_graph, &program2, &source2);
+    remaining.extend(harn_lint::lint_diagnostics_from_type_diagnostics(
+        &type_remaining,
+        &config.disable_rules,
+    ));
     if !remaining.is_empty() {
-        print_lint_diagnostics(&path_str, &source, &remaining);
+        print_lint_diagnostics(&path_str, &source2, &remaining);
     }
 
     applied
+}
+
+fn type_check_for_lint(
+    path: &Path,
+    config: &CheckConfig,
+    module_graph: &harn_modules::ModuleGraph,
+    program: &[harn_parser::SNode],
+    source: &str,
+) -> Vec<TypeDiagnostic> {
+    let mut checker = TypeChecker::with_strict_types(config.strict_types);
+    if let Some(imported) = module_graph.imported_names_for_file(path) {
+        checker = checker.with_imported_names(imported);
+    }
+    if let Some(imported) = module_graph.imported_type_declarations_for_file(path) {
+        checker = checker.with_imported_type_decls(imported);
+    }
+    checker.check_with_source(program, source)
 }

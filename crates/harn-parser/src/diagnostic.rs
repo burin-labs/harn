@@ -234,6 +234,7 @@ pub fn render_type_diagnostic(
             label: &related.message,
         })
         .collect::<Vec<_>>();
+    let primary_label = type_diagnostic_primary_label(diag);
     match &diag.span {
         Some(span) => render_diagnostic_with_related(
             source,
@@ -241,7 +242,7 @@ pub fn render_type_diagnostic(
             span,
             severity,
             &diag.message,
-            type_diagnostic_primary_label(diag),
+            primary_label.as_deref(),
             diag.help.as_deref(),
             &related,
         ),
@@ -249,13 +250,15 @@ pub fn render_type_diagnostic(
     }
 }
 
-fn type_diagnostic_primary_label(
-    diag: &crate::typechecker::TypeDiagnostic,
-) -> Option<&'static str> {
-    if diag.message.contains("expected ") && diag.message.contains("found ") {
-        Some("found this type")
-    } else {
-        None
+fn type_diagnostic_primary_label(diag: &crate::typechecker::TypeDiagnostic) -> Option<String> {
+    match &diag.details {
+        Some(crate::typechecker::DiagnosticDetails::LintRule { rule }) => {
+            Some(format!("lint[{rule}]"))
+        }
+        Some(crate::typechecker::DiagnosticDetails::TypeMismatch) => {
+            Some("found this type".to_string())
+        }
+        _ => None,
     }
 }
 

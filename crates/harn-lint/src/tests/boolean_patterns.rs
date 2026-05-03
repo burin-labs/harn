@@ -1,6 +1,6 @@
 //! Boolean-shape lint rules: `comparison-to-bool`,
-//! `unnecessary-else-return`, `duplicate-match-arm`, plus the
-//! comparison-to-bool autofix variants.
+//! `constant-logical-operand`, `unnecessary-else-return`,
+//! `duplicate-match-arm`, plus autofix variants.
 
 use super::*;
 
@@ -49,6 +49,41 @@ if x == 1 { log("one") }
     assert!(
         !has_rule(&diags, "comparison-to-bool"),
         "should not trigger for non-bool comparison: {diags:?}"
+    );
+}
+
+#[test]
+fn test_constant_logical_operand_autofix() {
+    let source = "pipeline default(task) {\n  let x = true\n  let a = x || true\n  let b = x && false\n  log(a)\n  log(b)\n}";
+    let diags = lint_source(source);
+    assert_eq!(count_rule(&diags, "constant-logical-operand"), 2);
+    let result = apply_fixes(source, &diags);
+    assert!(
+        result.contains("let a = true") && result.contains("let b = false"),
+        "expected constants, got: {result}"
+    );
+}
+
+#[test]
+fn test_constant_logical_operand_does_not_drop_impure_left_side() {
+    let source = "pipeline default(task) {\n  let a = expensive() || true\n  let b = expensive() && false\n  log(a)\n  log(b)\n}";
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "constant-logical-operand"),
+        0,
+        "impure left sides must not be removed: {diags:?}"
+    );
+}
+
+#[test]
+fn test_leading_logical_constants_autofix_even_with_impure_right_side() {
+    let source = "pipeline default(task) {\n  let a = true || expensive()\n  let b = false && expensive()\n  log(a)\n  log(b)\n}";
+    let diags = lint_source(source);
+    assert_eq!(count_rule(&diags, "constant-logical-operand"), 2);
+    let result = apply_fixes(source, &diags);
+    assert!(
+        result.contains("let a = true") && result.contains("let b = false"),
+        "right sides are unreachable, got: {result}"
     );
 }
 

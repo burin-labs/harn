@@ -13,6 +13,7 @@ use super::check_cmd::check_file_inner;
 use super::config::collect_harn_targets;
 use super::config::{build_module_graph, collect_cross_file_imports};
 use super::host_capabilities::parse_host_capability_value;
+use super::lint::lint_file_inner;
 use super::preflight::{collect_preflight_diagnostics, is_preflight_allowed};
 
 fn parse_program(source: &str) -> Vec<SNode> {
@@ -1193,4 +1194,39 @@ pub fn exposed() -> string {
         "expected missing-harndoc warning, got: {:?}",
         diagnostics.iter().map(|d| &d.rule).collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn lint_file_inner_reports_type_aware_lint_rules() {
+    let dir = unique_temp_dir("harn-lint-type-aware");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r#"
+type User = {name: string}
+pipeline main(task) {
+  let user: User = {name: "Ada"}
+  println(user?.name)
+}
+"#,
+    )
+    .unwrap();
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let outcome = lint_file_inner(
+        &file,
+        &CheckConfig::default(),
+        &cross_file_imports,
+        &module_graph,
+        false,
+        None,
+        &[],
+    );
+    assert!(
+        outcome.has_warning,
+        "type-aware lint should surface through `harn lint`"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

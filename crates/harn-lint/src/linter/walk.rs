@@ -428,6 +428,21 @@ impl<'a> Linter<'a> {
             }
 
             Node::BinaryOp { op, left, right } => {
+                if let Some((message, replacement)) =
+                    Self::constant_logical_reduction(op, left, right)
+                {
+                    self.diagnostics.push(LintDiagnostic {
+                        rule: "constant-logical-operand",
+                        message,
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(format!("replace this expression with `{replacement}`")),
+                        fix: Some(vec![FixEdit {
+                            span: snode.span,
+                            replacement: replacement.to_string(),
+                        }]),
+                    });
+                }
                 let is_pointless_self_comparison = (op == "==" || op == "!=")
                     && left.node == right.node
                     && is_pure_expression(&left.node);

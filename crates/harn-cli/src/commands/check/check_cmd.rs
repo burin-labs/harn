@@ -32,6 +32,9 @@ pub(crate) fn check_file_inner(
     }
     let type_diagnostics = checker.check_with_source(&program, &source);
     for diag in &type_diagnostics {
+        if harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules) {
+            continue;
+        }
         match diag.severity {
             DiagnosticSeverity::Error => has_error = true,
             DiagnosticSeverity::Warning => has_warning = true,

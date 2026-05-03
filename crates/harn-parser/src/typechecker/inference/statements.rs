@@ -30,6 +30,28 @@ use super::super::union::{
 use super::super::{InlayHintInfo, TypeChecker};
 use super::flow::{pattern_alternatives, resolve_union_shape_members};
 
+#[derive(Clone, Copy)]
+enum UntypedAccessKind {
+    Property,
+    Subscript,
+}
+
+impl UntypedAccessKind {
+    fn direct_label(self) -> &'static str {
+        match self {
+            Self::Property => "Direct property access",
+            Self::Subscript => "Direct subscript access",
+        }
+    }
+
+    fn variable_label(self) -> &'static str {
+        match self {
+            Self::Property => "Accessing property",
+            Self::Subscript => "Subscript access",
+        }
+    }
+}
+
 impl TypeChecker {
     pub(in crate::typechecker) fn check_block(&mut self, stmts: &[SNode], scope: &mut TypeScope) {
         let mut definitely_exited = false;
@@ -120,6 +142,76 @@ impl TypeChecker {
                 TypeExpr::Union(widened)
             }
             other => TypeExpr::Union(vec![other.clone(), TypeExpr::Named("nil".into())]),
+        }
+    }
+
+    fn check_generic_method_bound(
+        &mut self,
+        object: &SNode,
+        method: &str,
+        scope: &TypeScope,
+        span: Span,
+    ) {
+        let Some(TypeExpr::Named(type_name)) = self.infer_type(object, scope) else {
+            return;
+        };
+        if !scope.is_generic_type_param(&type_name) {
+            return;
+        }
+        let Some(iface_name) = scope.get_where_constraint(&type_name) else {
+            return;
+        };
+        let Some(iface_methods) = scope.get_interface(iface_name) else {
+            return;
+        };
+        if iface_methods.methods.iter().any(|m| m.name == method) {
+            return;
+        }
+        self.warning_at(
+            format!(
+                "Method '{}' not found in interface '{}' (constraint on '{}')",
+                method, iface_name, type_name
+            ),
+            span,
+        );
+    }
+
+    fn check_strict_untyped_access(
+        &mut self,
+        object: &SNode,
+        scope: &TypeScope,
+        span: Span,
+        kind: UntypedAccessKind,
+    ) {
+        if !self.strict_types {
+            return;
+        }
+        if let Node::FunctionCall { name, args, .. } = &object.node {
+            if builtin_signatures::is_untyped_boundary_source(name) {
+                let has_schema = (name == "llm_call" || name == "llm_completion")
+                    && Self::llm_call_has_typed_schema_option(args, scope);
+                if !has_schema {
+                    self.warning_at_with_help(
+                        format!("{} on unvalidated `{}()` result", kind.direct_label(), name),
+                        span,
+                        "assign to a variable and validate with schema_expect() or a type annotation first".to_string(),
+                    );
+                }
+            }
+        }
+        if let Node::Identifier(name) = &object.node {
+            if let Some(source) = scope.is_untyped_source(name) {
+                self.warning_at_with_help(
+                    format!(
+                        "{} on unvalidated value '{}' from `{}`",
+                        kind.variable_label(),
+                        name,
+                        source
+                    ),
+                    span,
+                    "validate with schema_expect(), schema_is() in an if-condition, or add a shape type annotation".to_string(),
+                );
+            }
         }
     }
 
@@ -934,107 +1026,43 @@ impl TypeChecker {
                 method,
                 args,
                 ..
-            }
-            | Node::OptionalMethodCall {
-                object,
-                method,
-                args,
-                ..
             } => {
                 self.check_node(object, scope);
                 for arg in args {
                     self.check_node(arg, scope);
                 }
-                // Definition-site generic checking: if the object's type is a
-                // constrained generic param (where T: Interface), verify the
-                // method exists in the bound interface.
-                if let Some(TypeExpr::Named(type_name)) = self.infer_type(object, scope) {
-                    if scope.is_generic_type_param(&type_name) {
-                        if let Some(iface_name) = scope.get_where_constraint(&type_name) {
-                            if let Some(iface_methods) = scope.get_interface(iface_name) {
-                                let has_method =
-                                    iface_methods.methods.iter().any(|m| m.name == *method);
-                                if !has_method {
-                                    self.warning_at(
-                                        format!(
-                                            "Method '{}' not found in interface '{}' (constraint on '{}')",
-                                            method, iface_name, type_name
-                                        ),
-                                        span,
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
+                self.check_generic_method_bound(object, method, scope, span);
             }
-            Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-                if self.strict_types {
-                    // Direct property access on boundary function result
-                    if let Node::FunctionCall { name, args, .. } = &object.node {
-                        if builtin_signatures::is_untyped_boundary_source(name) {
-                            let has_schema = (name == "llm_call" || name == "llm_completion")
-                                && Self::llm_call_has_typed_schema_option(args, scope);
-                            if !has_schema {
-                                self.warning_at_with_help(
-                                    format!(
-                                        "Direct property access on unvalidated `{}()` result",
-                                        name
-                                    ),
-                                    span,
-                                    "assign to a variable and validate with schema_expect() or a type annotation first".to_string(),
-                                );
-                            }
-                        }
-                    }
-                    // Property access on known untyped variable
-                    if let Node::Identifier(name) = &object.node {
-                        if let Some(source) = scope.is_untyped_source(name) {
-                            self.warning_at_with_help(
-                                format!(
-                                    "Accessing property on unvalidated value '{}' from `{}`",
-                                    name, source
-                                ),
-                                span,
-                                "validate with schema_expect(), schema_is() in an if-condition, or add a shape type annotation".to_string(),
-                            );
-                        }
-                    }
+            Node::OptionalMethodCall {
+                object,
+                method,
+                args,
+                ..
+            } => {
+                self.check_unnecessary_safe_method_call(snode, object, scope);
+                self.check_node(object, scope);
+                for arg in args {
+                    self.check_node(arg, scope);
                 }
+                self.check_generic_method_bound(object, method, scope, span);
+            }
+            Node::PropertyAccess { object, .. } => {
+                self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Property);
                 self.check_node(object, scope);
             }
-            Node::SubscriptAccess { object, index }
-            | Node::OptionalSubscriptAccess { object, index } => {
-                if self.strict_types {
-                    if let Node::FunctionCall { name, args, .. } = &object.node {
-                        if builtin_signatures::is_untyped_boundary_source(name) {
-                            let has_schema = (name == "llm_call" || name == "llm_completion")
-                                && Self::llm_call_has_typed_schema_option(args, scope);
-                            if !has_schema {
-                                self.warning_at_with_help(
-                                    format!(
-                                        "Direct subscript access on unvalidated `{}()` result",
-                                        name
-                                    ),
-                                    span,
-                                    "assign to a variable and validate with schema_expect() or a type annotation first".to_string(),
-                                );
-                            }
-                        }
-                    }
-                    if let Node::Identifier(name) = &object.node {
-                        if let Some(source) = scope.is_untyped_source(name) {
-                            self.warning_at_with_help(
-                                format!(
-                                    "Subscript access on unvalidated value '{}' from `{}`",
-                                    name, source
-                                ),
-                                span,
-                                "validate with schema_expect(), schema_is() in an if-condition, or add a shape type annotation".to_string(),
-                            );
-                        }
-                    }
-                }
+            Node::OptionalPropertyAccess { object, property } => {
+                self.check_unnecessary_safe_property_access(snode, object, property, scope);
+                self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Property);
+                self.check_node(object, scope);
+            }
+            Node::SubscriptAccess { object, index } => {
+                self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Subscript);
+                self.check_node(object, scope);
+                self.check_node(index, scope);
+            }
+            Node::OptionalSubscriptAccess { object, index } => {
+                self.check_unnecessary_safe_subscript_access(snode, object, scope);
+                self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Subscript);
                 self.check_node(object, scope);
                 self.check_node(index, scope);
             }
