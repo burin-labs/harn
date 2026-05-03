@@ -1,0 +1,35 @@
+# Experimental providers config for the codex-style loop spike.
+# Set HARN_PROVIDERS_CONFIG=/Users/ksinder/projects/harn/.worktrees/codex-loop/.experiments/providers.toml
+# before invoking harn so it picks this up.
+
+[providers.llamacpp]
+display_name = "llama.cpp local"
+base_url = "http://127.0.0.1:8080/v1"
+auth_style = "none"
+chat_endpoint = "/chat/completions"
+
+[providers.anthropic]
+display_name = "Anthropic"
+base_url = "https://api.anthropic.com"
+auth_style = "header"
+auth_header = "x-api-key"
+auth_env = "ANTHROPIC_API_KEY"
+chat_endpoint = "/v1/messages"
+extra_headers = { "anthropic-version" = "2023-06-01" }
+
+[providers.openai]
+display_name = "OpenAI"
+base_url = "https://api.openai.com/v1"
+auth_style = "bearer"
+auth_env = "OPENAI_API_KEY"
+chat_endpoint = "/chat/completions"
+
+[aliases."qwen3.6"]
+id = "qwen3.6"
+provider = "llamacpp"
+tool_format = "native"
+
+[aliases."local"]
+id = "qwen3.6"
+provider = "llamacpp"
+tool_format = "native"

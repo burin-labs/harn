@@ -790,6 +790,7 @@ impl AgentLoopState {
                 .is_some_and(|policy| policy.require_action_or_yield),
             self.config.tool_examples.as_deref(),
             !self.config.task_ledger.is_empty(),
+            &self.done_sentinel,
         );
         if let Some(client_cfg) = opts.tool_search.as_ref().filter(|c| c.include_stub_listing) {
             let mut stub_lines = Vec::new();
@@ -910,10 +911,19 @@ impl AgentLoopState {
         let config_skill_match = config.skill_match.clone();
         let config_working_files = config.working_files.clone();
         let custom_nudge = config.nudge.clone();
-        let done_sentinel = config
-            .done_sentinel
-            .clone()
-            .unwrap_or_else(|| "##DONE##".to_string());
+        // `done_sentinel` is the explicit "I'm done" stop signal the model
+        // can emit to terminate the loop:
+        //   - `None` (option omitted)  → default `##DONE##`
+        //   - `Some("")` (explicit empty) → opt out: no instruction injected
+        //     into the system prompt and no detection at all
+        //   - `Some(s)`                → custom sentinel `s`
+        // Detection sites guard with `!done_sentinel.is_empty()` so the empty
+        // case is a true no-op rather than relying on a sentinel literal that
+        // cannot appear in real text.
+        let done_sentinel = match config.done_sentinel.as_deref() {
+            None => "##DONE##".to_string(),
+            Some(s) => s.to_string(),
+        };
         let break_unless_phase = config.break_unless_phase.clone();
         let tool_retries = config.tool_retries;
         let tool_backoff_ms = config.tool_backoff_ms;
@@ -1109,6 +1119,7 @@ impl AgentLoopState {
                     .is_some_and(|policy| policy.require_action_or_yield),
                 tool_examples.as_deref(),
                 !config.task_ledger.is_empty(),
+                &done_sentinel,
             );
             // Client-mode tool_search: when the user opted into stub
             // listings, append a short "also available via search"
@@ -1165,23 +1176,30 @@ impl AgentLoopState {
             .as_ref()
             .map(|policy| policy.allow_done_sentinel)
             .unwrap_or(true);
+        // Sentinel injection is now driven by the sentinel value itself, not
+        // by `persistent`. The `persistent` flag controls only the loop's
+        // text-only-turn break behavior (see post_turn.rs); whether the
+        // model is *told* about the sentinel is orthogonal — a non-persistent
+        // tool-eager model still needs the explicit stop convention or it
+        // will exhaust the iteration budget.
+        let sentinel_active = allow_done_sentinel && !done_sentinel.is_empty();
         let done_instruction = if tool_format == "native" || !has_tools {
             format!("include `{done_sentinel}` exactly once in assistant text")
         } else {
             format!("emit `<done>{done_sentinel}</done>` as its own top-level block")
         };
-        let persistent_system_prompt = if persistent {
-            let progress_instruction = if has_tools {
-                if tool_format == "native" {
-                    "Use the provider tool channel until the request is complete; after tool evidence is sufficient, give the final user-facing answer in concise assistant text."
-                } else {
-                    "Use <tool_call> blocks until the request is complete; after tool evidence is sufficient, emit the final user-facing answer in a <user_response> block."
-                }
+        let progress_instruction = if has_tools {
+            if tool_format == "native" {
+                "Use the provider tool channel until the request is complete; after tool evidence is sufficient, give the final user-facing answer in concise assistant text."
             } else {
-                "Solve the request directly in assistant text — do not stop early to explain or summarize."
-            };
+                "Use <tool_call> blocks until the request is complete; after tool evidence is sufficient, emit the final user-facing answer in a <user_response> block."
+            }
+        } else {
+            "Solve the request directly in assistant text — do not stop early to explain or summarize."
+        };
+        let persistent_system_prompt = if persistent {
             if exit_when_verified {
-                if allow_done_sentinel {
+                if sentinel_active {
                     Some(format!(
                         "\n\nKeep working until the current request is complete. {progress_instruction} {} only after the current request passes verification.",
                         done_instruction,
@@ -1191,7 +1209,7 @@ impl AgentLoopState {
                         "\n\nKeep working until the current request is complete. {progress_instruction}"
                     ))
                 }
-            } else if allow_done_sentinel {
+            } else if sentinel_active {
                 Some(format!(
                     "\n\nIMPORTANT: You MUST keep working until the current request is complete. \
                      {progress_instruction} \
@@ -1204,6 +1222,15 @@ impl AgentLoopState {
                      {progress_instruction}"
                 ))
             }
+        } else if sentinel_active && has_tools {
+            // Non-persistent, tool-using loops: even though the loop will
+            // also break on a text-only turn, tool-eager models often never
+            // emit one. Tell the model the explicit stop convention so it
+            // can short-circuit when it's satisfied.
+            Some(format!(
+                "\n\nWhen you have produced the final answer for the user, {}.",
+                done_instruction
+            ))
         } else {
             None
         };

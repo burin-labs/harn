@@ -1,12 +1,20 @@
 use super::{
     build_tool_calling_contract_prompt, collect_tool_schemas_with_registry, json,
-    normalize_tool_args, sample_tool_registry, ComponentRegistry, TEXT_RESPONSE_PROTOCOL_HELP,
+    normalize_tool_args, sample_tool_registry, text_response_protocol_help, ComponentRegistry,
 };
 
 #[test]
 fn contract_prompt_renders_edit_signature_with_enum_and_required_markers() {
     let tools = sample_tool_registry();
-    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true, None, false);
+    let prompt = build_tool_calling_contract_prompt(
+        Some(&tools),
+        None,
+        "text",
+        true,
+        None,
+        false,
+        "##DONE##",
+    );
     // TypeScript declaration header.
     assert!(
         prompt.contains("declare function edit(args:"),
@@ -41,19 +49,36 @@ fn contract_prompt_renders_edit_signature_with_enum_and_required_markers() {
 
 #[test]
 fn contract_prompt_help_block_documents_tagged_protocol() {
-    // The help constant teaches the top-level tags, the call shape
+    // With the default sentinel: teaches the top-level tags, call shape
     // inside <tool_call>, and the done-block grammar.
-    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("Response protocol"));
-    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("<tool_call>"));
-    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("</tool_call>"));
-    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("<assistant_prose>"));
-    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("<user_response>"));
-    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("<done>##DONE##</done>"));
-    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("name({ key: value })"));
-    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("heredoc"));
+    let help = text_response_protocol_help("##DONE##");
+    assert!(help.contains("Response protocol"));
+    assert!(help.contains("<tool_call>"));
+    assert!(help.contains("</tool_call>"));
+    assert!(help.contains("<assistant_prose>"));
+    assert!(help.contains("<user_response>"));
+    assert!(help.contains("<done>##DONE##</done>"));
+    assert!(help.contains("name({ key: value })"));
+    assert!(help.contains("heredoc"));
     // Legacy bare-call phrasing must not regress.
-    assert!(!TEXT_RESPONSE_PROTOCOL_HELP.contains("contains no tool calls"));
-    assert!(!TEXT_RESPONSE_PROTOCOL_HELP.contains("```call"));
+    assert!(!help.contains("contains no tool calls"));
+    assert!(!help.contains("```call"));
+
+    // With sentinel opt-out: the done block, the done rule, and the
+    // sentinel-named completion clause all disappear; the protocol still
+    // teaches the rest of the tag grammar.
+    let opt_out = text_response_protocol_help("");
+    assert!(opt_out.contains("Response protocol"));
+    assert!(opt_out.contains("<user_response>"));
+    assert!(!opt_out.contains("<done>"));
+    assert!(!opt_out.contains("##DONE##"));
+    assert!(opt_out.contains("no more tool calls are needed"));
+
+    // Custom sentinel: substitutes consistently in done block, rule, and
+    // completion clause.
+    let custom = text_response_protocol_help("STOP");
+    assert!(custom.contains("<done>STOP</done>"));
+    assert!(!custom.contains("##DONE##"));
 }
 
 #[test]
@@ -63,8 +88,15 @@ fn contract_prompt_native_mode_prefers_provider_channel_without_text_fallback() 
     // the text-mode response grammar or duplicate `declare function`
     // schemas that can confuse native-tool parsers.
     let tools = sample_tool_registry();
-    let prompt =
-        build_tool_calling_contract_prompt(Some(&tools), None, "native", true, None, false);
+    let prompt = build_tool_calling_contract_prompt(
+        Some(&tools),
+        None,
+        "native",
+        true,
+        None,
+        false,
+        "##DONE##",
+    );
     assert!(
         prompt.contains("native tool-calling channel"),
         "native preamble missing: {prompt}"
@@ -83,7 +115,15 @@ fn contract_prompt_native_mode_prefers_provider_channel_without_text_fallback() 
 #[test]
 fn contract_prompt_ledger_help_requires_visible_task_ledger_ids() {
     let tools = sample_tool_registry();
-    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "native", true, None, true);
+    let prompt = build_tool_calling_contract_prompt(
+        Some(&tools),
+        None,
+        "native",
+        true,
+        None,
+        true,
+        "##DONE##",
+    );
     assert!(
         prompt.contains(
             "Only use the `ledger` tool if that `<task_ledger>` block is actually present"
@@ -103,7 +143,15 @@ fn contract_prompt_ledger_help_requires_visible_task_ledger_ids() {
 #[test]
 fn contract_prompt_text_mode_mentions_action_gate_before_examples() {
     let tools = sample_tool_registry();
-    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true, None, false);
+    let prompt = build_tool_calling_contract_prompt(
+        Some(&tools),
+        None,
+        "text",
+        true,
+        None,
+        false,
+        "##DONE##",
+    );
     assert!(prompt.contains("This turn is action-gated."));
     assert!(prompt.contains("`<tool_call>...</tool_call>`"));
     assert!(prompt.contains("Do not emit raw source code"));
@@ -113,8 +161,15 @@ fn contract_prompt_text_mode_mentions_action_gate_before_examples() {
 fn contract_prompt_includes_tool_examples_before_schemas() {
     let tools = sample_tool_registry();
     let examples = "read({ path: \"src/main.rs\" })\n\nedit({ action: \"create\", path: \"test.rs\", content: <<EOF\nfn main() {}\nEOF\n})";
-    let prompt =
-        build_tool_calling_contract_prompt(Some(&tools), None, "text", true, Some(examples), false);
+    let prompt = build_tool_calling_contract_prompt(
+        Some(&tools),
+        None,
+        "text",
+        true,
+        Some(examples),
+        false,
+        "##DONE##",
+    );
     // Examples section is present.
     assert!(
         prompt.contains("## Tool call examples"),
@@ -136,7 +191,15 @@ fn contract_prompt_includes_tool_examples_before_schemas() {
 #[test]
 fn contract_prompt_omits_examples_section_when_none() {
     let tools = sample_tool_registry();
-    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true, None, false);
+    let prompt = build_tool_calling_contract_prompt(
+        Some(&tools),
+        None,
+        "text",
+        true,
+        None,
+        false,
+        "##DONE##",
+    );
     assert!(
         !prompt.contains("Tool call examples"),
         "should not have examples section when None"
@@ -175,8 +238,15 @@ fn native_schema_ref_resolves_to_component_alias() {
         "expected type alias for FilePath: {aliases}"
     );
     // The signature for `touch` should reference `FilePath` by name.
-    let prompt =
-        build_tool_calling_contract_prompt(None, Some(&native_tools), "text", false, None, false);
+    let prompt = build_tool_calling_contract_prompt(
+        None,
+        Some(&native_tools),
+        "text",
+        false,
+        None,
+        false,
+        "##DONE##",
+    );
     assert!(
         prompt.contains("type FilePath = string;"),
         "prompt missing alias: {prompt}"

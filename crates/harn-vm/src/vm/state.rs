@@ -576,6 +576,20 @@ impl Vm {
         &self.output
     }
 
+    /// Drain and return the captured output, leaving the buffer empty.
+    /// Used by the async-builtin dispatch path to forward closure output
+    /// from a child VM back to its parent.
+    pub fn take_output(&mut self) -> String {
+        std::mem::take(&mut self.output)
+    }
+
+    /// Append text to this VM's captured output. Used to forward output
+    /// from child VMs (e.g. closures invoked via `call_closure_pub`)
+    /// back into the parent stream.
+    pub fn append_output(&mut self, text: &str) {
+        self.output.push_str(text);
+    }
+
     pub(crate) fn pop(&mut self) -> Result<VmValue, VmError> {
         self.stack.pop().ok_or(VmError::StackUnderflow)
     }

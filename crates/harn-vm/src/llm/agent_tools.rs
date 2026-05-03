@@ -381,7 +381,10 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 };
                 let args_vm = crate::stdlib::json_to_vm_value(tool_args);
                 let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
-                match vm.call_closure_pub(&handler, &[args_vm]).await {
+                let outcome = vm.call_closure_pub(&handler, &[args_vm]).await;
+                let captured = vm.take_output();
+                crate::vm::forward_child_output_to_parent(&captured);
+                match outcome {
                     Ok(val) => Ok(serde_json::Value::String(val.display())),
                     Err(VmError::CategorizedError {
                         message,
@@ -415,18 +418,20 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                     category: ErrorCategory::ToolRejected,
                 })
             }
-        } else if let Some(local_result) = handle_tool_locally(tool_name, tool_args) {
-            // VM-stdlib short-circuit (read_file / list_directory). Any
-            // other tool falls through to the script-handler / bridge
-            // path below.
-            executor = Some(ToolExecutor::HarnBuiltin);
-            Ok(serde_json::Value::String(local_result))
         } else if let Some(handler) = find_tool_handler(tools_val, tool_name) {
-            // A Harn-side handler closure exists — but if the tool was
-            // sourced from `mcp_list_tools`, the dict carries the
-            // originating server name as `_mcp_server`, and the call is
-            // semantically "served by MCP" even though dispatch goes
-            // through a Harn closure that ultimately invokes mcp_call.
+            // User-registered Harn handler. Runs BEFORE the vm-stdlib
+            // short-circuit so user-defined tool semantics always win
+            // over the runtime's built-in `read_file`/`list_directory`
+            // shortcuts; otherwise a script that registers `read_file`
+            // with a custom handler (mock data, sandboxed paths, audit
+            // wrappers) would silently get the built-in real-filesystem
+            // read instead of the user's intent.
+            //
+            // If the tool was sourced from `mcp_list_tools`, the dict
+            // carries the originating server name as `_mcp_server`, and
+            // the call is semantically "served by MCP" even though
+            // dispatch goes through a Harn closure that ultimately
+            // invokes mcp_call.
             executor = Some(match mcp_server_for_tool(tools_val, tool_name) {
                 Some(server_name) => ToolExecutor::McpServer { server_name },
                 None => ToolExecutor::HarnBuiltin,
@@ -444,7 +449,10 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
             };
             let args_vm = crate::stdlib::json_to_vm_value(tool_args);
             let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
-            match vm.call_closure_pub(&handler, &[args_vm]).await {
+            let outcome = vm.call_closure_pub(&handler, &[args_vm]).await;
+            let captured = vm.take_output();
+            crate::vm::forward_child_output_to_parent(&captured);
+            match outcome {
                 Ok(val) => Ok(serde_json::Value::String(val.display())),
                 Err(VmError::CategorizedError {
                     message,
@@ -452,6 +460,13 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 }) => Ok(denied_tool_result(tool_name, message)),
                 Err(e) => Ok(serde_json::Value::String(format!("Error: {e}"))),
             }
+        } else if let Some(local_result) = handle_tool_locally(tool_name, tool_args) {
+            // VM-stdlib short-circuit (read_file / list_directory) used
+            // when no user handler is registered for a tool name harn
+            // can service from its own stdlib. Provides the implicit
+            // "free" tools without forcing every script to wire them.
+            executor = Some(ToolExecutor::HarnBuiltin);
+            Ok(serde_json::Value::String(local_result))
         } else if let Some(bridge) = bridge {
             // Same `_mcp_server` discriminator: a host that surfaces an
             // MCP server's tools without a Harn-side closure (e.g. the

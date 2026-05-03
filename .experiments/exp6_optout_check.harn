@@ -1,0 +1,59 @@
+/** EXP6: Verify `done_sentinel: ""` opt-out cleanly omits sentinel guidance. */
+fn build_tools() -> dict {
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "calc",
+    "Evaluate a math expression",
+    {parameters: {expr: {type: "string"}}, handler: { _args -> "396" }},
+  )
+  return registry
+}
+
+pipeline main(task) {
+  let registry = build_tools()
+  log("--- with default sentinel ---")
+  let r1 = agent_loop(
+    "What is 17 * 23 + 5?",
+    "/no_think You are a math assistant.",
+    {
+      provider: "llamacpp",
+      model: "qwen3.6",
+      tool_format: "native",
+      persistent: false,
+      max_iterations: 4,
+      tools: registry,
+    },
+  )
+  log("default: status=${r1.status} iters=${r1.llm.iterations}")
+  log("\n--- with done_sentinel: \"\" (opt out) ---")
+  let r2 = agent_loop(
+    "What is 17 * 23 + 5?",
+    "/no_think You are a math assistant.",
+    {
+      provider: "llamacpp",
+      model: "qwen3.6",
+      tool_format: "native",
+      persistent: false,
+      max_iterations: 4,
+      tools: registry,
+      done_sentinel: "",
+    },
+  )
+  log("opt-out: status=${r2.status} iters=${r2.llm.iterations}")
+  log("\n--- with done_sentinel: \"STOP\" (custom) ---")
+  let r3 = agent_loop(
+    "What is 17 * 23 + 5?",
+    "/no_think You are a math assistant.",
+    {
+      provider: "llamacpp",
+      model: "qwen3.6",
+      tool_format: "native",
+      persistent: false,
+      max_iterations: 4,
+      tools: registry,
+      done_sentinel: "STOP",
+    },
+  )
+  log("custom: status=${r3.status} iters=${r3.llm.iterations}")
+}
