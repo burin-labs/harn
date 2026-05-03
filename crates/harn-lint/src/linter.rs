@@ -12,7 +12,9 @@ use harn_parser::{BindingPattern, Node, SNode, TypeExpr, TypedParam};
 use crate::complexity::cyclomatic_complexity;
 use crate::decls::{Declaration, FnDeclaration, ImportInfo, ParamDeclaration, TypeDeclaration};
 use crate::diagnostic::{LintDiagnostic, LintSeverity, DEFAULT_COMPLEXITY_THRESHOLD};
-use crate::fixes::{append_sink_fix, remove_method_call_wrapper_fix, simple_ident_rename_fix};
+use crate::fixes::{
+    append_sink_fix, is_pure_expression, remove_method_call_wrapper_fix, simple_ident_rename_fix,
+};
 use crate::harndoc::check_legacy_doc_comments;
 use crate::naming::{is_pascal_case, is_snake_case, to_pascal_case, to_snake_case};
 use crate::rules::blank_lines::check_blank_line_between_items;
@@ -330,6 +332,34 @@ impl<'a> Linter<'a> {
                 matches!(name.as_str(), "iter")
             }
             _ => false,
+        }
+    }
+
+    pub(super) fn constant_logical_reduction(
+        op: &str,
+        left: &SNode,
+        right: &SNode,
+    ) -> Option<(String, &'static str)> {
+        match (op, &left.node, &right.node) {
+            ("||", Node::BoolLiteral(true), _) => Some((
+                "`true || expr` always evaluates to `true`; the right side is unreachable"
+                    .to_string(),
+                "true",
+            )),
+            ("||", _, Node::BoolLiteral(true)) if is_pure_expression(&left.node) => Some((
+                "`expr || true` always evaluates to `true`".to_string(),
+                "true",
+            )),
+            ("&&", Node::BoolLiteral(false), _) => Some((
+                "`false && expr` always evaluates to `false`; the right side is unreachable"
+                    .to_string(),
+                "false",
+            )),
+            ("&&", _, Node::BoolLiteral(false)) if is_pure_expression(&left.node) => Some((
+                "`expr && false` always evaluates to `false`".to_string(),
+                "false",
+            )),
+            _ => None,
         }
     }
 

@@ -59,6 +59,9 @@ pub struct RelatedDiagnostic {
 /// variant without parsing the error string.
 #[derive(Debug, Clone)]
 pub enum DiagnosticDetails {
+    /// A concrete expected/found mismatch. Renderers can use this to
+    /// provide stable labels without scraping human-readable text.
+    TypeMismatch,
     /// A `match` expression with missing variant coverage. `missing`
     /// holds the formatted literal values of each uncovered variant
     /// (quoted for strings, bare for ints), ready to drop into a new
@@ -66,6 +69,11 @@ pub enum DiagnosticDetails {
     /// expression, so a code-action can locate the closing `}` by
     /// reading the source at `span.end`.
     NonExhaustiveMatch { missing: Vec<String> },
+    /// A type-aware lint diagnostic. These diagnostics are produced by
+    /// the type checker because the rule depends on flow-sensitive type
+    /// information, but `harn lint` should surface and filter them like
+    /// ordinary lint rules.
+    LintRule { rule: &'static str },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -349,7 +357,7 @@ impl TypeChecker {
             help: coercion_suggestion(expected, actual, value_span, self.source.as_deref()),
             related,
             fix: None,
-            details: None,
+            details: Some(DiagnosticDetails::TypeMismatch),
         });
     }
 
@@ -436,6 +444,25 @@ impl TypeChecker {
             related: Vec::new(),
             fix: None,
             details: None,
+        });
+    }
+
+    pub(in crate::typechecker) fn lint_warning_at_with_fix(
+        &mut self,
+        rule: &'static str,
+        message: String,
+        span: Span,
+        help: String,
+        fix: Vec<FixEdit>,
+    ) {
+        self.diagnostics.push(TypeDiagnostic {
+            message,
+            severity: DiagnosticSeverity::Warning,
+            span: Some(span),
+            help: Some(help),
+            related: Vec::new(),
+            fix: Some(fix),
+            details: Some(DiagnosticDetails::LintRule { rule }),
         });
     }
 }

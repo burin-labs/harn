@@ -155,13 +155,61 @@ fn lint_full(
         linter
             .diagnostics
             .into_iter()
-            .filter(|d| {
-                !disabled_rules
-                    .iter()
-                    .any(|r| rule_matches_disabled(d.rule, r))
-            })
+            .filter(|d| !rule_disabled(d.rule, disabled_rules))
             .collect()
     }
+}
+
+/// Convert type-checker diagnostics tagged as lint rules into ordinary
+/// lint diagnostics so CLI/editor callers can share rule filtering,
+/// rendering, and autofix plumbing.
+pub fn lint_diagnostics_from_type_diagnostics(
+    diagnostics: &[harn_parser::TypeDiagnostic],
+    disabled_rules: &[String],
+) -> Vec<LintDiagnostic> {
+    diagnostics
+        .iter()
+        .filter_map(type_diagnostic_as_lint)
+        .filter(|diagnostic| !rule_disabled(diagnostic.rule, disabled_rules))
+        .collect()
+}
+
+/// Returns true when a type diagnostic is a lint diagnostic disabled by
+/// the caller's lint configuration.
+pub fn type_diagnostic_lint_disabled(
+    diagnostic: &harn_parser::TypeDiagnostic,
+    disabled_rules: &[String],
+) -> bool {
+    type_diagnostic_lint_rule(diagnostic).is_some_and(|rule| rule_disabled(rule, disabled_rules))
+}
+
+fn type_diagnostic_as_lint(diagnostic: &harn_parser::TypeDiagnostic) -> Option<LintDiagnostic> {
+    let rule = type_diagnostic_lint_rule(diagnostic)?;
+    let span = diagnostic.span?;
+    Some(LintDiagnostic {
+        rule,
+        message: diagnostic.message.clone(),
+        span,
+        severity: match diagnostic.severity {
+            harn_parser::DiagnosticSeverity::Warning => LintSeverity::Warning,
+            harn_parser::DiagnosticSeverity::Error => LintSeverity::Error,
+        },
+        suggestion: diagnostic.help.clone(),
+        fix: diagnostic.fix.clone(),
+    })
+}
+
+fn type_diagnostic_lint_rule(diagnostic: &harn_parser::TypeDiagnostic) -> Option<&'static str> {
+    match &diagnostic.details {
+        Some(harn_parser::DiagnosticDetails::LintRule { rule }) => Some(*rule),
+        _ => None,
+    }
+}
+
+fn rule_disabled(rule: &str, disabled_rules: &[String]) -> bool {
+    disabled_rules
+        .iter()
+        .any(|disabled| rule_matches_disabled(rule, disabled))
 }
 
 fn rule_matches_disabled(rule: &str, disabled: &str) -> bool {

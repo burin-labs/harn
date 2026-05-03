@@ -14,11 +14,20 @@ use std::collections::BTreeMap;
 
 use crate::ast::*;
 use crate::builtin_signatures;
+use harn_lexer::{FixEdit, Span};
 
 use super::super::binary_ops::infer_binary_op_type;
 use super::super::scope::{builtin_return_type, InferredType, TypeScope};
 use super::super::union::simplify_union;
 use super::super::TypeChecker;
+
+const UNNECESSARY_SAFE_NAVIGATION_RULE: &str = "unnecessary-safe-navigation";
+
+enum SafeNavigationKind<'a> {
+    Subscript,
+    Property(&'a str),
+    Method,
+}
 
 impl TypeChecker {
     pub(in crate::typechecker) fn infer_try_error_type(
@@ -483,76 +492,17 @@ impl TypeChecker {
             }
 
             Node::PropertyAccess { object, property } => {
-                // EnumName.Variant → infer as the enum type
-                if let Node::Identifier(name) = &object.node {
-                    if let Some(enum_info) = scope.get_enum(name) {
-                        return Some(self.infer_enum_type(name, enum_info, property, &[], scope));
-                    }
-                }
-                // .variant on an enum value → string
-                if property == "variant" {
-                    let obj_type = self.infer_type(object, scope);
-                    if let Some(name) = obj_type.as_ref().and_then(Self::base_type_name) {
-                        if scope.get_enum(name).is_some() {
-                            return Some(TypeExpr::Named("string".into()));
-                        }
-                    }
-                }
-                // Shape field access: obj.field → field type
-                let obj_type = self.infer_type(object, scope);
-                // Pair<K, V> has `.first` and `.second` accessors.
-                if let Some(TypeExpr::Applied { name, args }) = &obj_type {
-                    if name == "Pair" && args.len() == 2 {
-                        if property == "first" {
-                            return Some(args[0].clone());
-                        } else if property == "second" {
-                            return Some(args[1].clone());
-                        }
-                    }
-                }
-                if let Some(TypeExpr::Shape(fields)) = &obj_type {
-                    if let Some(field) = fields.iter().find(|f| f.name == *property) {
-                        return Some(field.type_expr.clone());
-                    }
-                }
-                // Intersection field access: an `A & B` value has every
-                // field that A or B has. Look up the property in each
-                // component and return the first match.
-                if let Some(TypeExpr::Intersection(members)) = &obj_type {
-                    for member in members {
-                        if let TypeExpr::Shape(fields) = member {
-                            if let Some(field) = fields.iter().find(|f| f.name == *property) {
-                                return Some(field.type_expr.clone());
-                            }
-                        }
-                    }
-                }
-                None
+                self.infer_property_access_type(object, property, scope, false)
+            }
+            Node::OptionalPropertyAccess { object, property } => {
+                self.infer_property_access_type(object, property, scope, true)
             }
 
             Node::SubscriptAccess { object, index } => {
-                let obj_type = self.infer_type(object, scope);
-                match &obj_type {
-                    Some(TypeExpr::List(inner)) => Some(*inner.clone()),
-                    Some(TypeExpr::DictType(_, v)) => Some(*v.clone()),
-                    Some(TypeExpr::Shape(fields)) => {
-                        // If index is a string literal, look up the field type
-                        if let Node::StringLiteral(key) = &index.node {
-                            fields
-                                .iter()
-                                .find(|f| &f.name == key)
-                                .map(|f| f.type_expr.clone())
-                        } else {
-                            None
-                        }
-                    }
-                    Some(TypeExpr::Named(n)) if n == "list" => None,
-                    Some(TypeExpr::Named(n)) if n == "dict" => None,
-                    Some(TypeExpr::Named(n)) if n == "string" => {
-                        Some(TypeExpr::Named("string".into()))
-                    }
-                    _ => None,
-                }
+                self.infer_subscript_access_type(object, index, scope, false)
+            }
+            Node::OptionalSubscriptAccess { object, index } => {
+                self.infer_subscript_access_type(object, index, scope, true)
             }
             Node::SliceAccess { object, .. } => {
                 // Slicing a list returns the same list type; slicing a string returns string
@@ -576,6 +526,7 @@ impl TypeChecker {
                 method,
                 args,
             } => {
+                let optional_access = matches!(&snode.node, Node::OptionalMethodCall { .. });
                 if let Node::Identifier(name) = &object.node {
                     if let Some(enum_info) = scope.get_enum(name) {
                         return Some(self.infer_enum_type(name, enum_info, method, args, scope));
@@ -602,6 +553,11 @@ impl TypeChecker {
                     }
                 }
                 let obj_type = self.infer_type(object, scope);
+                let include_optional_nil = optional_access
+                    && obj_type
+                        .as_ref()
+                        .is_some_and(|ty| self.type_may_include_nil(ty, scope));
+                let result = |ty| Self::optional_method_result_type(ty, include_optional_nil);
                 // Iter<T> receiver: combinators preserve or transform T; sinks
                 // materialize. This must come before the shared-method match
                 // below so `.map` / `.filter` / etc. on an iter return Iter,
@@ -618,47 +574,50 @@ impl TypeChecker {
                     };
                     let iter_of = |ty: TypeExpr| TypeExpr::Iter(Box::new(ty));
                     match method.as_str() {
-                        "iter" => return Some(iter_of(t)),
+                        "iter" => return Some(result(iter_of(t))),
                         "map" | "flat_map" => {
                             // Closure-return inference is not threaded here;
                             // fall back to a coarse `iter<any>` — matches the
                             // list-return style the rest of the checker uses.
-                            return Some(TypeExpr::Named("iter".into()));
+                            return Some(result(TypeExpr::Named("iter".into())));
                         }
                         "filter" | "take" | "skip" | "take_while" | "skip_while" => {
-                            return Some(iter_of(t));
+                            return Some(result(iter_of(t)));
                         }
                         "zip" => {
-                            return Some(iter_of(pair(t, TypeExpr::Named("any".into()))));
+                            return Some(result(iter_of(pair(t, TypeExpr::Named("any".into())))));
                         }
                         "enumerate" => {
-                            return Some(iter_of(pair(TypeExpr::Named("int".into()), t)));
+                            return Some(result(iter_of(pair(TypeExpr::Named("int".into()), t))));
                         }
-                        "chain" => return Some(iter_of(t)),
+                        "chain" => return Some(result(iter_of(t))),
                         "chunks" | "windows" => {
-                            return Some(iter_of(TypeExpr::List(Box::new(t))));
+                            return Some(result(iter_of(TypeExpr::List(Box::new(t)))));
                         }
                         // Sinks
-                        "to_list" => return Some(TypeExpr::List(Box::new(t))),
+                        "to_list" => return Some(result(TypeExpr::List(Box::new(t)))),
                         "to_set" => {
-                            return Some(TypeExpr::Applied {
+                            return Some(result(TypeExpr::Applied {
                                 name: "set".into(),
                                 args: vec![t],
-                            })
+                            }))
                         }
-                        "to_dict" => return Some(TypeExpr::Named("dict".into())),
-                        "count" => return Some(TypeExpr::Named("int".into())),
+                        "to_dict" => return Some(result(TypeExpr::Named("dict".into()))),
+                        "count" => return Some(result(TypeExpr::Named("int".into()))),
                         "sum" => {
-                            return Some(TypeExpr::Union(vec![
+                            return Some(result(TypeExpr::Union(vec![
                                 TypeExpr::Named("int".into()),
                                 TypeExpr::Named("float".into()),
-                            ]))
+                            ])))
                         }
                         "min" | "max" | "first" | "last" | "find" => {
-                            return Some(TypeExpr::Union(vec![t, TypeExpr::Named("nil".into())]));
+                            return Some(result(TypeExpr::Union(vec![
+                                t,
+                                TypeExpr::Named("nil".into()),
+                            ])));
                         }
-                        "any" | "all" => return Some(TypeExpr::Named("bool".into())),
-                        "for_each" => return Some(TypeExpr::Named("nil".into())),
+                        "any" | "all" => return Some(result(TypeExpr::Named("bool".into()))),
+                        "for_each" => return Some(result(TypeExpr::Named("nil".into()))),
                         "reduce" => return None,
                         _ => {}
                     }
@@ -670,21 +629,21 @@ impl TypeChecker {
                 if method == "iter" {
                     match &obj_type {
                         Some(TypeExpr::List(inner)) => {
-                            return Some(TypeExpr::Iter(Box::new((**inner).clone())));
+                            return Some(result(TypeExpr::Iter(Box::new((**inner).clone()))));
                         }
                         Some(TypeExpr::Generator(inner)) | Some(TypeExpr::Stream(inner)) => {
-                            return Some(TypeExpr::Iter(Box::new((**inner).clone())));
+                            return Some(result(TypeExpr::Iter(Box::new((**inner).clone()))));
                         }
                         Some(TypeExpr::DictType(k, v)) => {
-                            return Some(TypeExpr::Iter(Box::new(TypeExpr::Applied {
+                            return Some(result(TypeExpr::Iter(Box::new(TypeExpr::Applied {
                                 name: "Pair".into(),
                                 args: vec![(**k).clone(), (**v).clone()],
-                            })));
+                            }))));
                         }
                         Some(TypeExpr::Named(n))
                             if n == "list" || n == "dict" || n == "set" || n == "string" =>
                         {
-                            return Some(TypeExpr::Named("iter".into()));
+                            return Some(result(TypeExpr::Named("iter".into())));
                         }
                         _ => {}
                     }
@@ -695,52 +654,52 @@ impl TypeChecker {
                 match method.as_str() {
                     // Shared: bool-returning methods
                     "contains" | "starts_with" | "ends_with" | "empty" | "has" | "any" | "all" => {
-                        Some(TypeExpr::Named("bool".into()))
+                        Some(result(TypeExpr::Named("bool".into())))
                     }
                     // Shared: int-returning methods
-                    "count" | "index_of" => Some(TypeExpr::Named("int".into())),
+                    "count" | "index_of" => Some(result(TypeExpr::Named("int".into()))),
                     // String methods
                     "trim" | "lowercase" | "uppercase" | "reverse" | "replace" | "substring"
                     | "pad_left" | "pad_right" | "repeat" | "join" => {
-                        Some(TypeExpr::Named("string".into()))
+                        Some(result(TypeExpr::Named("string".into())))
                     }
-                    "split" | "chars" => Some(TypeExpr::Named("list".into())),
+                    "split" | "chars" => Some(result(TypeExpr::Named("list".into()))),
                     // filter returns dict for dicts, list for lists
                     "filter" => {
                         if is_dict {
-                            Some(TypeExpr::Named("dict".into()))
+                            Some(result(TypeExpr::Named("dict".into())))
                         } else {
-                            Some(TypeExpr::Named("list".into()))
+                            Some(result(TypeExpr::Named("list".into())))
                         }
                     }
                     // List methods
-                    "map" | "flat_map" | "sort" => Some(TypeExpr::Named("list".into())),
+                    "map" | "flat_map" | "sort" => Some(result(TypeExpr::Named("list".into()))),
                     "window" | "each_cons" | "sliding_window" => match &obj_type {
-                        Some(TypeExpr::List(inner)) => Some(TypeExpr::List(Box::new(
+                        Some(TypeExpr::List(inner)) => Some(result(TypeExpr::List(Box::new(
                             TypeExpr::List(Box::new((**inner).clone())),
-                        ))),
-                        _ => Some(TypeExpr::Named("list".into())),
+                        )))),
+                        _ => Some(result(TypeExpr::Named("list".into()))),
                     },
                     "reduce" | "find" | "first" | "last" => None,
                     // Dict methods
-                    "keys" | "values" | "entries" => Some(TypeExpr::Named("list".into())),
+                    "keys" | "values" | "entries" => Some(result(TypeExpr::Named("list".into()))),
                     "merge" | "map_values" | "rekey" | "map_keys" => {
                         // Rekey/map_keys transform keys; resulting dict still keys-by-string.
                         // Preserve the value-type parameter when known so downstream code can
                         // still rely on dict<string, V> typing after a key-rename.
                         if let Some(TypeExpr::DictType(_, v)) = &obj_type {
-                            Some(TypeExpr::DictType(
+                            Some(result(TypeExpr::DictType(
                                 Box::new(TypeExpr::Named("string".into())),
                                 v.clone(),
-                            ))
+                            )))
                         } else {
-                            Some(TypeExpr::Named("dict".into()))
+                            Some(result(TypeExpr::Named("dict".into())))
                         }
                     }
                     // Conversions
-                    "to_string" => Some(TypeExpr::Named("string".into())),
-                    "to_int" => Some(TypeExpr::Named("int".into())),
-                    "to_float" => Some(TypeExpr::Named("float".into())),
+                    "to_string" => Some(result(TypeExpr::Named("string".into()))),
+                    "to_int" => Some(result(TypeExpr::Named("int".into()))),
+                    "to_float" => Some(result(TypeExpr::Named("float".into()))),
                     _ => None,
                 }
             }
@@ -834,6 +793,395 @@ impl TypeChecker {
                 .map(|struct_info| self.infer_struct_type(struct_name, struct_info, fields, scope)),
 
             _ => None,
+        }
+    }
+
+    fn infer_property_access_type(
+        &self,
+        object: &SNode,
+        property: &str,
+        scope: &TypeScope,
+        optional: bool,
+    ) -> InferredType {
+        if !optional {
+            // EnumName.Variant -> infer as the enum type.
+            if let Node::Identifier(name) = &object.node {
+                if let Some(enum_info) = scope.get_enum(name) {
+                    return Some(self.infer_enum_type(name, enum_info, property, &[], scope));
+                }
+            }
+        }
+        let obj_type = self.infer_type(object, scope)?;
+        self.infer_property_type_from_type(&obj_type, property, scope, optional)
+    }
+
+    fn infer_property_type_from_type(
+        &self,
+        ty: &TypeExpr,
+        property: &str,
+        scope: &TypeScope,
+        optional: bool,
+    ) -> InferredType {
+        let ty = self.resolve_alias(ty, scope);
+        match &ty {
+            TypeExpr::Named(name) if name == "nil" => {
+                optional.then(|| TypeExpr::Named("nil".into()))
+            }
+            TypeExpr::Named(name) if name == "list" => {
+                Self::list_property_type(None, property, optional)
+            }
+            TypeExpr::Named(name) if name == "string" => {
+                Self::string_property_type(property, optional)
+            }
+            TypeExpr::Named(name) if name == "dict" => None,
+            TypeExpr::Named(name) if scope.get_struct(name).is_some() => {
+                self.struct_property_type(name, &[], property, scope, optional)
+            }
+            TypeExpr::Named(name) if scope.get_enum(name).is_some() => {
+                Self::enum_property_type(property, optional)
+            }
+            TypeExpr::Union(members) => {
+                let mut inferred = Vec::new();
+                for member in members {
+                    if let Some(member_type) =
+                        self.infer_property_type_from_type(member, property, scope, optional)
+                    {
+                        inferred.push(member_type);
+                    } else if optional {
+                        inferred.push(TypeExpr::Named("nil".into()));
+                    }
+                }
+                (!inferred.is_empty()).then(|| simplify_union(inferred))
+            }
+            TypeExpr::Intersection(members) => {
+                for member in members {
+                    if let Some(member_type) =
+                        self.infer_property_type_from_type(member, property, scope, optional)
+                    {
+                        return Some(member_type);
+                    }
+                }
+                optional.then(|| TypeExpr::Named("nil".into()))
+            }
+            TypeExpr::Shape(fields) => Self::shape_property_type(fields, property, optional),
+            TypeExpr::List(inner) => {
+                Self::list_property_type(Some(inner.as_ref()), property, optional)
+            }
+            TypeExpr::DictType(_, value) => Some(*value.clone()),
+            TypeExpr::Applied { name, args } if name == "Pair" && args.len() == 2 => match property
+            {
+                "first" => Some(args[0].clone()),
+                "second" => Some(args[1].clone()),
+                _ if optional => Some(TypeExpr::Named("nil".into())),
+                _ => None,
+            },
+            TypeExpr::Applied { name, args } if scope.get_struct(name).is_some() => {
+                self.struct_property_type(name, args, property, scope, optional)
+            }
+            TypeExpr::Applied { name, .. } if scope.get_enum(name).is_some() => {
+                Self::enum_property_type(property, optional)
+            }
+            _ if optional => Some(TypeExpr::Named("nil".into())),
+            _ => None,
+        }
+    }
+
+    fn infer_subscript_access_type(
+        &self,
+        object: &SNode,
+        index: &SNode,
+        scope: &TypeScope,
+        optional: bool,
+    ) -> InferredType {
+        let obj_type = self.infer_type(object, scope)?;
+        self.infer_subscript_type_from_type(&obj_type, index, scope, optional)
+    }
+
+    fn infer_subscript_type_from_type(
+        &self,
+        ty: &TypeExpr,
+        index: &SNode,
+        scope: &TypeScope,
+        optional: bool,
+    ) -> InferredType {
+        let ty = self.resolve_alias(ty, scope);
+        match &ty {
+            TypeExpr::Named(name) if name == "nil" => {
+                optional.then(|| TypeExpr::Named("nil".into()))
+            }
+            TypeExpr::Union(members) => {
+                let mut inferred = Vec::new();
+                for member in members {
+                    if let Some(member_type) =
+                        self.infer_subscript_type_from_type(member, index, scope, optional)
+                    {
+                        inferred.push(member_type);
+                    }
+                }
+                (!inferred.is_empty()).then(|| simplify_union(inferred))
+            }
+            TypeExpr::List(inner) => Some(*inner.clone()),
+            TypeExpr::DictType(_, value) => Some(*value.clone()),
+            TypeExpr::Shape(fields) => {
+                if let Node::StringLiteral(key) = &index.node {
+                    Self::shape_property_type(fields, key, false)
+                } else {
+                    None
+                }
+            }
+            TypeExpr::Named(name) if name == "string" => Some(TypeExpr::Named("string".into())),
+            _ => None,
+        }
+    }
+
+    fn shape_property_type(
+        fields: &[ShapeField],
+        property: &str,
+        optional_access: bool,
+    ) -> InferredType {
+        let Some(field) = fields.iter().find(|field| field.name == property) else {
+            return optional_access.then(|| TypeExpr::Named("nil".into()));
+        };
+        Some(if field.optional {
+            simplify_union(vec![field.type_expr.clone(), TypeExpr::Named("nil".into())])
+        } else {
+            field.type_expr.clone()
+        })
+    }
+
+    fn list_property_type(
+        item_type: Option<&TypeExpr>,
+        property: &str,
+        optional_access: bool,
+    ) -> InferredType {
+        match property {
+            "count" => Some(TypeExpr::Named("int".into())),
+            "empty" => Some(TypeExpr::Named("bool".into())),
+            "first" | "last" => item_type
+                .map(|inner| simplify_union(vec![inner.clone(), TypeExpr::Named("nil".into())])),
+            _ if optional_access => Some(TypeExpr::Named("nil".into())),
+            _ => None,
+        }
+    }
+
+    fn string_property_type(property: &str, optional_access: bool) -> InferredType {
+        match property {
+            "count" => Some(TypeExpr::Named("int".into())),
+            "empty" => Some(TypeExpr::Named("bool".into())),
+            _ if optional_access => Some(TypeExpr::Named("nil".into())),
+            _ => None,
+        }
+    }
+
+    fn enum_property_type(property: &str, optional_access: bool) -> InferredType {
+        match property {
+            "variant" => Some(TypeExpr::Named("string".into())),
+            "fields" => Some(TypeExpr::Named("list".into())),
+            _ if optional_access => Some(TypeExpr::Named("nil".into())),
+            _ => None,
+        }
+    }
+
+    fn struct_property_type(
+        &self,
+        name: &str,
+        args: &[TypeExpr],
+        property: &str,
+        scope: &TypeScope,
+        optional_access: bool,
+    ) -> InferredType {
+        let struct_info = scope.get_struct(name)?;
+        let Some(field) = struct_info
+            .fields
+            .iter()
+            .find(|field| field.name == property)
+        else {
+            return optional_access.then(|| TypeExpr::Named("nil".into()));
+        };
+        let mut field_type = field.type_expr.clone()?;
+        if struct_info.type_params.len() == args.len() {
+            let bindings = struct_info
+                .type_params
+                .iter()
+                .map(|param| param.name.clone())
+                .zip(args.iter().cloned())
+                .collect::<BTreeMap<_, _>>();
+            field_type = Self::apply_type_bindings(&field_type, &bindings);
+        }
+        Some(if field.optional {
+            simplify_union(vec![field_type, TypeExpr::Named("nil".into())])
+        } else {
+            field_type
+        })
+    }
+
+    pub(in crate::typechecker) fn check_unnecessary_safe_property_access(
+        &mut self,
+        snode: &SNode,
+        object: &SNode,
+        property: &str,
+        scope: &TypeScope,
+    ) {
+        let Some(receiver_type) = self.infer_type(object, scope) else {
+            return;
+        };
+        if !self.type_is_provably_non_nil(&receiver_type, scope) {
+            return;
+        }
+        if !self.regular_property_access_is_safe(&receiver_type, property, scope) {
+            return;
+        }
+        self.emit_unnecessary_safe_navigation(
+            snode,
+            object,
+            SafeNavigationKind::Property(property),
+        );
+    }
+
+    pub(in crate::typechecker) fn check_unnecessary_safe_method_call(
+        &mut self,
+        snode: &SNode,
+        object: &SNode,
+        scope: &TypeScope,
+    ) {
+        let Some(receiver_type) = self.infer_type(object, scope) else {
+            return;
+        };
+        if self.type_is_provably_non_nil(&receiver_type, scope) {
+            self.emit_unnecessary_safe_navigation(snode, object, SafeNavigationKind::Method);
+        }
+    }
+
+    pub(in crate::typechecker) fn check_unnecessary_safe_subscript_access(
+        &mut self,
+        snode: &SNode,
+        object: &SNode,
+        scope: &TypeScope,
+    ) {
+        let Some(receiver_type) = self.infer_type(object, scope) else {
+            return;
+        };
+        if self.type_is_provably_non_nil(&receiver_type, scope) {
+            self.emit_unnecessary_safe_navigation(snode, object, SafeNavigationKind::Subscript);
+        }
+    }
+
+    fn emit_unnecessary_safe_navigation(
+        &mut self,
+        snode: &SNode,
+        object: &SNode,
+        kind: SafeNavigationKind<'_>,
+    ) {
+        let Some(fix) = self.safe_navigation_fix(snode.span, object, &kind) else {
+            return;
+        };
+        let span = fix[0].span;
+        let access = match kind {
+            SafeNavigationKind::Property(property) => format!("`?.{property}`"),
+            SafeNavigationKind::Method => "safe method call".to_string(),
+            SafeNavigationKind::Subscript => "`?[]`".to_string(),
+        };
+        self.lint_warning_at_with_fix(
+            UNNECESSARY_SAFE_NAVIGATION_RULE,
+            format!("{access} is unnecessary because the receiver cannot be nil"),
+            span,
+            "use ordinary access on non-optional receivers".to_string(),
+            fix,
+        );
+    }
+
+    fn safe_navigation_fix(
+        &self,
+        span: Span,
+        object: &SNode,
+        kind: &SafeNavigationKind<'_>,
+    ) -> Option<Vec<FixEdit>> {
+        let source = self.source.as_deref()?;
+        let search_start = object.span.end.min(span.end);
+        let search_end = span.end.min(source.len());
+        let region = source.get(search_start..search_end)?;
+        let (relative_start, len, replacement) = match kind {
+            SafeNavigationKind::Property(_) | SafeNavigationKind::Method => {
+                (region.find("?.")?, 2, ".")
+            }
+            SafeNavigationKind::Subscript => (region.find("?[")?, 1, ""),
+        };
+        let start = search_start + relative_start;
+        let end = start + len;
+        Some(vec![FixEdit {
+            span: Self::source_span_for_offsets(source, start, end),
+            replacement: replacement.to_string(),
+        }])
+    }
+
+    fn source_span_for_offsets(source: &str, start: usize, end: usize) -> Span {
+        let prefix = &source[..start.min(source.len())];
+        let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+        let line_start = prefix.rfind('\n').map(|offset| offset + 1).unwrap_or(0);
+        Span::with_offsets(start, end, line, start - line_start + 1)
+    }
+
+    fn optional_method_result_type(ty: TypeExpr, include_nil: bool) -> TypeExpr {
+        if include_nil {
+            simplify_union(vec![ty, TypeExpr::Named("nil".into())])
+        } else {
+            ty
+        }
+    }
+
+    fn type_may_include_nil(&self, ty: &TypeExpr, scope: &TypeScope) -> bool {
+        let ty = self.resolve_alias(ty, scope);
+        match &ty {
+            TypeExpr::Named(name) if name == "nil" => true,
+            TypeExpr::Union(members) => members
+                .iter()
+                .any(|member| self.type_may_include_nil(member, scope)),
+            _ => false,
+        }
+    }
+
+    fn type_is_provably_non_nil(&self, ty: &TypeExpr, scope: &TypeScope) -> bool {
+        let ty = self.resolve_alias(ty, scope);
+        match &ty {
+            TypeExpr::Named(name) if matches!(name.as_str(), "nil" | "any" | "unknown" | "_") => {
+                false
+            }
+            TypeExpr::Named(name) if scope.is_generic_type_param(name) => false,
+            TypeExpr::Union(members) => members
+                .iter()
+                .all(|member| self.type_is_provably_non_nil(member, scope)),
+            TypeExpr::Never => false,
+            _ => true,
+        }
+    }
+
+    fn regular_property_access_is_safe(
+        &self,
+        ty: &TypeExpr,
+        property: &str,
+        scope: &TypeScope,
+    ) -> bool {
+        let ty = self.resolve_alias(ty, scope);
+        match &ty {
+            TypeExpr::Union(members) => members
+                .iter()
+                .all(|member| self.regular_property_access_is_safe(member, property, scope)),
+            TypeExpr::Intersection(members) => members
+                .iter()
+                .any(|member| self.regular_property_access_is_safe(member, property, scope)),
+            TypeExpr::Shape(_) | TypeExpr::DictType(_, _) | TypeExpr::List(_) => true,
+            TypeExpr::Named(name) if name == "list" || name == "dict" || name == "string" => true,
+            TypeExpr::Named(name) if name == "Pair" => matches!(property, "first" | "second"),
+            TypeExpr::Named(name) => {
+                scope.get_struct(name).is_some() || scope.get_enum(name).is_some()
+            }
+            TypeExpr::Applied { name, .. } if name == "Pair" => {
+                matches!(property, "first" | "second")
+            }
+            TypeExpr::Applied { name, .. } => {
+                scope.get_struct(name).is_some() || scope.get_enum(name).is_some()
+            }
+            _ => false,
         }
     }
 
