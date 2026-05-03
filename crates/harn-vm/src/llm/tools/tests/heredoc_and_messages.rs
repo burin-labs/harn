@@ -643,7 +643,7 @@ fn assistant_tool_message_includes_empty_content_for_openai_style() {
 }
 
 #[test]
-fn assistant_tool_message_uses_ollama_native_shape() {
+fn assistant_tool_message_uses_ollama_openai_compatible_arguments() {
     let message = build_assistant_tool_message(
         "",
         &[json!({
@@ -659,8 +659,8 @@ fn assistant_tool_message_uses_ollama_native_shape() {
     assert_eq!(message["tool_calls"][0]["type"], "function");
     assert_eq!(message["tool_calls"][0]["function"]["name"], "read");
     assert_eq!(
-        message["tool_calls"][0]["function"]["arguments"]["path"],
-        "main.rs"
+        message["tool_calls"][0]["function"]["arguments"],
+        "{\"path\":\"main.rs\"}"
     );
 }
 

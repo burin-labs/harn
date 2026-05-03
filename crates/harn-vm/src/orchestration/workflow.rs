@@ -1524,7 +1524,24 @@ pub async fn execute_stage_node(
                         .and_then(|d| d.get("verify_completion"))
                         .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
                         .cloned(),
-                    max_verify_attempts: 3,
+                    verify_completion_judge: crate::llm::parse_completion_judge_option(
+                        &node
+                            .raw_model_policy
+                            .as_ref()
+                            .and_then(|value| value.as_dict())
+                            .cloned(),
+                    )?,
+                    max_verify_attempts: crate::llm::helpers::opt_int(
+                        &node
+                            .raw_model_policy
+                            .as_ref()
+                            .and_then(|value| value.as_dict())
+                            .cloned(),
+                        "max_verify_attempts",
+                    )
+                    .filter(|n| *n >= 0)
+                    .map(|n| n as usize)
+                    .unwrap_or(crate::llm::DEFAULT_MAX_VERIFY_ATTEMPTS),
                     llm_transcript_dir: node
                         .raw_model_policy
                         .as_ref()

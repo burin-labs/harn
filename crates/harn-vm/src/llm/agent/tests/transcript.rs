@@ -516,7 +516,7 @@ async fn persisted_session_keeps_compacted_prompt_surface_on_resume() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn user_response_block_can_complete_persistent_loop_without_done_sentinel() {
+async fn user_response_block_with_tool_call_is_not_final_completion() {
     reset_llm_mock_state();
     let response_text = "<tool_call>\nledger({ action: \"note\", text: \"verified completion\" })\n</tool_call>\n<user_response>Completed cleanly.</user_response>";
     let parsed = crate::llm::tools::parse_text_tool_calls_with_tools(response_text, None);
@@ -582,10 +582,11 @@ async fn user_response_block_can_complete_persistent_loop_without_done_sentinel(
     ]))));
     let mut config = base_agent_config();
     config.persistent = true;
-    config.max_iterations = 2;
+    config.max_iterations = 1;
 
     let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
-    assert_eq!(result["status"], "done");
+    assert_eq!(result["status"], "budget_exhausted");
+    assert_eq!(result["llm"]["iterations"].as_u64(), Some(1));
     assert_eq!(result["visible_text"].as_str(), Some("Completed cleanly."));
     reset_llm_mock_state();
 }
@@ -674,6 +675,118 @@ async fn tagged_done_block_does_not_complete_persistent_loop_without_tools() {
     assert_eq!(result["status"], "budget_exhausted");
     assert_eq!(result["llm"]["iterations"].as_u64(), Some(1));
     assert_eq!(result["visible_text"].as_str(), Some("Still working."));
+    reset_llm_mock_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn persistent_done_without_prior_tool_action_is_a_proposed_exit() {
+    reset_llm_mock_state();
+    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+        text: "<user_response>2 + 2 is 4.</user_response>\n<done>##DONE##</done>".to_string(),
+        tool_calls: Vec::new(),
+        match_pattern: None,
+        consume_on_match: true,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        thinking: None,
+        thinking_summary: None,
+        stop_reason: None,
+        model: "mock".to_string(),
+        provider: None,
+        blocks: None,
+        error: None,
+    });
+
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "What is 2 + 2?",
+    })]);
+    let dummy_tool = VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
+        ("name".to_string(), VmValue::String(Rc::from("look"))),
+        (
+            "description".to_string(),
+            VmValue::String(Rc::from("Inspect a file.")),
+        ),
+        (
+            "parameters".to_string(),
+            VmValue::Dict(Rc::new(std::collections::BTreeMap::new())),
+        ),
+        (
+            "executor".to_string(),
+            VmValue::String(Rc::from("host_bridge")),
+        ),
+        (
+            "host_capability".to_string(),
+            VmValue::String(Rc::from("workspace.read_text")),
+        ),
+    ])));
+    opts.tools = Some(VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
+        (
+            "tools".to_string(),
+            VmValue::List(Rc::new(vec![dummy_tool])),
+        ),
+    ]))));
+    let mut config = base_agent_config();
+    config.persistent = true;
+    config.max_iterations = 1;
+    config.turn_policy = Some(TurnPolicy {
+        require_action_or_yield: false,
+        allow_done_sentinel: true,
+        max_prose_chars: None,
+    });
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    assert_eq!(result["status"], "done");
+    assert_eq!(result["visible_text"].as_str(), Some("2 + 2 is 4."));
+    assert_eq!(result["llm"]["iterations"].as_u64(), Some(1));
+    reset_llm_mock_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn built_in_completion_judge_can_veto_then_confirm() {
+    reset_llm_mock_state();
+    for text in [
+        "<user_response>Done.</user_response>\n<done>##DONE##</done>",
+        "{\"pass\": false, \"feedback\": \"Give the user the actual answer before yielding.\"}",
+        "<user_response>The answer is 4.</user_response>\n<done>##DONE##</done>",
+        "{\"pass\": true}",
+    ] {
+        crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+            text: text.to_string(),
+            tool_calls: Vec::new(),
+            match_pattern: None,
+            consume_on_match: true,
+            input_tokens: None,
+            output_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            thinking: None,
+            thinking_summary: None,
+            stop_reason: None,
+            model: "mock".to_string(),
+            provider: None,
+            blocks: None,
+            error: None,
+        });
+    }
+
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "What is 2 + 2?",
+    })]);
+    let mut config = base_agent_config();
+    config.persistent = true;
+    config.max_iterations = 2;
+    config.max_verify_attempts = 2;
+    config.verify_completion_judge =
+        Some(crate::llm::agent::completion_judge::CompletionJudgeConfig::default());
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    assert_eq!(result["status"], "done");
+    assert_eq!(result["llm"]["iterations"].as_u64(), Some(2));
+    assert_eq!(result["visible_text"].as_str(), Some("The answer is 4."));
     reset_llm_mock_state();
 }
 

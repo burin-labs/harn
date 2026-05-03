@@ -721,10 +721,11 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
             .and_then(|o| o.get("verify_completion"))
             .filter(|v| matches!(v, VmValue::Closure(_)))
             .cloned(),
+        verify_completion_judge: crate::llm::parse_completion_judge_option(&options)?,
         max_verify_attempts: crate::llm::helpers::opt_int(&options, "max_verify_attempts")
             .filter(|n| *n >= 0)
             .map(|n| n as usize)
-            .unwrap_or(3),
+            .unwrap_or(crate::llm::DEFAULT_MAX_VERIFY_ATTEMPTS),
         llm_transcript_dir: crate::llm::helpers::opt_str(&options, "llm_transcript_dir"),
         skill_registry,
         skill_match,

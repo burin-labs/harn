@@ -8,6 +8,7 @@ use crate::value::{VmError, VmValue};
 use super::agent_config::AgentLoopConfig;
 
 mod agent_mcp;
+pub(crate) mod completion_judge;
 mod finalize;
 mod helpers;
 mod llm_call;
@@ -502,6 +503,7 @@ pub async fn run_agent_loop_internal(
     let stop_after_successful_tools = state.config.stop_after_successful_tools.clone();
     let post_turn_callback = state.config.post_turn_callback.clone();
     let verify_completion = state.config.verify_completion.clone();
+    let verify_completion_judge = state.config.verify_completion_judge.clone();
     let max_verify_attempts = state.config.max_verify_attempts;
     let bridge = state.bridge.clone();
     let max_iterations = state.max_iterations;
@@ -684,6 +686,8 @@ pub async fn run_agent_loop_internal(
                 turn_policy: turn_policy.as_ref(),
                 stop_after_successful_tools: &stop_after_successful_tools,
                 post_turn_callback: &post_turn_callback,
+                verify_completion_enabled: verify_completion.is_some()
+                    || verify_completion_judge.is_some(),
                 auto_compact: &auto_compact,
                 daemon_config: &daemon_config,
                 custom_nudge: &custom_nudge,
@@ -724,12 +728,12 @@ pub async fn run_agent_loop_internal(
         match iteration_outcome {
             post_turn::IterationOutcome::Continue => continue,
             post_turn::IterationOutcome::Break => {
-                // verify_completion stop hook: when set, runs at every
+                // verify_completion stop hooks: when set, run at every
                 // natural break and may veto with feedback so a "false
                 // done" gets one more turn instead of yielding to the
                 // caller. Bounded by max_verify_attempts to prevent a
                 // buggy judge from holding the loop open.
-                if let Some(closure_value) = verify_completion.as_ref() {
+                if verify_completion.is_some() || verify_completion_judge.is_some() {
                     if verify_attempts >= max_verify_attempts {
                         crate::events::log_warn(
                             "agent.verify_completion",
@@ -747,15 +751,32 @@ pub async fn run_agent_loop_internal(
                         "" => "natural",
                         other => other,
                     };
-                    let veto = post_turn::run_verify_completion(
-                        &mut state,
-                        closure_value,
-                        &session_id,
-                        iteration,
-                        stop_reason,
-                        &call_result.text,
-                    )
-                    .await?;
+                    let mut veto = false;
+                    if let Some(closure_value) = verify_completion.as_ref() {
+                        veto = post_turn::run_verify_completion(
+                            &mut state,
+                            closure_value,
+                            &session_id,
+                            iteration,
+                            stop_reason,
+                            &call_result.text,
+                        )
+                        .await?;
+                    }
+                    if !veto {
+                        if let Some(judge) = verify_completion_judge.as_ref() {
+                            veto = completion_judge::run_completion_judge(
+                                &mut state,
+                                judge,
+                                opts,
+                                &session_id,
+                                iteration,
+                                stop_reason,
+                                &call_result.text,
+                            )
+                            .await?;
+                        }
+                    }
                     if veto {
                         verify_attempts += 1;
                         crate::events::log_debug(

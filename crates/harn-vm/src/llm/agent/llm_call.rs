@@ -45,7 +45,7 @@ use super::super::helpers::{expects_structured_output, transcript_event};
 use super::super::tools::{collect_tool_schemas, parse_text_tool_calls_with_tools};
 use super::helpers::{
     append_message_to_contexts, loop_state_requests_phase_change, prose_exceeds_budget,
-    runtime_feedback_message, sentinel_without_action_nudge, trim_prose_for_history,
+    runtime_feedback_message, trim_prose_for_history,
 };
 use super::state::AgentLoopState;
 
@@ -531,13 +531,10 @@ pub(super) async fn run_llm_call(
     let sentinel_active = allow_done_sentinel && sentinel_lookup_active;
     // exit_when_verified: honor sentinel only if the last run() exit 0.
     let verified = !ctx.exit_when_verified || state.last_run_exit_code == Some(0);
-    // Guard against premature exit where the model emits done without acting.
-    let has_acted = !state.all_tools_used.is_empty() || !tool_calls.is_empty();
-    let completion_ready = has_acted || !ctx.has_tools;
     // Ledger gate: reject done while open/blocked deliverables remain.
     let ledger_blocks_done = state.task_ledger.gates_done();
-    let completion_requested =
-        sentinel_in_text || (sentinel_active && user_response.as_deref().is_some());
+    let completion_requested = tool_calls.is_empty()
+        && (sentinel_in_text || (sentinel_active && user_response.as_deref().is_some()));
     // Sentinel detection is no longer gated on `persistent`. The persistent
     // flag governs whether the loop breaks on a text-only turn (post_turn);
     // the model's explicit stop signal is honored in either mode. Persistent
@@ -546,8 +543,7 @@ pub(super) async fn run_llm_call(
     // non-persistent mode the request is "answer once" and the gates do
     // not apply.
     let sentinel_hit = if ctx.persistent {
-        (completion_requested && verified && completion_ready && !ledger_blocks_done)
-            || phase_change
+        (completion_requested && verified && !ledger_blocks_done) || phase_change
     } else {
         completion_requested || phase_change
     };
@@ -577,15 +573,6 @@ pub(super) async fn run_llm_call(
             runtime_feedback_message("verification_gate", corrective),
         );
     }
-    if completion_requested && !has_acted && ctx.persistent && ctx.has_tools {
-        let corrective = sentinel_without_action_nudge(ctx.tool_format, ctx.turn_policy);
-        append_message_to_contexts(
-            &mut state.visible_messages,
-            &mut state.recorded_messages,
-            runtime_feedback_message("sentinel_without_action", corrective),
-        );
-    }
-
     // Intercept `ledger(...)` before normal dispatch — it mutates
     // task_ledger state and has no host executor.
     let mut tool_calls: Vec<serde_json::Value> = tool_calls;

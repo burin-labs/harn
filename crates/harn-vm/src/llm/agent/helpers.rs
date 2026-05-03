@@ -184,31 +184,6 @@ pub(crate) fn action_turn_nudge(
     ))
 }
 
-pub(crate) fn sentinel_without_action_nudge(
-    tool_format: &str,
-    turn_policy: Option<&crate::orchestration::TurnPolicy>,
-) -> String {
-    let completion_signal = if tool_format == "native" {
-        "`##DONE##`"
-    } else {
-        "a <done> block"
-    };
-    let mut message = if turn_policy.is_some_and(|policy| !policy.allow_done_sentinel) {
-        format!(
-            "You emitted {completion_signal} in a workflow-owned action stage. The task is not complete yet. Make concrete progress with an available tool now, or switch phase if the workflow allows it. Do not output {completion_signal} in this stage."
-        )
-    } else {
-        format!(
-            "You emitted {completion_signal} without taking any tool action. The task is not complete yet. Make concrete progress with an available tool now, or switch phase if the workflow allows it. Do not emit {completion_signal} again until you have acted."
-        )
-    };
-    if let Some(nudge) = action_turn_nudge(tool_format, true, turn_policy, false) {
-        message.push(' ');
-        message.push_str(&nudge);
-    }
-    message
-}
-
 pub(crate) async fn inject_queued_user_messages(
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
     messages: &mut Vec<serde_json::Value>,
