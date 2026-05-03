@@ -1,0 +1,72 @@
+import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
+
+fn __profile_defaults(profile) {
+  if profile == "tool_using" {
+    return {max_iterations: 50, max_nudges: 8, tool_retries: 0, llm_retries: 2, schema_retries: 0}
+  }
+  if profile == "researcher" {
+    return {max_iterations: 30, max_nudges: 4, tool_retries: 0, llm_retries: 2, schema_retries: 0}
+  }
+  if profile == "verifier" {
+    return {max_iterations: 5, max_nudges: 0, tool_retries: 0, llm_retries: 2, schema_retries: 3}
+  }
+  if profile == "completer" {
+    return {max_iterations: 1, max_nudges: 0, tool_retries: 0, llm_retries: 2, schema_retries: 0}
+  }
+  throw "agent_loop: profile must be one of tool_using, researcher, verifier, completer"
+}
+
+fn __completion_judge_defaults(value) {
+  if type_of(value) == "bool" && value {
+    return {system: completion_judge_system_prompt(), feedback_fallback: completion_judge_feedback_prompt()}
+  }
+  return value
+}
+
+fn __has_key(opts, key) {
+  return contains(opts.keys(), key)
+}
+
+fn __judge_enabled(value) {
+  if value == nil {
+    return false
+  }
+  if type_of(value) == "bool" {
+    return value
+  }
+  if type_of(value) == "dict" {
+    let enabled = value?.enabled
+    if enabled == nil {
+      return true
+    }
+    return enabled
+  }
+  return true
+}
+
+fn __client_tool_search_requested(value) {
+  return type_of(value) == "dict" && value?.mode == "client"
+}
+
+/** agent_loop_options. */
+pub fn agent_loop_options(options = nil) {
+  var opts = options ?? {}
+  let profile = opts?.profile ?? "tool_using"
+  let defaults = __profile_defaults(profile)
+  opts = defaults + opts
+  if !__has_key(opts, "tool_format")
+    && (opts?.tools == nil || __client_tool_search_requested(opts?.tool_search)) {
+    opts = opts + {tool_format: "text"}
+  }
+  if __has_key(opts, "done_judge") && __judge_enabled(opts?.done_judge)
+    && !__has_key(opts, "done_sentinel") {
+    opts = opts + {done_sentinel: true}
+  }
+  if __has_key(opts, "verify_completion_judge") {
+    opts = opts + {verify_completion_judge: __completion_judge_defaults(opts?.verify_completion_judge)}
+  }
+  if __has_key(opts, "done_judge") {
+    opts = opts + {done_judge: __completion_judge_defaults(opts?.done_judge)}
+  }
+  return opts
+}

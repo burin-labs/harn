@@ -5,6 +5,7 @@
 //! fields — their `Drop` impls still pop orchestration stacks and clear
 //! session sinks on loop exit (success or error).
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::llm::daemon::{watch_state, DaemonLoopConfig, RealMtimeProvider};
@@ -159,6 +160,56 @@ fn filter_deferred_from_tools_val(
     let mut new_dict = dict.clone();
     new_dict.insert("tools".to_string(), VmValue::List(Rc::new(kept)));
     Some(VmValue::Dict(Rc::new(new_dict)))
+}
+
+fn render_deferred_tool_listing(search_name: &str, list: &str) -> String {
+    let mut bindings = BTreeMap::new();
+    bindings.insert(
+        "search_name".to_string(),
+        VmValue::String(Rc::from(search_name.to_string())),
+    );
+    bindings.insert(
+        "list".to_string(),
+        VmValue::String(Rc::from(list.to_string())),
+    );
+    crate::stdlib::template::render_stdlib_prompt_asset(
+        "agent/prompts/deferred_tool_listing.harn.prompt",
+        Some(&bindings),
+    )
+    .unwrap_or_else(|error| format!("deferred tool listing prompt render error: {error}"))
+}
+
+fn render_persistent_loop_system_prompt(
+    persistent: bool,
+    exit_when_verified: bool,
+    sentinel_active: bool,
+    has_tools: bool,
+    native_done: bool,
+    done_sentinel: &str,
+) -> String {
+    let mut bindings = BTreeMap::new();
+    bindings.insert("persistent".to_string(), VmValue::Bool(persistent));
+    bindings.insert(
+        "exit_when_verified".to_string(),
+        VmValue::Bool(exit_when_verified),
+    );
+    bindings.insert(
+        "sentinel_active".to_string(),
+        VmValue::Bool(sentinel_active),
+    );
+    bindings.insert("has_tools".to_string(), VmValue::Bool(has_tools));
+    bindings.insert("native_mode".to_string(), VmValue::Bool(native_done));
+    bindings.insert("native_done".to_string(), VmValue::Bool(native_done));
+    bindings.insert(
+        "done_sentinel".to_string(),
+        VmValue::String(Rc::from(done_sentinel.to_string())),
+    );
+    let rendered = crate::stdlib::template::render_stdlib_prompt_asset(
+        "agent/prompts/persistent_loop_system.harn.prompt",
+        Some(&bindings),
+    )
+    .unwrap_or_else(|error| format!("persistent loop prompt render error: {error}"));
+    format!("\n\n{}", rendered.trim())
 }
 
 /// Client-mode tool_search state carried across turns. Present only
@@ -818,11 +869,10 @@ impl AgentLoopState {
                 }
             }
             if !stub_lines.is_empty() {
-                prompt.push_str(&format!(
-                    "\n\n## Tools available via `{search_name}` (deferred)\n\n\
-                     Call `{search_name}` with a query to surface any of:\n\n{list}\n",
-                    search_name = client.synthetic_name,
-                    list = stub_lines.join("\n"),
+                prompt.push_str("\n\n");
+                prompt.push_str(&render_deferred_tool_listing(
+                    &client.synthetic_name,
+                    &stub_lines.join("\n"),
                 ));
             }
         }
@@ -1166,11 +1216,10 @@ impl AgentLoopState {
                     }
                 }
                 if !stub_lines.is_empty() {
-                    prompt.push_str(&format!(
-                        "\n\n## Tools available via `{search_name}` (deferred)\n\n\
-                         Call `{search_name}` with a query to surface any of:\n\n{list}\n",
-                        search_name = client_cfg.effective_name(),
-                        list = stub_lines.join("\n"),
+                    prompt.push_str("\n\n");
+                    prompt.push_str(&render_deferred_tool_listing(
+                        client_cfg.effective_name(),
+                        &stub_lines.join("\n"),
                     ));
                 }
             }
@@ -1191,53 +1240,18 @@ impl AgentLoopState {
         // tool-eager model still needs the explicit stop convention or it
         // will exhaust the iteration budget.
         let sentinel_active = allow_done_sentinel && !done_sentinel.is_empty();
-        let done_instruction = if tool_format == "native" || !has_tools {
-            format!("include `{done_sentinel}` exactly once in assistant text")
-        } else {
-            format!("emit `<done>{done_sentinel}</done>` as its own top-level block")
-        };
-        let progress_instruction = if has_tools {
-            if tool_format == "native" {
-                "Use the provider tool channel until the request is complete; after tool evidence is sufficient, give the final user-facing answer in concise assistant text."
-            } else {
-                "Use <tool_call> blocks until the request is complete; after tool evidence is sufficient, emit the final user-facing answer in a <user_response> block."
-            }
-        } else {
-            "Solve the request directly in assistant text — do not stop early to explain or summarize."
-        };
-        let persistent_system_prompt = if persistent {
-            if exit_when_verified {
-                if sentinel_active {
-                    Some(format!(
-                        "\n\nKeep working until the current request is complete. {progress_instruction} {} only after the current request passes verification.",
-                        done_instruction,
-                    ))
-                } else {
-                    Some(format!(
-                        "\n\nKeep working until the current request is complete. {progress_instruction}"
-                    ))
-                }
-            } else if sentinel_active {
-                Some(format!(
-                    "\n\nIMPORTANT: You MUST keep working until the current request is complete. \
-                     {progress_instruction} \
-                     When the requested work is complete, {}.",
-                    done_instruction
-                ))
-            } else {
-                Some(format!(
-                    "\n\nIMPORTANT: You MUST keep working until the current request is complete. \
-                     {progress_instruction}"
-                ))
-            }
-        } else if sentinel_active && has_tools {
+        let persistent_system_prompt = if persistent || (sentinel_active && has_tools) {
             // Non-persistent, tool-using loops: even though the loop will
             // also break on a text-only turn, tool-eager models often never
             // emit one. Tell the model the explicit stop convention so it
             // can short-circuit when it's satisfied.
-            Some(format!(
-                "\n\nWhen you have produced the final answer for the user, {}.",
-                done_instruction
+            Some(render_persistent_loop_system_prompt(
+                persistent,
+                exit_when_verified,
+                sentinel_active,
+                has_tools,
+                tool_format == "native" || !has_tools,
+                &done_sentinel,
             ))
         } else {
             None

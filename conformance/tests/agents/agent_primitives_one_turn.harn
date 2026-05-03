@@ -1,0 +1,34 @@
+fn calculator_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "add",
+    "Add two integers",
+    {
+      handler: { args -> args.left + args.right },
+      parameters: {
+        left: {type: "integer", description: "Left operand"},
+        right: {type: "integer", description: "Right operand"},
+      },
+      returns: {type: "integer"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+pipeline main() {
+  let tools = calculator_tools()
+  llm_mock({text: "<tool_call>\nadd({ left: 2, right: 3 })\n</tool_call>"})
+  let turn = agent_llm_turn("Calculate 2 + 3", nil, {provider: "mock", tools: tools})
+  let parsed = agent_parse_tool_calls(turn.text, tools)
+  let dispatched = agent_dispatch_tool_call(parsed.tool_calls[0], tools)
+  let malformed_text = agent_parse_tool_calls("<tool_call>\nadd({ left: })\n</tool_call>", tools)
+  let schema_error = agent_dispatch_tool_call({name: "add", arguments: {left: 2}}, tools)
+  println(parsed.tool_calls[0].name)
+  println(dispatched.ok)
+  println(dispatched.rendered_result)
+  println(len(malformed_text.tool_parse_errors) > 0)
+  println(schema_error.ok)
+  println(schema_error.error_category)
+}

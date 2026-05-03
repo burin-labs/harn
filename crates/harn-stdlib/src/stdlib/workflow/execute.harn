@@ -1,0 +1,6 @@
+import "std/workflow/prompts"
+
+/** workflow_execute. */
+pub fn workflow_execute(task, graph, artifacts = nil, options = nil) {
+  return __host_workflow_graph_run(task, graph, artifacts ?? [], options ?? {})
+}

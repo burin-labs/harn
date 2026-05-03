@@ -5,7 +5,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::agent_events::AgentEventSink;
-use crate::value::VmValue;
+use crate::stdlib::harn_entry::{register_harn_async_entrypoints, HarnAsyncEntrypoint};
+use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 use super::agent::run_agent_loop_internal;
@@ -20,6 +21,28 @@ use super::tools::build_assistant_response_message;
 
 pub(crate) const DEFAULT_AGENT_LOOP_LLM_RETRIES: usize = 2;
 pub(crate) const DEFAULT_MAX_VERIFY_ATTEMPTS: usize = 20;
+const HOST_LLM_SESSION_RUN_BUILTIN: &str = "__host_llm_session_run";
+
+const AGENT_STDLIB_ENTRYPOINTS: &[HarnAsyncEntrypoint] = &[
+    HarnAsyncEntrypoint::new("agent_loop", "std/agent/loop", "agent_loop"),
+    HarnAsyncEntrypoint::new("agent_turn", "std/agent/turn", "agent_turn"),
+    HarnAsyncEntrypoint::new("agent_llm_turn", "std/agent/primitives", "agent_llm_turn"),
+    HarnAsyncEntrypoint::new(
+        "agent_parse_tool_calls",
+        "std/agent/primitives",
+        "agent_parse_tool_calls",
+    ),
+    HarnAsyncEntrypoint::new(
+        "agent_dispatch_tool_call",
+        "std/agent/primitives",
+        "agent_dispatch_tool_call",
+    ),
+    HarnAsyncEntrypoint::new(
+        "agent_dispatch_tool_batch",
+        "std/agent/primitives",
+        "agent_dispatch_tool_batch",
+    ),
+];
 
 #[derive(Clone, Copy)]
 pub(crate) struct AgentLoopProfileDefaults {
@@ -507,167 +530,165 @@ fn push_structured_output_candidate(candidates: &mut Vec<String>, candidate: Str
     candidates.push(candidate);
 }
 
-pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
-    let b = bridge;
-    super::agent::install_current_host_bridge(b.clone());
-    vm.register_async_builtin("agent_loop", move |args| {
-        let captured_bridge = b.clone();
-        async move {
-            std::mem::drop(captured_bridge);
-            let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-            let profile_defaults = agent_loop_profile_defaults(&options, "agent_loop")?;
-            let max_iterations =
-                opt_int(&options, "max_iterations").unwrap_or(profile_defaults.max_iterations)
-                    as usize;
-            let persistent = opt_bool(&options, "persistent");
-            let max_nudges =
-                opt_int(&options, "max_nudges").unwrap_or(profile_defaults.max_nudges) as usize;
-            let custom_nudge = opt_str(&options, "nudge");
-            let tool_retries =
-                opt_int(&options, "tool_retries").unwrap_or(profile_defaults.tool_retries)
-                    as usize;
-            let schema_retries =
-                opt_int(&options, "schema_retries").unwrap_or(profile_defaults.schema_retries)
-                    as usize;
-            let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
-            let tool_format = opt_str(&options, "tool_format").unwrap_or_else(|| {
-                let opts = extract_llm_options(&args).ok();
-                let model = opts.as_ref().map(|o| o.model.as_str()).unwrap_or("");
-                let provider = opts.as_ref().map(|o| o.provider.as_str()).unwrap_or("");
-                crate::llm_config::default_tool_format(model, provider)
-            });
-            let native_tool_fallback = opt_str(&options, "native_tool_fallback")
-                .map(|value| {
-                    crate::orchestration::NativeToolFallbackPolicy::parse(&value).ok_or_else(
-                        || {
-                            crate::value::VmError::Runtime(format!(
-                                "agent_loop: native_tool_fallback must be one of allow, allow_once, reject; got `{value}`"
-                            ))
-                        },
-                    )
-                })
-                .transpose()?
-                .unwrap_or_default();
-            // `done_sentinel` accepts:
-            //   - missing / `nil`     → use tool_format-aware default (state.rs)
-            //   - `false`             → explicit disable (no injection, no detection)
-            //   - `true`              → explicit default sentinel (`##DONE##`)
-            //   - `string s`          → custom sentinel (empty `""` still means
-            //                           disabled for legacy back-compat)
-            // The first-class `bool` shape replaces the empty-string opt-out
-            // foot-gun where users had to remember `done_sentinel: ""`.
-            let done_sentinel = parse_done_sentinel_option(&options)?;
-            let break_unless_phase = opt_str(&options, "break_unless_phase");
-            let session_id = opt_str(&options, "session_id")
-                .or_else(crate::agent_sessions::current_session_id)
-                .unwrap_or_else(|| format!("agent_session_{}", uuid::Uuid::now_v7()));
-            let daemon = opt_bool(&options, "daemon");
-            let auto_compact = crate::llm::resolve_agent_loop_auto_compact(&args, &options).await?;
-            let policy = options.as_ref().and_then(|o| o.get("policy")).map(|v| {
-                let json = crate::llm::helpers::vm_value_to_json(v);
-                serde_json::from_value::<crate::orchestration::CapabilityPolicy>(json)
-                    .unwrap_or_default()
-            });
-            let command_policy = parse_command_policy_from_options(&options, "agent_loop")?;
-            let approval_policy =
-                options
-                    .as_ref()
-                    .and_then(|o| o.get("approval_policy"))
-                    .map(|v| {
-                        let json = crate::llm::helpers::vm_value_to_json(v);
-                        serde_json::from_value::<crate::orchestration::ToolApprovalPolicy>(json)
-                            .unwrap_or_default()
-                    });
-            let permissions = crate::llm::permissions::parse_dynamic_permission_policy(
-                options.as_ref().and_then(|o| o.get("permissions")),
-                "agent_loop",
-            )?;
-            let daemon_config = parse_daemon_loop_config(options.as_ref());
-            let turn_policy = options
-                .as_ref()
-                .and_then(|o| o.get("turn_policy"))
-                .map(|v| {
-                    let json = crate::llm::helpers::vm_value_to_json(v);
-                    serde_json::from_value::<crate::orchestration::TurnPolicy>(json)
-                        .unwrap_or_default()
-                });
-            let (skill_registry, skill_match, working_files) =
-                super::agent::parse_skill_config(&options);
-            let mcp_servers = super::agent::parse_mcp_server_specs(&options)?;
-            let autonomy_budget =
-                crate::llm::autonomy_budget::parse_autonomy_budget(
-                    options.as_ref(),
-                    &session_id,
-                    "agent_loop",
-                )?;
-            let mut opts = extract_llm_options(&args)?;
-            let budget = opts.budget.clone();
-            let result = run_agent_loop_internal(
-                &mut opts,
-                AgentLoopConfig {
-                    persistent,
-                    max_iterations,
-                    max_nudges,
-                    nudge: custom_nudge,
-                    done_sentinel,
-                    break_unless_phase,
-                    tool_retries,
-                    tool_backoff_ms,
-                    schema_retries,
-                    schema_retry_nudge: super::parse_schema_nudge(&options),
-                    tool_format,
-                    native_tool_fallback,
-                    auto_compact,
-                    policy,
-                    command_policy,
-                    permissions,
-                    approval_policy,
-                    daemon,
-                    daemon_config,
-                    llm_retries: opt_int(&options, "llm_retries")
-                        .unwrap_or(profile_defaults.llm_retries) as usize,
-                    llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
-                    token_budget: opt_int(&options, "token_budget"),
-                    budget,
-                    exit_when_verified: opt_bool(&options, "exit_when_verified"),
-                    loop_detect_warn: opt_int(&options, "loop_detect_warn").unwrap_or(2) as usize,
-                    loop_detect_block: opt_int(&options, "loop_detect_block").unwrap_or(3) as usize,
-                    loop_detect_skip: opt_int(&options, "loop_detect_skip").unwrap_or(4) as usize,
-                    tool_examples: opt_str(&options, "tool_examples"),
-                    turn_policy,
-                    stop_after_successful_tools: crate::llm::helpers::opt_str_list(
-                        &options,
-                        "stop_after_successful_tools",
-                    ),
-                    require_successful_tools: crate::llm::helpers::opt_str_list(
-                        &options,
-                        "require_successful_tools",
-                    ),
-                    session_id,
-                    event_sink: None,
-                    task_ledger: parse_task_ledger_from_options(&options),
-                    post_turn_callback: parse_closure_option(&options, "post_turn_callback")?,
-                    verify_completion: parse_closure_option(&options, "verify_completion")?,
-                    verify_completion_judge:
-                        super::agent::completion_judge::parse_completion_judge_option(&options)?,
-                    done_judge: super::agent::completion_judge::parse_done_judge_option(&options)?,
-                    max_verify_attempts: opt_int(&options, "max_verify_attempts")
-                        .filter(|n| *n >= 0)
-                        .map(|n| n as usize)
-                        .unwrap_or(DEFAULT_MAX_VERIFY_ATTEMPTS),
-                    llm_transcript_dir: opt_str(&options, "llm_transcript_dir"),
-                    skill_registry,
-                    skill_match,
-                    working_files,
-                    mcp_servers,
-                    mcp_clients: Default::default(),
-                    autonomy_budget,
-                },
-            )
-            .await?;
-            Ok(crate::stdlib::json_to_vm_value(&result))
-        }
+async fn run_llm_turn_loop_driver(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let options = args.get(2).and_then(|a| a.as_dict()).cloned();
+    let profile_defaults = agent_loop_profile_defaults(&options, "agent_loop")?;
+    let max_iterations =
+        opt_int(&options, "max_iterations").unwrap_or(profile_defaults.max_iterations) as usize;
+    let persistent = opt_bool(&options, "persistent");
+    let max_nudges =
+        opt_int(&options, "max_nudges").unwrap_or(profile_defaults.max_nudges) as usize;
+    let custom_nudge = opt_str(&options, "nudge");
+    let tool_retries =
+        opt_int(&options, "tool_retries").unwrap_or(profile_defaults.tool_retries) as usize;
+    let schema_retries =
+        opt_int(&options, "schema_retries").unwrap_or(profile_defaults.schema_retries) as usize;
+    let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
+    let tool_format = opt_str(&options, "tool_format").unwrap_or_else(|| {
+        let opts = extract_llm_options(&args).ok();
+        let model = opts.as_ref().map(|o| o.model.as_str()).unwrap_or("");
+        let provider = opts.as_ref().map(|o| o.provider.as_str()).unwrap_or("");
+        crate::llm_config::default_tool_format(model, provider)
     });
+    let native_tool_fallback = opt_str(&options, "native_tool_fallback")
+        .map(|value| {
+            crate::orchestration::NativeToolFallbackPolicy::parse(&value).ok_or_else(|| {
+                crate::value::VmError::Runtime(format!(
+                    "agent_loop: native_tool_fallback must be one of allow, allow_once, reject; got `{value}`"
+                ))
+            })
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let done_sentinel = parse_done_sentinel_option(&options)?;
+    let break_unless_phase = opt_str(&options, "break_unless_phase");
+    let session_id = opt_str(&options, "session_id")
+        .or_else(crate::agent_sessions::current_session_id)
+        .unwrap_or_else(|| format!("agent_session_{}", uuid::Uuid::now_v7()));
+    let daemon = opt_bool(&options, "daemon");
+    let auto_compact = crate::llm::resolve_agent_loop_auto_compact(&args, &options).await?;
+    let policy = options.as_ref().and_then(|o| o.get("policy")).map(|v| {
+        let json = crate::llm::helpers::vm_value_to_json(v);
+        serde_json::from_value::<crate::orchestration::CapabilityPolicy>(json).unwrap_or_default()
+    });
+    let command_policy = parse_command_policy_from_options(&options, "agent_loop")?;
+    let approval_policy = options
+        .as_ref()
+        .and_then(|o| o.get("approval_policy"))
+        .map(|v| {
+            let json = crate::llm::helpers::vm_value_to_json(v);
+            serde_json::from_value::<crate::orchestration::ToolApprovalPolicy>(json)
+                .unwrap_or_default()
+        });
+    let permissions = crate::llm::permissions::parse_dynamic_permission_policy(
+        options.as_ref().and_then(|o| o.get("permissions")),
+        "agent_loop",
+    )?;
+    let daemon_config = parse_daemon_loop_config(options.as_ref());
+    let turn_policy = options
+        .as_ref()
+        .and_then(|o| o.get("turn_policy"))
+        .map(|v| {
+            let json = crate::llm::helpers::vm_value_to_json(v);
+            serde_json::from_value::<crate::orchestration::TurnPolicy>(json).unwrap_or_default()
+        });
+    let (skill_registry, skill_match, working_files) = super::agent::parse_skill_config(&options);
+    let mcp_servers = super::agent::parse_mcp_server_specs(&options)?;
+    let autonomy_budget = crate::llm::autonomy_budget::parse_autonomy_budget(
+        options.as_ref(),
+        &session_id,
+        "agent_loop",
+    )?;
+    let mut opts = extract_llm_options(&args)?;
+    let budget = opts.budget.clone();
+    let result = run_agent_loop_internal(
+        &mut opts,
+        AgentLoopConfig {
+            persistent,
+            max_iterations,
+            max_nudges,
+            nudge: custom_nudge,
+            done_sentinel,
+            break_unless_phase,
+            tool_retries,
+            tool_backoff_ms,
+            schema_retries,
+            schema_retry_nudge: super::parse_schema_nudge(&options),
+            tool_format,
+            native_tool_fallback,
+            auto_compact,
+            policy,
+            command_policy,
+            permissions,
+            approval_policy,
+            daemon,
+            daemon_config,
+            llm_retries: opt_int(&options, "llm_retries").unwrap_or(profile_defaults.llm_retries)
+                as usize,
+            llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
+            token_budget: opt_int(&options, "token_budget"),
+            budget,
+            exit_when_verified: opt_bool(&options, "exit_when_verified"),
+            loop_detect_warn: opt_int(&options, "loop_detect_warn").unwrap_or(2) as usize,
+            loop_detect_block: opt_int(&options, "loop_detect_block").unwrap_or(3) as usize,
+            loop_detect_skip: opt_int(&options, "loop_detect_skip").unwrap_or(4) as usize,
+            tool_examples: opt_str(&options, "tool_examples"),
+            turn_policy,
+            stop_after_successful_tools: crate::llm::helpers::opt_str_list(
+                &options,
+                "stop_after_successful_tools",
+            ),
+            require_successful_tools: crate::llm::helpers::opt_str_list(
+                &options,
+                "require_successful_tools",
+            ),
+            session_id,
+            event_sink: None,
+            task_ledger: parse_task_ledger_from_options(&options),
+            post_turn_callback: parse_closure_option(&options, "post_turn_callback")?,
+            verify_completion: parse_closure_option(&options, "verify_completion")?,
+            verify_completion_judge: super::agent::completion_judge::parse_completion_judge_option(
+                &options,
+            )?,
+            done_judge: super::agent::completion_judge::parse_done_judge_option(&options)?,
+            max_verify_attempts: opt_int(&options, "max_verify_attempts")
+                .filter(|n| *n >= 0)
+                .map(|n| n as usize)
+                .unwrap_or(DEFAULT_MAX_VERIFY_ATTEMPTS),
+            llm_transcript_dir: opt_str(&options, "llm_transcript_dir"),
+            skill_registry,
+            skill_match,
+            working_files,
+            mcp_servers,
+            mcp_clients: Default::default(),
+            autonomy_budget,
+        },
+    )
+    .await?;
+    Ok(crate::stdlib::json_to_vm_value(&result))
+}
+
+fn register_llm_turn_loop_driver(vm: &mut Vm, bridge: Option<Rc<crate::bridge::HostBridge>>) {
+    if let Some(b) = bridge.as_ref() {
+        super::agent::install_current_host_bridge(b.clone());
+    }
+    vm.register_async_builtin(HOST_LLM_SESSION_RUN_BUILTIN, move |args| {
+        let captured_bridge = bridge.clone();
+        Box::pin(async move {
+            std::mem::drop(captured_bridge);
+            run_llm_turn_loop_driver(args).await
+        })
+    });
+}
+
+pub(crate) fn register_agent_loop(vm: &mut Vm) {
+    register_llm_turn_loop_driver(vm, None);
+    register_harn_async_entrypoints(vm, AGENT_STDLIB_ENTRYPOINTS);
+}
+
+pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
+    register_llm_turn_loop_driver(vm, Some(bridge));
+    register_harn_async_entrypoints(vm, AGENT_STDLIB_ENTRYPOINTS);
 }
 
 pub fn register_agent_subscribe(vm: &mut Vm) {

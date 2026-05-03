@@ -29,12 +29,13 @@
 //! The phase never breaks the outer iteration loop directly — all
 //! control flow decisions live in `post_turn`.
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::agent_events::{AgentEvent, ToolCallStatus, ToolExecutor};
 use crate::bridge::HostBridge;
 use crate::tool_annotations::ToolKind;
-use crate::value::VmError;
+use crate::value::{VmError, VmValue};
 
 use crate::orchestration::TurnPolicy;
 
@@ -307,13 +308,22 @@ pub(super) async fn run_llm_call(
                             ctx.native_tool_fallback.as_str(),
                         ),
                     );
-                    let feedback = format!(
-                        "This stage is running in native tool mode. Your last response emitted text-mode tool calls instead of provider-native tool calls.\n\n\
-                         Re-issue the same action using ONLY the native tool channel. Do not write `<tool_call>` tags, bare `name({{ ... }})` calls, Markdown fences, or JSON tool-call envelopes in assistant text.\n\n\
-                         Policy: `{}`. Observed fallback turn: {}.",
-                        ctx.native_tool_fallback.as_str(),
-                        fallback_index,
+                    let mut bindings = BTreeMap::new();
+                    bindings.insert(
+                        "policy".to_string(),
+                        VmValue::String(Rc::from(ctx.native_tool_fallback.as_str())),
                     );
+                    bindings.insert(
+                        "fallback_index".to_string(),
+                        VmValue::Int(fallback_index as i64),
+                    );
+                    let feedback = crate::stdlib::template::render_stdlib_prompt_asset(
+                        "agent/prompts/native_tool_contract_feedback.harn.prompt",
+                        Some(&bindings),
+                    )
+                    .unwrap_or_else(|error| {
+                        format!("native tool contract feedback prompt render error: {error}")
+                    });
                     append_message_to_contexts(
                         &mut state.visible_messages,
                         &mut state.recorded_messages,
@@ -374,21 +384,22 @@ pub(super) async fn run_llm_call(
                         calls.len()
                     )
                 };
-                let feedback = format!(
-                    "Your tool call could not be parsed: {error_summary}{partial_note}\n\n\
-                     Use heredoc syntax for multiline content — it requires NO escaping:\n\
-                     edit({{\n\
-                         action: \"create\",\n\
-                         path: \"...\",\n\
-                         content: <<EOF\n\
-                     package main\n\
-                     // backticks, quotes, backslashes — all fine inside heredoc\n\
-                     EOF\n\
-                     }})\n\n\
-                     Do NOT use backtick template literals for code that contains \
-                     backtick characters (Go raw strings, Rust raw strings, shell). \
-                     Heredoc avoids all escaping issues."
+                let mut bindings = BTreeMap::new();
+                bindings.insert(
+                    "error_summary".to_string(),
+                    VmValue::String(Rc::from(error_summary)),
                 );
+                bindings.insert(
+                    "partial_note".to_string(),
+                    VmValue::String(Rc::from(partial_note)),
+                );
+                let feedback = crate::stdlib::template::render_stdlib_prompt_asset(
+                    "agent/prompts/parse_guidance.harn.prompt",
+                    Some(&bindings),
+                )
+                .unwrap_or_else(|error| {
+                    format!("parse guidance feedback prompt render error: {error}")
+                });
                 append_message_to_contexts(
                     &mut state.visible_messages,
                     &mut state.recorded_messages,
@@ -460,18 +471,22 @@ pub(super) async fn run_llm_call(
         } else {
             format!("<done>{}</done>\n", ctx.done_sentinel)
         };
-        let feedback = format!(
-            "Your response violated the tagged response protocol. Each issue:\n- {}\n\n\
-             Re-emit using only these top-level tags, separated by whitespace:\n\n\
-             <assistant_prose>short narration (optional)</assistant_prose>\n\
-             <user_response>final user-facing answer (optional)</user_response>\n\
-             <tool_call>\nname({{ key: value }})\n</tool_call>\n\
-             {done_line}\n\
-             Nothing outside these tags is accepted. Do not paste source code, \
-             diffs, JSON, or command output as prose — wrap each action in its \
-             own <tool_call> block.",
-            protocol_violations.join("\n- "),
+        let mut bindings = BTreeMap::new();
+        bindings.insert(
+            "violations".to_string(),
+            VmValue::String(Rc::from(protocol_violations.join("\n- "))),
         );
+        bindings.insert(
+            "done_line".to_string(),
+            VmValue::String(Rc::from(done_line)),
+        );
+        let feedback = crate::stdlib::template::render_stdlib_prompt_asset(
+            "agent/prompts/protocol_violation_feedback.harn.prompt",
+            Some(&bindings),
+        )
+        .unwrap_or_else(|error| {
+            format!("protocol violation feedback prompt render error: {error}")
+        });
         append_message_to_contexts(
             &mut state.visible_messages,
             &mut state.recorded_messages,
@@ -562,11 +577,13 @@ pub(super) async fn run_llm_call(
         let code_str = state
             .last_run_exit_code
             .map_or("none".to_string(), |c| c.to_string());
-        let corrective = format!(
-            "You emitted a completion signal but verification has not passed \
-             (last run exit code: {code_str}). The loop will continue. \
-             Run the verification command and fix any failures before finishing."
-        );
+        let mut bindings = BTreeMap::new();
+        bindings.insert("code".to_string(), VmValue::String(Rc::from(code_str)));
+        let corrective = crate::stdlib::template::render_stdlib_prompt_asset(
+            "agent/prompts/verification_gate_feedback.harn.prompt",
+            Some(&bindings),
+        )
+        .unwrap_or_else(|error| format!("verification gate feedback prompt render error: {error}"));
         append_message_to_contexts(
             &mut state.visible_messages,
             &mut state.recorded_messages,

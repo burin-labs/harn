@@ -4,6 +4,7 @@
 //! thread-local feedback queue and host-bridge slot remain in
 //! `agent/mod.rs`.
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::value::VmError;
@@ -153,35 +154,36 @@ pub(crate) fn action_turn_nudge(
     if !policy.require_action_or_yield {
         return None;
     }
-    let prose_clause = if let Some(limit) = policy.max_prose_chars {
-        format!("Keep prose to at most {limit} visible characters, then")
-    } else {
-        "Keep prose brief, then".to_string()
-    };
-    let emphasis = if prose_too_long {
-        " Your last response spent too much budget on prose."
-    } else {
-        ""
-    };
-    let completion_clause = if has_tools && policy.allow_done_sentinel && tool_format == "native" {
-        "either make concrete progress with the provider tool channel, switch phase, or include `##DONE##` exactly once if the task is genuinely complete."
-    } else if has_tools && policy.allow_done_sentinel {
-        "either make concrete progress with a well-formed <tool_call> block, switch phase, or emit <user_response>final answer</user_response> plus a <done> block if the task is genuinely complete."
-    } else if has_tools {
-        "either make concrete progress with a well-formed <tool_call> block or switch phase if the workflow allows it."
-    } else if policy.allow_done_sentinel {
-        "either make concrete progress in your reply, switch phase, or include `##DONE##` exactly once if the task is genuinely complete."
-    } else {
-        "either make concrete progress in your reply or switch phase if the workflow allows it."
-    };
-    let mode_clause = if has_tools && tool_format == "native" {
-        " Use the provider tool channel only; handwritten tool-call text is invalid in this transcript."
-    } else {
-        ""
-    };
-    Some(format!(
-        "{prose_clause} {completion_clause}{emphasis}{mode_clause}"
-    ))
+    let mut bindings = BTreeMap::new();
+    bindings.insert(
+        "has_limit".to_string(),
+        VmValue::Bool(policy.max_prose_chars.is_some()),
+    );
+    bindings.insert(
+        "max_prose_chars".to_string(),
+        VmValue::Int(policy.max_prose_chars.unwrap_or_default() as i64),
+    );
+    bindings.insert("has_tools".to_string(), VmValue::Bool(has_tools));
+    bindings.insert(
+        "native_mode".to_string(),
+        VmValue::Bool(has_tools && tool_format == "native"),
+    );
+    bindings.insert(
+        "allow_done_sentinel".to_string(),
+        VmValue::Bool(policy.allow_done_sentinel),
+    );
+    bindings.insert(
+        "done_sentinel".to_string(),
+        VmValue::String(Rc::from("##DONE##")),
+    );
+    bindings.insert("prose_too_long".to_string(), VmValue::Bool(prose_too_long));
+    Some(
+        crate::stdlib::template::render_stdlib_prompt_asset(
+            "agent/prompts/action_turn_nudge.harn.prompt",
+            Some(&bindings),
+        )
+        .unwrap_or_else(|error| format!("action nudge prompt render error: {error}")),
+    )
 }
 
 pub(crate) async fn inject_queued_user_messages(

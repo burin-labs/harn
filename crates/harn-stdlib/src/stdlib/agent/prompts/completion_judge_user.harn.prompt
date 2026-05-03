@@ -1,0 +1,13 @@
+Stop reason: {{ stop_reason }}
+Session: {{ session_id }}
+Iteration: {{ iteration }}
+Session tools used: {{ all_tools_used }}
+Successful session tools: {{ successful_tools_used }}
+
+Transcript context:
+{{ transcript }}
+
+Latest assistant text:
+{{ last_text }}
+
+Decide whether this agent loop may yield to the user now. Consider the original user request, recent assistant prose, tool calls, and tool result outputs together. If the latest assistant message included a tool call, do not require an extra prose-only turn when the assistant text plus tool result already form a clear final answer. Respond as JSON with keys `pass` (bool), optional `feedback` (string), and optional `final_response` (string). If not safe, `feedback` must be a concrete instruction for the next turn. If safe but the current visible answer is a pre-tool phrase, raw tool output, or otherwise not a clean final answer, provide `final_response` as a concise user-facing answer grounded only in the transcript.

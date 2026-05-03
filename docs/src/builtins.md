@@ -1360,6 +1360,10 @@ the ergonomic Harn call surface for nested operations.
 | `command_policy(config)` | config: dict | dict | Normalize a command-runner policy with workspace roots, deterministic deny/approval rules, and optional pre/post closures |
 | `command_policy_push(policy)` | policy: dict | nil | Install a command policy for the current VM scope |
 | `command_policy_pop()` | — | nil | Remove the most recently installed command policy |
+| `with_execution_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped capability policy; the policy is popped on success or throw |
+| `with_approval_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped tool approval policy; the policy is popped on success or throw |
+| `with_command_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped command policy; the policy is popped on success or throw |
+| `with_dynamic_permissions(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped dynamic permission policy; the policy is popped on success or throw |
 | `command_risk_scan(ctx)` | ctx: dict | dict | Run deterministic command-risk classification and return labels, confidence, rationale, and recommended action |
 | `command_result_scan(ctx)` | ctx: dict | dict | Classify a command result envelope for unsafe output or audit annotations |
 | `command_llm_risk_scan(ctx, options?)` | ctx: dict, options: dict | dict | Return the structured risk-scan helper shape with redacted options; deterministic fallback does not make network calls |
@@ -1439,6 +1443,10 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns `{text, model, input_tokens, output_tokens}` |
 | `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with `##DONE##` completion sentinel (`<done>##DONE##</done>` in tagged text-tool stages), daemon/idling support, and optional per-turn context filtering. Returns `{status, text, visible_text, llm: {iterations, duration_ms, input_tokens, output_tokens}, tools: {calls, successful, rejected, mode}, transcript, task_ledger, trace, …}` |
 | `agent_turn(prompt, options?)` | prompt: string, options: dict | dict | High-level agent turn wrapper around `agent_loop`. It installs generic user-visible progress guidance, requires the sentinel completion judge (`done_judge`), defaults to a persistent sentinel loop, and returns the normal loop result plus `iterations` and `judge_decisions` summaries |
+| `agent_llm_turn(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Low-level one-turn LLM request used by stdlib orchestration; equivalent to `llm_call` but intentionally lives under the agent primitive surface |
+| `agent_parse_tool_calls(text, tools?)` | text: string, tools: registry or nil | dict | Parse tagged/text-mode tool calls into `{tool_calls, prose, canonical_text, protocol_violations, tool_parse_errors, done_marker}` |
+| `agent_dispatch_tool_call(call, tools?, options?)` | call: dict, tools: registry or nil, options: dict | dict | Dispatch one normalized tool call through the runtime parser/enforcement path and return `{ok, status, rendered_result, error_category, executor, ...}` |
+| `agent_dispatch_tool_batch(calls, tools?, options?)` | calls: list, tools: registry or nil, options: dict | list | Dispatch a list of normalized tool calls and return one result envelope per call |
 | `daemon_spawn(config)` | config: dict | dict | Start a daemon-mode agent and return a daemon handle with persisted state + queue metadata |
 | `daemon_trigger(handle, event)` | handle: dict or string, event: any | dict | Enqueue a durable FIFO trigger event for a running daemon; throws `VmError::DaemonQueueFull` on overflow |
 | `daemon_snapshot(handle)` | handle: dict or string | dict | Return the latest daemon snapshot plus live queue state (`pending_events`, `inflight_event`, counts, capacity) |

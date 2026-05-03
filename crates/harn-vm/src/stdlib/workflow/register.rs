@@ -11,6 +11,7 @@ use crate::orchestration::{
     RunStageRecord, RunTransitionRecord, WorkflowEdge, WorkflowGraph, WorkflowSkillContext,
     WorkflowSkillContextGuard,
 };
+use crate::stdlib::harn_entry::{register_harn_async_entrypoints, HarnAsyncEntrypoint};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -28,6 +29,13 @@ use super::policy::{
 };
 use super::stage::{execute_stage_attempts, replay_stage};
 use super::usage::{llm_usage_delta, llm_usage_snapshot};
+
+const WORKFLOW_STDLIB_ENTRYPOINTS: &[HarnAsyncEntrypoint] = &[HarnAsyncEntrypoint::new(
+    "workflow_execute",
+    "std/workflow/execute",
+    "workflow_execute",
+)];
+const HOST_WORKFLOW_GRAPH_RUN_BUILTIN: &str = "__host_workflow_graph_run";
 
 fn parse_trigger_event_option(
     value: Option<&VmValue>,
@@ -882,7 +890,7 @@ pub(crate) fn register_workflow_builtins(vm: &mut Vm) {
         workflow_graph_to_vm(&graph)
     });
 
-    vm.register_async_builtin("workflow_execute", |args| async move {
+    vm.register_async_builtin(HOST_WORKFLOW_GRAPH_RUN_BUILTIN, |args| async move {
         let task = args.first().map(|v| v.display()).unwrap_or_default();
         let graph =
             normalize_workflow_value(args.get(1).ok_or_else(|| {
@@ -896,6 +904,7 @@ pub(crate) fn register_workflow_builtins(vm: &mut Vm) {
             .unwrap_or_default();
         execute_workflow(task, graph, artifacts, options).await
     });
+    register_harn_async_entrypoints(vm, WORKFLOW_STDLIB_ENTRYPOINTS);
 
     type PostHookFn = Rc<dyn Fn(&str, &str) -> crate::orchestration::PostToolAction>;
 

@@ -978,11 +978,6 @@ pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
     VmValue::Dict(Rc::new(dict))
 }
 
-const AGENT_TURN_PREAMBLE_INSTRUCTION: &str = "\
-Before each group of tool calls, write one brief, user-visible sentence \
-stating what you will do next. Keep it as plain prose; do not wrap it in \
-JSON, XML, Markdown fences, or any other schema.";
-
 #[derive(Clone)]
 struct CapturingAgentEventSink {
     session_id: String,
@@ -1117,77 +1112,41 @@ async fn build_agent_loop_invocation(
     Ok((opts, config))
 }
 
-async fn agent_turn_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_agent_turn_collect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let prompt = match args.first() {
         Some(VmValue::String(text)) => text.to_string(),
         Some(other) => {
             return Err(VmError::Runtime(format!(
-                "agent_turn(prompt, opts?): prompt must be a string; got {}",
+                "__host_agent_turn_collect(prompt, system, opts): prompt must be a string; got {}",
                 other.type_name()
             )))
         }
         None => {
             return Err(VmError::Runtime(
-                "agent_turn(prompt, opts?): missing prompt".to_string(),
+                "__host_agent_turn_collect(prompt, system, opts): missing prompt".to_string(),
             ))
         }
     };
-    let mut options = match args.get(1) {
+    let system_prompt = match args.get(1) {
+        Some(VmValue::String(text)) => text.to_string(),
+        Some(VmValue::Nil) | None => String::new(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "__host_agent_turn_collect(prompt, system, opts): system must be a string or nil; got {}",
+                other.type_name()
+            )))
+        }
+    };
+    let mut options = match args.get(2) {
         Some(VmValue::Dict(dict)) => dict.as_ref().clone(),
         Some(VmValue::Nil) | None => std::collections::BTreeMap::new(),
         Some(other) => {
             return Err(VmError::Runtime(format!(
-                "agent_turn(prompt, opts?): opts must be a dict or nil; got {}",
-                other.type_name()
-            )))
+            "__host_agent_turn_collect(prompt, system, opts): opts must be a dict or nil; got {}",
+            other.type_name()
+        )))
         }
     };
-    let user_system = match options.remove("system") {
-        Some(VmValue::String(text)) if !text.trim().is_empty() => Some(text.to_string()),
-        Some(VmValue::String(_)) | Some(VmValue::Nil) | None => None,
-        Some(other) => {
-            return Err(VmError::Runtime(format!(
-                "agent_turn: system must be a string or nil; got {}",
-                other.type_name()
-            )))
-        }
-    };
-    if let Some(judge) = options.remove("judge") {
-        options.entry("done_judge".to_string()).or_insert(judge);
-    }
-    if matches!(
-        options.get("done_judge"),
-        Some(VmValue::Bool(false) | VmValue::Nil)
-    ) {
-        return Err(VmError::Runtime(
-            "agent_turn: done_judge is mandatory; pass a dict, true, or omit it".to_string(),
-        ));
-    }
-    options
-        .entry("done_judge".to_string())
-        .or_insert(VmValue::Bool(true));
-    if matches!(
-        options.get("done_sentinel"),
-        Some(VmValue::Bool(false) | VmValue::Nil)
-    ) {
-        return Err(VmError::Runtime(
-            "agent_turn: done_sentinel is required; pass true, a string, or omit it".to_string(),
-        ));
-    }
-    options
-        .entry("done_sentinel".to_string())
-        .or_insert(VmValue::Bool(true));
-    if matches!(
-        options.get("persistent"),
-        Some(VmValue::Bool(false) | VmValue::Nil)
-    ) {
-        return Err(VmError::Runtime(
-            "agent_turn: persistent sentinel looping is required; pass true or omit it".to_string(),
-        ));
-    }
-    options
-        .entry("persistent".to_string())
-        .or_insert(VmValue::Bool(true));
     options.entry("session_id".to_string()).or_insert_with(|| {
         VmValue::String(Rc::from(format!(
             "agent_turn_session_{}",
@@ -1195,14 +1154,10 @@ async fn agent_turn_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         )))
     });
 
-    let merged_system = match user_system {
-        Some(system) => format!("{AGENT_TURN_PREAMBLE_INSTRUCTION}\n\n{system}"),
-        None => AGENT_TURN_PREAMBLE_INSTRUCTION.to_string(),
-    };
     let loop_options = Some(options.clone());
     let loop_args = vec![
         VmValue::String(Rc::from(prompt)),
-        VmValue::String(Rc::from(merged_system)),
+        VmValue::String(Rc::from(system_prompt)),
         VmValue::Dict(Rc::new(options)),
     ];
     let captured_events = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1302,15 +1257,369 @@ fn agent_turn_iteration_summaries(
     turns.into_values().map(serde_json::Value::Object).collect()
 }
 
+fn agent_primitive_tools_arg(
+    args: &[VmValue],
+    index: usize,
+    label: &str,
+) -> Result<Option<VmValue>, VmError> {
+    match args.get(index) {
+        Some(VmValue::Nil) | None => Ok(crate::stdlib::tools::current_tool_registry()),
+        Some(VmValue::Dict(_)) => Ok(args.get(index).cloned()),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{label}: tools must be a tool registry dict or nil; got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn agent_primitive_options_arg(
+    args: &[VmValue],
+    index: usize,
+    label: &str,
+) -> Result<std::collections::BTreeMap<String, VmValue>, VmError> {
+    match args.get(index) {
+        Some(VmValue::Dict(options)) => Ok(options.as_ref().clone()),
+        Some(VmValue::Nil) | None => Ok(std::collections::BTreeMap::new()),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{label}: options must be a dict or nil; got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn agent_primitive_call_json(args: &[VmValue]) -> Result<serde_json::Value, VmError> {
+    match args.first() {
+        Some(VmValue::Dict(_)) => Ok(helpers::vm_value_to_json(args.first().unwrap())),
+        Some(other) => Err(VmError::Runtime(format!(
+            "__host_agent_dispatch_tool_call(call, tools?, options?): call must be a dict; got {}",
+            other.type_name()
+        ))),
+        None => Err(VmError::Runtime(
+            "__host_agent_dispatch_tool_call(call, tools?, options?): missing call".to_string(),
+        )),
+    }
+}
+
+fn agent_primitive_denied_tool(
+    tool_name: &str,
+    tool_args: &serde_json::Value,
+    reason: impl Into<String>,
+    category: crate::agent_events::ToolCallErrorCategory,
+) -> serde_json::Value {
+    let reason = reason.into();
+    let result = agent_tools::denied_tool_result(tool_name, reason.clone());
+    serde_json::json!({
+        "ok": false,
+        "status": "error",
+        "tool_name": tool_name,
+        "arguments": tool_args,
+        "result": result,
+        "rendered_result": agent_tools::render_tool_result(&result),
+        "error": reason,
+        "error_category": category.as_str(),
+        "executor": null,
+    })
+}
+
+fn agent_primitive_tool_name(call: &serde_json::Value) -> Result<String, VmError> {
+    call.get("name")
+        .and_then(|value| value.as_str())
+        .filter(|name| !name.trim().is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            VmError::Runtime(
+                "__host_agent_dispatch_tool_call: call.name must be a non-empty string".to_string(),
+            )
+        })
+}
+
+async fn host_agent_parse_tool_calls_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let text = match args.first() {
+        Some(VmValue::String(text)) => text.to_string(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "__host_agent_parse_tool_calls(text, tools?): text must be a string; got {}",
+                other.type_name()
+            )))
+        }
+        None => {
+            return Err(VmError::Runtime(
+                "__host_agent_parse_tool_calls(text, tools?): missing text".to_string(),
+            ))
+        }
+    };
+    let tools = agent_primitive_tools_arg(&args, 1, "__host_agent_parse_tool_calls")?;
+    let parsed = tools::parse_text_tool_calls_with_tools(&text, tools.as_ref());
+    Ok(json_to_vm_value(&serde_json::json!({
+        "calls": parsed.calls,
+        "tool_calls": parsed.calls,
+        "tool_parse_errors": parsed.errors,
+        "protocol_violations": parsed.violations,
+        "prose": parsed.prose,
+        "user_response": parsed.user_response,
+        "done_marker": parsed.done_marker,
+        "canonical_text": parsed.canonical,
+    })))
+}
+
+async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let call = agent_primitive_call_json(&args)?;
+    let tools = agent_primitive_tools_arg(&args, 1, "__host_agent_dispatch_tool_call")?;
+    let options = agent_primitive_options_arg(&args, 2, "__host_agent_dispatch_tool_call")?;
+    let options_ref = Some(options.clone());
+    let tool_name = agent_primitive_tool_name(&call)?;
+    let tool_id = call
+        .get("id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let mut tool_args = tools::normalize_tool_args(&tool_name, &call["arguments"]);
+    let session_id = opt_str(&options_ref, "session_id")
+        .or_else(current_agent_session_id)
+        .unwrap_or_else(|| format!("agent_primitive_session_{}", uuid::Uuid::now_v7()));
+    let tool_retries = opt_int(&options_ref, "tool_retries").unwrap_or(0).max(0) as usize;
+    let tool_backoff_ms = opt_int(&options_ref, "tool_backoff_ms")
+        .unwrap_or(1000)
+        .max(1) as u64;
+    let bridge = current_host_bridge();
+
+    if let Err(error) =
+        crate::orchestration::enforce_current_policy_for_tool(&tool_name).and_then(|_| {
+            crate::orchestration::enforce_tool_arg_constraints(
+                &crate::orchestration::current_execution_policy().unwrap_or_default(),
+                &tool_name,
+                &tool_args,
+            )
+        })
+    {
+        return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+            &tool_name,
+            &tool_args,
+            error.to_string(),
+            crate::agent_events::ToolCallErrorCategory::PermissionDenied,
+        )));
+    }
+
+    let mut permission_grants = std::collections::BTreeSet::new();
+    if let Some(permission) = permissions::check_dynamic_permission(
+        &mut permission_grants,
+        &tool_name,
+        &tool_args,
+        &session_id,
+    )
+    .await?
+    {
+        match permission {
+            permissions::PermissionCheck::Granted { .. } => {}
+            permissions::PermissionCheck::Denied { reason, .. } => {
+                return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+                    &tool_name,
+                    &tool_args,
+                    reason,
+                    crate::agent_events::ToolCallErrorCategory::PermissionDenied,
+                )));
+            }
+        }
+    }
+
+    let approval = crate::orchestration::current_approval_policy()
+        .map(|policy| policy.evaluate(&tool_name, &tool_args));
+    let mut approval_status = None;
+    match approval {
+        None | Some(crate::orchestration::ToolApprovalDecision::AutoApproved) => {}
+        Some(crate::orchestration::ToolApprovalDecision::AutoDenied { reason }) => {
+            return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+                &tool_name,
+                &tool_args,
+                reason,
+                crate::agent_events::ToolCallErrorCategory::PermissionDenied,
+            )));
+        }
+        Some(crate::orchestration::ToolApprovalDecision::RequiresHostApproval) => {
+            let Some(bridge) = bridge.as_ref() else {
+                return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+                    &tool_name,
+                    &tool_args,
+                    "approval required but no host bridge is available",
+                    crate::agent_events::ToolCallErrorCategory::PermissionDenied,
+                )));
+            };
+            let approval_id = if tool_id.is_empty() {
+                format!("tool_call_{}", uuid::Uuid::now_v7())
+            } else {
+                tool_id.clone()
+            };
+            let approval_request = crate::stdlib::hitl::approval_request_for_host_permission(
+                approval_id.clone(),
+                tool_name.clone(),
+                tool_args.clone(),
+                session_id.clone(),
+                Vec::new(),
+                serde_json::Value::Null,
+                vec![format!("tool.{tool_name}")],
+            );
+            let response = bridge
+                .call(
+                    "session/request_permission",
+                    serde_json::json!({
+                        "sessionId": session_id,
+                        "approvalRequest": approval_request,
+                        "toolCall": {
+                            "toolCallId": approval_id,
+                            "toolName": tool_name,
+                            "rawInput": tool_args,
+                        },
+                    }),
+                )
+                .await;
+            match response {
+                Ok(response) => {
+                    let outcome = response
+                        .get("outcome")
+                        .and_then(|value| value.get("outcome"))
+                        .and_then(|value| value.as_str())
+                        .or_else(|| response.get("outcome").and_then(|value| value.as_str()))
+                        .unwrap_or("");
+                    let granted = matches!(outcome, "selected" | "allow")
+                        || response
+                            .get("granted")
+                            .and_then(|value| value.as_bool())
+                            .unwrap_or(false);
+                    if granted {
+                        if let Some(new_args) = response.get("args") {
+                            tool_args = new_args.clone();
+                        }
+                        approval_status = Some("host_granted");
+                    } else {
+                        let reason = response
+                            .get("reason")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("host did not grant approval");
+                        return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+                            &tool_name,
+                            &tool_args,
+                            reason,
+                            crate::agent_events::ToolCallErrorCategory::PermissionDenied,
+                        )));
+                    }
+                }
+                Err(_) => {
+                    return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+                        &tool_name,
+                        &tool_args,
+                        "approval request failed or host does not implement session/request_permission",
+                        crate::agent_events::ToolCallErrorCategory::PermissionDenied,
+                    )));
+                }
+            }
+        }
+    }
+
+    match crate::orchestration::run_pre_tool_hooks(&tool_name, &tool_args).await? {
+        crate::orchestration::PreToolAction::Allow => {}
+        crate::orchestration::PreToolAction::Deny(reason) => {
+            return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+                &tool_name,
+                &tool_args,
+                reason,
+                crate::agent_events::ToolCallErrorCategory::PermissionDenied,
+            )));
+        }
+        crate::orchestration::PreToolAction::Modify(new_args) => {
+            tool_args = new_args;
+        }
+    }
+
+    let tool_schemas = tools::collect_tool_schemas(tools.as_ref(), None);
+    if let Err(message) = tools::validate_tool_args(&tool_name, &tool_args, &tool_schemas) {
+        return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+            &tool_name,
+            &tool_args,
+            message,
+            crate::agent_events::ToolCallErrorCategory::SchemaValidation,
+        )));
+    }
+
+    let started = std::time::Instant::now();
+    let outcome = agent_tools::dispatch_tool_execution_with_mcp(
+        &tool_name,
+        &tool_args,
+        tools.as_ref(),
+        None,
+        bridge.as_ref(),
+        tool_retries,
+        tool_backoff_ms,
+    )
+    .await;
+    let execution_duration_ms = started.elapsed().as_millis() as u64;
+    let executor = outcome
+        .executor
+        .as_ref()
+        .and_then(|executor| serde_json::to_value(executor).ok());
+
+    match outcome.result {
+        Ok(raw_result) => {
+            let rendered = agent_tools::render_tool_result(&raw_result);
+            let rendered =
+                crate::orchestration::run_post_tool_hooks(&tool_name, &tool_args, &rendered)
+                    .await?;
+            let denied = agent_tools::is_denied_tool_result(&raw_result);
+            let observation = format!(
+                "[result of {name}]\n{result}\n[end of {name} result]\n",
+                name = tool_name,
+                result = rendered
+            );
+            let error = denied.then(|| rendered.clone());
+            Ok(json_to_vm_value(&serde_json::json!({
+                "ok": !denied,
+                "status": if denied { "error" } else { "ok" },
+                "tool_name": tool_name.clone(),
+                "tool_call_id": tool_id,
+                "arguments": tool_args,
+                "result": raw_result,
+                "rendered_result": rendered,
+                "observation": observation,
+                "error": error,
+                "error_category": if denied { Some("tool_rejected") } else { None },
+                "executor": executor,
+                "approval": approval_status,
+                "execution_duration_ms": execution_duration_ms,
+            })))
+        }
+        Err(error) => {
+            let category = crate::value::error_to_category(&error);
+            Ok(json_to_vm_value(&serde_json::json!({
+                "ok": false,
+                "status": "error",
+                "tool_name": tool_name,
+                "tool_call_id": tool_id,
+                "arguments": tool_args,
+                "result": null,
+                "rendered_result": "",
+                "error": error.to_string(),
+                "error_category": category.as_str(),
+                "executor": executor,
+                "approval": approval_status,
+                "execution_duration_ms": execution_duration_ms,
+            })))
+        }
+    }
+}
+
 /// Register LLM builtins on a VM.
 pub fn register_llm_builtins(vm: &mut Vm) {
     rate_limit::init_from_config();
     agent_config::register_agent_subscribe(vm);
     agent_config::register_agent_inject_feedback(vm);
-    vm.register_async_builtin(
-        "agent_turn",
-        |args| async move { agent_turn_impl(args).await },
-    );
+    vm.register_async_builtin("__host_agent_turn_collect", |args| async move {
+        host_agent_turn_collect_impl(args).await
+    });
+    vm.register_async_builtin("__host_agent_parse_tool_calls", |args| async move {
+        host_agent_parse_tool_calls_impl(args).await
+    });
+    vm.register_async_builtin("__host_agent_dispatch_tool_call", |args| async move {
+        host_agent_dispatch_tool_call_impl(args).await
+    });
     vm.register_async_builtin("__cost_route", |args| async move {
         cost_route::cost_route_impl(args).await
     });
@@ -1488,13 +1797,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         Ok(vm_build_llm_result(&result, None, None, None))
     });
 
-    vm.register_async_builtin("agent_loop", |args| async move {
-        let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-        let (mut opts, config) =
-            build_agent_loop_invocation(&args, &options, "agent_loop", None).await?;
-        let result = run_agent_loop_internal(&mut opts, config).await?;
-        Ok(json_to_vm_value(&result))
-    });
+    agent_config::register_agent_loop(vm);
 
     register_llm_stream(vm);
     conversation::register_conversation_builtins(vm);

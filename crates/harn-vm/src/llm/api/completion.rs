@@ -3,6 +3,7 @@
 //! `/api/generate`, and a chat-based fallback that wraps the prompt in a
 //! user message and re-enters the chat path.
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
@@ -238,21 +239,26 @@ async fn vm_call_completion_fallback(
     suffix: Option<&str>,
 ) -> Result<LlmResult, VmError> {
     let mut fallback_opts = opts.clone();
-    let mut instruction = String::from(
-        "Continue the user's text. Return only the missing continuation with no commentary, fences, or quoting.",
+    let has_suffix = suffix.is_some_and(|s| !s.is_empty());
+    let mut bindings = BTreeMap::new();
+    bindings.insert("prefix".to_string(), VmValue::String(Rc::from(prefix)));
+    bindings.insert("has_suffix".to_string(), VmValue::Bool(has_suffix));
+    bindings.insert(
+        "suffix".to_string(),
+        VmValue::String(Rc::from(suffix.unwrap_or_default())),
     );
-    if let Some(suffix) = suffix.filter(|s| !s.is_empty()) {
-        instruction.push_str("\nRespect the required suffix exactly and produce only the text that belongs between PREFIX and SUFFIX.");
-        fallback_opts.messages = vec![serde_json::json!({
-            "role": "user",
-            "content": format!("PREFIX:\n{prefix}\n\nSUFFIX:\n{suffix}\n\nReturn only the missing text between PREFIX and SUFFIX."),
-        })];
-    } else {
-        fallback_opts.messages = vec![serde_json::json!({
-            "role": "user",
-            "content": format!("PREFIX:\n{prefix}\n\nReturn only the next continuation text."),
-        })];
-    }
+    let instruction = crate::stdlib::template::render_stdlib_prompt_asset(
+        "llm/prompts/completion_fallback_system.harn.prompt",
+        Some(&bindings),
+    )?;
+    let user_prompt = crate::stdlib::template::render_stdlib_prompt_asset(
+        "llm/prompts/completion_fallback_user.harn.prompt",
+        Some(&bindings),
+    )?;
+    fallback_opts.messages = vec![serde_json::json!({
+        "role": "user",
+        "content": user_prompt,
+    })];
     fallback_opts.system = match &opts.system {
         Some(system) => Some(format!("{system}\n\n{instruction}")),
         None => Some(instruction),

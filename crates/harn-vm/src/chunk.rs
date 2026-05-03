@@ -566,6 +566,20 @@ impl CompiledFunction {
     pub fn has_nominal_type(&self, name: &str) -> bool {
         self.nominal_type_names.iter().any(|ty| ty == name)
     }
+
+    pub(crate) fn fresh_runtime_clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            type_params: self.type_params.clone(),
+            nominal_type_names: self.nominal_type_names.clone(),
+            params: self.params.clone(),
+            default_start: self.default_start,
+            chunk: Rc::new(self.chunk.fresh_runtime_clone()),
+            is_generator: self.is_generator,
+            is_stream: self.is_stream,
+            has_rest_param: self.has_rest_param,
+        }
+    }
 }
 
 impl Chunk {
@@ -767,6 +781,29 @@ impl Chunk {
     pub(crate) fn set_inline_cache_entry(&self, slot: usize, entry: InlineCacheEntry) {
         if let Some(existing) = self.inline_caches.borrow_mut().get_mut(slot) {
             *existing = entry;
+        }
+    }
+
+    pub(crate) fn fresh_runtime_clone(&self) -> Self {
+        let inline_cache_count = self.inline_cache_slots.len();
+        Self {
+            code: self.code.clone(),
+            constants: self.constants.clone(),
+            lines: self.lines.clone(),
+            columns: self.columns.clone(),
+            source_file: self.source_file.clone(),
+            current_col: self.current_col,
+            functions: self
+                .functions
+                .iter()
+                .map(|function| Rc::new(function.fresh_runtime_clone()))
+                .collect(),
+            inline_cache_slots: self.inline_cache_slots.clone(),
+            inline_caches: Rc::new(RefCell::new(vec![
+                InlineCacheEntry::Empty;
+                inline_cache_count
+            ])),
+            local_slots: self.local_slots.clone(),
         }
     }
 

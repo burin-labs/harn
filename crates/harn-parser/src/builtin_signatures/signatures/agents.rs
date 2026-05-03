@@ -121,11 +121,58 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         where_clauses: &[],
     },
     BuiltinSignature {
+        name: "agent_dispatch_tool_batch",
+        params: &[
+            Param::new("calls", TY_LIST),
+            Param::optional("tools", TY_DICT_OR_NIL),
+            Param::optional("options", TY_DICT),
+        ],
+        returns: TY_LIST,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "agent_dispatch_tool_call",
+        params: &[
+            Param::new("call", TY_DICT),
+            Param::optional("tools", TY_DICT_OR_NIL),
+            Param::optional("options", TY_DICT),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "agent_llm_turn",
+        params: &[
+            Param::new("prompt", TY_STRING),
+            Param::optional("system", TY_STRING_OR_NIL),
+            Param::optional("options", TY_DICT),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "agent_loop",
         params: &[
             Param::new("prompt", TY_STRING),
             Param::optional("system", TY_STRING),
             Param::optional("options", TY_DICT),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "agent_parse_tool_calls",
+        params: &[
+            Param::new("text", TY_STRING),
+            Param::optional("tools", TY_DICT_OR_NIL),
         ],
         returns: TY_DICT,
         type_params: &[],

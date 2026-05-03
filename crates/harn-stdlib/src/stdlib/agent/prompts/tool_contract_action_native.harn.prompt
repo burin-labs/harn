@@ -1,0 +1,1 @@
+This turn is action-gated. If tools are available, open your response with a native tool call, not prose. Do not emit raw source code, diffs, JSON{{ if done_sentinel }}, or `{{ done_sentinel }}`{{ end }} before the first successful tool action.

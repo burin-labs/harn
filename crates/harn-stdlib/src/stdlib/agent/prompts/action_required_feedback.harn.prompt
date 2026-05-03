@@ -1,0 +1,1 @@
+You returned assistant text or JSON before using any tool. This stage requires at least one tool action before an answer counts. That response was not accepted. {{ guidance }}

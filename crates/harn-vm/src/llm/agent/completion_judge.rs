@@ -21,8 +21,20 @@ pub(crate) struct CompletionJudgeConfig {
 impl Default for CompletionJudgeConfig {
     fn default() -> Self {
         Self {
-            system: "You are a strict completion judge for an autonomous agent. Decide if the latest visible response is a safe final answer. Return only JSON.".to_string(),
-            feedback_fallback: "The completion judge was not satisfied. Continue with the smallest concrete next action before yielding.".to_string(),
+            system: crate::stdlib::template::render_stdlib_prompt_asset(
+                "agent/prompts/completion_judge_default.harn.prompt",
+                None,
+            )
+            .unwrap_or_else(|error| {
+                format!("completion judge system prompt render error: {error}")
+            }),
+            feedback_fallback: crate::stdlib::template::render_stdlib_prompt_asset(
+                "agent/prompts/completion_judge_feedback_fallback.harn.prompt",
+                None,
+            )
+            .unwrap_or_else(|error| {
+                format!("completion judge feedback prompt render error: {error}")
+            }),
             max_feedback_chars: 600,
             options: BTreeMap::new(),
         }
@@ -299,12 +311,37 @@ fn build_judge_prompt(
     last_text: &str,
 ) -> String {
     let transcript = render_judge_transcript(state);
-    format!(
-        "Stop reason: {stop_reason}\nSession: {session_id}\nIteration: {iteration}\nSession tools used: {}\nSuccessful session tools: {}\n\nTranscript context:\n{transcript}\n\nLatest assistant text:\n{}\n\nDecide whether this agent loop may yield to the user now. Consider the original user request, recent assistant prose, tool calls, and tool result outputs together. If the latest assistant message included a tool call, do not require an extra prose-only turn when the assistant text plus tool result already form a clear final answer. Respond as JSON with keys pass (bool), optional feedback (string), and optional final_response (string). If not safe, feedback must be a concrete instruction for the next turn. If safe but the current visible answer is a pre-tool phrase, raw tool output, or otherwise not a clean final answer, provide final_response as a concise user-facing answer grounded only in the transcript.",
-        state.all_tools_used.join(", "),
-        state.successful_tools_used.join(", "),
-        last_text.trim()
+    let mut bindings = BTreeMap::new();
+    bindings.insert(
+        "stop_reason".to_string(),
+        VmValue::String(Rc::from(stop_reason)),
+    );
+    bindings.insert(
+        "session_id".to_string(),
+        VmValue::String(Rc::from(session_id)),
+    );
+    bindings.insert("iteration".to_string(), VmValue::Int(iteration as i64));
+    bindings.insert(
+        "all_tools_used".to_string(),
+        VmValue::String(Rc::from(state.all_tools_used.join(", "))),
+    );
+    bindings.insert(
+        "successful_tools_used".to_string(),
+        VmValue::String(Rc::from(state.successful_tools_used.join(", "))),
+    );
+    bindings.insert(
+        "transcript".to_string(),
+        VmValue::String(Rc::from(transcript)),
+    );
+    bindings.insert(
+        "last_text".to_string(),
+        VmValue::String(Rc::from(last_text.trim().to_string())),
+    );
+    crate::stdlib::template::render_stdlib_prompt_asset(
+        "agent/prompts/completion_judge_user.harn.prompt",
+        Some(&bindings),
     )
+    .unwrap_or_else(|error| format!("completion judge user prompt render error: {error}"))
 }
 
 fn render_judge_transcript(state: &AgentLoopState) -> String {

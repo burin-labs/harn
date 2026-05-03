@@ -1,0 +1,14 @@
+Your tool call could not be parsed: {{ error_summary }}{{ partial_note }}
+
+Use heredoc syntax for multiline content. It requires no escaping:
+
+edit({
+    action: "create",
+    path: "...",
+    content: <<EOF
+package main
+// backticks, quotes, and backslashes are all fine inside heredoc
+EOF
+})
+
+Do not use backtick template literals for code that contains backtick characters, such as Go raw strings, Rust raw strings, or shell snippets. Heredoc avoids those escaping issues.

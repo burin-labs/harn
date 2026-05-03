@@ -403,19 +403,6 @@ fn render_llm_compaction_prompt(
     formatted: &str,
     archived_count: usize,
 ) -> Result<String, VmError> {
-    let Some(path) = summarize_prompt.filter(|path| !path.trim().is_empty()) else {
-        return Ok(format!(
-            "Summarize these archived conversation messages for a follow-on agent. Preserve goals, constraints, decisions, completed tool work, unresolved issues, and next actions. Output only the summary text.\n\nArchived message count: {archived_count}\n\nConversation:\n{formatted}"
-        ));
-    };
-
-    let resolved = crate::stdlib::process::resolve_source_asset_path(path);
-    let template = std::fs::read_to_string(&resolved).map_err(|error| {
-        VmError::Runtime(format!(
-            "failed to read compaction summarize_prompt {}: {error}",
-            resolved.display()
-        ))
-    })?;
     let mut bindings = BTreeMap::new();
     bindings.insert(
         "formatted_messages".to_string(),
@@ -425,17 +412,16 @@ fn render_llm_compaction_prompt(
         "archived_count".to_string(),
         VmValue::Int(archived_count as i64),
     );
-    crate::stdlib::template::render_template_result(
-        &template,
-        Some(&bindings),
-        resolved.parent(),
-        Some(&resolved),
-    )
-    .map_err(|error| {
-        VmError::Runtime(format!(
-            "compaction summarize_prompt render error: {error:?}"
-        ))
-    })
+    let Some(path) = summarize_prompt.filter(|path| !path.trim().is_empty()) else {
+        return crate::stdlib::template::render_stdlib_prompt_asset(
+            "orchestration/prompts/compaction_summary.harn.prompt",
+            Some(&bindings),
+        );
+    };
+
+    let asset = crate::stdlib::template::TemplateAsset::render_target(path)
+        .map_err(|error| VmError::Runtime(format!("compaction summarize_prompt: {error}")))?;
+    crate::stdlib::template::render_asset_result(&asset, Some(&bindings)).map_err(VmError::from)
 }
 
 async fn custom_compaction_summary(
