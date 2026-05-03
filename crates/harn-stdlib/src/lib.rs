@@ -1,0 +1,220 @@
+//! Canonical embedded Harn standard library source catalog.
+//!
+//! This crate intentionally contains only static source strings so runtime and
+//! static tooling crates can share the same stdlib modules without depending on
+//! each other.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StdlibSource {
+    pub module: &'static str,
+    pub source: &'static str,
+}
+
+pub const STDLIB_SOURCES: &[StdlibSource] = &[
+    StdlibSource {
+        module: "text",
+        source: include_str!("stdlib/stdlib_text.harn"),
+    },
+    StdlibSource {
+        module: "collections",
+        source: include_str!("stdlib/stdlib_collections.harn"),
+    },
+    StdlibSource {
+        module: "math",
+        source: include_str!("stdlib/stdlib_math.harn"),
+    },
+    StdlibSource {
+        module: "path",
+        source: include_str!("stdlib/stdlib_path.harn"),
+    },
+    StdlibSource {
+        module: "json",
+        source: include_str!("stdlib/stdlib_json.harn"),
+    },
+    StdlibSource {
+        module: "graphql",
+        source: include_str!("stdlib/stdlib_graphql.harn"),
+    },
+    StdlibSource {
+        module: "schema",
+        source: include_str!("stdlib/stdlib_schema.harn"),
+    },
+    StdlibSource {
+        module: "testing",
+        source: include_str!("stdlib/stdlib_testing.harn"),
+    },
+    StdlibSource {
+        module: "files",
+        source: include_str!("stdlib/stdlib_files.harn"),
+    },
+    StdlibSource {
+        module: "vision",
+        source: include_str!("stdlib/stdlib_vision.harn"),
+    },
+    StdlibSource {
+        module: "context",
+        source: include_str!("stdlib/stdlib_context.harn"),
+    },
+    StdlibSource {
+        module: "runtime",
+        source: include_str!("stdlib/stdlib_runtime.harn"),
+    },
+    StdlibSource {
+        module: "review",
+        source: include_str!("stdlib/stdlib_review.harn"),
+    },
+    StdlibSource {
+        module: "experiments",
+        source: include_str!("stdlib/stdlib_experiments.harn"),
+    },
+    StdlibSource {
+        module: "project",
+        source: include_str!("stdlib/stdlib_project.harn"),
+    },
+    StdlibSource {
+        module: "prompt_library",
+        source: include_str!("stdlib/stdlib_prompt_library.harn"),
+    },
+    StdlibSource {
+        module: "async",
+        source: include_str!("stdlib/stdlib_async.harn"),
+    },
+    StdlibSource {
+        module: "agents",
+        source: include_str!("stdlib/stdlib_agents.harn"),
+    },
+    StdlibSource {
+        module: "agent_state",
+        source: include_str!("stdlib/stdlib_agent_state.harn"),
+    },
+    StdlibSource {
+        module: "memory",
+        source: include_str!("stdlib/stdlib_memory.harn"),
+    },
+    StdlibSource {
+        module: "postgres",
+        source: include_str!("stdlib/stdlib_postgres.harn"),
+    },
+    StdlibSource {
+        module: "checkpoint",
+        source: include_str!("stdlib/stdlib_checkpoint.harn"),
+    },
+    StdlibSource {
+        module: "host",
+        source: include_str!("stdlib/stdlib_host.harn"),
+    },
+    StdlibSource {
+        module: "git",
+        source: include_str!("stdlib/stdlib_git.harn"),
+    },
+    StdlibSource {
+        module: "hitl",
+        source: include_str!("stdlib/stdlib_hitl.harn"),
+    },
+    StdlibSource {
+        module: "trust",
+        source: include_str!("stdlib/stdlib_trust.harn"),
+    },
+    StdlibSource {
+        module: "corrections",
+        source: include_str!("stdlib/stdlib_corrections.harn"),
+    },
+    StdlibSource {
+        module: "plan",
+        source: include_str!("stdlib/stdlib_plan.harn"),
+    },
+    StdlibSource {
+        module: "waitpoints",
+        source: include_str!("stdlib/stdlib_waitpoints.harn"),
+    },
+    StdlibSource {
+        module: "waitpoint",
+        source: include_str!("stdlib/stdlib_waitpoint.harn"),
+    },
+    StdlibSource {
+        module: "monitors",
+        source: include_str!("stdlib/stdlib_monitors.harn"),
+    },
+    StdlibSource {
+        module: "worktree",
+        source: include_str!("stdlib/stdlib_worktree.harn"),
+    },
+    StdlibSource {
+        module: "acp",
+        source: include_str!("stdlib/stdlib_acp.harn"),
+    },
+    StdlibSource {
+        module: "triggers",
+        source: include_str!("stdlib/stdlib_triggers.harn"),
+    },
+    StdlibSource {
+        module: "connectors/shared",
+        source: include_str!("stdlib/stdlib_connectors_shared.harn"),
+    },
+    StdlibSource {
+        module: "connectors/github",
+        source: include_str!("stdlib/stdlib_connectors_github.harn"),
+    },
+    StdlibSource {
+        module: "connectors/linear",
+        source: include_str!("stdlib/stdlib_connectors_linear.harn"),
+    },
+    StdlibSource {
+        module: "connectors/notion",
+        source: include_str!("stdlib/stdlib_connectors_notion.harn"),
+    },
+    StdlibSource {
+        module: "connectors/slack",
+        source: include_str!("stdlib/stdlib_connectors_slack.harn"),
+    },
+];
+
+pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
+    STDLIB_SOURCES
+        .iter()
+        .find_map(|entry| (entry.module == module).then_some(entry.source))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::{get_stdlib_source, STDLIB_SOURCES};
+
+    #[test]
+    fn stdlib_sources_are_non_empty() {
+        for entry in STDLIB_SOURCES {
+            assert!(
+                !entry.source.trim().is_empty(),
+                "{} should have non-empty source",
+                entry.module
+            );
+        }
+    }
+
+    #[test]
+    fn stdlib_source_names_are_unique() {
+        let mut names = BTreeSet::new();
+        for entry in STDLIB_SOURCES {
+            assert!(names.insert(entry.module), "duplicate {}", entry.module);
+        }
+    }
+
+    #[test]
+    fn key_stdlib_modules_resolve() {
+        for module in [
+            "context",
+            "waitpoint",
+            "connectors/shared",
+            "connectors/github",
+            "connectors/linear",
+            "connectors/notion",
+            "connectors/slack",
+        ] {
+            assert!(
+                get_stdlib_source(module).is_some(),
+                "std/{module} should resolve"
+            );
+        }
+    }
+}

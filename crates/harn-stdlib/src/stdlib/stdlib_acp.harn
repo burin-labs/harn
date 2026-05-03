@@ -1,0 +1,95 @@
+/**
+ * std/acp — Canonical Agent Client Protocol envelope types.
+ *
+ * These type aliases match the ACP `sessionUpdate` schema
+ * byte-for-byte, so a pipeline that declares `-> SessionUpdate` (or
+ * one of the concrete variants below) can be validated at the
+ * Harn→ACP boundary by the Harn type checker instead of relying on
+ * the host bridge as the only enforcement point.
+ *
+ * Import with: `import "std/acp"`. See `docs/src/mcp-and-acp.md`
+ * ("Typed pipeline returns") for end-to-end usage.
+ */
+type AgentMessageChunk = {
+  sessionUpdate: string,
+  content: {type: string, text: string?, annotations: dict?},
+}
+
+type ToolCall = {
+  sessionUpdate: string,
+  toolCallId: string,
+  title: string?,
+  kind: string?,
+  status: string?,
+  content: list<dict>?,
+  locations: list<dict>?,
+  rawInput: dict?,
+  rawOutput: dict?,
+}
+
+type ToolCallUpdate = {
+  sessionUpdate: string,
+  toolCallId: string,
+  status: string?,
+  title: string?,
+  content: list<dict>?,
+  locations: list<dict>?,
+  rawOutput: dict?,
+  executor: string | dict | nil,
+}
+
+type Plan = {
+  sessionUpdate: string,
+  entries: list<{content: string, priority: string?, status: string?}>,
+  harnPlan?: dict,
+}
+
+type Handoff = {sessionUpdate: string, handoffId: string, artifactId: string?, handoff: dict}
+
+type SessionUpdate = AgentMessageChunk | ToolCall | ToolCallUpdate | Plan | Handoff
+
+type PipelineResult = {text: string?, events: list<SessionUpdate>?, run_record: dict?}
+
+pub fn agent_message_chunk(text) {
+  return {sessionUpdate: "agent_message_chunk", content: {type: "text", text: text, annotations: nil}}
+}
+
+pub fn tool_call(tool_call_id, title) {
+  return {
+    sessionUpdate: "tool_call",
+    toolCallId: tool_call_id,
+    title: title,
+    kind: nil,
+    status: "pending",
+    content: nil,
+    locations: nil,
+    rawInput: nil,
+    rawOutput: nil,
+  }
+}
+
+pub fn tool_call_update(tool_call_id, status) {
+  return {
+    sessionUpdate: "tool_call_update",
+    toolCallId: tool_call_id,
+    status: status,
+    title: nil,
+    content: nil,
+    locations: nil,
+    rawOutput: nil,
+    executor: nil,
+  }
+}
+
+pub fn plan(entries) {
+  return {sessionUpdate: "plan", entries: entries}
+}
+
+/** harn_plan builds an ACP plan update from a harn.plan.v1 artifact. */
+pub fn harn_plan(plan_artifact) {
+  return {sessionUpdate: "plan", entries: plan_entries(plan_artifact), harnPlan: plan_artifact}
+}
+
+pub fn handoff_update(handoff_id, artifact_id, handoff) {
+  return {sessionUpdate: "handoff", handoffId: handoff_id, artifactId: artifact_id, handoff: handoff}
+}

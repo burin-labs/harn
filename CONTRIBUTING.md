@@ -53,12 +53,15 @@ adding ~30–60 s of stat traffic unrelated to cargo.
 
 ### Test tiers
 
-The workspace splits tests into two tiers to keep the pre-push hook fast:
+The workspace splits tests into two tiers and keeps pre-push targeted so local
+pushes do not repeatedly pay for broad workspace compilation that CI already
+runs:
 
 **Fast suite** — `make test`
 
 In-process, deterministic, zero subprocess-per-test. Wall-clock budget: <2 min
-on a warm cache. Runs automatically on pre-push and on every PR. The nextest
+on a warm cache. Runs on every PR and when you opt into the broader local
+pre-push gate with `HARN_PREPUSH_FULL_TESTS=1`. The nextest
 `default` and `ci` profiles exclude the `harn-cli` integration test binaries
 (those live in `crates/harn-cli/tests/` and spawn the compiled `harn` binary as
 a subprocess).
@@ -147,11 +150,13 @@ build contention.
 
 Pre-commit hooks (`.githooks/pre-commit`) run fmt + clippy + highlight keyword
 regeneration + markdown lint automatically. Pre-push hooks
-(`.githooks/pre-push`) run workspace tests, Harn formatting checks, and
-markdown lint before code leaves your machine. Both hooks now bootstrap the
-portal frontend dependencies through `./scripts/ensure_portal_deps.sh` before
-running portal lint, and the repo-root `npm run portal:*` commands reuse the
-same bootstrap path.
+(`.githooks/pre-push`) run targeted package `cargo check --tests` for changed
+crates, affected Harn formatting/lint checks, generated-file drift checks, and
+markdown/actionlint/portal lint when touched. Set `HARN_PREPUSH_FULL_TESTS=1`
+to run `make test` from pre-push before code leaves your machine. Both hooks
+bootstrap the portal frontend dependencies through
+`./scripts/ensure_portal_deps.sh` before running portal lint, and the repo-root
+`npm run portal:*` commands reuse the same bootstrap path.
 
 ## Project structure
 

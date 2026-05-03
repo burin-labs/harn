@@ -142,8 +142,8 @@ ENVIRONMENT VARIABLES
   HARN_BOOTSTRAP_NEW_CRATES=1
     First-release bootstrap mode for a brand-new workspace crate that
     an already-published crate now depends on. Skips the publish
-    dry-run and tells verify_crate_packages.sh to skip the harn-cli
-    package check (which fails when a path-dep crate isn't on
+    dry-run and tells verify_crate_packages.sh to skip package checks
+    for downstream crates that fail when a path-dep crate isn't on
     crates.io yet). The real publish later uses
     `cargo publish --workspace`, which orders intra-workspace deps
     correctly. See harn#609.
@@ -315,7 +315,8 @@ run_common_gates() {
   # fail looking that crate up on crates.io even with --no-verify. Skip
   # the dry-run and let `cargo publish --workspace` order the crates at
   # real-publish time. The audit's package-audit lane reads the same
-  # env var via verify_crate_packages.sh and skips the harn-cli check.
+  # env var via verify_crate_packages.sh and skips downstream package
+  # checks that need the new crate to already exist on crates.io.
   # See harn#609 for the full failure mode.
   if [[ "${HARN_BOOTSTRAP_NEW_CRATES:-0}" == "1" ]]; then
     echo "=== HARN_BOOTSTRAP_NEW_CRATES=1: skipping publish dry-run ==="

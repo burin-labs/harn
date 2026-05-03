@@ -7,7 +7,8 @@ hook_dir=$(dirname "$0")
 changed=$(mktemp)
 harn_format_files=$(mktemp)
 harn_lint_files=$(mktemp)
-trap 'rm -f "$changed" "$harn_format_files" "$harn_lint_files"' EXIT
+changed_packages=$(mktemp)
+trap 'rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_packages"' EXIT
 hook_write_push_files "$changed"
 
 # Merge-queue guard. GitHub does not reject pushes to a PR that's already
@@ -49,20 +50,22 @@ if command -v gh >/dev/null 2>&1; then
   fi
 fi
 
-echo "=== Pre-push: running fast release-quality checks ==="
-if hook_paths_match "$changed" "$HOOK_TEST_PATTERN"; then
-  test_start=$(date +%s)
-  make test || exit 1
-  test_elapsed=$(( $(date +%s) - test_start ))
-  if [ "$test_elapsed" -gt 120 ]; then
-    echo ""
-    echo "error: pre-push 'make test' exceeded 120s budget (took ${test_elapsed}s)" >&2
-    echo "hint: Move slow tests to the e2e suite (cargo nextest profile 'e2e')." >&2
-    echo "      See CONTRIBUTING.md for the two-tier test model." >&2
-    exit 2
+echo "=== Pre-push: running targeted local checks ==="
+if [ "${HARN_PREPUSH_FULL_TESTS:-0}" = "1" ] && hook_paths_match "$changed" "$HOOK_TEST_PATTERN"; then
+  make test
+elif hook_paths_match "$changed" '(^Cargo\.toml$|^Cargo\.lock$|^Makefile$|^\.config/nextest\.toml$)'; then
+  cargo check --workspace --tests
+elif hook_paths_match "$changed" "$HOOK_TEST_PATTERN"; then
+  hook_write_changed_cargo_packages "$changed" "$changed_packages"
+  if [ -s "$changed_packages" ]; then
+    while IFS= read -r package; do
+      cargo check -p "$package" --tests
+    done < "$changed_packages"
+  else
+    echo "=== Pre-push: skipping Cargo check (no changed crate packages) ==="
   fi
 else
-  echo "=== Pre-push: skipping Rust/Harn tests (no code changes) ==="
+  echo "=== Pre-push: skipping Cargo check (no Rust/Harn code changes) ==="
 fi
 
 if hook_paths_match "$changed" "$HOOK_HARN_PATTERN"; then
@@ -136,6 +139,14 @@ if hook_paths_match "$changed" "$HOOK_LANGSPEC_PATTERN"; then
   echo "    Language spec mirror OK."
 else
   echo "=== Pre-push: skipping language spec check (no spec changes) ==="
+fi
+
+if hook_paths_match "$changed" "$HOOK_HIGHLIGHT_PATTERN"; then
+  echo "=== Pre-push: checking generated highlight keywords ==="
+  make -s check-highlight
+  echo "    Highlight keywords OK."
+else
+  echo "=== Pre-push: skipping highlight check (no lexer/stdlib changes) ==="
 fi
 
 # Block retroactive edits to released CHANGELOG sections. New entries

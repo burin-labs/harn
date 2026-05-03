@@ -1850,6 +1850,7 @@ dependencies = [
  "croner",
  "harn-lexer",
  "harn-parser",
+ "harn-stdlib",
  "serde",
  "tempfile",
  "toml",
@@ -1892,6 +1893,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-stdlib"
+version = "0.7.56"
+
+[[package]]
 name = "harn-vm"
 version = "0.7.56"
 dependencies = [
@@ -1913,6 +1918,7 @@ dependencies = [
  "harn-lexer",
  "harn-modules",
  "harn-parser",
+ "harn-stdlib",
  "hex",
  "httpdate",
  "ignore",

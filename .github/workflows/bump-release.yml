@@ -24,9 +24,10 @@ on:
           First-release bootstrap for a new workspace crate that an
           already-published crate (e.g. harn-cli) now depends on. Sets
           HARN_BOOTSTRAP_NEW_CRATES=1, which skips the publish dry-run
-          and the audit's harn-cli package check. The real publish on
-          finalize uses `cargo publish --workspace` which orders
-          intra-workspace deps correctly. See harn#609.
+          and audit package checks for downstream crates that need it on
+          crates.io. The real publish on finalize uses
+          `cargo publish --workspace` which orders intra-workspace deps
+          correctly. See harn#609.
         type: boolean
         default: false
       skip_dry_run:
@@ -160,9 +161,9 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # First-release bootstrap for a brand-new workspace crate.
           # release_ship.sh + verify_crate_packages.sh both honor the
-          # env var: skip the publish dry-run and the harn-cli package
-          # check that fails when a path-dep crate isn't on crates.io
-          # yet. Defaults to "0" on push events.
+          # env var: skip the publish dry-run and downstream package
+          # checks that fail when a path-dep crate isn't on crates.io yet.
+          # Defaults to "0" on push events.
           HARN_BOOTSTRAP_NEW_CRATES: ${{ inputs.bootstrap_new_crates && '1' || '0' }}
         run: |
           args=(--bump "${{ steps.bump.outputs.type }}")

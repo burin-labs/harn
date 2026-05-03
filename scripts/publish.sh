@@ -72,9 +72,10 @@ WORKSPACE_CRATES=(
   harn-lexer
   harn-parser
   harn-ir
+  harn-stdlib
   harn-fmt
-  harn-vm
   harn-modules
+  harn-vm
   harn-lint
   harn-dap
   harn-serve

@@ -37,6 +37,7 @@ if hook_paths_match "$changed" "$HOOK_HARN_PATTERN"; then
   if [ -s "$harn_lint_files" ]; then
     echo "=== Pre-commit: linting staged Harn files ==="
     xargs -0 cargo run --quiet --bin harn -- lint --fix < "$harn_lint_files"
+    xargs -0 cargo run --quiet --bin harn -- fmt < "$harn_lint_files"
     xargs -0 git add -- < "$harn_lint_files"
     echo "    Harn lint OK."
   else
