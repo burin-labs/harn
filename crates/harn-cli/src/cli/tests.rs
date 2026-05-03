@@ -1639,7 +1639,7 @@ fn test_parses_check_provider_matrix_args() {
         "check",
         "--provider-matrix",
         "--format",
-        "json",
+        "markdown",
         "--filter",
         "json-schema",
     ]);
@@ -1648,7 +1648,7 @@ fn test_parses_check_provider_matrix_args() {
         panic!("expected check command");
     };
     assert!(args.provider_matrix);
-    assert_eq!(args.format, CheckOutputFormat::Json);
+    assert_eq!(args.format, CheckOutputFormat::Markdown);
     assert_eq!(args.filter.as_deref(), Some("json-schema"));
     assert!(args.targets.is_empty());
 }

@@ -25,17 +25,6 @@ pub(crate) struct DumpTriggerQuickrefArgs {
 }
 
 #[derive(Debug, Args)]
-pub(crate) struct DumpProviderMatrixArgs {
-    /// Path to the generated provider matrix page (relative to the repo root).
-    #[arg(long, default_value = "docs/src/provider-matrix.md")]
-    pub output: String,
-    /// Verify the on-disk file matches what would be generated; exit non-zero
-    /// if stale. Used by CI to prevent drift from capabilities.toml.
-    #[arg(long)]
-    pub check: bool,
-}
-
-#[derive(Debug, Args)]
 pub(crate) struct DumpConnectorMatrixArgs {
     /// Path to the generated connector parity matrix page (relative to the repo root).
     #[arg(long, default_value = "docs/src/connectors/parity-matrix.md")]

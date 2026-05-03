@@ -63,8 +63,7 @@ pub(crate) use crystallize::{
 };
 pub(crate) use doctor::DoctorArgs;
 pub(crate) use dump::{
-    DumpConnectorMatrixArgs, DumpHighlightKeywordsArgs, DumpProviderMatrixArgs,
-    DumpTriggerQuickrefArgs,
+    DumpConnectorMatrixArgs, DumpHighlightKeywordsArgs, DumpTriggerQuickrefArgs,
 };
 pub(crate) use explain::ExplainArgs;
 pub(crate) use flow::{
@@ -291,13 +290,6 @@ SCRIPTING
     /// `make gen-trigger-quickref` target.
     #[command(hide = true, name = "dump-trigger-quickref")]
     DumpTriggerQuickref(DumpTriggerQuickrefArgs),
-    /// Regenerate docs/src/provider-matrix.md from the live LLM capability table.
-    ///
-    /// Dev-only. Hidden from `--help` — invoke via
-    /// `cargo run -p harn-cli -- dump-provider-matrix` or the
-    /// `make gen-provider-matrix` target.
-    #[command(hide = true, name = "dump-provider-matrix")]
-    DumpProviderMatrix(DumpProviderMatrixArgs),
     /// Regenerate docs/src/connectors/parity-matrix.md from connector package manifests.
     ///
     /// Dev-only. Hidden from `--help` — invoke via
