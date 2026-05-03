@@ -6,7 +6,8 @@ covers how to use each from both client and server perspectives.
 
 For a scan-friendly status table across all protocol entry points, see the
 [protocol support matrix](./protocol-support.md). For shared serving internals,
-see [Outbound workflow server](./harn-serve.md).
+see [Outbound workflow server](./harn-serve.md). Harn-owned ACP/MCP extension
+fields are specified in [Harn ACP/MCP extensions v1](./spec/harn-extensions/v1.md).
 
 ## MCP client (connecting to MCP servers)
 

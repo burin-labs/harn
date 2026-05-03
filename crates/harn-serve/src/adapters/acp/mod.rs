@@ -81,7 +81,7 @@ fn harn_acp_extension_meta() -> serde_json::Value {
                     "shell_invocation"
                 ]
             },
-            "extensionContract": "docs/src/bridge-protocol.md#acp-compatibility-contract",
+            "extensionContract": "https://harnlang.com/spec/harn-extensions/v1",
         }
     })
 }
@@ -1717,6 +1717,10 @@ mod tests {
                     initialize["result"]["agentCapabilities"]["_meta"]["harn"]
                         ["schemaCompatibility"],
                     ACP_SCHEMA_COMPATIBILITY
+                );
+                assert_eq!(
+                    initialize["result"]["agentCapabilities"]["_meta"]["harn"]["extensionContract"],
+                    "https://harnlang.com/spec/harn-extensions/v1"
                 );
                 assert_eq!(
                     initialize["result"]["agentCapabilities"]["_meta"]["harn"]
