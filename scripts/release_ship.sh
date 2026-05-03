@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="${HARN_RELEASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$ROOT_DIR"
 
 # ── Timing instrumentation ──────────────────────────────────────────────
@@ -131,6 +131,12 @@ FINALIZE MODE
   5. Renders changelog-backed release notes.
   6. Creates/updates a GitHub release with the rendered notes.
 
+  Manual recovery after a tag was already pushed may run from a
+  detached HEAD at vX.Y.Z. In that case finalize skips the main
+  fast-forward check and publishes the already-tagged commit, keeping
+  crates.io content, release notes, and the tag aligned even if main
+  has moved on.
+
   Set RELEASE_FINALIZE_REAUDIT=1 (or pass --reaudit) to opt back into
   the full release-gate audit before finalizing — useful when running
   --finalize locally after manual repo edits.
@@ -254,6 +260,30 @@ sync_base_branch() {
     echo "hint: re-trigger publish-release.yml — it'll detect drift for the new version"
     exit 1
   fi
+}
+
+require_existing_release_tag_checkout() {
+  local version="$1"
+  local tag="v$version"
+  local branch
+  branch="$(git branch --show-current)"
+  if [[ -n "$branch" ]]; then
+    echo "error: release_ship.sh --finalize must run from $BASE_BRANCH or detached at $tag; current branch is $branch"
+    exit 1
+  fi
+  if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+    echo "error: release_ship.sh --finalize is detached, but $tag does not exist locally"
+    exit 1
+  fi
+  local tag_commit head_commit
+  tag_commit="$(git rev-list -n 1 "$tag")"
+  head_commit="$(git rev-parse HEAD)"
+  if [[ "$tag_commit" != "$head_commit" ]]; then
+    echo "error: release_ship.sh --finalize is detached at $head_commit, but $tag points to $tag_commit"
+    echo "hint: checkout $BASE_BRANCH for a normal finalize, or checkout $tag for manual tag-publish recovery"
+    exit 1
+  fi
+  echo "Finalize recovery from existing tag $tag at $head_commit"
 }
 
 require_release_branch() {
@@ -573,7 +603,11 @@ if [[ "$MODE" == "prepare-here" ]]; then
 elif [[ "$MODE" == "finalize" ]]; then
   require_clean_tree
   EXPECTED_VERSION="$(current_version)"
-  sync_base_branch "$BASE_BRANCH"
+  if [[ "$(git branch --show-current)" == "$BASE_BRANCH" ]]; then
+    sync_base_branch "$BASE_BRANCH"
+  else
+    require_existing_release_tag_checkout "$EXPECTED_VERSION"
+  fi
   # Trust the merge-queue CI by default; opt-in re-audit via env var or
   # --reaudit flag.
   if [[ "${RELEASE_FINALIZE_REAUDIT:-0}" != "1" ]]; then
