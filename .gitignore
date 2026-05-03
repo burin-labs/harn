@@ -56,3 +56,5 @@ experiments/burin-mini/.qmode/
 experiments/burin-mini/workspace/.harn/
 # Per-iteration logs from scripts/stress_subprocess_tests.sh.
 .stress-logs/
+# Worktrees
+.worktrees/
