@@ -109,6 +109,7 @@ pub(super) async fn run_turn_preflight(
                     .is_some_and(|policy| policy.require_action_or_yield),
                 state.config.tool_examples.as_deref(),
                 !state.config.task_ledger.is_empty(),
+                &state.done_sentinel,
             )
         });
     let tool_prompt_slot = dynamic_contract_prompt

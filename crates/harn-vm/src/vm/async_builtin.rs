@@ -18,6 +18,26 @@ pub fn clone_async_builtin_child_vm() -> Option<Vm> {
     CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| slot.borrow().last().map(|vm| vm.child_vm()))
 }
 
+/// Forward captured output from a transient child VM (typically created via
+/// `clone_async_builtin_child_vm` and used to invoke a closure) back into the
+/// async-builtin's host stack entry. The dispatch loop drains that entry's
+/// output back to the original parent VM after the async builtin returns.
+///
+/// Without this hook, `log()`/`print()` calls inside `post_turn_callback`
+/// closures, tool handlers, and other VM-side closures invoked from async
+/// builtins would silently disappear because the transient cb_vm.output
+/// buffer is dropped on scope exit.
+pub fn forward_child_output_to_parent(text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
+        if let Some(top) = slot.borrow_mut().last_mut() {
+            top.append_output(text);
+        }
+    });
+}
+
 pub struct AsyncBuiltinChildVmGuard;
 
 pub fn install_async_builtin_child_vm(vm: Vm) -> AsyncBuiltinChildVmGuard {

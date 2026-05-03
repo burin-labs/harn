@@ -27,6 +27,7 @@ pub(crate) fn build_tool_calling_contract_prompt(
     require_action: bool,
     tool_examples: Option<&str>,
     include_task_ledger_help: bool,
+    done_sentinel: &str,
 ) -> String {
     let mut prompt = String::from("\n\n## Tool Calling Contract\n");
     prompt.push_str(&format!(
@@ -34,27 +35,19 @@ pub(crate) fn build_tool_calling_contract_prompt(
     ));
 
     if mode == "native" {
-        prompt.push_str(NATIVE_CALL_CONTRACT_HELP);
+        prompt.push_str(&native_call_contract_help(done_sentinel));
         if require_action {
-            prompt.push_str(
-                "\nThis turn is action-gated. If tools are available, open your response \
-                 with a native tool call, not prose. Do not emit raw source code, diffs, \
-                 JSON, or `##DONE##` before the first successful tool action.\n",
-            );
+            prompt.push_str(&native_action_gated_clause(done_sentinel));
         }
         if include_task_ledger_help {
-            prompt.push_str(TASK_LEDGER_HELP);
+            prompt.push_str(&task_ledger_help(done_sentinel));
         }
     } else {
         // Front-load format + examples before schemas so weaker models
         // see the calling convention while attention is strongest.
-        prompt.push_str(TEXT_RESPONSE_PROTOCOL_HELP);
+        prompt.push_str(&text_response_protocol_help(done_sentinel));
         if require_action {
-            prompt.push_str(
-                "\nThis turn is action-gated. If tools are available, open your response \
-                 with a tool call (`<tool_call>...</tool_call>`), not prose. Do not emit \
-                 raw source code, diffs, JSON, or a <done> block before the first tool call.\n",
-            );
+            prompt.push_str(&text_action_gated_clause(done_sentinel));
         }
         if let Some(examples) = tool_examples {
             let trimmed = examples.trim();
@@ -65,7 +58,7 @@ pub(crate) fn build_tool_calling_contract_prompt(
             }
         }
         if include_task_ledger_help {
-            prompt.push_str(TASK_LEDGER_HELP);
+            prompt.push_str(&task_ledger_help(done_sentinel));
         }
 
         let (schemas, registry) = collect_tool_schemas_with_registry(tools_val, native_tools);
@@ -157,22 +150,41 @@ fn build_tool_args_type(params: &[ToolParamSchema]) -> TypeExpr {
     TypeExpr::Object(fields)
 }
 
-/// Help text for the fenceless TS call syntax. Declared as a constant so tests
-/// can assert on its content without duplicating the string.
-///
-/// The text is written to minimise backtick-counting demands on weaker models:
-/// prose references to single-character syntax use quoted descriptions
-/// ('backtick', 'double quote') and the ONE code example is embedded in the
-/// paragraph without any wrapping fence. Wrapping the example in a Markdown
-/// fenced code block caused confusion because models had to balance several
-/// levels of backticks at once.
-pub(crate) const TEXT_RESPONSE_PROTOCOL_HELP: &str = "
+/// Build the text-mode response protocol help block, substituting the
+/// configured sentinel value (or omitting the sentinel guidance entirely
+/// when the sentinel is opted out).
+pub(crate) fn text_response_protocol_help(done_sentinel: &str) -> String {
+    let (done_block_line, done_rule_line, completion_clause) = if done_sentinel.is_empty() {
+        (
+            String::new(),
+            String::new(),
+            "Once the request is satisfied and no more tool calls are needed, emit \
+             `<user_response>...</user_response>` with the final answer and do not \
+             include any `<tool_call>` block — that signals completion."
+                .to_string(),
+        )
+    } else {
+        (
+            format!("<done>{done_sentinel}</done>\n\n"),
+            format!(
+                "- `<done>{done_sentinel}</done>` signals task completion. Emit it only \
+                 after a successful verifying tool call; the runtime rejects it otherwise.\n"
+            ),
+            format!(
+                "Prefer `<tool_call>` over `<assistant_prose>` while work remains. Once no \
+                 more tool calls are needed, emit `<user_response>...</user_response>` and \
+                 then `<done>{done_sentinel}</done>`."
+            ),
+        )
+    };
+    format!(
+        "
 ## Response protocol
 
 Every response must be a sequence of these tags, with only whitespace between them:
 
 <tool_call>
-name({ key: value })
+name({{ key: value }})
 </tool_call>
 
 <assistant_prose>
@@ -183,52 +195,109 @@ Short narration. Optional.
 Final user-facing answer. Required when no more tool calls are needed.
 </user_response>
 
-<done>##DONE##</done>
-
-Rules the runtime enforces:
+{done_block_line}Rules the runtime enforces:
 
 - No text, code, diffs, JSON, or reasoning outside these tags. Any stray content is rejected with structured feedback.
-- `<tool_call>` wraps exactly one bare call `name({ key: value })`. Do not quote or JSON-encode the call. Use heredoc `<<TAG` ... `TAG` for multiline string fields — raw content, no escaping. Place TAG at the start of the closing line; closing punctuation like `},` may follow on that same line.
+- `<tool_call>` wraps exactly one bare call `name({{ key: value }})`. Do not quote or JSON-encode the call. Use heredoc `<<TAG` ... `TAG` for multiline string fields — raw content, no escaping. Place TAG at the start of the closing line; closing punctuation like `}},` may follow on that same line.
 - `<assistant_prose>` is optional and must be brief. Never paste source code, file contents, command transcripts, or long plans here — wrap those in the relevant tool call instead.
 - `<user_response>` is reserved for the final user-facing answer that hosts should surface. Emit it when the user should see a wrap-up or answer, and keep it concise and grounded.
-- `<done>##DONE##</done>` signals task completion. Emit it only after a successful verifying tool call; the runtime rejects it otherwise.
-- Do not prefix calls with labels like `tool_code:`, `python:`, `shell:`, or any language tag, and do not wrap tool calls in Markdown fences.
-- Prefer `<tool_call>` over `<assistant_prose>` while work remains. Once no more tool calls are needed, emit `<user_response>...</user_response>`.
+{done_rule_line}- Do not prefix calls with labels like `tool_code:`, `python:`, `shell:`, or any language tag, and do not wrap tool calls in Markdown fences.
+- {completion_clause}
 
 Example of a well-formed response:
 
 <assistant_prose>Creating the test file.</assistant_prose>
 <user_response>Created the test file.</user_response>
 <tool_call>
-edit({ action: \"create\", path: \"tests/test_foo.py\", content: <<EOF
+edit({{ action: \"create\", path: \"tests/test_foo.py\", content: <<EOF
 def test_foo():
     assert foo() == 42
 EOF
-})
+}})
 </tool_call>
-";
+"
+    )
+}
 
-pub(crate) const NATIVE_CALL_CONTRACT_HELP: &str = "
+/// Build the native-tool-protocol help block, substituting the sentinel.
+pub(crate) fn native_call_contract_help(done_sentinel: &str) -> String {
+    let completion_clause = if done_sentinel.is_empty() {
+        "When the task is complete and no more tool calls are needed, emit your \
+         final user-facing answer in `<user_response>...</user_response>` (or just \
+         plain assistant text) and stop calling tools — that signals completion."
+            .to_string()
+    } else {
+        format!(
+            "When the task is complete and no more tool calls are needed, include \
+             `{done_sentinel}` exactly once in assistant text."
+        )
+    };
+    format!(
+        "
 ## Native tool protocol
 
 The provider exposes tool definitions outside this prompt.
 
 - Invoke tools only through the provider's native tool-calling channel.
 - The current workflow/system prompt may mention only the tool names available for this stage; do not assume tools from earlier stages remain available.
-- Do not write text-mode tool tags, bare `name({ ... })` calls, Markdown code fences, or JSON tool-call envelopes in assistant text.
-- Keep assistant prose short and operational. If you emit a final user-facing answer, wrap it in `<user_response>...</user_response>`. When the task is complete and no more tool calls are needed, include `##DONE##` exactly once in assistant text.
-";
+- Do not write text-mode tool tags, bare `name({{ ... }})` calls, Markdown code fences, or JSON tool-call envelopes in assistant text.
+- Keep assistant prose short and operational. If you emit a final user-facing answer, wrap it in `<user_response>...</user_response>`. {completion_clause}
+"
+    )
+}
 
-pub(crate) const TASK_LEDGER_HELP: &str = "
+/// Action-gated guard injected when `turn_policy.require_action_or_yield` is true.
+pub(crate) fn native_action_gated_clause(done_sentinel: &str) -> String {
+    let sentinel_clause = if done_sentinel.is_empty() {
+        String::new()
+    } else {
+        format!(", or `{done_sentinel}`")
+    };
+    format!(
+        "\nThis turn is action-gated. If tools are available, open your response \
+         with a native tool call, not prose. Do not emit raw source code, diffs, \
+         JSON{sentinel_clause} before the first successful tool action.\n"
+    )
+}
+
+/// Action-gated guard for text mode.
+pub(crate) fn text_action_gated_clause(done_sentinel: &str) -> String {
+    let sentinel_clause = if done_sentinel.is_empty() {
+        String::new()
+    } else {
+        ", or a <done> block".to_string()
+    };
+    format!(
+        "\nThis turn is action-gated. If tools are available, open your response \
+         with a tool call (`<tool_call>...</tool_call>`), not prose. Do not emit \
+         raw source code, diffs, JSON{sentinel_clause} before the first tool call.\n"
+    )
+}
+
+/// Task-ledger help block. The "{done_sentinel} is rejected while any
+/// deliverable is open" clause only appears when a sentinel is configured.
+pub(crate) fn task_ledger_help(done_sentinel: &str) -> String {
+    let sentinel_block = if done_sentinel.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " When a task ledger is present, the `{done_sentinel}` sentinel is rejected \
+             while any deliverable is `open` or `blocked`."
+        )
+    };
+    format!(
+        "
 ## Task ledger
 
-The runtime may inject a durable `<task_ledger>` of the user's deliverables above this prompt. Only use the `ledger` tool if that `<task_ledger>` block is actually present in the current turn. If no `<task_ledger>` block is present, ignore this section entirely and do not call `ledger(...)`. When a task ledger is present, the `##DONE##` sentinel is rejected while any deliverable is `open` or `blocked`. Use the ledger ids shown in that block; do not invent ids such as `deliverable-N`.
+The runtime may inject a durable `<task_ledger>` of the user's deliverables above this prompt. Only use the `ledger` tool if that `<task_ledger>` block is actually present in the current turn. If no `<task_ledger>` block is present, ignore this section entirely and do not call `ledger(...)`.{sentinel_block} Use the ledger ids shown in that block; do not invent ids such as `deliverable-N`.
 
-- `ledger({ action: \"add\", text: \"what needs to happen\" })` — declare a new sub-deliverable.
-- `ledger({ action: \"mark\", id: \"deliverable-id-from-task-ledger\", status: \"done\" })` — mark a deliverable complete after a real tool call satisfied it.
-- `ledger({ action: \"mark\", id: \"deliverable-id-from-task-ledger\", status: \"dropped\", note: \"why\" })` — escape hatch when scope truly changed; the note is required.
-- `ledger({ action: \"rationale\", text: \"one-sentence answer to why the user will call this done\" })` — commit to an interpretation of the success criterion.
-- `ledger({ action: \"note\", text: \"observation worth remembering across turns\" })` — durable cross-stage memory.
+- `ledger({{ action: \"add\", text: \"what needs to happen\" }})` — declare a new sub-deliverable.
+- `ledger({{ action: \"mark\", id: \"deliverable-id-from-task-ledger\", status: \"done\" }})` — mark a deliverable complete after a real tool call satisfied it.
+- `ledger({{ action: \"mark\", id: \"deliverable-id-from-task-ledger\", status: \"dropped\", note: \"why\" }})` — escape hatch when scope truly changed; the note is required.
+- `ledger({{ action: \"rationale\", text: \"one-sentence answer to why the user will call this done\" }})` — commit to an interpretation of the success criterion.
+- `ledger({{ action: \"note\", text: \"observation worth remembering across turns\" }})` — durable cross-stage memory.
 
 Prefer marking deliverables done only AFTER a concrete tool call demonstrates completion (an edit landed, a run() returned exit 0, a read confirmed an invariant). Don't mark done on prose alone.
-";
+"
+    )
+}

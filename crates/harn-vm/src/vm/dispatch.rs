@@ -316,9 +316,14 @@ impl Vm {
                     slot.borrow_mut().push(self.child_vm());
                 });
                 let result = async_builtin(args).await;
-                CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
-                    slot.borrow_mut().pop();
+                let captured = CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
+                    let mut stack = slot.borrow_mut();
+                    let mut top = stack.pop();
+                    top.as_mut().map(|vm| vm.take_output()).unwrap_or_default()
                 });
+                if !captured.is_empty() {
+                    self.output.push_str(&captured);
+                }
                 result
             }
         }

@@ -455,18 +455,22 @@ pub(super) async fn run_llm_call(
         );
     }
     if should_inject_protocol_feedback {
+        let done_line = if ctx.done_sentinel.is_empty() {
+            String::new()
+        } else {
+            format!("<done>{}</done>\n", ctx.done_sentinel)
+        };
         let feedback = format!(
             "Your response violated the tagged response protocol. Each issue:\n- {}\n\n\
              Re-emit using only these top-level tags, separated by whitespace:\n\n\
              <assistant_prose>short narration (optional)</assistant_prose>\n\
              <user_response>final user-facing answer (optional)</user_response>\n\
              <tool_call>\nname({{ key: value }})\n</tool_call>\n\
-             <done>{done_sentinel}</done>\n\n\
+             {done_line}\n\
              Nothing outside these tags is accepted. Do not paste source code, \
              diffs, JSON, or command output as prose — wrap each action in its \
              own <tool_call> block.",
             protocol_violations.join("\n- "),
-            done_sentinel = ctx.done_sentinel,
         );
         append_message_to_contexts(
             &mut state.visible_messages,
@@ -476,11 +480,18 @@ pub(super) async fn run_llm_call(
     }
 
     // Check sentinel on every response; when it coexists with tool calls
-    // we still process the tools, then exit.
-    let tagged_done_hit = tagged_done_marker
-        .as_deref()
-        .is_some_and(|body| body == ctx.done_sentinel);
-    let plain_done_hit = if ctx.tool_format == "native" {
+    // we still process the tools, then exit. An empty `done_sentinel` means
+    // the user has opted out of sentinel detection entirely — short-circuit
+    // before doing any string-contains checks (since `text.contains("")` is
+    // always true and would falsely signal completion every turn).
+    let sentinel_lookup_active = !ctx.done_sentinel.is_empty();
+    let tagged_done_hit = sentinel_lookup_active
+        && tagged_done_marker
+            .as_deref()
+            .is_some_and(|body| body == ctx.done_sentinel);
+    let plain_done_hit = if !sentinel_lookup_active {
+        false
+    } else if ctx.tool_format == "native" {
         // Native-mode providers may surface the sentinel in visible prose
         // while tool calls travel separately via the provider channel.
         text.contains(ctx.done_sentinel)
@@ -517,6 +528,7 @@ pub(super) async fn run_llm_call(
         .turn_policy
         .map(|policy| policy.allow_done_sentinel)
         .unwrap_or(true);
+    let sentinel_active = allow_done_sentinel && sentinel_lookup_active;
     // exit_when_verified: honor sentinel only if the last run() exit 0.
     let verified = !ctx.exit_when_verified || state.last_run_exit_code == Some(0);
     // Guard against premature exit where the model emits done without acting.
@@ -525,10 +537,20 @@ pub(super) async fn run_llm_call(
     // Ledger gate: reject done while open/blocked deliverables remain.
     let ledger_blocks_done = state.task_ledger.gates_done();
     let completion_requested =
-        sentinel_in_text || (allow_done_sentinel && user_response.as_deref().is_some());
-    let sentinel_hit = ctx.persistent
-        && ((completion_requested && verified && completion_ready && !ledger_blocks_done)
-            || phase_change);
+        sentinel_in_text || (sentinel_active && user_response.as_deref().is_some());
+    // Sentinel detection is no longer gated on `persistent`. The persistent
+    // flag governs whether the loop breaks on a text-only turn (post_turn);
+    // the model's explicit stop signal is honored in either mode. Persistent
+    // loops still apply the verification/ledger gates because those guard
+    // against premature completion in long-running multi-turn work; in
+    // non-persistent mode the request is "answer once" and the gates do
+    // not apply.
+    let sentinel_hit = if ctx.persistent {
+        (completion_requested && verified && completion_ready && !ledger_blocks_done)
+            || phase_change
+    } else {
+        completion_requested || phase_change
+    };
 
     if completion_requested && ledger_blocks_done && ctx.persistent {
         let corrective = state.task_ledger.done_gate_feedback();
