@@ -13,4 +13,28 @@ pipeline default() {
   let explicit_native = agent_loop_options({provider: "mock", tools: tool_registry(), tool_format: "native"})
   println(explicit_native.tool_format)
   println(contains(explicit_native.keys(), "done_sentinel"))
+  println(contains(no_tools.keys(), "task_ledger"))
+  let shorthand = agent_loop_options(
+    {provider: "mock", root_task: " Build feature ", deliverables: ["Write code", "", "Run tests"]},
+  )
+  println(shorthand.task_ledger.root_task)
+  println(len(shorthand.task_ledger.deliverables))
+  println(shorthand.task_ledger.deliverables[0].id)
+  println(shorthand.task_ledger.deliverables[0].status)
+  println(shorthand.task_ledger.deliverables[1].id)
+  let explicit_ledger = agent_loop_options(
+    {
+      provider: "mock",
+      root_task: "ignored",
+      deliverables: ["ignored"],
+      task_ledger: {
+        root_task: "explicit",
+        deliverables: [{id: "custom", text: "Use caller ledger", status: "done"}],
+        rationale: "caller-owned",
+        observations: ["observed"],
+      },
+    },
+  )
+  println(explicit_ledger.task_ledger.root_task)
+  println(explicit_ledger.task_ledger.deliverables[0].id)
 }

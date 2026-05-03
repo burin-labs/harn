@@ -2,6 +2,7 @@ const LLM_MOD_RS: &str = include_str!("../src/llm/mod.rs");
 const AGENT_CONFIG_RS: &str = include_str!("../src/llm/agent_config.rs");
 const WORKFLOW_REGISTER_RS: &str = include_str!("../src/stdlib/workflow/register.rs");
 const AGENT_LOOP_HARN: &str = include_str!("../../harn-stdlib/src/stdlib/agent/loop.harn");
+const AGENT_OPTIONS_HARN: &str = include_str!("../../harn-stdlib/src/stdlib/agent/options.harn");
 const AGENT_TURN_HARN: &str = include_str!("../../harn-stdlib/src/stdlib/agent/turn.harn");
 const WORKFLOW_EXECUTE_HARN: &str =
     include_str!("../../harn-stdlib/src/stdlib/workflow/execute.harn");
@@ -30,6 +31,12 @@ fn public_orchestration_entrypoints_dispatch_through_harn_stdlib() {
     assert!(
         !AGENT_CONFIG_RS.contains("agent_loop_profile_defaults(&options, \"agent_loop\")"),
         "public agent_loop profile/default policy belongs in std/agent/options.harn"
+    );
+    assert!(
+        !AGENT_CONFIG_RS.contains("opts.get(\"root_task\")")
+            && !AGENT_CONFIG_RS.contains("opts.get(\"deliverables\")")
+            && AGENT_OPTIONS_HARN.contains("__with_task_ledger_shorthand"),
+        "public task-ledger shorthand belongs in std/agent/options.harn"
     );
     assert!(
         LLM_MOD_RS.contains("__host_agent_capture_events")
