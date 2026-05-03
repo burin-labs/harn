@@ -466,27 +466,10 @@ pub(super) async fn run_llm_call(
         );
     }
     if should_inject_protocol_feedback {
-        let done_line = if ctx.done_sentinel.is_empty() {
-            String::new()
-        } else {
-            format!("<done>{}</done>\n", ctx.done_sentinel)
-        };
-        let mut bindings = BTreeMap::new();
-        bindings.insert(
-            "violations".to_string(),
-            VmValue::String(Rc::from(protocol_violations.join("\n- "))),
+        let feedback = crate::llm::tools::text_response_protocol_repair_feedback(
+            &protocol_violations,
+            ctx.done_sentinel,
         );
-        bindings.insert(
-            "done_line".to_string(),
-            VmValue::String(Rc::from(done_line)),
-        );
-        let feedback = crate::stdlib::template::render_stdlib_prompt_asset(
-            "agent/prompts/protocol_violation_feedback.harn.prompt",
-            Some(&bindings),
-        )
-        .unwrap_or_else(|error| {
-            format!("protocol violation feedback prompt render error: {error}")
-        });
         append_message_to_contexts(
             &mut state.visible_messages,
             &mut state.recorded_messages,

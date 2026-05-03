@@ -114,7 +114,10 @@ async fn fetch_ollama_context_window(model: &str, base_url: &str) -> Option<usiz
     {
         return Some(n as usize);
     }
-    Some(super::ollama::ollama_runtime_settings_from_env().num_ctx as usize)
+    Some(
+        super::ollama::OllamaRuntimeSettings::from_env_overrides_and_model(None, Some(model))
+            .num_ctx as usize,
+    )
 }
 
 /// Fetch context window from an OpenAI-compatible `/models` endpoint.

@@ -1,6 +1,7 @@
 use super::{
     build_tool_calling_contract_prompt, collect_tool_schemas_with_registry, json,
-    normalize_tool_args, sample_tool_registry, text_response_protocol_help, ComponentRegistry,
+    normalize_tool_args, sample_tool_registry, text_response_protocol_help,
+    text_response_protocol_repair_feedback, ComponentRegistry,
 };
 
 #[test]
@@ -60,6 +61,13 @@ fn contract_prompt_help_block_documents_tagged_protocol() {
     assert!(help.contains("<done>##DONE##</done>"));
     assert!(help.contains("name({ key: value })"));
     assert!(help.contains("heredoc"));
+    assert!(help.contains("Do not write `<tool_call>##DONE##</tool_call>`"));
+    assert!(help.contains("Never emit another `<tool_call>` after `<user_response>`"));
+    let example_tool = help.find("Example tool response:").unwrap();
+    let example_final = help.find("Example final response:").unwrap();
+    assert!(example_tool < example_final);
+    let tool_example = &help[example_tool..example_final];
+    assert!(!tool_example.contains("<user_response>"));
     // Legacy bare-call phrasing must not regress.
     assert!(!help.contains("contains no tool calls"));
     assert!(!help.contains("```call"));
@@ -79,6 +87,26 @@ fn contract_prompt_help_block_documents_tagged_protocol() {
     let custom = text_response_protocol_help("STOP");
     assert!(custom.contains("<done>STOP</done>"));
     assert!(!custom.contains("##DONE##"));
+}
+
+#[test]
+fn protocol_repair_feedback_uses_shared_prompt_asset() {
+    let feedback = text_response_protocol_repair_feedback(
+        &[
+            "Unknown top-level tag \"<tool_call>\".".to_string(),
+            "Stray text outside response tags.".to_string(),
+        ],
+        "##DONE##",
+    );
+    assert!(feedback.contains("violated the tagged response protocol"));
+    assert!(feedback.contains("- Unknown top-level tag \"<tool_call>\"."));
+    assert!(feedback.contains("- Stray text outside response tags."));
+    assert!(feedback.contains("<done>##DONE##</done>"));
+    assert!(feedback.contains("name({ key: value })"));
+
+    let opt_out = text_response_protocol_repair_feedback(&["bad".to_string()], "");
+    assert!(!opt_out.contains("<done>"));
+    assert!(!opt_out.contains("##DONE##"));
 }
 
 #[test]
