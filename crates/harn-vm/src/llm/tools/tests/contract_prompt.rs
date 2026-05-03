@@ -61,6 +61,7 @@ fn contract_prompt_help_block_documents_tagged_protocol() {
     assert!(help.contains("<done>##DONE##</done>"));
     assert!(help.contains("name({ key: value })"));
     assert!(help.contains("heredoc"));
+    assert!(help.contains("Do not nest or repeat `<tool_call>` tags"));
     assert!(help.contains("Do not write `<tool_call>##DONE##</tool_call>`"));
     assert!(help.contains("Never emit another `<tool_call>` after `<user_response>`"));
     let example_tool = help.find("Example tool response:").unwrap();
@@ -103,6 +104,7 @@ fn protocol_repair_feedback_uses_shared_prompt_asset() {
     assert!(feedback.contains("- Stray text outside response tags."));
     assert!(feedback.contains("<done>##DONE##</done>"));
     assert!(feedback.contains("name({ key: value })"));
+    assert!(feedback.contains("Do not nest or repeat `<tool_call>` tags"));
 
     let opt_out = text_response_protocol_repair_feedback(&["bad".to_string()], "");
     assert!(!opt_out.contains("<done>"));
