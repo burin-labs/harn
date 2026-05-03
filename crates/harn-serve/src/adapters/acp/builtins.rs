@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::atomic::Ordering;
 
 use super::AcpBridge;
 
@@ -223,8 +224,10 @@ pub(super) async fn acp_terminal_exec(
         )));
     }
 
+    // If cancellation races terminal creation, Harn still needs the
+    // terminal id so it can terminate the client-side process.
     let create_result = bridge
-        .call_client(
+        .call_client_for_cleanup(
             "terminal/create",
             serde_json::json!({
                 "sessionId": bridge.session_id,
@@ -239,6 +242,11 @@ pub(super) async fn acp_terminal_exec(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+
+    if bridge.cancellation.cancelled.load(Ordering::SeqCst) {
+        kill_and_release_terminal(bridge, &terminal_id).await;
+        return Err(harn_vm::VmError::Runtime("Cancelled".into()));
+    }
 
     if terminal_id.is_empty() {
         // Client doesn't support terminal — fall back to local exec.
@@ -279,25 +287,26 @@ pub(super) async fn acp_terminal_exec(
     }
 
     // wait_for_exit returns the stdout/stderr/combined/exitCode payload.
-    let wait_result = bridge
+    let wait_result = match bridge
         .call_client(
             "terminal/wait_for_exit",
-            serde_json::json!({
-                "sessionId": bridge.session_id,
-                "terminalId": terminal_id,
-            }),
+            terminal_params(&bridge.session_id, &terminal_id),
         )
         .await
-        .unwrap_or(serde_json::json!({}));
+    {
+        Ok(result) => result,
+        Err(error) if bridge.cancellation.cancelled.load(Ordering::SeqCst) => {
+            kill_and_release_terminal(bridge, &terminal_id).await;
+            return Err(error);
+        }
+        Err(_) => serde_json::json!({}),
+    };
 
     // Usually empty since wait_for_exit already drained the pipes.
     let _output_result = bridge
-        .call_client(
+        .call_client_for_cleanup(
             "terminal/output",
-            serde_json::json!({
-                "sessionId": bridge.session_id,
-                "terminalId": terminal_id,
-            }),
+            terminal_params(&bridge.session_id, &terminal_id),
         )
         .await
         .unwrap_or(serde_json::json!({}));
@@ -305,12 +314,9 @@ pub(super) async fn acp_terminal_exec(
     let output_result = wait_result;
 
     let _ = bridge
-        .call_client(
+        .call_client_for_cleanup(
             "terminal/release",
-            serde_json::json!({
-                "sessionId": bridge.session_id,
-                "terminalId": terminal_id,
-            }),
+            terminal_params(&bridge.session_id, &terminal_id),
         )
         .await;
 
@@ -350,6 +356,27 @@ pub(super) async fn acp_terminal_exec(
     }
     Ok(output)
 }
+
+fn terminal_params(session_id: &str, terminal_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "sessionId": session_id,
+        "terminalId": terminal_id,
+    })
+}
+
+async fn kill_and_release_terminal(bridge: &AcpBridge, terminal_id: &str) {
+    if terminal_id.is_empty() {
+        return;
+    }
+    let params = terminal_params(&bridge.session_id, terminal_id);
+    let _ = bridge
+        .call_client_for_cleanup("terminal/kill", params.clone())
+        .await;
+    let _ = bridge
+        .call_client_for_cleanup("terminal/release", params)
+        .await;
+}
+
 pub(super) fn normalize_host_capability_manifest(value: harn_vm::VmValue) -> harn_vm::VmValue {
     let Some(root) = value.as_dict() else {
         return harn_vm::VmValue::Dict(Rc::new(BTreeMap::new()));
