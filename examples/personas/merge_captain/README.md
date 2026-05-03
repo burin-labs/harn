@@ -11,15 +11,29 @@ scenario is a paired:
   scenario's expected state-machine steps, model/tool budgets,
   approval-required tool patterns, and forbidden actions.
 
+The issue #1012 suite is intentionally deterministic and in-process:
+fixtures do not hit live GitHub, live remotes, or wall-clock waits.
+New goldens can pin `expected_state_transitions` so CI catches
+behavioral drift, not just final pass/fail status.
+
 ## Scenarios
 
 | scenario              | transcript                              | golden                              | expected outcome |
 | --------------------- | --------------------------------------- | ----------------------------------- | ---------------- |
 | `green_pr`            | `transcripts/green_pr.jsonl`            | `goldens/green_pr.json`             | PASS             |
+| `pending_checks_wait` | `transcripts/pending_checks_wait.jsonl` | `goldens/pending_checks_wait.json`  | PASS deferred    |
 | `failing_ci`          | `transcripts/failing_ci.jsonl`          | `goldens/failing_ci.json`           | PASS w/ handoff  |
+| `failing_ci_repair_state` | `transcripts/failing_ci_repair_state.jsonl` | `goldens/failing_ci_repair_state.json` | PASS repair |
+| `dirty_rebase_clean`  | `transcripts/dirty_rebase_clean.jsonl`  | `goldens/dirty_rebase_clean.json`   | PASS rebase      |
 | `semantic_conflict`   | `transcripts/semantic_conflict.jsonl`   | `goldens/semantic_conflict.json`    | PASS w/ handoff  |
 | `merge_queue`         | `transcripts/merge_queue.jsonl`         | `goldens/merge_queue.json`          | PASS observe     |
+| `merge_queue_entry_success` | `transcripts/merge_queue_entry_success.jsonl` | `goldens/merge_queue_entry_success.json` | PASS queued |
+| `merge_group_failure_actionable` | `transcripts/merge_group_failure_actionable.jsonl` | `goldens/merge_group_failure_actionable.json` | PASS repair |
 | `new_pr_arrival`      | `transcripts/new_pr_arrival.jsonl`      | `goldens/new_pr_arrival.json`       | PASS deferred    |
+| `new_pr_arrives_while_waiting` | `transcripts/new_pr_arrives_while_waiting.jsonl` | `goldens/new_pr_arrives_while_waiting.json` | PASS queued |
+| `downstream_version_bump_waits` | `transcripts/downstream_version_bump_waits.jsonl` | `goldens/downstream_version_bump_waits.json` | PASS blocked |
+| `force_with_lease_mismatch` | `transcripts/force_with_lease_mismatch.jsonl` | `goldens/force_with_lease_mismatch.json` | PASS handoff |
+| `release_harness_crystallization` | `transcripts/release_harness_crystallization.jsonl` | `goldens/release_harness_crystallization.json` | PASS fixture |
 | `bad_unsafe_merge`    | `transcripts/bad_unsafe_merge.jsonl`    | `goldens/bad_unsafe_merge.json`     | FAIL (negative)  |
 
 ## Running the audit
@@ -66,6 +80,7 @@ The `type` field is the AgentEvent variant (`turn_start`,
   "max_repeat": 1,
   "require_approval_for": [{"glob": "*merge*"}],
   "forbidden_actions": [{"glob": "*force_push*"}],
+  "expected_state_transitions": ["intake", "verify_checks"],
   "state_steps": [
     {
       "step": "verify_checks",

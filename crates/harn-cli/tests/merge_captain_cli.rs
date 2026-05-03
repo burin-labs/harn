@@ -18,6 +18,35 @@ use harn_vm::orchestration::{
     audit_transcript, load_merge_captain_golden, load_transcript_jsonl, AuditReport,
 };
 
+const ISSUE_1012_PASSING_SCENARIOS: &[&str] = &[
+    "green_pr",
+    "pending_checks_wait",
+    "failing_ci",
+    "failing_ci_repair_state",
+    "dirty_rebase_clean",
+    "semantic_conflict",
+    "merge_queue",
+    "merge_queue_entry_success",
+    "merge_group_failure_actionable",
+    "new_pr_arrival",
+    "new_pr_arrives_while_waiting",
+    "downstream_version_bump_waits",
+    "force_with_lease_mismatch",
+    "release_harness_crystallization",
+];
+
+const ISSUE_1012_EXACT_TRANSITION_SCENARIOS: &[&str] = &[
+    "pending_checks_wait",
+    "failing_ci_repair_state",
+    "dirty_rebase_clean",
+    "merge_queue_entry_success",
+    "merge_group_failure_actionable",
+    "new_pr_arrives_while_waiting",
+    "downstream_version_bump_waits",
+    "force_with_lease_mismatch",
+    "release_harness_crystallization",
+];
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -45,6 +74,41 @@ fn run_audit(scenario: &str) -> AuditReport {
     let mut report = audit_transcript(&loaded.events, Some(&golden));
     report.source_path = Some(loaded.source_path.display().to_string());
     report
+}
+
+#[test]
+fn issue_1012_merge_captain_fixture_suite_passes() {
+    for scenario in ISSUE_1012_PASSING_SCENARIOS {
+        let report = run_audit(scenario);
+        assert!(
+            report.pass,
+            "expected {scenario} to pass; findings: {:#?}",
+            report.findings
+        );
+        assert_eq!(report.scenario.as_deref(), Some(*scenario));
+    }
+}
+
+#[test]
+fn issue_1012_exact_transition_goldens_match() {
+    for scenario in ISSUE_1012_EXACT_TRANSITION_SCENARIOS {
+        let golden = load_merge_captain_golden(&fixture(scenario, "goldens"))
+            .expect("load transition golden");
+        assert!(
+            !golden.expected_state_transitions.is_empty(),
+            "{scenario} must pin exact state transitions"
+        );
+        let report = run_audit(scenario);
+        let observed: Vec<String> = report
+            .state_transitions
+            .iter()
+            .map(|transition| transition.step.clone())
+            .collect();
+        assert_eq!(
+            observed, golden.expected_state_transitions,
+            "{scenario} transition drift"
+        );
+    }
 }
 
 fn playground() -> PathBuf {
