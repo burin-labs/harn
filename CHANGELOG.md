@@ -6,16 +6,65 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.7.57
 
 ### Added
 
-- **Generic `agent_turn` wrapper and sentinel judge.** New
-  `agent_turn(prompt, opts?)` wraps the common single-request agent shape with
-  generic progress guidance, a persistent completion sentinel, mandatory
-  sentinel judging, and compact `iterations` / `judge_decisions` summaries.
-  `agent_loop` also accepts `done_judge: true` or a policy dict to run the
-  same structured judge only after the done sentinel is emitted.
+- **Persona orchestration prelude.** New `std/personas/prelude` helpers provide reusable,
+  receipt-friendly workflow patterns: `verify_then_act`, `bounded_loop`,
+  `cheap_classify_then_escalate`, `parallel_sweep_with_circuit_breaker`,
+  `with_audit_receipt`, and `with_approval_gate`. The helpers share a structured
+  `{ok, status, result, error, receipt}` envelope and are documented in
+  `docs/src/personas/prelude.md`.
+- **A2A push notification auth.** The A2A adapter now verifies inbound push webhooks and can
+  register authenticated outbound push callbacks. Supported callback schemes include Bearer,
+  Basic, API key, OAuth2 client credentials, OpenID Connect ID tokens with JWKS validation,
+  and mTLS.
+- **MCP resource subscriptions.** Harn MCP servers now advertise and handle
+  `resources/subscribe` and `resources/unsubscribe`, including subscription tracking and
+  update notifications for resource-aware clients.
+- **Generic `agent_turn` wrapper and sentinel judge.** New `agent_turn(prompt, opts?)`
+  wraps the single-turn agent pattern with progress guidance, completion-sentinel judging,
+  and compact iteration/judge summaries. `agent_loop` also accepts `done_judge: true` or a
+  judge policy dict.
+- **Type-aware `unnecessary-safe-navigation` diagnostics.** The typechecker now warns and
+  offers fixes when `?.`, `?.method(...)`, or `?[]` is used on a receiver known to be
+  non-optional.
+- **List literals in ternary branches.** Ternary arms can now be list literals without
+  extra grouping, e.g. `condition ? [a, b] : [c]`.
+- **`unnecessary-parentheses` lint.** `harn lint` now warns on parentheses around a single
+  value expression when those parentheses are not required by call, declaration, or
+  precedence context.
+
+### Changed
+
+- **Unified static and runtime typechecking.** Builtin signatures now flow through one
+  parser-side registry for static checks and VM call-boundary validation. This tightens
+  arity/type behavior and removes legacy drift between compile-time and runtime errors; code
+  that relied on missing arguments being silently treated as `nil` should make defaults
+  explicit.
+- **Canonical `harn-stdlib` crate.** Standard-library `.harn` sources moved out of
+  `harn-modules` into a new dependency-free `crates/harn-stdlib` catalog crate. Public
+  `std/...` imports continue to resolve, while `harn-modules` and `harn-vm` delegate source
+  lookup to the shared catalog.
+- **ACP agent event coverage.** Agent loop lifecycle events such as `BudgetExhausted`,
+  `LoopStuck`, and `DaemonWatchdogTripped` are now bridged as `_harn/agentEvent`
+  `ExtNotification`s with advertised capability metadata.
+- **CI sweep placement.** Heavy flake-detection and thread-parity sweeps moved off the PR
+  path to scheduled/manual workflows, while the retained PR checks keep the faster smoke and
+  portability coverage.
+
+### Fixed
+
+- **Tool-surface alias warnings.** Deprecated argument alias diagnostics are scoped to the
+  matching tool call instead of scanning all prompt text, eliminating false positives across
+  unrelated tool surfaces.
+- **Release binary workflow idempotency.** `build-release-binaries.yml` now runs on tag push
+  or manual dispatch and checks existing release assets/container tags before rebuilding,
+  with a `force_rebuild` escape hatch for recovery.
+- **Windows and generated-text portability in CI.** The release-window CI changes also fixed
+  path separator, CRLF, and generated text comparison issues in the retained Windows smoke
+  and spec sync jobs.
 
 ## v0.7.56
 
