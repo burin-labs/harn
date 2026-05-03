@@ -1876,6 +1876,7 @@ dependencies = [
  "harn-vm",
  "hex",
  "hmac 0.13.0",
+ "jsonwebtoken",
  "rcgen",
  "reqwest",
  "rustls",

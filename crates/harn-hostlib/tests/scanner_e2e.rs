@@ -17,7 +17,8 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use harn_hostlib::scanner::{
-    scan_incremental, scan_project, FileRecord, ScanProjectOptions, SymbolKind,
+    scan_incremental, scan_project, scan_project_with_git, FileRecord, GitCapabilities,
+    ScanProjectOptions, SymbolKind,
 };
 use tempfile::tempdir;
 
@@ -130,6 +131,22 @@ fn touch_after(path: &Path, base: SystemTime) {
     let _ = filetime::set_file_mtime(path, filetime::FileTime::from_system_time(new_mtime));
 }
 
+#[derive(Default)]
+struct MockGit {
+    files: Option<Vec<String>>,
+    churn: std::collections::BTreeMap<String, f64>,
+}
+
+impl GitCapabilities for MockGit {
+    fn list_files(&self, _root: &Path) -> Option<Vec<String>> {
+        self.files.clone()
+    }
+
+    fn churn_scores(&self, _root: &Path) -> std::collections::BTreeMap<String, f64> {
+        self.churn.clone()
+    }
+}
+
 #[test]
 fn scan_project_emits_full_result_shape() {
     let tmp = tempdir().unwrap();
@@ -232,6 +249,35 @@ fn scan_project_emits_full_result_shape() {
     // Snapshot persisted at the canonical location.
     let snapshot_path = tmp.path().join(".harn/hostlib/scanner-snapshot.json");
     assert!(snapshot_path.exists());
+}
+
+#[test]
+fn scan_project_uses_injected_git_capabilities() {
+    let tmp = tempdir().unwrap();
+    build_fixture(tmp.path());
+
+    let git = MockGit {
+        files: Some(vec![
+            "Cargo.toml".to_string(),
+            "src/main.rs".to_string(),
+            "src/routes/accounts.rs".to_string(),
+            "target/debug/junk.txt".to_string(),
+        ]),
+        churn: [("src/main.rs".to_string(), 0.75)].into_iter().collect(),
+    };
+    let result = scan_project_with_git(tmp.path(), ScanProjectOptions::default(), &git);
+    let paths: Vec<&str> = result
+        .files
+        .iter()
+        .map(|f| f.relative_path.as_str())
+        .collect();
+
+    assert_eq!(
+        paths,
+        vec!["Cargo.toml", "src/main.rs", "src/routes/accounts.rs"]
+    );
+    let main = find_file(&result.files, "src/main.rs").unwrap();
+    assert_eq!(main.churn_score, 0.75);
 }
 
 fn project_name(root: &Path) -> String {
@@ -341,38 +387,43 @@ fn symbol_records_carry_canonical_kind() {
 }
 
 #[test]
-fn scan_project_self_smoke_test() {
-    // Scanning the harn workspace itself exercises the same surface end
-    // to end against real-world content: mixed Rust, TypeScript, markdown,
-    // a real `.gitignore`, and a real Cargo workspace. The assertions stay
-    // conservative so the test catches shape regressions without becoming
-    // a performance benchmark.
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let workspace_root = Path::new(manifest_dir)
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("manifest dir lives two levels under workspace root");
-
-    let opts = ScanProjectOptions {
-        // Don't shell out to git here — keeps the test hermetic across hosts.
-        include_git_history: false,
-        ..ScanProjectOptions::default()
-    };
-
-    let result = scan_project(workspace_root, opts);
-
-    assert!(!result.files.is_empty(), "harn workspace should have files");
-    assert!(
-        !result.symbols.is_empty(),
-        "harn workspace should have symbols"
+fn scan_project_workspace_shape_smoke_test() {
+    let tmp = tempdir().unwrap();
+    build_fixture(tmp.path());
+    write(
+        tmp.path(),
+        ".github/workflows/ci.yml",
+        "name: ci\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n",
+    );
+    write(
+        tmp.path(),
+        "docs/src/language-spec.md",
+        "# Language Spec\n\n```harn\nfn main() { 1 }\n```\n",
+    );
+    write(
+        tmp.path(),
+        "crates/harn-hostlib/src/lib.rs",
+        "pub mod scanner;\npub fn install() {}\n",
     );
 
-    // Wall-clock budgets here flake on shared CI under load. Performance
-    // characterization belongs in `cargo bench`, not in correctness tests.
-    // The file-count + symbol-count invariants above already catch shape
-    // regressions.
+    let result = scan_project_with_git(
+        tmp.path(),
+        ScanProjectOptions {
+            include_git_history: false,
+            ..ScanProjectOptions::default()
+        },
+        &MockGit::default(),
+    );
 
-    // Sanity: well-known top-level files show up.
+    assert!(
+        !result.files.is_empty(),
+        "workspace fixture should have files"
+    );
+    assert!(
+        !result.symbols.is_empty(),
+        "workspace fixture should have symbols"
+    );
+
     let names: Vec<&str> = result
         .files
         .iter()
@@ -381,15 +432,3 @@ fn scan_project_self_smoke_test() {
     assert!(names.iter().any(|n| n.ends_with("Cargo.toml")));
     assert!(names.iter().any(|n| n.contains("crates/harn-hostlib")));
 }
-
-// Earlier drafts of this suite included a
-// `scan_project_handles_empty_directory_gracefully` test that scanned a
-// fresh `tempfile::tempdir()` and asserted the result was empty. It was
-// removed because it flaked under heavy `cargo nextest run --workspace`
-// load — `tempfile::tempdir()` resolves through `/var/folders/.../T/`
-// on macOS, and another concurrent test occasionally raced with us by
-// touching files under that tree before our scan ran. The empty-input
-// contract is still exercised: `scan_project_truncates_to_max_files`
-// touches `max_files=2` against the small fixture, and the
-// incremental-scan tests verify behavior on dirs with zero hits in the
-// `delta` block.

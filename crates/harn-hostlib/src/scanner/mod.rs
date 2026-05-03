@@ -31,6 +31,7 @@ mod commands;
 mod discover;
 mod extensions;
 mod folders;
+mod git;
 mod imports;
 mod result;
 mod scoring;
@@ -49,6 +50,7 @@ fn strip_ambient_git_env(cmd: &mut Command) {
     }
 }
 
+pub use git::GitCapabilities;
 pub use result::{
     DependencyEdge, FileRecord, FolderRecord, LanguageStat, ProjectMetadata, ScanDelta, ScanResult,
     SubProject, SymbolKind, SymbolRecord,
@@ -115,12 +117,25 @@ impl Default for ScanProjectOptions {
 
 /// Run a full scan of `root`, persist a snapshot, and return the result.
 pub fn scan_project(root: &Path, opts: ScanProjectOptions) -> ScanResult {
+    scan_project_with_git(root, opts, &git::CliGitCapabilities)
+}
+
+/// Run a full scan using caller-supplied Git data.
+///
+/// Embedders normally call [`scan_project`]. Tests and hosts that already
+/// virtualize Git can use this entry point to keep scanner behavior
+/// deterministic without depending on ambient process state.
+pub fn scan_project_with_git(
+    root: &Path,
+    opts: ScanProjectOptions,
+    git: &dyn GitCapabilities,
+) -> ScanResult {
     let canonical = canonicalize(root);
     let discover_opts = discover::DiscoverOptions {
         include_hidden: opts.include_hidden,
         respect_gitignore: opts.respect_gitignore,
     };
-    let mut discovered = discover::discover_files(&canonical, discover_opts);
+    let mut discovered = discover::discover_files(&canonical, discover_opts, git);
     let truncated = if opts.max_files > 0 && discovered.len() > opts.max_files {
         discovered.truncate(opts.max_files);
         true
@@ -133,7 +148,7 @@ pub fn scan_project(root: &Path, opts: ScanProjectOptions) -> ScanResult {
     scoring::compute_reference_counts(&mut symbols, &files);
 
     if opts.include_git_history {
-        let churn = scoring::compute_churn_scores(&canonical);
+        let churn = git.churn_scores(&canonical);
         scoring::apply_churn(&mut files, &churn);
     }
     scoring::compute_importance_scores(&mut symbols, &files);
@@ -188,6 +203,16 @@ pub fn scan_incremental(
     explicit_changed: Option<&[String]>,
     opts: ScanProjectOptions,
 ) -> IncrementalScan {
+    scan_incremental_with_git(token, explicit_changed, opts, &git::CliGitCapabilities)
+}
+
+/// Refresh a snapshot using caller-supplied Git data.
+pub fn scan_incremental_with_git(
+    token: &str,
+    explicit_changed: Option<&[String]>,
+    opts: ScanProjectOptions,
+    git: &dyn GitCapabilities,
+) -> IncrementalScan {
     let root = snapshot::token_to_root(token);
     let canonical = canonicalize(&root);
 
@@ -195,7 +220,7 @@ pub fn scan_incremental(
     let cached = match cached {
         Some(c) => c,
         None => {
-            let result = scan_project(&canonical, opts);
+            let result = scan_project_with_git(&canonical, opts, git);
             return IncrementalScan {
                 result,
                 delta: ScanDelta {
@@ -210,7 +235,7 @@ pub fn scan_incremental(
         include_hidden: opts.include_hidden,
         respect_gitignore: opts.respect_gitignore,
     };
-    let mut current = discover::discover_files(&canonical, discover_opts);
+    let mut current = discover::discover_files(&canonical, discover_opts, git);
     if opts.max_files > 0 && current.len() > opts.max_files {
         current.truncate(opts.max_files);
     }
@@ -221,7 +246,7 @@ pub fn scan_incremental(
         total > 0 && (delta.added.len() + delta.modified.len()) * 10 > total * 3;
 
     if needs_full_rescan {
-        let result = scan_project(&canonical, opts);
+        let result = scan_project_with_git(&canonical, opts, git);
         return IncrementalScan {
             result,
             delta: ScanDelta {
@@ -280,7 +305,7 @@ pub fn scan_incremental(
 
     scoring::compute_reference_counts(&mut symbols, &files);
     if opts.include_git_history {
-        let churn = scoring::compute_churn_scores(&canonical);
+        let churn = git.churn_scores(&canonical);
         scoring::apply_churn(&mut files, &churn);
     }
     scoring::compute_importance_scores(&mut symbols, &files);
@@ -520,7 +545,13 @@ fn parse_options(
     let include_hidden = optional_bool(builtin, dict, "include_hidden", false)?;
     let respect_gitignore = optional_bool(builtin, dict, "respect_gitignore", true)?;
     let max_files = optional_int(builtin, dict, "max_files", 0)?;
-    let include_git_history = optional_bool(builtin, dict, "include_git_history", true)?;
+    let include_git_history_default = builtin == SCAN_PROJECT_BUILTIN;
+    let include_git_history = optional_bool(
+        builtin,
+        dict,
+        "include_git_history",
+        include_git_history_default,
+    )?;
     let repo_map_token_budget = optional_int(builtin, dict, "repo_map_token_budget", 1200)?;
     if max_files < 0 {
         return Err(HostlibError::InvalidParameter {
@@ -730,4 +761,20 @@ fn delta_to_value(delta: &ScanDelta) -> VmValue {
         ("removed", VmValue::List(Rc::new(removed))),
         ("full_rescan", VmValue::Bool(delta.full_rescan)),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_option_defaults_match_request_schemas() {
+        let dict = std::collections::BTreeMap::new();
+
+        let scan_project = parse_options(SCAN_PROJECT_BUILTIN, &dict).unwrap();
+        let scan_incremental = parse_options(SCAN_INCREMENTAL_BUILTIN, &dict).unwrap();
+
+        assert!(scan_project.include_git_history);
+        assert!(!scan_incremental.include_git_history);
+    }
 }

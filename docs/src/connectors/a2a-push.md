@@ -83,6 +83,38 @@ The built-in `harn serve a2a` adapter advertises push notification
 support, stores push configs, and posts `statusUpdate` payloads to each
 configured webhook when an asynchronous task completes or fails.
 
+`pushNotificationConfig.authentication` is honored when the remote
+webhook declares how Harn should authenticate the callback:
+
+```json
+{
+  "url": "https://client.example/a2a/push",
+  "authentication": {
+    "schemes": ["OAuth2"],
+    "token_url": "https://idp.example/oauth/token",
+    "client_id": "harn-a2a",
+    "client_secret": "${secret}",
+    "scope": "push.write"
+  }
+}
+```
+
+Supported schemes:
+
+- `Bearer`: sends `Authorization: Bearer <credentials>`.
+- `Basic`: sends `Authorization: Basic <credentials>`, or builds the
+  value from `username`/`password`.
+- `ApiKey`: sends `credentials` in `X-API-Key` by default, or in the
+  configured `header`.
+- `OAuth2`: uses client credentials at `token_url` and sends the
+  returned bearer `access_token`.
+- `OpenIDConnect` / `oidc`: uses client credentials, requires an
+  `id_token`, validates it against `issuer`, `client_id`/`audience`,
+  and `jwks_url`, then sends it as a bearer credential. JWKS are cached
+  and refreshed when a token arrives with a rotated `kid`.
+- `mTLS`: loads `client_cert` plus `client_key`, or `client_identity`,
+  and may use `ca_cert` for private webhook CAs.
+
 Legacy `a2a-push` routes without `[triggers.a2a_push]` keep the older
 orchestrator listener auth: `HARN_ORCHESTRATOR_API_KEYS` plus
 `HARN_ORCHESTRATOR_HMAC_SECRET`.

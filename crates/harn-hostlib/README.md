@@ -155,6 +155,12 @@ a token-budgeted text repo map. Two builtins:
   — refresh the snapshot. Falls back to a full rescan when the snapshot is
   missing or the diff exceeds ~30% of the workspace.
 
+The Rust scanner API routes Git-backed file discovery and churn scoring through
+`GitCapabilities`. The default hostlib builtin uses the Git CLI only when the
+scan root is inside a worktree; embedders and tests can supply a mock capability
+with `scan_project_with_git` when they need deterministic scanner behavior
+without depending on ambient checkout state.
+
 Unlike the `tools/` surface, the scanner is **not** gated by
 `hostlib_enable("tools:deterministic")`: producing a `ScanResult` is a
 read-only operation that doesn't mutate user state and the snapshot file

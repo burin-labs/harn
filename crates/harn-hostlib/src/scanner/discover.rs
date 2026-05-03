@@ -3,18 +3,19 @@
 //!
 //! Discovery semantics:
 //!
-//! 1. Try `git ls-files --cached --others --exclude-standard` (so the file
+//! 1. Ask the scanner's [`GitCapabilities`](super::GitCapabilities) for
+//!    `git ls-files --cached --others --exclude-standard` data (so the file
 //!    set matches `git status` perfectly when run inside a checkout).
-//! 2. Fall back to a `walkdir`/`ignore` walk that honors `.gitignore` and
-//!    the [`super::extensions::EXCLUDED_DIRS`] table.
+//! 2. Fall back to a `walkdir`/`ignore` walk when Git data is unavailable.
+//!    The fallback honors `.gitignore` and the
+//!    [`super::extensions::EXCLUDED_DIRS`] table.
 //! 3. Filter to source extensions and de-duplicate.
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
-
 use ignore::WalkBuilder;
+use std::path::{Path, PathBuf};
 
 use crate::scanner::extensions::{is_excluded_dir, should_include, should_traverse};
+use crate::scanner::GitCapabilities;
 
 /// One discovered file. Paths are stored side-by-side because the scanner
 /// reads each file by absolute path but stores everything under
@@ -29,11 +30,12 @@ pub struct DiscoveredFile {
 
 /// Run discovery against `root`. Returns deterministic, alphabetically
 /// sorted entries.
-pub fn discover_files(root: &Path, opts: DiscoverOptions) -> Vec<DiscoveredFile> {
-    let mut files = git_ls_files(root).unwrap_or_default();
-    if files.is_empty() {
-        files = walk_files(root, opts);
-    }
+pub fn discover_files(
+    root: &Path,
+    opts: DiscoverOptions,
+    git: &dyn GitCapabilities,
+) -> Vec<DiscoveredFile> {
+    let mut files = git_ls_files(root, git).unwrap_or_else(|| walk_files(root, opts));
     files.retain(|entry| should_include(&entry.relative_path));
     files.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
     files.dedup_by(|a, b| a.relative_path == b.relative_path);
@@ -58,41 +60,27 @@ impl Default for DiscoverOptions {
     }
 }
 
-fn git_ls_files(root: &Path) -> Option<Vec<DiscoveredFile>> {
-    let mut cmd = Command::new("git");
-    super::strip_ambient_git_env(&mut cmd);
-    let output = cmd
-        .args([
-            "-C",
-            root.to_str()?,
-            "ls-files",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8(output.stdout).ok()?;
+fn git_ls_files(root: &Path, git: &dyn GitCapabilities) -> Option<Vec<DiscoveredFile>> {
+    let paths = git.list_files(root)?;
     let mut entries = Vec::new();
-    for line in stdout.lines() {
-        if line.is_empty() {
+    let mut saw_path = false;
+    for path in paths {
+        if path.is_empty() {
             continue;
         }
-        if !should_traverse(line) {
+        saw_path = true;
+        if !should_traverse(&path) {
             continue;
         }
         entries.push(DiscoveredFile {
-            relative_path: line.to_string(),
-            absolute_path: root.join(line),
+            absolute_path: root.join(&path),
+            relative_path: path,
         });
     }
-    if entries.is_empty() {
-        None
-    } else {
+    if saw_path {
         Some(entries)
+    } else {
+        None
     }
 }
 
@@ -161,10 +149,52 @@ mod tests {
         fs::write(root.join("README.md"), "# hi").unwrap();
         fs::write(root.join("node_modules/foo/bar.js"), "x").unwrap();
 
-        let files = discover_files(root, DiscoverOptions::default());
+        let files = discover_files(root, DiscoverOptions::default(), &NoGit);
         let names: Vec<_> = files.iter().map(|f| f.relative_path.as_str()).collect();
         assert!(names.contains(&"src/main.rs"));
         assert!(names.contains(&"README.md"));
         assert!(!names.iter().any(|n| n.starts_with("node_modules")));
+    }
+
+    #[test]
+    fn git_file_list_comes_from_injected_capability() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/tracked.rs"), "fn tracked() {}\n").unwrap();
+        fs::write(root.join("src/unlisted.rs"), "fn unlisted() {}\n").unwrap();
+
+        let git = MockGit {
+            files: vec!["src/tracked.rs".to_string()],
+        };
+        let files = discover_files(root, DiscoverOptions::default(), &git);
+        let names: Vec<_> = files.iter().map(|f| f.relative_path.as_str()).collect();
+        assert_eq!(names, vec!["src/tracked.rs"]);
+    }
+
+    struct NoGit;
+
+    impl GitCapabilities for NoGit {
+        fn list_files(&self, _root: &Path) -> Option<Vec<String>> {
+            None
+        }
+
+        fn churn_scores(&self, _root: &Path) -> std::collections::BTreeMap<String, f64> {
+            std::collections::BTreeMap::new()
+        }
+    }
+
+    struct MockGit {
+        files: Vec<String>,
+    }
+
+    impl GitCapabilities for MockGit {
+        fn list_files(&self, _root: &Path) -> Option<Vec<String>> {
+            Some(self.files.clone())
+        }
+
+        fn churn_scores(&self, _root: &Path) -> std::collections::BTreeMap<String, f64> {
+            std::collections::BTreeMap::new()
+        }
     }
 }

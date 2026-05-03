@@ -14,8 +14,6 @@
 //! compatibility tests.
 
 use std::collections::{BTreeMap, HashSet};
-use std::path::Path;
-use std::process::Command;
 
 use crate::scanner::result::{FileRecord, SymbolRecord};
 
@@ -49,51 +47,6 @@ pub fn compute_reference_counts(symbols: &mut [SymbolRecord], files: &[FileRecor
     for sym in symbols.iter_mut() {
         sym.reference_count = ref_counts.get(&sym.name).copied().unwrap_or(0);
     }
-}
-
-/// Compute per-file churn scores from the last 90 days of git history.
-/// Returns the mapping; callers apply it to [`FileRecord::churn_score`].
-/// Returns an empty map if `git` is unavailable, the call fails, or the
-/// repo has no commits in the window.
-pub fn compute_churn_scores(root: &Path) -> BTreeMap<String, f64> {
-    let mut cmd = Command::new("git");
-    super::strip_ambient_git_env(&mut cmd);
-    let output = cmd
-        .args([
-            "-C",
-            match root.to_str() {
-                Some(s) => s,
-                None => return BTreeMap::new(),
-            },
-            "log",
-            "--since=90.days",
-            "--name-only",
-            "--pretty=format:",
-        ])
-        .output();
-    let output = match output {
-        Ok(o) if o.status.success() => o,
-        _ => return BTreeMap::new(),
-    };
-    let stdout = match String::from_utf8(output.stdout) {
-        Ok(s) => s,
-        Err(_) => return BTreeMap::new(),
-    };
-
-    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for line in stdout.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        *counts.entry(trimmed.to_string()).or_insert(0) += 1;
-    }
-
-    let max = counts.values().copied().max().unwrap_or(1).max(1) as f64;
-    counts
-        .into_iter()
-        .map(|(file, count)| (file, count as f64 / max))
-        .collect()
 }
 
 /// Apply the churn map to a slice of file records (mutates in place).
