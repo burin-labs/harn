@@ -48,6 +48,47 @@ fn __client_tool_search_requested(value) {
   return type_of(value) == "dict" && value?.mode == "client"
 }
 
+fn __task_ledger_deliverable_text(value) {
+  let text = if type_of(value) == "string" {
+    value
+  } else {
+    to_string(value)
+  }
+  return trim(text)
+}
+
+fn __task_ledger_from_shorthand(opts) {
+  let root_task = trim(opts?.root_task ?? "")
+  var deliverables = []
+  let shorthand = opts?.deliverables
+  if type_of(shorthand) == "list" {
+    for (index, item) in iter(shorthand).enumerate() {
+      let text = __task_ledger_deliverable_text(item)
+      if text != "" {
+        deliverables = deliverables
+          .push(
+          {id: "deliverable-" + to_string(index + 1), text: text, status: "open", note: nil},
+        )
+      }
+    }
+  }
+  if root_task == "" && len(deliverables) == 0 {
+    return nil
+  }
+  return {root_task: root_task, deliverables: deliverables, rationale: "", observations: []}
+}
+
+fn __with_task_ledger_shorthand(opts) {
+  if __has_key(opts, "task_ledger") {
+    return opts
+  }
+  let ledger = __task_ledger_from_shorthand(opts)
+  if ledger == nil {
+    return opts
+  }
+  return opts + {task_ledger: ledger}
+}
+
 /** agent_loop_options. */
 pub fn agent_loop_options(options = nil) {
   var opts = options ?? {}
@@ -68,5 +109,6 @@ pub fn agent_loop_options(options = nil) {
   if __has_key(opts, "done_judge") {
     opts = opts + {done_judge: __completion_judge_defaults(opts?.done_judge)}
   }
+  opts = __with_task_ledger_shorthand(opts)
   return opts
 }

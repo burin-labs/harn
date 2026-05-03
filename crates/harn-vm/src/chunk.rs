@@ -486,6 +486,32 @@ pub struct Chunk {
 pub type ChunkRef = Rc<Chunk>;
 pub type CompiledFunctionRef = Rc<CompiledFunction>;
 
+#[derive(Debug, Clone)]
+pub(crate) struct CachedChunk {
+    code: Vec<u8>,
+    constants: Vec<Constant>,
+    lines: Vec<u32>,
+    columns: Vec<u32>,
+    source_file: Option<String>,
+    current_col: u32,
+    functions: Vec<CachedCompiledFunction>,
+    inline_cache_slots: BTreeMap<usize, usize>,
+    local_slots: Vec<LocalSlotInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CachedCompiledFunction {
+    name: String,
+    type_params: Vec<String>,
+    nominal_type_names: Vec<String>,
+    params: Vec<ParamSlot>,
+    default_start: Option<usize>,
+    chunk: CachedChunk,
+    is_generator: bool,
+    is_stream: bool,
+    has_rest_param: bool,
+}
+
 /// One parameter slot of a compiled user-defined function. Carries the
 /// declared name, the (optional) declared type expression, and a flag
 /// for whether a default value was provided. The runtime consults the
@@ -567,17 +593,31 @@ impl CompiledFunction {
         self.nominal_type_names.iter().any(|ty| ty == name)
     }
 
-    pub(crate) fn fresh_runtime_clone(&self) -> Self {
-        Self {
+    pub(crate) fn freeze_for_cache(&self) -> CachedCompiledFunction {
+        CachedCompiledFunction {
             name: self.name.clone(),
             type_params: self.type_params.clone(),
             nominal_type_names: self.nominal_type_names.clone(),
             params: self.params.clone(),
             default_start: self.default_start,
-            chunk: Rc::new(self.chunk.fresh_runtime_clone()),
+            chunk: self.chunk.freeze_for_cache(),
             is_generator: self.is_generator,
             is_stream: self.is_stream,
             has_rest_param: self.has_rest_param,
+        }
+    }
+
+    pub(crate) fn from_cached(cached: &CachedCompiledFunction) -> Self {
+        Self {
+            name: cached.name.clone(),
+            type_params: cached.type_params.clone(),
+            nominal_type_names: cached.nominal_type_names.clone(),
+            params: cached.params.clone(),
+            default_start: cached.default_start,
+            chunk: Rc::new(Chunk::from_cached(&cached.chunk)),
+            is_generator: cached.is_generator,
+            is_stream: cached.is_stream,
+            has_rest_param: cached.has_rest_param,
         }
     }
 }
@@ -784,9 +824,8 @@ impl Chunk {
         }
     }
 
-    pub(crate) fn fresh_runtime_clone(&self) -> Self {
-        let inline_cache_count = self.inline_cache_slots.len();
-        Self {
+    pub(crate) fn freeze_for_cache(&self) -> CachedChunk {
+        CachedChunk {
             code: self.code.clone(),
             constants: self.constants.clone(),
             lines: self.lines.clone(),
@@ -796,14 +835,33 @@ impl Chunk {
             functions: self
                 .functions
                 .iter()
-                .map(|function| Rc::new(function.fresh_runtime_clone()))
+                .map(|function| function.freeze_for_cache())
                 .collect(),
             inline_cache_slots: self.inline_cache_slots.clone(),
+            local_slots: self.local_slots.clone(),
+        }
+    }
+
+    pub(crate) fn from_cached(cached: &CachedChunk) -> Self {
+        let inline_cache_count = cached.inline_cache_slots.len();
+        Self {
+            code: cached.code.clone(),
+            constants: cached.constants.clone(),
+            lines: cached.lines.clone(),
+            columns: cached.columns.clone(),
+            source_file: cached.source_file.clone(),
+            current_col: cached.current_col,
+            functions: cached
+                .functions
+                .iter()
+                .map(|function| Rc::new(CompiledFunction::from_cached(function)))
+                .collect(),
+            inline_cache_slots: cached.inline_cache_slots.clone(),
             inline_caches: Rc::new(RefCell::new(vec![
                 InlineCacheEntry::Empty;
                 inline_cache_count
             ])),
-            local_slots: self.local_slots.clone(),
+            local_slots: cached.local_slots.clone(),
         }
     }
 

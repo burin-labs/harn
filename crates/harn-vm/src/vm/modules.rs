@@ -5,8 +5,9 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::chunk::{Chunk, CompiledFunction};
+use crate::chunk::{CachedChunk, CachedCompiledFunction, Chunk, CompiledFunction};
 use crate::value::{ModuleFunctionRegistry, VmClosure, VmEnv, VmError, VmValue};
 
 use super::{ScopeSpan, Vm};
@@ -21,24 +22,26 @@ struct ModuleImportSpec {
 #[derive(Clone)]
 struct CompiledStdlibModule {
     imports: Vec<ModuleImportSpec>,
-    init_chunk: Option<Chunk>,
-    functions: BTreeMap<String, CompiledFunction>,
+    init_chunk: Option<CachedChunk>,
+    functions: BTreeMap<String, CachedCompiledFunction>,
     public_names: HashSet<String>,
 }
 
-thread_local! {
-    static STDLIB_MODULE_ARTIFACT_CACHE: RefCell<BTreeMap<String, Rc<CompiledStdlibModule>>> =
-        const { RefCell::new(BTreeMap::new()) };
+static STDLIB_MODULE_ARTIFACT_CACHE: OnceLock<Mutex<BTreeMap<String, Arc<CompiledStdlibModule>>>> =
+    OnceLock::new();
+
+fn stdlib_module_artifact_cache() -> &'static Mutex<BTreeMap<String, Arc<CompiledStdlibModule>>> {
+    STDLIB_MODULE_ARTIFACT_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
 #[cfg(test)]
 fn reset_stdlib_module_artifact_cache() {
-    STDLIB_MODULE_ARTIFACT_CACHE.with(|cache| cache.borrow_mut().clear());
+    stdlib_module_artifact_cache().lock().unwrap().clear();
 }
 
 #[cfg(test)]
 fn stdlib_module_artifact_cache_len() -> usize {
-    STDLIB_MODULE_ARTIFACT_CACHE.with(|cache| cache.borrow().len())
+    stdlib_module_artifact_cache().lock().unwrap().len()
 }
 
 #[derive(Clone)]
@@ -73,18 +76,21 @@ fn stdlib_module_artifact(
     module: &str,
     synthetic: &Path,
     source: &str,
-) -> Result<Rc<CompiledStdlibModule>, VmError> {
+) -> Result<Arc<CompiledStdlibModule>, VmError> {
     let key = stdlib_artifact_cache_key(module, source);
-    if let Some(cached) =
-        STDLIB_MODULE_ARTIFACT_CACHE.with(|cache| cache.borrow().get(&key).cloned())
     {
-        return Ok(cached);
+        let cache = stdlib_module_artifact_cache().lock().unwrap();
+        if let Some(cached) = cache.get(&key) {
+            return Ok(Arc::clone(cached));
+        }
     }
 
-    let compiled = Rc::new(compile_stdlib_module_artifact(synthetic, source)?);
-    STDLIB_MODULE_ARTIFACT_CACHE.with(|cache| {
-        cache.borrow_mut().insert(key, Rc::clone(&compiled));
-    });
+    let compiled = Arc::new(compile_stdlib_module_artifact(synthetic, source)?);
+    let mut cache = stdlib_module_artifact_cache().lock().unwrap();
+    if let Some(cached) = cache.get(&key) {
+        return Ok(Arc::clone(cached));
+    }
+    cache.insert(key, Arc::clone(&compiled));
     Ok(compiled)
 }
 
@@ -141,7 +147,8 @@ fn compile_stdlib_module_artifact(
         Some(
             crate::Compiler::new()
                 .compile(&init_nodes)
-                .map_err(|e| VmError::Runtime(format!("Import init compile error: {e}")))?,
+                .map_err(|e| VmError::Runtime(format!("Import init compile error: {e}")))?
+                .freeze_for_cache(),
         )
     };
 
@@ -169,7 +176,7 @@ fn compile_stdlib_module_artifact(
         let func_chunk = compiler
             .compile_fn_body(type_params, params, body, module_source_file.clone())
             .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
-        functions.insert(name.clone(), func_chunk);
+        functions.insert(name.clone(), func_chunk.freeze_for_cache());
         if *is_pub {
             public_names.insert(name.clone());
         }
@@ -256,7 +263,7 @@ impl Vm {
         let module_state: crate::value::ModuleState = {
             let mut init_env = self.env.clone();
             if let Some(init_chunk) = &artifact.init_chunk {
-                let fresh_init_chunk = init_chunk.fresh_runtime_clone();
+                let fresh_init_chunk = Chunk::from_cached(init_chunk);
                 let saved_env = std::mem::replace(&mut self.env, init_env);
                 let saved_frames = std::mem::take(&mut self.frames);
                 let saved_handlers = std::mem::take(&mut self.exception_handlers);
@@ -280,7 +287,7 @@ impl Vm {
 
         for (name, compiled) in &artifact.functions {
             let closure = Rc::new(VmClosure {
-                func: Rc::new(compiled.fresh_runtime_clone()),
+                func: Rc::new(CompiledFunction::from_cached(compiled)),
                 env: module_env.clone(),
                 source_dir: None,
                 module_functions: Some(Rc::clone(&registry)),
@@ -794,25 +801,44 @@ impl Vm {
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
 
     use super::*;
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
-        reset_stdlib_module_artifact_cache();
+    static CACHE_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
-        let mut first_vm = Vm::new();
-        let first_exports = first_vm
-            .load_module_exports_from_import("std/agent/prompts")
-            .await
-            .expect("first stdlib import succeeds");
+    fn cache_test_guard() -> MutexGuard<'static, ()> {
+        CACHE_TEST_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap()
+    }
+
+    #[test]
+    fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
+        let _guard = cache_test_guard();
+        reset_stdlib_module_artifact_cache();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime builds");
+
+        let first_exports = runtime.block_on(async {
+            let mut first_vm = Vm::new();
+            first_vm
+                .load_module_exports_from_import("std/agent/prompts")
+                .await
+                .expect("first stdlib import succeeds")
+        });
         assert_eq!(stdlib_module_artifact_cache_len(), 1);
 
-        let mut second_vm = Vm::new();
-        let second_exports = second_vm
-            .load_module_exports_from_import("std/agent/prompts")
-            .await
-            .expect("second stdlib import succeeds");
+        let second_exports = runtime.block_on(async {
+            let mut second_vm = Vm::new();
+            second_vm
+                .load_module_exports_from_import("std/agent/prompts")
+                .await
+                .expect("second stdlib import succeeds")
+        });
         assert_eq!(stdlib_module_artifact_cache_len(), 1);
 
         let first = first_exports
@@ -829,5 +855,38 @@ mod tests {
             first.module_state.as_ref().expect("first module state"),
             second.module_state.as_ref().expect("second module state")
         ));
+    }
+
+    #[test]
+    fn stdlib_artifact_cache_is_process_wide_across_threads() {
+        let _guard = cache_test_guard();
+        reset_stdlib_module_artifact_cache();
+
+        let handle = std::thread::spawn(|| {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime builds");
+            runtime.block_on(async {
+                let mut vm = Vm::new();
+                vm.load_module_exports_from_import("std/agent/prompts")
+                    .await
+                    .expect("thread stdlib import succeeds");
+            });
+        });
+        handle.join().expect("thread joins");
+        assert_eq!(stdlib_module_artifact_cache_len(), 1);
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime builds");
+        runtime.block_on(async {
+            let mut vm = Vm::new();
+            vm.load_module_exports_from_import("std/agent/prompts")
+                .await
+                .expect("main-thread stdlib import succeeds");
+        });
+        assert_eq!(stdlib_module_artifact_cache_len(), 1);
     }
 }
