@@ -50,8 +50,9 @@ use super::super::helpers::transcript_event;
 use super::helpers::{
     action_turn_nudge, append_host_messages_to_recorded, append_message_to_contexts,
     assistant_history_text, daemon_snapshot_from_state, inject_queued_user_messages,
-    interpret_post_turn_callback_result, maybe_auto_compact_agent_messages,
-    maybe_persist_daemon_snapshot, runtime_feedback_message, should_stop_after_successful_tools,
+    interpret_post_turn_callback_verdict, interpret_verify_completion_verdict,
+    maybe_auto_compact_agent_messages, maybe_persist_daemon_snapshot, runtime_feedback_message,
+    should_stop_after_successful_tools,
 };
 use super::llm_call::LlmCallResult;
 use super::state::AgentLoopState;
@@ -160,7 +161,17 @@ pub(super) async fn run_post_turn(
             .iter()
             .filter_map(|tc| tc["name"].as_str())
             .collect();
+        // `session_id` is the live agent_session id the loop is reading
+        // from / appending to. Exposing it makes the post_turn_callback
+        // a complete judge-layer hook: closures can call
+        // `agent_session_snapshot(info.session_id)` to read the
+        // in-flight transcript, `agent_session_inject(info.session_id,
+        // ...)` to push a graded message, or `agent_session_fork_at(...)`
+        // to branch a checkpoint — all without a second nested
+        // `agent_loop` call. See `docs/llm/harn-quickref.md` for the
+        // canonical "judge / reflection" pattern.
         let turn_info = serde_json::json!({
+            "session_id": ctx.session_id,
             "tool_names": tool_names,
             "tool_results": dispatch.tool_results_this_iter,
             "successful_tool_names": successful_tool_names,
@@ -203,8 +214,26 @@ pub(super) async fn run_post_turn(
             let cb_result = cb_vm.call_closure_pub(closure, &[info_vm]).await?;
             let cb_output = cb_vm.take_output();
             crate::vm::forward_child_output_to_parent(&cb_output);
-            let (message, stop) = interpret_post_turn_callback_result(&cb_result);
-            if let Some(msg) = message {
+            let verdict = interpret_post_turn_callback_verdict(&cb_result);
+            // Typed `inject` rows are pushed BEFORE the legacy `message`
+            // path so a judge that returns both gets a consistent
+            // ordering: explicit role-tagged rows first (rendered as
+            // genuine assistant/system/etc. messages on the next turn),
+            // then the auto-wrapped runtime_feedback note. Order matches
+            // a script that called `agent_session_inject(...)` directly
+            // and then returned a `message:` separately.
+            for inject in verdict.injects {
+                let message = serde_json::json!({
+                    "role": inject.role,
+                    "content": inject.content,
+                });
+                append_message_to_contexts(
+                    &mut state.visible_messages,
+                    &mut state.recorded_messages,
+                    message,
+                );
+            }
+            if let Some(msg) = verdict.message {
                 if !msg.trim().is_empty() {
                     let feedback = runtime_feedback_message("post_turn_callback", msg.as_str());
                     append_message_to_contexts(
@@ -214,7 +243,7 @@ pub(super) async fn run_post_turn(
                     );
                 }
             }
-            if stop {
+            if verdict.stop {
                 crate::events::log_debug(
                     "agent.post_turn_callback",
                     &format!("iter={iteration} post_turn_callback requested stage stop"),
@@ -793,4 +822,85 @@ pub(super) async fn run_post_turn(
     )
     .await?;
     Ok(IterationOutcome::Continue)
+}
+
+/// Run the `verify_completion` closure once and apply its decision.
+/// Returns `true` when the closure vetoed the stop (caller should
+/// `continue` the loop and bump the verify-attempts counter); returns
+/// `false` when the closure confirmed the stop (caller should break).
+///
+/// On veto, this function appends the closure's typed `inject` rows
+/// and/or `<runtime_feedback>` message to the in-flight transcript so
+/// the next turn's LLM call sees the judge's nudge. Verify activity is
+/// observable via `crate::events::log_debug` (no new AgentEvent
+/// variant needed — the existing FeedbackInjected event covers the
+/// inject/message side, and the verify decision itself is per-loop
+/// rather than per-event).
+pub(super) async fn run_verify_completion(
+    state: &mut AgentLoopState,
+    closure_value: &VmValue,
+    session_id: &str,
+    iteration: usize,
+    stop_reason: &str,
+    last_text: &str,
+) -> Result<bool, VmError> {
+    let closure = match closure_value {
+        VmValue::Closure(c) => c,
+        _ => return Ok(false),
+    };
+    let mut cb_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+        VmError::Runtime("verify_completion requires an async builtin VM context".to_string())
+    })?;
+    let info = serde_json::json!({
+        "session_id": session_id,
+        "iteration": iteration,
+        "stop_reason": stop_reason,
+        "last_text": last_text,
+        "session_tools_used": state.all_tools_used,
+        "session_successful_tools": state.successful_tools_used,
+    });
+    let info_vm = crate::stdlib::json_to_vm_value(&info);
+    let cb_result = cb_vm.call_closure_pub(closure, &[info_vm]).await?;
+    let cb_output = cb_vm.take_output();
+    crate::vm::forward_child_output_to_parent(&cb_output);
+    match interpret_verify_completion_verdict(&cb_result) {
+        super::helpers::VerifyDecision::Confirmed => Ok(false),
+        super::helpers::VerifyDecision::Vetoed { message, injects } => {
+            for inject in injects {
+                let m = serde_json::json!({
+                    "role": inject.role,
+                    "content": inject.content,
+                });
+                append_message_to_contexts(
+                    &mut state.visible_messages,
+                    &mut state.recorded_messages,
+                    m,
+                );
+                super::emit_agent_event(&AgentEvent::FeedbackInjected {
+                    session_id: session_id.to_string(),
+                    kind: "verify_completion_inject".to_string(),
+                    content: inject.content,
+                })
+                .await;
+            }
+            if let Some(msg) = message {
+                let trimmed = msg.trim();
+                if !trimmed.is_empty() {
+                    let feedback = runtime_feedback_message("verify_completion", trimmed);
+                    append_message_to_contexts(
+                        &mut state.visible_messages,
+                        &mut state.recorded_messages,
+                        feedback,
+                    );
+                    super::emit_agent_event(&AgentEvent::FeedbackInjected {
+                        session_id: session_id.to_string(),
+                        kind: "verify_completion_feedback".to_string(),
+                        content: trimmed.to_string(),
+                    })
+                    .await;
+                }
+            }
+            Ok(true)
+        }
+    }
 }

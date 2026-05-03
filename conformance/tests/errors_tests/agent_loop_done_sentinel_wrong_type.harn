@@ -1,0 +1,10 @@
+// `done_sentinel` must be a string, bool, or nil. Passing an int is a
+// runtime type error, which guards against silent foot-guns where users
+// expect a number to coerce or be ignored.
+pipeline test(task) {
+  agent_loop(
+    "do work",
+    nil,
+    {provider: "mock", persistent: true, max_iterations: 1, done_sentinel: 42},
+  )
+}

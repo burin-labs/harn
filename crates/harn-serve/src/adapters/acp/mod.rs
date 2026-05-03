@@ -52,6 +52,29 @@ pub(super) const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "worker_update",
 ];
 
+/// JSON-RPC method name for the ACP `ExtNotification` envelope that
+/// carries Harn pipeline-loop milestones. The leading `_` puts it in
+/// the ACP-reserved extension namespace, so strict clients that don't
+/// know the method MUST ignore it gracefully (per the ACP
+/// extensibility spec). Callers should never hardcode the literal —
+/// reference this constant so a future rename ripples through the
+/// adapter, fixtures, tests, and capability advertisement together.
+pub(super) const HARN_AGENT_EVENT_METHOD: &str = "_harn/agentEvent";
+
+/// Pipeline-loop milestone kinds the adapter currently emits via
+/// `_harn/agentEvent`. The list is stable wire vocabulary — adding a
+/// new kind is additive and SHOULD be treated by clients as
+/// "unknown kind, ignore." Keep it sorted for diff-friendliness and
+/// keep it in lockstep with the match arm in `events.rs`.
+pub(super) const HARN_AGENT_EVENT_KINDS: &[&str] = &[
+    "budget_exhausted",
+    "daemon_watchdog_tripped",
+    "feedback_injected",
+    "loop_stuck",
+    "turn_end",
+    "turn_start",
+];
+
 pub(super) const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "audit",
     "durationMs",
@@ -72,6 +95,22 @@ fn harn_acp_extension_meta() -> serde_json::Value {
             "sessionUpdateExtensions": HARN_SESSION_UPDATE_EXTENSIONS,
             "toolLifecycleExtensionFields": HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
             "contentExtensionFields": HARN_CONTENT_EXTENSION_FIELDS,
+            // ACP `ExtNotification` methods this server emits beyond the
+            // canonical `session/update` stream. Clients that recognize
+            // the method consume the payload; clients that don't MUST
+            // ignore it (per ACP extensibility spec). Keys are method
+            // names; values are static descriptors so a client can
+            // version-check before subscribing.
+            "extensionMethods": {
+                HARN_AGENT_EVENT_METHOD: {
+                    "description": "Pipeline-loop milestones (turn boundaries, \
+                                    feedback injections, budget exhaustion, \
+                                    loop-stuck, daemon watchdog) that have no \
+                                    canonical ACP session/update mapping.",
+                    "kinds": HARN_AGENT_EVENT_KINDS,
+                    "schema": "https://harnlang.com/spec/harn-extensions/agent-event/v1",
+                },
+            },
             "hostCapabilityOperations": {
                 "process": [
                     "exec",
@@ -1571,8 +1610,8 @@ mod tests {
     use super::builtins::normalize_host_capability_manifest;
     use super::{
         sanitize_visible_assistant_text, AcpBridge, AcpOutput, AcpServer, AcpServerConfig,
-        ACP_SCHEMA_COMPATIBILITY, HARN_SESSION_UPDATE_EXTENSIONS,
-        HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+        ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
+        HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
     };
     use crate::{ApiKeyAuthConfig, AuthMethodConfig, AuthPolicy};
     use harn_vm::visible_text::VisibleTextState;
@@ -1726,6 +1765,18 @@ mod tests {
                     initialize["result"]["agentCapabilities"]["_meta"]["harn"]
                         ["sessionUpdateExtensions"],
                     serde_json::json!(HARN_SESSION_UPDATE_EXTENSIONS)
+                );
+                let agent_event_method = &initialize["result"]["agentCapabilities"]["_meta"]
+                    ["harn"]["extensionMethods"][HARN_AGENT_EVENT_METHOD];
+                assert!(
+                    agent_event_method.is_object(),
+                    "agent capabilities must advertise the {HARN_AGENT_EVENT_METHOD} \
+                     ExtNotification method so burin-code can subscribe — got: {agent_event_method}"
+                );
+                assert_eq!(
+                    agent_event_method["kinds"],
+                    serde_json::json!(HARN_AGENT_EVENT_KINDS),
+                    "advertised kinds must match the canonical HARN_AGENT_EVENT_KINDS list"
                 );
                 assert_eq!(
                     initialize["result"]["agentCapabilities"]["_meta"]["harn"]

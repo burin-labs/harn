@@ -911,19 +911,6 @@ impl AgentLoopState {
         let config_skill_match = config.skill_match.clone();
         let config_working_files = config.working_files.clone();
         let custom_nudge = config.nudge.clone();
-        // `done_sentinel` is the explicit "I'm done" stop signal the model
-        // can emit to terminate the loop:
-        //   - `None` (option omitted)  → default `##DONE##`
-        //   - `Some("")` (explicit empty) → opt out: no instruction injected
-        //     into the system prompt and no detection at all
-        //   - `Some(s)`                → custom sentinel `s`
-        // Detection sites guard with `!done_sentinel.is_empty()` so the empty
-        // case is a true no-op rather than relying on a sentinel literal that
-        // cannot appear in real text.
-        let done_sentinel = match config.done_sentinel.as_deref() {
-            None => "##DONE##".to_string(),
-            Some(s) => s.to_string(),
-        };
         let break_unless_phase = config.break_unless_phase.clone();
         let tool_retries = config.tool_retries;
         let tool_backoff_ms = config.tool_backoff_ms;
@@ -931,6 +918,27 @@ impl AgentLoopState {
             crate::llm_config::default_tool_format(&opts.model, &opts.provider)
         } else {
             config.tool_format.clone()
+        };
+        // `done_sentinel` is the explicit "I'm done" stop signal the model
+        // can emit to terminate the loop. Resolution layers, in order:
+        //   - explicit `Some("")` (legacy empty / new `false`)  → disabled
+        //   - explicit `Some(s)`                                 → custom
+        //   - omitted (`None`) and `tool_format == "native"`     → disabled
+        //     (native tool-calling models signal completion by simply not
+        //     calling a tool — a sentinel adds noise without value, and
+        //     defaulting it ON forced users to write `done_sentinel: ""`
+        //     in every native script. See harn#1181 follow-up: the
+        //     foot-gun fix.)
+        //   - omitted (`None`) and any other `tool_format`       → `##DONE##`
+        //     (text and mixed-mode flows still benefit from the sentinel
+        //     because text-only outputs have no other terminal signal.)
+        // Detection sites guard with `!done_sentinel.is_empty()` so the
+        // empty case is a true no-op rather than a literal that cannot
+        // appear in real text.
+        let done_sentinel = match config.done_sentinel.as_deref() {
+            Some(s) => s.to_string(),
+            None if tool_format == "native" => String::new(),
+            None => "##DONE##".to_string(),
         };
         let mut transcript_summary = opts.transcript_summary.clone();
         let (session_id, anonymous_session) = if config.session_id.trim().is_empty() {

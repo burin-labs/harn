@@ -140,6 +140,14 @@ pub struct ProviderRule {
     /// survive the provider route and return in the visible response body.
     #[serde(default)]
     pub text_tool_wire_format_supported: Option<bool>,
+    /// In-prompt directive that disables this model's "thinking" mode when
+    /// the API doesn't expose a first-class field (or exposes it
+    /// inconsistently across templates / quantizations). For Qwen3 family
+    /// chat templates this is `/no_think`. When `thinking: false` is
+    /// requested and this is set, Harn auto-prepends the directive to the
+    /// system message so script authors don't need to know it exists.
+    #[serde(default)]
+    pub thinking_disable_directive: Option<String>,
 }
 
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
@@ -170,6 +178,7 @@ pub struct Capabilities {
     pub reasoning_effort_supported: bool,
     pub recommended_endpoint: Option<String>,
     pub text_tool_wire_format_supported: bool,
+    pub thinking_disable_directive: Option<String>,
 }
 
 impl Default for Capabilities {
@@ -197,6 +206,7 @@ impl Default for Capabilities {
             reasoning_effort_supported: false,
             recommended_endpoint: None,
             text_tool_wire_format_supported: true,
+            thinking_disable_directive: None,
         }
     }
 }
@@ -452,6 +462,7 @@ fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
         reasoning_effort_supported: rule.reasoning_effort_supported.unwrap_or(false),
         recommended_endpoint: rule.recommended_endpoint.clone(),
         text_tool_wire_format_supported: rule.text_tool_wire_format_supported.unwrap_or(true),
+        thinking_disable_directive: rule.thinking_disable_directive.clone(),
     }
 }
 

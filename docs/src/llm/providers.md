@@ -139,6 +139,7 @@ Each `[[capabilities.provider.<name>]]` entry accepts these fields:
 | `interleaved_thinking_supported` | bool | `thinking: true` can request Anthropic's `interleaved-thinking-2025-05-14` beta header. |
 | `anthropic_beta_features` | list of strings | Anthropic beta feature names always requested for this provider/model route. |
 | `vision_supported` | bool | Image content accepted by the provider/model route. |
+| `thinking_disable_directive` | string | In-prompt directive (e.g. `"/no_think"` for Qwen3 chat templates) auto-prepended to the system message when the resolved `thinking` is `Disabled`. Lets script authors write `thinking: false` uniformly across providers without learning per-template prompt directives. Idempotent — never injected twice. |
 
 First match wins. User rules for a given provider are consulted
 before the shipped rules — so the order inside the TOML file matters

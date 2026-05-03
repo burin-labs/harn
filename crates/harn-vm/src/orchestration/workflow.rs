@@ -1517,6 +1517,14 @@ pub async fn execute_stage_node(
                         .and_then(|d| d.get("post_turn_callback"))
                         .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
                         .cloned(),
+                    verify_completion: node
+                        .raw_model_policy
+                        .as_ref()
+                        .and_then(|v| v.as_dict())
+                        .and_then(|d| d.get("verify_completion"))
+                        .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
+                        .cloned(),
+                    max_verify_attempts: 3,
                     llm_transcript_dir: node
                         .raw_model_policy
                         .as_ref()

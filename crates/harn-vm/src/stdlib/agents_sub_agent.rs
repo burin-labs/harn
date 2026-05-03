@@ -716,6 +716,15 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
             .and_then(|o| o.get("post_turn_callback"))
             .filter(|v| matches!(v, VmValue::Closure(_)))
             .cloned(),
+        verify_completion: options
+            .as_ref()
+            .and_then(|o| o.get("verify_completion"))
+            .filter(|v| matches!(v, VmValue::Closure(_)))
+            .cloned(),
+        max_verify_attempts: crate::llm::helpers::opt_int(&options, "max_verify_attempts")
+            .filter(|n| *n >= 0)
+            .map(|n| n as usize)
+            .unwrap_or(3),
         llm_transcript_dir: crate::llm::helpers::opt_str(&options, "llm_transcript_dir"),
         skill_registry,
         skill_match,

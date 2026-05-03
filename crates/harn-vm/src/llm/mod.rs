@@ -1217,7 +1217,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             options.as_ref().and_then(|o| o.get("permissions")),
             "agent_loop",
         )?;
-        let done_sentinel = opt_str(&options, "done_sentinel");
+        let done_sentinel = agent_config::parse_done_sentinel_option(&options)?;
         let break_unless_phase = opt_str(&options, "break_unless_phase");
         let exit_when_verified = opt_bool(&options, "exit_when_verified");
         let daemon_config = parse_daemon_loop_config(options.as_ref());
@@ -1269,11 +1269,18 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 session_id,
                 event_sink: None,
                 task_ledger: parse_task_ledger_from_vm_options(&options),
-                post_turn_callback: options
-                    .as_ref()
-                    .and_then(|o| o.get("post_turn_callback"))
-                    .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
-                    .cloned(),
+                post_turn_callback: agent_config::parse_closure_option(
+                    &options,
+                    "post_turn_callback",
+                )?,
+                verify_completion: agent_config::parse_closure_option(
+                    &options,
+                    "verify_completion",
+                )?,
+                max_verify_attempts: opt_int(&options, "max_verify_attempts")
+                    .filter(|n| *n >= 0)
+                    .map(|n| n as usize)
+                    .unwrap_or(3),
                 llm_transcript_dir: opt_str(&options, "llm_transcript_dir"),
                 skill_registry,
                 skill_match,

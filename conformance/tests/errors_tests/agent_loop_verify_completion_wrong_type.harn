@@ -1,0 +1,11 @@
+// `verify_completion` must be a closure or nil. Passing a non-callable
+// value used to silently no-op (.filter(Closure)) which made typos in
+// agent_loop options invisible. The strict parse turns the typo into a
+// loud failure.
+pipeline test(task) {
+  agent_loop(
+    "do work",
+    nil,
+    {provider: "mock", persistent: true, max_iterations: 1, verify_completion: 42},
+  )
+}

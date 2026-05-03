@@ -1,0 +1,7 @@
+scenario1.status=done
+scenario1.iters=2
+scenario1.calls=2
+scenario2.status=verify_exhausted
+scenario2.calls=3
+scenario3.status=done
+scenario3.iters=1
