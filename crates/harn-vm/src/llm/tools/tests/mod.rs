@@ -13,8 +13,9 @@ pub(super) use super::{
     build_assistant_tool_message, build_tool_calling_contract_prompt, build_tool_result_message,
     collect_tool_schemas, collect_tool_schemas_with_registry, extract_deferred_tool_names,
     normalize_tool_args, parse_bare_calls_in_body, parse_native_json_tool_calls,
-    parse_text_tool_calls_with_tools, text_response_protocol_help, validate_tool_args,
-    vm_tools_to_native, ComponentRegistry,
+    parse_text_tool_calls_with_tools, text_response_protocol_help,
+    text_response_protocol_repair_feedback, validate_tool_args, vm_tools_to_native,
+    ComponentRegistry,
 };
 pub(super) use crate::value::VmValue;
 pub(super) use serde_json::json;

@@ -103,9 +103,14 @@ impl OllamaRuntimeSettings {
     }
 
     pub fn from_env_and_overrides(overrides: Option<&Value>) -> Self {
+        Self::from_env_overrides_and_model(overrides, None)
+    }
+
+    pub fn from_env_overrides_and_model(overrides: Option<&Value>, model: Option<&str>) -> Self {
         Self {
             num_ctx: num_ctx_from_overrides(overrides)
                 .or_else(num_ctx_from_env)
+                .or_else(|| num_ctx_from_model_catalog(model))
                 .unwrap_or(OLLAMA_DEFAULT_NUM_CTX),
             keep_alive: keep_alive_from_overrides(overrides)
                 .or_else(keep_alive_from_env)
@@ -140,7 +145,7 @@ pub(crate) fn ollama_unload_grace_duration_from_env() -> Duration {
 }
 
 pub async fn warm_ollama_model(model: &str, base_url: Option<&str>) -> Result<(), String> {
-    let settings = OllamaRuntimeSettings::from_env();
+    let settings = OllamaRuntimeSettings::from_env_overrides_and_model(None, Some(model));
     warm_ollama_model_with_settings(model, base_url, &settings).await
 }
 
@@ -174,6 +179,7 @@ pub(crate) fn apply_ollama_runtime_settings(body: &mut Value, overrides: Option<
     if explicit_num_ctx.is_some() || body.pointer("/options/num_ctx").is_none() {
         let num_ctx = explicit_num_ctx
             .or_else(num_ctx_from_env)
+            .or_else(|| num_ctx_from_model_catalog(body.get("model").and_then(Value::as_str)))
             .unwrap_or(OLLAMA_DEFAULT_NUM_CTX);
         ensure_options_object(body).insert("num_ctx".to_string(), serde_json::json!(num_ctx));
     }
@@ -206,6 +212,15 @@ fn num_ctx_from_env() -> Option<u64> {
     OLLAMA_NUM_CTX_ENV_KEYS
         .iter()
         .find_map(|key| std::env::var(key).ok().and_then(|raw| parse_num_ctx(&raw)))
+}
+
+fn num_ctx_from_model_catalog(model: Option<&str>) -> Option<u64> {
+    let model = model?.trim();
+    if model.is_empty() {
+        return None;
+    }
+    let entry = crate::llm_config::model_catalog_entry(model)?;
+    (entry.context_window > 0).then_some(entry.context_window)
 }
 
 fn keep_alive_from_env() -> Option<Value> {
@@ -694,6 +709,49 @@ mod tests {
     }
 
     #[test]
+    fn runtime_settings_use_catalog_context_after_env_and_overrides() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _env = [
+            ScopedEnvVar::remove("HARN_OLLAMA_NUM_CTX"),
+            ScopedEnvVar::remove("OLLAMA_CONTEXT_LENGTH"),
+            ScopedEnvVar::remove("OLLAMA_NUM_CTX"),
+            ScopedEnvVar::remove("HARN_OLLAMA_KEEP_ALIVE"),
+            ScopedEnvVar::remove("OLLAMA_KEEP_ALIVE"),
+        ];
+        crate::llm_config::clear_user_overrides();
+        let mut overlay = crate::llm_config::ProvidersConfig::default();
+        overlay.models.insert(
+            "qwen-test".to_string(),
+            crate::llm_config::ModelDef {
+                name: "Qwen Test".to_string(),
+                provider: "ollama".to_string(),
+                context_window: 100_000,
+                stream_timeout: None,
+                capabilities: vec![],
+                pricing: None,
+            },
+        );
+        crate::llm_config::set_user_overrides(Some(overlay));
+
+        let settings = OllamaRuntimeSettings::from_env_overrides_and_model(None, Some("qwen-test"));
+        assert_eq!(settings.num_ctx, 100_000);
+
+        let env = ScopedEnvVar::set("HARN_OLLAMA_NUM_CTX", "65536");
+        let settings = OllamaRuntimeSettings::from_env_overrides_and_model(None, Some("qwen-test"));
+        assert_eq!(settings.num_ctx, 65_536);
+        drop(env);
+
+        let overrides = serde_json::json!({"num_ctx": 8192});
+        let settings = OllamaRuntimeSettings::from_env_overrides_and_model(
+            Some(&overrides),
+            Some("qwen-test"),
+        );
+        assert_eq!(settings.num_ctx, 8_192);
+
+        crate::llm_config::clear_user_overrides();
+    }
+
+    #[test]
     fn provider_overrides_beat_env_and_normalize_keep_alive() {
         let _guard = env_lock().lock().expect("env lock");
         let _env = [
@@ -736,6 +794,42 @@ mod tests {
         assert_eq!(body["keep_alive"], serde_json::json!("30m"));
         assert_eq!(body["think"], serde_json::json!(true));
         assert!(body.get("num_ctx").is_none());
+    }
+
+    #[test]
+    fn apply_runtime_settings_uses_catalog_context_when_body_has_model() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _env = [
+            ScopedEnvVar::remove("HARN_OLLAMA_NUM_CTX"),
+            ScopedEnvVar::remove("OLLAMA_CONTEXT_LENGTH"),
+            ScopedEnvVar::remove("OLLAMA_NUM_CTX"),
+            ScopedEnvVar::remove("HARN_OLLAMA_KEEP_ALIVE"),
+            ScopedEnvVar::remove("OLLAMA_KEEP_ALIVE"),
+        ];
+        crate::llm_config::clear_user_overrides();
+        let mut overlay = crate::llm_config::ProvidersConfig::default();
+        overlay.models.insert(
+            "qwen-test".to_string(),
+            crate::llm_config::ModelDef {
+                name: "Qwen Test".to_string(),
+                provider: "ollama".to_string(),
+                context_window: 100_000,
+                stream_timeout: None,
+                capabilities: vec![],
+                pricing: None,
+            },
+        );
+        crate::llm_config::set_user_overrides(Some(overlay));
+
+        let mut body = serde_json::json!({
+            "model": "qwen-test",
+            "options": {"temperature": 0.1}
+        });
+        apply_ollama_runtime_settings(&mut body, None);
+        assert_eq!(body["options"]["num_ctx"], serde_json::json!(100000));
+        assert_eq!(body["options"]["temperature"], serde_json::json!(0.1));
+
+        crate::llm_config::clear_user_overrides();
     }
 
     #[test]

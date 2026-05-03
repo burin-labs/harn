@@ -145,3 +145,23 @@ pub(crate) fn text_response_protocol_help(done_sentinel: &str) -> String {
     )
     .unwrap_or_else(|error| format!("Response protocol prompt render error: {error}"))
 }
+
+pub(crate) fn text_response_protocol_repair_feedback(
+    protocol_violations: &[String],
+    done_sentinel: &str,
+) -> String {
+    let done_line = if done_sentinel.is_empty() {
+        String::new()
+    } else {
+        format!("<done>{done_sentinel}</done>\n")
+    };
+    let violations = protocol_violations.join("\n- ");
+    let mut bindings = BTreeMap::new();
+    bindings.insert("violations".to_string(), vm_string(&violations));
+    bindings.insert("done_line".to_string(), vm_string(&done_line));
+    crate::stdlib::template::render_stdlib_prompt_asset(
+        "agent/prompts/protocol_violation_feedback.harn.prompt",
+        Some(&bindings),
+    )
+    .unwrap_or_else(|error| format!("protocol violation feedback prompt render error: {error}"))
+}
