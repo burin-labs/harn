@@ -19,6 +19,7 @@
     "**/node_modules",
     "target",
     "docs/dist",
+    ".worktrees",
     ".burin",
     ".claude",
     "docs/src/SUMMARY.md",
