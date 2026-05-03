@@ -1256,15 +1256,14 @@ pub async fn execute_stage_node(
         selection_policy.include_kinds = node.input_contract.input_kinds.clone();
     }
     let selected = super::select_artifacts_adaptive(artifacts.to_vec(), &selection_policy);
-    let rendered_context = if let Some(assembler) = node.raw_context_assembler.as_ref() {
+    let rendered_context_override = if let Some(assembler) = node.raw_context_assembler.as_ref() {
         let assembled =
             crate::stdlib::assemble::assemble_from_options(&selected, assembler).await?;
-        super::render_assembled_chunks(&assembled)
+        Some(super::render_assembled_chunks(&assembled))
     } else {
-        super::render_artifacts_context(&selected, &node.context_policy)
+        None
     };
     let verification_contracts = super::stage_verification_contracts(node_id, node)?;
-    let rendered_verification = super::render_verification_context(&verification_contracts);
     let stage_session_id = resolve_node_session_id(node);
     if node.input_contract.require_transcript && !crate::agent_sessions::exists(&stage_session_id) {
         return Err(VmError::Runtime(format!(
@@ -1287,12 +1286,18 @@ pub async fn execute_stage_node(
             )));
         }
     }
-    let prompt = super::render_workflow_prompt(
+    let prepared_prompt = super::prepare_workflow_stage_prompt(
         task,
         node.task_label.as_deref(),
-        &rendered_verification,
-        &rendered_context,
-    );
+        &selected,
+        &node.context_policy,
+        rendered_context_override.as_deref(),
+        &verification_contracts,
+    )
+    .await?;
+    let prompt = prepared_prompt.prompt;
+    let rendered_context = prepared_prompt.rendered_context;
+    let rendered_verification = prepared_prompt.rendered_verification;
 
     // Precedence for the tool-calling contract format:
     //   1. explicit `model_policy.tool_format` on the node

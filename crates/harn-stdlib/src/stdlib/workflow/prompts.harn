@@ -12,3 +12,177 @@ pub fn workflow_stage_prompt(bindings) {
 pub fn workflow_verification_context_intro() {
   return render_workflow_prompt_asset("verification_context_intro.harn.prompt", {})
 }
+
+fn __workflow_escape_prompt_text(text) {
+  return to_string(text ?? "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+}
+
+fn __workflow_artifact_title(artifact) {
+  let title = artifact?.title
+  if title != nil {
+    return title
+  }
+  return to_string(artifact?.kind ?? "") + " " + to_string(artifact?.id ?? "")
+}
+
+fn __workflow_artifact_body(artifact) {
+  let text = artifact?.text
+  if text != nil {
+    return text
+  }
+  let data = artifact?.data
+  if data != nil {
+    return json_stringify(data)
+  }
+  return ""
+}
+
+fn __workflow_render_artifact_xml(artifact) {
+  let title = __workflow_artifact_title(artifact)
+  let source = artifact?.source ?? "unknown"
+  let freshness = artifact?.freshness ?? "normal"
+  return "<artifact>\n"
+    + "<title>"
+    + __workflow_escape_prompt_text(title)
+    + "</title>\n"
+    + "<kind>"
+    + __workflow_escape_prompt_text(artifact?.kind ?? "")
+    + "</kind>\n"
+    + "<source>"
+    + __workflow_escape_prompt_text(source)
+    + "</source>\n"
+    + "<freshness>"
+    + __workflow_escape_prompt_text(freshness)
+    + "</freshness>\n"
+    + "<priority>"
+    + to_string(artifact?.priority ?? 0)
+    + "</priority>\n"
+    + "<body>\n"
+    + __workflow_artifact_body(artifact)
+    + "\n</body>\n"
+    + "</artifact>"
+}
+
+fn __workflow_render_artifact_json(artifact) {
+  return json_stringify(
+    {
+      id: artifact?.id,
+      kind: artifact?.kind,
+      title: __workflow_artifact_title(artifact),
+      source: artifact?.source,
+      freshness: artifact?.freshness,
+      priority: artifact?.priority,
+      text: __workflow_artifact_body(artifact),
+    },
+  )
+}
+
+/** workflow_render_artifacts_context. */
+pub fn workflow_render_artifacts_context(artifacts = nil, policy = nil) {
+  let render = policy?.render
+  var parts = []
+  for artifact in artifacts ?? [] {
+    if render == "json" {
+      parts = parts.push(__workflow_render_artifact_json(artifact))
+    } else {
+      parts = parts.push(__workflow_render_artifact_xml(artifact))
+    }
+  }
+  return join(parts, "\n\n")
+}
+
+fn __workflow_push_optional_field(out, name, value) {
+  if value == nil {
+    return out
+  }
+  return out + "<" + name + ">" + __workflow_escape_prompt_text(value) + "</" + name + ">\n"
+}
+
+fn __workflow_push_int_field(out, name, value) {
+  if value == nil {
+    return out
+  }
+  return out + "<" + name + ">" + to_string(value) + "</" + name + ">\n"
+}
+
+fn __workflow_push_string_list(out, name, values) {
+  if len(values ?? []) == 0 {
+    return out
+  }
+  var result = out + "<" + name + ">\n"
+  for value in values {
+    result = result + "- " + __workflow_escape_prompt_text(value) + "\n"
+  }
+  return result + "</" + name + ">\n"
+}
+
+fn __workflow_push_checks(out, checks) {
+  if len(checks ?? []) == 0 {
+    return out
+  }
+  var result = out + "<checks>\n"
+  for check in checks {
+    result = result + "- " + __workflow_escape_prompt_text(check?.kind ?? "")
+      + ": "
+      + __workflow_escape_prompt_text(check?.value ?? "")
+    if check?.note != nil {
+      result = result + " (" + __workflow_escape_prompt_text(check.note) + ")"
+    }
+    result = result + "\n"
+  }
+  return result + "</checks>\n"
+}
+
+fn __workflow_render_contract(contract) {
+  var out = "\n<contract>\n"
+  out = __workflow_push_optional_field(out, "source_node", contract?.source_node)
+  out = __workflow_push_optional_field(out, "summary", contract?.summary)
+  out = __workflow_push_optional_field(out, "command", contract?.command)
+  out = __workflow_push_int_field(out, "expect_status", contract?.expect_status)
+  out = __workflow_push_optional_field(out, "assert_text", contract?.assert_text)
+  out = __workflow_push_optional_field(out, "expect_text", contract?.expect_text)
+  out = __workflow_push_string_list(out, "required_identifiers", contract?.required_identifiers ?? [])
+  out = __workflow_push_string_list(out, "required_paths", contract?.required_paths ?? [])
+  out = __workflow_push_string_list(out, "required_text", contract?.required_text ?? [])
+  out = __workflow_push_checks(out, contract?.checks ?? [])
+  out = __workflow_push_string_list(out, "notes", contract?.notes ?? [])
+  return out + "</contract>"
+}
+
+/** workflow_render_verification_context. */
+pub fn workflow_render_verification_context(contracts = nil) {
+  if len(contracts ?? []) == 0 {
+    return ""
+  }
+  var out = workflow_verification_context_intro() + "\n"
+  for contract in contracts {
+    out = out + __workflow_render_contract(contract)
+  }
+  return out
+}
+
+fn __workflow_stage_label(label) {
+  let trimmed = trim(label ?? "")
+  if trimmed == "" {
+    return "Task"
+  }
+  return trimmed
+}
+
+/** workflow_prepare_stage_prompt. */
+pub fn workflow_prepare_stage_prompt(config = nil) {
+  let opts = config ?? {}
+  let rendered_context = opts?.rendered_context
+    ?? workflow_render_artifacts_context(opts?.artifacts ?? [], opts?.context_policy ?? {})
+  let rendered_verification = opts?.rendered_verification
+    ?? workflow_render_verification_context(opts?.verification_contracts ?? [])
+  let prompt = workflow_stage_prompt(
+    {
+      label: __workflow_escape_prompt_text(__workflow_stage_label(opts?.task_label)),
+      instructions: trim(opts?.task ?? ""),
+      verification: trim(rendered_verification),
+      context: trim(rendered_context),
+    },
+  )
+  return {prompt: prompt, rendered_context: rendered_context, rendered_verification: rendered_verification}
+}

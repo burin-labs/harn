@@ -1,11 +1,8 @@
 //! Artifact types, normalization, selection, and context rendering.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
-
-use crate::value::VmValue;
 
 use super::{
     handoff_artifact_record, handoff_from_json_value, microcompact_tool_output, new_id,
@@ -350,140 +347,70 @@ pub fn render_artifacts_context(artifacts: &[ArtifactRecord], policy: &ContextPo
     parts.join("\n\n")
 }
 
-pub fn render_workflow_prompt(
-    task: &str,
-    task_label: Option<&str>,
-    rendered_verification: &str,
-    rendered_context: &str,
-) -> String {
-    let label = task_label
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("Task");
-    let mut bindings = BTreeMap::new();
-    bindings.insert(
-        "label".to_string(),
-        VmValue::String(Rc::from(escape_prompt_text(label))),
-    );
-    bindings.insert(
-        "instructions".to_string(),
-        VmValue::String(Rc::from(task.trim().to_string())),
-    );
-    bindings.insert(
-        "verification".to_string(),
-        VmValue::String(Rc::from(rendered_verification.trim().to_string())),
-    );
-    bindings.insert(
-        "context".to_string(),
-        VmValue::String(Rc::from(rendered_context.trim().to_string())),
-    );
-    crate::stdlib::template::render_stdlib_prompt_asset(
-        "workflow/prompts/stage.harn.prompt",
-        Some(&bindings),
-    )
-    .unwrap_or_else(|error| format!("workflow stage prompt render error: {error}"))
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreparedWorkflowStagePrompt {
+    pub prompt: String,
+    pub rendered_context: String,
+    pub rendered_verification: String,
 }
 
-pub fn render_verification_context(contracts: &[VerificationContract]) -> String {
-    if contracts.is_empty() {
-        return String::new();
-    }
+pub async fn prepare_workflow_stage_prompt(
+    task: &str,
+    task_label: Option<&str>,
+    artifacts: &[ArtifactRecord],
+    context_policy: &ContextPolicy,
+    rendered_context: Option<&str>,
+    verification_contracts: &[VerificationContract],
+) -> Result<PreparedWorkflowStagePrompt, crate::value::VmError> {
+    let payload = serde_json::json!({
+        "task": task,
+        "task_label": task_label,
+        "artifacts": artifacts,
+        "context_policy": context_policy,
+        "rendered_context": rendered_context,
+        "verification_contracts": verification_contracts,
+    });
+    let config = crate::stdlib::json_to_vm_value(&payload);
+    let mut vm = crate::vm::Vm::new();
+    crate::stdlib::register_core_stdlib(&mut vm);
+    let exports = vm
+        .load_module_exports_from_import("std/workflow/prompts")
+        .await?;
+    let prepare = exports
+        .get("workflow_prepare_stage_prompt")
+        .cloned()
+        .ok_or_else(|| {
+            crate::value::VmError::Runtime(
+                "std/workflow/prompts missing workflow_prepare_stage_prompt export".to_string(),
+            )
+        })?;
+    let prepared = vm.call_closure_pub(&prepare, &[config]).await?;
+    let prepared = crate::llm::vm_value_to_json(&prepared);
+    let prepared = prepared.as_object().ok_or_else(|| {
+        crate::value::VmError::Runtime(
+            "workflow_prepare_stage_prompt must return a dict".to_string(),
+        )
+    })?;
+    Ok(PreparedWorkflowStagePrompt {
+        prompt: workflow_prompt_string_field(prepared, "prompt")?,
+        rendered_context: workflow_prompt_string_field(prepared, "rendered_context")?,
+        rendered_verification: workflow_prompt_string_field(prepared, "rendered_verification")?,
+    })
+}
 
-    let mut out = crate::stdlib::template::render_stdlib_prompt_asset(
-        "workflow/prompts/verification_context_intro.harn.prompt",
-        None,
-    )
-    .unwrap_or_else(|error| format!("workflow verification prompt render error: {error}"));
-    out.push('\n');
-
-    for contract in contracts {
-        out.push_str("\n<contract>\n");
-        if let Some(source_node) = contract.source_node.as_deref() {
-            out.push_str("<source_node>");
-            out.push_str(&escape_prompt_text(source_node));
-            out.push_str("</source_node>\n");
-        }
-        if let Some(summary) = contract.summary.as_deref() {
-            out.push_str("<summary>");
-            out.push_str(&escape_prompt_text(summary));
-            out.push_str("</summary>\n");
-        }
-        if let Some(command) = contract.command.as_deref() {
-            out.push_str("<command>");
-            out.push_str(&escape_prompt_text(command));
-            out.push_str("</command>\n");
-        }
-        if let Some(expect_status) = contract.expect_status {
-            out.push_str("<expect_status>");
-            out.push_str(&expect_status.to_string());
-            out.push_str("</expect_status>\n");
-        }
-        if let Some(assert_text) = contract.assert_text.as_deref() {
-            out.push_str("<assert_text>");
-            out.push_str(&escape_prompt_text(assert_text));
-            out.push_str("</assert_text>\n");
-        }
-        if let Some(expect_text) = contract.expect_text.as_deref() {
-            out.push_str("<expect_text>");
-            out.push_str(&escape_prompt_text(expect_text));
-            out.push_str("</expect_text>\n");
-        }
-        if !contract.required_identifiers.is_empty() {
-            out.push_str("<required_identifiers>\n");
-            for value in &contract.required_identifiers {
-                out.push_str("- ");
-                out.push_str(&escape_prompt_text(value));
-                out.push('\n');
-            }
-            out.push_str("</required_identifiers>\n");
-        }
-        if !contract.required_paths.is_empty() {
-            out.push_str("<required_paths>\n");
-            for value in &contract.required_paths {
-                out.push_str("- ");
-                out.push_str(&escape_prompt_text(value));
-                out.push('\n');
-            }
-            out.push_str("</required_paths>\n");
-        }
-        if !contract.required_text.is_empty() {
-            out.push_str("<required_text>\n");
-            for value in &contract.required_text {
-                out.push_str("- ");
-                out.push_str(&escape_prompt_text(value));
-                out.push('\n');
-            }
-            out.push_str("</required_text>\n");
-        }
-        if !contract.checks.is_empty() {
-            out.push_str("<checks>\n");
-            for check in &contract.checks {
-                out.push_str("- ");
-                out.push_str(&escape_prompt_text(&check.kind));
-                out.push_str(": ");
-                out.push_str(&escape_prompt_text(&check.value));
-                if let Some(note) = check.note.as_deref() {
-                    out.push_str(" (");
-                    out.push_str(&escape_prompt_text(note));
-                    out.push(')');
-                }
-                out.push('\n');
-            }
-            out.push_str("</checks>\n");
-        }
-        if !contract.notes.is_empty() {
-            out.push_str("<notes>\n");
-            for note in &contract.notes {
-                out.push_str("- ");
-                out.push_str(&escape_prompt_text(note));
-                out.push('\n');
-            }
-            out.push_str("</notes>\n");
-        }
-        out.push_str("</contract>");
-    }
-
-    out
+fn workflow_prompt_string_field(
+    value: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Result<String, crate::value::VmError> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            crate::value::VmError::Runtime(format!(
+                "workflow_prepare_stage_prompt must return string field '{field}'"
+            ))
+        })
 }
 
 fn escape_prompt_text(text: &str) -> String {

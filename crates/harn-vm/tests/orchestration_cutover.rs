@@ -6,8 +6,11 @@ const AGENT_OPTIONS_HARN: &str = include_str!("../../harn-stdlib/src/stdlib/agen
 const AGENT_TURN_HARN: &str = include_str!("../../harn-stdlib/src/stdlib/agent/turn.harn");
 const WORKFLOW_EXECUTE_HARN: &str =
     include_str!("../../harn-stdlib/src/stdlib/workflow/execute.harn");
+const WORKFLOW_PROMPTS_HARN: &str =
+    include_str!("../../harn-stdlib/src/stdlib/workflow/prompts.harn");
 const CONTRACT_PROMPT_RS: &str = include_str!("../src/llm/tools/contract_prompt.rs");
 const WORKFLOW_ARTIFACTS_RS: &str = include_str!("../src/orchestration/artifacts.rs");
+const WORKFLOW_RS: &str = include_str!("../src/orchestration/workflow.rs");
 
 #[test]
 fn public_orchestration_entrypoints_dispatch_through_harn_stdlib() {
@@ -47,6 +50,16 @@ fn public_orchestration_entrypoints_dispatch_through_harn_stdlib() {
         WORKFLOW_REGISTER_RS.contains("__host_workflow_graph_run")
             && WORKFLOW_EXECUTE_HARN.contains("__host_workflow_graph_run"),
         "the Harn workflow facade should call only the host workflow graph primitive"
+    );
+    assert!(
+        WORKFLOW_RS.contains("prepare_workflow_stage_prompt(")
+            && WORKFLOW_PROMPTS_HARN.contains("workflow_prepare_stage_prompt"),
+        "workflow stage prompt preparation belongs in std/workflow/prompts.harn"
+    );
+    assert!(
+        !WORKFLOW_ARTIFACTS_RS.contains("pub fn render_workflow_prompt")
+            && !WORKFLOW_ARTIFACTS_RS.contains("pub fn render_verification_context"),
+        "workflow stage and verification prompt renderers must not move back into Rust"
     );
 }
 

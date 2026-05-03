@@ -3,10 +3,10 @@ use super::map::{execute_join_policy, LocalTask};
 use super::register::execute_workflow;
 use super::stage::{classify_stage_outcome, execute_stage_attempts, replay_stage};
 use crate::orchestration::{
-    inject_workflow_verification_contracts, render_artifacts_context, render_workflow_prompt,
-    save_run_record, workflow_verification_contracts, RunChildRecord, RunExecutionRecord,
-    RunRecord, RunStageRecord, VerificationContract, VerificationRequirement, WorkflowEdge,
-    WorkflowGraph, WorkflowNode,
+    inject_workflow_verification_contracts, prepare_workflow_stage_prompt,
+    render_artifacts_context, save_run_record, workflow_verification_contracts, ContextPolicy,
+    RunChildRecord, RunExecutionRecord, RunRecord, RunStageRecord, VerificationContract,
+    VerificationRequirement, WorkflowEdge, WorkflowGraph, WorkflowNode,
 };
 use crate::tracing::{set_tracing_enabled, span_end, span_start, SpanKind};
 use crate::value::VmValue;
@@ -183,14 +183,19 @@ fn snapshot_trace_spans_returns_completed_trace_tree() {
     set_tracing_enabled(false);
 }
 
-#[test]
-fn render_workflow_prompt_puts_task_before_context() {
-    let prompt = render_workflow_prompt(
+#[tokio::test(flavor = "current_thread")]
+async fn prepare_workflow_stage_prompt_puts_task_before_context() {
+    let prepared = prepare_workflow_stage_prompt(
         "Create the missing test file with one edit call.",
         Some("Create Required Outputs"),
-        "",
-        "<artifact>\n<title>tests/unit/test_example.py</title>\n<body>\npass\n</body>\n</artifact>",
-    );
+        &[],
+        &ContextPolicy::default(),
+        Some("<artifact>\n<title>tests/unit/test_example.py</title>\n<body>\npass\n</body>\n</artifact>"),
+        &[],
+    )
+    .await
+    .expect("workflow stage prompt renders");
+    let prompt = prepared.prompt;
     let task_index = prompt
         .find("<workflow_task>")
         .expect("workflow task block should exist");
@@ -210,14 +215,25 @@ fn render_workflow_prompt_puts_task_before_context() {
     );
 }
 
-#[test]
-fn render_workflow_prompt_places_verification_before_context() {
-    let prompt = render_workflow_prompt(
+#[tokio::test(flavor = "current_thread")]
+async fn prepare_workflow_stage_prompt_places_verification_before_context() {
+    let contracts = vec![VerificationContract {
+        required_identifiers: vec!["rateLimit".to_string()],
+        ..Default::default()
+    }];
+    let prepared = prepare_workflow_stage_prompt(
         "Implement the verifier-exact wiring.",
         Some("Implement"),
-        "<contract>\n<required_identifiers>\n- rateLimit\n</required_identifiers>\n</contract>",
-        "<artifact>\n<title>src/server.ts</title>\n<body>\nexisting code\n</body>\n</artifact>",
-    );
+        &[],
+        &ContextPolicy::default(),
+        Some(
+            "<artifact>\n<title>src/server.ts</title>\n<body>\nexisting code\n</body>\n</artifact>",
+        ),
+        &contracts,
+    )
+    .await
+    .expect("workflow stage prompt renders");
+    let prompt = prepared.prompt;
 
     let verification_index = prompt
         .find("<workflow_verification>")
@@ -232,14 +248,19 @@ fn render_workflow_prompt_places_verification_before_context() {
     assert!(prompt.contains("rateLimit"));
 }
 
-#[test]
-fn render_workflow_prompt_makes_current_stage_scope_authoritative() {
-    let prompt = render_workflow_prompt(
+#[tokio::test(flavor = "current_thread")]
+async fn prepare_workflow_stage_prompt_makes_current_stage_scope_authoritative() {
+    let prepared = prepare_workflow_stage_prompt(
         "Only update src/current.ts.",
         Some("Execute Current Batch"),
-        "",
-        "<artifact>\n<title>Action graph</title>\n<body>\nFuture step: run final verification\n</body>\n</artifact>",
-    );
+        &[],
+        &ContextPolicy::default(),
+        Some("<artifact>\n<title>Action graph</title>\n<body>\nFuture step: run final verification\n</body>\n</artifact>"),
+        &[],
+    )
+    .await
+    .expect("workflow stage prompt renders");
+    let prompt = prepared.prompt;
 
     assert!(prompt.contains("Treat `<workflow_context>` as supporting evidence"));
     assert!(prompt.contains("do only what the current workflow task and system prompt authorize"));
