@@ -6,7 +6,7 @@ HOOK_HARN_PATTERN='(\.harn$|^conformance/tests/|^experiments/)'
 HOOK_MARKDOWN_PATTERN='\.md$'
 HOOK_ACTIONS_PATTERN='(^\.github/workflows/|^\.githooks/|^Makefile$)'
 HOOK_PORTAL_PATTERN='(^crates/harn-cli/portal/|^package(-lock)?\.json$)'
-HOOK_HIGHLIGHT_PATTERN='(^crates/harn-lexer/|^crates/harn-vm/src/(stdlib|stdlib_.*\.harn|lib\.rs)|^crates/harn-modules/|^docs/theme/harn-keywords\.js$)'
+HOOK_HIGHLIGHT_PATTERN='(^crates/harn-lexer/|^crates/harn-stdlib/src/stdlib/|^crates/harn-vm/src/(stdlib|lib\.rs)|^crates/harn-modules/|^docs/theme/harn-keywords\.js$)'
 HOOK_LANGSPEC_PATTERN='(^spec/HARN_SPEC\.md$|^docs/src/language-spec\.md$)'
 HOOK_HARN_FORMAT_SKIP=' semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn '
 
@@ -75,4 +75,24 @@ hook_write_harn_lint_files() {
         ;;
     esac
   done < "$input"
+}
+
+hook_write_changed_cargo_packages() {
+  input=$1
+  output=$2
+  : > "$output"
+  while IFS= read -r path; do
+    case "$path" in
+      crates/*/*)
+        crate=${path#crates/}
+        crate=${crate%%/*}
+        manifest="crates/$crate/Cargo.toml"
+        if [ -f "$manifest" ]; then
+          package=$(awk -F '"' '/^name = / { print $2; exit }' "$manifest")
+          [ -n "$package" ] && printf '%s\n' "$package" >> "$output"
+        fi
+        ;;
+    esac
+  done < "$input"
+  sort -u -o "$output" "$output"
 }

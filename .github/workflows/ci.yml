@@ -29,22 +29,8 @@ jobs:
         with:
           components: rustfmt
       - run: make fmt-check
-      - name: Check stdlib mirror parity
-        run: |
-          for vm_file in crates/harn-vm/src/stdlib*.harn; do
-            module_file="crates/harn-modules/src/stdlib/$(basename "$vm_file")"
-
-            if [ ! -f "$module_file" ]; then
-              echo "::error file=$vm_file::Missing stdlib mirror $module_file"
-              exit 1
-            fi
-
-            if ! cmp -s "$vm_file" "$module_file"; then
-              echo "::error file=$vm_file::Stdlib mirror drift: $vm_file must match $module_file byte-for-byte"
-              echo "Run: cp \"$vm_file\" \"$module_file\""
-              exit 1
-            fi
-          done
+      - name: Check canonical stdlib package
+        run: cargo package -p harn-stdlib --allow-dirty --no-verify
 
   lint-md:
     name: Markdown lint
@@ -160,12 +146,12 @@ jobs:
       - name: Compile workspace tests and run Windows unit slice
         shell: bash
         run: |
-          windows_filter='package(harn-lexer) or package(harn-parser) or package(harn-vm) or package(harn-hostlib) or package(harn-fmt) or package(harn-lint) or package(harn-modules)'
+          windows_filter='package(harn-lexer) or package(harn-parser) or package(harn-stdlib) or package(harn-vm) or package(harn-hostlib) or package(harn-fmt) or package(harn-lint) or package(harn-modules)'
           if command -v cargo-nextest >/dev/null 2>&1; then
             cargo nextest run --workspace -E "$windows_filter"
           else
             cargo test --workspace --no-run
-            cargo test -p harn-lexer -p harn-parser -p harn-vm -p harn-hostlib -p harn-fmt -p harn-lint -p harn-modules
+            cargo test -p harn-lexer -p harn-parser -p harn-stdlib -p harn-vm -p harn-hostlib -p harn-fmt -p harn-lint -p harn-modules
           fi
       - name: Smoke test harn run
         shell: bash

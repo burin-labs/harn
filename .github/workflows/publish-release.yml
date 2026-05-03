@@ -37,7 +37,8 @@ on:
           First-release bootstrap for a new workspace crate that an
           already-published crate now depends on. Sets
           HARN_BOOTSTRAP_NEW_CRATES=1, which skips the publish dry-run
-          and the audit's harn-cli package check. The real publish
+          and audit package checks for downstream crates that need it
+          on crates.io. The real publish
           uses `cargo publish --workspace`, which orders intra-workspace
           deps correctly. See harn#609.
         type: boolean
@@ -194,9 +195,9 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # First-release bootstrap recovery path. See harn#609.
           # release_ship.sh + verify_crate_packages.sh both honor the
-          # env var: skip the publish dry-run and the harn-cli package
-          # check that fails when a path-dep crate isn't on crates.io
-          # yet. Defaults to "0" on push events.
+          # env var: skip the publish dry-run and downstream package
+          # checks that fail when a path-dep crate isn't on crates.io yet.
+          # Defaults to "0" on push events.
           HARN_BOOTSTRAP_NEW_CRATES: ${{ inputs.bootstrap_new_crates && '1' || '0' }}
           # Default off — merge-queue CI of the just-landed Release PR
           # already proved the same gates a few minutes ago. The

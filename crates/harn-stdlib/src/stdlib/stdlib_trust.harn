@@ -1,0 +1,55 @@
+/*
+ * std/trust - TrustGraph query and policy helpers.
+ *
+ * Import with: `import "std/trust"`.
+ */
+import "std/triggers"
+
+type TrustGraphRecord = {
+  actor_id: string,
+  action: string,
+  approver: string?,
+  outcome: TrustOutcome,
+  evidence_refs: list<dict>,
+  trace_id: string,
+  timestamp: string,
+  autonomy_tier_at_time: AutonomyTier,
+}
+
+type TrustGraphQueryFilters = {
+  actor: string?,
+  actor_id: string?,
+  agent: string?,
+  action: string?,
+  outcome: TrustOutcome?,
+  since: string?,
+  until: string?,
+  autonomy_tier_at_time: AutonomyTier?,
+  tier: AutonomyTier?,
+  limit: int?,
+}
+
+/** query returns TrustGraphRecord rows from the runtime trust graph. */
+pub fn query(filters = {}) -> list<TrustGraphRecord> {
+  return trust.query(filters)
+}
+
+/** record appends a TrustGraph decision and returns its stable TrustEntryId. */
+pub fn record(decision) -> TrustEntryId {
+  return trust.record(decision)
+}
+
+/** score returns aggregate trust counters and derived capability policy. */
+pub fn score(actor_id: string, action: string? = nil) -> TrustScore {
+  return trust.score(actor_id, action)
+}
+
+/** policy_for returns the capability policy derived from trust history. */
+pub fn policy_for(actor_id: string) -> CapabilityPolicy {
+  return trust.policy_for(actor_id)
+}
+
+/** verify_chain verifies the underlying OpenTrustGraph hash chain. */
+pub fn verify_chain() -> TrustChainReport {
+  return trust.verify_chain()
+}

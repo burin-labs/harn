@@ -22,13 +22,15 @@ This repository implements Harn, a programming language and runtime for orchestr
 - `crates/harn-wasm` is excluded from the Cargo workspace. Build it separately with
   `cd crates/harn-wasm && wasm-pack build`.
 - Installed hooks are worth keeping on: pre-commit runs `cargo fmt`, clippy, markdown lint,
-  actionlint, and portal lint; pre-push runs workspace tests plus markdown, actionlint, portal, and
-  conformance format checks.
+  actionlint, and portal lint; pre-push runs targeted package checks plus markdown, actionlint,
+  portal, generated-file drift checks, and affected Harn format/lint checks. Set
+  `HARN_PREPUSH_FULL_TESTS=1` for the broader `make test` gate before pushing.
 
 ## Repository Map
 
 - `crates/harn-lexer`: tokenizer and span tracking.
 - `crates/harn-parser`: AST, parser, and type checker.
+- `crates/harn-stdlib`: canonical embedded Harn stdlib source catalog.
 - `crates/harn-vm`: compiler, VM, stdlib, LLM/providers, orchestration runtime, transcripts, and
   bridge/ACP integration.
 - `crates/harn-cli`: `harn` CLI, conformance runner, portal server, MCP/OAuth commands, A2A/ACP
