@@ -1,0 +1,324 @@
+fn __workflow_list(value) {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __workflow_contains(values, value) {
+  return contains(__workflow_list(values), value)
+}
+
+fn __workflow_num(value, fallback = 0) {
+  if type_of(value) == "int" || type_of(value) == "float" {
+    return value
+  }
+  return fallback
+}
+
+fn __workflow_freshness_rank(value) {
+  if value == "stale" {
+    return 0
+  }
+  if value == "normal" || value == nil {
+    return 1
+  }
+  if value == "fresh" {
+    return 2
+  }
+  if value == "live" {
+    return 3
+  }
+  return 1
+}
+
+fn __workflow_metadata_string_list(artifact, key) {
+  let metadata = artifact?.metadata ?? {}
+  let raw = metadata[key]
+  var out = []
+  for item in __workflow_list(raw) {
+    if type_of(item) == "string" && trim(item) != "" {
+      out = out.push(trim(item))
+    }
+  }
+  return out
+}
+
+fn __workflow_push_unique(values, value) {
+  if __workflow_contains(values, value) {
+    return values
+  }
+  return values.push(value)
+}
+
+fn __workflow_fresh_changed_paths(artifacts) {
+  var paths = []
+  for artifact in artifacts {
+    if __workflow_freshness_rank(artifact?.freshness) >= 2 {
+      for path in __workflow_metadata_string_list(artifact, "changed_paths") {
+        paths = __workflow_push_unique(paths, path)
+      }
+    }
+  }
+  return paths
+}
+
+fn __workflow_artifact_has_stale_evidence(artifact, fresh_changed_paths) {
+  let evidence_paths = __workflow_metadata_string_list(artifact, "evidence_paths")
+  if len(evidence_paths) == 0 {
+    return false
+  }
+  if __workflow_freshness_rank(artifact?.freshness) >= 2 {
+    return false
+  }
+  for path in evidence_paths {
+    if __workflow_contains(fresh_changed_paths, path) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __workflow_drop_stale_evidence_artifacts(artifacts) {
+  let fresh_changed_paths = __workflow_fresh_changed_paths(artifacts)
+  if len(fresh_changed_paths) == 0 {
+    return artifacts
+  }
+  var out = []
+  for artifact in artifacts {
+    if !__workflow_artifact_has_stale_evidence(artifact, fresh_changed_paths) {
+      out = out.push(artifact)
+    }
+  }
+  return out
+}
+
+fn __workflow_artifact_text(artifact) {
+  if artifact?.text == nil {
+    return ""
+  }
+  return artifact.text
+}
+
+fn __workflow_artifact_priority(artifact) {
+  return __workflow_num(artifact?.priority, 0)
+}
+
+fn __workflow_dedup_artifacts(artifacts) {
+  var out = []
+  for artifact in artifacts {
+    let text = __workflow_artifact_text(artifact)
+    if text == "" {
+      out = out.push(artifact)
+      continue
+    }
+    var next = []
+    var replaced = false
+    for existing in out {
+      if !replaced && __workflow_artifact_text(existing) == text {
+        if __workflow_artifact_priority(artifact) > __workflow_artifact_priority(existing) {
+          next = next.push(artifact)
+        } else {
+          next = next.push(existing)
+        }
+        replaced = true
+      } else {
+        next = next.push(existing)
+      }
+    }
+    if !replaced {
+      next = next.push(artifact)
+    }
+    out = next
+  }
+  return out
+}
+
+fn __workflow_microcompact_text(text, max_chars) {
+  if len(text) <= max_chars || max_chars < 200 {
+    return text
+  }
+  let keep = floor(max_chars / 2)
+  let tail_start = max(len(text) - keep, 0)
+  let head = text.substring(0, keep)
+  let tail = text.substring(tail_start, len(text))
+  let snipped = len(text) - len(head) - len(tail)
+  return head + "\n\n[... " + to_string(snipped) + " characters snipped ...]\n\n" + tail
+}
+
+fn __workflow_microcompact_artifact(artifact, cap_tokens) {
+  let estimated = __workflow_num(artifact?.estimated_tokens, 0)
+  let max_chars = cap_tokens * 4
+  if estimated <= cap_tokens * 2 || max_chars < 200 || artifact?.text == nil {
+    return artifact
+  }
+  if len(artifact.text) <= max_chars {
+    return artifact
+  }
+  return artifact
+    + {text: __workflow_microcompact_text(artifact.text, max_chars), estimated_tokens: cap_tokens}
+}
+
+fn __workflow_microcompact_artifacts(artifacts, policy) {
+  if policy?.max_tokens == nil || len(artifacts) == 0 {
+    return artifacts
+  }
+  let count = max(len(artifacts), 1)
+  let max_tokens = policy.max_tokens
+  let per_artifact_budget = floor(max_tokens / count)
+  let cap = min(max(per_artifact_budget, 500), max_tokens)
+  var out = []
+  for artifact in artifacts {
+    out = out.push(__workflow_microcompact_artifact(artifact, cap))
+  }
+  return out
+}
+
+fn __workflow_artifact_matches_policy(artifact, policy) {
+  let include_kinds = __workflow_list(policy?.include_kinds)
+  let exclude_kinds = __workflow_list(policy?.exclude_kinds)
+  let include_stages = __workflow_list(policy?.include_stages)
+  if len(include_kinds) > 0 && !__workflow_contains(include_kinds, artifact?.kind) {
+    return false
+  }
+  if __workflow_contains(exclude_kinds, artifact?.kind) {
+    return false
+  }
+  if len(include_stages) > 0 && !__workflow_contains(include_stages, artifact?.stage) {
+    return false
+  }
+  return true
+}
+
+fn __workflow_artifact_precedes(left, right, policy) {
+  let pinned_ids = __workflow_list(policy?.pinned_ids)
+  let left_pinned = __workflow_contains(pinned_ids, left?.id)
+  let right_pinned = __workflow_contains(pinned_ids, right?.id)
+  if left_pinned != right_pinned {
+    return left_pinned
+  }
+  let prioritize_kinds = __workflow_list(policy?.prioritize_kinds)
+  let left_kind = __workflow_contains(prioritize_kinds, left?.kind)
+  let right_kind = __workflow_contains(prioritize_kinds, right?.kind)
+  if left_kind != right_kind {
+    return left_kind
+  }
+  let left_priority = __workflow_artifact_priority(left)
+  let right_priority = __workflow_artifact_priority(right)
+  if left_priority != right_priority {
+    return left_priority > right_priority
+  }
+  if policy?.prefer_fresh {
+    let left_fresh = __workflow_freshness_rank(left?.freshness)
+    let right_fresh = __workflow_freshness_rank(right?.freshness)
+    if left_fresh != right_fresh {
+      return left_fresh > right_fresh
+    }
+  }
+  if policy?.prefer_recent {
+    let left_created = to_string(left?.created_at ?? "")
+    let right_created = to_string(right?.created_at ?? "")
+    if left_created != right_created {
+      return left_created > right_created
+    }
+  }
+  let left_relevance = __workflow_num(left?.relevance, 0)
+  let right_relevance = __workflow_num(right?.relevance, 0)
+  if left_relevance != right_relevance {
+    return left_relevance > right_relevance
+  }
+  let left_tokens = __workflow_num(left?.estimated_tokens, 999999999)
+  let right_tokens = __workflow_num(right?.estimated_tokens, 999999999)
+  if left_tokens != right_tokens {
+    return left_tokens < right_tokens
+  }
+  return false
+}
+
+fn __workflow_insert_artifact_sorted(sorted, artifact, policy) {
+  var out = []
+  var inserted = false
+  for existing in sorted {
+    if !inserted && __workflow_artifact_precedes(artifact, existing, policy) {
+      out = out.push(artifact)
+      inserted = true
+    }
+    out = out.push(existing)
+  }
+  if !inserted {
+    out = out.push(artifact)
+  }
+  return out
+}
+
+fn __workflow_sort_artifacts(artifacts, policy) {
+  var sorted = []
+  for artifact in artifacts {
+    sorted = __workflow_insert_artifact_sorted(sorted, artifact, policy)
+  }
+  return sorted
+}
+
+/** workflow_stage_context_policy. */
+pub fn workflow_stage_context_policy(context_policy = nil, input_contract = nil) {
+  let policy = context_policy ?? {}
+  if len(__workflow_list(policy?.include_kinds)) > 0 {
+    return policy
+  }
+  let input_kinds = __workflow_list(input_contract?.input_kinds)
+  if len(input_kinds) == 0 {
+    return policy
+  }
+  return policy + {include_kinds: input_kinds}
+}
+
+/** workflow_select_artifacts. */
+pub fn workflow_select_artifacts(artifacts = nil, policy = nil) {
+  let opts = policy ?? {}
+  var candidates = []
+  for artifact in __workflow_list(artifacts) {
+    if __workflow_artifact_matches_policy(artifact, opts) {
+      candidates = candidates.push(artifact)
+    }
+  }
+  let sorted = __workflow_sort_artifacts(candidates, opts)
+  let reserve_tokens = __workflow_num(opts?.reserve_tokens, 0)
+  let max_tokens = if opts?.max_tokens == nil {
+    nil
+  } else {
+    max(__workflow_num(opts.max_tokens, 0) - reserve_tokens, 0)
+  }
+  var used_tokens = 0
+  var selected = []
+  for artifact in sorted {
+    if opts?.max_artifacts != nil && len(selected) >= opts.max_artifacts {
+      break
+    }
+    let next_tokens = __workflow_num(artifact?.estimated_tokens, 0)
+    if max_tokens != nil && used_tokens + next_tokens > max_tokens {
+      continue
+    }
+    used_tokens = used_tokens + next_tokens
+    selected = selected.push(artifact)
+  }
+  return selected
+}
+
+/** workflow_select_artifacts_adaptive. */
+pub fn workflow_select_artifacts_adaptive(artifacts = nil, policy = nil) {
+  let opts = policy ?? {}
+  let fresh = __workflow_drop_stale_evidence_artifacts(__workflow_list(artifacts))
+  let deduped = __workflow_dedup_artifacts(fresh)
+  let compacted = __workflow_microcompact_artifacts(deduped, opts)
+  return workflow_select_artifacts(compacted, opts)
+}
+
+/** workflow_select_stage_artifacts. */
+pub fn workflow_select_stage_artifacts(config = nil) {
+  let opts = config ?? {}
+  let policy = workflow_stage_context_policy(opts?.context_policy ?? {}, opts?.input_contract ?? {})
+  return {
+    context_policy: policy,
+    artifacts: workflow_select_artifacts_adaptive(opts?.artifacts ?? [], policy),
+  }
+}
