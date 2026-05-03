@@ -69,29 +69,35 @@ impl BundleManifestBuilder {
         candidates: &[PathBuf],
         kind: &'static str,
     ) {
-        let resolved = candidates
+        let stdlib_asset = harn_modules::asset_paths::stdlib_prompt_asset_path(target)
+            .map(|rel| format!("std://{rel}"));
+        let resolved = stdlib_asset.clone().unwrap_or_else(|| {
+            candidates
+                .iter()
+                .find(|path| path.exists())
+                .or_else(|| candidates.first())
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| target.to_string())
+        });
+        let candidate_strings = stdlib_asset
             .iter()
-            .find(|path| path.exists())
-            .or_else(|| candidates.first())
             .cloned()
-            .unwrap_or_else(|| PathBuf::from(target));
-        let key = format!(
-            "{}\u{0}{}\u{0}{}",
-            declared_in.display(),
-            via,
-            resolved.display()
-        );
+            .chain(candidates.iter().map(|path| path.display().to_string()))
+            .collect::<Vec<_>>();
+        let exists = if stdlib_asset.is_some() {
+            harn_vm::stdlib_modules::get_stdlib_prompt_asset(target).is_some()
+        } else {
+            candidates.iter().any(|path| path.exists())
+        };
+        let key = format!("{}\u{0}{}\u{0}{}", declared_in.display(), via, resolved);
         self.assets.entry(key).or_insert(BundleAssetRecord {
             declared_in: declared_in.display().to_string(),
             via: via.to_string(),
             kind,
             target: target.to_string(),
-            resolved: resolved.display().to_string(),
-            candidates: candidates
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect(),
-            exists: candidates.iter().any(|path| path.exists()),
+            resolved,
+            candidates: candidate_strings,
+            exists,
         });
     }
 

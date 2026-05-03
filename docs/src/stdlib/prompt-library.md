@@ -31,6 +31,12 @@ body = "Use nextest for {{crate}} and keep sccache warm."
 
 An entry can use `body`, `prompt`, or `text` inline. It can also use `path` to
 load a sibling `.harn.prompt` / `.prompt` template relative to the catalog.
+Embedded stdlib prompt fragments can be loaded directly with `std/...harn.prompt`
+paths because `read_file` exposes their raw template source:
+
+```harn,ignore
+let library = prompt_library_load("std/agent/prompts/tool_contract_text.harn.prompt")
+```
 
 Single `.harn.prompt` files can carry TOML front matter:
 

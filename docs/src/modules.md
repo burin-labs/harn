@@ -601,6 +601,16 @@ is exact.
 so a deeply-included partial can pull in its sibling fragments by the
 same stable name regardless of which entry pipeline rendered it.
 
+Stdlib prompt assets use `std/...harn.prompt` paths:
+
+```harn,ignore
+render_prompt("std/agent/prompts/tool_contract_text.harn.prompt", {})
+```
+
+These assets are embedded alongside stdlib modules, cache by stable asset id
+and content hash, and use `std://...` template URIs in prompt provenance.
+They are the default home for reusable model-facing stdlib prompt prose.
+
 `harn check` resolves `@`-paths during preflight and fails the run
 when:
 

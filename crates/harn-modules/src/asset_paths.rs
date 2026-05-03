@@ -36,6 +36,16 @@ pub fn is_asset_path(path: &str) -> bool {
     path.starts_with(ASSET_PREFIX)
 }
 
+/// Return the stdlib prompt-asset path without its `std/` prefix.
+///
+/// `std/...` prompt assets are embedded, not filesystem paths, but they
+/// share this module so runtime, CLI, and editor tooling classify prompt
+/// targets the same way.
+pub fn stdlib_prompt_asset_path(path: &str) -> Option<&str> {
+    let rel = path.strip_prefix("std/")?;
+    (!rel.is_empty()).then_some(rel)
+}
+
 /// Parse an `@`-prefixed path. Returns `None` for plain paths so callers
 /// can fall back to source-relative resolution. Malformed `@`-paths
 /// (e.g. `@foo` with no slash) also return `None`; the resolver wraps
@@ -198,6 +208,18 @@ mod tests {
         assert!(parse("relative/path").is_none());
         assert!(parse("/absolute/path").is_none());
         assert!(parse("../sibling").is_none());
+    }
+
+    #[test]
+    fn stdlib_prompt_paths_are_classified_without_filesystem_resolution() {
+        assert_eq!(
+            stdlib_prompt_asset_path("std/agent/prompts/tool_contract_text.harn.prompt"),
+            Some("agent/prompts/tool_contract_text.harn.prompt")
+        );
+        assert_eq!(
+            stdlib_prompt_asset_path("agent/prompts/foo.harn.prompt"),
+            None
+        );
     }
 
     #[test]

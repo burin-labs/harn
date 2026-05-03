@@ -119,6 +119,29 @@ pub fn chat() -> string {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn preflight_accepts_embedded_stdlib_prompt_target() {
+    let dir = unique_temp_dir("harn-check-stdlib-render-prompt");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("chat.harn");
+    let source = r#"
+pub fn chat() -> string {
+  return render_prompt("std/agent/prompts/tool_contract_text.harn.prompt", {})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("render_prompt target")),
+        "embedded stdlib prompt should not be treated as a missing file: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Acceptance for issue #771: dynamic first arguments are not statically
 /// checkable, so `render_prompt(some_var, ...)` must be silently
 /// skipped — no false positives on legitimate dynamic dispatch.
@@ -1002,6 +1025,7 @@ import "lib/helper.harn"
 pipeline main() {
   let review = render_prompt("prompts/review.harn.prompt")
   let snippet = render("shared/snippet.prompt")
+  let contract = render_prompt("std/agent/prompts/tool_contract_text.harn.prompt")
   host_call("project.scan", {})
   exec_at("shared", "pwd")
   spawn_agent({
@@ -1009,7 +1033,7 @@ pipeline main() {
     node: {kind: "stage"},
     execution: {worktree: {repo: "./repo"}}
   })
-  println(review + snippet)
+  println(review + snippet + contract)
 }
 "#,
     )
@@ -1058,7 +1082,14 @@ pipeline main() {
         .any(|entry| entry
             .as_str()
             .is_some_and(|value| value.ends_with("/shared/snippet.prompt"))));
-    assert_eq!(manifest["summary"]["prompt_asset_count"].as_u64(), Some(2));
+    assert!(manifest["prompt_assets"]
+        .as_array()
+        .expect("prompt assets")
+        .iter()
+        .any(|entry| entry
+            .as_str()
+            .is_some_and(|value| value == "std://agent/prompts/tool_contract_text.harn.prompt")));
+    assert_eq!(manifest["summary"]["prompt_asset_count"].as_u64(), Some(3));
     assert_eq!(
         manifest["summary"]["module_dependency_count"].as_u64(),
         Some(1)

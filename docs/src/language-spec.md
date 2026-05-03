@@ -4857,6 +4857,11 @@ real file at preflight time. `harn contracts bundle` records every
 resolved asset under `prompt_assets`. Plain (non-`@`) paths keep their
 legacy source-relative resolution unchanged.
 
+Stdlib prompt assets use embedded `std/...harn.prompt` paths, for example
+`std/agent/prompts/tool_contract_text.harn.prompt`. They are the default home
+for reusable model-facing stdlib prompt prose, render without filesystem I/O,
+and report stable `std://...` provenance URIs.
+
 ### `[llm]` — packaged provider extensions
 
 ```toml

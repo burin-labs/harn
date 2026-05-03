@@ -1,0 +1,2 @@
+Stage {{ name | default: "unnamed" }}:
+{{ goal | default: "Complete the assigned stage and report the result." }}

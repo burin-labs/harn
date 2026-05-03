@@ -8,7 +8,9 @@
 
 use std::path::{Path, PathBuf};
 
-pub use harn_modules::asset_paths::{is_asset_path, parse, resolve, AssetRef};
+pub use harn_modules::asset_paths::{
+    is_asset_path, parse, resolve, stdlib_prompt_asset_path, AssetRef,
+};
 
 /// Resolve an `@`-prefixed asset path against the project root, or fall
 /// back to the legacy source-relative resolver when `path` is plain.

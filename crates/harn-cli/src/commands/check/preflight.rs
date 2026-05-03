@@ -113,13 +113,17 @@ fn scan_static_tool_surface_preflight(
         .map(|tool| tool.name.clone())
         .collect::<BTreeSet<_>>();
     for prompt_target in prompt_targets {
-        let candidates = resolve_preflight_target(file_path, &prompt_target, config);
-        let Some(existing) = candidates.iter().find(|path| path.exists()) else {
-            continue;
+        let body = if harn_modules::asset_paths::stdlib_prompt_asset_path(&prompt_target).is_some()
+        {
+            harn_vm::stdlib_modules::get_stdlib_prompt_asset(&prompt_target).map(str::to_string)
+        } else {
+            let candidates = resolve_preflight_target(file_path, &prompt_target, config);
+            let Some(existing) = candidates.iter().find(|path| path.exists()) else {
+                continue;
+            };
+            std::fs::read_to_string(existing).ok()
         };
-        let Ok(body) = std::fs::read_to_string(existing) else {
-            continue;
-        };
+        let Some(body) = body else { continue };
         for reference in harn_vm::tool_surface::prompt_tool_references(&body) {
             if !tool_names.contains(&reference) {
                 diagnostics.push(PreflightDiagnostic {
@@ -755,6 +759,25 @@ fn scan_node_preflight(
         }
         Node::FunctionCall { name, args, .. } if name == "render" || name == "render_prompt" => {
             if let Some(template_path) = args.first().and_then(literal_template_path) {
+                if scan_stdlib_prompt_target(
+                    &template_path,
+                    name,
+                    args[0].span,
+                    file_path,
+                    source,
+                    diagnostics,
+                ) {
+                    scan_children(
+                        args,
+                        file_path,
+                        source,
+                        config,
+                        host_capabilities,
+                        visited,
+                        diagnostics,
+                    );
+                    return;
+                }
                 if let Some(asset_ref) = harn_modules::asset_paths::parse(&template_path) {
                     let anchor = file_path.parent().unwrap_or(Path::new("."));
                     if let Err(err) = harn_modules::asset_paths::resolve(&asset_ref, anchor) {
@@ -914,42 +937,53 @@ fn scan_node_preflight(
                 }
                 if cap == "template" && op == "render" {
                     if let Some(template_path) = host_render_path_arg(params_arg) {
-                        if let Some(asset_ref) = harn_modules::asset_paths::parse(&template_path) {
-                            let anchor = file_path.parent().unwrap_or(Path::new("."));
-                            if let Err(err) = harn_modules::asset_paths::resolve(&asset_ref, anchor)
+                        if !scan_stdlib_prompt_target(
+                            &template_path,
+                            "host template render",
+                            params_arg.map(|arg| arg.span).unwrap_or(node.span),
+                            file_path,
+                            source,
+                            diagnostics,
+                        ) {
+                            if let Some(asset_ref) =
+                                harn_modules::asset_paths::parse(&template_path)
                             {
+                                let anchor = file_path.parent().unwrap_or(Path::new("."));
+                                if let Err(err) =
+                                    harn_modules::asset_paths::resolve(&asset_ref, anchor)
+                                {
+                                    diagnostics.push(PreflightDiagnostic {
+                                        path: file_path.display().to_string(),
+                                        source: source.to_string(),
+                                        span: params_arg.map(|arg| arg.span).unwrap_or(node.span),
+                                        message: format!("preflight: {err}"),
+                                        help: Some(
+                                            "see docs/src/modules.md#package-root-prompt-assets for `@/...` and `@<alias>/...` syntax".to_string(),
+                                        ),
+                                        tags: None,
+                                    });
+                                    return;
+                                }
+                            }
+                            let resolved =
+                                resolve_preflight_target(file_path, &template_path, config);
+                            if !resolved.iter().any(|path| path.exists()) {
                                 diagnostics.push(PreflightDiagnostic {
                                     path: file_path.display().to_string(),
                                     source: source.to_string(),
-                                    span: params_arg
-                                        .map(|arg| arg.span)
-                                        .unwrap_or(node.span),
-                                    message: format!("preflight: {err}"),
+                                    span: params_arg.map(|arg| arg.span).unwrap_or(node.span),
+                                    message: format!(
+                                        "preflight: host template render target '{}' does not exist at {}",
+                                        template_path,
+                                        render_candidate_paths(&resolved)
+                                    ),
                                     help: Some(
-                                        "see docs/src/modules.md#package-root-prompt-assets for `@/...` and `@<alias>/...` syntax".to_string(),
+                                        "verify the template path, or set [check].bundle_root / --bundle-root when validating bundled layouts. Use `@/...` for project-root paths"
+                                            .to_string(),
                                     ),
                                     tags: None,
                                 });
-                                return;
                             }
-                        }
-                        let resolved = resolve_preflight_target(file_path, &template_path, config);
-                        if !resolved.iter().any(|path| path.exists()) {
-                            diagnostics.push(PreflightDiagnostic {
-                                path: file_path.display().to_string(),
-                                source: source.to_string(),
-                                span: params_arg.map(|arg| arg.span).unwrap_or(node.span),
-                                message: format!(
-                                    "preflight: host template render target '{}' does not exist at {}",
-                                    template_path,
-                                    render_candidate_paths(&resolved)
-                                ),
-                                help: Some(
-                                    "verify the template path, or set [check].bundle_root / --bundle-root when validating bundled layouts. Use `@/...` for project-root paths"
-                                        .to_string(),
-                                ),
-                                tags: None,
-                            });
                         }
                     }
                 }
@@ -1815,6 +1849,46 @@ fn render_candidate_paths(candidates: &[PathBuf]) -> String {
         .map(|path| path.display().to_string())
         .collect::<Vec<_>>()
         .join(" or ")
+}
+
+fn scan_stdlib_prompt_target(
+    template_path: &str,
+    target_label: &str,
+    span: harn_lexer::Span,
+    file_path: &Path,
+    source: &str,
+    diagnostics: &mut Vec<PreflightDiagnostic>,
+) -> bool {
+    if harn_modules::asset_paths::stdlib_prompt_asset_path(template_path).is_none() {
+        return false;
+    }
+    let Some(body) = harn_vm::stdlib_modules::get_stdlib_prompt_asset(template_path) else {
+        diagnostics.push(PreflightDiagnostic {
+            path: file_path.display().to_string(),
+            source: source.to_string(),
+            span,
+            message: format!(
+                "preflight: {target_label} target '{template_path}' is not an embedded stdlib prompt asset"
+            ),
+            help: Some(
+                "verify the `std/...harn.prompt` asset path against the stdlib prompt asset catalog"
+                    .to_string(),
+            ),
+            tags: None,
+        });
+        return true;
+    };
+    if let Err(err) = harn_vm::stdlib::template::validate_template_syntax(body) {
+        diagnostics.push(PreflightDiagnostic {
+            path: file_path.display().to_string(),
+            source: source.to_string(),
+            span,
+            message: format!("preflight: template '{template_path}' has a syntax error: {err}"),
+            help: Some("fix the embedded stdlib prompt asset template syntax".to_string()),
+            tags: None,
+        });
+    }
+    true
 }
 
 pub(super) fn host_render_path_arg(arg: Option<&SNode>) -> Option<String> {

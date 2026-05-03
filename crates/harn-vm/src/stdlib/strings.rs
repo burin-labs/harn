@@ -104,7 +104,8 @@ fn words_to_kebab<S: AsRef<str>>(words: &[S]) -> String {
 }
 
 use crate::stdlib::template::{
-    render_template_result, render_template_with_provenance, PromptSourceSpan, PromptSpanKind,
+    render_asset_result, render_asset_with_provenance_result, render_template_result,
+    PromptSourceSpan, PromptSpanKind, TemplateAsset,
 };
 
 fn render_template_string(args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -117,25 +118,17 @@ fn render_template_string(args: &[VmValue]) -> Result<VmValue, VmError> {
 
 fn render_asset(args: &[VmValue]) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
-    let resolved = resolve_render_target(&path)?;
-    let template = std::fs::read_to_string(&resolved).map_err(|e| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
-            "Failed to read template {}: {e}",
-            resolved.display()
-        ))))
-    })?;
-    let base = resolved.parent();
+    let asset = resolve_render_target(&path)?;
     let bindings = args.get(1).and_then(|a| a.as_dict());
-    let rendered = render_template_result(&template, bindings, base, Some(&resolved))
-        .map_err(VmError::from)?;
+    let rendered = render_asset_result(&asset, bindings).map_err(VmError::from)?;
     Ok(VmValue::String(Rc::from(rendered)))
 }
 
 /// Resolve a `render(...)` / `render_prompt(...)` target, honoring the
 /// `@/` and `@<alias>/` package-root forms (issue #742) and falling back
 /// to the legacy source-relative path resolver for plain strings.
-fn resolve_render_target(path: &str) -> Result<std::path::PathBuf, VmError> {
-    crate::stdlib::asset_paths::resolve_or_source_relative(path, None)
+fn resolve_render_target(path: &str) -> Result<TemplateAsset, VmError> {
+    TemplateAsset::render_target(path)
         .map_err(|msg| VmError::Thrown(VmValue::String(Rc::from(msg))))
 }
 
@@ -147,32 +140,21 @@ fn resolve_render_target(path: &str) -> Result<std::path::PathBuf, VmError> {
 /// section when a user clicks a chunk of the rendered prompt.
 fn render_asset_with_provenance(args: &[VmValue]) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
-    let resolved = resolve_render_target(&path)?;
-    let template = std::fs::read_to_string(&resolved).map_err(|e| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
-            "Failed to read template {}: {e}",
-            resolved.display()
-        ))))
-    })?;
-    let base = resolved.parent();
+    let asset = resolve_render_target(&path)?;
     let bindings = args.get(1).and_then(|a| a.as_dict());
     let (rendered, spans) =
-        render_template_with_provenance(&template, bindings, base, Some(&resolved), true)
-            .map_err(VmError::from)?;
+        render_asset_with_provenance_result(&asset, bindings, true).map_err(VmError::from)?;
     // Register in the thread-local provenance map so the DAP adapter
     // can answer `burin/promptProvenance` / `burin/promptConsumers`
     // queries for this render by id — the IDE only needs the id;
     // span payloads arrive over the DAP channel on demand.
     let prompt_id = crate::stdlib::template::register_prompt(
-        resolved.display().to_string(),
+        asset.uri.clone(),
         rendered.clone(),
         spans.clone(),
     );
     Ok(provenance_result_dict(
-        rendered,
-        resolved.display().to_string(),
-        prompt_id,
-        &spans,
+        rendered, asset.uri, prompt_id, &spans,
     ))
 }
 
@@ -216,8 +198,15 @@ fn span_to_vm_dict(span: &PromptSourceSpan) -> VmValue {
         "kind".into(),
         VmValue::String(Rc::from(span_kind_label(span.kind))),
     );
+    d.insert(
+        "template_uri".into(),
+        VmValue::String(Rc::from(span.template_uri.as_str())),
+    );
     if let Some(ref v) = span.bound_value {
         d.insert("bound_value".into(), VmValue::String(Rc::from(v.as_str())));
+    }
+    if let Some(parent) = span.parent_span.as_deref() {
+        d.insert("parent_span".into(), span_to_vm_dict(parent));
     }
     VmValue::Dict(Rc::new(d))
 }

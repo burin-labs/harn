@@ -250,6 +250,14 @@ fn write_cached_text(path: PathBuf, content: Rc<str>) {
 pub(crate) fn register_fs_builtins(vm: &mut Vm) {
     vm.register_builtin("read_file", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
+        if let Some(source) = crate::stdlib_modules::get_stdlib_prompt_asset(&path) {
+            return Ok(VmValue::String(Rc::from(source)));
+        }
+        if crate::stdlib::asset_paths::stdlib_prompt_asset_path(&path).is_some() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "Unknown stdlib prompt asset {path}"
+            )))));
+        }
         let resolved = resolve_fs_path(&path);
         crate::stdlib::sandbox::enforce_fs_path(
             "read_file",
@@ -274,6 +282,14 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
 
     vm.register_builtin("read_file_result", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
+        if let Some(source) = crate::stdlib_modules::get_stdlib_prompt_asset(&path) {
+            return Ok(result_ok(VmValue::String(Rc::from(source))));
+        }
+        if crate::stdlib::asset_paths::stdlib_prompt_asset_path(&path).is_some() {
+            return Ok(result_err(VmValue::String(Rc::from(format!(
+                "Unknown stdlib prompt asset {path}"
+            )))));
+        }
         let resolved = resolve_fs_path(&path);
         if let Err(error) = crate::stdlib::sandbox::enforce_fs_path(
             "read_file_result",
@@ -798,6 +814,19 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn read_file_loads_embedded_stdlib_prompt_source() {
+        let mut vm = vm();
+        let source = call(
+            &mut vm,
+            "read_file",
+            vec![s("std/agent/prompts/tool_contract_text.harn.prompt")],
+        )
+        .unwrap()
+        .display();
+        assert!(source.contains("{{ include \"action_turn_nudge.harn.prompt\" }}"));
     }
 
     #[test]
