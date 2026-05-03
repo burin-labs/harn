@@ -30,6 +30,7 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "git" => Some(include_str!("stdlib_git.harn")),
         "hitl" => Some(include_str!("stdlib_hitl.harn")),
         "trust" => Some(include_str!("stdlib_trust.harn")),
+        "corrections" => Some(include_str!("stdlib_corrections.harn")),
         "plan" => Some(include_str!("stdlib_plan.harn")),
         "waitpoints" => Some(include_str!("stdlib_waitpoints.harn")),
         "waitpoint" => Some(include_str!("stdlib_waitpoint.harn")),

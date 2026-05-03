@@ -28,6 +28,21 @@ pub(crate) struct TriggerReplayArgs {
     /// Resolve the binding version that was active at this historical timestamp.
     #[arg(long = "as-of", value_name = "TIMESTAMP")]
     pub as_of: Option<String>,
+    /// Record a human steering correction from a replay step (`event`, `outcome`, or action graph node id).
+    #[arg(long = "steer-from", value_name = "STEP", requires = "to_decision")]
+    pub steer_from: Option<String>,
+    /// JSON decision the human wants to apply at `--steer-from`.
+    #[arg(long = "to-decision", value_name = "JSON", requires = "steer_from")]
+    pub to_decision: Option<String>,
+    /// Human-readable reason for a replay steering correction.
+    #[arg(long = "reason", value_name = "TEXT", requires = "steer_from")]
+    pub reason: Option<String>,
+    /// Actor applying a replay steering correction.
+    #[arg(long = "applied-by", value_name = "ACTOR", requires = "steer_from")]
+    pub applied_by: Option<String>,
+    /// Correction learning scope: this_run, this_persona, or all.
+    #[arg(long = "scope", value_name = "SCOPE", requires = "steer_from")]
+    pub scope: Option<String>,
     /// Preview which records would be replayed without dispatching them.
     #[arg(long)]
     pub dry_run: bool,

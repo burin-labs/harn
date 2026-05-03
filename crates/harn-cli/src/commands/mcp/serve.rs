@@ -261,6 +261,16 @@ struct TriggerReplayRequest {
     event_id: String,
     #[serde(default)]
     as_of: Option<String>,
+    #[serde(default)]
+    steer_from: Option<String>,
+    #[serde(default)]
+    to_decision: Option<JsonValue>,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    applied_by: Option<String>,
+    #[serde(default)]
+    scope: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -271,6 +281,36 @@ struct DlqRetryRequest {
 #[derive(Clone, Debug, Deserialize)]
 struct SecretScanRequest {
     content: String,
+}
+
+fn trigger_replay_steering_from_request(
+    request: &TriggerReplayRequest,
+) -> Result<Option<crate::commands::trigger::replay::ReplaySteering>, String> {
+    let Some(step) = request.steer_from.as_ref() else {
+        if request.to_decision.is_some()
+            || request.reason.is_some()
+            || request.applied_by.is_some()
+            || request.scope.is_some()
+        {
+            return Err(
+                "harn.trigger.replay: steer_from is required for replay steering fields"
+                    .to_string(),
+            );
+        }
+        return Ok(None);
+    };
+    let to_decision = request
+        .to_decision
+        .clone()
+        .ok_or_else(|| "harn.trigger.replay: steer_from requires to_decision".to_string())?;
+    crate::commands::trigger::replay::ReplaySteering::new(
+        step.clone(),
+        to_decision,
+        request.reason.clone(),
+        request.applied_by.clone(),
+        request.scope.as_deref(),
+    )
+    .map(Some)
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -616,13 +656,21 @@ impl McpOrchestratorService {
             ),
             tool_def(
                 "harn.trigger.replay",
-                "Replay an existing trigger event, optionally resolving bindings as of a historical timestamp.",
+                "Replay an existing trigger event, optionally resolving bindings as of a historical timestamp or recording a teaching correction.",
                 json!({
                     "type": "object",
                     "required": ["event_id"],
                     "properties": {
                         "event_id": { "type": "string" },
                         "as_of": { "type": "string" },
+                        "steer_from": { "type": "string" },
+                        "to_decision": {},
+                        "reason": { "type": "string" },
+                        "applied_by": { "type": "string" },
+                        "scope": {
+                            "type": "string",
+                            "enum": ["this_run", "this_persona", "all"],
+                        },
                     },
                     "additionalProperties": false,
                 }),
@@ -1191,7 +1239,8 @@ impl McpOrchestratorService {
     async fn tool_trigger_replay(&self, arguments: JsonValue) -> Result<JsonValue, String> {
         let request: TriggerReplayRequest =
             serde_json::from_value(arguments).map_err(|error| error.to_string())?;
-        if let Some(as_of) = request.as_of.as_deref() {
+        let steering = trigger_replay_steering_from_request(&request)?;
+        if request.as_of.is_some() || steering.is_some() {
             let workspace_root = self
                 .config_path
                 .parent()
@@ -1202,8 +1251,9 @@ impl McpOrchestratorService {
                 ctx.event_log.clone(),
                 &workspace_root,
                 &request.event_id,
-                Some(as_of),
+                request.as_of.as_deref(),
                 false,
+                steering.as_ref(),
             )
             .await?;
             return serde_json::to_value(report).map_err(|error| error.to_string());
@@ -2743,6 +2793,31 @@ mod tests {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(path, contents).unwrap();
+    }
+
+    #[test]
+    fn trigger_replay_steering_request_validates_pairs() {
+        let request = TriggerReplayRequest {
+            event_id: "evt-1".to_string(),
+            as_of: None,
+            steer_from: None,
+            to_decision: Some(json!({"status": "skipped"})),
+            reason: None,
+            applied_by: None,
+            scope: None,
+        };
+        assert!(trigger_replay_steering_from_request(&request).is_err());
+
+        let request = TriggerReplayRequest {
+            steer_from: Some("outcome".to_string()),
+            scope: Some("this_persona".to_string()),
+            ..request
+        };
+        let steering = trigger_replay_steering_from_request(&request)
+            .expect("valid steering")
+            .expect("steering present");
+        assert_eq!(steering.step, "outcome");
+        assert_eq!(steering.scope, harn_vm::CorrectionScope::ThisPersona);
     }
 
     fn fixture_args(temp: &TempDir) -> McpServeArgs {

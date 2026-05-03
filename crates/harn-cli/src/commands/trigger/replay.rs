@@ -7,6 +7,7 @@ use serde_json::{json, Value as JsonValue};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+use harn_vm::corrections::{append_correction_record, CorrectionRecord, CorrectionScope};
 use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
 
 use crate::cli::TriggerReplayArgs;
@@ -56,6 +57,54 @@ pub struct TriggerReplayReport {
     pub original: Option<DispatchOutcomeSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drift: Option<DriftReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correction: Option<CorrectionRecord>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ReplaySteering {
+    pub step: String,
+    pub to_decision: JsonValue,
+    pub reason: String,
+    pub applied_by: String,
+    pub scope: CorrectionScope,
+}
+
+impl ReplaySteering {
+    pub fn new(
+        step: impl Into<String>,
+        to_decision: JsonValue,
+        reason: Option<String>,
+        applied_by: Option<String>,
+        scope: Option<&str>,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            step: step.into(),
+            to_decision,
+            reason: reason.unwrap_or_else(default_correction_reason),
+            applied_by: applied_by.unwrap_or_else(default_correction_applied_by),
+            scope: scope
+                .map(CorrectionScope::parse)
+                .transpose()?
+                .unwrap_or_default(),
+        })
+    }
+
+    fn from_cli_decision(
+        step: impl Into<String>,
+        raw_to_decision: &str,
+        reason: Option<String>,
+        applied_by: Option<String>,
+        scope: Option<&str>,
+    ) -> Result<Self, String> {
+        Self::new(
+            step,
+            parse_decision_value(raw_to_decision),
+            reason,
+            applied_by,
+            scope,
+        )
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -93,6 +142,7 @@ struct BulkReplayOptions<'a> {
 
 pub(crate) async fn run(args: TriggerReplayArgs) -> Result<(), String> {
     let (workspace_root, event_log) = workspace_root_and_event_log()?;
+    let steering = replay_steering_from_args(&args)?;
 
     if args.where_expr.is_none() {
         let event_id = args
@@ -105,6 +155,7 @@ pub(crate) async fn run(args: TriggerReplayArgs) -> Result<(), String> {
             event_id,
             args.as_of.as_deref(),
             args.diff,
+            steering.as_ref(),
         )
         .await?;
 
@@ -114,6 +165,10 @@ pub(crate) async fn run(args: TriggerReplayArgs) -> Result<(), String> {
                 .map_err(|error| format!("failed to encode replay report: {error}"))?
         );
         return Ok(());
+    }
+
+    if steering.is_some() {
+        return Err("--steer-from is only supported for single-event replay".to_string());
     }
 
     install_trigger_runtime(&workspace_root).await?;
@@ -180,9 +235,10 @@ pub async fn replay_report_for_event_log(
     event_id: &str,
     as_of: Option<&str>,
     diff: bool,
+    steering: Option<&ReplaySteering>,
 ) -> Result<TriggerReplayReport, String> {
     let recorded = load_recorded_event(&event_log, event_id).await?;
-    replay_report_for_record(event_log, workspace_root, recorded, as_of, diff).await
+    replay_report_for_record(event_log, workspace_root, recorded, as_of, diff, steering).await
 }
 
 async fn replay_report_for_record(
@@ -191,6 +247,7 @@ async fn replay_report_for_record(
     recorded: TriggerEventRecord,
     as_of: Option<&str>,
     diff: bool,
+    steering: Option<&ReplaySteering>,
 ) -> Result<TriggerReplayReport, String> {
     let mut vm = build_replay_vm(workspace_root);
     let extensions = package::load_runtime_extensions(workspace_root);
@@ -206,9 +263,15 @@ async fn replay_report_for_record(
     };
     let as_of = as_of.map(parse_timestamp).transpose()?;
     let binding = resolve_binding(&recorded, as_of)?;
+    let steering_from_decision = match steering {
+        Some(steering) => Some(
+            resolve_steering_from_decision(&event_log, &recorded, &binding, &steering.step).await?,
+        ),
+        None => None,
+    };
 
     append_replay_record(&event_log, &binding, &recorded.event).await?;
-    let dispatcher = harn_vm::Dispatcher::with_event_log(vm, event_log);
+    let dispatcher = harn_vm::Dispatcher::with_event_log(vm, event_log.clone());
     let replay = dispatcher
         .dispatch_replay(
             &binding,
@@ -218,6 +281,20 @@ async fn replay_report_for_record(
         .await
         .map_err(|error| format!("trigger replay failed: {error}"))?;
     let replay_summary = summarize_dispatch_outcome(&replay);
+    let correction = match (steering, steering_from_decision) {
+        (Some(steering), Some(from_decision)) => Some(
+            append_replay_correction(
+                &event_log,
+                &recorded,
+                &binding,
+                &replay_summary,
+                steering,
+                from_decision,
+            )
+            .await?,
+        ),
+        _ => None,
+    };
 
     let drift = original
         .as_ref()
@@ -230,6 +307,7 @@ async fn replay_report_for_record(
         replay: replay_summary,
         original,
         drift,
+        correction,
     })
 }
 
@@ -270,6 +348,7 @@ async fn replay_bulk_targets(
             target.record.clone(),
             options.as_of,
             options.diff,
+            None,
         )
         .await?;
         executed_count += 1;
@@ -326,6 +405,149 @@ pub fn build_replay_vm(workspace_root: &Path) -> harn_vm::Vm {
     vm.set_project_root(workspace_root);
     vm.set_source_dir(workspace_root);
     vm
+}
+
+fn replay_steering_from_args(args: &TriggerReplayArgs) -> Result<Option<ReplaySteering>, String> {
+    let Some(step) = args.steer_from.as_ref() else {
+        return Ok(None);
+    };
+    let raw_to_decision = args
+        .to_decision
+        .as_deref()
+        .ok_or_else(|| "--steer-from requires --to-decision".to_string())?;
+    ReplaySteering::from_cli_decision(
+        step.clone(),
+        raw_to_decision,
+        args.reason.clone(),
+        args.applied_by.clone(),
+        args.scope.as_deref(),
+    )
+    .map(Some)
+}
+
+fn default_correction_reason() -> String {
+    "manual replay steering".to_string()
+}
+
+fn default_correction_applied_by() -> String {
+    std::env::var("HARN_APPLIED_BY").unwrap_or_else(|_| "operator".to_string())
+}
+
+fn parse_decision_value(raw: &str) -> JsonValue {
+    serde_json::from_str(raw).unwrap_or_else(|_| JsonValue::String(raw.to_string()))
+}
+
+async fn resolve_steering_from_decision(
+    event_log: &Arc<AnyEventLog>,
+    recorded: &TriggerEventRecord,
+    binding: &harn_vm::triggers::registry::TriggerBinding,
+    step: &str,
+) -> Result<JsonValue, String> {
+    match step {
+        "event" | "trigger" => serde_json::to_value(&recorded.event)
+            .map_err(|error| format!("failed to encode trigger event for correction: {error}")),
+        "outcome" | "dispatch" | "terminal" => serde_json::to_value(
+            load_original_outcome(event_log, recorded).await?,
+        )
+        .map_err(|error| {
+            format!("failed to encode original dispatch outcome for correction: {error}")
+        }),
+        other => {
+            let binding_key = binding.binding_key();
+            load_action_graph_node(event_log, &recorded.event.id.0, &binding_key, other)
+                .await?
+                .ok_or_else(|| {
+                    format!(
+                        "unknown replay step '{other}'; expected event, outcome, or an action graph node id"
+                    )
+                })
+        }
+    }
+}
+
+async fn load_action_graph_node(
+    event_log: &Arc<AnyEventLog>,
+    event_id: &str,
+    binding_key: &str,
+    step: &str,
+) -> Result<Option<JsonValue>, String> {
+    let topic = Topic::new(ACTION_GRAPH_TOPIC)
+        .map_err(|error| format!("invalid action graph topic: {error}"))?;
+    let events = event_log
+        .read_range(&topic, None, usize::MAX)
+        .await
+        .map_err(|error| format!("failed to read action graph updates: {error}"))?;
+    for (_, event) in events {
+        let context = event.payload.get("context");
+        if context
+            .and_then(|value| value.get("event_id"))
+            .and_then(|value| value.as_str())
+            .is_some_and(|candidate| candidate != event_id)
+        {
+            continue;
+        }
+        if context
+            .and_then(|value| value.get("binding_key"))
+            .and_then(|value| value.as_str())
+            .is_some_and(|candidate| candidate != binding_key)
+        {
+            continue;
+        }
+        let Some(nodes) = event.payload["observability"]["action_graph_nodes"].as_array() else {
+            continue;
+        };
+        if let Some(node) = nodes.iter().find(|node| {
+            node.get("id").and_then(|value| value.as_str()) == Some(step)
+                || node.get("node_id").and_then(|value| value.as_str()) == Some(step)
+        }) {
+            return Ok(Some(node.clone()));
+        }
+    }
+    Ok(None)
+}
+
+async fn append_replay_correction(
+    event_log: &Arc<AnyEventLog>,
+    recorded: &TriggerEventRecord,
+    binding: &harn_vm::triggers::registry::TriggerBinding,
+    replay: &DispatchOutcomeSummary,
+    steering: &ReplaySteering,
+    from_decision: JsonValue,
+) -> Result<CorrectionRecord, String> {
+    let mut record = CorrectionRecord::new(
+        from_decision,
+        steering.to_decision.clone(),
+        steering.reason.clone(),
+        steering.applied_by.clone(),
+        steering.scope,
+    );
+    record.actor_id = Some(binding.id.as_str().to_string());
+    record.action = Some(format!(
+        "{}.{}",
+        recorded.event.provider.as_str(),
+        recorded.event.kind
+    ));
+    record.trace_id = Some(recorded.event.trace_id.0.clone());
+    record.step = Some(steering.step.clone());
+    record.metadata.insert(
+        "event_id".to_string(),
+        serde_json::json!(recorded.event.id.0),
+    );
+    record.metadata.insert(
+        "binding_key".to_string(),
+        serde_json::json!(binding.binding_key()),
+    );
+    record.metadata.insert(
+        "binding_version".to_string(),
+        serde_json::json!(binding.version),
+    );
+    record.metadata.insert(
+        "replay_status".to_string(),
+        serde_json::json!(replay.status),
+    );
+    append_correction_record(event_log, &record)
+        .await
+        .map_err(|error| format!("failed to append correction record: {error}"))
 }
 
 pub(crate) fn parse_timestamp(raw: &str) -> Result<OffsetDateTime, String> {
@@ -745,8 +967,9 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        append_replay_record, build_replay_vm, load_recorded_event, resolve_binding,
-        summarize_dispatch_outcome, TriggerEventRecord, TRIGGER_EVENTS_TOPIC,
+        append_replay_record, build_replay_vm, load_recorded_event, replay_report_for_record,
+        resolve_binding, summarize_dispatch_outcome, ReplaySteering, TriggerEventRecord,
+        TRIGGER_EVENTS_TOPIC,
     };
     use crate::package;
 
@@ -832,6 +1055,74 @@ mod tests {
                 && log.metadata.get("recorded_version") == Some(&serde_json::json!(1))
                 && log.metadata.get("resolved_version") == Some(&serde_json::json!(3))
         }));
+
+        harn_vm::reset_thread_local_state();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn replay_steering_appends_correction_and_adapts_policy() {
+        let _guard = crate::tests::common::harn_state_lock::lock_harn_state();
+        harn_vm::reset_thread_local_state();
+
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let workspace_root = tempdir.path();
+        let event_log = install_default_for_base_dir(workspace_root).expect("install event log");
+
+        install_local_manifest(workspace_root, "on_tick_v1");
+        append_trigger_event(
+            &event_log,
+            TriggerEventRecord {
+                binding_id: TEST_TRIGGER_ID.to_string(),
+                binding_version: 1,
+                replay_of_event_id: None,
+                event: recorded_cron_event("evt-steer", OffsetDateTime::now_utc()),
+            },
+        )
+        .await;
+
+        let recorded = load_recorded_event(&event_log, "evt-steer")
+            .await
+            .expect("load recorded event");
+        let steering = ReplaySteering {
+            step: "event".to_string(),
+            to_decision: serde_json::json!({"kind": "cron.steered"}),
+            reason: "human corrected replay routing".to_string(),
+            applied_by: "alice".to_string(),
+            scope: harn_vm::CorrectionScope::ThisPersona,
+        };
+
+        let report = replay_report_for_record(
+            event_log.clone(),
+            workspace_root,
+            recorded,
+            None,
+            false,
+            Some(&steering),
+        )
+        .await
+        .expect("replay report");
+
+        let correction = report.correction.expect("correction record");
+        assert_eq!(correction.actor_id.as_deref(), Some(TEST_TRIGGER_ID));
+        assert_eq!(correction.step.as_deref(), Some("event"));
+        assert_eq!(correction.applied_by, "alice");
+        assert_eq!(correction.scope, harn_vm::CorrectionScope::ThisPersona);
+
+        let corrections = harn_vm::query_correction_records(
+            &event_log,
+            &harn_vm::CorrectionQueryFilters {
+                actor_id: Some(TEST_TRIGGER_ID.to_string()),
+                ..harn_vm::CorrectionQueryFilters::default()
+            },
+        )
+        .await
+        .expect("query corrections");
+        assert_eq!(corrections.len(), 1);
+
+        let policy = harn_vm::policy_for_agent(&event_log, TEST_TRIGGER_ID)
+            .await
+            .expect("policy for agent");
+        assert_eq!(policy.side_effect_level.as_deref(), Some("read_only"));
 
         harn_vm::reset_thread_local_state();
     }

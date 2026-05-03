@@ -388,7 +388,10 @@ pub async fn trust_score_for(
     )
     .await?;
     let effective_tier = resolve_agent_autonomy_tier(log, agent, AutonomyTier::ActAuto).await?;
-    Ok(score_from_records(agent, action, effective_tier, &records))
+    let mut score = score_from_records(agent, action, effective_tier, &records);
+    score.policy =
+        crate::corrections::apply_corrections_to_policy(log, agent, score.policy).await?;
+    Ok(score)
 }
 
 pub async fn policy_for_agent(

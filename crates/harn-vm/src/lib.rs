@@ -10,6 +10,7 @@ pub mod checkpoint;
 mod chunk;
 mod compiler;
 pub mod connectors;
+pub mod corrections;
 pub mod egress;
 pub mod event_log;
 pub mod events;
@@ -82,6 +83,12 @@ pub use connectors::{
     RateLimitConfig, RateLimiterFactory, RawInbound, SlackConnector, StreamConnector,
     TriggerBinding, TriggerKind, TriggerRegistry, WebhookSignatureVariant,
     RUST_PROVIDER_CONNECTOR_COMPAT_PROVIDERS,
+};
+pub use corrections::{
+    append_correction_record, apply_corrections_to_policy, correction_query_filters_from_json,
+    correction_record_from_json, policy_with_corrections, query_correction_records,
+    CorrectionQueryFilters, CorrectionRecord, CorrectionScope, CORRECTIONS_TOPIC,
+    CORRECTION_EVENT_KIND, CORRECTION_SCHEMA_V0,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;
