@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -60,9 +60,17 @@ pub(crate) struct McpOrchestratorService {
     oauth: Option<OAuthResourceServer>,
     prompt_catalog: Arc<Mutex<FilePromptCatalog>>,
     list_notify_tx: broadcast::Sender<JsonValue>,
+    resource_notify_tx: broadcast::Sender<McpResourceNotification>,
     task_notify_tx: broadcast::Sender<McpTaskNotification>,
     tasks: Arc<Mutex<BTreeMap<String, McpTaskRecord>>>,
+    resource_watchers: Arc<Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>>,
     _list_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
+}
+
+#[derive(Clone, Debug)]
+struct McpResourceNotification {
+    uri: String,
+    message: JsonValue,
 }
 
 #[derive(Clone, Debug)]
@@ -126,6 +134,7 @@ struct ConnectionState {
     authenticated: bool,
     client_identity: String,
     protocol_version: String,
+    subscribed_resources: BTreeSet<String>,
 }
 
 impl Default for ConnectionState {
@@ -135,6 +144,7 @@ impl Default for ConnectionState {
             authenticated: false,
             client_identity: "unknown".to_string(),
             protocol_version: MCP_PROTOCOL_VERSION.to_string(),
+            subscribed_resources: BTreeSet::new(),
         }
     }
 }
@@ -283,6 +293,12 @@ struct SecretScanRequest {
     content: String,
 }
 
+#[derive(Clone, Debug)]
+struct ResourceSubscription {
+    uri: String,
+    topic: Topic,
+}
+
 fn trigger_replay_steering_from_request(
     request: &TriggerReplayRequest,
 ) -> Result<Option<crate::commands::trigger::replay::ReplaySteering>, String> {
@@ -366,6 +382,7 @@ impl McpOrchestratorService {
         )));
         let manifest_source = Arc::new(Mutex::new(manifest_source));
         let (list_notify_tx, _) = broadcast::channel(64);
+        let (resource_notify_tx, _) = broadcast::channel(128);
         let (task_notify_tx, _) = broadcast::channel(64);
         let list_watcher = start_list_change_watcher(
             project_root,
@@ -382,8 +399,10 @@ impl McpOrchestratorService {
             oauth,
             prompt_catalog,
             list_notify_tx,
+            resource_notify_tx,
             task_notify_tx,
             tasks: Arc::new(Mutex::new(BTreeMap::new())),
+            resource_watchers: Arc::new(Mutex::new(BTreeMap::new())),
             _list_watcher: Arc::new(Mutex::new(list_watcher)),
         })
     }
@@ -430,6 +449,10 @@ impl McpOrchestratorService {
         self.list_notify_tx.subscribe()
     }
 
+    fn subscribe_resource_notifications(&self) -> broadcast::Receiver<McpResourceNotification> {
+        self.resource_notify_tx.subscribe()
+    }
+
     fn subscribe_task_notifications(&self) -> broadcast::Receiver<McpTaskNotification> {
         self.task_notify_tx.subscribe()
     }
@@ -468,6 +491,8 @@ impl McpOrchestratorService {
             mcp_protocol::METHOD_TASKS_CANCEL => self.handle_tasks_cancel(id, session, &params),
             "resources/list" => self.handle_resources_list(id, &params).await,
             "resources/read" => self.handle_resources_read(id, &params).await,
+            "resources/subscribe" => self.handle_resources_subscribe(id, session, &params).await,
+            "resources/unsubscribe" => self.handle_resources_unsubscribe(id, session, &params),
             "resources/templates/list" => self.handle_resource_templates_list(id, &params),
             "prompts/list" => self.handle_prompts_list(id, &params),
             "prompts/get" => self.handle_prompts_get(id, &params),
@@ -525,7 +550,7 @@ impl McpOrchestratorService {
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": {
                     "tools": { "listChanged": true },
-                    "resources": { "listChanged": true },
+                    "resources": { "listChanged": true, "subscribe": true },
                     "prompts": { "listChanged": true },
                     "logging": {},
                     "tasks": mcp_protocol::tasks_capability(),
@@ -1178,6 +1203,50 @@ impl McpOrchestratorService {
         }
     }
 
+    async fn handle_resources_subscribe(
+        &self,
+        id: JsonValue,
+        session: &mut ConnectionState,
+        params: &JsonValue,
+    ) -> JsonValue {
+        let uri = params
+            .get("uri")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default();
+        let subscription = match self.resource_subscription(uri).await {
+            Ok(subscription) => subscription,
+            Err(error) => return harn_vm::jsonrpc::error_response(id, -32002, &error),
+        };
+        session
+            .subscribed_resources
+            .insert(subscription.uri.clone());
+        match self.ensure_resource_update_watcher(subscription).await {
+            Ok(()) => harn_vm::jsonrpc::response(id, json!({})),
+            Err(error) => harn_vm::jsonrpc::error_response(id, -32603, &error),
+        }
+    }
+
+    fn handle_resources_unsubscribe(
+        &self,
+        id: JsonValue,
+        session: &mut ConnectionState,
+        params: &JsonValue,
+    ) -> JsonValue {
+        if let Some(uri) = params.get("uri").and_then(JsonValue::as_str) {
+            session.subscribed_resources.remove(uri);
+        }
+        harn_vm::jsonrpc::response(id, json!({}))
+    }
+
+    fn notify_topic_resource_changed(&self, topic_name: &str) {
+        for uri in resource_uris_for_topic(topic_name) {
+            let _ = self.resource_notify_tx.send(McpResourceNotification {
+                uri: uri.clone(),
+                message: resource_updated_notification(&uri),
+            });
+        }
+    }
+
     async fn tool_secret_scan(&self, arguments: JsonValue) -> Result<JsonValue, String> {
         let request: SecretScanRequest =
             serde_json::from_value(arguments).map_err(|error| error.to_string())?;
@@ -1207,6 +1276,7 @@ impl McpOrchestratorService {
         merge_json_object(&mut event, request.payload);
         inject_trace_headers(&mut event, &session.client_identity, trace_id);
         let handle = trigger_fire(&mut ctx, &request.trigger_id, event).await?;
+        self.notify_topic_resource_changed(TRIGGER_OUTBOX_TOPIC);
         Ok(json!({
             "event_id": handle.event_id,
             "status": handle.status,
@@ -1270,6 +1340,7 @@ impl McpOrchestratorService {
 
         let mut ctx = load_local_runtime(&self.local_args()).await?;
         let handle = trigger_replay(&mut ctx, &request.event_id).await?;
+        self.notify_topic_resource_changed(TRIGGER_OUTBOX_TOPIC);
         serde_json::to_value(handle).map_err(|error| error.to_string())
     }
 
@@ -1327,6 +1398,7 @@ impl McpOrchestratorService {
             .find(|entry| entry.id == request.entry_id)
             .ok_or_else(|| format!("unknown pending DLQ entry '{}'", request.entry_id))?;
         let handle = trigger_replay(&mut ctx, &entry.event_id).await?;
+        self.notify_topic_resource_changed(TRIGGER_OUTBOX_TOPIC);
         Ok(json!({
             "entry_id": entry.id,
             "handle": handle,
@@ -1387,8 +1459,23 @@ impl McpOrchestratorService {
             "description": "The running orchestrator manifest",
             "mimeType": "application/toml",
         })];
+        resources.extend(static_topic_resources());
 
         let ctx = load_local_runtime(&self.local_args()).await?;
+        for topic in ctx
+            .event_log
+            .topics()
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            if is_agent_transcript_topic(topic.as_str()) {
+                resources.push(topic_resource_def(
+                    topic.as_str(),
+                    topic.as_str(),
+                    "Agent transcript event stream",
+                ));
+            }
+        }
         let recorded = read_topic(&ctx.event_log, TRIGGER_EVENTS_TOPIC).await?;
         for (event_id, event) in recorded {
             let Ok(record) = serde_json::from_value::<RecordedTriggerEvent>(event.payload) else {
@@ -1439,7 +1526,137 @@ impl McpOrchestratorService {
                 "application/json",
             ));
         }
+        if uri.starts_with("harn://topic/") {
+            let detail = self.topic_resource(uri).await?;
+            return Ok((
+                serde_json::to_string_pretty(&detail).map_err(|error| error.to_string())?,
+                "application/json",
+            ));
+        }
         Err(format!("resource not found: {uri}"))
+    }
+
+    async fn topic_resource(&self, uri: &str) -> Result<JsonValue, String> {
+        let subscription = self.resource_subscription(uri).await?;
+        let ctx = load_local_runtime(&self.local_args()).await?;
+        let events = ctx
+            .event_log
+            .read_range(&subscription.topic, None, usize::MAX)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(json!({
+            "uri": subscription.uri,
+            "topic": subscription.topic.as_str(),
+            "events": preview_events(events),
+        }))
+    }
+
+    async fn resource_subscription(&self, uri: &str) -> Result<ResourceSubscription, String> {
+        let topic_name = topic_name_for_resource_uri(uri)
+            .ok_or_else(|| format!("resource is not subscribable: {uri}"))?;
+        let topic = Topic::new(topic_name).map_err(|error| error.to_string())?;
+        if is_static_subscribable_topic(topic.as_str()) {
+            return Ok(ResourceSubscription {
+                uri: uri.to_string(),
+                topic,
+            });
+        }
+
+        if is_agent_transcript_topic(topic.as_str()) {
+            let ctx = load_local_runtime(&self.local_args()).await?;
+            let exists = ctx
+                .event_log
+                .topics()
+                .await
+                .map_err(|error| error.to_string())?
+                .iter()
+                .any(|existing| existing.as_str() == topic.as_str());
+            if exists {
+                return Ok(ResourceSubscription {
+                    uri: uri.to_string(),
+                    topic,
+                });
+            }
+        }
+
+        Err(format!("resource not found: {uri}"))
+    }
+
+    async fn ensure_resource_update_watcher(
+        &self,
+        subscription: ResourceSubscription,
+    ) -> Result<(), String> {
+        if self
+            .resource_watchers
+            .lock()
+            .expect("resource watchers poisoned")
+            .contains_key(&subscription.uri)
+        {
+            return Ok(());
+        }
+
+        let ctx = load_local_runtime(&self.local_args()).await?;
+        let start_from = ctx
+            .event_log
+            .latest(&subscription.topic)
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut stream = ctx
+            .event_log
+            .clone()
+            .subscribe(&subscription.topic, start_from)
+            .await
+            .map_err(|error| error.to_string())?;
+        let event_log = ctx.event_log.clone();
+        let topic = subscription.topic.clone();
+        let tx = self.resource_notify_tx.clone();
+        let uri = subscription.uri.clone();
+        let handle = tokio::spawn(async move {
+            let mut last_seen = start_from.unwrap_or(0);
+            let mut poll = tokio::time::interval(std::time::Duration::from_millis(50));
+            loop {
+                tokio::select! {
+                    received = stream.next() => {
+                        match received {
+                            Some(Ok((event_id, _))) if event_id > last_seen => {
+                                last_seen = event_id;
+                                let _ = tx.send(McpResourceNotification {
+                                    uri: uri.clone(),
+                                    message: resource_updated_notification(&uri),
+                                });
+                            }
+                            Some(Ok(_)) => {}
+                            Some(Err(_)) | None => break,
+                        }
+                    }
+                    _ = poll.tick() => {
+                        match event_log.latest(&topic).await {
+                            Ok(Some(event_id)) if event_id > last_seen => {
+                                last_seen = event_id;
+                                let _ = tx.send(McpResourceNotification {
+                                    uri: uri.clone(),
+                                    message: resource_updated_notification(&uri),
+                                });
+                            }
+                            Ok(_) => {}
+                            Err(_) => break,
+                        }
+                    }
+                }
+            }
+        });
+
+        let mut watchers = self
+            .resource_watchers
+            .lock()
+            .expect("resource watchers poisoned");
+        if let std::collections::btree_map::Entry::Vacant(entry) = watchers.entry(subscription.uri)
+        {
+            entry.insert(handle);
+        } else {
+            handle.abort();
+        }
+        Ok(())
     }
 
     async fn event_resource(&self, event_id: &str) -> Result<JsonValue, String> {
@@ -1586,6 +1803,7 @@ async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
     let mut lines = stdin.lines();
     let mut session = ConnectionState::default();
     let mut list_notifications = service.subscribe_list_notifications();
+    let mut resource_notifications = service.subscribe_resource_notifications();
     let mut task_notifications = service.subscribe_task_notifications();
 
     eprintln!("[harn] MCP stdio server ready");
@@ -1612,6 +1830,16 @@ async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
             notification = list_notifications.recv() => {
                 match notification {
                     Ok(notification) => write_stdio_json(&mut stdout, &notification).await?,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            notification = resource_notifications.recv() => {
+                match notification {
+                    Ok(notification) if session.subscribed_resources.contains(&notification.uri) => {
+                        write_stdio_json(&mut stdout, &notification.message).await?;
+                    }
+                    Ok(_) => continue,
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
@@ -1958,6 +2186,15 @@ async fn http_get_stream(State(state): State<HttpState>, headers: HeaderMap) -> 
         .as_ref()
         .cloned()
     {
+        spawn_resource_notification_forwarder(state.service.clone(), sender, session.clone());
+    }
+    if let Some(sender) = session
+        .sse_tx
+        .lock()
+        .expect("SSE sender poisoned")
+        .as_ref()
+        .cloned()
+    {
         spawn_task_notification_forwarder(state.service.clone(), sender, session.clone());
     }
     let mut response = sse_response(rx).into_response();
@@ -2036,6 +2273,15 @@ async fn legacy_sse_stream(State(state): State<HttpState>, headers: HeaderMap) -
         .cloned();
     if let Some(list_tx) = list_tx {
         spawn_list_notification_forwarder(state.service.clone(), list_tx);
+    }
+    let resource_tx = session
+        .sse_tx
+        .lock()
+        .expect("legacy SSE sender poisoned")
+        .as_ref()
+        .cloned();
+    if let Some(resource_tx) = resource_tx {
+        spawn_resource_notification_forwarder(state.service.clone(), resource_tx, session.clone());
     }
     let task_tx = session
         .sse_tx
@@ -2266,6 +2512,36 @@ fn spawn_list_notification_forwarder(
             match notifications.recv().await {
                 Ok(message) => {
                     if sender.unbounded_send(message).is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
+fn spawn_resource_notification_forwarder(
+    service: Arc<McpOrchestratorService>,
+    sender: UnboundedSender<JsonValue>,
+    session: Arc<HttpSession>,
+) {
+    let mut notifications = service.subscribe_resource_notifications();
+    tokio::spawn(async move {
+        loop {
+            match notifications.recv().await {
+                Ok(notification) => {
+                    let subscribed = session
+                        .state
+                        .lock()
+                        .expect("MCP session poisoned")
+                        .subscribed_resources
+                        .contains(&notification.uri);
+                    if !subscribed {
+                        continue;
+                    }
+                    if sender.unbounded_send(notification.message).is_err() {
                         break;
                     }
                 }
@@ -2734,6 +3010,72 @@ fn preview_events(events: Vec<(u64, LogEvent)>) -> Vec<QueuePreviewEntry> {
         .collect()
 }
 
+fn static_topic_resources() -> Vec<JsonValue> {
+    vec![
+        topic_resource_def(
+            "trigger.inbox",
+            "Trigger Inbox",
+            "Queued trigger inbox events",
+        ),
+        topic_resource_def(
+            TRIGGER_OUTBOX_TOPIC,
+            "Trigger Outbox",
+            "Dispatched trigger outbox events",
+        ),
+    ]
+}
+
+fn topic_resource_def(topic_name: &str, name: &str, description: &str) -> JsonValue {
+    json!({
+        "uri": topic_resource_uri(topic_name),
+        "name": name,
+        "description": description,
+        "mimeType": "application/json",
+    })
+}
+
+fn topic_resource_uri(topic_name: &str) -> String {
+    format!("harn://topic/{topic_name}")
+}
+
+fn topic_name_for_resource_uri(uri: &str) -> Option<&str> {
+    let topic_name = uri.strip_prefix("harn://topic/")?;
+    match topic_name {
+        "trigger.inbox" => Some(TRIGGER_INBOX_ENVELOPES_TOPIC),
+        TRIGGER_OUTBOX_TOPIC => Some(TRIGGER_OUTBOX_TOPIC),
+        value if is_agent_transcript_topic(value) => Some(value),
+        _ => None,
+    }
+}
+
+fn resource_uris_for_topic(topic_name: &str) -> Vec<String> {
+    match topic_name {
+        TRIGGER_INBOX_ENVELOPES_TOPIC => vec![topic_resource_uri("trigger.inbox")],
+        TRIGGER_OUTBOX_TOPIC => vec![topic_resource_uri(TRIGGER_OUTBOX_TOPIC)],
+        value if is_agent_transcript_topic(value) => vec![topic_resource_uri(value)],
+        _ => Vec::new(),
+    }
+}
+
+fn is_static_subscribable_topic(topic_name: &str) -> bool {
+    matches!(
+        topic_name,
+        TRIGGER_INBOX_ENVELOPES_TOPIC | TRIGGER_OUTBOX_TOPIC
+    )
+}
+
+fn is_agent_transcript_topic(topic_name: &str) -> bool {
+    topic_name.starts_with("agent.transcript.")
+}
+
+fn resource_updated_notification(uri: &str) -> JsonValue {
+    json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/resources/updated",
+        "params": { "uri": uri },
+    })
+}
+
 fn filter_related_events(
     events: Vec<(u64, LogEvent)>,
     event_id: &str,
@@ -2944,6 +3286,10 @@ pub fn on_fail(event: TriggerEvent) -> any {
             json!(true)
         );
         assert_eq!(
+            response["result"]["capabilities"]["resources"]["subscribe"],
+            json!(true)
+        );
+        assert_eq!(
             response["result"]["capabilities"]["prompts"]["listChanged"],
             json!(true)
         );
@@ -3021,6 +3367,29 @@ pub fn on_fail(event: TriggerEvent) -> any {
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(broadcast::error::RecvError::Closed) => {
                     panic!("notification channel closed")
+                }
+            }
+        }
+    }
+
+    async fn recv_next_resource_notification(
+        notifications: &mut broadcast::Receiver<McpResourceNotification>,
+    ) -> McpResourceNotification {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "timed out waiting for resource notification"
+            );
+            match tokio::time::timeout(remaining, notifications.recv())
+                .await
+                .expect("timed out waiting for resource notification")
+            {
+                Ok(msg) => return msg,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => {
+                    panic!("resource notification channel closed")
                 }
             }
         }
@@ -3597,6 +3966,72 @@ version = "0.1.0"
             }),
             "action_graph={action_graph:?}"
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resource_subscription_notifies_when_event_log_topic_changes() {
+        let _guard = lock_harn_state();
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+        let mut session = init_session(&service).await;
+        let mut notifications = service.subscribe_resource_notifications();
+
+        let subscribed = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(
+                    10,
+                    "resources/subscribe",
+                    json!({ "uri": "harn://topic/trigger.outbox" }),
+                ),
+            )
+            .await;
+        assert_eq!(subscribed["result"], json!({}));
+        assert!(session
+            .subscribed_resources
+            .contains("harn://topic/trigger.outbox"));
+
+        let fire = call_tool(
+            &service,
+            &mut session,
+            "harn.trigger.fire",
+            json!({ "trigger_id": "cron-ok", "payload": {} }),
+        )
+        .await;
+        assert_eq!(fire["status"], "dispatched");
+
+        let notification = recv_next_resource_notification(&mut notifications).await;
+        assert_eq!(notification.uri, "harn://topic/trigger.outbox");
+        assert_eq!(
+            notification.message["method"],
+            json!("notifications/resources/updated")
+        );
+        assert_eq!(
+            notification.message["params"]["uri"],
+            json!("harn://topic/trigger.outbox")
+        );
+
+        let topic = read_resource(&service, &mut session, "harn://topic/trigger.outbox").await;
+        assert_eq!(topic["topic"], json!("trigger.outbox"));
+        assert!(topic["events"]
+            .as_array()
+            .is_some_and(|events| !events.is_empty()));
+
+        let unsubscribed = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(
+                    11,
+                    "resources/unsubscribe",
+                    json!({ "uri": "harn://topic/trigger.outbox" }),
+                ),
+            )
+            .await;
+        assert_eq!(unsubscribed["result"], json!({}));
+        assert!(!session
+            .subscribed_resources
+            .contains("harn://topic/trigger.outbox"));
     }
 
     #[tokio::test(flavor = "current_thread")]

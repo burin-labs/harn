@@ -168,6 +168,8 @@ impl McpServer {
             crate::mcp_protocol::METHOD_TASKS_CANCEL => self.handle_task_lookup(&id, &params),
             "resources/list" => self.handle_resources_list(&id, &params),
             "resources/read" => self.handle_resources_read(&id, &params, vm).await,
+            "resources/subscribe" => self.handle_resources_subscribe(&id, &params),
+            "resources/unsubscribe" => self.handle_resources_unsubscribe(&id, &params),
             "resources/templates/list" => self.handle_resource_templates_list(&id, &params),
             "prompts/list" => self.handle_prompts_list(&id, &params),
             "prompts/get" => self.handle_prompts_get(&id, &params, vm).await,
@@ -197,7 +199,7 @@ impl McpServer {
         {
             capabilities.insert(
                 "resources".into(),
-                serde_json::json!({ "listChanged": true }),
+                serde_json::json!({ "listChanged": true, "subscribe": true }),
             );
         }
         if !self.prompts.is_empty() {
@@ -534,6 +536,41 @@ impl McpServer {
             "id": id,
             "error": { "code": -32002, "message": format!("Resource not found: {uri}") }
         })
+    }
+
+    fn handle_resources_subscribe(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) -> serde_json::Value {
+        let uri = params.get("uri").and_then(|u| u.as_str()).unwrap_or("");
+        if !self.resource_uri_exists(uri) {
+            return serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32002, "message": format!("Resource not found: {uri}") }
+            });
+        }
+        crate::jsonrpc::response(id.clone(), serde_json::json!({}))
+    }
+
+    fn handle_resources_unsubscribe(
+        &self,
+        id: &serde_json::Value,
+        _params: &serde_json::Value,
+    ) -> serde_json::Value {
+        crate::jsonrpc::response(id.clone(), serde_json::json!({}))
+    }
+
+    fn resource_uri_exists(&self, uri: &str) -> bool {
+        if uri == "well-known://mcp-card" {
+            return self.server_card.is_some();
+        }
+        self.resources.iter().any(|resource| resource.uri == uri)
+            || self
+                .resource_templates
+                .iter()
+                .any(|template| match_uri_template(&template.uri_template, uri).is_some())
     }
 
     fn handle_resource_templates_list(
