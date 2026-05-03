@@ -1,0 +1,52 @@
+import { agent_loop_options } from "std/agent/options"
+import { agent_turn_preamble_prompt } from "std/agent/prompts"
+
+fn __agent_turn_system(user_system) {
+  let preamble = agent_turn_preamble_prompt()
+  if user_system == nil || user_system == "" {
+    return preamble
+  }
+  if type_of(user_system) != "string" {
+    throw "agent_turn: system must be a string or nil"
+  }
+  return preamble + "\n\n" + user_system
+}
+
+fn __false_or_nil(value) {
+  return value == nil || (type_of(value) == "bool" && !value)
+}
+
+fn __agent_turn_options(options) {
+  var opts = options ?? {}
+  if type_of(opts) != "dict" {
+    throw "agent_turn(prompt, opts?): opts must be a dict or nil"
+  }
+  if contains(opts.keys(), "judge") {
+    opts = opts + {done_judge: opts.judge}
+  }
+  if contains(opts.keys(), "done_judge") && __false_or_nil(opts?.done_judge) {
+    throw "agent_turn: done_judge is mandatory; pass a dict, true, or omit it"
+  }
+  if contains(opts.keys(), "done_sentinel") && __false_or_nil(opts?.done_sentinel) {
+    throw "agent_turn: done_sentinel is required; pass true, a string, or omit it"
+  }
+  if contains(opts.keys(), "persistent") && __false_or_nil(opts?.persistent) {
+    throw "agent_turn: persistent sentinel looping is required; pass true or omit it"
+  }
+  if !contains(opts.keys(), "done_judge") {
+    opts = opts + {done_judge: true}
+  }
+  if !contains(opts.keys(), "done_sentinel") {
+    opts = opts + {done_sentinel: true}
+  }
+  if !contains(opts.keys(), "persistent") {
+    opts = opts + {persistent: true}
+  }
+  return agent_loop_options(opts)
+}
+
+/** agent_turn. */
+pub fn agent_turn(prompt, options = nil) {
+  let opts = options ?? {}
+  return __host_agent_turn_collect(prompt, __agent_turn_system(opts?.system), __agent_turn_options(opts))
+}

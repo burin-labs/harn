@@ -22,6 +22,11 @@ assets. These render without touching the filesystem and report stable
 let tool_contract = render_prompt("std/agent/prompts/tool_contract_text.harn.prompt", {})
 ```
 
+Protected Rust orchestration paths are checked by `make check-rust-prompt-prose`;
+move reusable model-facing instructions into stdlib prompt assets unless the
+Rust literal is a short diagnostic, parser/protocol token, provider API string,
+or other primitive constant.
+
 This page is the reference. The one-page [quickref](./docs/llm/harn-quickref.md)
 has a condensed version for agents writing Harn.
 

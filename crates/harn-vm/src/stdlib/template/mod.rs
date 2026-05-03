@@ -25,7 +25,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::value::VmValue;
+use crate::value::{VmError, VmValue};
 
 mod assets;
 mod ast;
@@ -326,6 +326,19 @@ pub(crate) fn render_asset_result(
 ) -> Result<String, TemplateError> {
     let (rendered, _spans) = render_asset_with_provenance_result(asset, bindings, false)?;
     Ok(rendered)
+}
+
+pub(crate) fn render_stdlib_prompt_asset(
+    path: &str,
+    bindings: Option<&BTreeMap<String, VmValue>>,
+) -> Result<String, VmError> {
+    let target = if path.starts_with("std/") {
+        path.to_string()
+    } else {
+        format!("std/{path}")
+    };
+    let asset = TemplateAsset::render_target(&target).map_err(VmError::Runtime)?;
+    render_asset_result(&asset, bindings).map_err(VmError::from)
 }
 
 pub(crate) fn render_asset_with_provenance_result(

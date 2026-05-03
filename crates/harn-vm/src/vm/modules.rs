@@ -1,13 +1,45 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::rc::Rc;
 
+use crate::chunk::{Chunk, CompiledFunction};
 use crate::value::{ModuleFunctionRegistry, VmClosure, VmEnv, VmError, VmValue};
 
 use super::{ScopeSpan, Vm};
+
+#[derive(Clone)]
+struct ModuleImportSpec {
+    path: String,
+    selected_names: Option<Vec<String>>,
+    is_pub: bool,
+}
+
+#[derive(Clone)]
+struct CompiledStdlibModule {
+    imports: Vec<ModuleImportSpec>,
+    init_chunk: Option<Chunk>,
+    functions: BTreeMap<String, CompiledFunction>,
+    public_names: HashSet<String>,
+}
+
+thread_local! {
+    static STDLIB_MODULE_ARTIFACT_CACHE: RefCell<BTreeMap<String, Rc<CompiledStdlibModule>>> =
+        const { RefCell::new(BTreeMap::new()) };
+}
+
+#[cfg(test)]
+fn reset_stdlib_module_artifact_cache() {
+    STDLIB_MODULE_ARTIFACT_CACHE.with(|cache| cache.borrow_mut().clear());
+}
+
+#[cfg(test)]
+fn stdlib_module_artifact_cache_len() -> usize {
+    STDLIB_MODULE_ARTIFACT_CACHE.with(|cache| cache.borrow().len())
+}
 
 #[derive(Clone)]
 pub(crate) struct LoadedModule {
@@ -28,6 +60,127 @@ pub fn resolve_module_import_path(base: &Path, path: &str) -> PathBuf {
     }
 
     file_path
+}
+
+fn stdlib_artifact_cache_key(module: &str, source: &str) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    module.hash(&mut hasher);
+    source.hash(&mut hasher);
+    format!("{module}:{:016x}", hasher.finish())
+}
+
+fn stdlib_module_artifact(
+    module: &str,
+    synthetic: &Path,
+    source: &str,
+) -> Result<Rc<CompiledStdlibModule>, VmError> {
+    let key = stdlib_artifact_cache_key(module, source);
+    if let Some(cached) =
+        STDLIB_MODULE_ARTIFACT_CACHE.with(|cache| cache.borrow().get(&key).cloned())
+    {
+        return Ok(cached);
+    }
+
+    let compiled = Rc::new(compile_stdlib_module_artifact(synthetic, source)?);
+    STDLIB_MODULE_ARTIFACT_CACHE.with(|cache| {
+        cache.borrow_mut().insert(key, Rc::clone(&compiled));
+    });
+    Ok(compiled)
+}
+
+fn compile_stdlib_module_artifact(
+    synthetic: &Path,
+    source: &str,
+) -> Result<CompiledStdlibModule, VmError> {
+    let mut lexer = harn_lexer::Lexer::new(source);
+    let tokens = lexer.tokenize().map_err(|e| {
+        VmError::Runtime(format!("Import lex error in {}: {e}", synthetic.display()))
+    })?;
+    let mut parser = harn_parser::Parser::new(tokens);
+    let program = parser.parse().map_err(|e| {
+        VmError::Runtime(format!(
+            "Import parse error in {}: {e}",
+            synthetic.display()
+        ))
+    })?;
+
+    let imports = program
+        .iter()
+        .filter_map(|node| match &node.node {
+            harn_parser::Node::ImportDecl { path, is_pub } => Some(ModuleImportSpec {
+                path: path.clone(),
+                selected_names: None,
+                is_pub: *is_pub,
+            }),
+            harn_parser::Node::SelectiveImport {
+                names,
+                path,
+                is_pub,
+            } => Some(ModuleImportSpec {
+                path: path.clone(),
+                selected_names: Some(names.clone()),
+                is_pub: *is_pub,
+            }),
+            _ => None,
+        })
+        .collect();
+
+    let init_nodes: Vec<harn_parser::SNode> = program
+        .iter()
+        .filter(|sn| {
+            matches!(
+                &sn.node,
+                harn_parser::Node::VarBinding { .. } | harn_parser::Node::LetBinding { .. }
+            )
+        })
+        .cloned()
+        .collect();
+    let init_chunk = if init_nodes.is_empty() {
+        None
+    } else {
+        Some(
+            crate::Compiler::new()
+                .compile(&init_nodes)
+                .map_err(|e| VmError::Runtime(format!("Import init compile error: {e}")))?,
+        )
+    };
+
+    let mut functions = BTreeMap::new();
+    let mut public_names = HashSet::new();
+    let module_source_file = Some(synthetic.display().to_string());
+    for node in &program {
+        let inner = match &node.node {
+            harn_parser::Node::AttributedDecl { inner, .. } => inner.as_ref(),
+            _ => node,
+        };
+        let harn_parser::Node::FnDecl {
+            name,
+            type_params,
+            params,
+            body,
+            is_pub,
+            ..
+        } = &inner.node
+        else {
+            continue;
+        };
+
+        let mut compiler = crate::Compiler::new();
+        let func_chunk = compiler
+            .compile_fn_body(type_params, params, body, module_source_file.clone())
+            .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
+        functions.insert(name.clone(), func_chunk);
+        if *is_pub {
+            public_names.insert(name.clone());
+        }
+    }
+
+    Ok(CompiledStdlibModule {
+        imports,
+        init_chunk,
+        functions,
+        public_names,
+    })
 }
 
 impl Vm {
@@ -61,6 +214,135 @@ impl Vm {
         self.imported_paths.pop();
         self.module_cache.insert(synthetic, loaded.clone());
         Ok(loaded)
+    }
+
+    async fn load_stdlib_module_from_source(
+        &mut self,
+        module: &str,
+        synthetic: PathBuf,
+        source: &'static str,
+    ) -> Result<LoadedModule, VmError> {
+        if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
+            return Ok(loaded);
+        }
+        self.source_cache
+            .insert(synthetic.clone(), source.to_string());
+
+        let artifact = stdlib_module_artifact(module, &synthetic, source)?;
+        self.imported_paths.push(synthetic.clone());
+        let loaded = self
+            .instantiate_stdlib_module(&synthetic, artifact.as_ref())
+            .await?;
+        self.imported_paths.pop();
+        self.module_cache.insert(synthetic, loaded.clone());
+        Ok(loaded)
+    }
+
+    async fn instantiate_stdlib_module(
+        &mut self,
+        _synthetic: &Path,
+        artifact: &CompiledStdlibModule,
+    ) -> Result<LoadedModule, VmError> {
+        let caller_env = self.env.clone();
+        let old_source_dir = self.source_dir.clone();
+        self.env = VmEnv::new();
+        self.source_dir = None;
+
+        for import in &artifact.imports {
+            self.execute_import(&import.path, import.selected_names.as_deref())
+                .await?;
+        }
+
+        let module_state: crate::value::ModuleState = {
+            let mut init_env = self.env.clone();
+            if let Some(init_chunk) = &artifact.init_chunk {
+                let fresh_init_chunk = init_chunk.fresh_runtime_clone();
+                let saved_env = std::mem::replace(&mut self.env, init_env);
+                let saved_frames = std::mem::take(&mut self.frames);
+                let saved_handlers = std::mem::take(&mut self.exception_handlers);
+                let saved_iterators = std::mem::take(&mut self.iterators);
+                let saved_deadlines = std::mem::take(&mut self.deadlines);
+                let init_result = self.run_chunk(&fresh_init_chunk).await;
+                init_env = std::mem::replace(&mut self.env, saved_env);
+                self.frames = saved_frames;
+                self.exception_handlers = saved_handlers;
+                self.iterators = saved_iterators;
+                self.deadlines = saved_deadlines;
+                init_result?;
+            }
+            Rc::new(RefCell::new(init_env))
+        };
+
+        let module_env = self.env.clone();
+        let registry: ModuleFunctionRegistry = Rc::new(RefCell::new(BTreeMap::new()));
+        let mut functions: BTreeMap<String, Rc<VmClosure>> = BTreeMap::new();
+        let mut public_names = artifact.public_names.clone();
+
+        for (name, compiled) in &artifact.functions {
+            let closure = Rc::new(VmClosure {
+                func: Rc::new(compiled.fresh_runtime_clone()),
+                env: module_env.clone(),
+                source_dir: None,
+                module_functions: Some(Rc::clone(&registry)),
+                module_state: Some(Rc::clone(&module_state)),
+            });
+            registry
+                .borrow_mut()
+                .insert(name.clone(), Rc::clone(&closure));
+            self.env
+                .define(name, VmValue::Closure(Rc::clone(&closure)), false)?;
+            module_state
+                .borrow_mut()
+                .define(name, VmValue::Closure(Rc::clone(&closure)), false)?;
+            functions.insert(name.clone(), Rc::clone(&closure));
+        }
+
+        for import in artifact.imports.iter().filter(|import| import.is_pub) {
+            let cache_key = self.cache_key_for_import(&import.path);
+            let Some(loaded) = self.module_cache.get(&cache_key).cloned() else {
+                return Err(VmError::Runtime(format!(
+                    "Re-export error: imported module '{}' was not loaded",
+                    import.path
+                )));
+            };
+            let names_to_reexport: Vec<String> = match &import.selected_names {
+                Some(names) => names.clone(),
+                None => {
+                    if loaded.public_names.is_empty() {
+                        loaded.functions.keys().cloned().collect()
+                    } else {
+                        loaded.public_names.iter().cloned().collect()
+                    }
+                }
+            };
+            for name in names_to_reexport {
+                let Some(closure) = loaded.functions.get(&name) else {
+                    return Err(VmError::Runtime(format!(
+                        "Re-export error: '{name}' is not exported by '{}'",
+                        import.path
+                    )));
+                };
+                if let Some(existing) = functions.get(&name) {
+                    if !Rc::ptr_eq(existing, closure) {
+                        return Err(VmError::Runtime(format!(
+                            "Re-export collision: '{name}' is defined here and also \
+                             re-exported from '{}'",
+                            import.path
+                        )));
+                    }
+                }
+                functions.insert(name.clone(), Rc::clone(closure));
+                public_names.insert(name);
+            }
+        }
+
+        self.env = caller_env;
+        self.source_dir = old_source_dir;
+
+        Ok(LoadedModule {
+            functions,
+            public_names,
+        })
     }
 
     fn export_loaded_module(
@@ -112,7 +394,7 @@ impl Vm {
                         return Ok(());
                     }
                     let loaded = self
-                        .load_module_from_source(synthetic.clone(), source)
+                        .load_stdlib_module_from_source(module, synthetic.clone(), source)
                         .await?;
                     self.export_loaded_module(&synthetic, &loaded, selected_names)?;
                     return Ok(());
@@ -506,5 +788,46 @@ impl Vm {
             .unwrap_or_else(|| PathBuf::from("."));
         let file_path = resolve_module_import_path(&base, import_path);
         self.load_module_exports(&file_path).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
+        reset_stdlib_module_artifact_cache();
+
+        let mut first_vm = Vm::new();
+        let first_exports = first_vm
+            .load_module_exports_from_import("std/agent/prompts")
+            .await
+            .expect("first stdlib import succeeds");
+        assert_eq!(stdlib_module_artifact_cache_len(), 1);
+
+        let mut second_vm = Vm::new();
+        let second_exports = second_vm
+            .load_module_exports_from_import("std/agent/prompts")
+            .await
+            .expect("second stdlib import succeeds");
+        assert_eq!(stdlib_module_artifact_cache_len(), 1);
+
+        let first = first_exports
+            .get("render_agent_prompt")
+            .expect("first export exists");
+        let second = second_exports
+            .get("render_agent_prompt")
+            .expect("second export exists");
+
+        assert!(!Rc::ptr_eq(first, second));
+        assert!(!Rc::ptr_eq(&first.func, &second.func));
+        assert!(!Rc::ptr_eq(&first.func.chunk, &second.func.chunk));
+        assert!(!Rc::ptr_eq(
+            first.module_state.as_ref().expect("first module state"),
+            second.module_state.as_ref().expect("second module state")
+        ));
     }
 }

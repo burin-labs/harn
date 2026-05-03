@@ -1,0 +1,35 @@
+fn scoped_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {path: {type: "string", description: "Path"}},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+pipeline main() {
+  let tools = scoped_tools()
+  let call = {name: "write_note", arguments: {path: "notes.txt"}}
+  let denied = with_approval_policy({auto_deny: ["write*"]}, fn() { return agent_dispatch_tool_call(call, tools) })
+  println(denied.ok)
+  println(denied.error_category)
+  try {
+    with_approval_policy(
+      {auto_deny: ["write*"]},
+      fn() {
+        throw "boom"
+      },
+    )
+  } catch (e) {
+    println("caught")
+  }
+  let allowed = agent_dispatch_tool_call(call, tools)
+  println(allowed.ok)
+  println(allowed.rendered_result)
+}

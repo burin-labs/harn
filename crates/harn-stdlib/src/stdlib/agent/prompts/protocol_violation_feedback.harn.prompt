@@ -1,0 +1,11 @@
+Your response violated the tagged response protocol. Each issue:
+- {{ violations }}
+
+Re-emit using only these top-level tags, separated by whitespace:
+
+<assistant_prose>short narration (optional)</assistant_prose>
+<user_response>final user-facing answer (optional)</user_response>
+<tool_call>
+name({ key: value })
+</tool_call>
+{{ done_line }}Nothing outside these tags is accepted. Do not paste source code, diffs, JSON, or command output as prose. Wrap each action in its own `<tool_call>` block.

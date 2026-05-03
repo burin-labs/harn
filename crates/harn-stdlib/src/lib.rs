@@ -90,6 +90,26 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_agents.harn"),
     },
     StdlibSource {
+        module: "agent/prompts",
+        source: include_str!("stdlib/agent/prompts.harn"),
+    },
+    StdlibSource {
+        module: "agent/options",
+        source: include_str!("stdlib/agent/options.harn"),
+    },
+    StdlibSource {
+        module: "agent/primitives",
+        source: include_str!("stdlib/agent/primitives.harn"),
+    },
+    StdlibSource {
+        module: "agent/loop",
+        source: include_str!("stdlib/agent/loop.harn"),
+    },
+    StdlibSource {
+        module: "agent/turn",
+        source: include_str!("stdlib/agent/turn.harn"),
+    },
+    StdlibSource {
         module: "agent_state",
         source: include_str!("stdlib/stdlib_agent_state.harn"),
     },
@@ -177,6 +197,14 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         module: "connectors/slack",
         source: include_str!("stdlib/stdlib_connectors_slack.harn"),
     },
+    StdlibSource {
+        module: "workflow/prompts",
+        source: include_str!("stdlib/workflow/prompts.harn"),
+    },
+    StdlibSource {
+        module: "workflow/execute",
+        source: include_str!("stdlib/workflow/execute.harn"),
+    },
 ];
 
 pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
@@ -185,16 +213,106 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
         source: include_str!("stdlib/agent/prompts/tool_contract_text.harn.prompt"),
     },
     StdlibPromptAsset {
+        path: "agent/prompts/tool_contract_native.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/tool_contract_native.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/tool_contract_text_response_protocol.harn.prompt",
+        source: include_str!(
+            "stdlib/agent/prompts/tool_contract_text_response_protocol.harn.prompt"
+        ),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/tool_contract_action_native.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/tool_contract_action_native.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/tool_contract_action_text.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/tool_contract_action_text.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/tool_contract_task_ledger.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/tool_contract_task_ledger.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/tool_contract_deferred_tools.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/tool_contract_deferred_tools.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/deferred_tool_listing.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/deferred_tool_listing.harn.prompt"),
+    },
+    StdlibPromptAsset {
         path: "agent/prompts/action_turn_nudge.harn.prompt",
         source: include_str!("stdlib/agent/prompts/action_turn_nudge.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/agent_turn_preamble.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/agent_turn_preamble.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/default_nudge.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/default_nudge.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/persistent_loop_system.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/persistent_loop_system.harn.prompt"),
     },
     StdlibPromptAsset {
         path: "agent/prompts/completion_judge_default.harn.prompt",
         source: include_str!("stdlib/agent/prompts/completion_judge_default.harn.prompt"),
     },
     StdlibPromptAsset {
+        path: "agent/prompts/completion_judge_feedback_fallback.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/completion_judge_feedback_fallback.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/completion_judge_user.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/completion_judge_user.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/parse_guidance.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/parse_guidance.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/protocol_violation_feedback.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/protocol_violation_feedback.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/native_tool_contract_feedback.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/native_tool_contract_feedback.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/verification_gate_feedback.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/verification_gate_feedback.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/action_required_feedback.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/action_required_feedback.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/daemon_watch_feedback.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/daemon_watch_feedback.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/daemon_timer_feedback.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/daemon_timer_feedback.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "llm/prompts/completion_fallback_system.harn.prompt",
+        source: include_str!("stdlib/llm/prompts/completion_fallback_system.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "llm/prompts/completion_fallback_user.harn.prompt",
+        source: include_str!("stdlib/llm/prompts/completion_fallback_user.harn.prompt"),
+    },
+    StdlibPromptAsset {
         path: "workflow/prompts/stage.harn.prompt",
         source: include_str!("stdlib/workflow/prompts/stage.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "workflow/prompts/verification_context_intro.harn.prompt",
+        source: include_str!("stdlib/workflow/prompts/verification_context_intro.harn.prompt"),
     },
     StdlibPromptAsset {
         path: "orchestration/prompts/compaction_summary.harn.prompt",

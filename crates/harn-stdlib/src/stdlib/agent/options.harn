@@ -1,0 +1,36 @@
+import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
+
+fn __profile_defaults(profile) {
+  if profile == "tool_using" {
+    return {max_iterations: 50, max_nudges: 8, tool_retries: 0, llm_retries: 2, schema_retries: 0}
+  }
+  if profile == "researcher" {
+    return {max_iterations: 30, max_nudges: 4, tool_retries: 0, llm_retries: 2, schema_retries: 0}
+  }
+  if profile == "verifier" {
+    return {max_iterations: 5, max_nudges: 0, tool_retries: 0, llm_retries: 2, schema_retries: 3}
+  }
+  if profile == "completer" {
+    return {max_iterations: 1, max_nudges: 0, tool_retries: 0, llm_retries: 2, schema_retries: 0}
+  }
+  throw "agent_loop: profile must be one of tool_using, researcher, verifier, completer"
+}
+
+fn __completion_judge_defaults(value) {
+  if type_of(value) == "bool" && value {
+    return {system: completion_judge_system_prompt(), feedback_fallback: completion_judge_feedback_prompt()}
+  }
+  return value
+}
+
+/** agent_loop_options. */
+pub fn agent_loop_options(options = nil) {
+  let opts = options ?? {}
+  let profile = opts?.profile ?? "tool_using"
+  let defaults = __profile_defaults(profile)
+  return defaults + opts
+    + {
+    verify_completion_judge: __completion_judge_defaults(opts?.verify_completion_judge),
+    done_judge: __completion_judge_defaults(opts?.done_judge),
+  }
+}

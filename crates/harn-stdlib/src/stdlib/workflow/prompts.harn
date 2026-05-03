@@ -1,0 +1,14 @@
+/** render_workflow_prompt_asset. */
+pub fn render_workflow_prompt_asset(path, bindings = nil) {
+  return render_prompt("std/workflow/prompts/" + path, bindings ?? {})
+}
+
+/** workflow_stage_prompt. */
+pub fn workflow_stage_prompt(bindings) {
+  return render_workflow_prompt_asset("stage.harn.prompt", bindings)
+}
+
+/** workflow_verification_context_intro. */
+pub fn workflow_verification_context_intro() {
+  return render_workflow_prompt_asset("verification_context_intro.harn.prompt", {})
+}

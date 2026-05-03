@@ -1,0 +1,1 @@
+Daemon timer wake fired. Re-check for background work and only act when there is new information or a pending follow-up.

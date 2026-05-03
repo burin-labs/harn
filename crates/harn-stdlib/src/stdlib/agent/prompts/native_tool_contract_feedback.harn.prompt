@@ -1,0 +1,5 @@
+This stage is running in native tool mode. Your last response emitted text-mode tool calls instead of provider-native tool calls.
+
+Re-issue the same action using only the native tool channel. Do not write `<tool_call>` tags, bare `name({ ... })` calls, Markdown fences, or JSON tool-call envelopes in assistant text.
+
+Policy: `{{ policy }}`. Observed fallback turn: {{ fallback_index }}.

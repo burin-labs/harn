@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast conformance protocol-conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets sync-language-spec check-language-spec lint-test-patterns check-receipt-structs
+.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast conformance protocol-conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets sync-language-spec check-language-spec lint-test-patterns check-receipt-structs check-rust-prompt-prose
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance protocol-conformance check-highlight check-language-spec check-trigger-quickref check-provider-matrix check-connector-matrix check-trigger-examples check-docs-snippets lint-test-patterns check-receipt-structs portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance protocol-conformance check-highlight check-language-spec check-trigger-quickref check-provider-matrix check-connector-matrix check-trigger-examples check-docs-snippets lint-test-patterns check-receipt-structs check-rust-prompt-prose portal-check
 
 check: all
 
@@ -257,3 +257,7 @@ lint-test-patterns:
 
 check-receipt-structs:
 	@./scripts/check_receipt_struct_duplication.py
+
+check-rust-prompt-prose:
+	@python3 scripts/check_rust_prompt_prose.py --self-test
+	@python3 scripts/check_rust_prompt_prose.py

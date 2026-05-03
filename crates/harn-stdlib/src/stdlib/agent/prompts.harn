@@ -1,0 +1,39 @@
+/** render_agent_prompt. */
+pub fn render_agent_prompt(path, bindings = nil) {
+  return render_prompt("std/agent/prompts/" + path, bindings ?? {})
+}
+
+/** action_turn_nudge_prompt. */
+pub fn action_turn_nudge_prompt(bindings) {
+  return render_agent_prompt("action_turn_nudge.harn.prompt", bindings)
+}
+
+/** persistent_loop_system_prompt. */
+pub fn persistent_loop_system_prompt(bindings) {
+  return render_agent_prompt("persistent_loop_system.harn.prompt", bindings)
+}
+
+/** default_nudge_prompt. */
+pub fn default_nudge_prompt(bindings) {
+  return render_agent_prompt("default_nudge.harn.prompt", bindings)
+}
+
+/** completion_judge_system_prompt. */
+pub fn completion_judge_system_prompt() {
+  return render_agent_prompt("completion_judge_default.harn.prompt", {})
+}
+
+/** completion_judge_feedback_prompt. */
+pub fn completion_judge_feedback_prompt() {
+  return render_agent_prompt("completion_judge_feedback_fallback.harn.prompt", {})
+}
+
+/** completion_judge_user_prompt. */
+pub fn completion_judge_user_prompt(bindings) {
+  return render_agent_prompt("completion_judge_user.harn.prompt", bindings)
+}
+
+/** agent_turn_preamble_prompt. */
+pub fn agent_turn_preamble_prompt() {
+  return render_agent_prompt("agent_turn_preamble.harn.prompt", {})
+}

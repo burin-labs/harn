@@ -1,0 +1,2 @@
+Continue the user's text. Return only the missing continuation with no commentary, fences, or quoting.{{ if has_suffix }}
+Respect the required suffix exactly and produce only the text that belongs between PREFIX and SUFFIX.{{ end }}

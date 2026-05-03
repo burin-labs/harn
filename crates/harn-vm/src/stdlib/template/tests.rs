@@ -298,8 +298,8 @@ fn stdlib_prompt_asset_renders_and_includes_embedded_partial() {
     let asset =
         TemplateAsset::render_target("std/agent/prompts/tool_contract_text.harn.prompt").unwrap();
     let out = render_asset_result(&asset, Some(&dict(&[]))).unwrap();
-    assert!(out.contains("Tool contract:"));
-    assert!(out.contains("Before acting, restate the intended action"));
+    assert!(out.contains("## Tool Calling Contract"));
+    assert!(out.contains("## Available tools"));
 }
 
 #[test]
@@ -307,13 +307,12 @@ fn stdlib_prompt_provenance_uses_stable_template_uris() {
     let asset =
         TemplateAsset::render_target("std/agent/prompts/tool_contract_text.harn.prompt").unwrap();
     let (out, spans) = render_asset_with_provenance_result(&asset, Some(&dict(&[])), true).unwrap();
-    assert!(out.contains("Tool contract:"));
+    assert!(out.contains("## Tool Calling Contract"));
     assert!(spans
         .iter()
         .any(|span| span.template_uri == "std://agent/prompts/tool_contract_text.harn.prompt"));
-    assert!(spans
-        .iter()
-        .any(|span| span.template_uri == "std://agent/prompts/action_turn_nudge.harn.prompt"));
+    assert!(spans.iter().any(|span| span.template_uri
+        == "std://agent/prompts/tool_contract_text_response_protocol.harn.prompt"));
 }
 
 #[test]

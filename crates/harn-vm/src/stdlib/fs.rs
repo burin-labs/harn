@@ -826,7 +826,10 @@ mod tests {
         )
         .unwrap()
         .display();
-        assert!(source.contains("{{ include \"action_turn_nudge.harn.prompt\" }}"));
+        assert!(
+            source.contains("{{ include \"tool_contract_text_response_protocol.harn.prompt\" }}")
+        );
+        assert!(source.contains("{{ include \"tool_contract_native.harn.prompt\" }}"));
     }
 
     #[test]

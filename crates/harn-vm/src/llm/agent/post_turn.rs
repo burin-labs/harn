@@ -38,6 +38,7 @@
 //!     Break
 //!   - action-turn nudge (or custom nudge) injection, Continue
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::agent_events::AgentEvent;
@@ -490,24 +491,18 @@ pub(super) async fn run_post_turn(
             ctx.turn_policy,
             call_result.prose_too_long,
         )
-        .unwrap_or_else(|| {
-            if ctx.has_tools {
-                "Use a tool call to make progress.".to_string()
-            } else {
-                "Make concrete progress in your reply.".to_string()
-            }
-        });
+        .unwrap_or_else(|| render_default_nudge(ctx.has_tools, false));
+        let mut bindings = BTreeMap::new();
+        bindings.insert("guidance".to_string(), VmValue::String(Rc::from(guidance)));
+        let feedback = crate::stdlib::template::render_stdlib_prompt_asset(
+            "agent/prompts/action_required_feedback.harn.prompt",
+            Some(&bindings),
+        )
+        .unwrap_or_else(|error| format!("action required feedback prompt render error: {error}"));
         append_message_to_contexts(
             &mut state.visible_messages,
             &mut state.recorded_messages,
-            runtime_feedback_message(
-                "action_required",
-                format!(
-                    "You returned assistant text/JSON before using any tool. \
-                     This stage requires at least one tool action before an answer counts. \
-                     That response was not accepted. {guidance}"
-                ),
-            ),
+            runtime_feedback_message("action_required", feedback),
         );
         emit_post_agent_turn_hook(
             ctx.session_id,
@@ -661,21 +656,28 @@ pub(super) async fn run_post_turn(
             } else if resumed {
                 Some(("resume", None))
             } else if !changed_paths.is_empty() {
-                Some((
-                    "watch",
-                    Some(format!(
-                        "Daemon wake: watched paths changed: {}. Re-check the task state and act only if something actually changed.",
-                        changed_paths.join(", ")
-                    )),
-                ))
+                let mut bindings = BTreeMap::new();
+                bindings.insert(
+                    "changed_paths".to_string(),
+                    VmValue::String(Rc::from(changed_paths.join(", "))),
+                );
+                let message = crate::stdlib::template::render_stdlib_prompt_asset(
+                    "agent/prompts/daemon_watch_feedback.harn.prompt",
+                    Some(&bindings),
+                )
+                .unwrap_or_else(|error| {
+                    format!("daemon watch feedback prompt render error: {error}")
+                });
+                Some(("watch", Some(message)))
             } else if ctx.daemon_config.wake_interval_ms.is_some() {
-                Some((
-                    "timer",
-                    Some(
-                        "Daemon timer wake fired. Re-check for background work and only act when there is new information or a pending follow-up."
-                            .to_string(),
-                    ),
-                ))
+                let message = crate::stdlib::template::render_stdlib_prompt_asset(
+                    "agent/prompts/daemon_timer_feedback.harn.prompt",
+                    None,
+                )
+                .unwrap_or_else(|error| {
+                    format!("daemon timer feedback prompt render error: {error}")
+                });
+                Some(("timer", Some(message)))
             } else {
                 None
             };
@@ -851,13 +853,7 @@ pub(super) async fn run_post_turn(
         call_result.prose_too_long,
     )
     .or_else(|| ctx.custom_nudge.clone())
-    .unwrap_or_else(|| {
-        if ctx.has_tools {
-            "Continue — use a tool call to make progress.".to_string()
-        } else {
-            "Continue — make progress in your reply.".to_string()
-        }
-    });
+    .unwrap_or_else(|| render_default_nudge(ctx.has_tools, true));
     append_message_to_contexts(
         &mut state.visible_messages,
         &mut state.recorded_messages,
@@ -875,6 +871,20 @@ pub(super) async fn run_post_turn(
     )
     .await?;
     Ok(IterationOutcome::Continue)
+}
+
+fn render_default_nudge(has_tools: bool, continue_prefix: bool) -> String {
+    let mut bindings = BTreeMap::new();
+    bindings.insert("has_tools".to_string(), VmValue::Bool(has_tools));
+    bindings.insert(
+        "continue_prefix".to_string(),
+        VmValue::Bool(continue_prefix),
+    );
+    crate::stdlib::template::render_stdlib_prompt_asset(
+        "agent/prompts/default_nudge.harn.prompt",
+        Some(&bindings),
+    )
+    .unwrap_or_else(|error| format!("default nudge prompt render error: {error}"))
 }
 
 fn verified_tool_turn_visible_text(

@@ -1,0 +1,11 @@
+## Task ledger
+
+The runtime may inject a durable `<task_ledger>` of the user's deliverables above this prompt. Only use the `ledger` tool if that `<task_ledger>` block is actually present in the current turn. If no `<task_ledger>` block is present, ignore this section entirely and do not call `ledger(...)`.{{ if done_sentinel }} When a task ledger is present, the `{{ done_sentinel }}` sentinel is rejected while any deliverable is `open` or `blocked`.{{ end }} Use the ledger ids shown in that block; do not invent ids such as `deliverable-N`.
+
+- `ledger({ action: "add", text: "what needs to happen" })`: declare a new sub-deliverable.
+- `ledger({ action: "mark", id: "deliverable-id-from-task-ledger", status: "done" })`: mark a deliverable complete after a real tool call satisfied it.
+- `ledger({ action: "mark", id: "deliverable-id-from-task-ledger", status: "dropped", note: "why" })`: escape hatch when scope truly changed; the note is required.
+- `ledger({ action: "rationale", text: "one-sentence answer to why the user will call this done" })`: commit to an interpretation of the success criterion.
+- `ledger({ action: "note", text: "observation worth remembering across turns" })`: durable cross-stage memory.
+
+Prefer marking deliverables done only after a concrete tool call demonstrates completion: an edit landed, a run() returned exit 0, or a read confirmed an invariant. Do not mark done on prose alone.
