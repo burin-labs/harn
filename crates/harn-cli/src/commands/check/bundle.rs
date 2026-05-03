@@ -11,6 +11,7 @@ use super::preflight::{
     dict_literal_field, host_render_path_arg, literal_string, parse_host_call_args,
     resolve_preflight_target, resolve_source_relative,
 };
+use super::source::parse_resolved_module;
 
 #[derive(Debug, Clone)]
 struct BundleModuleRecord {
@@ -233,15 +234,12 @@ fn scan_node_bundle(
 ) {
     match &node.node {
         Node::ImportDecl { path, .. } | Node::SelectiveImport { path, .. } => {
-            if path.starts_with("std/") {
-                return;
-            }
             if let Some(import_path) = resolve_import_path(file_path, path) {
-                let import_str = import_path.to_string_lossy().into_owned();
-                let (_, import_program) = parse_source_file(&import_str);
-                manifest.add_module(&import_path, "import");
-                manifest.add_import_edge(file_path, &import_path);
-                scan_program_bundle(&import_path, &import_program, config, visited, manifest);
+                if let Some((_, import_program)) = parse_resolved_module(&import_path) {
+                    manifest.add_module(&import_path, "import");
+                    manifest.add_import_edge(file_path, &import_path);
+                    scan_program_bundle(&import_path, &import_program, config, visited, manifest);
+                }
             }
         }
         Node::FunctionCall { name, args, .. } if name == "render" || name == "render_prompt" => {

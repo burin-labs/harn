@@ -105,6 +105,18 @@ struct PackageManifest {
     exports: HashMap<String, String>,
 }
 
+/// Return the source for a resolved module path.
+///
+/// Real paths are read from disk. `<std>/<module>` virtual paths are backed by
+/// the embedded stdlib source table, so callers can parse resolved stdlib
+/// modules without knowing about the stdlib mirror layout.
+pub fn read_module_source(path: &Path) -> Option<String> {
+    if let Some(stdlib_module) = stdlib_module_from_path(path) {
+        return stdlib::get_stdlib_source(stdlib_module).map(ToString::to_string);
+    }
+    std::fs::read_to_string(path).ok()
+}
+
 /// Build a module graph from a set of files.
 ///
 /// Files referenced via `import` statements are loaded recursively so the
@@ -649,18 +661,8 @@ pub struct ReExportConflict {
 }
 
 fn load_module(path: &Path) -> ModuleInfo {
-    // `<std>/<name>` virtual paths map to the embedded stdlib source
-    // rather than a real file on disk.
-    let source = if let Some(stdlib_module) = stdlib_module_from_path(path) {
-        match stdlib::get_stdlib_source(stdlib_module) {
-            Some(src) => src.to_string(),
-            None => return ModuleInfo::default(),
-        }
-    } else {
-        match std::fs::read_to_string(path) {
-            Ok(src) => src,
-            Err(_) => return ModuleInfo::default(),
-        }
+    let Some(source) = read_module_source(path) else {
+        return ModuleInfo::default();
     };
     let mut lexer = harn_lexer::Lexer::new(&source);
     let tokens = match lexer.tokenize() {
@@ -971,6 +973,33 @@ mod tests {
             .expect("std/math should resolve");
         // `clamp` is defined in stdlib_math.harn as `pub fn clamp(...)`.
         assert!(imported.contains("clamp"));
+    }
+
+    #[test]
+    fn stdlib_internal_imports_resolve_without_leaking_to_callers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let entry = write_file(
+            root,
+            "entry.harn",
+            "import { process_run } from \"std/runtime\"\nprocess_run([\"echo\", \"ok\"])\n",
+        );
+
+        let graph = build(std::slice::from_ref(&entry));
+        let entry_imports = graph
+            .imported_names_for_file(&entry)
+            .expect("std/runtime should resolve");
+        assert!(entry_imports.contains("process_run"));
+        assert!(
+            !entry_imports.contains("filter_nil"),
+            "private std/runtime dependency leaked to caller"
+        );
+
+        let runtime_path = stdlib::stdlib_virtual_path("runtime");
+        let runtime_imports = graph
+            .imported_names_for_file(&runtime_path)
+            .expect("std/runtime internal imports should resolve");
+        assert!(runtime_imports.contains("filter_nil"));
     }
 
     #[test]

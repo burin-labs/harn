@@ -45,6 +45,7 @@
 - [Audit receipts](./audit-receipts.md)
 - [Skills](./skills.md)
 - [Personas](./personas.md)
+  - [Persona Prelude](./personas/prelude.md)
   - [Merge Captain](./personas/merge-captain.md)
 - [Skill provenance](./skill-provenance.md)
 - [Sessions](./sessions.md)

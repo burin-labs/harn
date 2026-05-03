@@ -1,0 +1,34 @@
+import { cheap_classify_then_escalate } from "std/personas/prelude"
+
+pipeline test(task) {
+  let opts = {
+    persona: "triage_captain",
+    step: "classify",
+    trace_id: "trace-classify",
+    started_at: "2026-05-03T00:00:00Z",
+    completed_at: "2026-05-03T00:00:00Z",
+    min_confidence: 0.7,
+  }
+  let escalated = cheap_classify_then_escalate(
+    "PR-42",
+    fn(input) { return {label: "maybe", confidence: 0.4, input: input} },
+    fn(input) { return {label: "merge", confidence: 0.99, input: input} },
+    fn(result) { return result.label == "maybe" },
+    opts,
+  )
+  println(escalated.status)
+  println(escalated.escalated)
+  println(escalated.result.label)
+  println(len(escalated.receipt.tool_calls))
+  let cheap = cheap_classify_then_escalate(
+    "PR-43",
+    fn(input) { return {label: "ignore", confidence: 0.95, input: input} },
+    fn(input) { return {label: "unused", confidence: 1.0, input: input} },
+    fn(result) { return result.label == "maybe" },
+    opts,
+  )
+  println(cheap.status)
+  println(cheap.escalated)
+  println(cheap.result.label)
+  println(len(cheap.receipt.tool_calls))
+}

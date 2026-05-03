@@ -1,0 +1,721 @@
+/**
+ * std/personas/prelude — small orchestration primitives for persona scripts.
+ *
+ * The helpers return explicit envelopes so callers can persist, render, or
+ * compose them without depending on ambient host state.
+ */
+fn __prelude_is_callable(value) -> bool {
+  let kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __prelude_digest(value) {
+  if value == nil {
+    return nil
+  }
+  return "sha256:" + sha256(json_stringify(value))
+}
+
+fn __prelude_error_object(error) {
+  if error == nil {
+    return nil
+  }
+  if type_of(error) == "dict" {
+    return error
+  }
+  return {message: to_string(error)}
+}
+
+fn __prelude_error_message(error) -> string {
+  if error == nil {
+    return ""
+  }
+  if type_of(error) == "dict" {
+    return error?.message ?? json_stringify(error)
+  }
+  return to_string(error)
+}
+
+fn __prelude_as_result(value) {
+  let ok_probe = try {
+    is_ok(value)
+  }
+  if is_ok(ok_probe) && unwrap(ok_probe) {
+    return {ok: true, value: unwrap(value), error: nil}
+  }
+  let err_probe = try {
+    is_err(value)
+  }
+  if is_ok(err_probe) && unwrap(err_probe) {
+    return {ok: false, value: nil, error: unwrap_err(value)}
+  }
+  if type_of(value) == "dict" && value?.ok != nil {
+    return {ok: value.ok, value: value?.value ?? value?.result, error: value?.error}
+  }
+  if type_of(value) == "dict" && value?.status != nil {
+    let status = lowercase(to_string(value.status))
+    let ok = contains(["ok", "pass", "passed", "success", "succeeded"], status)
+    return {
+      ok: ok,
+      value: value,
+      error: if ok {
+        nil
+      } else {
+        value
+      },
+    }
+  }
+  if type_of(value) == "bool" {
+    return {
+      ok: value,
+      value: value,
+      error: if value {
+        nil
+      } else {
+        {message: "predicate returned false"}
+      },
+    }
+  }
+  return {
+    ok: value != nil,
+    value: value,
+    error: if value == nil {
+      {message: "predicate returned nil"}
+    } else {
+      nil
+    },
+  }
+}
+
+fn __prelude_receipt_id(opts, status, calls) -> string {
+  if opts?.id != nil {
+    return opts.id
+  }
+  let seed = {
+    persona: opts?.persona ?? "persona_prelude",
+    step: opts?.step,
+    trace_id: opts?.trace_id ?? "",
+    started_at: opts?.started_at ?? "",
+    status: status,
+    inputs_digest: opts?.inputs_digest ?? __prelude_digest(opts?.input),
+    calls: calls,
+  }
+  return "receipt-" + substring(sha256(json_stringify(seed)), 0, 16)
+}
+
+fn __prelude_receipt(opts, status, result, error, calls, approvals, side_effects) {
+  let options = opts ?? {}
+  let started_at = options?.started_at ?? date_iso()
+  let completed_at = options?.completed_at ?? started_at
+  let persona = options?.persona ?? "persona_prelude"
+  let input_digest = options?.inputs_digest ?? __prelude_digest(options?.input)
+  let output_digest = options?.outputs_digest ?? __prelude_digest(result)
+  return {
+    schema: "harn.receipt.v1",
+    id: __prelude_receipt_id(options + {started_at: started_at}, status, calls),
+    parent_run_id: options?.parent_run_id,
+    persona: persona,
+    step: options?.step,
+    trace_id: options?.trace_id ?? ("trace-" + substring(sha256(started_at + ":" + persona), 0, 16)),
+    started_at: started_at,
+    completed_at: completed_at,
+    status: status,
+    inputs_digest: input_digest,
+    outputs_digest: output_digest,
+    model_calls: options?.model_calls ?? [],
+    tool_calls: calls ?? [],
+    cost_usd: options?.cost_usd ?? 0.0,
+    approvals: approvals ?? [],
+    handoffs: options?.handoffs ?? [],
+    side_effects: side_effects ?? [],
+    error: __prelude_error_object(error),
+    redaction_class: options?.redaction_class ?? "internal",
+    metadata: options?.metadata ?? {},
+  }
+}
+
+fn __prelude_call_record(name, status, value, error) {
+  return {
+    name: name,
+    status: status,
+    outputs_digest: __prelude_digest(value),
+    error: __prelude_error_object(error),
+  }
+}
+
+/**
+ * Run a deterministic verifier, then run actor only when the verifier
+ * returns an ok-shaped value.
+ */
+pub fn verify_then_act(verifier, actor, options = nil) {
+  let opts = options ?? {}
+  let started_at = opts?.started_at ?? date_iso()
+  let verifier_name = opts?.verifier_name ?? "verifier"
+  let actor_name = opts?.actor_name ?? "actor"
+  let verified_raw = try {
+    verifier()
+  }
+  if is_err(verified_raw) {
+    let error = unwrap_err(verified_raw)
+    let calls = [__prelude_call_record(verifier_name, "failure", nil, error)]
+    return {
+      ok: false,
+      status: "verification_error",
+      verified: false,
+      acted: false,
+      result: nil,
+      error: __prelude_error_object(error),
+      receipt: __prelude_receipt(opts + {started_at: started_at}, "failure", nil, error, calls, [], []),
+    }
+  }
+  let verified = __prelude_as_result(unwrap(verified_raw))
+  var calls = [
+    __prelude_call_record(
+      verifier_name,
+      if verified.ok {
+        "success"
+      } else {
+        "denied"
+      },
+      verified.value,
+      verified.error,
+    ),
+  ]
+  if !verified.ok {
+    return {
+      ok: false,
+      status: "verification_failed",
+      verified: false,
+      acted: false,
+      result: nil,
+      error: __prelude_error_object(verified.error),
+      receipt: __prelude_receipt(opts + {started_at: started_at}, "denied", nil, verified.error, calls, [], []),
+    }
+  }
+  let acted = try {
+    actor()
+  }
+  if is_err(acted) {
+    let error = unwrap_err(acted)
+    calls = calls + [__prelude_call_record(actor_name, "failure", nil, error)]
+    return {
+      ok: false,
+      status: "actor_error",
+      verified: true,
+      acted: true,
+      result: nil,
+      error: __prelude_error_object(error),
+      receipt: __prelude_receipt(opts + {started_at: started_at}, "failure", nil, error, calls, [], []),
+    }
+  }
+  let result = unwrap(acted)
+  calls = calls + [__prelude_call_record(actor_name, "success", result, nil)]
+  return {
+    ok: true,
+    status: "success",
+    verified: true,
+    acted: true,
+    result: result,
+    error: nil,
+    receipt: __prelude_receipt(opts + {started_at: started_at}, "success", result, nil, calls, [], []),
+  }
+}
+
+/**
+ * Run step_fn(state) until it reports done, makes no progress, or exhausts
+ * the supplied iteration/time budget.
+ */
+pub fn bounded_loop(state_init, step_fn, options = nil) {
+  let opts = options ?? {}
+  let started_at = opts?.started_at ?? date_iso()
+  let started_ms = timestamp() * 1000
+  let max_iterations = opts?.max_iterations ?? 10
+  let max_duration_ms = opts?.max_duration_ms ?? opts?.max_duration
+  let progress_required = opts?.progress_required ?? false
+  var state = nil
+  if __prelude_is_callable(state_init) {
+    let init_outcome = try {
+      state_init()
+    }
+    if is_err(init_outcome) {
+      let error = unwrap_err(init_outcome)
+      let calls = [__prelude_call_record("state_init", "failure", nil, error)]
+      return {
+        ok: false,
+        status: "failure",
+        state: nil,
+        iterations: 0,
+        stopped_reason: "state_init_error",
+        history: [],
+        error: __prelude_error_object(error),
+        receipt: __prelude_receipt(opts + {started_at: started_at}, "failure", nil, error, calls, [], []),
+      }
+    }
+    state = unwrap(init_outcome)
+  } else {
+    state = state_init
+  }
+  var history = []
+  var iterations = 0
+  var stopped_reason = "max_iterations"
+  while iterations < max_iterations {
+    if max_duration_ms != nil && timestamp() * 1000 - started_ms >= max_duration_ms {
+      stopped_reason = "max_duration"
+      break
+    }
+    let before_digest = __prelude_digest(state)
+    let step_outcome = try {
+      step_fn(state)
+    }
+    iterations += 1
+    if is_err(step_outcome) {
+      let error = unwrap_err(step_outcome)
+      let calls = [__prelude_call_record("loop_step", "failure", nil, error)]
+      return {
+        ok: false,
+        status: "failure",
+        state: state,
+        iterations: iterations,
+        stopped_reason: "error",
+        history: history,
+        error: __prelude_error_object(error),
+        receipt: __prelude_receipt(opts + {started_at: started_at}, "failure", state, error, calls, [], []),
+      }
+    }
+    let step_value = unwrap(step_outcome)
+    let is_envelope = type_of(step_value) == "dict"
+      && (step_value?.state != nil || step_value?.done != nil || step_value?.progress != nil
+      || step_value?.progress_made != nil)
+    let next_state = if is_envelope && step_value?.state != nil {
+      step_value.state
+    } else {
+      step_value
+    }
+    let next_digest = __prelude_digest(next_state)
+    let progressed = if is_envelope && step_value?.progress != nil {
+      step_value.progress
+    } else {
+      if is_envelope && step_value?.progress_made != nil {
+        step_value.progress_made
+      } else {
+        next_digest != before_digest
+      }
+    }
+    let done = is_envelope && step_value?.done ?? false
+    history = history + [{iteration: iterations, progress: progressed, done: done}]
+    state = next_state
+    if done {
+      stopped_reason = "done"
+      break
+    }
+    if progress_required && !progressed {
+      stopped_reason = "no_progress"
+      break
+    }
+  }
+  let status = if stopped_reason == "done" {
+    "completed"
+  } else {
+    "stopped"
+  }
+  let calls = [__prelude_call_record("bounded_loop", status, state, nil)]
+  return {
+    ok: status == "completed" || stopped_reason == "max_iterations" || stopped_reason == "no_progress",
+    status: status,
+    state: state,
+    iterations: iterations,
+    stopped_reason: stopped_reason,
+    history: history,
+    receipt: __prelude_receipt(
+      opts + {started_at: started_at},
+      if status == "completed" {
+        "success"
+      } else {
+        "noop"
+      },
+      state,
+      nil,
+      calls,
+      [],
+      [],
+    ),
+  }
+}
+
+fn __prelude_invoke_model(input, model_spec, options) {
+  let opts = options ?? {}
+  if __prelude_is_callable(model_spec) {
+    return model_spec(input)
+  }
+  if type_of(model_spec) == "dict" {
+    let prompt = to_string(model_spec?.prompt ?? input)
+    let system = model_spec?.system ?? opts?.system
+    return llm_call(prompt, system, opts + model_spec)
+  }
+  return llm_call(to_string(input), opts?.system, opts + {model: model_spec})
+}
+
+fn __prelude_confidence(value) {
+  if type_of(value) == "dict" && value?.confidence != nil {
+    return value.confidence
+  }
+  return 1.0
+}
+
+/**
+ * Classify with a cheap route first, then escalate when confidence is low
+ * or the caller-supplied predicate returns true.
+ */
+pub fn cheap_classify_then_escalate(
+  input,
+  cheap_model,
+  escalate_model,
+  escalation_predicate,
+  options = nil,
+) {
+  let opts = options ?? {}
+  let started_at = opts?.started_at ?? date_iso()
+  let min_confidence = opts?.min_confidence ?? 0.7
+  let cheap_result = try {
+    __prelude_invoke_model(input, cheap_model, opts?.cheap_options ?? {})
+  }
+  var calls = []
+  if is_err(cheap_result) {
+    let cheap_error = unwrap_err(cheap_result)
+    calls = calls + [__prelude_call_record("cheap_classify", "failure", nil, cheap_error)]
+    let escalated_after_error = try {
+      __prelude_invoke_model(input, escalate_model, opts?.escalate_options ?? {})
+    }
+    if is_err(escalated_after_error) {
+      let error = unwrap_err(escalated_after_error)
+      calls = calls + [__prelude_call_record("escalate_classify", "failure", nil, error)]
+      return {
+        ok: false,
+        status: "failure",
+        escalated: true,
+        result: nil,
+        cheap: nil,
+        error: __prelude_error_object(error),
+        receipt: __prelude_receipt(opts + {started_at: started_at}, "failure", nil, error, calls, [], []),
+      }
+    }
+    let result = unwrap(escalated_after_error)
+    calls = calls + [__prelude_call_record("escalate_classify", "success", result, nil)]
+    return {
+      ok: true,
+      status: "escalated",
+      escalated: true,
+      result: result,
+      cheap: nil,
+      error: nil,
+      receipt: __prelude_receipt(opts + {started_at: started_at}, "success", result, nil, calls, [], []),
+    }
+  }
+  let cheap = unwrap(cheap_result)
+  calls = calls + [__prelude_call_record("cheap_classify", "success", cheap, nil)]
+  var should_escalate = __prelude_confidence(cheap) < min_confidence
+  if __prelude_is_callable(escalation_predicate) {
+    let predicate_outcome = try {
+      escalation_predicate(cheap)
+    }
+    if is_err(predicate_outcome) {
+      let predicate_error = unwrap_err(predicate_outcome)
+      calls = calls + [__prelude_call_record("escalation_predicate", "failure", nil, predicate_error)]
+      should_escalate = true
+    } else if unwrap(predicate_outcome) {
+      should_escalate = true
+    }
+  }
+  if !should_escalate {
+    return {
+      ok: true,
+      status: "cheap",
+      escalated: false,
+      result: cheap,
+      cheap: cheap,
+      error: nil,
+      receipt: __prelude_receipt(opts + {started_at: started_at}, "success", cheap, nil, calls, [], []),
+    }
+  }
+  let escalated = try {
+    __prelude_invoke_model(input, escalate_model, opts?.escalate_options ?? {})
+  }
+  if is_err(escalated) {
+    let error = unwrap_err(escalated)
+    calls = calls + [__prelude_call_record("escalate_classify", "failure", nil, error)]
+    return {
+      ok: false,
+      status: "failure",
+      escalated: true,
+      result: nil,
+      cheap: cheap,
+      error: __prelude_error_object(error),
+      receipt: __prelude_receipt(opts + {started_at: started_at}, "failure", nil, error, calls, [], []),
+    }
+  }
+  let result = unwrap(escalated)
+  calls = calls + [__prelude_call_record("escalate_classify", "success", result, nil)]
+  return {
+    ok: true,
+    status: "escalated",
+    escalated: true,
+    result: result,
+    cheap: cheap,
+    error: nil,
+    receipt: __prelude_receipt(opts + {started_at: started_at}, "success", result, nil, calls, [], []),
+  }
+}
+
+/**
+ * Execute items in bounded parallel batches and stop scheduling new work when
+ * failures reach the circuit-breaker threshold.
+ */
+pub fn parallel_sweep_with_circuit_breaker(items, step_fn, options = nil) {
+  let opts = options ?? {}
+  let started_at = opts?.started_at ?? date_iso()
+  var max_concurrent = opts?.max_concurrent ?? 4
+  if max_concurrent < 1 {
+    max_concurrent = 1
+  }
+  let max_failures = opts?.max_failures ?? 1
+  var index = 0
+  var succeeded = 0
+  var failed = 0
+  var results = []
+  var broken = false
+  while index < len(items) {
+    var end_index = index + max_concurrent
+    if end_index > len(items) {
+      end_index = len(items)
+    }
+    let batch = items[index:end_index]
+    let settled = parallel settle batch { item ->
+      step_fn(item)
+    }
+    for item_result in settled.results {
+      if is_ok(item_result) {
+        let value = unwrap(item_result)
+        succeeded += 1
+        results = results + [{ok: true, value: value, error: nil}]
+      } else {
+        let error = unwrap_err(item_result)
+        failed += 1
+        results = results + [{ok: false, value: nil, error: __prelude_error_object(error)}]
+      }
+    }
+    index = end_index
+    if failed >= max_failures {
+      broken = true
+      break
+    }
+  }
+  let skipped = len(items) - index
+  if broken && __prelude_is_callable(opts?.on_break) {
+    opts.on_break({failed: failed, skipped: skipped, succeeded: succeeded})
+  }
+  let status = if broken {
+    "circuit_open"
+  } else {
+    "completed"
+  }
+  let calls = [
+    __prelude_call_record(
+      "parallel_sweep",
+      status,
+      {succeeded: succeeded, failed: failed, skipped: skipped},
+      nil,
+    ),
+  ]
+  return {
+    ok: !broken,
+    status: status,
+    circuit_open: broken,
+    succeeded: succeeded,
+    failed: failed,
+    skipped: skipped,
+    results: results,
+    receipt: __prelude_receipt(
+      opts + {started_at: started_at},
+      if broken {
+        "failure"
+      } else {
+        "success"
+      },
+      results,
+      nil,
+      calls,
+      [],
+      [],
+    ),
+  }
+}
+
+/** Return a wrapper that runs a step and attaches a canonical receipt envelope. */
+pub fn with_audit_receipt(step_fn, options = nil) {
+  let opts = options ?? {}
+  return fn() {
+    let started_at = opts?.started_at ?? date_iso()
+    let outcome = try {
+      step_fn()
+    }
+    if is_err(outcome) {
+      let error = unwrap_err(outcome)
+      let calls = [__prelude_call_record(opts?.step ?? "step", "failure", nil, error)]
+      return {
+        ok: false,
+        status: "failure",
+        result: nil,
+        error: __prelude_error_object(error),
+        receipt: __prelude_receipt(opts + {started_at: started_at}, "failure", nil, error, calls, [], []),
+      }
+    }
+    let result = unwrap(outcome)
+    let calls = [__prelude_call_record(opts?.step ?? "step", "success", result, nil)]
+    return {
+      ok: true,
+      status: "success",
+      result: result,
+      error: nil,
+      receipt: __prelude_receipt(opts + {started_at: started_at}, "success", result, nil, calls, [], []),
+    }
+  }
+}
+
+/**
+ * Return a wrapper that requires an approval record before running a step.
+ * Without an approval record or `request_approval: true`, the wrapper returns
+ * a suspended envelope instead of blocking indefinitely.
+ */
+pub fn with_approval_gate(approval_kind, step_fn, options = nil) {
+  let opts = options ?? {}
+  return fn() {
+    let started_at = opts?.started_at ?? date_iso()
+    var approval = opts?.approval
+    if approval == nil && opts?.request_approval ?? false {
+      let requested = try {
+        request_approval(to_string(approval_kind), opts?.approval_options ?? {})
+      }
+      if is_err(requested) {
+        let error = unwrap_err(requested)
+        let status = if __prelude_error_message(error).contains("timeout") {
+          "suspended"
+        } else {
+          "denied"
+        }
+        let calls = [__prelude_call_record("approval_gate", status, nil, error)]
+        return {
+          ok: false,
+          status: status,
+          approval_required: true,
+          approval_kind: approval_kind,
+          result: nil,
+          error: __prelude_error_object(error),
+          receipt: __prelude_receipt(
+            opts + {started_at: started_at, step: opts?.step ?? to_string(approval_kind)},
+            if status == "denied" {
+              "denied"
+            } else {
+              "running"
+            },
+            nil,
+            error,
+            calls,
+            [],
+            [],
+          ),
+        }
+      }
+      approval = unwrap(requested)
+    }
+    if approval == nil {
+      let calls = [__prelude_call_record("approval_gate", "suspended", nil, nil)]
+      return {
+        ok: false,
+        status: "suspended",
+        approval_required: true,
+        approval_kind: approval_kind,
+        result: nil,
+        error: nil,
+        receipt: __prelude_receipt(
+          opts + {started_at: started_at, step: opts?.step ?? to_string(approval_kind)},
+          "running",
+          nil,
+          nil,
+          calls,
+          [],
+          [],
+        ),
+      }
+    }
+    if !(approval?.approved ?? false) {
+      let error = {message: approval?.reason ?? "approval denied"}
+      let calls = [__prelude_call_record("approval_gate", "denied", nil, error)]
+      return {
+        ok: false,
+        status: "denied",
+        approval_required: true,
+        approval_kind: approval_kind,
+        result: nil,
+        error: error,
+        receipt: __prelude_receipt(
+          opts + {started_at: started_at, step: opts?.step ?? to_string(approval_kind)},
+          "denied",
+          nil,
+          error,
+          calls,
+          [approval],
+          [],
+        ),
+      }
+    }
+    let outcome = try {
+      step_fn()
+    }
+    if is_err(outcome) {
+      let error = unwrap_err(outcome)
+      let calls = [
+        __prelude_call_record("approval_gate", "success", approval, nil),
+        __prelude_call_record(opts?.step ?? "approved_step", "failure", nil, error),
+      ]
+      return {
+        ok: false,
+        status: "failure",
+        approval_required: false,
+        approval_kind: approval_kind,
+        result: nil,
+        error: __prelude_error_object(error),
+        receipt: __prelude_receipt(
+          opts + {started_at: started_at, step: opts?.step ?? to_string(approval_kind)},
+          "failure",
+          nil,
+          error,
+          calls,
+          [approval],
+          [],
+        ),
+      }
+    }
+    let result = unwrap(outcome)
+    let calls = [
+      __prelude_call_record("approval_gate", "success", approval, nil),
+      __prelude_call_record(opts?.step ?? "approved_step", "success", result, nil),
+    ]
+    return {
+      ok: true,
+      status: "success",
+      approval_required: false,
+      approval_kind: approval_kind,
+      result: result,
+      error: nil,
+      receipt: __prelude_receipt(
+        opts + {started_at: started_at, step: opts?.step ?? to_string(approval_kind)},
+        "success",
+        result,
+        nil,
+        calls,
+        [approval],
+        [],
+      ),
+    }
+  }
+}

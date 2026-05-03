@@ -12,7 +12,7 @@ The boundary should stay narrow:
 
 What belongs in Harn `std/*` modules or the VM:
 
-- Generic runtime wrappers like `runtime_task()`, `process_exec()`, or
+- Generic runtime wrappers like `runtime_task()`, `process_run()`, or
   `interaction_ask()`
 - Reusable metadata/scanner helpers and product-agnostic project-state normalization
 - Transcript schemas, assets, compaction, and replay semantics

@@ -4,6 +4,7 @@ use harn_modules::resolve_import_path;
 use harn_parser::{Node, SNode};
 
 use super::preflight::PreflightDiagnostic;
+use super::source::parse_resolved_module;
 
 /// Tracks the origin of an imported name for collision detection.
 struct ImportedName {
@@ -24,15 +25,12 @@ pub(super) fn scan_import_collisions(
     for node in program {
         match &node.node {
             Node::ImportDecl { path, .. } => {
-                if path.starts_with("std/") {
-                    continue;
-                }
                 let Some(import_path) = resolve_import_path(file_path, path) else {
                     // Already diagnosed as unresolved elsewhere.
                     continue;
                 };
                 let import_str = import_path.to_string_lossy().into_owned();
-                let Ok(import_source) = std::fs::read_to_string(&import_path) else {
+                let Some((import_source, _)) = parse_resolved_module(&import_path) else {
                     continue;
                 };
                 let names = collect_exported_names(&import_source, &import_path);
@@ -64,9 +62,6 @@ pub(super) fn scan_import_collisions(
                 }
             }
             Node::SelectiveImport { names, path, .. } => {
-                if path.starts_with("std/") {
-                    continue;
-                }
                 let module_path = resolve_import_path(file_path, path)
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_else(|| path.clone());
@@ -232,7 +227,7 @@ fn collect_exported_names_into(
                 is_pub: true,
             } => {
                 if let Some(nested_path) = resolve_import_path(file_path, nested) {
-                    if let Ok(nested_source) = std::fs::read_to_string(&nested_path) {
+                    if let Some((nested_source, _)) = parse_resolved_module(&nested_path) {
                         collect_exported_names_into(&nested_source, &nested_path, names, visited);
                     }
                 }

@@ -8,7 +8,7 @@ import {
   update_message,
   user_info,
 } from "std/connectors/slack"
-import { process_exec } from "std/runtime"
+import { process_shell } from "std/runtime"
 
 fn wait_for_file(path, attempts) {
   var remaining = attempts
@@ -28,7 +28,7 @@ pipeline default() {
   let pid_path = path_join(state_dir, "server.pid")
   let log_path = path_join(state_dir, "server.log")
   mkdir(state_dir)
-  let start = process_exec(
+  let start = process_shell(
     "python3 \"" + server_script + "\" \"" + state_dir + "\" >\"" + log_path
       + "\" 2>&1 & echo $! > \""
       + pid_path
@@ -54,7 +54,7 @@ pipeline default() {
   let auth = api_call("auth.test")
   let state = json_parse(http_get(base + "/__state").body)
   let _stop = http_post(base + "/__shutdown", "")
-  process_exec("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
+  process_shell("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
   reset()
   println(posted.channel)
   println(updated.text)

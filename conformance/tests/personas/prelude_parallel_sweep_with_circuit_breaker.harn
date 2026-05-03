@@ -1,0 +1,31 @@
+import { parallel_sweep_with_circuit_breaker } from "std/personas/prelude"
+
+pipeline test(task) {
+  let result = parallel_sweep_with_circuit_breaker(
+    [1, 2, 3, 4],
+    fn(item) {
+      if item == 2 {
+        throw "boom"
+      }
+      return item * 10
+    },
+    {
+      persona: "sweep_captain",
+      step: "sweep_prs",
+      trace_id: "trace-sweep",
+      started_at: "2026-05-03T00:00:00Z",
+      completed_at: "2026-05-03T00:00:00Z",
+      max_concurrent: 2,
+      max_failures: 1,
+    },
+  )
+  println(result.status)
+  println(result.circuit_open)
+  println(result.succeeded)
+  println(result.failed)
+  println(result.skipped)
+  println(len(result.results))
+  println(result.results[0].value)
+  println(result.results[1].ok)
+  println(result.receipt.status)
+}

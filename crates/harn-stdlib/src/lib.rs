@@ -148,6 +148,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_triggers.harn"),
     },
     StdlibSource {
+        module: "personas/prelude",
+        source: include_str!("stdlib/stdlib_personas_prelude.harn"),
+    },
+    StdlibSource {
         module: "connectors/shared",
         source: include_str!("stdlib/stdlib_connectors_shared.harn"),
     },
@@ -205,6 +209,7 @@ mod tests {
         for module in [
             "context",
             "waitpoint",
+            "personas/prelude",
             "connectors/shared",
             "connectors/github",
             "connectors/linear",

@@ -9,7 +9,15 @@ pipeline default() {
   println(runtime_pipeline_input()?.message)
   println(runtime_dry_run())
   println(runtime_approved_plan())
-  let result = process_exec("printf ok")
+  let result = process_shell("printf ok")
   println(result?.success)
   println(result?.combined)
+  let argv = if platform() == "windows" {
+    ["cmd", "/C", "echo|set /p=argv-ok"]
+  } else {
+    ["printf", "argv-ok"]
+  }
+  let argv_result = process_run(argv, {timeout_ms: 5000})
+  println(argv_result?.success)
+  println(process_result_text(argv_result))
 }

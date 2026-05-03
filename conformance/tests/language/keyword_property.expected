@@ -3,3 +3,13 @@ test
 pattern
 user
 status
+true
+owner
+2
+frontier
+cleanup
+policy
+ready
+review
+smoke
+{"eval_pack":"smoke"}

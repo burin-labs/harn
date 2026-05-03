@@ -81,6 +81,7 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__select_list",
     "__select_timeout",
     "__select_try",
+    "__testing_call_body",
 ];
 
 #[test]

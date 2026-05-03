@@ -5,6 +5,42 @@ use crate::value::{error_to_category, values_equal, ErrorCategory, VmError, VmVa
 use crate::vm::Vm;
 
 pub(crate) fn register_testing_builtins(vm: &mut Vm) {
+    vm.register_async_builtin("__testing_call_body", |args| async move {
+        let body = args
+            .first()
+            .cloned()
+            .ok_or_else(|| VmError::Runtime("__testing_call_body: body is required".to_string()))?;
+        if !Vm::is_callable_value(&body) {
+            return Err(VmError::TypeError(format!(
+                "__testing_call_body: body must be callable, got {}",
+                body.type_name()
+            )));
+        }
+
+        let call_args = match &body {
+            VmValue::Closure(closure) => {
+                let required = closure.func.required_param_count();
+                if required == 0 {
+                    Vec::new()
+                } else if required == 1 {
+                    vec![VmValue::Nil]
+                } else {
+                    return Err(VmError::Runtime(format!(
+                        "__testing_call_body: body expects {required} required argument(s); scoped mock helpers pass at most one context value"
+                    )));
+                }
+            }
+            _ => Vec::new(),
+        };
+
+        let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+            VmError::Runtime("__testing_call_body: builtin requires VM execution context".to_string())
+        })?;
+        let result = vm.call_callable_value(&body, &call_args).await;
+        crate::vm::forward_child_output_to_parent(&vm.take_output());
+        result
+    });
+
     vm.register_builtin("assert", |args, _out| {
         let condition = args.first().unwrap_or(&VmValue::Nil);
         if !condition.is_truthy() {

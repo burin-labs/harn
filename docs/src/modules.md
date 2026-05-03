@@ -82,7 +82,8 @@ described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/path`, `std/vision`, `std/context`, `std/agent_state`, `std/agents`,
 `std/runtime`, `std/review`, `std/experiments`, `std/project`, `std/memory`,
 `std/prompt_library`, `std/monitors`, `std/worktree`, `std/checkpoint`,
-`std/connectors/shared`, and provider-specific `std/connectors/...` modules).
+`std/personas/prelude`, `std/connectors/shared`, and provider-specific
+`std/connectors/...` modules).
 These add layered
 utilities on top of the core builtins; the core builtins themselves are
 always available.
@@ -106,6 +107,7 @@ import "std/prompt_library"
 import "std/review"
 import "std/experiments"
 import "std/monitors"
+import "std/personas/prelude"
 import "std/connectors/shared"
 ```
 
@@ -398,8 +400,11 @@ Generic host/runtime helpers that are useful across many hosts:
 | `runtime_pipeline_input()` | Return structured pipeline input from the host |
 | `runtime_dry_run()` | Return whether the current run is dry-run only |
 | `runtime_approved_plan()` | Return the host-approved plan text when available |
-| `process_exec(command)` | Execute a process through the typed host contract |
-| `process_exec_with_timeout(command, timeout_ms)` | Execute a process with an explicit timeout |
+| `process_run(argv, options?)` | Execute a process through argv-mode `process.exec`; prefer this for programmatic commands |
+| `process_shell(command, options?)` | Execute an explicit shell command through `process.exec` after resolving the host default shell |
+| `process_result_text(result)` | Return stdout, stderr, combined output, or inline output from a command-runner result |
+| `process_result_success(result)` | Return explicit command success when present, otherwise derive success from `status` and `exit_code` |
+| `shell_quote(value)` | Quote a value as one POSIX shell argument for unavoidable shell-mode command composition |
 | `interaction_ask(question)` | Ask the host/user a question through the typed interaction contract |
 | `interaction_ask_with_kind(question, kind)` | Ask the host/user a question with an explicit interaction kind |
 | `record_run_metadata(run, workflow_name)` | Persist normalized workflow run metadata through the runtime contract |
@@ -509,12 +514,27 @@ Helpers for isolated git worktree execution built on `exec_at(...)` and
 | `worktree_diff(path, base_ref?)` | Render diff output for the worktree |
 | `worktree_shell(path, script)` | Run an arbitrary shell command inside the worktree |
 
+### std/personas/prelude
+
+Reusable orchestration primitives for durable persona workflows. See
+[Persona Prelude](./personas/prelude.md) for the complete API.
+
+| Function | Description |
+|---|---|
+| `verify_then_act(verifier, actor, options?)` | Run an actor only after an ok-shaped verifier result |
+| `bounded_loop(state_init, step_fn, options?)` | Run a state loop with iteration, duration, and progress bounds |
+| `cheap_classify_then_escalate(input, cheap_model, escalate_model, escalation_predicate, options?)` | Use a cheap classifier first and escalate ambiguous or failed cases |
+| `parallel_sweep_with_circuit_breaker(items, step_fn, options?)` | Process a bounded parallel sweep and stop scheduling after too many failures |
+| `with_audit_receipt(step_fn, options?)` | Wrap a step so success and failure both produce a receipt envelope |
+| `with_approval_gate(approval_kind, step_fn, options?)` | Require a replayed or HITL approval before running a step |
+
 ### Selective imports
 
 Import specific functions from any module:
 
 ```harn
 import { extract_paths, parse_cells } from "std/text"
+import std::personas::prelude::{verify_then_act}
 ```
 
 ### Public re-exports

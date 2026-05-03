@@ -3,7 +3,7 @@
 // Runs each command listed in the per-repo policy and returns a record
 // the receipt can attach. In dry-run mode the commands are recorded but
 // not executed.
-import { process_exec_with_timeout } from "std/runtime"
+import { process_shell } from "std/runtime"
 
 /** Run all local verification commands for a repo. */
 pub fn run_local_verify(commands, dry_run) {
@@ -23,7 +23,7 @@ pub fn run_local_verify(commands, dry_run) {
       } else {
         let started = now_ms()
         let result = try {
-          process_exec_with_timeout(cmd.command, cmd.timeout_ms ?? timeout_ms)
+          process_shell(to_string(cmd.command), {timeout_ms: cmd.timeout_ms ?? timeout_ms})
         }
         let finished = now_ms()
         if !is_ok(result) {
