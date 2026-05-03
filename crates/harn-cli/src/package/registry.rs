@@ -331,35 +331,50 @@ pub(crate) fn remove_materialized_package(
     packages_dir: &Path,
     alias: &str,
 ) -> Result<(), PackageError> {
-    let dir = packages_dir.join(alias);
-    match fs::symlink_metadata(&dir) {
-        Ok(metadata) if metadata.file_type().is_symlink() || metadata.is_file() => {
-            fs::remove_file(&dir)
-                .map_err(|error| format!("failed to remove {}: {error}", dir.display()))?;
-        }
-        Ok(metadata) if metadata.is_dir() => {
-            fs::remove_dir_all(&dir)
-                .map_err(|error| format!("failed to remove {}: {error}", dir.display()))?;
-        }
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("failed to stat {}: {error}", dir.display()).into()),
-    }
-    let file = packages_dir.join(format!("{alias}.harn"));
-    match fs::symlink_metadata(&file) {
-        Ok(metadata) if metadata.file_type().is_symlink() || metadata.is_file() => {
-            fs::remove_file(&file)
-                .map_err(|error| format!("failed to remove {}: {error}", file.display()))?;
-        }
-        Ok(metadata) if metadata.is_dir() => {
-            fs::remove_dir_all(&file)
-                .map_err(|error| format!("failed to remove {}: {error}", file.display()))?;
-        }
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("failed to stat {}: {error}", file.display()).into()),
-    }
+    remove_materialized_path(&packages_dir.join(alias))?;
+    remove_materialized_path(&packages_dir.join(format!("{alias}.harn")))?;
     Ok(())
+}
+
+fn remove_materialized_path(path: &Path) -> Result<(), PackageError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if is_link_like(&metadata) => remove_link_like_path(path)
+            .map_err(|error| format!("failed to remove {}: {error}", path.display()).into()),
+        Ok(metadata) if metadata.is_file() => fs::remove_file(path)
+            .map_err(|error| format!("failed to remove {}: {error}", path.display()).into()),
+        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path)
+            .map_err(|error| format!("failed to remove {}: {error}", path.display()).into()),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("failed to stat {}: {error}", path.display()).into()),
+    }
+}
+
+fn is_link_like(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_symlink() || is_windows_reparse_point(metadata)
+}
+
+#[cfg(windows)]
+fn is_windows_reparse_point(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn is_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
+    false
+}
+
+fn remove_link_like_path(path: &Path) -> std::io::Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(file_error) => match fs::remove_dir(path) {
+            Ok(()) => Ok(()),
+            Err(_) => Err(file_error),
+        },
+    }
 }
 
 #[cfg(unix)]
@@ -1628,6 +1643,29 @@ mod tests {
         fs::write(root.join(CONTENT_HASH_FILE), "changed\n").unwrap();
         let second = compute_content_hash(root).unwrap();
         assert_eq!(first, second);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_materialized_package_unlinks_directory_symlink_without_touching_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        let packages = tmp.path().join(".harn/packages");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&packages).unwrap();
+        fs::write(
+            source.join("lib.harn"),
+            "pub fn value() -> number { return 1 }\n",
+        )
+        .unwrap();
+
+        let materialized = packages.join("acme");
+        std::os::unix::fs::symlink(&source, &materialized).unwrap();
+
+        remove_materialized_package(&packages, "acme").unwrap();
+
+        assert!(!materialized.exists());
+        assert!(source.join("lib.harn").is_file());
     }
 
     #[test]

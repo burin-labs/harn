@@ -6,6 +6,13 @@ on:
   pull_request:
   merge_group:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
   # sccache is wired in via .cargo/config.toml (rustc-wrapper = "sccache").
@@ -97,27 +104,29 @@ jobs:
     name: Detect code changes
     runs-on: ubuntu-latest
     outputs:
-      rust: ${{ steps.filter.outputs.rust }}
+      windows: ${{ steps.filter.outputs.windows }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - id: filter
         uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         with:
           filters: |
-            rust:
+            windows:
               - 'crates/**'
               - 'conformance/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - '.cargo/**'
               - 'rust-toolchain.toml'
-              - '.github/workflows/ci.yml'
+              - 'Makefile'
+              - 'scripts/**'
+              - '.github/workflows/**'
 
   windows:
     name: Rust on Windows (build + smoke test)
     runs-on: windows-latest
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'merge_group' || github.event_name == 'push'
+    if: needs.changes.outputs.windows == 'true' || github.event_name == 'merge_group' || github.event_name == 'push'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -222,9 +231,10 @@ jobs:
             ["GitHub Actions lint"]="${{ needs.actions.result }}"
           )
 
-          # The Windows job is gated on `changes.outputs.rust` and is skipped
-          # on PRs that don't touch Rust/CI. Treat `skipped` as passing here;
-          # only an actual failure should fail the gate.
+          # The Windows job is gated on `changes.outputs.windows` and is skipped
+          # on PRs that don't touch Rust/workflow/platform-sensitive paths.
+          # Treat `skipped` as passing here; only an actual failure should fail
+          # the gate.
           windows_result="${{ needs.windows.result }}"
           echo "Rust on Windows (build + smoke test): $windows_result"
           if [ "$windows_result" != "success" ] && [ "$windows_result" != "skipped" ]; then

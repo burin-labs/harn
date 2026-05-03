@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use axum::http::StatusCode;
@@ -479,14 +479,38 @@ fn collect_launch_targets(
         } else if path.extension().is_some_and(|ext| ext == "harn") {
             let relative = path
                 .strip_prefix(workspace_root)
-                .map_err(|error| format!("failed to relativize {}: {error}", path.display()))?
-                .display()
-                .to_string();
+                .map_err(|error| format!("failed to relativize {}: {error}", path.display()))?;
             out.push(PortalLaunchTarget {
-                path: relative,
+                path: logical_path(relative),
                 group: group.to_string(),
             });
         }
     }
     Ok(())
+}
+
+fn logical_path(path: &Path) -> String {
+    path.components()
+        .filter_map(|component| match component {
+            Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+            Component::CurDir => None,
+            Component::ParentDir => Some("..".to_string()),
+            Component::RootDir | Component::Prefix(_) => {
+                Some(component.as_os_str().to_string_lossy().into_owned())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logical_path_uses_slashes_for_native_launch_paths() {
+        let path = Path::new("examples").join("nested").join("demo.harn");
+
+        assert_eq!(logical_path(&path), "examples/nested/demo.harn");
+    }
 }
