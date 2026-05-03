@@ -31,7 +31,7 @@ pipeline test(task) {
     when_to_use "User asks to check metrics or dashboards"
     allowed_tools ["query_metrics"]
   }
-  let registry = skill_define(ship, "inspect", skill_find(inspect, "inspect"))
+  let registry = skill_define(ship, "inspect", skill_find(inspect, "inspect") ?? {})
   let flow = workflow_graph(
     {
       name: "deploy",

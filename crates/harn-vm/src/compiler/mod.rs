@@ -293,12 +293,13 @@ impl Compiler {
             }
             Node::FnDecl {
                 name,
+                type_params,
                 params,
                 body,
                 is_stream,
                 ..
             } => {
-                self.compile_fn_decl(name, params, body, *is_stream)?;
+                self.compile_fn_decl(name, type_params, params, body, *is_stream)?;
             }
             Node::ToolDecl {
                 name,

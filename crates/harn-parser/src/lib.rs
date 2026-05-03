@@ -1,5 +1,5 @@
 mod ast;
-pub(crate) mod builtin_signatures;
+pub mod builtin_signatures;
 pub mod diagnostic;
 mod parser;
 pub mod typechecker;

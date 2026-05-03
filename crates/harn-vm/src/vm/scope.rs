@@ -74,6 +74,7 @@ impl Vm {
         if self.frames.len() >= Self::MAX_FRAMES {
             return Err(VmError::StackOverflow);
         }
+        crate::typecheck::validate_user_call(&closure.func, args, None)?;
         let saved_env = self.env.clone();
 
         // If this closure originated from an imported module, switch
@@ -141,6 +142,14 @@ impl Vm {
 
         // Buffer size of 1: the generator produces one value at a time.
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
+
+        if let Err(error) = crate::typecheck::validate_user_call(&closure.func, args, None) {
+            let _ = tx.try_send(Err(error));
+            return VmValue::Generator(VmGenerator {
+                done: Rc::new(std::cell::Cell::new(false)),
+                receiver: Rc::new(tokio::sync::Mutex::new(rx)),
+            });
+        }
 
         let mut child = self.child_vm();
         child.yield_sender = Some(tx);

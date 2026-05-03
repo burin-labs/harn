@@ -127,7 +127,7 @@ Automatically retry a block up to N times:
 ```harn
 retry 3 {
   let response = http_post(url, payload)
-  let parsed = json_parse(response)
+  let parsed = json_parse(response.body)
   parsed
 }
 ```
@@ -384,7 +384,7 @@ at a higher level.
 retry 3 {
   try {
     let result = llm_call(prompt, system)
-    let parsed = json_parse(result)
+    let parsed = json_parse(result.text)
     return parsed
   } catch (e) {
     println("Attempt failed: ${e}")

@@ -1,1 +1,1 @@
-tool_define: config must be a dict with parameters and handler
+argument 4 `config`: expected dict, found string

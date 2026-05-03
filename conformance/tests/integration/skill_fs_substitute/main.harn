@@ -1,8 +1,11 @@
-// `skill_render(skill, args)` — substitute $1 / $2 / $ARGUMENTS /
-// ${HARN_SKILL_DIR} in the discovered SKILL.md body.
+/**
+ * `skill_render(skill, args)` — substitute $1 / $2 / $ARGUMENTS /
+ * ${HARN_SKILL_DIR} in the discovered SKILL.md body.
+ */
 pipeline test(task) {
-  let ship = skill_find(skills, "ship")
-  assert(ship != nil, "ship skill discovered")
+  let found_ship = skill_find(skills, "ship")
+  assert(found_ship != nil, "ship skill discovered")
+  let ship = found_ship ?? {}
   let rendered = skill_render(ship, ["prod", "us-east-1"])
   // $1 / $2 expand positionally.
   assert(contains(rendered, "deploy prod to us-east-1"), "positional args substituted")

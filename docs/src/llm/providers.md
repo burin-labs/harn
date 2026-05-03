@@ -282,7 +282,7 @@ Set the model explicitly or via environment:
 
 ```harn
 // In code
-llm_call({model: "claude-sonnet-4-5-20241022", prompt: "..."})
+llm_call("...", nil, {model: "claude-sonnet-4-5-20241022"})
 
 // Or via environment
 // export HARN_LLM_MODEL=gpt-4o
@@ -304,7 +304,7 @@ export HARN_RATE_LIMIT_OPENAI=120
 Or in code:
 
 ```harn
-llm_rate_limit("anthropic", 60)
+llm_rate_limit("anthropic", {rpm: 60})
 ```
 
 The rate limiter uses a token-bucket algorithm and will pause before sending

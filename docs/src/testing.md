@@ -190,8 +190,8 @@ For testing agent loops without real LLM calls, use `llm_mock()`:
 llm_mock({text: "The answer is 42"})
 
 let result = llm_call([
-  {role: "user", content: "What is the answer?"}
-])
+  {role: "user", content: "What is the answer?"},
+].join("\n"))
 log(result)
 ```
 

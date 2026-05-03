@@ -63,7 +63,7 @@ pipeline default(task) {
 
   while !done && iterations < 10 {
     let response = llm_call(messages, system)
-    let calls = tool_parse_call(response)
+    let calls = tool_parse_call(response.text)
 
     if calls.count() == 0 {
       println(response)
@@ -264,8 +264,7 @@ pipeline default(task) {
     retry 3 {
       try {
         let raw = llm_call(prompt, system)
-        let parsed = json_parse(raw)
-        return parsed
+        return json_parse(raw.text)
       } catch (e) {
         println("LLM call failed: ${e}")
         throw AgentError.LlmFailure(to_string(e))
@@ -405,7 +404,7 @@ Respond with ONLY a JSON array of objects, each with "step" (string) and
   fn get_plan(task_desc) {
     retry 3 {
       let raw = llm_call(task_desc, system)
-      let parsed = json_parse(raw)
+      let parsed = json_parse(raw.text)
 
       // Validate structure
       guard type_of(parsed) == "list" else {
@@ -627,7 +626,7 @@ Evaluate multiple prompts concurrently using `parallel each`.
 // Evaluate multiple prompts in parallel
 let prompts = ["Explain X", "Explain Y", "Explain Z"]
 let responses = parallel each prompts { p ->
-  llm_call({prompt: p})
+  llm_call(p)
 }
 ```
 
@@ -637,7 +636,7 @@ Connect to an MCP server, list tools, call one, and disconnect.
 
 ```harn
 // Connect to an MCP server and call tools
-let client = mcp_connect({command: "npx", args: ["-y", "some-mcp-server"]})
+let client = mcp_connect("npx", ["-y", "some-mcp-server"])
 let tools = mcp_list_tools(client)
 log("Available: ${len(tools)} tools")
 let result = mcp_call(client, "tool_name", {arg: "value"})

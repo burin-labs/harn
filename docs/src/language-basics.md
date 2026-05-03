@@ -473,7 +473,10 @@ fn log(level, ...parts) {
 log("INFO", "server", "started")  // [INFO] server started
 ```
 
-If no extra arguments are provided, the rest parameter is an empty list.
+If no extra arguments are provided, the rest parameter is an empty list. A type
+annotation on a rest parameter describes each extra argument, and the binding
+inside the function has the corresponding list type: `...nums: int` accepts
+only integer extras and binds `nums` as `list<int>`.
 
 ### Closures
 

@@ -40,6 +40,18 @@ impl Compiler {
         c
     }
 
+    pub(super) fn nominal_type_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .struct_layouts
+            .keys()
+            .chain(self.enum_names.iter())
+            .cloned()
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
     /// Populate `type_aliases` from a program's top-level `type T = ...`
     /// declarations so later lowerings can resolve alias names to their
     /// canonical `TypeExpr`.
@@ -318,7 +330,13 @@ impl Compiler {
     pub(super) fn emit_type_checks(&mut self, params: &[TypedParam]) {
         for param in params {
             if let Some(type_expr) = &param.type_expr {
-                if let harn_parser::TypeExpr::Named(name) = type_expr {
+                let check_type = if param.rest {
+                    harn_parser::TypeExpr::List(Box::new(type_expr.clone()))
+                } else {
+                    type_expr.clone()
+                };
+
+                if let harn_parser::TypeExpr::Named(name) = &check_type {
                     if let Some(methods) = self.interface_methods.get(name).cloned() {
                         let fn_idx = self
                             .chunk
@@ -340,7 +358,7 @@ impl Compiler {
                     }
                 }
 
-                if let Some(schema) = Self::type_expr_to_schema_value(type_expr) {
+                if let Some(schema) = Self::type_expr_to_schema_value(&check_type) {
                     let fn_idx = self
                         .chunk
                         .add_constant(Constant::String("__assert_schema".into()));
@@ -1054,6 +1072,7 @@ impl Compiler {
     /// entry-point pipeline.
     pub fn compile_fn_body(
         &mut self,
+        type_params: &[harn_parser::TypeParam],
         params: &[TypedParam],
         body: &[SNode],
         source_file: Option<String>,
@@ -1074,7 +1093,9 @@ impl Compiler {
         fn_compiler.chunk.source_file = source_file;
         Ok(CompiledFunction {
             name: String::new(),
-            params: TypedParam::names(params),
+            type_params: type_params.iter().map(|param| param.name.clone()).collect(),
+            nominal_type_names: fn_compiler.nominal_type_names(),
+            params: crate::chunk::ParamSlot::vec_from_typed(params),
             default_start: TypedParam::default_start(params),
             chunk: Rc::new(fn_compiler.chunk),
             is_generator: is_gen,

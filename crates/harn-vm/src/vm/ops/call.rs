@@ -104,6 +104,7 @@ impl super::super::Vm {
         args: &[VmValue],
     ) -> Result<bool, VmError> {
         if name == "await" {
+            crate::typecheck::validate_builtin_call(name, args, None)?;
             let task_id = args.first().and_then(|a| match a {
                 VmValue::TaskHandle(id) => Some(id.clone()),
                 _ => None,
@@ -127,6 +128,7 @@ impl super::super::Vm {
         }
 
         if name == "cancel" {
+            crate::typecheck::validate_builtin_call(name, args, None)?;
             if let Some(VmValue::TaskHandle(id)) = args.first() {
                 if let Some(handle) = self.spawned_tasks.remove(id) {
                     handle.handle.abort();
@@ -137,6 +139,7 @@ impl super::super::Vm {
         }
 
         if name == "cancel_graceful" {
+            crate::typecheck::validate_builtin_call(name, args, None)?;
             let task_id = args.first().and_then(|a| match a {
                 VmValue::TaskHandle(id) => Some(id.clone()),
                 _ => None,
@@ -202,6 +205,7 @@ impl super::super::Vm {
         }
 
         if name == "is_cancelled" {
+            crate::typecheck::validate_builtin_call(name, args, None)?;
             let cancelled = self
                 .cancel_token
                 .as_ref()
@@ -363,6 +367,7 @@ impl super::super::Vm {
         };
 
         if let Some(closure) = resolved_closure {
+            crate::typecheck::validate_user_call(&closure.func, &args, None)?;
             if closure.func.is_generator {
                 // Generators cannot be tail-call optimized.
                 let gen = self.create_generator(&closure, &args);

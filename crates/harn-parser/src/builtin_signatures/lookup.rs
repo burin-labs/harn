@@ -1,13 +1,17 @@
+//! Public lookup helpers over the unified [`BuiltinSignature`] registry.
+//!
+//! Both the type checker (this crate) and the runtime (`harn-vm`) consume
+//! these helpers. Generic builtins declare their type parameters via
+//! [`BuiltinSignature::type_params`] and use [`Ty::Generic`]/[`Ty::SchemaOf`]
+//! in param/return positions; the type checker materializes those at each
+//! call site against the surrounding scope.
+
 use crate::ast::TypeExpr;
 
-use super::{
-    all_signatures, generics, BuiltinGenericSig, BuiltinMetadata, BuiltinReturn, BuiltinSig,
-    EMPTY_RETURN_TYPES, RETURN_BOOL, RETURN_BYTES, RETURN_DICT, RETURN_FLOAT, RETURN_INT,
-    RETURN_LIST, RETURN_NEVER, RETURN_NIL, RETURN_STRING,
-};
+use super::{all_signatures, BuiltinMetadata, BuiltinSignature, Ty};
 
-/// Binary-search the registry for a given name.
-fn lookup(name: &str) -> Option<&'static BuiltinSig> {
+/// Binary-search the registry for a given name. O(log N).
+pub fn lookup(name: &str) -> Option<&'static BuiltinSignature> {
     let signatures = all_signatures();
     signatures
         .binary_search_by_key(&name, |sig| sig.name)
@@ -16,57 +20,43 @@ fn lookup(name: &str) -> Option<&'static BuiltinSig> {
 }
 
 /// Is `name` a builtin known to the parser?
-pub(crate) fn is_builtin(name: &str) -> bool {
+pub fn is_builtin(name: &str) -> bool {
     lookup(name).is_some()
 }
 
-/// Every builtin name in alphabetical order, exposed via
-/// [`crate::known_builtin_names`] for cross-crate drift testing.
-pub(crate) fn iter_builtin_names() -> impl Iterator<Item = &'static str> {
+/// Every builtin name in alphabetical order.
+pub fn iter_builtin_names() -> impl Iterator<Item = &'static str> {
     all_signatures().iter().map(|sig| sig.name)
 }
 
-pub(crate) fn iter_builtin_metadata() -> impl Iterator<Item = BuiltinMetadata> {
+/// Iterate over every builtin's name and statically-known return-type
+/// strings. Used by `harn-lint` and other consumers that want a
+/// lightweight "what does this builtin return" view without bringing in
+/// the full type IR.
+pub fn iter_builtin_metadata() -> impl Iterator<Item = BuiltinMetadata> {
     all_signatures().iter().map(|sig| BuiltinMetadata {
         name: sig.name,
-        return_types: match sig.return_type {
-            Some(BuiltinReturn::Named(name)) => match name {
-                "bool" => RETURN_BOOL,
-                "bytes" => RETURN_BYTES,
-                "dict" => RETURN_DICT,
-                "float" => RETURN_FLOAT,
-                "int" => RETURN_INT,
-                "list" => RETURN_LIST,
-                "nil" => RETURN_NIL,
-                "string" => RETURN_STRING,
-                _ => EMPTY_RETURN_TYPES,
-            },
-            Some(BuiltinReturn::Union(names)) => names,
-            Some(BuiltinReturn::Never) => RETURN_NEVER,
-            None => EMPTY_RETURN_TYPES,
-        },
+        return_types: builtin_return_type_names(sig),
     })
 }
 
-/// Statically-known return type for `name`. `None` for unknown names OR
-/// builtins with a dynamic return type (e.g. `json_parse`).
-pub(crate) fn builtin_return_type(name: &str) -> Option<TypeExpr> {
+/// Statically-known return type for `name`, materialized as a [`TypeExpr`].
+/// Returns `None` for unknown names AND for builtins whose return type is
+/// genuinely dynamic ([`Ty::Any`]).
+pub fn builtin_return_type(name: &str) -> Option<TypeExpr> {
     let sig = lookup(name)?;
-    match sig.return_type? {
-        BuiltinReturn::Named(ty) => Some(TypeExpr::Named(ty.into())),
-        BuiltinReturn::Union(tys) => Some(TypeExpr::Union(
-            tys.iter().map(|ty| TypeExpr::Named((*ty).into())).collect(),
-        )),
-        BuiltinReturn::Never => Some(TypeExpr::Never),
+    if sig.returns.is_any() {
+        return None;
     }
+    Some(sig.returns.to_type_expr())
 }
 
-pub(crate) fn lookup_generic_builtin_sig(name: &str) -> Option<BuiltinGenericSig> {
-    generics::lookup_generic_builtin_sig(name)
-}
-
-/// Returns true if this builtin produces an untyped/opaque value that should
-/// be validated before field access in strict types mode.
+/// Returns true if this builtin produces an untyped/opaque value that
+/// should be validated before field access in strict types mode.
+///
+/// This is the same set the linter's `untyped-dict-access` rule treats
+/// as boundary sources — JSON parsing, HTTP responses, LLM outputs,
+/// host capability calls, etc.
 pub fn is_untyped_boundary_source(name: &str) -> bool {
     matches!(
         name,
@@ -97,4 +87,38 @@ pub fn is_untyped_boundary_source(name: &str) -> bool {
             | "host_tool_call"
             | "mcp_call"
     )
+}
+
+/// Convert the signature's return type to a tiny `&'static [&'static str]`
+/// view used by `BuiltinMetadata` consumers (linter, LSP) that don't
+/// pull in the full type IR. Only basic primitive names and the common
+/// `T | nil` unions are exposed; everything else returns an empty slice
+/// so callers know to consult [`builtin_return_type`] instead.
+fn builtin_return_type_names(sig: &BuiltinSignature) -> &'static [&'static str] {
+    match &sig.returns {
+        Ty::Named(name) => match *name {
+            "bool" => &["bool"],
+            "bytes" => &["bytes"],
+            "dict" => &["dict"],
+            "float" => &["float"],
+            "int" => &["int"],
+            "list" => &["list"],
+            "nil" => &["nil"],
+            "string" => &["string"],
+            _ => &[],
+        },
+        Ty::Union(members) => match *members {
+            [Ty::Named("string"), Ty::Named("nil")] => &["string", "nil"],
+            [Ty::Named("nil"), Ty::Named("string")] => &["string", "nil"],
+            [Ty::Named("int"), Ty::Named("nil")] => &["int", "nil"],
+            [Ty::Named("nil"), Ty::Named("int")] => &["int", "nil"],
+            [Ty::Named("dict"), Ty::Named("nil")] => &["dict", "nil"],
+            [Ty::Named("nil"), Ty::Named("dict")] => &["dict", "nil"],
+            [Ty::Named("bytes"), Ty::Named("nil")] => &["bytes", "nil"],
+            [Ty::Named("nil"), Ty::Named("bytes")] => &["bytes", "nil"],
+            _ => &[],
+        },
+        Ty::Never => &["never"],
+        _ => &[],
+    }
 }

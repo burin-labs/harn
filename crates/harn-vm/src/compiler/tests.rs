@@ -145,7 +145,10 @@ fn test_compile_function_params_to_slots() {
 fn test_compile_closure() {
     let chunk = compile_source("pipeline test(task) { let f = { x -> x * 2 } }");
     assert!(!chunk.functions.is_empty());
-    assert_eq!(chunk.functions[0].params, vec!["x"]);
+    assert_eq!(
+        chunk.functions[0].param_names().collect::<Vec<_>>(),
+        vec!["x"]
+    );
 }
 
 #[test]

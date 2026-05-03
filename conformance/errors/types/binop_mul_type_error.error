@@ -1,1 +1,1 @@
-re:can't multiply \w+ and \w+ \(try string \* int\)
+can't multiply bool and int

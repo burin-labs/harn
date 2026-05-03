@@ -258,6 +258,7 @@ impl Vm {
                 };
                 let harn_parser::Node::FnDecl {
                     name,
+                    type_params,
                     params,
                     body,
                     is_pub,
@@ -270,7 +271,7 @@ impl Vm {
                 let mut compiler = crate::Compiler::new();
                 let module_source_file = debug_source_file.map(|p| p.display().to_string());
                 let func_chunk = compiler
-                    .compile_fn_body(params, body, module_source_file)
+                    .compile_fn_body(type_params, params, body, module_source_file)
                     .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
                 let closure = Rc::new(VmClosure {
                     func: Rc::new(func_chunk),

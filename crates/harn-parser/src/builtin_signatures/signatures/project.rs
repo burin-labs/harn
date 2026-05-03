@@ -1,126 +1,304 @@
 //! Project, metadata, checkpoint, and store builtin signatures.
 
-use super::{BuiltinReturn, BuiltinSig};
+use super::{
+    BuiltinSignature, Param, Ty, TY_ANY, TY_DICT, TY_DICT_OR_NIL, TY_LIST, TY_NIL, TY_STRING,
+    TY_STRING_OR_NIL,
+};
 
-pub(crate) const SIGNATURES: &[BuiltinSig] = &[
-    BuiltinSig {
+pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
+    // checkpoint(key, value) — persist a checkpoint immediately. value may
+    // be any VM value (serialized via JSON).
+    BuiltinSignature {
         name: "checkpoint",
-        return_type: None,
+        params: &[Param::new("key", TY_STRING), Param::new("value", TY_ANY)],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "checkpoint_clear",
-        return_type: None,
+        params: &[],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "checkpoint_delete",
-        return_type: None,
+        params: &[Param::new("key", TY_STRING)],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "checkpoint_exists",
-        return_type: None,
+        params: &[Param::new("key", TY_STRING)],
+        returns: Ty::Named("bool"),
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // checkpoint_get(key) -> stored value | nil. Stored values round-trip
+    // through JSON, so the static type is dynamic.
+    BuiltinSignature {
         name: "checkpoint_get",
-        return_type: None,
+        params: &[Param::new("key", TY_STRING)],
+        returns: TY_ANY,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "checkpoint_list",
-        return_type: None,
+        params: &[],
+        returns: TY_LIST,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // compute_content_hash(dir) — fnv hash of file list + sizes + mtimes.
+    BuiltinSignature {
         name: "compute_content_hash",
-        return_type: Some(BuiltinReturn::Named("string")),
+        params: &[Param::new("dir", TY_STRING)],
+        returns: TY_STRING,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // invalidate_facts(dir?) — metadata invalidation is namespace-driven.
+    BuiltinSignature {
         name: "invalidate_facts",
-        return_type: Some(BuiltinReturn::Named("nil")),
+        params: &[Param::optional("dir", TY_STRING)],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: true,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // metadata_entries(namespace?) -> list of {dir, local, resolved} dicts.
+    BuiltinSignature {
         name: "metadata_entries",
-        return_type: Some(BuiltinReturn::Named("list")),
+        params: &[Param::optional("namespace", TY_STRING_OR_NIL)],
+        returns: TY_LIST,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // metadata_get(dir, namespace?) -> dict | nil
+    BuiltinSignature {
         name: "metadata_get",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[
+            Param::new("dir", TY_STRING),
+            Param::optional("namespace", TY_STRING_OR_NIL),
+        ],
+        returns: TY_DICT_OR_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "metadata_refresh_hashes",
-        return_type: Some(BuiltinReturn::Named("nil")),
+        params: &[],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // metadata_resolve(dir, namespace?) -> dict | nil
+    BuiltinSignature {
         name: "metadata_resolve",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[
+            Param::new("dir", TY_STRING),
+            Param::optional("namespace", TY_STRING_OR_NIL),
+        ],
+        returns: TY_DICT_OR_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "metadata_save",
-        return_type: Some(BuiltinReturn::Named("nil")),
+        params: &[],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // metadata_set(dir, namespace, data)
+    BuiltinSignature {
         name: "metadata_set",
-        return_type: Some(BuiltinReturn::Named("nil")),
+        params: &[
+            Param::new("dir", TY_STRING),
+            Param::new("namespace", TY_STRING),
+            Param::new("data", TY_DICT),
+        ],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // metadata_stale(project?) -> {any_stale: bool, tier1: list, tier2: list}
+    BuiltinSignature {
         name: "metadata_stale",
-        return_type: None,
+        params: &[Param::optional("project", TY_STRING)],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // metadata_status(namespace?) -> dict
+    BuiltinSignature {
         name: "metadata_status",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[Param::optional("namespace", TY_STRING_OR_NIL)],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // project_catalog_native() -> list of catalog dict entries.
+    BuiltinSignature {
         name: "project_catalog_native",
-        return_type: Some(BuiltinReturn::Named("list")),
+        params: &[],
+        returns: TY_LIST,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // project_enrich_native(path?, options?) -> dict (LLM-enriched evidence).
+    BuiltinSignature {
         name: "project_enrich_native",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[
+            Param::optional("path", TY_STRING),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // project_fingerprint(path?) -> ProjectFingerprint-shaped dict.
+    BuiltinSignature {
         name: "project_fingerprint",
-        return_type: None,
+        params: &[Param::optional("path", TY_STRING)],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // project_root() -> string | nil. Resolves the repo root for the
+    // currently-executing source file.
+    BuiltinSignature {
         name: "project_root",
-        return_type: Some(BuiltinReturn::Named("string")),
+        params: &[],
+        returns: TY_STRING_OR_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // project_scan_native(path?, options?) -> dict of evidence.
+    BuiltinSignature {
         name: "project_scan_native",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[
+            Param::optional("path", TY_STRING),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // project_scan_tree_native(path?, options?) -> dict keyed by relative
+    // directory.
+    BuiltinSignature {
         name: "project_scan_tree_native",
-        return_type: Some(BuiltinReturn::Named("dict")),
+        params: &[
+            Param::optional("path", TY_STRING),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // project_walk_tree_native(path?, options?) -> list of tree entry dicts.
+    BuiltinSignature {
         name: "project_walk_tree_native",
-        return_type: Some(BuiltinReturn::Named("list")),
+        params: &[
+            Param::optional("path", TY_STRING),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        returns: TY_LIST,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // scan_directory(path?, pattern_or_options?, options?) -> list of
+    // {path, size, modified, is_dir} dicts. The middle arg may be either a
+    // glob pattern string or an options dict.
+    BuiltinSignature {
         name: "scan_directory",
-        return_type: None,
+        params: &[
+            Param::optional("path", TY_STRING),
+            Param::optional(
+                "pattern_or_options",
+                Ty::Union(&[TY_STRING, TY_DICT, TY_NIL]),
+            ),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        returns: TY_LIST,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "store_clear",
-        return_type: None,
+        params: &[],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "store_delete",
-        return_type: None,
+        params: &[Param::new("key", TY_STRING)],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    // store_get(key) -> stored value | nil. Values round-trip through JSON
+    // so the static type is dynamic.
+    BuiltinSignature {
         name: "store_get",
-        return_type: None,
+        params: &[Param::new("key", TY_STRING)],
+        returns: TY_ANY,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "store_list",
-        return_type: None,
+        params: &[],
+        returns: TY_LIST,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "store_save",
-        return_type: None,
+        params: &[],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
-    BuiltinSig {
+    BuiltinSignature {
         name: "store_set",
-        return_type: None,
+        params: &[Param::new("key", TY_STRING), Param::new("value", TY_ANY)],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
     },
 ];

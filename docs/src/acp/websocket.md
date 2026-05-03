@@ -57,12 +57,13 @@ pipeline acp_websocket_echo() {
   })
 
   while true {
-    let conn = websocket_accept(server, 30000)
-    if conn?.type == "timeout" {
+    let accepted = websocket_accept(server, 30000)
+    if accepted == nil || accepted?.type == "timeout" {
       continue
     }
+    let conn = accepted ?? {}
 
-    let frame = websocket_receive(conn, 30000)
+    let frame = websocket_receive(conn, 30000) ?? {}
     if frame?.type == "text" {
       let request = json_parse(frame.data)
       websocket_send(conn, json_stringify({

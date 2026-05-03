@@ -1,4 +1,47 @@
+use harn_lexer::Span;
+
 use super::VmValue;
+
+/// Bound expressing how many arguments a callable accepts. Used in
+/// [`VmError::ArityMismatch`] so error messages can render the exact
+/// signature contract the caller violated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArityExpect {
+    /// Exactly N parameters, no defaults, no rest.
+    Exact(usize),
+    /// `min..=max`: some params have defaults but the upper bound is fixed.
+    Range { min: usize, max: usize },
+    /// At least N parameters; further args land in a rest list. Used for
+    /// `print` / `log` / variadics.
+    AtLeast(usize),
+}
+
+impl std::fmt::Display for ArityExpect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArityExpect::Exact(n) => write!(f, "{n}"),
+            ArityExpect::Range { min, max } => write!(f, "{min}..={max}"),
+            ArityExpect::AtLeast(n) => write!(f, "at least {n}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ArityMismatchError {
+    pub callee: String,
+    pub expected: ArityExpect,
+    pub got: usize,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArgTypeMismatchError {
+    pub callee: String,
+    pub param: String,
+    pub expected: String,
+    pub got: &'static str,
+    pub span: Option<Span>,
+}
 
 #[derive(Debug, Clone)]
 pub enum VmError {
@@ -22,6 +65,16 @@ pub enum VmError {
     },
     Return(VmValue),
     InvalidInstruction(u8),
+    /// Wrong number of arguments at a call site. Distinct from
+    /// [`VmError::TypeError`] so the runtime can match-and-recover (and
+    /// so error UX renders `expected 2..=3 got 1` consistently).
+    ArityMismatch(Box<ArityMismatchError>),
+    /// Argument value did not satisfy the declared parameter type.
+    /// `expected` is a pretty-printed type expression; `got` is the value's
+    /// runtime type name (`VmValue::type_name`). Used for both
+    /// user-defined function parameters (with declared types) and
+    /// registry-known builtin parameters.
+    ArgTypeMismatch(Box<ArgTypeMismatchError>),
 }
 
 /// Error categories for structured error handling in agent orchestration.
@@ -266,7 +319,35 @@ impl std::fmt::Display for VmError {
             ),
             VmError::Return(_) => write!(f, "Return from function"),
             VmError::InvalidInstruction(op) => write!(f, "Invalid instruction: 0x{op:02x}"),
+            VmError::ArityMismatch(err) => {
+                write!(
+                    f,
+                    "Arity mismatch: '{}' expects {} argument(s), got {}{}",
+                    err.callee,
+                    err.expected,
+                    err.got,
+                    fmt_span_suffix(&err.span)
+                )
+            }
+            VmError::ArgTypeMismatch(err) => {
+                write!(
+                    f,
+                    "Type error: '{}' parameter `{}` expects {}, got {}{}",
+                    err.callee,
+                    err.param,
+                    err.expected,
+                    err.got,
+                    fmt_span_suffix(&err.span)
+                )
+            }
         }
+    }
+}
+
+fn fmt_span_suffix(span: &Option<Span>) -> String {
+    match span {
+        Some(s) => format!(" (at byte {}..{})", s.start, s.end),
+        None => String::new(),
     }
 }
 

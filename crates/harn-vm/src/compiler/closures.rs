@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use harn_parser::{SNode, TypedParam};
+use harn_parser::{SNode, TypeParam, TypedParam};
 
 use crate::chunk::{CompiledFunction, Constant, Op};
 use crate::schema;
@@ -15,6 +15,7 @@ impl Compiler {
     pub(super) fn compile_fn_decl(
         &mut self,
         name: &str,
+        type_params: &[TypeParam],
         params: &[TypedParam],
         body: &[SNode],
         is_stream: bool,
@@ -39,7 +40,9 @@ impl Compiler {
 
         let func = CompiledFunction {
             name: name.to_string(),
-            params: TypedParam::names(params),
+            type_params: type_params.iter().map(|param| param.name.clone()).collect(),
+            nominal_type_names: fn_compiler.nominal_type_names(),
+            params: crate::chunk::ParamSlot::vec_from_typed(params),
             default_start: TypedParam::default_start(params),
             chunk: Rc::new(fn_compiler.chunk),
             is_generator: is_gen,
@@ -81,7 +84,9 @@ impl Compiler {
 
         let func = CompiledFunction {
             name: name.to_string(),
-            params: TypedParam::names(params),
+            type_params: Vec::new(),
+            nominal_type_names: fn_compiler.nominal_type_names(),
+            params: crate::chunk::ParamSlot::vec_from_typed(params),
             default_start: TypedParam::default_start(params),
             chunk: Rc::new(fn_compiler.chunk),
             is_generator: false,
@@ -358,7 +363,9 @@ impl Compiler {
 
         let func = CompiledFunction {
             name: "<closure>".to_string(),
-            params: TypedParam::names(params),
+            type_params: Vec::new(),
+            nominal_type_names: fn_compiler.nominal_type_names(),
+            params: crate::chunk::ParamSlot::vec_from_typed(params),
             default_start: TypedParam::default_start(params),
             chunk: Rc::new(fn_compiler.chunk),
             is_generator: is_gen,
