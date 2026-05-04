@@ -621,13 +621,18 @@ pub(super) async fn execute_sub_agent(
         sub_agent_start_event(&spec),
     );
 
+    let mut loop_options = spec.options.clone();
+    loop_options.insert(
+        "session_id".to_string(),
+        VmValue::String(Rc::from(spec.session_id.clone())),
+    );
     let args = vec![
         VmValue::String(Rc::from(spec.task.clone())),
         spec.system
             .as_ref()
             .map(|system| VmValue::String(Rc::from(system.clone())))
             .unwrap_or(VmValue::Nil),
-        VmValue::Dict(Rc::new(spec.options.clone())),
+        VmValue::Dict(Rc::new(loop_options)),
     ];
     let result = crate::stdlib::harn_entry::call_harn_export_by_name(
         "std/agent/loop",
@@ -937,6 +942,9 @@ mod tests {
             parent_session_id: Some(parent.clone()),
         };
 
+        let mut vm = crate::Vm::new();
+        crate::register_vm_stdlib(&mut vm);
+        let _vm_context = crate::vm::install_async_builtin_child_vm(vm);
         let result = execute_sub_agent(spec).await.unwrap();
         assert_eq!(result.payload["ok"].as_bool(), Some(true));
 
