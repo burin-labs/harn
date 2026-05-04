@@ -5,9 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    handoff_artifact_record, handoff_from_json_value, microcompact_tool_output, new_id,
-    normalize_handoff_artifact_json, now_rfc3339, ContextPolicy, StageContract,
-    VerificationContract,
+    call_workflow_stdlib_function, handoff_artifact_record, handoff_from_json_value,
+    microcompact_tool_output, new_id, normalize_handoff_artifact_json, now_rfc3339, ContextPolicy,
+    StageContract, VerificationContract,
 };
 
 /// Snip an artifact's text to fit within a token budget.
@@ -346,20 +346,6 @@ pub fn render_artifacts_context(artifacts: &[ArtifactRecord], policy: &ContextPo
         }
     }
     parts.join("\n\n")
-}
-
-async fn call_workflow_stdlib_function(
-    module: &str,
-    function: &str,
-    args: &[crate::value::VmValue],
-) -> Result<crate::value::VmValue, crate::value::VmError> {
-    let mut vm = crate::vm::Vm::new();
-    crate::stdlib::register_core_stdlib(&mut vm);
-    let exports = vm.load_module_exports_from_import(module).await?;
-    let closure = exports.get(function).cloned().ok_or_else(|| {
-        crate::value::VmError::Runtime(format!("{module} missing {function} export"))
-    })?;
-    vm.call_closure_pub(&closure, args).await
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]

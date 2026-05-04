@@ -8,6 +8,8 @@ const WORKFLOW_EXECUTE_HARN: &str =
     include_str!("../../harn-stdlib/src/stdlib/workflow/execute.harn");
 const WORKFLOW_CONTEXT_HARN: &str =
     include_str!("../../harn-stdlib/src/stdlib/workflow/context.harn");
+const WORKFLOW_OPTIONS_HARN: &str =
+    include_str!("../../harn-stdlib/src/stdlib/workflow/options.harn");
 const WORKFLOW_PROMPTS_HARN: &str =
     include_str!("../../harn-stdlib/src/stdlib/workflow/prompts.harn");
 const CONTRACT_PROMPT_RS: &str = include_str!("../src/llm/tools/contract_prompt.rs");
@@ -129,6 +131,19 @@ fn public_orchestration_entrypoints_dispatch_through_harn_stdlib() {
         !WORKFLOW_RS.contains("selection_policy.include_kinds")
             && !WORKFLOW_RS.contains("select_artifacts_adaptive(artifacts.to_vec()"),
         "workflow.rs should not own stage artifact-selection policy"
+    );
+    assert!(
+        WORKFLOW_RS.contains("prepare_workflow_stage_agent_options(")
+            && WORKFLOW_OPTIONS_HARN.contains("workflow_stage_agent_options"),
+        "workflow stage agent option composition belongs in std/workflow/options.harn"
+    );
+    assert!(
+        !WORKFLOW_RS.contains("HARN_AGENT_TOOL_FORMAT")
+            && !WORKFLOW_RS.contains("default_tool_format(&model, &provider)")
+            && !WORKFLOW_RS
+                .contains("max_iterations: node.model_policy.max_iterations.unwrap_or(16)")
+            && !WORKFLOW_RS.contains("max_nudges: node.model_policy.max_nudges.unwrap_or(3)"),
+        "workflow.rs should not own stage tool-format/default loop policy"
     );
 }
 

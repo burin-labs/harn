@@ -3,11 +3,11 @@ use super::map::{execute_join_policy, LocalTask};
 use super::register::execute_workflow;
 use super::stage::{classify_stage_outcome, execute_stage_attempts, replay_stage};
 use crate::orchestration::{
-    inject_workflow_verification_contracts, prepare_workflow_stage_prompt,
-    render_artifacts_context, save_run_record, select_workflow_stage_artifacts,
-    workflow_verification_contracts, ContextPolicy, RunChildRecord, RunExecutionRecord, RunRecord,
-    RunStageRecord, VerificationContract, VerificationRequirement, WorkflowEdge, WorkflowGraph,
-    WorkflowNode,
+    inject_workflow_verification_contracts, prepare_workflow_stage_agent_options,
+    prepare_workflow_stage_prompt, render_artifacts_context, save_run_record,
+    select_workflow_stage_artifacts, workflow_verification_contracts, ContextPolicy,
+    RunChildRecord, RunExecutionRecord, RunRecord, RunStageRecord, VerificationContract,
+    VerificationRequirement, WorkflowEdge, WorkflowGraph, WorkflowNode,
 };
 use crate::tracing::{set_tracing_enabled, span_end, span_start, SpanKind};
 use crate::value::VmValue;
@@ -284,6 +284,50 @@ fn render_artifacts_context_uses_structured_artifact_blocks() {
     assert!(rendered.contains("<artifact>"));
     assert!(rendered.contains("<title>tests/unit/test_example.py</title>"));
     assert!(rendered.contains("<body>\ndef test_example():"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepare_workflow_stage_agent_options_runs_policy_in_harn() {
+    let mut node = WorkflowNode {
+        mode: Some("agent".to_string()),
+        done_sentinel: Some("DONE".to_string()),
+        exit_when_verified: true,
+        ..Default::default()
+    };
+    node.model_policy.tool_format = Some(" native ".to_string());
+    node.model_policy.max_iterations = Some(4);
+    node.model_policy.max_nudges = Some(1);
+    node.model_policy.nudge = Some("use a tool".to_string());
+    node.model_policy.native_tool_fallback =
+        crate::orchestration::NativeToolFallbackPolicy::AllowOnce;
+    node.model_policy.tool_examples = Some("example".to_string());
+    node.model_policy.stop_after_successful_tools = Some(vec!["edit".to_string()]);
+    node.model_policy.require_successful_tools = Some(vec!["test".to_string()]);
+
+    let prepared = prepare_workflow_stage_agent_options(&node, "stage-session", true)
+        .await
+        .expect("workflow stage options compose");
+    assert!(prepared.run_agent_loop);
+    assert_eq!(prepared.tool_format, "native");
+    assert_eq!(prepared.llm_options["session_id"], "stage-session");
+    assert_eq!(prepared.llm_options["tool_format"], "native");
+    assert_eq!(prepared.agent_loop_options["max_iterations"], 4);
+    assert_eq!(prepared.agent_loop_options["max_nudges"], 1);
+    assert_eq!(prepared.agent_loop_options["nudge"], "use a tool");
+    assert_eq!(
+        prepared.agent_loop_options["native_tool_fallback"],
+        "allow_once"
+    );
+    assert_eq!(prepared.agent_loop_options["done_sentinel"], "DONE");
+    assert_eq!(prepared.agent_loop_options["exit_when_verified"], true);
+    assert_eq!(
+        prepared.agent_loop_options["stop_after_successful_tools"][0],
+        "edit"
+    );
+    assert_eq!(
+        prepared.agent_loop_options["require_successful_tools"][0],
+        "test"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
