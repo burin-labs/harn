@@ -10,8 +10,6 @@ use std::time::{Duration, Instant};
 
 pub use process::HarnProcessTestNoLock;
 
-const MCP_LOG_RECV_INTERVAL: Duration = Duration::from_millis(25);
-
 #[allow(dead_code)]
 pub fn lock_mcp_process_tests() -> HarnProcessTestNoLock {
     // The cross-process lock that this used to acquire was retired in favor
@@ -47,8 +45,12 @@ pub fn wait_for_child_log_suffix(
 ) -> String {
     let deadline = Instant::now() + timeout;
     let mut observed = Vec::new();
-    while Instant::now() < deadline {
-        match rx.recv_timeout(MCP_LOG_RECV_INTERVAL) {
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match rx.recv_timeout(remaining) {
             Ok(line) if line.contains(needle) => {
                 return line
                     .split(needle)
@@ -58,7 +60,7 @@ pub fn wait_for_child_log_suffix(
                     .to_string();
             }
             Ok(line) => observed.push(line),
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Timeout) => break,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 panic!(
                     "{label} stderr stream closed before readiness log `{needle}` appeared\nstderr={}",
