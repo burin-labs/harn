@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     new_id, now_rfc3339, redact_transcript_visibility, ArtifactRecord, AutoCompactPolicy,
     BranchSemantics, CapabilityPolicy, ContextPolicy, EscalationPolicy, JoinPolicy, MapPolicy,
-    ModelPolicy, NativeToolFallbackPolicy, ReducePolicy, RetryPolicy, StageContract,
+    ModelPolicy, ReducePolicy, RetryPolicy, StageContract,
 };
 use crate::llm::{extract_llm_options, vm_call_llm_full, vm_value_to_json};
 use crate::tool_surface::{tool_capability_policy_from_spec, tool_names_from_spec};
@@ -831,74 +831,6 @@ fn reachable_nodes(graph: &WorkflowGraph) -> BTreeSet<String> {
 /// `agent_session_open` / `agent_session_fork` flowing through a graph
 /// line up); falls back to a stable, node-derived id so multi-stage
 /// graphs with no explicit session share a conversation across stages.
-/// Per-stage skill registry. Per-node `model_policy.skills` takes
-/// precedence over the workflow-level `run_options.skills` — authors
-/// can scope a skill set to one stage without affecting siblings. When
-/// neither is set, returns `None` so the agent loop runs without
-/// skill matching (preserves pre-Gap-2 behavior for callers that
-/// didn't opt in).
-fn resolve_stage_skill_registry(node: &WorkflowNode) -> Option<VmValue> {
-    let per_node = node
-        .raw_model_policy
-        .as_ref()
-        .and_then(|v| v.as_dict())
-        .and_then(|d| d.get("skills"))
-        .cloned()
-        .and_then(normalize_inline_registry);
-    if per_node.is_some() {
-        return per_node;
-    }
-    super::current_workflow_skill_context().and_then(|ctx| ctx.registry)
-}
-
-/// Mirror of `resolve_stage_skill_registry` for the match config:
-/// per-node `model_policy.skill_match` wins, falling back to the
-/// workflow-level setting.
-fn resolve_stage_skill_match(node: &WorkflowNode) -> crate::llm::SkillMatchConfig {
-    let per_node = node
-        .raw_model_policy
-        .as_ref()
-        .and_then(|v| v.as_dict())
-        .and_then(|d| d.get("skill_match"))
-        .and_then(|v| v.as_dict().cloned());
-    if let Some(dict) = per_node {
-        return crate::llm::parse_skill_match_config_dict(&dict);
-    }
-    super::current_workflow_skill_context()
-        .and_then(|ctx| ctx.match_config)
-        .and_then(|v| v.as_dict().cloned())
-        .map(|d| crate::llm::parse_skill_match_config_dict(&d))
-        .unwrap_or_default()
-}
-
-/// Accept both a validated `skill_registry` dict and a bare list of
-/// skill entries. The workflow-level parser in `register.rs` does the
-/// same — we duplicate here so per-node `model_policy.skills` settings
-/// (not routed through that parser) also benefit.
-fn normalize_inline_registry(value: VmValue) -> Option<VmValue> {
-    use std::collections::BTreeMap;
-    use std::rc::Rc;
-    match &value {
-        VmValue::Dict(d)
-            if d.get("_type")
-                .map(|v| v.display() == "skill_registry")
-                .unwrap_or(false) =>
-        {
-            Some(value)
-        }
-        VmValue::List(list) => {
-            let mut dict = BTreeMap::new();
-            dict.insert(
-                "_type".to_string(),
-                VmValue::String(Rc::from("skill_registry")),
-            );
-            dict.insert("skills".to_string(), VmValue::List(list.clone()));
-            Some(VmValue::Dict(Rc::new(dict)))
-        }
-        _ => None,
-    }
-}
-
 fn resolve_node_session_id(node: &WorkflowNode) -> String {
     if let Some(explicit) = node
         .raw_model_policy
@@ -948,90 +880,174 @@ fn raw_auto_compact_string(node: &WorkflowNode, key: &str) -> Option<String> {
         })
 }
 
-pub(crate) async fn resolve_stage_auto_compact(
-    node: &WorkflowNode,
-    opts: &crate::llm::api::LlmCallOptions,
-) -> Result<Option<crate::orchestration::AutoCompactConfig>, VmError> {
-    if !node.auto_compact.enabled {
-        return Ok(None);
-    }
-
-    let mut ac = crate::orchestration::AutoCompactConfig::default();
-    if let Some(v) = node.auto_compact.token_threshold {
-        ac.token_threshold = v;
-    }
-    if let Some(v) = node.auto_compact.tool_output_max_chars {
-        ac.tool_output_max_chars = v;
-    }
-    if let Some(ref strategy) = node.auto_compact.compact_strategy {
-        if let Ok(s) = crate::orchestration::parse_compact_strategy(strategy) {
-            ac.compact_strategy = s;
-        }
-    }
-    if let Some(v) = node.auto_compact.hard_limit_tokens {
-        ac.hard_limit_tokens = Some(v);
-    }
-    if let Some(ref strategy) = node.auto_compact.hard_limit_strategy {
-        if let Ok(s) = crate::orchestration::parse_compact_strategy(strategy) {
-            ac.hard_limit_strategy = s;
-        }
-    }
-
-    // Workflow nodes keep the richer agent-loop-only compaction knobs in the
-    // raw dict because the typed policy shape intentionally models only the
-    // common workflow fields.
-    if let Some(v) = raw_auto_compact_int(node, "compact_keep_last")
-        .or_else(|| raw_auto_compact_int(node, "keep_last"))
-    {
-        ac.keep_last = v;
-    }
-    if let Some(prompt) = raw_auto_compact_string(node, "summarize_prompt") {
-        ac.summarize_prompt = Some(prompt);
-    }
-
-    // Closure fields can't round-trip through serde, so extract them directly
-    // from the raw VmValue dict.
-    if let Some(dict) = raw_auto_compact_dict(node) {
-        if let Some(cb) = dict.get("compress_callback") {
-            ac.compress_callback = Some(cb.clone());
-        }
-        if let Some(cb) = dict.get("mask_callback") {
-            ac.mask_callback = Some(cb.clone());
-        }
-        if let Some(cb) = dict.get("custom_compactor") {
-            ac.custom_compactor = Some(cb.clone());
-        }
-    }
-
-    let user_specified_threshold = node.auto_compact.token_threshold.is_some();
-    let user_specified_hard_limit = node.auto_compact.hard_limit_tokens.is_some();
-    crate::llm::api::adapt_auto_compact_to_provider(
-        &mut ac,
-        user_specified_threshold,
-        user_specified_hard_limit,
-        &opts.provider,
-        &opts.model,
-        &opts.api_key,
-    )
-    .await;
-
-    Ok(Some(ac))
+fn raw_model_policy_dict(node: &WorkflowNode) -> Option<&BTreeMap<String, VmValue>> {
+    node.raw_model_policy
+        .as_ref()
+        .and_then(|value| value.as_dict())
 }
 
-fn parse_native_tool_fallback_option(
-    options: &Option<BTreeMap<String, VmValue>>,
-) -> Result<NativeToolFallbackPolicy, VmError> {
-    crate::llm::helpers::opt_str(options, "native_tool_fallback")
-        .map(|value| {
-            NativeToolFallbackPolicy::parse(&value).ok_or_else(|| {
-                VmError::Runtime(format!(
-                    "workflow_stage_agent_options: native_tool_fallback must be one of \
-                     allow, allow_once, reject; got `{value}`"
-                ))
-            })
-        })
-        .transpose()
-        .map(|value| value.unwrap_or_default())
+fn insert_json_vm_option<T: Serialize>(
+    options: &mut BTreeMap<String, VmValue>,
+    key: &str,
+    value: &T,
+) -> Result<(), VmError> {
+    let json = serde_json::to_value(value).map_err(|error| {
+        VmError::Runtime(format!("workflow stage option encode error: {error}"))
+    })?;
+    options.insert(key.to_string(), crate::stdlib::json_to_vm_value(&json));
+    Ok(())
+}
+
+fn merge_raw_model_policy_options(options: &mut BTreeMap<String, VmValue>, node: &WorkflowNode) {
+    if let Some(raw) = raw_model_policy_dict(node) {
+        for (key, value) in raw {
+            if !matches!(value, VmValue::Nil) {
+                options.insert(key.clone(), value.clone());
+            }
+        }
+    }
+}
+
+fn preserve_nested_command_policy(options: &mut BTreeMap<String, VmValue>, node: &WorkflowNode) {
+    if options.contains_key("command_policy") {
+        return;
+    }
+    let Some(command_policy) = raw_model_policy_dict(node)
+        .and_then(|dict| dict.get("policy"))
+        .and_then(|value| value.as_dict())
+        .and_then(|policy| policy.get("command_policy"))
+    else {
+        return;
+    };
+    options.insert("command_policy".to_string(), command_policy.clone());
+}
+
+fn stage_tools_value(node: &WorkflowNode) -> Option<VmValue> {
+    node.raw_tools.clone().or_else(|| {
+        if matches!(node.tools, serde_json::Value::Null) {
+            None
+        } else {
+            Some(crate::stdlib::json_to_vm_value(&node.tools))
+        }
+    })
+}
+
+fn add_stage_tools_option(
+    options: &mut BTreeMap<String, VmValue>,
+    tools_value: &Option<VmValue>,
+    tool_names: &[String],
+) {
+    if !tool_names.is_empty() {
+        if let Some(value) = tools_value.clone() {
+            options.insert("tools".to_string(), value);
+        }
+    }
+}
+
+fn workflow_stage_llm_options(
+    node: &WorkflowNode,
+    stage_session_id: &str,
+    tools_value: &Option<VmValue>,
+    tool_names: &[String],
+    stage_agent_options: &super::WorkflowStageAgentOptions,
+) -> BTreeMap<String, VmValue> {
+    let mut options = stage_agent_options.llm_options_vm_dict();
+    merge_raw_model_policy_options(&mut options, node);
+    options.insert(
+        "session_id".to_string(),
+        VmValue::String(Rc::from(stage_session_id.to_string())),
+    );
+    options.insert(
+        "tool_format".to_string(),
+        VmValue::String(Rc::from(stage_agent_options.tool_format.clone())),
+    );
+    add_stage_tools_option(&mut options, tools_value, tool_names);
+    options
+}
+
+fn add_workflow_agent_compaction_options(
+    options: &mut BTreeMap<String, VmValue>,
+    node: &WorkflowNode,
+) {
+    if !node.auto_compact.enabled {
+        options.insert("auto_compact".to_string(), VmValue::Bool(false));
+        return;
+    }
+    options.insert("auto_compact".to_string(), VmValue::Bool(true));
+    if let Some(value) = node.auto_compact.token_threshold {
+        options.insert("compact_threshold".to_string(), VmValue::Int(value as i64));
+    }
+    if let Some(value) = node.auto_compact.tool_output_max_chars {
+        options.insert(
+            "tool_output_max_chars".to_string(),
+            VmValue::Int(value as i64),
+        );
+    }
+    if let Some(value) = node.auto_compact.hard_limit_tokens {
+        options.insert("hard_limit_tokens".to_string(), VmValue::Int(value as i64));
+    }
+    if let Some(strategy) = node.auto_compact.compact_strategy.as_ref() {
+        options.insert(
+            "compact_strategy".to_string(),
+            VmValue::String(Rc::from(strategy.clone())),
+        );
+    }
+    if let Some(strategy) = node.auto_compact.hard_limit_strategy.as_ref() {
+        options.insert(
+            "hard_limit_strategy".to_string(),
+            VmValue::String(Rc::from(strategy.clone())),
+        );
+    }
+    if let Some(value) = raw_auto_compact_int(node, "compact_keep_last")
+        .or_else(|| raw_auto_compact_int(node, "keep_last"))
+    {
+        options.insert("compact_keep_last".to_string(), VmValue::Int(value as i64));
+    }
+    if let Some(prompt) = raw_auto_compact_string(node, "summarize_prompt") {
+        options.insert(
+            "summarize_prompt".to_string(),
+            VmValue::String(Rc::from(prompt)),
+        );
+    }
+    if let Some(dict) = raw_auto_compact_dict(node) {
+        for key in ["compress_callback", "mask_callback"] {
+            if let Some(callback) = dict.get(key) {
+                options.insert(key.to_string(), callback.clone());
+            }
+        }
+        if let Some(callback) = dict.get("custom_compactor") {
+            options.insert("compact_callback".to_string(), callback.clone());
+        }
+    }
+}
+
+fn workflow_stage_agent_loop_options(
+    node: &WorkflowNode,
+    stage_session_id: &str,
+    tools_value: &Option<VmValue>,
+    tool_names: &[String],
+    stage_agent_options: &super::WorkflowStageAgentOptions,
+) -> Result<BTreeMap<String, VmValue>, VmError> {
+    let mut options = stage_agent_options.agent_loop_options_vm_dict();
+    merge_raw_model_policy_options(&mut options, node);
+    preserve_nested_command_policy(&mut options, node);
+    add_workflow_agent_compaction_options(&mut options, node);
+    add_stage_tools_option(&mut options, tools_value, tool_names);
+    let tool_policy = tool_capability_policy_from_spec(&node.tools);
+    let effective_policy = tool_policy
+        .intersect(&node.capability_policy)
+        .map_err(VmError::Runtime)?;
+    insert_json_vm_option(&mut options, "policy", &effective_policy)?;
+    insert_json_vm_option(&mut options, "approval_policy", &node.approval_policy)?;
+    options.insert(
+        "session_id".to_string(),
+        VmValue::String(Rc::from(stage_session_id.to_string())),
+    );
+    options.insert(
+        "tool_format".to_string(),
+        VmValue::String(Rc::from(stage_agent_options.tool_format.clone())),
+    );
+    Ok(options)
 }
 
 pub async fn execute_stage_node(
@@ -1155,234 +1171,47 @@ pub async fn execute_stage_node(
             })
         }
     } else {
-        let mut options = stage_agent_options.llm_options_vm_dict();
-        let tools_value = node.raw_tools.clone().or_else(|| {
-            if matches!(node.tools, serde_json::Value::Null) {
-                None
-            } else {
-                Some(crate::stdlib::json_to_vm_value(&node.tools))
-            }
-        });
-        if tools_value.is_some() && !tool_names.is_empty() {
-            options.insert("tools".to_string(), tools_value.unwrap_or(VmValue::Nil));
-        }
-
-        let args = vec![
-            VmValue::String(Rc::from(prompt.clone())),
-            node.system
-                .clone()
-                .map(|s| VmValue::String(Rc::from(s)))
-                .unwrap_or(VmValue::Nil),
-            VmValue::Dict(Rc::new(options)),
-        ];
-        let mut opts = extract_llm_options(&args)?;
-        let auto_compact = resolve_stage_auto_compact(node, &opts).await?;
-        let budget = opts.budget.clone();
-
+        let tools_value = stage_tools_value(node);
         if stage_agent_options.run_agent_loop {
-            let agent_loop_options = Some(stage_agent_options.agent_loop_options_vm_dict());
-            let tool_policy = tool_capability_policy_from_spec(&node.tools);
-            let effective_policy = tool_policy
-                .intersect(&node.capability_policy)
-                .map_err(VmError::Runtime)?;
-            let permissions = crate::llm::permissions::parse_dynamic_permission_policy(
-                node.raw_model_policy
-                    .as_ref()
-                    .and_then(|value| value.as_dict())
-                    .and_then(|dict| dict.get("permissions")),
-                "workflow model_policy",
+            let options = workflow_stage_agent_loop_options(
+                node,
+                &stage_session_id,
+                &tools_value,
+                &tool_names,
+                &stage_agent_options,
             )?;
-            crate::llm::run_agent_loop_internal(
-                &mut opts,
-                crate::llm::AgentLoopConfig {
-                    persistent: crate::llm::helpers::opt_bool(&agent_loop_options, "persistent"),
-                    max_iterations: crate::llm::helpers::opt_int(
-                        &agent_loop_options,
-                        "max_iterations",
-                    )
-                    .unwrap_or(16) as usize,
-                    max_nudges: crate::llm::helpers::opt_int(&agent_loop_options, "max_nudges")
-                        .unwrap_or(3) as usize,
-                    nudge: crate::llm::helpers::opt_str(&agent_loop_options, "nudge"),
-                    done_sentinel: crate::llm::helpers::opt_str(
-                        &agent_loop_options,
-                        "done_sentinel",
-                    ),
-                    break_unless_phase: None,
-                    tool_retries: crate::llm::helpers::opt_int(&agent_loop_options, "tool_retries")
-                        .unwrap_or(0) as usize,
-                    tool_backoff_ms: crate::llm::helpers::opt_int(
-                        &agent_loop_options,
-                        "tool_backoff_ms",
-                    )
-                    .unwrap_or(1000) as u64,
-                    schema_retries: crate::llm::helpers::opt_int(
-                        &agent_loop_options,
-                        "schema_retries",
-                    )
-                    .unwrap_or(0) as usize,
-                    schema_retry_nudge: crate::llm::parse_schema_nudge(
-                        &node
-                            .raw_model_policy
-                            .as_ref()
-                            .and_then(|value| value.as_dict())
-                            .cloned(),
-                    ),
-                    tool_format: crate::llm::helpers::opt_str(&agent_loop_options, "tool_format")
-                        .unwrap_or_else(|| tool_format.clone()),
-                    native_tool_fallback: parse_native_tool_fallback_option(&agent_loop_options)?,
-                    auto_compact,
-                    policy: Some(effective_policy),
-                    command_policy: crate::orchestration::parse_command_policy_value(
-                        node.raw_model_policy
-                            .as_ref()
-                            .and_then(|value| value.as_dict())
-                            .and_then(|dict| dict.get("command_policy"))
-                            .or_else(|| {
-                                node.raw_model_policy
-                                    .as_ref()
-                                    .and_then(|value| value.as_dict())
-                                    .and_then(|dict| dict.get("policy"))
-                                    .and_then(|value| value.as_dict())
-                                    .and_then(|policy| policy.get("command_policy"))
-                            }),
-                        "workflow model_policy",
-                    )?,
-                    permissions,
-                    approval_policy: Some(node.approval_policy.clone()),
-                    daemon: crate::llm::helpers::opt_bool(&agent_loop_options, "daemon"),
-                    daemon_config: Default::default(),
-                    llm_retries: crate::llm::helpers::opt_int(&agent_loop_options, "llm_retries")
-                        .unwrap_or(2) as usize,
-                    llm_backoff_ms: crate::llm::helpers::opt_int(
-                        &agent_loop_options,
-                        "llm_backoff_ms",
-                    )
-                    .unwrap_or(2000) as u64,
-                    token_budget: None,
-                    budget,
-                    exit_when_verified: crate::llm::helpers::opt_bool(
-                        &agent_loop_options,
-                        "exit_when_verified",
-                    ),
-                    loop_detect_warn: crate::llm::helpers::opt_int(
-                        &agent_loop_options,
-                        "loop_detect_warn",
-                    )
-                    .unwrap_or(2) as usize,
-                    loop_detect_block: crate::llm::helpers::opt_int(
-                        &agent_loop_options,
-                        "loop_detect_block",
-                    )
-                    .unwrap_or(3) as usize,
-                    loop_detect_skip: crate::llm::helpers::opt_int(
-                        &agent_loop_options,
-                        "loop_detect_skip",
-                    )
-                    .unwrap_or(4) as usize,
-                    tool_examples: crate::llm::helpers::opt_str(
-                        &agent_loop_options,
-                        "tool_examples",
-                    ),
-                    turn_policy: agent_loop_options
-                        .as_ref()
-                        .and_then(|options| options.get("turn_policy"))
-                        .map(crate::llm::helpers::vm_value_to_json)
-                        .and_then(|json| serde_json::from_value(json).ok()),
-                    stop_after_successful_tools: crate::llm::helpers::opt_str_list(
-                        &agent_loop_options,
-                        "stop_after_successful_tools",
-                    ),
-                    require_successful_tools: crate::llm::helpers::opt_str_list(
-                        &agent_loop_options,
-                        "require_successful_tools",
-                    ),
-                    // Use the same session id resolved for the stage so
-                    // agent_subscribe handlers keyed on it, and session
-                    // storage lookups in the agent loop, stay consistent.
-                    session_id: stage_session_id.clone(),
-                    event_sink: None,
-                    // Seed from the stage's explicit deliverables/ledger so the
-                    // graph carries a task-wide plan through map branches and
-                    // nested stages. Empty ledger means no gate.
-                    task_ledger: node
-                        .raw_model_policy
-                        .as_ref()
-                        .and_then(|v| v.as_dict())
-                        .and_then(|d| d.get("task_ledger"))
-                        .map(crate::llm::helpers::vm_value_to_json)
-                        .and_then(|json| serde_json::from_value(json).ok())
-                        .unwrap_or_default(),
-                    post_turn_callback: node
-                        .raw_model_policy
-                        .as_ref()
-                        .and_then(|v| v.as_dict())
-                        .and_then(|d| d.get("post_turn_callback"))
-                        .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
-                        .cloned(),
-                    verify_completion: node
-                        .raw_model_policy
-                        .as_ref()
-                        .and_then(|v| v.as_dict())
-                        .and_then(|d| d.get("verify_completion"))
-                        .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
-                        .cloned(),
-                    verify_completion_judge: crate::llm::parse_completion_judge_option(
-                        &node
-                            .raw_model_policy
-                            .as_ref()
-                            .and_then(|value| value.as_dict())
-                            .cloned(),
-                    )?,
-                    done_judge: crate::llm::parse_done_judge_option(
-                        &node
-                            .raw_model_policy
-                            .as_ref()
-                            .and_then(|value| value.as_dict())
-                            .cloned(),
-                    )?,
-                    max_verify_attempts: crate::llm::helpers::opt_int(
-                        &node
-                            .raw_model_policy
-                            .as_ref()
-                            .and_then(|value| value.as_dict())
-                            .cloned(),
-                        "max_verify_attempts",
-                    )
-                    .filter(|n| *n >= 0)
-                    .map(|n| n as usize)
-                    .unwrap_or(crate::llm::DEFAULT_MAX_VERIFY_ATTEMPTS),
-                    llm_transcript_dir: node
-                        .raw_model_policy
-                        .as_ref()
-                        .and_then(|v| v.as_dict())
-                        .and_then(|d| d.get("llm_transcript_dir"))
-                        .and_then(|v| match v {
-                            crate::value::VmValue::String(s) => Some(s.to_string()),
-                            _ => None,
-                        }),
-                    // Inherit the workflow-level skill wiring installed
-                    // by `workflow_execute`. Per-node `model_policy.skills`
-                    // (optional) overrides, letting authors scope a skill
-                    // set to one stage without affecting siblings. Empty
-                    // thread-local = no skills configured (direct
-                    // `execute_stage_node` callers outside a workflow).
-                    skill_registry: resolve_stage_skill_registry(node),
-                    skill_match: resolve_stage_skill_match(node),
-                    working_files: Vec::new(),
-                    mcp_servers: Vec::new(),
-                    mcp_clients: Default::default(),
-                    autonomy_budget: crate::llm::autonomy_budget::parse_autonomy_budget(
-                        node.raw_model_policy
-                            .as_ref()
-                            .and_then(|value| value.as_dict()),
-                        &stage_session_id,
-                        "workflow model_policy",
-                    )?,
-                },
+            let result = crate::stdlib::harn_entry::call_harn_export_by_name(
+                "std/agent/loop",
+                "agent_loop",
+                "workflow_stage_agent_loop",
+                &[
+                    VmValue::String(Rc::from(prompt.clone())),
+                    node.system
+                        .clone()
+                        .map(|s| VmValue::String(Rc::from(s)))
+                        .unwrap_or(VmValue::Nil),
+                    VmValue::Dict(Rc::new(options)),
+                ],
             )
-            .await?
+            .await?;
+            crate::llm::vm_value_to_json(&result)
         } else {
+            let options = workflow_stage_llm_options(
+                node,
+                &stage_session_id,
+                &tools_value,
+                &tool_names,
+                &stage_agent_options,
+            );
+            let args = vec![
+                VmValue::String(Rc::from(prompt.clone())),
+                node.system
+                    .clone()
+                    .map(|s| VmValue::String(Rc::from(s)))
+                    .unwrap_or(VmValue::Nil),
+                VmValue::Dict(Rc::new(options)),
+            ];
+            let opts = extract_llm_options(&args)?;
             let result = vm_call_llm_full(&opts).await?;
             crate::llm::agent_loop_result_from_llm(&result, opts)
         }
