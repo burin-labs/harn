@@ -157,6 +157,10 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
     AGENT_HOST_SESSIONS.with(|sessions| {
         sessions.borrow_mut().insert(resolved.clone(), session);
     });
+    // Push the session id onto the thread-local current-session stack so
+    // tool handlers + nested calls inside the loop see it via
+    // `agent_session_current_id()`. Paired with the pop in finalize.
+    crate::agent_sessions::push_current_session(resolved.clone());
 
     let mut control = BTreeMap::new();
     control.insert(
@@ -196,6 +200,8 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
                 "{HOST_SESSION_FINALIZE}: unknown session `{session_id}`"
             ))
         })?;
+    // Pair with the push in init so subsequent loops see the right stack.
+    crate::agent_sessions::pop_current_session();
 
     let snapshot = crate::agent_sessions::snapshot(&session_id);
     let transcript_json = snapshot
@@ -300,9 +306,15 @@ fn host_agent_session_record_tool_results_builtin(
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let dispatch = args.get(1).cloned().unwrap_or(VmValue::Nil);
-    let results_value = dict_get(&dispatch, "results")
-        .cloned()
-        .unwrap_or(VmValue::Nil);
+    // dispatch may be either a flat list of results (as returned by
+    // agent_dispatch_tool_batch) or a dict with a `results` key (legacy
+    // shape some callers still synthesize). Handle both.
+    let results_value = match &dispatch {
+        VmValue::List(_) => dispatch.clone(),
+        _ => dict_get(&dispatch, "results")
+            .cloned()
+            .unwrap_or(VmValue::Nil),
+    };
     let mut successful = Vec::new();
     let mut rejected = Vec::new();
     for result in list_items(&results_value).iter() {

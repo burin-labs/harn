@@ -15,11 +15,24 @@ fn __default_done_sentinel(opts) {
   return sentinel
 }
 
-fn __sentinel_hit(text, sentinel) {
+fn __sentinel_hit(text, sentinel, parsed_done_marker) {
   if sentinel == "" {
     return false
   }
+  if parsed_done_marker != nil && parsed_done_marker != "" {
+    return contains(parsed_done_marker, sentinel)
+  }
   return contains(text, sentinel)
+}
+
+fn __dispatch_results_list(dispatch) {
+  if dispatch == nil {
+    return []
+  }
+  if type_of(dispatch) == "list" {
+    return dispatch
+  }
+  return dispatch?.results ?? []
 }
 
 fn __post_turn_callback_verdict(opts, payload) {
@@ -55,10 +68,7 @@ fn __interpret_verdict(verdict) {
 }
 
 fn __successful_tool_names(dispatch) {
-  if dispatch == nil {
-    return []
-  }
-  let results = dispatch?.results ?? []
+  let results = __dispatch_results_list(dispatch)
   var names = []
   for result in results {
     if result?.success {
@@ -98,8 +108,10 @@ pub fn agent_extract_tool_calls(llm_result, opts) {
 pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   let sentinel = __default_done_sentinel(opts)
   let text = llm_result?.text ?? ""
-  let has_tool_calls = len(llm_result?.tool_calls ?? []) > 0 || (dispatch != nil && len(dispatch?.results ?? []) > 0)
-  if __sentinel_hit(text, sentinel) {
+  let parsed_done_marker = llm_result?.parsed_done_marker
+  let dispatch_results = __dispatch_results_list(dispatch)
+  let has_tool_calls = len(llm_result?.tool_calls ?? []) > 0 || len(dispatch_results) > 0
+  if __sentinel_hit(text, sentinel, parsed_done_marker) {
     return {
       kind: "break",
       stop_reason: "sentinel",
@@ -131,7 +143,7 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   if verdict.kind == "rich" && verdict.stop {
     return {kind: "break", stop_reason: "post_turn_stop", needs_verify: opts?.verify_completion != nil}
   }
-  let persistent = opts?.persistent ?? true
+  let persistent = opts?.persistent ?? false
   if !has_tool_calls && !persistent {
     return {
       kind: "break",
