@@ -11,6 +11,8 @@ pub const METHOD_COMPLETION_COMPLETE: &str = "completion/complete";
 pub const METHOD_TASK_STATUS_NOTIFICATION: &str = "notifications/tasks/status";
 pub const METHOD_ROOTS_LIST: &str = "roots/list";
 pub const METHOD_ROOTS_LIST_CHANGED_NOTIFICATION: &str = "notifications/roots/list_changed";
+pub const METHOD_LOGGING_SET_LEVEL: &str = "logging/setLevel";
+pub const METHOD_LOGGING_MESSAGE_NOTIFICATION: &str = "notifications/message";
 pub const RELATED_TASK_META_KEY: &str = "io.modelcontextprotocol/related-task";
 pub const DEFAULT_TASK_POLL_INTERVAL_MS: u64 = 250;
 pub const DEFAULT_MCP_LIST_PAGE_SIZE: usize = 100;
@@ -162,6 +164,79 @@ pub fn tasks_capability() -> JsonValue {
 
 pub fn completions_capability() -> JsonValue {
     json!({})
+}
+
+/// Severity levels defined by the MCP logging utility (RFC 5424 ordering).
+///
+/// Variants are ordered from most verbose (`Debug`) to most severe
+/// (`Emergency`); `Ord` follows that ordering so that
+/// `level >= subscribed_level` filters notifications by severity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum McpLogLevel {
+    Debug,
+    Info,
+    Notice,
+    Warning,
+    Error,
+    Critical,
+    Alert,
+    Emergency,
+}
+
+impl McpLogLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Notice => "notice",
+            Self::Warning => "warning",
+            Self::Error => "error",
+            Self::Critical => "critical",
+            Self::Alert => "alert",
+            Self::Emergency => "emergency",
+        }
+    }
+
+    pub fn from_str_ci(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "debug" => Some(Self::Debug),
+            "info" => Some(Self::Info),
+            "notice" => Some(Self::Notice),
+            "warning" | "warn" => Some(Self::Warning),
+            "error" | "err" => Some(Self::Error),
+            "critical" | "crit" => Some(Self::Critical),
+            "alert" => Some(Self::Alert),
+            "emergency" | "emerg" => Some(Self::Emergency),
+            _ => None,
+        }
+    }
+}
+
+pub fn logging_capability() -> JsonValue {
+    json!({})
+}
+
+/// Encode a `notifications/message` envelope per
+/// <https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/logging>.
+pub fn logging_message_notification(
+    level: McpLogLevel,
+    logger: Option<&str>,
+    data: JsonValue,
+) -> JsonValue {
+    let mut params = serde_json::Map::new();
+    params.insert(
+        "level".to_string(),
+        JsonValue::String(level.as_str().into()),
+    );
+    if let Some(logger) = logger {
+        params.insert("logger".to_string(), JsonValue::String(logger.to_string()));
+    }
+    params.insert("data".to_string(), data);
+    json!({
+        "jsonrpc": "2.0",
+        "method": METHOD_LOGGING_MESSAGE_NOTIFICATION,
+        "params": JsonValue::Object(params),
+    })
 }
 
 pub fn completion_result(
@@ -387,6 +462,63 @@ mod tests {
         assert_eq!(next.start, DEFAULT_MCP_LIST_PAGE_SIZE);
         assert_eq!(next.end, 105);
         assert_eq!(next.next_cursor, None);
+    }
+
+    #[test]
+    fn log_levels_round_trip_through_string_form() {
+        for level in [
+            McpLogLevel::Debug,
+            McpLogLevel::Info,
+            McpLogLevel::Notice,
+            McpLogLevel::Warning,
+            McpLogLevel::Error,
+            McpLogLevel::Critical,
+            McpLogLevel::Alert,
+            McpLogLevel::Emergency,
+        ] {
+            assert_eq!(McpLogLevel::from_str_ci(level.as_str()), Some(level));
+        }
+        assert_eq!(McpLogLevel::from_str_ci("WARN"), Some(McpLogLevel::Warning));
+        assert_eq!(
+            McpLogLevel::from_str_ci("Crit"),
+            Some(McpLogLevel::Critical)
+        );
+        assert_eq!(McpLogLevel::from_str_ci(""), None);
+        assert_eq!(McpLogLevel::from_str_ci("trace"), None);
+    }
+
+    #[test]
+    fn log_levels_order_from_debug_to_emergency() {
+        assert!(McpLogLevel::Debug < McpLogLevel::Info);
+        assert!(McpLogLevel::Warning < McpLogLevel::Error);
+        assert!(McpLogLevel::Error < McpLogLevel::Emergency);
+    }
+
+    #[test]
+    fn logging_message_notification_matches_spec_envelope() {
+        let notification = logging_message_notification(
+            McpLogLevel::Warning,
+            Some("audit.signature_verify"),
+            json!({"event_id": 1, "kind": "verify_failed"}),
+        );
+        assert_eq!(notification["jsonrpc"], json!("2.0"));
+        assert_eq!(
+            notification["method"],
+            json!(METHOD_LOGGING_MESSAGE_NOTIFICATION)
+        );
+        assert_eq!(notification["params"]["level"], json!("warning"));
+        assert_eq!(
+            notification["params"]["logger"],
+            json!("audit.signature_verify")
+        );
+        assert_eq!(
+            notification["params"]["data"]["kind"],
+            json!("verify_failed")
+        );
+
+        let no_logger =
+            logging_message_notification(McpLogLevel::Info, None, json!({"hello": "world"}));
+        assert!(no_logger["params"].get("logger").is_none());
     }
 
     #[test]
