@@ -11,7 +11,7 @@ use crate::orchestration::{
     RunStageRecord, RunTransitionRecord, WorkflowEdge, WorkflowGraph, WorkflowSkillContext,
     WorkflowSkillContextGuard,
 };
-use crate::stdlib::harn_entry::{register_harn_module_entrypoints, HarnEntrypointModule};
+use crate::stdlib::harn_entry::register_harn_entrypoint_category;
 use crate::stdlib::registration::{
     async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
@@ -33,10 +33,7 @@ use super::policy::{
 use super::stage::{execute_stage_attempts, replay_stage};
 use super::usage::{llm_usage_delta, llm_usage_snapshot};
 
-const WORKFLOW_STDLIB_ENTRYPOINT_MODULES: &[HarnEntrypointModule] = &[HarnEntrypointModule::new(
-    "std/workflow/execute",
-    "workflow.stdlib",
-)];
+const WORKFLOW_STDLIB_ENTRYPOINT_CATEGORY: &str = "workflow.stdlib";
 const HOST_WORKFLOW_GRAPH_RUN_BUILTIN: &str = "__host_workflow_graph_run";
 type PostHookFn = Rc<dyn Fn(&str, &str) -> crate::orchestration::PostToolAction>;
 
@@ -794,7 +791,7 @@ pub(in crate::stdlib) async fn execute_workflow(
 
 pub(crate) fn register_workflow_builtins(vm: &mut Vm) {
     register_builtin_group(vm, WORKFLOW_PRIMITIVES);
-    register_harn_module_entrypoints(vm, WORKFLOW_STDLIB_ENTRYPOINT_MODULES);
+    register_harn_entrypoint_category(vm, WORKFLOW_STDLIB_ENTRYPOINT_CATEGORY);
 }
 
 fn workflow_graph_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

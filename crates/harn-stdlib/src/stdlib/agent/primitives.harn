@@ -1,3 +1,4 @@
+// @harn-entrypoint-category agent.stdlib
 /** agent_llm_turn. */
 pub fn agent_llm_turn(prompt, system = nil, options = nil) {
   return llm_call(prompt, system, options ?? {})

@@ -1,3 +1,4 @@
+// @harn-entrypoint-category workflow.stdlib
 import "std/workflow/prompts"
 
 /** workflow_execute. */

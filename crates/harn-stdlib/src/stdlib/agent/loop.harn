@@ -1,3 +1,4 @@
+// @harn-entrypoint-category agent.stdlib
 import { agent_loop_options } from "std/agent/options"
 
 /** agent_loop. */

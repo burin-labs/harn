@@ -3,23 +3,11 @@
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct HarnEntrypointModule {
-    pub import_path: &'static str,
-    pub category: &'static str,
-}
-
-impl HarnEntrypointModule {
-    pub(crate) const fn new(import_path: &'static str, category: &'static str) -> Self {
-        Self {
-            import_path,
-            category,
+pub(crate) fn register_harn_entrypoint_category(vm: &mut Vm, category: &str) {
+    for module in harn_stdlib::entrypoint_modules() {
+        if module.category != category {
+            continue;
         }
-    }
-}
-
-pub(crate) fn register_harn_module_entrypoints(vm: &mut Vm, modules: &[HarnEntrypointModule]) {
-    for module in modules {
         let Some(module_name) = module.import_path.strip_prefix("std/") else {
             continue;
         };
@@ -27,11 +15,11 @@ pub(crate) fn register_harn_module_entrypoints(vm: &mut Vm, modules: &[HarnEntry
             let arity = arity_for_export(&export);
             let entrypoint = HarnEntrypoint {
                 public_name: export.name.clone(),
-                import_path: module.import_path.to_string(),
+                import_path: module.import_path.clone(),
                 export_name: export.name,
                 signature: export.signature,
                 arity,
-                category: module.category.to_string(),
+                category: module.category.clone(),
                 doc: export.doc,
             };
             entrypoint.register(vm);
