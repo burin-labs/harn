@@ -374,24 +374,18 @@ pub(super) async fn run_llm_call(
                         calls.len(),
                     ),
                 );
-                let partial_note = if calls.is_empty() {
-                    String::new()
-                } else {
-                    format!(
-                        "\n\n(The other {} tool call(s) in this turn parsed \
-                         successfully and were dispatched; the errors above \
-                         describe only the malformed ones, which were dropped.)",
-                        calls.len()
-                    )
-                };
                 let mut bindings = BTreeMap::new();
                 bindings.insert(
                     "error_summary".to_string(),
                     VmValue::String(Rc::from(error_summary)),
                 );
                 bindings.insert(
-                    "partial_note".to_string(),
-                    VmValue::String(Rc::from(partial_note)),
+                    "has_partial_success".to_string(),
+                    VmValue::Bool(!calls.is_empty()),
+                );
+                bindings.insert(
+                    "parsed_call_count".to_string(),
+                    VmValue::Int(calls.len() as i64),
                 );
                 let feedback = crate::stdlib::template::render_stdlib_prompt_asset(
                     "agent/prompts/parse_guidance.harn.prompt",
