@@ -1,0 +1,11 @@
+import { agent_session_messages } from "std/agent/state"
+
+/** agent_build_turn_system. */
+pub fn agent_build_turn_system(session, opts, iteration) {
+  return __host_agent_build_turn_system(session.session_id, opts, iteration)
+}
+
+/** agent_build_turn_messages. */
+pub fn agent_build_turn_messages(session, opts, iteration) {
+  return agent_session_messages(session.session_id)
+}

@@ -1,3 +1,10 @@
+// Most of this module is now legacy: the agent loop has moved into
+// std/agent/loop.harn and `crate::llm::agent_session_host`. We keep the
+// types and infrastructure compiled until the deletion pass lands so
+// downstream consumers (e.g. agent_observe, transcript bookkeeping) keep
+// linking.
+#![allow(dead_code)]
+
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;

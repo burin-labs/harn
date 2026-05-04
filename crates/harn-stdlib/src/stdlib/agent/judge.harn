@@ -1,0 +1,78 @@
+import { completion_judge_user_prompt } from "std/agent/prompts"
+import { agent_session_inject_feedback } from "std/agent/state"
+
+fn __judge_payload(session, opts, stop_reason, text) {
+  return {
+    session_id: session.session_id,
+    task: session?.task ?? "",
+    stop_reason: stop_reason,
+    text: text,
+    visible_text: text,
+  }
+}
+
+fn __judge_invoke_closure(verify_completion, payload) {
+  let result = verify_completion(payload)
+  if result == nil || result == "" {
+    return {vetoed: false}
+  }
+  if type_of(result) == "bool" {
+    return {vetoed: !result}
+  }
+  if type_of(result) == "string" {
+    return {vetoed: true, feedback: result}
+  }
+  if type_of(result) == "dict" {
+    let confirm = result?.confirm ?? false
+    let message = result?.message ?? result?.feedback
+    return {vetoed: !confirm, feedback: message}
+  }
+  return {vetoed: false}
+}
+
+fn __judge_invoke_structured(judge_cfg, opts, payload) {
+  let system = judge_cfg?.system ?? ""
+  let user = completion_judge_user_prompt(payload)
+  let schema = {
+    type: "object",
+    properties: {verdict: {type: "string"}, reasoning: {type: "string"}, next_step: {type: "string"}},
+    required: ["verdict"],
+  }
+  let base = opts?.llm_options ?? {}
+  let llm_opts = base
+    + {
+    model: judge_cfg?.model ?? opts?.model,
+    provider: judge_cfg?.provider ?? opts?.provider,
+    output_schema: schema,
+    session_id: payload.session_id,
+    system: system,
+  }
+  let result = llm_call_structured(user, schema, llm_opts)
+  let verdict = result?.verdict ?? "done"
+  if verdict == "done" {
+    return {vetoed: false}
+  }
+  let feedback = result?.next_step ?? result?.reasoning
+    ?? (judge_cfg?.feedback_fallback ?? "")
+  return {vetoed: true, feedback: feedback}
+}
+
+/** agent_verify_or_continue. */
+pub fn agent_verify_or_continue(session, opts, stop_reason, text) {
+  let payload = __judge_payload(session, opts, stop_reason, text)
+  var verdict = {vetoed: false}
+  if opts?.verify_completion != nil {
+    verdict = __judge_invoke_closure(opts.verify_completion, payload)
+  }
+  if !verdict.vetoed && opts?.verify_completion_judge != nil {
+    verdict = __judge_invoke_structured(opts.verify_completion_judge, opts, payload)
+  }
+  let done_judge_applies = opts?.done_judge != nil && (stop_reason == "sentinel" || stop_reason == "natural")
+  if !verdict.vetoed && done_judge_applies {
+    verdict = __judge_invoke_structured(opts.done_judge, opts, payload)
+  }
+  if verdict.vetoed && verdict?.feedback != nil && verdict.feedback != "" {
+    agent_session_inject_feedback(session.session_id, "verify_completion", verdict.feedback)
+  }
+  return verdict
+}

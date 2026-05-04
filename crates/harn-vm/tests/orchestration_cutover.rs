@@ -38,9 +38,21 @@ fn stdlib_facades_and_host_primitives_are_discoverable() {
     assert_eq!(workflow_execute.category(), Some("workflow.stdlib"));
 
     for name in [
-        "__host_agent_session_prepare",
-        "__host_agent_session_step",
+        "__host_agent_session_init",
         "__host_agent_session_finalize",
+        "__host_agent_session_messages",
+        "__host_agent_session_record_assistant",
+        "__host_agent_session_record_tool_results",
+        "__host_agent_session_record_usage",
+        "__host_agent_session_drain_feedback",
+        "__host_agent_session_totals",
+        "__host_agent_session_inject_feedback",
+        "__host_agent_session_set_active_skills",
+        "__host_agent_session_active_skills",
+        "__host_agent_session_compact_if_needed",
+        "__host_agent_budget_pre_call_blocked",
+        "__host_agent_build_turn_system",
+        "__host_skill_score",
         "__host_agent_capture_events",
         "__host_agent_parse_tool_calls",
         "__host_agent_dispatch_tool_call",

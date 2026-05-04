@@ -1,15 +1,115 @@
 // @harn-entrypoint-category agent.stdlib
+import { agent_autocompact_if_needed } from "std/agent/autocompact"
+import { agent_budget_post_call_blocked, agent_budget_pre_call_blocked } from "std/agent/budget"
+import { agent_verify_or_continue } from "std/agent/judge"
 import { agent_loop_options } from "std/agent/options"
+import { agent_compute_post_turn } from "std/agent/postturn"
+import { agent_build_turn_messages, agent_build_turn_system } from "std/agent/preflight"
+import { agent_skills_match } from "std/agent/skills"
+import {
+  agent_session_drain_feedback,
+  agent_session_finalize,
+  agent_session_init,
+  agent_session_inject_feedback,
+  agent_session_record_assistant,
+  agent_session_record_tool_results,
+  agent_session_record_usage,
+} from "std/agent/state"
 
 /** agent_loop. */
 pub fn agent_loop(message, system_prompt = nil, options = nil) {
   let opts = agent_loop_options(options)
-  var state = __host_agent_session_prepare(message, system_prompt, opts)
-  if state.done {
-    return state.result
+  let session = agent_session_init(message, system_prompt, opts)
+  if session?.done {
+    return session.result
   }
-  while !state.done && state.iteration < state.max_iterations {
-    state = __host_agent_session_step(state.state_id)
+  var iteration = 0
+  var stop_reason = nil
+  var final_status = ""
+  var verify_attempts = 0
+  let max_verify_attempts = opts?.max_verify_attempts ?? 20
+  let max_iterations = opts?.max_iterations ?? 50
+  while iteration < max_iterations {
+    if agent_budget_pre_call_blocked(session, opts) {
+      final_status = "budget_exhausted"
+      break
+    }
+    agent_skills_match(session, opts, iteration)
+    agent_autocompact_if_needed(session, opts)
+    let pending = agent_session_drain_feedback(session.session_id)
+    for note in pending {
+      agent_session_inject_feedback(session.session_id, note.kind, note.content)
+    }
+    let turn_system = agent_build_turn_system(session, opts, iteration)
+    let turn_messages = agent_build_turn_messages(session, opts, iteration)
+    let base_opts = opts?.llm_options ?? opts ?? {}
+    let llm_opts = base_opts + {messages: turn_messages, session_id: session.session_id}
+    let llm_result = llm_call(message, turn_system, llm_opts)
+    iteration = iteration + 1
+    let raw_text = llm_result?.text ?? ""
+    let parsed = agent_parse_tool_calls(raw_text, opts?.tools)
+    let visible_text = if parsed?.user_response != nil && parsed.user_response != "" {
+      parsed.user_response
+    } else {
+      if parsed?.prose != nil && parsed.prose != "" {
+        parsed.prose
+      } else {
+        raw_text
+      }
+    }
+    let normalized = llm_result + {text: visible_text, visible_text: visible_text}
+    agent_session_record_assistant(session.session_id, normalized)
+    let native_calls = llm_result?.tool_calls ?? []
+    let tool_calls = if len(native_calls) > 0 {
+      native_calls
+    } else {
+      parsed?.calls ?? []
+    }
+    var dispatch = nil
+    if len(tool_calls) > 0 {
+      dispatch = agent_dispatch_tool_batch(
+        tool_calls,
+        opts?.tools,
+        {session_id: session.session_id, tool_format: opts.tool_format},
+      )
+      agent_session_record_tool_results(session.session_id, dispatch)
+    }
+    let totals = agent_session_record_usage(session.session_id, llm_result)
+    if agent_budget_post_call_blocked(totals, opts) {
+      final_status = "budget_exhausted"
+      break
+    }
+    let outcome = agent_compute_post_turn(
+      session,
+      normalized + {parsed_done_marker: parsed?.done_marker ?? ""},
+      dispatch,
+      opts,
+      iteration,
+    )
+    if outcome.kind == "continue" {
+      continue
+    }
+    let needs_verify = outcome.needs_verify
+    if needs_verify {
+      if verify_attempts >= max_verify_attempts {
+        final_status = "verify_exhausted"
+        stop_reason = outcome.stop_reason
+        break
+      }
+      let verdict = agent_verify_or_continue(session, opts, outcome.stop_reason, llm_result.text)
+      if verdict.vetoed {
+        verify_attempts = verify_attempts + 1
+        continue
+      }
+    }
+    stop_reason = outcome.stop_reason
+    break
   }
-  return __host_agent_session_finalize(state.state_id)
+  if final_status == "" && iteration >= max_iterations && stop_reason == nil {
+    final_status = "budget_exhausted"
+  }
+  return agent_session_finalize(
+    session.session_id,
+    {final_status: final_status, stop_reason: stop_reason ?? "", iterations: iteration},
+  )
 }

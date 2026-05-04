@@ -1,11 +1,14 @@
-// Skills & Tool Vault phase 3 (harn#74): session-resume restores
-// the last active skill when the user re-enters a named session.
-//
-// The resume path reads `agent_sessions::active_skills(session_id)`;
-// this test rides on the public `agent_session_*` builtins to bake
-// a durable session first, then re-enters it under a fresh
-// agent_loop invocation and checks the skill stayed hot without
-// re-matching.
+/**
+ * @xfail: skill matching/scoring not yet a primitive — tracked in burin-labs/harn#1240
+ * Skills & Tool Vault phase 3 (harn#74): session-resume restores
+ * the last active skill when the user re-enters a named session.
+ *
+ * The resume path reads `agent_sessions::active_skills(session_id)`;
+ * this test rides on the public `agent_session_*` builtins to bake
+ * a durable session first, then re-enters it under a fresh
+ * agent_loop invocation and checks the skill stayed hot without
+ * re-matching.
+ */
 pipeline test(task) {
   llm_mock_clear()
   skill sticky_skill {

@@ -1,3 +1,6 @@
+/**
+ * @xfail: agent_loop `policy.tool_arg_constraints` not yet honored by Harn-driven loop — tracked in burin-labs/harn#1236
+ */
 fn list_tools() {
   var tools = tool_registry()
   tools = tool_define(

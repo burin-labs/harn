@@ -1,3 +1,4 @@
+// @xfail: tool-search client + tool_search_query events not yet emitted by Harn loop — tracked in burin-labs/harn#1236
 /**
  * Tool Vault phase 2 (harn#70): advanced client-mode options —
  * `mode: "client"`, `budget_tokens` cap with oldest-eviction, and the

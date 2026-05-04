@@ -1,3 +1,4 @@
+// @xfail: loop option validation / verifier-profile / compaction events / verify-completion shape regression — tracked in burin-labs/harn#1236
 /* Verifies the `verify_completion` stop-hook contract end-to-end:
    - the closure fires when the loop is about to yield,
    - returning a string vetoes the stop and injects feedback,

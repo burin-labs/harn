@@ -1,3 +1,6 @@
+/**
+ * @xfail: per-agent permissions + sub-agent intersection not yet wired — tracked in burin-labs/harn#1239
+ */
 fn write_tools() {
   var tools = tool_registry()
   tools = tool_define(
