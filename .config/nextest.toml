@@ -89,18 +89,6 @@ harn-cli-bin = { max-threads = 8 }
 # delayed by neighboring DAP tests. Keep leak failures enabled and remove
 # the concurrency pressure instead.
 harn-dap = { max-threads = 1 }
-# `harn-hostlib`'s `tools_git` integration tests and the
-# `end_to_end_git_via_harn_script` smoke test each call `fixture_repo()`,
-# which spawns ~10 sequential `git` subprocesses (init, three configs, two
-# adds, two commits, one remote add). On Windows, where process creation is
-# expensive and AV scanning of fresh tempdirs adds extra latency, running
-# these tests at full workspace fan-out causes them to starve each other:
-# under load on Windows runners we've seen tests that normally complete in
-# <100ms wall-clock balloon to 48–60+ s and trip nextest's slow-test cap.
-# Throttling concurrency for this small cohort keeps the rest of the suite
-# at full parallelism while preventing the git subprocess fan-out from
-# saturating the runner.
-harn-hostlib-git = { max-threads = 2 }
 
 # Transport-layer LLM tests do real localhost TCP with a 3s accept deadline.
 # They're bounded internally but give them a bit more room than the default
@@ -138,14 +126,6 @@ leak-timeout = { period = "10s", result = "pass" }
 filter = "package(harn-dap)"
 test-group = "harn-dap"
 
-# Throttle the git-subprocess-heavy harn-hostlib tests and give them more
-# headroom before nextest fires the slow-test terminator. See the
-# `harn-hostlib-git` test-group comment above for rationale.
-[[profile.default.overrides]]
-filter = 'package(harn-hostlib) and (binary(tools_git) or test(end_to_end_git_via_harn_script))'
-test-group = "harn-hostlib-git"
-slow-timeout = { period = "30s", terminate-after = 4, grace-period = "10s" }
-
 [[profile.ci.overrides]]
 filter = "package(harn-cli) and kind(test)"
 test-group = "harn-subprocess"
@@ -159,11 +139,6 @@ leak-timeout = { period = "10s", result = "pass" }
 [[profile.ci.overrides]]
 filter = "package(harn-dap)"
 test-group = "harn-dap"
-
-[[profile.ci.overrides]]
-filter = 'package(harn-hostlib) and (binary(tools_git) or test(end_to_end_git_via_harn_script))'
-test-group = "harn-hostlib-git"
-slow-timeout = { period = "60s", terminate-after = 3, grace-period = "15s" }
 
 # Flake-detection profile: zero retries, no fail-fast, tighter slow-test
 # threshold.  Used by the flake-detection CI workflow which runs touched
@@ -197,11 +172,6 @@ leak-timeout = { period = "10s", result = "pass" }
 [[profile.flake-detection.overrides]]
 filter = "package(harn-dap)"
 test-group = "harn-dap"
-
-[[profile.flake-detection.overrides]]
-filter = 'package(harn-hostlib) and (binary(tools_git) or test(end_to_end_git_via_harn_script))'
-test-group = "harn-hostlib-git"
-slow-timeout = { period = "30s", terminate-after = 4, grace-period = "10s" }
 
 # E2E profile overrides: throttle subprocess concurrency the same way the
 # default/ci profiles do so nightly runs stay deterministic.
