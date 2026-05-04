@@ -312,6 +312,64 @@ async fn completion_judge_can_confirm_successful_tool_turn_from_transcript_conte
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn completion_judge_accepts_long_final_response() {
+    let guard = serialize_tests();
+    drain_thread_local_state();
+    reset_llm_mock_state();
+    let temp_file = tempfile::NamedTempFile::new().expect("create temp file");
+    let path = temp_file.path().to_path_buf();
+    std::fs::write(&path, "LONG-ANSWER\n").expect("write temp file");
+    let final_response = format!(
+        "Confirmed LONG-ANSWER. {}",
+        "This sentence keeps a useful but lengthy final answer valid. ".repeat(70)
+    );
+    let judge_json = serde_json::json!({
+        "pass": true,
+        "final_response": final_response,
+    })
+    .to_string();
+
+    crate::llm::mock::push_llm_mock(tool_call_with_text_mock(
+        "I will inspect the file.".to_string(),
+        "read_file",
+        json!({"path": path.to_string_lossy().to_string()}),
+    ));
+    crate::llm::mock::push_llm_mock(text_mock(&judge_json));
+    crate::llm::mock::push_llm_mock(text_mock("unexpected extra turn"));
+
+    let mut opts = base_opts(vec![json!({
+        "role": "user",
+        "content": "Read the validation file and summarize it fully.",
+    })]);
+    opts.native_tools = Some(vec![native_read_file_schema()]);
+    let mut config = base_agent_config();
+    config.persistent = true;
+    config.max_iterations = 3;
+    config.max_verify_attempts = 2;
+    config.tool_format = "native".to_string();
+    config.verify_completion_judge =
+        Some(crate::llm::agent::completion_judge::CompletionJudgeConfig::default());
+    config.session_id = "test-judge-long-final-response".to_string();
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    let calls = get_llm_mock_calls();
+    assert_eq!(
+        calls.len(),
+        2,
+        "long but valid judge final_response should not be schema-vetoed"
+    );
+    assert_eq!(result["status"], "done");
+    assert_eq!(
+        result["visible_text"].as_str(),
+        Some(final_response.trim_end())
+    );
+
+    std::fs::remove_file(path).ok();
+    reset_llm_mock_state();
+    drop(guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn completion_judge_treats_null_optional_fields_as_absent() {
     let guard = serialize_tests();
     drain_thread_local_state();

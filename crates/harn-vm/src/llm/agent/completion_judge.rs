@@ -158,7 +158,7 @@ pub(super) async fn run_completion_judge(
             "reasoning": {"type": ["string", "null"], "maxLength": 2000},
             "feedback": {"type": ["string", "null"], "maxLength": config.max_feedback_chars},
             "next_step": {"type": ["string", "null"], "maxLength": config.max_feedback_chars},
-            "final_response": {"type": ["string", "null"], "maxLength": 2000},
+            "final_response": {"type": ["string", "null"], "maxLength": 20000},
         },
     });
     let options = build_judge_options(config, main_opts);

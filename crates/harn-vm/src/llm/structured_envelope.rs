@@ -31,7 +31,7 @@ use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 
-use super::helpers::extract_llm_options;
+use super::helpers::{extract_llm_options, vm_value_to_json};
 use super::{execute_schema_retry_loop, rewrite_structured_args, SchemaLoopOutcome};
 
 /// Build the `{ok, data, raw_text, error, error_category, attempts,
@@ -52,9 +52,17 @@ pub(crate) async fn run_structured_envelope(
     // `extract_llm_options` runs — repair is a result-envelope
     // configuration knob, not a pass-through provider option.
     let repair_config = take_repair_config(&mut rewritten);
-    let options_dict = rewritten.get(2).and_then(|a| a.as_dict()).cloned();
+    let mut options_dict = rewritten.get(2).and_then(|a| a.as_dict()).cloned();
     let opts = match extract_llm_options(&rewritten) {
         Ok(opts) => opts,
+        Err(err) if is_unsupported_structured_transport_error(&err) => {
+            apply_prompt_mode_structured_transport(&mut rewritten);
+            options_dict = rewritten.get(2).and_then(|a| a.as_dict()).cloned();
+            match extract_llm_options(&rewritten) {
+                Ok(opts) => opts,
+                Err(fallback_err) => return Ok(envelope_from_arg_error(&fallback_err)),
+            }
+        }
         Err(err) => return Ok(envelope_from_arg_error(&err)),
     };
     let provider_hint = opts.provider.clone();
@@ -100,6 +108,44 @@ pub(crate) async fn run_structured_envelope(
         classify_main_failure(&main_outcome),
         false,
     ))
+}
+
+fn is_unsupported_structured_transport_error(err: &VmError) -> bool {
+    let message = err.to_string();
+    message.contains("option `output_format` is not supported")
+        || message.contains("unsupported structured_output strategy")
+}
+
+fn apply_prompt_mode_structured_transport(args: &mut [VmValue]) {
+    let schema = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    if let Some(prompt) = args.get_mut(0).and_then(|value| match value {
+        VmValue::String(text) => Some(text.to_string()),
+        _ => None,
+    }) {
+        args[0] = VmValue::String(Rc::from(prompt_with_schema_contract(&prompt, &schema)));
+    }
+    if let Some(options) = args.get_mut(2) {
+        let mut dict = options.as_dict().cloned().unwrap_or_default();
+        dict.insert(
+            "output_format".to_string(),
+            VmValue::String(Rc::from("text")),
+        );
+        dict.insert(
+            "response_format".to_string(),
+            VmValue::String(Rc::from("text")),
+        );
+        *options = VmValue::Dict(Rc::new(dict));
+    }
+}
+
+fn prompt_with_schema_contract(prompt: &str, schema: &VmValue) -> String {
+    let schema_json = serde_json::to_string_pretty(&vm_value_to_json(schema))
+        .unwrap_or_else(|_| schema.display());
+    format!(
+        "{prompt}\n\n\
+Structured output transport is unavailable for this model. Return ONLY JSON that conforms to this JSON Schema. \
+Do not include prose, markdown fences, or commentary.\n\nJSON Schema:\n{schema_json}"
+    )
 }
 
 fn classify_main_failure(outcome: &SchemaLoopOutcome) -> EnvelopeFailureKind {
@@ -511,5 +557,56 @@ mod tests {
         disabled.insert("enabled".to_string(), VmValue::Bool(false));
         let dict_disabled = parse_repair_value(&VmValue::Dict(Rc::new(disabled))).unwrap();
         assert!(!dict_disabled.enabled);
+    }
+
+    #[test]
+    fn prompt_mode_structured_transport_keeps_harn_side_validation() {
+        let schema = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("type".to_string(), VmValue::String(Rc::from("object"))),
+            (
+                "properties".to_string(),
+                VmValue::Dict(Rc::new(BTreeMap::from([(
+                    "pass".to_string(),
+                    VmValue::Dict(Rc::new(BTreeMap::from([(
+                        "type".to_string(),
+                        VmValue::String(Rc::from("boolean")),
+                    )]))),
+                )]))),
+            ),
+        ])));
+        let options = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("provider".to_string(), VmValue::String(Rc::from("ollama"))),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("gemma4-128k:latest")),
+            ),
+        ])));
+        let mut args = crate::llm::rewrite_structured_args(vec![
+            VmValue::String(Rc::from("Return a completion verdict.")),
+            schema,
+            options,
+        ])
+        .unwrap();
+
+        let err = match extract_llm_options(&args) {
+            Ok(_) => panic!("native structured transport should be unsupported"),
+            Err(err) => err,
+        };
+        assert!(is_unsupported_structured_transport_error(&err));
+
+        apply_prompt_mode_structured_transport(&mut args);
+        let opts = extract_llm_options(&args).expect("prompt-mode structured call should parse");
+        assert!(matches!(
+            opts.output_format,
+            crate::llm::api::OutputFormat::Text
+        ));
+        assert!(
+            opts.output_schema.is_some(),
+            "Harn must still validate the model's JSON after prompt-mode fallback"
+        );
+        assert!(opts.messages[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Return ONLY JSON that conforms to this JSON Schema"));
     }
 }
