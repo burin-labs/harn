@@ -11,6 +11,7 @@ use crate::BuiltinId;
 
 use super::debug::DebugHook;
 use super::modules::LoadedModule;
+use super::VmBuiltinMetadata;
 
 /// RAII guard that starts a tracing span on creation and ends it on drop.
 pub(crate) struct ScopeSpan(u64);
@@ -136,6 +137,7 @@ pub struct Vm {
     pub(crate) output: String,
     pub(crate) builtins: BTreeMap<String, VmBuiltinFn>,
     pub(crate) async_builtins: BTreeMap<String, VmAsyncBuiltinFn>,
+    pub(crate) builtin_metadata: BTreeMap<String, VmBuiltinMetadata>,
     /// Numeric side index for builtins. Name-keyed maps remain authoritative;
     /// this index is the hot path for direct builtin bytecode and callback refs.
     pub(crate) builtins_by_id: BTreeMap<BuiltinId, VmBuiltinEntry>,
@@ -383,6 +385,7 @@ impl Vm {
             output: String::new(),
             builtins: BTreeMap::new(),
             async_builtins: BTreeMap::new(),
+            builtin_metadata: BTreeMap::new(),
             builtins_by_id: BTreeMap::new(),
             builtin_id_collisions: HashSet::new(),
             iterators: Vec::new(),
@@ -475,6 +478,7 @@ impl Vm {
             output: String::new(),
             builtins: self.builtins.clone(),
             async_builtins: self.async_builtins.clone(),
+            builtin_metadata: self.builtin_metadata.clone(),
             builtins_by_id: self.builtins_by_id.clone(),
             builtin_id_collisions: self.builtin_id_collisions.clone(),
             iterators: Vec::new(),
@@ -558,6 +562,16 @@ impl Vm {
         let mut names: Vec<String> = self.builtins.keys().cloned().collect();
         names.extend(self.async_builtins.keys().cloned());
         names
+    }
+
+    /// Return discoverable metadata for registered builtins.
+    pub fn builtin_metadata(&self) -> Vec<VmBuiltinMetadata> {
+        self.builtin_metadata.values().cloned().collect()
+    }
+
+    /// Return discoverable metadata for a registered builtin name.
+    pub fn builtin_metadata_for(&self, name: &str) -> Option<&VmBuiltinMetadata> {
+        self.builtin_metadata.get(name)
     }
 
     /// Set a global constant (e.g. `pi`, `e`).

@@ -9,14 +9,55 @@ use std::sync::Arc;
 use crate::bridge::HostBridge;
 use crate::llm::daemon::{load_snapshot, DaemonSnapshot};
 use crate::orchestration::DaemonEventKindRecord;
+use crate::stdlib::registration::{
+    boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
+};
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{Vm, VmBuiltinArity};
 
 const SNAPSHOT_FILE: &str = "daemon.json";
 const META_FILE: &str = "daemon.meta.json";
 const DEFAULT_EVENT_QUEUE_CAPACITY: usize = 1024;
 const DAEMON_MONITOR_POLL_MS: u64 = 10;
 const DAEMON_STOP_WAIT_MS: u64 = 500;
+
+const DAEMON_SYNC_PRIMITIVES: &[SyncBuiltin] =
+    &[SyncBuiltin::new("daemon_snapshot", daemon_snapshot_builtin)
+        .signature("daemon_snapshot(handle)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("agent.daemon")
+        .doc("Refresh and return a daemon snapshot with queued event state.")];
+
+const DAEMON_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
+    AsyncBuiltin::new("daemon_spawn", |args| {
+        boxed_async_builtin(daemon_spawn_builtin(args))
+    })
+    .signature("daemon_spawn(config)")
+    .arity(VmBuiltinArity::Exact(1))
+    .category("agent.daemon")
+    .doc("Spawn a persistent daemon agent worker."),
+    AsyncBuiltin::new("daemon_trigger", |args| {
+        boxed_async_builtin(daemon_trigger_builtin(args))
+    })
+    .signature("daemon_trigger(handle, payload)")
+    .arity(VmBuiltinArity::Exact(2))
+    .category("agent.daemon")
+    .doc("Queue an event payload for a running daemon."),
+    AsyncBuiltin::new("daemon_stop", |args| {
+        boxed_async_builtin(daemon_stop_builtin(args))
+    })
+    .signature("daemon_stop(handle)")
+    .arity(VmBuiltinArity::Exact(1))
+    .category("agent.daemon")
+    .doc("Stop a running daemon and persist its latest snapshot."),
+    AsyncBuiltin::new("daemon_resume", |args| {
+        boxed_async_builtin(daemon_resume_builtin(args))
+    })
+    .signature("daemon_resume(path)")
+    .arity(VmBuiltinArity::Exact(1))
+    .category("agent.daemon")
+    .doc("Resume a daemon from persisted state."),
+];
 
 fn default_event_queue_capacity() -> usize {
     DEFAULT_EVENT_QUEUE_CAPACITY
@@ -94,380 +135,383 @@ thread_local! {
 }
 
 pub fn register_daemon_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("daemon_spawn", |args| async move {
-        let child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-            VmError::Runtime("daemon_spawn requires an async builtin VM context".to_string())
-        })?;
-        let config = require_dict_arg(&args, 0, "daemon_spawn")?;
-        let spec = parse_spawn_spec(config, None, None)?;
-        if find_daemon_by_root(&spec.persist_root)
-            .is_some_and(|state| state.borrow().status == "running")
-        {
+    register_sync_builtins(vm, DAEMON_SYNC_PRIMITIVES);
+    register_async_builtins(vm, DAEMON_ASYNC_PRIMITIVES);
+}
+
+async fn daemon_spawn_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+        VmError::Runtime("daemon_spawn requires an async builtin VM context".to_string())
+    })?;
+    let config = require_dict_arg(&args, 0, "daemon_spawn")?;
+    let spec = parse_spawn_spec(config, None, None)?;
+    if find_daemon_by_root(&spec.persist_root)
+        .is_some_and(|state| state.borrow().status == "running")
+    {
+        return Err(VmError::Runtime(format!(
+            "daemon_spawn: a daemon is already running for '{}'",
+            spec.persist_root
+        )));
+    }
+
+    let state = Rc::new(RefCell::new(DaemonState {
+        id: spec.id.clone(),
+        name: spec.name.clone(),
+        prompt: spec.prompt.clone(),
+        system: spec.system.clone(),
+        session_id: spec.session_id.clone(),
+        persist_root: spec.persist_root.clone(),
+        snapshot_path: spec.snapshot_path.clone(),
+        options: spec.options.clone(),
+        bridge: new_daemon_bridge().await?,
+        handle: None,
+        monitor_handle: None,
+        status: "running".to_string(),
+        last_error: None,
+        last_result: None,
+        last_snapshot: None,
+        event_queue_capacity: spec.event_queue_capacity.max(1),
+        next_event_seq: 0,
+        pending_events: VecDeque::new(),
+        inflight_event: None,
+        inflight_snapshot_saved_at: None,
+        inflight_snapshot_iterations: 0,
+        stop_requested: false,
+    }));
+    {
+        let daemon = state.borrow();
+        persist_daemon_meta(&daemon)?;
+    }
+    register_daemon(state.clone());
+    spawn_daemon_task(state.clone(), child_vm);
+    start_daemon_monitor(state.clone());
+    wait_for_snapshot(state.clone(), None, 500).await;
+    record_daemon_event(
+        &spec.id,
+        &spec.name,
+        DaemonEventKindRecord::Spawned,
+        &spec.persist_root,
+        summarize_text(&spec.prompt),
+    );
+    let summary = {
+        let daemon = state.borrow();
+        daemon_summary(&daemon)?
+    };
+    Ok(summary)
+}
+
+async fn daemon_trigger_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let target = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("daemon_trigger: missing daemon handle".to_string()))?;
+    let payload = args
+        .get(1)
+        .ok_or_else(|| VmError::Runtime("daemon_trigger: missing event payload".to_string()))?;
+    let daemon_id = daemon_id_from_value(target)?;
+    let state = with_daemon_state(&daemon_id, |state| Ok(state.clone()))?;
+    {
+        let mut daemon = state.borrow_mut();
+        refresh_snapshot(&mut daemon)?;
+        reconcile_inflight_event(&mut daemon)?;
+        if daemon.status != "running" {
             return Err(VmError::Runtime(format!(
-                "daemon_spawn: a daemon is already running for '{}'",
-                spec.persist_root
+                "daemon_trigger: daemon {} is not running",
+                daemon.id
             )));
         }
-
-        let state = Rc::new(RefCell::new(DaemonState {
-            id: spec.id.clone(),
-            name: spec.name.clone(),
-            prompt: spec.prompt.clone(),
-            system: spec.system.clone(),
-            session_id: spec.session_id.clone(),
-            persist_root: spec.persist_root.clone(),
-            snapshot_path: spec.snapshot_path.clone(),
-            options: spec.options.clone(),
-            bridge: new_daemon_bridge().await?,
-            handle: None,
-            monitor_handle: None,
-            status: "running".to_string(),
-            last_error: None,
-            last_result: None,
-            last_snapshot: None,
-            event_queue_capacity: spec.event_queue_capacity.max(1),
-            next_event_seq: 0,
-            pending_events: VecDeque::new(),
-            inflight_event: None,
-            inflight_snapshot_saved_at: None,
-            inflight_snapshot_iterations: 0,
-            stop_requested: false,
-        }));
-        {
-            let daemon = state.borrow();
-            persist_daemon_meta(&daemon)?;
-        }
-        register_daemon(state.clone());
-        spawn_daemon_task(state.clone(), child_vm);
-        start_daemon_monitor(state.clone());
-        wait_for_snapshot(state.clone(), None, 500).await;
-        record_daemon_event(
-            &spec.id,
-            &spec.name,
-            DaemonEventKindRecord::Spawned,
-            &spec.persist_root,
-            summarize_text(&spec.prompt),
-        );
-        let summary = {
-            let daemon = state.borrow();
-            daemon_summary(&daemon)?
-        };
-        Ok(summary)
-    });
-
-    vm.register_async_builtin("daemon_trigger", |args| async move {
-        let target = args
-            .first()
-            .ok_or_else(|| VmError::Runtime("daemon_trigger: missing daemon handle".to_string()))?;
-        let payload = args
-            .get(1)
-            .ok_or_else(|| VmError::Runtime("daemon_trigger: missing event payload".to_string()))?;
-        let daemon_id = daemon_id_from_value(target)?;
-        let state = with_daemon_state(&daemon_id, |state| Ok(state.clone()))?;
-        {
-            let mut daemon = state.borrow_mut();
-            refresh_snapshot(&mut daemon)?;
-            reconcile_inflight_event(&mut daemon)?;
-            if daemon.status != "running" {
-                return Err(VmError::Runtime(format!(
-                    "daemon_trigger: daemon {} is not running",
-                    daemon.id
-                )));
-            }
-            if queued_event_len(&daemon) >= daemon.event_queue_capacity {
-                return Err(VmError::DaemonQueueFull {
-                    daemon_id: daemon.id.clone(),
-                    capacity: daemon.event_queue_capacity,
-                });
-            }
-            let next_seq = daemon.next_event_seq + 1;
-            daemon.next_event_seq = next_seq;
-            daemon.pending_events.push_back(QueuedDaemonEvent {
-                seq: next_seq,
-                enqueued_at: crate::orchestration::now_rfc3339(),
-                payload: crate::llm::vm_value_to_json(payload),
+        if queued_event_len(&daemon) >= daemon.event_queue_capacity {
+            return Err(VmError::DaemonQueueFull {
+                daemon_id: daemon.id.clone(),
+                capacity: daemon.event_queue_capacity,
             });
-            persist_daemon_meta(&daemon)?;
         }
+        let next_seq = daemon.next_event_seq + 1;
+        daemon.next_event_seq = next_seq;
+        daemon.pending_events.push_back(QueuedDaemonEvent {
+            seq: next_seq,
+            enqueued_at: crate::orchestration::now_rfc3339(),
+            payload: crate::llm::vm_value_to_json(payload),
+        });
+        persist_daemon_meta(&daemon)?;
+    }
+    {
+        let daemon = state.borrow();
+        record_daemon_event(
+            &daemon.id,
+            &daemon.name,
+            DaemonEventKindRecord::Triggered,
+            &daemon.persist_root,
+            summarize_text(&trigger_payload_text(payload)),
+        );
+    }
+    maybe_deliver_next_event(state.clone()).await?;
+    let summary = {
+        let daemon = state.borrow();
+        daemon_summary(&daemon)?
+    };
+    Ok(summary)
+}
+
+fn daemon_snapshot_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let target = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("daemon_snapshot: missing daemon handle".to_string()))?;
+    let daemon_id = daemon_id_from_value(target)?;
+    with_daemon_state(&daemon_id, |state| {
+        let mut daemon = state.borrow_mut();
+        let snapshot = refresh_snapshot(&mut daemon)?;
+        reconcile_inflight_event(&mut daemon)?;
+        record_daemon_event(
+            &daemon.id,
+            &daemon.name,
+            DaemonEventKindRecord::Snapshotted,
+            &daemon.persist_root,
+            summarize_snapshot(snapshot.as_ref()),
+        );
+        let pending_events = daemon.pending_events.iter().cloned().collect::<Vec<_>>();
+        Ok(snapshot_to_vm(
+            &snapshot.unwrap_or_default(),
+            &pending_events,
+            daemon.inflight_event.as_ref(),
+            daemon.event_queue_capacity,
+        ))
+    })
+}
+
+async fn daemon_stop_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let target = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("daemon_stop: missing daemon handle".to_string()))?;
+    let daemon_id = daemon_id_from_value(target)?;
+    let state = with_daemon_state(&daemon_id, |state| Ok(state.clone()))?;
+    {
+        let mut daemon = state.borrow_mut();
+        if daemon.status == "stopped" {
+            return daemon_summary(&daemon);
+        }
+        daemon.stop_requested = true;
+        if let Some(handle) = daemon.monitor_handle.take() {
+            handle.abort();
+        }
+        persist_daemon_meta(&daemon)?;
+    }
+
+    let started = std::time::Instant::now();
+    while (started.elapsed().as_millis() as u64) < DAEMON_STOP_WAIT_MS {
         {
             let daemon = state.borrow();
-            record_daemon_event(
-                &daemon.id,
-                &daemon.name,
-                DaemonEventKindRecord::Triggered,
-                &daemon.persist_root,
-                summarize_text(&trigger_payload_text(payload)),
-            );
+            if daemon.status != "running" || daemon.bridge.is_daemon_idle() {
+                break;
+            }
         }
-        maybe_deliver_next_event(state.clone()).await?;
-        let summary = {
-            let daemon = state.borrow();
-            daemon_summary(&daemon)?
-        };
-        Ok(summary)
-    });
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
 
-    vm.register_builtin("daemon_snapshot", |args, _out| {
-        let target = args.first().ok_or_else(|| {
-            VmError::Runtime("daemon_snapshot: missing daemon handle".to_string())
-        })?;
-        let daemon_id = daemon_id_from_value(target)?;
-        with_daemon_state(&daemon_id, |state| {
-            let mut daemon = state.borrow_mut();
-            let snapshot = refresh_snapshot(&mut daemon)?;
-            reconcile_inflight_event(&mut daemon)?;
-            record_daemon_event(
-                &daemon.id,
-                &daemon.name,
-                DaemonEventKindRecord::Snapshotted,
-                &daemon.persist_root,
-                summarize_snapshot(snapshot.as_ref()),
-            );
-            let pending_events = daemon.pending_events.iter().cloned().collect::<Vec<_>>();
-            Ok(snapshot_to_vm(
-                &snapshot.unwrap_or_default(),
-                &pending_events,
-                daemon.inflight_event.as_ref(),
-                daemon.event_queue_capacity,
-            ))
-        })
-    });
+    let summary = {
+        let mut daemon = state.borrow_mut();
+        refresh_snapshot(&mut daemon)?;
+        reconcile_inflight_event(&mut daemon)?;
+        requeue_inflight_event(&mut daemon)?;
+        if let Some(handle) = daemon.handle.take() {
+            handle.abort();
+        }
+        daemon.status = "stopped".to_string();
+        daemon.last_error = None;
+        daemon.stop_requested = false;
+        daemon.bridge.set_daemon_idle(false);
+        persist_daemon_meta(&daemon)?;
+        record_daemon_event(
+            &daemon.id,
+            &daemon.name,
+            DaemonEventKindRecord::Stopped,
+            &daemon.persist_root,
+            summarize_snapshot(daemon.last_snapshot.as_ref()),
+        );
+        daemon_summary(&daemon)?
+    };
+    Ok(summary)
+}
 
-    vm.register_async_builtin("daemon_stop", |args| async move {
-        let target = args
-            .first()
-            .ok_or_else(|| VmError::Runtime("daemon_stop: missing daemon handle".to_string()))?;
-        let daemon_id = daemon_id_from_value(target)?;
-        let state = with_daemon_state(&daemon_id, |state| Ok(state.clone()))?;
+async fn daemon_resume_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+        VmError::Runtime("daemon_resume requires an async builtin VM context".to_string())
+    })?;
+    let persist_root = required_string_arg(&args, 0, "daemon_resume", "path")?;
+    let paths = daemon_paths(&persist_root);
+    let snapshot = load_snapshot(&paths.snapshot_path)?;
+    let meta = read_meta(&paths.meta_path)?;
+    let mut pending_events = VecDeque::from(meta.pending_events.clone());
+    if let Some(inflight) = meta.inflight_event.clone() {
+        pending_events.push_front(inflight);
+    }
+
+    let options = match crate::stdlib::json_to_vm_value(&meta.options) {
+        VmValue::Dict(dict) => (*dict).clone(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "daemon_resume: metadata at '{}' is not a dict",
+                paths.meta_path
+            )))
+        }
+    };
+    let spec = parse_spawn_spec(
+        &BTreeMap::from([
+            (
+                "name".to_string(),
+                VmValue::String(Rc::from(meta.name.clone())),
+            ),
+            (
+                "task".to_string(),
+                VmValue::String(Rc::from(meta.prompt.clone())),
+            ),
+            (
+                "persist_path".to_string(),
+                VmValue::String(Rc::from(persist_root.clone())),
+            ),
+            (
+                "session_id".to_string(),
+                VmValue::String(Rc::from(meta.session_id.clone())),
+            ),
+            (
+                "options".to_string(),
+                VmValue::Dict(Rc::new(options.clone())),
+            ),
+        ]),
+        Some(meta.id.clone()),
+        meta.system.clone(),
+    )?;
+
+    if let Some(state) = find_daemon_by_root(&persist_root) {
+        if state.borrow().status == "running" {
+            return Err(VmError::Runtime(format!(
+                "daemon_resume: daemon '{}' is already running",
+                persist_root
+            )));
+        }
+        let bridge = new_daemon_bridge().await?;
         {
             let mut daemon = state.borrow_mut();
-            if daemon.status == "stopped" {
-                return daemon_summary(&daemon);
-            }
-            daemon.stop_requested = true;
-            if let Some(handle) = daemon.monitor_handle.take() {
-                handle.abort();
-            }
-            persist_daemon_meta(&daemon)?;
-        }
-
-        let started = std::time::Instant::now();
-        while (started.elapsed().as_millis() as u64) < DAEMON_STOP_WAIT_MS {
-            {
-                let daemon = state.borrow();
-                if daemon.status != "running" || daemon.bridge.is_daemon_idle() {
-                    break;
-                }
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        }
-
-        let summary = {
-            let mut daemon = state.borrow_mut();
-            refresh_snapshot(&mut daemon)?;
-            reconcile_inflight_event(&mut daemon)?;
-            requeue_inflight_event(&mut daemon)?;
-            if let Some(handle) = daemon.handle.take() {
-                handle.abort();
-            }
-            daemon.status = "stopped".to_string();
+            daemon.id = spec.id.clone();
+            daemon.name = spec.name.clone();
+            daemon.prompt = spec.prompt.clone();
+            daemon.system = spec.system.clone();
+            daemon.session_id = spec.session_id.clone();
+            daemon.persist_root = spec.persist_root.clone();
+            daemon.snapshot_path = spec.snapshot_path.clone();
+            daemon.options = options.clone();
+            daemon
+                .options
+                .insert("daemon".to_string(), VmValue::Bool(true));
+            daemon
+                .options
+                .insert("persistent".to_string(), VmValue::Bool(false));
+            daemon.options.insert(
+                "session_id".to_string(),
+                VmValue::String(Rc::from(spec.session_id.clone())),
+            );
+            daemon.options.insert(
+                "persist_path".to_string(),
+                VmValue::String(Rc::from(spec.snapshot_path.clone())),
+            );
+            daemon.options.insert(
+                "resume_path".to_string(),
+                VmValue::String(Rc::from(spec.snapshot_path.clone())),
+            );
+            daemon.status = "running".to_string();
             daemon.last_error = None;
+            daemon.last_result = None;
+            daemon.last_snapshot = Some(snapshot.clone());
+            daemon.event_queue_capacity = meta.event_queue_capacity.max(1);
+            daemon.next_event_seq = meta.next_event_seq;
+            daemon.pending_events = pending_events.clone();
+            daemon.inflight_event = None;
+            daemon.inflight_snapshot_saved_at = None;
+            daemon.inflight_snapshot_iterations = 0;
             daemon.stop_requested = false;
-            daemon.bridge.set_daemon_idle(false);
-            persist_daemon_meta(&daemon)?;
-            record_daemon_event(
-                &daemon.id,
-                &daemon.name,
-                DaemonEventKindRecord::Stopped,
-                &daemon.persist_root,
-                summarize_snapshot(daemon.last_snapshot.as_ref()),
-            );
-            daemon_summary(&daemon)?
-        };
-        Ok(summary)
-    });
-
-    vm.register_async_builtin("daemon_resume", |args| async move {
-        let child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-            VmError::Runtime("daemon_resume requires an async builtin VM context".to_string())
-        })?;
-        let persist_root = required_string_arg(&args, 0, "daemon_resume", "path")?;
-        let paths = daemon_paths(&persist_root);
-        let snapshot = load_snapshot(&paths.snapshot_path)?;
-        let meta = read_meta(&paths.meta_path)?;
-        let mut pending_events = VecDeque::from(meta.pending_events.clone());
-        if let Some(inflight) = meta.inflight_event.clone() {
-            pending_events.push_front(inflight);
-        }
-
-        let options = match crate::stdlib::json_to_vm_value(&meta.options) {
-            VmValue::Dict(dict) => (*dict).clone(),
-            _ => {
-                return Err(VmError::Runtime(format!(
-                    "daemon_resume: metadata at '{}' is not a dict",
-                    paths.meta_path
-                )))
-            }
-        };
-        let spec = parse_spawn_spec(
-            &BTreeMap::from([
-                (
-                    "name".to_string(),
-                    VmValue::String(Rc::from(meta.name.clone())),
-                ),
-                (
-                    "task".to_string(),
-                    VmValue::String(Rc::from(meta.prompt.clone())),
-                ),
-                (
-                    "persist_path".to_string(),
-                    VmValue::String(Rc::from(persist_root.clone())),
-                ),
-                (
-                    "session_id".to_string(),
-                    VmValue::String(Rc::from(meta.session_id.clone())),
-                ),
-                (
-                    "options".to_string(),
-                    VmValue::Dict(Rc::new(options.clone())),
-                ),
-            ]),
-            Some(meta.id.clone()),
-            meta.system.clone(),
-        )?;
-
-        if let Some(state) = find_daemon_by_root(&persist_root) {
-            if state.borrow().status == "running" {
-                return Err(VmError::Runtime(format!(
-                    "daemon_resume: daemon '{}' is already running",
-                    persist_root
-                )));
-            }
-            let bridge = new_daemon_bridge().await?;
-            {
-                let mut daemon = state.borrow_mut();
-                daemon.id = spec.id.clone();
-                daemon.name = spec.name.clone();
-                daemon.prompt = spec.prompt.clone();
-                daemon.system = spec.system.clone();
-                daemon.session_id = spec.session_id.clone();
-                daemon.persist_root = spec.persist_root.clone();
-                daemon.snapshot_path = spec.snapshot_path.clone();
-                daemon.options = options.clone();
-                daemon
-                    .options
-                    .insert("daemon".to_string(), VmValue::Bool(true));
-                daemon
-                    .options
-                    .insert("persistent".to_string(), VmValue::Bool(false));
-                daemon.options.insert(
-                    "session_id".to_string(),
-                    VmValue::String(Rc::from(spec.session_id.clone())),
-                );
-                daemon.options.insert(
-                    "persist_path".to_string(),
-                    VmValue::String(Rc::from(spec.snapshot_path.clone())),
-                );
-                daemon.options.insert(
-                    "resume_path".to_string(),
-                    VmValue::String(Rc::from(spec.snapshot_path.clone())),
-                );
-                daemon.status = "running".to_string();
-                daemon.last_error = None;
-                daemon.last_result = None;
-                daemon.last_snapshot = Some(snapshot.clone());
-                daemon.event_queue_capacity = meta.event_queue_capacity.max(1);
-                daemon.next_event_seq = meta.next_event_seq;
-                daemon.pending_events = pending_events.clone();
-                daemon.inflight_event = None;
-                daemon.inflight_snapshot_saved_at = None;
-                daemon.inflight_snapshot_iterations = 0;
-                daemon.stop_requested = false;
-                daemon.bridge = bridge;
-                daemon.bridge.set_daemon_idle(true);
-                persist_daemon_meta(&daemon)?;
-            }
-            maybe_deliver_next_event(state.clone()).await?;
-            spawn_daemon_task(state.clone(), child_vm);
-            start_daemon_monitor(state.clone());
-            wait_for_snapshot(state.clone(), Some(snapshot.saved_at.clone()), 500).await;
-            let summary = {
-                let daemon = state.borrow();
-                record_daemon_event(
-                    &daemon.id,
-                    &daemon.name,
-                    DaemonEventKindRecord::Resumed,
-                    &daemon.persist_root,
-                    summarize_snapshot(Some(&snapshot)),
-                );
-                daemon_summary(&daemon)?
-            };
-            return Ok(summary);
-        }
-
-        let mut resume_options = options;
-        resume_options.insert("daemon".to_string(), VmValue::Bool(true));
-        resume_options.insert("persistent".to_string(), VmValue::Bool(false));
-        resume_options.insert(
-            "session_id".to_string(),
-            VmValue::String(Rc::from(spec.session_id.clone())),
-        );
-        resume_options.insert(
-            "persist_path".to_string(),
-            VmValue::String(Rc::from(spec.snapshot_path.clone())),
-        );
-        resume_options.insert(
-            "resume_path".to_string(),
-            VmValue::String(Rc::from(spec.snapshot_path.clone())),
-        );
-
-        let state = Rc::new(RefCell::new(DaemonState {
-            id: spec.id.clone(),
-            name: spec.name.clone(),
-            prompt: spec.prompt.clone(),
-            system: spec.system.clone(),
-            session_id: spec.session_id.clone(),
-            persist_root: spec.persist_root.clone(),
-            snapshot_path: spec.snapshot_path.clone(),
-            options: resume_options,
-            bridge: new_daemon_bridge().await?,
-            handle: None,
-            monitor_handle: None,
-            status: "running".to_string(),
-            last_error: None,
-            last_result: None,
-            last_snapshot: Some(snapshot.clone()),
-            event_queue_capacity: meta.event_queue_capacity.max(1),
-            next_event_seq: meta.next_event_seq,
-            pending_events,
-            inflight_event: None,
-            inflight_snapshot_saved_at: None,
-            inflight_snapshot_iterations: 0,
-            stop_requested: false,
-        }));
-        {
-            let daemon = state.borrow();
+            daemon.bridge = bridge;
+            daemon.bridge.set_daemon_idle(true);
             persist_daemon_meta(&daemon)?;
         }
-        state.borrow().bridge.set_daemon_idle(true);
         maybe_deliver_next_event(state.clone()).await?;
-        register_daemon(state.clone());
         spawn_daemon_task(state.clone(), child_vm);
         start_daemon_monitor(state.clone());
         wait_for_snapshot(state.clone(), Some(snapshot.saved_at.clone()), 500).await;
-        record_daemon_event(
-            &spec.id,
-            &spec.name,
-            DaemonEventKindRecord::Resumed,
-            &spec.persist_root,
-            summarize_snapshot(Some(&snapshot)),
-        );
         let summary = {
             let daemon = state.borrow();
+            record_daemon_event(
+                &daemon.id,
+                &daemon.name,
+                DaemonEventKindRecord::Resumed,
+                &daemon.persist_root,
+                summarize_snapshot(Some(&snapshot)),
+            );
             daemon_summary(&daemon)?
         };
-        Ok(summary)
-    });
+        return Ok(summary);
+    }
+
+    let mut resume_options = options;
+    resume_options.insert("daemon".to_string(), VmValue::Bool(true));
+    resume_options.insert("persistent".to_string(), VmValue::Bool(false));
+    resume_options.insert(
+        "session_id".to_string(),
+        VmValue::String(Rc::from(spec.session_id.clone())),
+    );
+    resume_options.insert(
+        "persist_path".to_string(),
+        VmValue::String(Rc::from(spec.snapshot_path.clone())),
+    );
+    resume_options.insert(
+        "resume_path".to_string(),
+        VmValue::String(Rc::from(spec.snapshot_path.clone())),
+    );
+
+    let state = Rc::new(RefCell::new(DaemonState {
+        id: spec.id.clone(),
+        name: spec.name.clone(),
+        prompt: spec.prompt.clone(),
+        system: spec.system.clone(),
+        session_id: spec.session_id.clone(),
+        persist_root: spec.persist_root.clone(),
+        snapshot_path: spec.snapshot_path.clone(),
+        options: resume_options,
+        bridge: new_daemon_bridge().await?,
+        handle: None,
+        monitor_handle: None,
+        status: "running".to_string(),
+        last_error: None,
+        last_result: None,
+        last_snapshot: Some(snapshot.clone()),
+        event_queue_capacity: meta.event_queue_capacity.max(1),
+        next_event_seq: meta.next_event_seq,
+        pending_events,
+        inflight_event: None,
+        inflight_snapshot_saved_at: None,
+        inflight_snapshot_iterations: 0,
+        stop_requested: false,
+    }));
+    {
+        let daemon = state.borrow();
+        persist_daemon_meta(&daemon)?;
+    }
+    state.borrow().bridge.set_daemon_idle(true);
+    maybe_deliver_next_event(state.clone()).await?;
+    register_daemon(state.clone());
+    spawn_daemon_task(state.clone(), child_vm);
+    start_daemon_monitor(state.clone());
+    wait_for_snapshot(state.clone(), Some(snapshot.saved_at.clone()), 500).await;
+    record_daemon_event(
+        &spec.id,
+        &spec.name,
+        DaemonEventKindRecord::Resumed,
+        &spec.persist_root,
+        summarize_snapshot(Some(&snapshot)),
+    );
+    let summary = {
+        let daemon = state.borrow();
+        daemon_summary(&daemon)?
+    };
+    Ok(summary)
 }
 
 fn require_dict_arg<'a>(

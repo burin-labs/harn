@@ -6,7 +6,7 @@ use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 use crate::BuiltinId;
 
 use super::async_builtin::CURRENT_ASYNC_BUILTIN_CHILD_VM;
-use super::{ScopeSpan, Vm, VmBuiltinDispatch, VmBuiltinEntry};
+use super::{ScopeSpan, Vm, VmBuiltinDispatch, VmBuiltinEntry, VmBuiltinKind, VmBuiltinMetadata};
 
 impl Vm {
     fn index_builtin_id(&mut self, name: &str, dispatch: VmBuiltinDispatch) {
@@ -53,12 +53,34 @@ impl Vm {
         F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + 'static,
     {
         self.builtins.insert(name.to_string(), Rc::new(f));
+        self.builtin_metadata
+            .insert(name.to_string(), VmBuiltinMetadata::sync(name.to_string()));
         self.refresh_builtin_id(name);
+    }
+
+    /// Register a sync builtin function with discoverable metadata.
+    pub fn register_builtin_with_metadata<F>(&mut self, metadata: VmBuiltinMetadata, f: F)
+    where
+        F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + 'static,
+    {
+        let name = metadata.name().to_string();
+        self.builtins.insert(name.clone(), Rc::new(f));
+        self.builtin_metadata
+            .insert(name.clone(), metadata.with_kind(VmBuiltinKind::Sync));
+        self.refresh_builtin_id(&name);
     }
 
     /// Remove a sync builtin (so an async version can take precedence).
     pub fn unregister_builtin(&mut self, name: &str) {
         self.builtins.remove(name);
+        if self.async_builtins.contains_key(name) {
+            self.builtin_metadata.insert(
+                name.to_string(),
+                VmBuiltinMetadata::async_builtin(name.to_string()),
+            );
+        } else {
+            self.builtin_metadata.remove(name);
+        }
         self.refresh_builtin_id(name);
     }
 
@@ -70,7 +92,28 @@ impl Vm {
     {
         self.async_builtins
             .insert(name.to_string(), Rc::new(move |args| Box::pin(f(args))));
+        self.builtin_metadata.insert(
+            name.to_string(),
+            VmBuiltinMetadata::async_builtin(name.to_string()),
+        );
         self.refresh_builtin_id(name);
+    }
+
+    /// Register an async builtin function with discoverable metadata.
+    pub fn register_async_builtin_with_metadata<F, Fut>(
+        &mut self,
+        metadata: VmBuiltinMetadata,
+        f: F,
+    ) where
+        F: Fn(Vec<VmValue>) -> Fut + 'static,
+        Fut: Future<Output = Result<VmValue, VmError>> + 'static,
+    {
+        let name = metadata.name().to_string();
+        self.async_builtins
+            .insert(name.clone(), Rc::new(move |args| Box::pin(f(args))));
+        self.builtin_metadata
+            .insert(name.clone(), metadata.with_kind(VmBuiltinKind::Async));
+        self.refresh_builtin_id(&name);
     }
 
     pub(crate) fn registered_builtin_id(&self, name: &str) -> Option<BuiltinId> {

@@ -1,3 +1,6 @@
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
+
 /// Known builtin names with their signatures for completion.
 /// Each entry is (name, detail) where detail shows the parameter signature.
 pub(crate) const BUILTINS: &[(&str, &str)] = &[
@@ -541,6 +544,59 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ("jwt_sign", "jwt_sign(alg, claims, private_key) -> string"),
 ];
 
+#[derive(Debug)]
+pub(crate) struct BuiltinDetail {
+    pub(crate) name: String,
+    pub(crate) signature: String,
+    doc: Option<String>,
+}
+
+pub(crate) fn builtin_details() -> &'static [BuiltinDetail] {
+    static DETAILS: OnceLock<Vec<BuiltinDetail>> = OnceLock::new();
+    DETAILS.get_or_init(|| {
+        let mut details = BTreeMap::new();
+        for metadata in harn_vm::stdlib::stdlib_builtin_metadata() {
+            let name = metadata.name();
+            if name.starts_with("__") {
+                continue;
+            }
+            let signature = metadata.signature().unwrap_or(name);
+            details.insert(
+                name.to_string(),
+                BuiltinDetail {
+                    name: name.to_string(),
+                    signature: signature.to_string(),
+                    doc: metadata.doc().map(str::to_string),
+                },
+            );
+        }
+        for &(name, signature) in BUILTINS {
+            details
+                .entry(name.to_string())
+                .and_modify(|detail: &mut BuiltinDetail| {
+                    detail.signature = signature.to_string();
+                })
+                .or_insert_with(|| BuiltinDetail {
+                    name: name.to_string(),
+                    signature: signature.to_string(),
+                    doc: None,
+                });
+        }
+        details.into_values().collect()
+    })
+}
+
+pub(crate) fn builtin_signature(name: &str) -> Option<&'static str> {
+    builtin_details()
+        .iter()
+        .find(|detail| detail.name.as_str() == name)
+        .map(|detail| detail.signature.as_str())
+}
+
+pub(crate) fn is_builtin(name: &str) -> bool {
+    builtin_signature(name).is_some()
+}
+
 /// Known keywords for completion.
 pub(crate) const KEYWORDS: &[&str] = &[
     "pipeline",
@@ -898,9 +954,21 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         // Graceful cancellation
         "cancel_graceful" => "**cancel_graceful(handle, timeout?)** → Result — Signal cancellation and wait for graceful shutdown",
         "is_cancelled" => "**is_cancelled()** → bool — Check if current task has been cancelled",
-        _ => return None,
+        _ => return runtime_builtin_doc(name),
     };
     Some(doc.to_string())
+}
+
+fn runtime_builtin_doc(name: &str) -> Option<String> {
+    builtin_details()
+        .iter()
+        .find(|detail| detail.name.as_str() == name)
+        .and_then(|detail| {
+            detail
+                .doc
+                .as_ref()
+                .map(|doc| format!("**{}** — {doc}", detail.signature))
+        })
 }
 
 pub(crate) fn keyword_doc(name: &str) -> Option<String> {

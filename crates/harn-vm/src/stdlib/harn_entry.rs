@@ -1,13 +1,17 @@
 //! Registration helpers for public builtins implemented by Harn stdlib modules.
 
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HarnAsyncEntrypoint {
     pub public_name: &'static str,
     pub import_path: &'static str,
     pub export_name: &'static str,
+    signature: Option<&'static str>,
+    arity: Option<VmBuiltinArity>,
+    category: Option<&'static str>,
+    doc: Option<&'static str>,
 }
 
 impl HarnAsyncEntrypoint {
@@ -20,13 +24,54 @@ impl HarnAsyncEntrypoint {
             public_name,
             import_path,
             export_name,
+            signature: None,
+            arity: None,
+            category: None,
+            doc: None,
         }
     }
 
+    pub(crate) const fn signature(mut self, signature: &'static str) -> Self {
+        self.signature = Some(signature);
+        self
+    }
+
+    pub(crate) const fn arity(mut self, arity: VmBuiltinArity) -> Self {
+        self.arity = Some(arity);
+        self
+    }
+
+    pub(crate) const fn category(mut self, category: &'static str) -> Self {
+        self.category = Some(category);
+        self
+    }
+
+    pub(crate) const fn doc(mut self, doc: &'static str) -> Self {
+        self.doc = Some(doc);
+        self
+    }
+
     fn register(self, vm: &mut Vm) {
-        vm.register_async_builtin(self.public_name, move |args| {
+        vm.register_async_builtin_with_metadata(self.metadata(), move |args| {
             Box::pin(async move { call_harn_export(self, args).await })
         });
+    }
+
+    fn metadata(self) -> VmBuiltinMetadata {
+        let mut metadata = VmBuiltinMetadata::async_static(self.public_name);
+        if let Some(signature) = self.signature {
+            metadata = metadata.signature_static(signature);
+        }
+        if let Some(arity) = self.arity {
+            metadata = metadata.arity(arity);
+        }
+        if let Some(category) = self.category {
+            metadata = metadata.category_static(category);
+        }
+        if let Some(doc) = self.doc {
+            metadata = metadata.doc_static(doc);
+        }
+        metadata
     }
 }
 

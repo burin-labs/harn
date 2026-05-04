@@ -4,7 +4,7 @@ use harn_parser::format_type;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
-use crate::constants::{builtin_doc, keyword_doc, BUILTINS};
+use crate::constants::{builtin_doc, builtin_signature, keyword_doc};
 use crate::helpers::{lsp_position_to_offset, word_at_position};
 use crate::symbols::{
     format_flow_attributes_block, format_shape_expanded, format_union_shapes_expanded,
@@ -231,8 +231,8 @@ impl HarnLsp {
             return Ok(None);
         }
 
-        let sig_str = match BUILTINS.iter().find(|(n, _)| *n == name.as_str()) {
-            Some((_, sig)) => *sig,
+        let sig_str = match builtin_signature(&name) {
+            Some(sig) => sig,
             None => return Ok(None),
         };
 

@@ -5,9 +5,74 @@ use std::time::Instant;
 
 use serde_json::Value as JsonValue;
 
+use crate::stdlib::registration::{
+    boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
+};
 use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::clone_async_builtin_child_vm;
-use crate::vm::Vm;
+use crate::vm::{Vm, VmBuiltinArity};
+
+const HOST_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
+    SyncBuiltin::new("host_mock", host_mock_builtin)
+        .signature("host_mock(capability, op, response_or_config, params?)")
+        .arity(VmBuiltinArity::Range { min: 3, max: 4 })
+        .category("host")
+        .doc("Register a typed host mock for tests."),
+    SyncBuiltin::new("host_mock_clear", host_mock_clear_builtin)
+        .signature("host_mock_clear()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("host")
+        .doc("Clear typed host mocks and recorded calls."),
+    SyncBuiltin::new("host_mock_calls", host_mock_calls_builtin)
+        .signature("host_mock_calls()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("host")
+        .doc("Return typed host mock invocations."),
+    SyncBuiltin::new("host_mock_push_scope", host_mock_push_scope_builtin)
+        .signature("host_mock_push_scope()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("host")
+        .doc("Push an isolated host mock scope."),
+    SyncBuiltin::new("host_mock_pop_scope", host_mock_pop_scope_builtin)
+        .signature("host_mock_pop_scope()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("host")
+        .doc("Pop the current isolated host mock scope."),
+    SyncBuiltin::new("host_capabilities", host_capabilities_builtin)
+        .signature("host_capabilities()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("host")
+        .doc("Return the typed host capability manifest."),
+    SyncBuiltin::new("host_has", host_has_builtin)
+        .signature("host_has(capability, op?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .category("host")
+        .doc("Return whether a host capability or operation is available."),
+];
+
+const HOST_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
+    AsyncBuiltin::new("host_call", |args| {
+        boxed_async_builtin(host_call_builtin(args))
+    })
+    .signature("host_call(name, args)")
+    .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+    .category("host")
+    .doc("Invoke a host capability operation by capability.operation name."),
+    AsyncBuiltin::new("host_tool_list", |args| {
+        boxed_async_builtin(host_tool_list_builtin(args))
+    })
+    .signature("host_tool_list()")
+    .arity(VmBuiltinArity::Exact(0))
+    .category("host")
+    .doc("List host tools exposed by the active bridge."),
+    AsyncBuiltin::new("host_tool_call", |args| {
+        boxed_async_builtin(host_tool_call_builtin(args))
+    })
+    .signature("host_tool_call(name, args?)")
+    .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+    .category("host")
+    .doc("Call a host tool exposed by the active bridge."),
+];
 
 #[derive(Clone)]
 struct HostMock {
@@ -845,100 +910,103 @@ fn vm_string(value: &VmValue) -> Option<&str> {
 }
 
 pub(crate) fn register_host_builtins(vm: &mut Vm) {
-    vm.register_builtin("host_mock", |args, _out| {
-        let host_mock = parse_host_mock(args)?;
-        push_host_mock(host_mock);
-        Ok(VmValue::Nil)
-    });
+    register_sync_builtins(vm, HOST_SYNC_PRIMITIVES);
+    register_async_builtins(vm, HOST_ASYNC_PRIMITIVES);
+}
 
-    vm.register_builtin("host_mock_clear", |_args, _out| {
-        reset_host_state();
-        Ok(VmValue::Nil)
-    });
+fn host_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let host_mock = parse_host_mock(args)?;
+    push_host_mock(host_mock);
+    Ok(VmValue::Nil)
+}
 
-    vm.register_builtin("host_mock_calls", |_args, _out| {
-        let calls = HOST_MOCK_CALLS.with(|calls| {
-            calls
-                .borrow()
-                .iter()
-                .map(mock_call_value)
-                .collect::<Vec<_>>()
+fn host_mock_clear_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    reset_host_state();
+    Ok(VmValue::Nil)
+}
+
+fn host_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let calls = HOST_MOCK_CALLS.with(|calls| {
+        calls
+            .borrow()
+            .iter()
+            .map(mock_call_value)
+            .collect::<Vec<_>>()
+    });
+    Ok(VmValue::List(Rc::new(calls)))
+}
+
+fn host_mock_push_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    push_host_mock_scope();
+    Ok(VmValue::Nil)
+}
+
+fn host_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if !pop_host_mock_scope() {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "host_mock_pop_scope: no scope to pop",
+        ))));
+    }
+    Ok(VmValue::Nil)
+}
+
+fn host_capabilities_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(capability_manifest_with_mocks())
+}
+
+fn host_has_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let capability = args.first().map(|a| a.display()).unwrap_or_default();
+    let operation = args.get(1).map(|a| a.display());
+    let manifest = capability_manifest_with_mocks();
+    let has = manifest
+        .as_dict()
+        .and_then(|d| d.get(&capability))
+        .and_then(|v| v.as_dict())
+        .is_some_and(|cap| {
+            if let Some(operation) = operation {
+                cap.get("ops")
+                    .and_then(|v| match v {
+                        VmValue::List(list) => {
+                            Some(list.iter().any(|item| item.display() == operation))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(false)
+            } else {
+                true
+            }
         });
-        Ok(VmValue::List(Rc::new(calls)))
-    });
+    Ok(VmValue::Bool(has))
+}
 
-    vm.register_builtin("host_mock_push_scope", |_args, _out| {
-        push_host_mock_scope();
-        Ok(VmValue::Nil)
-    });
+async fn host_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let name = args.first().map(|a| a.display()).unwrap_or_default();
+    let params = args
+        .get(1)
+        .and_then(|a| a.as_dict())
+        .cloned()
+        .unwrap_or_default();
+    let Some((capability, operation)) = name.split_once('.') else {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "host_call: unsupported operation name '{name}'"
+        )))));
+    };
+    dispatch_host_operation(capability, operation, &params).await
+}
 
-    vm.register_builtin("host_mock_pop_scope", |_args, _out| {
-        if !pop_host_mock_scope() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "host_mock_pop_scope: no scope to pop",
-            ))));
-        }
-        Ok(VmValue::Nil)
-    });
+async fn host_tool_list_builtin(_args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    dispatch_host_tool_list().await
+}
 
-    vm.register_builtin("host_capabilities", |_args, _out| {
-        Ok(capability_manifest_with_mocks())
-    });
-
-    vm.register_builtin("host_has", |args, _out| {
-        let capability = args.first().map(|a| a.display()).unwrap_or_default();
-        let operation = args.get(1).map(|a| a.display());
-        let manifest = capability_manifest_with_mocks();
-        let has = manifest
-            .as_dict()
-            .and_then(|d| d.get(&capability))
-            .and_then(|v| v.as_dict())
-            .is_some_and(|cap| {
-                if let Some(operation) = operation {
-                    cap.get("ops")
-                        .and_then(|v| match v {
-                            VmValue::List(list) => {
-                                Some(list.iter().any(|item| item.display() == operation))
-                            }
-                            _ => None,
-                        })
-                        .unwrap_or(false)
-                } else {
-                    true
-                }
-            });
-        Ok(VmValue::Bool(has))
-    });
-
-    vm.register_async_builtin("host_call", |args| async move {
-        let name = args.first().map(|a| a.display()).unwrap_or_default();
-        let params = args
-            .get(1)
-            .and_then(|a| a.as_dict())
-            .cloned()
-            .unwrap_or_default();
-        let Some((capability, operation)) = name.split_once('.') else {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "host_call: unsupported operation name '{name}'"
-            )))));
-        };
-        dispatch_host_operation(capability, operation, &params).await
-    });
-
-    vm.register_async_builtin("host_tool_list", |_args| async move {
-        dispatch_host_tool_list().await
-    });
-
-    vm.register_async_builtin("host_tool_call", |args| async move {
-        let name = args.first().map(|a| a.display()).unwrap_or_default();
-        if name.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "host_tool_call: tool name is required",
-            ))));
-        }
-        let call_args = args.get(1).cloned().unwrap_or(VmValue::Nil);
-        dispatch_host_tool_call(&name, &call_args).await
-    });
+async fn host_tool_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let name = args.first().map(|a| a.display()).unwrap_or_default();
+    if name.is_empty() {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "host_tool_call: tool name is required",
+        ))));
+    }
+    let call_args = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    dispatch_host_tool_call(&name, &call_args).await
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@ use harn_parser::{Node, SNode};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
-use crate::constants::BUILTINS;
+use crate::constants::is_builtin;
 use crate::helpers::{
     lsp_position_to_offset, offset_to_position, span_to_full_range, word_at_position,
 };
@@ -145,7 +145,7 @@ impl HarnLsp {
         };
 
         // Builtins must not be renamed.
-        if BUILTINS.iter().any(|(n, _)| *n == old_name) {
+        if is_builtin(&old_name) {
             return Ok(None);
         }
 

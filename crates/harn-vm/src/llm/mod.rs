@@ -152,9 +152,12 @@ pub(crate) fn ensure_real_llm_allowed(provider: &str) -> Result<(), crate::value
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::stdlib::registration::{
+    boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
+};
 use crate::stdlib::{json_to_vm_value, schema_result_value};
 use crate::value::{VmChannelHandle, VmError, VmStream, VmStreamCancel, VmValue};
-use crate::vm::Vm;
+use crate::vm::{Vm, VmBuiltinArity};
 
 use self::api::{vm_build_llm_result, vm_call_completion_full};
 use self::helpers::{opt_int, opt_str};
@@ -1437,468 +1440,560 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
     }
 }
 
-macro_rules! register_async_builtins {
-    ($vm:expr, {$($name:literal => $handler:path),+ $(,)?}) => {
-        $(
-            $vm.register_async_builtin($name, |args| async move { $handler(args).await });
-        )+
+const LLM_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
+    SyncBuiltin::new("agent_trace", agent_trace_builtin)
+        .signature("agent_trace()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("agent.trace")
+        .doc("Return captured agent trace events for the current process."),
+    SyncBuiltin::new("agent_trace_summary", agent_trace_summary_builtin)
+        .signature("agent_trace_summary()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("agent.trace")
+        .doc("Return a summarized view of captured agent trace events."),
+];
+
+const LLM_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
+    AsyncBuiltin::new("__host_agent_capture_events", |args| {
+        boxed_async_builtin(host_agent_capture_events_impl(args))
+    })
+    .signature("__host_agent_capture_events(session_id, body)")
+    .arity(VmBuiltinArity::Exact(2))
+    .category("agent.host")
+    .doc("Capture agent events emitted while executing a Harn closure."),
+    AsyncBuiltin::new("__host_agent_parse_tool_calls", |args| {
+        boxed_async_builtin(host_agent_parse_tool_calls_impl(args))
+    })
+    .signature("__host_agent_parse_tool_calls(text, tools?)")
+    .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+    .category("agent.host")
+    .doc("Parse model text into normalized agent tool-call records."),
+    AsyncBuiltin::new("__host_agent_dispatch_tool_call", |args| {
+        boxed_async_builtin(host_agent_dispatch_tool_call_impl(args))
+    })
+    .signature("__host_agent_dispatch_tool_call(call, tools?, options?)")
+    .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+    .category("agent.host")
+    .doc("Dispatch one normalized agent tool call through the host tool runtime."),
+    AsyncBuiltin::new("__host_agent_dispatch_tool_batch", |args| {
+        boxed_async_builtin(host_agent_dispatch_tool_batch_impl(args))
+    })
+    .signature("__host_agent_dispatch_tool_batch(calls, tools?, options?)")
+    .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+    .category("agent.host")
+    .doc("Dispatch a batch of normalized agent tool calls through the host tool runtime."),
+    AsyncBuiltin::new("__cost_route", |args| {
+        boxed_async_builtin(cost_route::cost_route_impl(args))
+    })
+    .signature("__cost_route(options)")
+    .arity(VmBuiltinArity::Range { min: 0, max: 1 })
+    .category("llm.host")
+    .doc("Route an LLM request by cost and capability metadata."),
+    AsyncBuiltin::new("llm_call", |args| boxed_async_builtin(llm_call_impl(args)))
+        .signature("llm_call(prompt, system?, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+        .category("llm.host")
+        .doc("Execute one LLM call and return the normalized Harn result dict."),
+    AsyncBuiltin::new("llm_stream_call", |args| {
+        boxed_async_builtin(llm_stream_call_impl(args))
+    })
+    .signature("llm_stream_call(prompt, system?, options?)")
+    .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+    .category("llm.host")
+    .doc("Execute one streaming LLM call and return the normalized Harn result dict."),
+    AsyncBuiltin::new("llm_call_safe", |args| {
+        boxed_async_builtin(llm_call_safe_builtin(args))
+    })
+    .signature("llm_call_safe(prompt, system?, options?)")
+    .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+    .category("llm.host")
+    .doc("Execute one LLM call and return a non-throwing safe envelope."),
+    AsyncBuiltin::new("llm_call_structured", |args| {
+        boxed_async_builtin(llm_call_structured_builtin(args))
+    })
+    .signature("llm_call_structured(prompt, schema, options?)")
+    .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+    .category("llm.structured")
+    .doc("Call an LLM for JSON data and return parsed schema-valid data."),
+    AsyncBuiltin::new("llm_call_structured_safe", |args| {
+        boxed_async_builtin(llm_call_structured_safe_builtin(args))
+    })
+    .signature("llm_call_structured_safe(prompt, schema, options?)")
+    .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+    .category("llm.structured")
+    .doc("Call an LLM for JSON data and return a non-throwing schema envelope."),
+    AsyncBuiltin::new("llm_call_structured_result", |args| {
+        boxed_async_builtin(llm_call_structured_result_builtin(args))
+    })
+    .signature("llm_call_structured_result(prompt, schema, options?)")
+    .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+    .category("llm.structured")
+    .doc("Call an LLM for JSON data and return a diagnostic structured-output envelope."),
+    AsyncBuiltin::new("schema_recover", |args| {
+        boxed_async_builtin(schema_recover_builtin(args))
+    })
+    .signature("schema_recover(text, schema, options?)")
+    .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+    .category("schema.recovery")
+    .doc(
+        "Recover malformed JSON text against a schema using deterministic and optional LLM repair.",
+    ),
+    AsyncBuiltin::new("with_rate_limit", |args| {
+        boxed_async_builtin(with_rate_limit_builtin(args))
+    })
+    .signature("with_rate_limit(provider, callback, options?)")
+    .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+    .category("llm.rate_limit")
+    .doc("Run a closure behind the provider rate limiter with retryable-error backoff."),
+    AsyncBuiltin::new("llm_completion", |args| {
+        boxed_async_builtin(llm_completion_builtin(args))
+    })
+    .signature("llm_completion(prefix, suffix?, system?, options?)")
+    .arity(VmBuiltinArity::Range { min: 1, max: 4 })
+    .category("llm.host")
+    .doc("Execute a fill-in-the-middle LLM completion request."),
+    AsyncBuiltin::new("llm_stream", |args| {
+        boxed_async_builtin(llm_stream_builtin(args))
+    })
+    .signature("llm_stream(prompt, system?, options?)")
+    .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+    .category("llm.host")
+    .doc("Execute a legacy channel-based streaming LLM request."),
+];
+
+const LLM_MOCK_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
+    SyncBuiltin::new("llm_mock", llm_mock_builtin)
+        .signature("llm_mock(config)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("llm.mock")
+        .doc("Register a deterministic LLM mock response for tests."),
+    SyncBuiltin::new("llm_mock_calls", llm_mock_calls_builtin)
+        .signature("llm_mock_calls()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("llm.mock")
+        .doc("Return recorded LLM mock calls."),
+    SyncBuiltin::new("llm_mock_clear", llm_mock_clear_builtin)
+        .signature("llm_mock_clear()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("llm.mock")
+        .doc("Clear deterministic LLM mocks and recorded calls."),
+    SyncBuiltin::new("llm_mock_push_scope", llm_mock_push_scope_builtin)
+        .signature("llm_mock_push_scope()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("llm.mock")
+        .doc("Push an isolated LLM mock scope."),
+    SyncBuiltin::new("llm_mock_pop_scope", llm_mock_pop_scope_builtin)
+        .signature("llm_mock_pop_scope()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("llm.mock")
+        .doc("Pop the current isolated LLM mock scope."),
+];
+
+async fn llm_call_safe_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    match llm_call_impl(args).await {
+        Ok(response) => Ok(llm_safe_envelope_ok(response)),
+        Err(err) => Ok(llm_safe_envelope_err(&err)),
+    }
+}
+
+async fn llm_call_structured_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let rewritten = rewrite_structured_args(args)?;
+    let response = llm_call_impl(rewritten).await?;
+    Ok(extract_structured_data(response))
+}
+
+async fn llm_call_structured_safe_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let rewritten = match rewrite_structured_args(args) {
+        Ok(v) => v,
+        Err(err) => return Ok(structured_safe_envelope_err(&err)),
     };
+    match llm_call_impl(rewritten).await {
+        Ok(response) => Ok(structured_safe_envelope_ok(extract_structured_data(
+            response,
+        ))),
+        Err(err) => Ok(structured_safe_envelope_err(&err)),
+    }
+}
+
+async fn llm_call_structured_result_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    structured_envelope::llm_call_structured_result_impl(args, None).await
+}
+
+async fn schema_recover_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    schema_recover::schema_recover_impl(args, None).await
+}
+
+async fn with_rate_limit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let provider = args.first().map(|a| a.display()).unwrap_or_default();
+    if provider.is_empty() {
+        return Err(VmError::Runtime(
+            "with_rate_limit: provider name is required".to_string(),
+        ));
+    }
+    let closure = match args.get(1) {
+        Some(VmValue::Closure(c)) => c.clone(),
+        _ => {
+            return Err(VmError::Runtime(
+                "with_rate_limit: second argument must be a closure".to_string(),
+            ))
+        }
+    };
+    let opts = args.get(2).and_then(|a| a.as_dict()).cloned();
+    let max_retries = helpers::opt_int(&opts, "max_retries").unwrap_or(5).max(0) as usize;
+    let mut backoff_ms = helpers::opt_int(&opts, "backoff_ms").unwrap_or(1000).max(1) as u64;
+
+    let mut attempt: usize = 0;
+    loop {
+        rate_limit::acquire_permit(&provider).await;
+        let mut child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+            VmError::Runtime("with_rate_limit requires an async builtin VM context".to_string())
+        })?;
+        match child_vm.call_closure_pub(&closure, &[]).await {
+            Ok(v) => return Ok(v),
+            Err(err) => {
+                let cat = crate::value::error_to_category(&err);
+                let retryable = matches!(
+                    cat,
+                    crate::value::ErrorCategory::RateLimit
+                        | crate::value::ErrorCategory::Overloaded
+                        | crate::value::ErrorCategory::TransientNetwork
+                        | crate::value::ErrorCategory::Timeout
+                );
+                if !retryable || attempt >= max_retries {
+                    return Err(err);
+                }
+                crate::events::log_debug(
+                    "llm.with_rate_limit",
+                    &format!(
+                        "retrying after {cat:?} (attempt {}/{max_retries}) in {backoff_ms}ms",
+                        attempt + 1
+                    ),
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                backoff_ms = backoff_ms.saturating_mul(2).min(30_000);
+                attempt += 1;
+            }
+        }
+    }
+}
+
+async fn llm_completion_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let prefix = args.first().map(|a| a.display()).unwrap_or_default();
+    let suffix = args.get(1).and_then(|a| {
+        if matches!(a, VmValue::Nil) {
+            None
+        } else {
+            Some(a.display())
+        }
+    });
+    let opts = extract_llm_options(&[
+        VmValue::String(Rc::from(prefix.clone())),
+        args.get(2).cloned().unwrap_or(VmValue::Nil),
+        args.get(3).cloned().unwrap_or(VmValue::Nil),
+    ])?;
+    if let Some(span_id) = crate::tracing::current_span_id() {
+        crate::tracing::span_set_metadata(span_id, "model", serde_json::json!(opts.model.clone()));
+        crate::tracing::span_set_metadata(
+            span_id,
+            "provider",
+            serde_json::json!(opts.provider.clone()),
+        );
+    }
+
+    let start = std::time::Instant::now();
+    let result = vm_call_completion_full(&opts, &prefix, suffix.as_deref()).await?;
+    trace_llm_call(LlmTraceEntry {
+        model: result.model.clone(),
+        input_tokens: result.input_tokens,
+        output_tokens: result.output_tokens,
+        duration_ms: start.elapsed().as_millis() as u64,
+    });
+    if let Some(span_id) = crate::tracing::current_span_id() {
+        crate::tracing::span_set_metadata(span_id, "status", serde_json::json!("ok"));
+        crate::tracing::span_set_metadata(
+            span_id,
+            "input_tokens",
+            serde_json::json!(result.input_tokens),
+        );
+        crate::tracing::span_set_metadata(
+            span_id,
+            "output_tokens",
+            serde_json::json!(result.output_tokens),
+        );
+    }
+    Ok(vm_build_llm_result(&result, None, None, None))
+}
+
+fn agent_trace_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let events = trace::peek_agent_trace();
+    let list: Vec<VmValue> = events
+        .iter()
+        .filter_map(|e| serde_json::to_value(e).ok())
+        .map(|v| json_to_vm_value(&v))
+        .collect();
+    Ok(VmValue::List(Rc::new(list)))
+}
+
+fn agent_trace_summary_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let summary = trace::agent_trace_summary();
+    Ok(json_to_vm_value(&summary))
 }
 
 /// Register LLM builtins on a VM.
 pub fn register_llm_builtins(vm: &mut Vm) {
     rate_limit::init_from_config();
-    agent_config::register_agent_subscribe(vm);
-    agent_config::register_agent_inject_feedback(vm);
-    register_async_builtins!(vm, {
-        "__host_agent_capture_events" => host_agent_capture_events_impl,
-        "__host_agent_parse_tool_calls" => host_agent_parse_tool_calls_impl,
-        "__host_agent_dispatch_tool_call" => host_agent_dispatch_tool_call_impl,
-        "__host_agent_dispatch_tool_batch" => host_agent_dispatch_tool_batch_impl,
-        "__cost_route" => cost_route::cost_route_impl,
-        "llm_call" => llm_call_impl,
-        "llm_stream_call" => llm_stream_call_impl,
-    });
-    // `llm_call_safe` shares the exact same execution path as `llm_call`
-    // but replaces the throw-on-failure contract with a normalized
-    // `{ok, response, error}` envelope. Saves five lines of
-    // `try`/`guard`/`unwrap`/`?.data` boilerplate at every callsite.
-    vm.register_async_builtin("llm_call_safe", |args| async move {
-        match llm_call_impl(args).await {
-            Ok(response) => Ok(llm_safe_envelope_ok(response)),
-            Err(err) => Ok(llm_safe_envelope_err(&err)),
-        }
-    });
-
-    // `llm_call_structured(prompt, schema, options?)` is ergonomic
-    // sugar for the "ask for JSON against this schema, retry on
-    // validation failure, return the parsed data" pattern. Throws on
-    // exhausted schema retries or transport failure so callers can
-    // assume the returned value matches the schema. The paired
-    // `*_safe` variant returns `{ok, data, error}` for call sites
-    // that prefer explicit branching over `try`.
-    vm.register_async_builtin("llm_call_structured", |args| async move {
-        let rewritten = rewrite_structured_args(args)?;
-        let response = llm_call_impl(rewritten).await?;
-        Ok(extract_structured_data(response))
-    });
-    vm.register_async_builtin("llm_call_structured_safe", |args| async move {
-        let rewritten = match rewrite_structured_args(args) {
-            Ok(v) => v,
-            Err(err) => return Ok(structured_safe_envelope_err(&err)),
-        };
-        match llm_call_impl(rewritten).await {
-            Ok(response) => Ok(structured_safe_envelope_ok(extract_structured_data(
-                response,
-            ))),
-            Err(err) => Ok(structured_safe_envelope_err(&err)),
-        }
-    });
-
-    // `llm_call_structured_result(prompt, schema, options?)` returns a
-    // diagnostic envelope `{ok, data, raw_text, error, error_category,
-    // attempts, repaired, extracted_json, usage, model, provider}` so
-    // production agent pipelines can preserve raw model text, attempt
-    // counts, and validation/repair state without hand-rolling
-    // safe_parse/json_extract/repair chains. Never throws on
-    // transport/schema failures — `ok: false` + `error_category`
-    // dispatches branch on the failure mode. See harn#744.
-    vm.register_async_builtin("llm_call_structured_result", |args| async move {
-        structured_envelope::llm_call_structured_result_impl(args, None).await
-    });
-
-    // `schema_recover(text, schema, opts?)` — three-tier malformed-JSON
-    // repair: direct parse → extract-from-prose → regex field scrape →
-    // optional one-shot LLM repair pass. Returns a diagnostic envelope
-    // dict `{ok, data, raw_text, error, error_category, attempts,
-    // stage, repaired}` so callers dispatch on `ok` / `stage` instead
-    // of hand-rolling normalize_*() chains. Disabled-LLM-repair mode
-    // (`{llm_repair: false}`) keeps it fully deterministic. See
-    // harn#906.
-    vm.register_async_builtin("schema_recover", |args| async move {
-        schema_recover::schema_recover_impl(args, None).await
-    });
-
-    // `with_rate_limit(provider, fn() -> T, opts?) -> T` — acquires a
-    // permit from the provider's sliding-window rate limiter, invokes
-    // the closure, and retries with exponential backoff on
-    // classifier-retryable errors. Composes with
-    // `HARN_RATE_LIMIT_<PROVIDER>` env vars and `llm_rate_limit(...)`.
-    vm.register_async_builtin("with_rate_limit", |args| async move {
-        let provider = args.first().map(|a| a.display()).unwrap_or_default();
-        if provider.is_empty() {
-            return Err(VmError::Runtime(
-                "with_rate_limit: provider name is required".to_string(),
-            ));
-        }
-        let closure = match args.get(1) {
-            Some(VmValue::Closure(c)) => c.clone(),
-            _ => {
-                return Err(VmError::Runtime(
-                    "with_rate_limit: second argument must be a closure".to_string(),
-                ))
-            }
-        };
-        let opts = args.get(2).and_then(|a| a.as_dict()).cloned();
-        let max_retries = helpers::opt_int(&opts, "max_retries").unwrap_or(5).max(0) as usize;
-        let mut backoff_ms = helpers::opt_int(&opts, "backoff_ms").unwrap_or(1000).max(1) as u64;
-
-        let mut attempt: usize = 0;
-        loop {
-            rate_limit::acquire_permit(&provider).await;
-            let mut child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-                VmError::Runtime("with_rate_limit requires an async builtin VM context".to_string())
-            })?;
-            match child_vm.call_closure_pub(&closure, &[]).await {
-                Ok(v) => return Ok(v),
-                Err(err) => {
-                    let cat = crate::value::error_to_category(&err);
-                    let retryable = matches!(
-                        cat,
-                        crate::value::ErrorCategory::RateLimit
-                            | crate::value::ErrorCategory::Overloaded
-                            | crate::value::ErrorCategory::TransientNetwork
-                            | crate::value::ErrorCategory::Timeout
-                    );
-                    if !retryable || attempt >= max_retries {
-                        return Err(err);
-                    }
-                    crate::events::log_debug(
-                        "llm.with_rate_limit",
-                        &format!(
-                            "retrying after {cat:?} (attempt {}/{max_retries}) in {backoff_ms}ms",
-                            attempt + 1
-                        ),
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
-                    backoff_ms = backoff_ms.saturating_mul(2).min(30_000);
-                    attempt += 1;
-                }
-            }
-        }
-    });
-
-    vm.register_async_builtin("llm_completion", |args| async move {
-        let prefix = args.first().map(|a| a.display()).unwrap_or_default();
-        let suffix = args.get(1).and_then(|a| {
-            if matches!(a, VmValue::Nil) {
-                None
-            } else {
-                Some(a.display())
-            }
-        });
-        let opts = extract_llm_options(&[
-            VmValue::String(Rc::from(prefix.clone())),
-            args.get(2).cloned().unwrap_or(VmValue::Nil),
-            args.get(3).cloned().unwrap_or(VmValue::Nil),
-        ])?;
-        if let Some(span_id) = crate::tracing::current_span_id() {
-            crate::tracing::span_set_metadata(
-                span_id,
-                "model",
-                serde_json::json!(opts.model.clone()),
-            );
-            crate::tracing::span_set_metadata(
-                span_id,
-                "provider",
-                serde_json::json!(opts.provider.clone()),
-            );
-        }
-
-        let start = std::time::Instant::now();
-        let result = vm_call_completion_full(&opts, &prefix, suffix.as_deref()).await?;
-        trace_llm_call(LlmTraceEntry {
-            model: result.model.clone(),
-            input_tokens: result.input_tokens,
-            output_tokens: result.output_tokens,
-            duration_ms: start.elapsed().as_millis() as u64,
-        });
-        if let Some(span_id) = crate::tracing::current_span_id() {
-            crate::tracing::span_set_metadata(span_id, "status", serde_json::json!("ok"));
-            crate::tracing::span_set_metadata(
-                span_id,
-                "input_tokens",
-                serde_json::json!(result.input_tokens),
-            );
-            crate::tracing::span_set_metadata(
-                span_id,
-                "output_tokens",
-                serde_json::json!(result.output_tokens),
-            );
-        }
-        Ok(vm_build_llm_result(&result, None, None, None))
-    });
-
+    agent_config::register_agent_control_primitives(vm);
+    register_sync_builtins(vm, LLM_SYNC_PRIMITIVES);
+    register_async_builtins(vm, LLM_ASYNC_PRIMITIVES);
     agent_config::register_agent_loop(vm);
 
-    register_llm_stream(vm);
     conversation::register_conversation_builtins(vm);
     config_builtins::register_config_builtins(vm);
     cost::register_cost_builtins(vm);
     register_llm_mock_builtins(vm);
     transcript_stats::register_transcript_builtins(vm);
-
-    vm.register_builtin("agent_trace", |_args, _out| {
-        let events = trace::peek_agent_trace();
-        let list: Vec<VmValue> = events
-            .iter()
-            .filter_map(|e| serde_json::to_value(e).ok())
-            .map(|v| json_to_vm_value(&v))
-            .collect();
-        Ok(VmValue::List(Rc::new(list)))
-    });
-
-    vm.register_builtin("agent_trace_summary", |_args, _out| {
-        let summary = trace::agent_trace_summary();
-        Ok(json_to_vm_value(&summary))
-    });
 }
 
 /// Register llm_mock / llm_mock_calls / llm_mock_clear builtins.
 fn register_llm_mock_builtins(vm: &mut Vm) {
-    use mock::{get_llm_mock_calls, push_llm_mock, reset_llm_mock_state, LlmMock, MockError};
-
-    vm.register_builtin("llm_mock", |args, _out| {
-        let config = match args.first() {
-            Some(VmValue::Dict(d)) => d,
-            _ => {
-                return Err(crate::value::VmError::Runtime(
-                    "llm_mock: expected a dict argument".to_string(),
-                ))
-            }
-        };
-
-        let text = config.get("text").map(|v| v.display()).unwrap_or_default();
-
-        let tool_calls = match config.get("tool_calls") {
-            Some(VmValue::List(list)) => list
-                .iter()
-                .map(helpers::vm_value_to_json)
-                .collect::<Vec<_>>(),
-            _ => Vec::new(),
-        };
-
-        let match_pattern = config.get("match").and_then(|v| {
-            if matches!(v, VmValue::Nil) {
-                None
-            } else {
-                Some(v.display())
-            }
-        });
-        let consume_on_match = matches!(config.get("consume_match"), Some(VmValue::Bool(true)));
-
-        let input_tokens = config.get("input_tokens").and_then(|v| v.as_int());
-        let output_tokens = config.get("output_tokens").and_then(|v| v.as_int());
-        let cache_read_tokens = config.get("cache_read_tokens").and_then(|v| v.as_int());
-        let cache_write_tokens = config
-            .get("cache_write_tokens")
-            .and_then(|v| v.as_int())
-            .or_else(|| {
-                config
-                    .get("cache_creation_input_tokens")
-                    .and_then(|v| v.as_int())
-            });
-        let thinking = config.get("thinking").and_then(|v| {
-            if matches!(v, VmValue::Nil) {
-                None
-            } else {
-                Some(v.display())
-            }
-        });
-        let thinking_summary = config.get("thinking_summary").and_then(|v| {
-            if matches!(v, VmValue::Nil) {
-                None
-            } else {
-                Some(v.display())
-            }
-        });
-        let stop_reason = config.get("stop_reason").and_then(|v| {
-            if matches!(v, VmValue::Nil) {
-                None
-            } else {
-                Some(v.display())
-            }
-        });
-        let model = config
-            .get("model")
-            .map(|v| v.display())
-            .unwrap_or_else(|| "mock".to_string());
-
-        // Optional error injection: {error: {category, message,
-        // retry_after_ms?}}. When present the mock short-circuits the
-        // provider call and surfaces as `VmError::CategorizedError`,
-        // making it observable via `error_category`, the `llm_call`
-        // thrown dict, and the `llm_call_safe` envelope.
-        let error = match config.get("error") {
-            None | Some(VmValue::Nil) => None,
-            Some(VmValue::Dict(err_dict)) => {
-                let category_str = err_dict
-                    .get("category")
-                    .map(|v| v.display())
-                    .unwrap_or_default();
-                if category_str.is_empty() {
-                    return Err(crate::value::VmError::Runtime(
-                        "llm_mock: error.category is required".to_string(),
-                    ));
-                }
-                let category = crate::value::ErrorCategory::parse(&category_str);
-                // Reject typos loudly: `parse` falls back to Generic on
-                // unknown input. Let `"generic"` through; anything else
-                // that fell back is a typo.
-                if category.as_str() != category_str {
-                    return Err(crate::value::VmError::Runtime(format!(
-                        "llm_mock: unknown error category `{category_str}`",
-                    )));
-                }
-                let message = err_dict
-                    .get("message")
-                    .map(|v| v.display())
-                    .unwrap_or_default();
-                let retry_after_ms = match err_dict.get("retry_after_ms") {
-                    None | Some(VmValue::Nil) => None,
-                    Some(v) => match v.as_int() {
-                        Some(n) if n >= 0 => Some(n as u64),
-                        _ => {
-                            return Err(crate::value::VmError::Runtime(
-                                "llm_mock: error.retry_after_ms must be a non-negative int"
-                                    .to_string(),
-                            ));
-                        }
-                    },
-                };
-                Some(MockError {
-                    category,
-                    message,
-                    retry_after_ms,
-                })
-            }
-            _ => {
-                return Err(crate::value::VmError::Runtime(
-                    "llm_mock: error must be a dict {category, message, retry_after_ms?}"
-                        .to_string(),
-                ));
-            }
-        };
-
-        push_llm_mock(LlmMock {
-            text,
-            tool_calls,
-            match_pattern,
-            consume_on_match,
-            input_tokens,
-            output_tokens,
-            cache_read_tokens,
-            cache_write_tokens,
-            thinking,
-            thinking_summary,
-            stop_reason,
-            model,
-            provider: None,
-            blocks: None,
-            error,
-        });
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("llm_mock_calls", |_args, _out| {
-        let calls = get_llm_mock_calls();
-        let result: Vec<VmValue> = calls
-            .iter()
-            .map(|c| {
-                let mut dict = std::collections::BTreeMap::new();
-                let messages: Vec<VmValue> = c.messages.iter().map(json_to_vm_value).collect();
-                dict.insert("messages".to_string(), VmValue::List(Rc::new(messages)));
-                dict.insert(
-                    "system".to_string(),
-                    match &c.system {
-                        Some(s) => VmValue::String(Rc::from(s.as_str())),
-                        None => VmValue::Nil,
-                    },
-                );
-                dict.insert(
-                    "tools".to_string(),
-                    match &c.tools {
-                        Some(t) => {
-                            let tools: Vec<VmValue> = t.iter().map(json_to_vm_value).collect();
-                            VmValue::List(Rc::new(tools))
-                        }
-                        None => VmValue::Nil,
-                    },
-                );
-                dict.insert("thinking".to_string(), json_to_vm_value(&c.thinking));
-                VmValue::Dict(Rc::new(dict))
-            })
-            .collect();
-        Ok(VmValue::List(Rc::new(result)))
-    });
-
-    vm.register_builtin("llm_mock_clear", |_args, _out| {
-        reset_llm_mock_state();
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("llm_mock_push_scope", |_args, _out| {
-        mock::push_llm_mock_scope();
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("llm_mock_pop_scope", |_args, _out| {
-        if !mock::pop_llm_mock_scope() {
-            return Err(crate::value::VmError::Thrown(VmValue::String(Rc::from(
-                "llm_mock_pop_scope: no scope to pop",
-            ))));
-        }
-        Ok(VmValue::Nil)
-    });
+    register_sync_builtins(vm, LLM_MOCK_SYNC_PRIMITIVES);
 }
 
-/// Register llm_stream builtin.
-fn register_llm_stream(vm: &mut Vm) {
-    vm.register_async_builtin("llm_stream", |args| async move {
-        let opts = extract_llm_options(&args)?;
-        let provider = opts.provider.clone();
-        let prompt_text = opts
-            .messages
-            .last()
-            .and_then(|m| m["content"].as_str())
-            .unwrap_or("")
-            .to_string();
+fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let config = match args.first() {
+        Some(VmValue::Dict(d)) => d,
+        _ => {
+            return Err(VmError::Runtime(
+                "llm_mock: expected a dict argument".to_string(),
+            ))
+        }
+    };
 
-        let (tx, rx) = tokio::sync::mpsc::channel::<VmValue>(64);
-        let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let closed_clone = closed.clone();
-        #[allow(clippy::arc_with_non_send_sync)]
-        let tx_arc = Arc::new(tx);
-        let tx_for_task = tx_arc.clone();
+    let text = config.get("text").map(|v| v.display()).unwrap_or_default();
 
-        tokio::task::spawn_local(async move {
-            if provider == "mock" {
-                let words: Vec<&str> = prompt_text.split_whitespace().collect();
-                for word in &words {
-                    let _ = tx_for_task.send(VmValue::String(Rc::from(*word))).await;
-                }
-                closed_clone.store(true, std::sync::atomic::Ordering::Relaxed);
-                return;
-            }
+    let tool_calls = match config.get("tool_calls") {
+        Some(VmValue::List(list)) => list
+            .iter()
+            .map(helpers::vm_value_to_json)
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
 
-            let result = vm_stream_llm(&opts, &tx_for_task).await;
-            closed_clone.store(true, std::sync::atomic::Ordering::Relaxed);
-            if let Err(e) = result {
-                let _ = tx_for_task
-                    .send(VmValue::String(Rc::from(format!("error: {e}"))))
-                    .await;
-            }
-        });
-
-        #[allow(clippy::arc_with_non_send_sync)]
-        let handle = VmChannelHandle {
-            name: Rc::from("llm_stream"),
-            sender: tx_arc,
-            receiver: Arc::new(tokio::sync::Mutex::new(rx)),
-            closed,
-        };
-        Ok(VmValue::Channel(handle))
+    let match_pattern = config.get("match").and_then(|v| {
+        if matches!(v, VmValue::Nil) {
+            None
+        } else {
+            Some(v.display())
+        }
     });
+    let consume_on_match = matches!(config.get("consume_match"), Some(VmValue::Bool(true)));
+
+    let input_tokens = config.get("input_tokens").and_then(|v| v.as_int());
+    let output_tokens = config.get("output_tokens").and_then(|v| v.as_int());
+    let cache_read_tokens = config.get("cache_read_tokens").and_then(|v| v.as_int());
+    let cache_write_tokens = config
+        .get("cache_write_tokens")
+        .and_then(|v| v.as_int())
+        .or_else(|| {
+            config
+                .get("cache_creation_input_tokens")
+                .and_then(|v| v.as_int())
+        });
+    let thinking = config.get("thinking").and_then(|v| {
+        if matches!(v, VmValue::Nil) {
+            None
+        } else {
+            Some(v.display())
+        }
+    });
+    let thinking_summary = config.get("thinking_summary").and_then(|v| {
+        if matches!(v, VmValue::Nil) {
+            None
+        } else {
+            Some(v.display())
+        }
+    });
+    let stop_reason = config.get("stop_reason").and_then(|v| {
+        if matches!(v, VmValue::Nil) {
+            None
+        } else {
+            Some(v.display())
+        }
+    });
+    let model = config
+        .get("model")
+        .map(|v| v.display())
+        .unwrap_or_else(|| "mock".to_string());
+
+    // Optional error injection: {error: {category, message,
+    // retry_after_ms?}}. When present the mock short-circuits the
+    // provider call and surfaces as `VmError::CategorizedError`,
+    // making it observable via `error_category`, the `llm_call`
+    // thrown dict, and the `llm_call_safe` envelope.
+    let error = match config.get("error") {
+        None | Some(VmValue::Nil) => None,
+        Some(VmValue::Dict(err_dict)) => {
+            let category_str = err_dict
+                .get("category")
+                .map(|v| v.display())
+                .unwrap_or_default();
+            if category_str.is_empty() {
+                return Err(VmError::Runtime(
+                    "llm_mock: error.category is required".to_string(),
+                ));
+            }
+            let category = crate::value::ErrorCategory::parse(&category_str);
+            // Reject typos loudly: `parse` falls back to Generic on
+            // unknown input. Let `"generic"` through; anything else
+            // that fell back is a typo.
+            if category.as_str() != category_str {
+                return Err(VmError::Runtime(format!(
+                    "llm_mock: unknown error category `{category_str}`",
+                )));
+            }
+            let message = err_dict
+                .get("message")
+                .map(|v| v.display())
+                .unwrap_or_default();
+            let retry_after_ms = match err_dict.get("retry_after_ms") {
+                None | Some(VmValue::Nil) => None,
+                Some(v) => match v.as_int() {
+                    Some(n) if n >= 0 => Some(n as u64),
+                    _ => {
+                        return Err(VmError::Runtime(
+                            "llm_mock: error.retry_after_ms must be a non-negative int".to_string(),
+                        ));
+                    }
+                },
+            };
+            Some(mock::MockError {
+                category,
+                message,
+                retry_after_ms,
+            })
+        }
+        _ => {
+            return Err(VmError::Runtime(
+                "llm_mock: error must be a dict {category, message, retry_after_ms?}".to_string(),
+            ));
+        }
+    };
+
+    mock::push_llm_mock(mock::LlmMock {
+        text,
+        tool_calls,
+        match_pattern,
+        consume_on_match,
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
+        thinking,
+        thinking_summary,
+        stop_reason,
+        model,
+        provider: None,
+        blocks: None,
+        error,
+    });
+    Ok(VmValue::Nil)
+}
+
+fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let calls = mock::get_llm_mock_calls();
+    let result: Vec<VmValue> = calls
+        .iter()
+        .map(|c| {
+            let mut dict = std::collections::BTreeMap::new();
+            let messages: Vec<VmValue> = c.messages.iter().map(json_to_vm_value).collect();
+            dict.insert("messages".to_string(), VmValue::List(Rc::new(messages)));
+            dict.insert(
+                "system".to_string(),
+                match &c.system {
+                    Some(s) => VmValue::String(Rc::from(s.as_str())),
+                    None => VmValue::Nil,
+                },
+            );
+            dict.insert(
+                "tools".to_string(),
+                match &c.tools {
+                    Some(t) => {
+                        let tools: Vec<VmValue> = t.iter().map(json_to_vm_value).collect();
+                        VmValue::List(Rc::new(tools))
+                    }
+                    None => VmValue::Nil,
+                },
+            );
+            dict.insert("thinking".to_string(), json_to_vm_value(&c.thinking));
+            VmValue::Dict(Rc::new(dict))
+        })
+        .collect();
+    Ok(VmValue::List(Rc::new(result)))
+}
+
+fn llm_mock_clear_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    mock::reset_llm_mock_state();
+    Ok(VmValue::Nil)
+}
+
+fn llm_mock_push_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    mock::push_llm_mock_scope();
+    Ok(VmValue::Nil)
+}
+
+fn llm_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if !mock::pop_llm_mock_scope() {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "llm_mock_pop_scope: no scope to pop",
+        ))));
+    }
+    Ok(VmValue::Nil)
+}
+
+async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let opts = extract_llm_options(&args)?;
+    let provider = opts.provider.clone();
+    let prompt_text = opts
+        .messages
+        .last()
+        .and_then(|m| m["content"].as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let (tx, rx) = tokio::sync::mpsc::channel::<VmValue>(64);
+    let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let closed_clone = closed.clone();
+    #[allow(clippy::arc_with_non_send_sync)]
+    let tx_arc = Arc::new(tx);
+    let tx_for_task = tx_arc.clone();
+
+    tokio::task::spawn_local(async move {
+        if provider == "mock" {
+            let words: Vec<&str> = prompt_text.split_whitespace().collect();
+            for word in &words {
+                let _ = tx_for_task.send(VmValue::String(Rc::from(*word))).await;
+            }
+            closed_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+            return;
+        }
+
+        let result = vm_stream_llm(&opts, &tx_for_task).await;
+        closed_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Err(e) = result {
+            let _ = tx_for_task
+                .send(VmValue::String(Rc::from(format!("error: {e}"))))
+                .await;
+        }
+    });
+
+    #[allow(clippy::arc_with_non_send_sync)]
+    let handle = VmChannelHandle {
+        name: Rc::from("llm_stream"),
+        sender: tx_arc,
+        receiver: Arc::new(tokio::sync::Mutex::new(rx)),
+        closed,
+    };
+    Ok(VmValue::Channel(handle))
 }
 
 fn llm_stream_chunk(

@@ -1839,6 +1839,7 @@ dependencies = [
  "harn-lint",
  "harn-modules",
  "harn-parser",
+ "harn-vm",
  "tokio",
  "tower-lsp",
 ]

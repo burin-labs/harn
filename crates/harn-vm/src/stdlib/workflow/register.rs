@@ -12,8 +12,11 @@ use crate::orchestration::{
     WorkflowSkillContextGuard,
 };
 use crate::stdlib::harn_entry::{register_harn_async_entrypoints, HarnAsyncEntrypoint};
+use crate::stdlib::registration::{
+    boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
+};
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{Vm, VmBuiltinArity};
 
 use super::super::{parse_artifact_list, parse_context_policy};
 
@@ -34,8 +37,143 @@ const WORKFLOW_STDLIB_ENTRYPOINTS: &[HarnAsyncEntrypoint] = &[HarnAsyncEntrypoin
     "workflow_execute",
     "std/workflow/execute",
     "workflow_execute",
-)];
+)
+.signature("workflow_execute(task, graph, artifacts?, options?)")
+.arity(VmBuiltinArity::Range { min: 2, max: 4 })
+.category("workflow.stdlib")
+.doc("Dispatch the public workflow execution facade through the Harn stdlib.")];
 const HOST_WORKFLOW_GRAPH_RUN_BUILTIN: &str = "__host_workflow_graph_run";
+type PostHookFn = Rc<dyn Fn(&str, &str) -> crate::orchestration::PostToolAction>;
+
+const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
+    SyncBuiltin::new("workflow_graph", workflow_graph_builtin)
+        .signature("workflow_graph(input?)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
+        .category("workflow.host")
+        .doc("Normalize a workflow value and return the canonical workflow graph dict."),
+    SyncBuiltin::new("workflow_validate", workflow_validate_builtin)
+        .signature("workflow_validate(input?, ceiling?)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 2 })
+        .category("workflow.host")
+        .doc("Validate a workflow graph against a capability policy ceiling."),
+    SyncBuiltin::new("workflow_inspect", workflow_inspect_builtin)
+        .signature("workflow_inspect(input?, ceiling?)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 2 })
+        .category("workflow.host")
+        .doc("Return normalized workflow graph shape and validation details."),
+    SyncBuiltin::new("workflow_policy_report", workflow_policy_report_builtin)
+        .signature("workflow_policy_report(graph, ceiling?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .category("workflow.host")
+        .doc("Report workflow and node policies against an effective ceiling."),
+    SyncBuiltin::new("workflow_clone", workflow_clone_builtin)
+        .signature("workflow_clone(graph)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("workflow.host")
+        .doc("Clone a workflow graph and append audit metadata."),
+    SyncBuiltin::new("workflow_insert_node", workflow_insert_node_builtin)
+        .signature("workflow_insert_node(graph, node, edge?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+        .category("workflow.host")
+        .doc("Insert a node and optional edge into a workflow graph."),
+    SyncBuiltin::new("workflow_replace_node", workflow_replace_node_builtin)
+        .signature("workflow_replace_node(graph, node_id, node)")
+        .arity(VmBuiltinArity::Exact(3))
+        .category("workflow.host")
+        .doc("Replace one node in a workflow graph."),
+    SyncBuiltin::new("workflow_rewire", workflow_rewire_builtin)
+        .signature("workflow_rewire(graph, from, to, branch?)")
+        .arity(VmBuiltinArity::Range { min: 3, max: 4 })
+        .category("workflow.host")
+        .doc("Replace outgoing edge wiring for one workflow graph node."),
+    SyncBuiltin::new(
+        "workflow_set_model_policy",
+        workflow_set_model_policy_builtin,
+    )
+    .signature("workflow_set_model_policy(graph, node_id, policy)")
+    .arity(VmBuiltinArity::Exact(3))
+    .category("workflow.host")
+    .doc("Set one node's model policy."),
+    SyncBuiltin::new(
+        "workflow_set_context_policy",
+        workflow_set_context_policy_builtin,
+    )
+    .signature("workflow_set_context_policy(graph, node_id, policy)")
+    .arity(VmBuiltinArity::Exact(3))
+    .category("workflow.host")
+    .doc("Set one node's context policy."),
+    SyncBuiltin::new(
+        "workflow_set_auto_compact",
+        workflow_set_auto_compact_builtin,
+    )
+    .signature("workflow_set_auto_compact(graph, node_id, policy)")
+    .arity(VmBuiltinArity::Exact(3))
+    .category("workflow.host")
+    .doc("Set one node's auto-compaction policy."),
+    SyncBuiltin::new(
+        "workflow_set_output_visibility",
+        workflow_set_output_visibility_builtin,
+    )
+    .signature("workflow_set_output_visibility(graph, node_id, visibility)")
+    .arity(VmBuiltinArity::Exact(3))
+    .category("workflow.host")
+    .doc("Set one node's output visibility policy."),
+    SyncBuiltin::new("workflow_diff", workflow_diff_builtin)
+        .signature("workflow_diff(left, right)")
+        .arity(VmBuiltinArity::Exact(2))
+        .category("workflow.host")
+        .doc("Compare two workflow graph values for canonical JSON changes."),
+    SyncBuiltin::new("workflow_commit", workflow_commit_builtin)
+        .signature("workflow_commit(graph, reason?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .category("workflow.host")
+        .doc("Validate and commit workflow graph audit metadata."),
+    SyncBuiltin::new("register_tool_hook", register_tool_hook_builtin)
+        .signature("register_tool_hook(config?)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
+        .category("workflow.host")
+        .doc("Register low-level pre/post tool hooks for workflow execution."),
+    SyncBuiltin::new("clear_tool_hooks", clear_tool_hooks_builtin)
+        .signature("clear_tool_hooks()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("workflow.host")
+        .doc("Clear registered low-level workflow tool hooks."),
+    SyncBuiltin::new(
+        "select_artifacts_adaptive",
+        select_artifacts_adaptive_builtin,
+    )
+    .signature("select_artifacts_adaptive(artifacts?, policy?)")
+    .arity(VmBuiltinArity::Range { min: 0, max: 2 })
+    .category("workflow.host")
+    .doc("Select workflow artifacts according to a context policy."),
+    SyncBuiltin::new("estimate_tokens", estimate_tokens_builtin)
+        .signature("estimate_tokens(messages?)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
+        .category("workflow.host")
+        .doc("Estimate tokens for a list of message objects."),
+    SyncBuiltin::new("microcompact", microcompact_builtin)
+        .signature("microcompact(text, max_chars?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .category("workflow.host")
+        .doc("Compact long tool output with the host microcompaction primitive."),
+];
+
+const WORKFLOW_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
+    AsyncBuiltin::new(HOST_WORKFLOW_GRAPH_RUN_BUILTIN, |args| {
+        boxed_async_builtin(host_workflow_graph_run_builtin(args))
+    })
+    .signature("__host_workflow_graph_run(task, graph, artifacts?, options?)")
+    .arity(VmBuiltinArity::Range { min: 2, max: 4 })
+    .category("workflow.host")
+    .doc("Execute the low-level workflow graph primitive used by Harn stdlib workflow facades."),
+    AsyncBuiltin::new("transcript_auto_compact", |args| {
+        boxed_async_builtin(transcript_auto_compact_builtin(args))
+    })
+    .signature("transcript_auto_compact(messages, options?)")
+    .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+    .category("workflow.host")
+    .doc("Apply the workflow/agent transcript auto-compaction primitive to a message list."),
+];
 
 fn parse_trigger_event_option(
     value: Option<&VmValue>,
@@ -654,414 +792,426 @@ pub(in crate::stdlib) async fn execute_workflow(
 }
 
 pub(crate) fn register_workflow_builtins(vm: &mut Vm) {
-    vm.register_builtin("workflow_graph", |args, _out| {
-        let input = args
-            .first()
-            .cloned()
-            .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
-        let graph = normalize_workflow_value(&input)?;
-        workflow_graph_to_vm(&graph)
-    });
+    register_sync_builtins(vm, WORKFLOW_SYNC_PRIMITIVES);
+    register_async_builtins(vm, WORKFLOW_ASYNC_PRIMITIVES);
+    register_harn_async_entrypoints(vm, WORKFLOW_STDLIB_ENTRYPOINTS);
+}
 
-    vm.register_builtin("workflow_validate", |args, _out| {
-        let input = args
-            .first()
-            .cloned()
-            .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
-        let graph = normalize_workflow_value(&input)?;
-        let ceiling = args.get(1).map(normalize_policy).transpose()?;
-        to_vm(&validate_workflow(
-            &graph,
-            ceiling.as_ref().or(Some(&builtin_ceiling())),
-        ))
-    });
+fn workflow_graph_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let input = args
+        .first()
+        .cloned()
+        .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
+    let graph = normalize_workflow_value(&input)?;
+    workflow_graph_to_vm(&graph)
+}
 
-    vm.register_builtin("workflow_inspect", |args, _out| {
-        let input = args
-            .first()
-            .cloned()
-            .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
-        let graph = normalize_workflow_value(&input)?;
-        let ceiling = args.get(1).map(normalize_policy).transpose()?;
-        let builtin = builtin_ceiling();
-        let report = validate_workflow(&graph, ceiling.as_ref().or(Some(&builtin)));
-        to_vm(&serde_json::json!({
-            "graph": graph,
-            "validation": report,
-            "node_count": graph.nodes.len(),
-            "edge_count": graph.edges.len(),
-        }))
-    });
+fn workflow_validate_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let input = args
+        .first()
+        .cloned()
+        .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
+    let graph = normalize_workflow_value(&input)?;
+    let ceiling = args.get(1).map(normalize_policy).transpose()?;
+    to_vm(&validate_workflow(
+        &graph,
+        ceiling.as_ref().or(Some(&builtin_ceiling())),
+    ))
+}
 
-    vm.register_builtin("workflow_policy_report", |args, _out| {
-        let input = args
-            .first()
-            .cloned()
-            .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
-        let graph = normalize_workflow_value(&input)?;
-        let ceiling = args.get(1).map(normalize_policy).transpose()?;
-        let builtin = builtin_ceiling();
-        let effective_ceiling = ceiling.unwrap_or(builtin);
-        let report = validate_workflow(&graph, Some(&effective_ceiling));
-        to_vm(&serde_json::json!({
-            "workflow_policy": graph.capability_policy,
-            "ceiling": effective_ceiling,
-            "validation": report,
-                "nodes": graph.nodes.iter().map(|(node_id, node)| serde_json::json!({
-                "node_id": node_id,
-                "policy": node.capability_policy,
-                "tools": node.tools,
-            })).collect::<Vec<_>>(),
-        }))
-    });
+fn workflow_inspect_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let input = args
+        .first()
+        .cloned()
+        .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
+    let graph = normalize_workflow_value(&input)?;
+    let ceiling = args.get(1).map(normalize_policy).transpose()?;
+    let builtin = builtin_ceiling();
+    let report = validate_workflow(&graph, ceiling.as_ref().or(Some(&builtin)));
+    to_vm(&serde_json::json!({
+        "graph": graph,
+        "validation": report,
+        "node_count": graph.nodes.len(),
+        "edge_count": graph.edges.len(),
+    }))
+}
 
-    vm.register_builtin("workflow_clone", |args, _out| {
-        let input = args
-            .first()
-            .cloned()
-            .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
-        let mut graph = normalize_workflow_value(&input)?;
-        graph.id = format!("{}_clone", graph.id);
-        graph.version += 1;
-        append_audit_entry(&mut graph, "clone", None, None, BTreeMap::new());
-        workflow_graph_to_vm(&graph)
-    });
+fn workflow_policy_report_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let input = args
+        .first()
+        .cloned()
+        .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
+    let graph = normalize_workflow_value(&input)?;
+    let ceiling = args.get(1).map(normalize_policy).transpose()?;
+    let builtin = builtin_ceiling();
+    let effective_ceiling = ceiling.unwrap_or(builtin);
+    let report = validate_workflow(&graph, Some(&effective_ceiling));
+    to_vm(&serde_json::json!({
+        "workflow_policy": graph.capability_policy,
+        "ceiling": effective_ceiling,
+        "validation": report,
+            "nodes": graph.nodes.iter().map(|(node_id, node)| serde_json::json!({
+            "node_id": node_id,
+            "policy": node.capability_policy,
+            "tools": node.tools,
+        })).collect::<Vec<_>>(),
+    }))
+}
 
-    vm.register_builtin("workflow_insert_node", |args, _out| {
-        let mut graph = normalize_workflow_value(args.first().ok_or_else(|| {
+fn workflow_clone_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let input = args
+        .first()
+        .cloned()
+        .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
+    let mut graph = normalize_workflow_value(&input)?;
+    graph.id = format!("{}_clone", graph.id);
+    graph.version += 1;
+    append_audit_entry(&mut graph, "clone", None, None, BTreeMap::new());
+    workflow_graph_to_vm(&graph)
+}
+
+fn workflow_insert_node_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let mut graph =
+        normalize_workflow_value(args.first().ok_or_else(|| {
             VmError::Runtime("workflow_insert_node: missing workflow".to_string())
         })?)?;
-        let node_value = args
-            .get(1)
-            .ok_or_else(|| VmError::Runtime("workflow_insert_node: missing node".to_string()))?;
-        let mut node =
-            crate::orchestration::parse_workflow_node_value(node_value, "workflow_insert_node")?;
-        let node_id = node
-            .id
-            .clone()
-            .or_else(|| {
-                node_value
-                    .as_dict()
-                    .and_then(|d| d.get("id"))
-                    .map(|v| v.display())
-            })
-            .unwrap_or_else(|| format!("node_{}", graph.nodes.len() + 1));
-        node.id = Some(node_id.clone());
-        graph.nodes.insert(node_id.clone(), node);
-        if let Some(VmValue::Dict(edge_dict)) = args.get(2) {
-            let edge_json = crate::llm::vm_value_to_json(&VmValue::Dict(edge_dict.clone()));
-            let edge = crate::orchestration::parse_workflow_edge_json(
-                edge_json,
-                "workflow_insert_node edge",
-            )?;
-            graph.edges.push(edge);
-        }
-        append_audit_entry(
-            &mut graph,
-            "insert_node",
-            Some(node_id),
-            None,
-            BTreeMap::new(),
-        );
-        workflow_graph_to_vm(&graph)
-    });
+    let node_value = args
+        .get(1)
+        .ok_or_else(|| VmError::Runtime("workflow_insert_node: missing node".to_string()))?;
+    let mut node =
+        crate::orchestration::parse_workflow_node_value(node_value, "workflow_insert_node")?;
+    let node_id = node
+        .id
+        .clone()
+        .or_else(|| {
+            node_value
+                .as_dict()
+                .and_then(|d| d.get("id"))
+                .map(|v| v.display())
+        })
+        .unwrap_or_else(|| format!("node_{}", graph.nodes.len() + 1));
+    node.id = Some(node_id.clone());
+    graph.nodes.insert(node_id.clone(), node);
+    if let Some(VmValue::Dict(edge_dict)) = args.get(2) {
+        let edge_json = crate::llm::vm_value_to_json(&VmValue::Dict(edge_dict.clone()));
+        let edge =
+            crate::orchestration::parse_workflow_edge_json(edge_json, "workflow_insert_node edge")?;
+        graph.edges.push(edge);
+    }
+    append_audit_entry(
+        &mut graph,
+        "insert_node",
+        Some(node_id),
+        None,
+        BTreeMap::new(),
+    );
+    workflow_graph_to_vm(&graph)
+}
 
-    vm.register_builtin("workflow_replace_node", |args, _out| {
-        let mut graph = normalize_workflow_value(args.first().ok_or_else(|| {
+fn workflow_replace_node_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let mut graph =
+        normalize_workflow_value(args.first().ok_or_else(|| {
             VmError::Runtime("workflow_replace_node: missing workflow".to_string())
         })?)?;
-        let node_id = args.get(1).map(|v| v.display()).ok_or_else(|| {
-            VmError::Runtime("workflow_replace_node: missing node id".to_string())
-        })?;
-        let mut node = crate::orchestration::parse_workflow_node_value(
-            args.get(2).ok_or_else(|| {
-                VmError::Runtime("workflow_replace_node: missing node".to_string())
-            })?,
-            "workflow_replace_node",
-        )?;
-        node.id = Some(node_id.clone());
-        graph.nodes.insert(node_id.clone(), node);
-        append_audit_entry(
-            &mut graph,
-            "replace_node",
-            Some(node_id),
-            None,
-            BTreeMap::new(),
-        );
-        workflow_graph_to_vm(&graph)
+    let node_id = args
+        .get(1)
+        .map(|v| v.display())
+        .ok_or_else(|| VmError::Runtime("workflow_replace_node: missing node id".to_string()))?;
+    let mut node = crate::orchestration::parse_workflow_node_value(
+        args.get(2)
+            .ok_or_else(|| VmError::Runtime("workflow_replace_node: missing node".to_string()))?,
+        "workflow_replace_node",
+    )?;
+    node.id = Some(node_id.clone());
+    graph.nodes.insert(node_id.clone(), node);
+    append_audit_entry(
+        &mut graph,
+        "replace_node",
+        Some(node_id),
+        None,
+        BTreeMap::new(),
+    );
+    workflow_graph_to_vm(&graph)
+}
+
+fn workflow_rewire_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let mut graph = normalize_workflow_value(
+        args.first()
+            .ok_or_else(|| VmError::Runtime("workflow_rewire: missing workflow".to_string()))?,
+    )?;
+    let from = args
+        .get(1)
+        .map(|v| v.display())
+        .ok_or_else(|| VmError::Runtime("workflow_rewire: missing from".to_string()))?;
+    let to = args
+        .get(2)
+        .map(|v| v.display())
+        .ok_or_else(|| VmError::Runtime("workflow_rewire: missing to".to_string()))?;
+    let branch = args.get(3).map(|v| v.display()).filter(|s| !s.is_empty());
+    graph
+        .edges
+        .retain(|edge| !(edge.from == from && edge.branch == branch));
+    graph.edges.push(WorkflowEdge {
+        from: from.clone(),
+        to,
+        branch,
+        label: None,
     });
+    append_audit_entry(&mut graph, "rewire", Some(from), None, BTreeMap::new());
+    workflow_graph_to_vm(&graph)
+}
 
-    vm.register_builtin("workflow_rewire", |args, _out| {
-        let mut graph =
-            normalize_workflow_value(args.first().ok_or_else(|| {
-                VmError::Runtime("workflow_rewire: missing workflow".to_string())
-            })?)?;
-        let from = args
-            .get(1)
-            .map(|v| v.display())
-            .ok_or_else(|| VmError::Runtime("workflow_rewire: missing from".to_string()))?;
-        let to = args
-            .get(2)
-            .map(|v| v.display())
-            .ok_or_else(|| VmError::Runtime("workflow_rewire: missing to".to_string()))?;
-        let branch = args.get(3).map(|v| v.display()).filter(|s| !s.is_empty());
-        graph
-            .edges
-            .retain(|edge| !(edge.from == from && edge.branch == branch));
-        graph.edges.push(WorkflowEdge {
-            from: from.clone(),
-            to,
-            branch,
-            label: None,
-        });
-        append_audit_entry(&mut graph, "rewire", Some(from), None, BTreeMap::new());
-        workflow_graph_to_vm(&graph)
-    });
+fn workflow_set_model_policy_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    set_node_policy(args, |node, policy| {
+        node.model_policy = serde_json::from_value(policy)
+            .map_err(|e| VmError::Runtime(format!("workflow_set_model_policy: {e}")))?;
+        Ok(())
+    })
+}
 
-    vm.register_builtin("workflow_set_model_policy", |args, _out| {
-        set_node_policy(args, |node, policy| {
-            node.model_policy = serde_json::from_value(policy)
-                .map_err(|e| VmError::Runtime(format!("workflow_set_model_policy: {e}")))?;
-            Ok(())
-        })
-    });
+fn workflow_set_context_policy_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    set_node_policy(args, |node, policy| {
+        node.context_policy = serde_json::from_value(policy)
+            .map_err(|e| VmError::Runtime(format!("workflow_set_context_policy: {e}")))?;
+        Ok(())
+    })
+}
 
-    vm.register_builtin("workflow_set_context_policy", |args, _out| {
-        set_node_policy(args, |node, policy| {
-            node.context_policy = serde_json::from_value(policy)
-                .map_err(|e| VmError::Runtime(format!("workflow_set_context_policy: {e}")))?;
-            Ok(())
-        })
-    });
+fn workflow_set_auto_compact_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    set_node_policy(args, |node, policy| {
+        node.auto_compact = serde_json::from_value(policy)
+            .map_err(|e| VmError::Runtime(format!("workflow_set_auto_compact: {e}")))?;
+        Ok(())
+    })
+}
 
-    vm.register_builtin("workflow_set_auto_compact", |args, _out| {
-        set_node_policy(args, |node, policy| {
-            node.auto_compact = serde_json::from_value(policy)
-                .map_err(|e| VmError::Runtime(format!("workflow_set_auto_compact: {e}")))?;
-            Ok(())
-        })
-    });
-
-    vm.register_builtin("workflow_set_output_visibility", |args, _out| {
-        set_node_policy(args, |node, policy| {
-            node.output_visibility = match policy {
-                serde_json::Value::Null => None,
-                serde_json::Value::String(s) => Some(s),
-                _ => {
-                    return Err(VmError::Runtime(
-                        "workflow_set_output_visibility: value must be a string or nil".into(),
-                    ))
-                }
-            };
-            Ok(())
-        })
-    });
-
-    vm.register_builtin("workflow_diff", |args, _out| {
-        let left = normalize_workflow_value(args.first().ok_or_else(|| {
-            VmError::Runtime("workflow_diff: missing left workflow".to_string())
-        })?)?;
-        let right = normalize_workflow_value(args.get(1).ok_or_else(|| {
-            VmError::Runtime("workflow_diff: missing right workflow".to_string())
-        })?)?;
-        let left_json = serde_json::to_value(&left).unwrap_or_default();
-        let right_json = serde_json::to_value(&right).unwrap_or_default();
-        to_vm(&serde_json::json!({
-            "changed": left_json != right_json,
-            "left": left,
-            "right": right,
-        }))
-    });
-
-    vm.register_builtin("workflow_commit", |args, _out| {
-        let mut graph =
-            normalize_workflow_value(args.first().ok_or_else(|| {
-                VmError::Runtime("workflow_commit: missing workflow".to_string())
-            })?)?;
-        let reason = args.get(1).map(|v| v.display()).filter(|s| !s.is_empty());
-        let report = validate_workflow(&graph, Some(&builtin_ceiling()));
-        if !report.valid {
-            return Err(VmError::Runtime(format!(
-                "workflow_commit: invalid workflow: {}",
-                report.errors.join("; ")
-            )));
-        }
-        append_audit_entry(&mut graph, "commit", None, reason, BTreeMap::new());
-        workflow_graph_to_vm(&graph)
-    });
-
-    vm.register_async_builtin(HOST_WORKFLOW_GRAPH_RUN_BUILTIN, |args| async move {
-        let task = args.first().map(|v| v.display()).unwrap_or_default();
-        let graph =
-            normalize_workflow_value(args.get(1).ok_or_else(|| {
-                VmError::Runtime("workflow_execute: missing workflow".to_string())
-            })?)?;
-        let artifacts = parse_artifact_list(args.get(2))?;
-        let options = args
-            .get(3)
-            .and_then(|v| v.as_dict())
-            .cloned()
-            .unwrap_or_default();
-        execute_workflow(task, graph, artifacts, options).await
-    });
-    register_harn_async_entrypoints(vm, WORKFLOW_STDLIB_ENTRYPOINTS);
-
-    type PostHookFn = Rc<dyn Fn(&str, &str) -> crate::orchestration::PostToolAction>;
-
-    vm.register_builtin("register_tool_hook", |args, _out| {
-        let config = args
-            .first()
-            .and_then(|a| a.as_dict())
-            .cloned()
-            .unwrap_or_default();
-        let pattern = config
-            .get("pattern")
-            .map(|v| v.display())
-            .unwrap_or_else(|| "*".to_string());
-        let deny_reason = config.get("deny").map(|v| v.display());
-        let max_output = config.get("max_output").and_then(|v| match v {
-            VmValue::Int(n) => Some(*n as usize),
-            _ => None,
-        });
-
-        let pre: Option<crate::orchestration::PreToolHookFn> = deny_reason.map(|reason| {
-            Rc::new(move |_name: &str, _args: &serde_json::Value| {
-                crate::orchestration::PreToolAction::Deny(reason.clone())
-            }) as _
-        });
-
-        let post: Option<PostHookFn> = max_output.map(|max| {
-            Rc::new(move |_name: &str, result: &str| {
-                if result.len() > max {
-                    crate::orchestration::PostToolAction::Modify(
-                        crate::orchestration::microcompact_tool_output(result, max),
-                    )
-                } else {
-                    crate::orchestration::PostToolAction::Pass
-                }
-            }) as _
-        });
-
-        crate::orchestration::register_tool_hook(crate::orchestration::ToolHook {
-            pattern,
-            pre,
-            post,
-        });
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("clear_tool_hooks", |_args, _out| {
-        crate::orchestration::clear_tool_hooks();
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("select_artifacts_adaptive", |args, _out| {
-        let artifacts_val = args.first().cloned().unwrap_or(VmValue::Nil);
-        let policy_val = args.get(1).cloned().unwrap_or(VmValue::Nil);
-        let artifacts: Vec<ArtifactRecord> = parse_artifact_list(Some(&artifacts_val))?;
-        let policy: crate::orchestration::ContextPolicy = parse_context_policy(Some(&policy_val))?;
-        let selected = crate::orchestration::select_artifacts_adaptive(artifacts, &policy);
-        to_vm(&selected)
-    });
-
-    vm.register_builtin("estimate_tokens", |args, _out| {
-        let messages: Vec<serde_json::Value> = args
-            .first()
-            .and_then(|a| match a {
-                VmValue::List(list) => Some(
-                    list.iter()
-                        .map(crate::llm::helpers::vm_value_to_json)
-                        .collect(),
-                ),
-                _ => None,
-            })
-            .unwrap_or_default();
-        let tokens = crate::orchestration::estimate_message_tokens(&messages);
-        Ok(VmValue::Int(tokens as i64))
-    });
-
-    vm.register_builtin("microcompact", |args, _out| {
-        let text = args.first().map(|a| a.display()).unwrap_or_default();
-        let max_chars = args
-            .get(1)
-            .and_then(|v| match v {
-                VmValue::Int(n) => Some(*n as usize),
-                _ => None,
-            })
-            .unwrap_or(20_000);
-        Ok(VmValue::String(Rc::from(
-            crate::orchestration::microcompact_tool_output(&text, max_chars),
-        )))
-    });
-
-    vm.register_async_builtin("transcript_auto_compact", |args| async move {
-        let mut messages: Vec<serde_json::Value> = match args.first() {
-            Some(VmValue::List(list)) => list
-                .iter()
-                .map(crate::llm::helpers::vm_value_to_json)
-                .collect(),
+fn workflow_set_output_visibility_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    set_node_policy(args, |node, policy| {
+        node.output_visibility = match policy {
+            serde_json::Value::Null => None,
+            serde_json::Value::String(s) => Some(s),
             _ => {
                 return Err(VmError::Runtime(
-                    "transcript_auto_compact: first argument must be a message list".to_string(),
+                    "workflow_set_output_visibility: value must be a string or nil".into(),
                 ))
             }
         };
-        let options = args.get(1).and_then(|v| v.as_dict()).cloned();
-        let mut config = crate::orchestration::AutoCompactConfig::default();
-        if let Some(v) = options
-            .as_ref()
-            .and_then(|o| o.get("compact_threshold"))
-            .and_then(|v| v.as_int())
-        {
-            config.token_threshold = v.max(0) as usize;
-        }
-        if let Some(v) = options
-            .as_ref()
-            .and_then(|o| o.get("tool_output_max_chars"))
-            .and_then(|v| v.as_int())
-        {
-            config.tool_output_max_chars = v.max(0) as usize;
-        }
-        if let Some(v) = options
-            .as_ref()
-            .and_then(|o| o.get("keep_last"))
-            .and_then(|v| v.as_int())
-        {
-            config.keep_last = v.max(0) as usize;
-        }
-        if let Some(strategy) = options
-            .as_ref()
-            .and_then(|o| o.get("compact_strategy"))
-            .map(|v| v.display())
-        {
-            config.compact_strategy = crate::orchestration::parse_compact_strategy(&strategy)?;
-        }
-        if let Some(callback) = options.as_ref().and_then(|o| o.get("compact_callback")) {
-            config.custom_compactor = Some(callback.clone());
-            if !options
-                .as_ref()
-                .is_some_and(|o| o.contains_key("compact_strategy"))
-            {
-                config.compact_strategy = crate::orchestration::CompactStrategy::Custom;
-            }
-        }
-        let llm_opts = if config.compact_strategy == crate::orchestration::CompactStrategy::Llm {
-            Some(crate::llm::extract_llm_options(&[
-                VmValue::String(Rc::from("")),
-                VmValue::Nil,
-                args.get(1).cloned().unwrap_or(VmValue::Nil),
-            ])?)
-        } else {
-            None
-        };
-        let _ =
-            crate::orchestration::auto_compact_messages(&mut messages, &config, llm_opts.as_ref())
-                .await?;
-        Ok(VmValue::List(Rc::new(
-            messages
-                .iter()
-                .map(crate::stdlib::json_to_vm_value)
-                .collect(),
-        )))
+        Ok(())
+    })
+}
+
+fn workflow_diff_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let left =
+        normalize_workflow_value(args.first().ok_or_else(|| {
+            VmError::Runtime("workflow_diff: missing left workflow".to_string())
+        })?)?;
+    let right =
+        normalize_workflow_value(args.get(1).ok_or_else(|| {
+            VmError::Runtime("workflow_diff: missing right workflow".to_string())
+        })?)?;
+    let left_json = serde_json::to_value(&left).unwrap_or_default();
+    let right_json = serde_json::to_value(&right).unwrap_or_default();
+    to_vm(&serde_json::json!({
+        "changed": left_json != right_json,
+        "left": left,
+        "right": right,
+    }))
+}
+
+fn workflow_commit_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let mut graph = normalize_workflow_value(
+        args.first()
+            .ok_or_else(|| VmError::Runtime("workflow_commit: missing workflow".to_string()))?,
+    )?;
+    let reason = args.get(1).map(|v| v.display()).filter(|s| !s.is_empty());
+    let report = validate_workflow(&graph, Some(&builtin_ceiling()));
+    if !report.valid {
+        return Err(VmError::Runtime(format!(
+            "workflow_commit: invalid workflow: {}",
+            report.errors.join("; ")
+        )));
+    }
+    append_audit_entry(&mut graph, "commit", None, reason, BTreeMap::new());
+    workflow_graph_to_vm(&graph)
+}
+
+async fn host_workflow_graph_run_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let task = args.first().map(|v| v.display()).unwrap_or_default();
+    let graph = normalize_workflow_value(
+        args.get(1)
+            .ok_or_else(|| VmError::Runtime("workflow_execute: missing workflow".to_string()))?,
+    )?;
+    let artifacts = parse_artifact_list(args.get(2))?;
+    let options = args
+        .get(3)
+        .and_then(|v| v.as_dict())
+        .cloned()
+        .unwrap_or_default();
+    execute_workflow(task, graph, artifacts, options).await
+}
+
+fn register_tool_hook_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let config = args
+        .first()
+        .and_then(|a| a.as_dict())
+        .cloned()
+        .unwrap_or_default();
+    let pattern = config
+        .get("pattern")
+        .map(|v| v.display())
+        .unwrap_or_else(|| "*".to_string());
+    let deny_reason = config.get("deny").map(|v| v.display());
+    let max_output = config.get("max_output").and_then(|v| match v {
+        VmValue::Int(n) => Some(*n as usize),
+        _ => None,
     });
+
+    let pre: Option<crate::orchestration::PreToolHookFn> = deny_reason.map(|reason| {
+        Rc::new(move |_name: &str, _args: &serde_json::Value| {
+            crate::orchestration::PreToolAction::Deny(reason.clone())
+        }) as _
+    });
+
+    let post: Option<PostHookFn> = max_output.map(|max| {
+        Rc::new(move |_name: &str, result: &str| {
+            if result.len() > max {
+                crate::orchestration::PostToolAction::Modify(
+                    crate::orchestration::microcompact_tool_output(result, max),
+                )
+            } else {
+                crate::orchestration::PostToolAction::Pass
+            }
+        }) as _
+    });
+
+    crate::orchestration::register_tool_hook(crate::orchestration::ToolHook { pattern, pre, post });
+    Ok(VmValue::Nil)
+}
+
+fn clear_tool_hooks_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    crate::orchestration::clear_tool_hooks();
+    Ok(VmValue::Nil)
+}
+
+fn select_artifacts_adaptive_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let artifacts_val = args.first().cloned().unwrap_or(VmValue::Nil);
+    let policy_val = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let artifacts: Vec<ArtifactRecord> = parse_artifact_list(Some(&artifacts_val))?;
+    let policy: crate::orchestration::ContextPolicy = parse_context_policy(Some(&policy_val))?;
+    let selected = crate::orchestration::select_artifacts_adaptive(artifacts, &policy);
+    to_vm(&selected)
+}
+
+fn estimate_tokens_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let messages: Vec<serde_json::Value> = args
+        .first()
+        .and_then(|a| match a {
+            VmValue::List(list) => Some(
+                list.iter()
+                    .map(crate::llm::helpers::vm_value_to_json)
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_default();
+    let tokens = crate::orchestration::estimate_message_tokens(&messages);
+    Ok(VmValue::Int(tokens as i64))
+}
+
+fn microcompact_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = args.first().map(|a| a.display()).unwrap_or_default();
+    let max_chars = args
+        .get(1)
+        .and_then(|v| match v {
+            VmValue::Int(n) => Some(*n as usize),
+            _ => None,
+        })
+        .unwrap_or(20_000);
+    Ok(VmValue::String(Rc::from(
+        crate::orchestration::microcompact_tool_output(&text, max_chars),
+    )))
+}
+
+async fn transcript_auto_compact_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let mut messages: Vec<serde_json::Value> = match args.first() {
+        Some(VmValue::List(list)) => list
+            .iter()
+            .map(crate::llm::helpers::vm_value_to_json)
+            .collect(),
+        _ => {
+            return Err(VmError::Runtime(
+                "transcript_auto_compact: first argument must be a message list".to_string(),
+            ))
+        }
+    };
+    let options = args.get(1).and_then(|v| v.as_dict()).cloned();
+    let mut config = crate::orchestration::AutoCompactConfig::default();
+    if let Some(v) = options
+        .as_ref()
+        .and_then(|o| o.get("compact_threshold"))
+        .and_then(|v| v.as_int())
+    {
+        config.token_threshold = v.max(0) as usize;
+    }
+    if let Some(v) = options
+        .as_ref()
+        .and_then(|o| o.get("tool_output_max_chars"))
+        .and_then(|v| v.as_int())
+    {
+        config.tool_output_max_chars = v.max(0) as usize;
+    }
+    if let Some(v) = options
+        .as_ref()
+        .and_then(|o| o.get("keep_last"))
+        .and_then(|v| v.as_int())
+    {
+        config.keep_last = v.max(0) as usize;
+    }
+    if let Some(strategy) = options
+        .as_ref()
+        .and_then(|o| o.get("compact_strategy"))
+        .map(|v| v.display())
+    {
+        config.compact_strategy = crate::orchestration::parse_compact_strategy(&strategy)?;
+    }
+    if let Some(callback) = options.as_ref().and_then(|o| o.get("compact_callback")) {
+        config.custom_compactor = Some(callback.clone());
+        if !options
+            .as_ref()
+            .is_some_and(|o| o.contains_key("compact_strategy"))
+        {
+            config.compact_strategy = crate::orchestration::CompactStrategy::Custom;
+        }
+    }
+    let llm_opts = if config.compact_strategy == crate::orchestration::CompactStrategy::Llm {
+        Some(crate::llm::extract_llm_options(&[
+            VmValue::String(Rc::from("")),
+            VmValue::Nil,
+            args.get(1).cloned().unwrap_or(VmValue::Nil),
+        ])?)
+    } else {
+        None
+    };
+    crate::orchestration::auto_compact_messages(&mut messages, &config, llm_opts.as_ref()).await?;
+    Ok(VmValue::List(Rc::new(
+        messages
+            .iter()
+            .map(crate::stdlib::json_to_vm_value)
+            .collect(),
+    )))
 }

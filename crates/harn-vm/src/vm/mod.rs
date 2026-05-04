@@ -1,4 +1,5 @@
 mod async_builtin;
+mod builtin;
 mod debug;
 mod dispatch;
 mod execution;
@@ -20,6 +21,7 @@ pub use async_builtin::{
     clone_async_builtin_child_vm, forward_child_output_to_parent, install_async_builtin_child_vm,
     restore_async_builtin_child_vm, take_async_builtin_child_vm, AsyncBuiltinChildVmGuard,
 };
+pub use builtin::{VmBuiltinArity, VmBuiltinKind, VmBuiltinMetadata};
 pub use debug::{DebugAction, DebugState};
 pub use modules::resolve_module_import_path;
 pub use state::Vm;

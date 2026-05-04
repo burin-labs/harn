@@ -18,5 +18,6 @@ harn-ir = { path = "../harn-ir", version = "0.7" }
 harn-lint = { path = "../harn-lint", version = "0.7" }
 harn-modules = { path = "../harn-modules", version = "0.7" }
 harn-fmt = { path = "../harn-fmt", version = "0.7" }
+harn-vm = { path = "../harn-vm", version = "0.7" }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
