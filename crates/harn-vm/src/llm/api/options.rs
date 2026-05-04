@@ -121,34 +121,6 @@ pub(crate) enum ToolSearchStrategy {
 }
 
 impl ToolSearchStrategy {
-    pub(crate) fn as_short(self) -> &'static str {
-        match self {
-            ToolSearchStrategy::Bm25 => "bm25",
-            ToolSearchStrategy::Regex => "regex",
-            ToolSearchStrategy::Semantic => "semantic",
-            ToolSearchStrategy::Host => "host",
-        }
-    }
-
-    /// Whether this strategy runs entirely inside the VM (no bridge
-    /// hop). Used by the dispatch path to decide between the sync
-    /// in-tree index and the `tool_search/query` RPC.
-    #[allow(dead_code)] // consumed by harness tests + future dispatch refactors
-    pub(crate) fn is_in_tree(self) -> bool {
-        matches!(self, ToolSearchStrategy::Bm25 | ToolSearchStrategy::Regex)
-    }
-
-    /// Map to the in-tree strategy enum used by
-    /// [`crate::llm::tool_search::run_in_tree`]. Panics on non-in-tree
-    /// strategies — callers must gate on `is_in_tree()`.
-    pub(crate) fn as_in_tree(self) -> crate::llm::tool_search::InTreeStrategy {
-        match self {
-            ToolSearchStrategy::Bm25 => crate::llm::tool_search::InTreeStrategy::Bm25,
-            ToolSearchStrategy::Regex => crate::llm::tool_search::InTreeStrategy::Regex,
-            _ => unreachable!("as_in_tree called on {self:?}"),
-        }
-    }
-
     /// Default strategy for a given variant when the user did not
     /// specify one explicitly. Native-facing variant leaks into the
     /// client path as a sensible default: `variant: regex` users
@@ -191,22 +163,11 @@ pub(crate) struct ToolSearchConfig {
     /// Client-mode implementation strategy. When unset, defaults to
     /// `ToolSearchStrategy::default_for_variant(variant)`.
     pub strategy: Option<ToolSearchStrategy>,
-    /// Soft cap on how many deferred tools the client-executed loop
-    /// may promote into the eager set over the life of this call.
-    /// Oldest-promoted tools are evicted when the cap is hit. `None`
-    /// means no cap — rely on the `max_results` per search call.
-    pub budget_tokens: Option<i64>,
     /// Override for the synthetic tool's name. Default
     /// `__harn_tool_search`. Lets skills with a brand-specific vocabulary
     /// name the tool something the model will understand out of the
     /// box (`find_tool`, `discover_tool`, etc.).
     pub name: Option<String>,
-    /// When true, the client-mode loop includes a short stub line for
-    /// each deferred tool (name + one-line summary) alongside the
-    /// synthetic search tool so the model knows what's available
-    /// without calling search first. Default: `false` — the Anthropic
-    /// native path also ships no stubs.
-    pub include_stub_listing: bool,
     /// Canonical native-shape JSON for every tool that had
     /// `defer_loading: true` at option-parse time, keyed by tool name.
     /// Populated by `apply_tool_search_client_injection` and later
@@ -224,9 +185,7 @@ impl ToolSearchConfig {
             mode: ToolSearchMode::Auto,
             always_loaded: Vec::new(),
             strategy: None,
-            budget_tokens: None,
             name: None,
-            include_stub_listing: false,
             deferred_bodies: std::collections::BTreeMap::new(),
         }
     }

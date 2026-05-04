@@ -13,14 +13,6 @@ pub enum LlmReplayMode {
     Replay,
 }
 
-/// Tool recording mode — mirrors LLM replay for tool call results.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolRecordingMode {
-    Off,
-    Record,
-    Replay,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CliLlmMockMode {
     Off,
@@ -78,9 +70,7 @@ type LlmMockScope = (Vec<LlmMock>, Vec<LlmMockCall>, BTreeSet<String>);
 thread_local! {
     static LLM_REPLAY_MODE: RefCell<LlmReplayMode> = const { RefCell::new(LlmReplayMode::Off) };
     static LLM_FIXTURE_DIR: RefCell<String> = const { RefCell::new(String::new()) };
-    static TOOL_RECORDING_MODE: RefCell<ToolRecordingMode> = const { RefCell::new(ToolRecordingMode::Off) };
     static TOOL_RECORDINGS: RefCell<Vec<ToolCallRecord>> = const { RefCell::new(Vec::new()) };
-    static TOOL_REPLAY_FIXTURES: RefCell<Vec<ToolCallRecord>> = const { RefCell::new(Vec::new()) };
     static LLM_MOCKS: RefCell<Vec<LlmMock>> = const { RefCell::new(Vec::new()) };
     static CLI_LLM_MOCK_MODE: RefCell<CliLlmMockMode> = const { RefCell::new(CliLlmMockMode::Off) };
     static CLI_LLM_MOCKS: RefCell<Vec<LlmMock>> = const { RefCell::new(Vec::new()) };
@@ -727,39 +717,7 @@ pub(crate) fn mock_llm_response(
     Ok(result)
 }
 
-pub fn set_tool_recording_mode(mode: ToolRecordingMode) {
-    TOOL_RECORDING_MODE.with(|v| *v.borrow_mut() = mode);
-}
-
-pub(crate) fn get_tool_recording_mode() -> ToolRecordingMode {
-    TOOL_RECORDING_MODE.with(|v| *v.borrow())
-}
-
-/// Append a tool call record during recording mode.
-pub(crate) fn record_tool_call(record: ToolCallRecord) {
-    TOOL_RECORDINGS.with(|v| v.borrow_mut().push(record));
-}
-
 /// Take all recorded tool calls, leaving the buffer empty.
 pub fn drain_tool_recordings() -> Vec<ToolCallRecord> {
     TOOL_RECORDINGS.with(|v| std::mem::take(&mut *v.borrow_mut()))
-}
-
-/// Load tool call fixtures for replay mode.
-pub fn load_tool_replay_fixtures(records: Vec<ToolCallRecord>) {
-    TOOL_REPLAY_FIXTURES.with(|v| *v.borrow_mut() = records);
-}
-
-/// Look up a recorded fixture by tool name + args hash.
-pub(crate) fn find_tool_replay_fixture(
-    tool_name: &str,
-    args: &serde_json::Value,
-) -> Option<ToolCallRecord> {
-    let hash = crate::orchestration::tool_fixture_hash(tool_name, args);
-    TOOL_REPLAY_FIXTURES.with(|v| {
-        v.borrow()
-            .iter()
-            .find(|r| r.tool_name == tool_name && r.args_hash == hash)
-            .cloned()
-    })
 }

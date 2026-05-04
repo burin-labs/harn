@@ -1466,9 +1466,7 @@ fn parse_tool_search_option(
             mode: ToolSearchMode::Auto,
             always_loaded: Vec::new(),
             strategy: None,
-            budget_tokens: None,
             name: None,
-            include_stub_listing: false,
             deferred_bodies: std::collections::BTreeMap::new(),
         })),
         VmValue::Dict(d) => {
@@ -1508,15 +1506,6 @@ fn parse_tool_search_option(
                 }
                 None => None,
             };
-            let budget_tokens = match d.get("budget_tokens") {
-                Some(VmValue::Int(n)) => Some(*n),
-                Some(VmValue::Nil) | None => None,
-                Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
-                        "tool_search.budget_tokens: expected an integer",
-                    ))));
-                }
-            };
             let name = match d.get("name") {
                 Some(VmValue::String(s)) => {
                     let s = s.as_ref().trim();
@@ -1533,29 +1522,18 @@ fn parse_tool_search_option(
                     ))));
                 }
             };
-            let include_stub_listing = match d.get("include_stub_listing") {
-                Some(VmValue::Bool(b)) => *b,
-                Some(VmValue::Nil) | None => false,
-                Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
-                        "tool_search.include_stub_listing: expected a bool",
-                    ))));
-                }
-            };
             Ok(Some(ToolSearchConfig {
                 variant,
                 mode,
                 always_loaded,
                 strategy,
-                budget_tokens,
                 name,
-                include_stub_listing,
                 deferred_bodies: std::collections::BTreeMap::new(),
             }))
         }
         _ => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
             "tool_search: expected bool, string (\"bm25\"/\"regex\"), or dict \
-             ({variant, mode, strategy, always_loaded, budget_tokens, name, include_stub_listing})",
+             ({variant, mode, strategy, always_loaded, name})",
         )))),
     }
 }

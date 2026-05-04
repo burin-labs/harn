@@ -1,53 +1,10 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::event_log::EventLog;
 use serde::{Deserialize, Serialize};
 
-use crate::value::{VmError, VmValue};
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
-pub(crate) struct DaemonLoopConfig {
-    pub persist_path: Option<String>,
-    pub resume_path: Option<String>,
-    pub wake_interval_ms: Option<u64>,
-    pub watch_paths: Vec<String>,
-    pub consolidate_on_idle: bool,
-    /// Maximum number of consecutive idle-wait attempts that can return
-    /// `None` (no wake reason) before the daemon watchdog trips. A bridge
-    /// that never signals, an empty watch-path set, and no wake_interval
-    /// would otherwise leave the daemon blocked forever. `None` disables
-    /// the watchdog; `Some(0)` trips on the first idle attempt.
-    pub idle_watchdog_attempts: Option<usize>,
-}
-
-impl DaemonLoopConfig {
-    pub(crate) fn effective_persist_path(&self) -> Option<&str> {
-        self.persist_path.as_deref().or(self.resume_path.as_deref())
-    }
-
-    pub(crate) fn has_wake_source(&self, has_bridge: bool) -> bool {
-        has_bridge || self.wake_interval_ms.is_some() || !self.watch_paths.is_empty()
-    }
-
-    pub(crate) fn idle_wait_ms(&self, idle_backoff_ms: u64) -> u64 {
-        self.wake_interval_ms.unwrap_or(idle_backoff_ms.max(1))
-    }
-
-    pub(crate) fn update_idle_backoff(&self, idle_backoff_ms: &mut u64) {
-        if let Some(fixed) = self.wake_interval_ms {
-            *idle_backoff_ms = fixed.max(1);
-            return;
-        }
-        *idle_backoff_ms = match *idle_backoff_ms {
-            0..=100 => 500,
-            101..=500 => 1000,
-            1001..=1999 => 2000,
-            _ => 2000,
-        };
-    }
-}
+use crate::event_log::EventLog;
+use crate::value::VmError;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -86,113 +43,6 @@ impl DaemonSnapshot {
     }
 }
 
-/// Reads a file's modification time. Production uses
-/// [`RealMtimeProvider`]; tests inject [`MockMtimeProvider`] to drive
-/// the watcher with virtual time and skip filesystem-quantization
-/// races entirely.
-pub(crate) trait MtimeProvider {
-    /// Returns the file's mtime as nanoseconds since the Unix epoch,
-    /// or `0` when the path is missing or unreadable. Nanosecond
-    /// precision avoids a second-boundary race: two edits to the same
-    /// path less than a full second apart would otherwise read the
-    /// same `as_secs()` value and be reported as unchanged.
-    fn mtime_ns(&self, path: &str) -> u64;
-}
-
-/// Production [`MtimeProvider`] backed by `std::fs::metadata`. u64
-/// covers nanos-since-epoch through year 2554.
-pub(crate) struct RealMtimeProvider;
-
-impl MtimeProvider for RealMtimeProvider {
-    fn mtime_ns(&self, path: &str) -> u64 {
-        std::fs::metadata(path)
-            .ok()
-            .and_then(|metadata| metadata.modified().ok())
-            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .and_then(|duration| u64::try_from(duration.as_nanos()).ok())
-            .unwrap_or(0)
-    }
-}
-
-pub(crate) fn watch_state(provider: &dyn MtimeProvider, paths: &[String]) -> BTreeMap<String, u64> {
-    paths
-        .iter()
-        .map(|path| (path.clone(), provider.mtime_ns(path)))
-        .collect::<BTreeMap<_, _>>()
-}
-
-pub(crate) fn detect_watch_changes(
-    provider: &dyn MtimeProvider,
-    paths: &[String],
-    previous: &mut BTreeMap<String, u64>,
-) -> Vec<String> {
-    let mut changed = Vec::new();
-    for path in paths {
-        let current = provider.mtime_ns(path);
-        let prior = previous.get(path).copied().unwrap_or(0);
-        if prior != 0 && current != 0 && current != prior {
-            changed.push(path.clone());
-        }
-        previous.insert(path.clone(), current);
-    }
-    changed
-}
-
-/// Test-only [`MtimeProvider`] backed by an in-memory map. Tests pin
-/// the mtime for each watched path explicitly (`set`) and advance it
-/// (`advance`) without touching the filesystem or the wall clock.
-#[cfg(test)]
-pub(crate) struct MockMtimeProvider {
-    stamps: std::cell::RefCell<BTreeMap<String, u64>>,
-}
-
-#[cfg(test)]
-impl MockMtimeProvider {
-    pub(crate) fn new() -> Self {
-        Self {
-            stamps: std::cell::RefCell::new(BTreeMap::new()),
-        }
-    }
-
-    pub(crate) fn set(&self, path: impl Into<String>, ns: u64) {
-        self.stamps.borrow_mut().insert(path.into(), ns);
-    }
-
-    pub(crate) fn advance(&self, path: &str, delta_ns: u64) {
-        let mut stamps = self.stamps.borrow_mut();
-        let entry = stamps.entry(path.to_string()).or_insert(0);
-        *entry = entry.saturating_add(delta_ns);
-    }
-
-    pub(crate) fn clear(&self, path: &str) {
-        self.stamps.borrow_mut().remove(path);
-    }
-}
-
-#[cfg(test)]
-impl MtimeProvider for MockMtimeProvider {
-    fn mtime_ns(&self, path: &str) -> u64 {
-        self.stamps.borrow().get(path).copied().unwrap_or(0)
-    }
-}
-
-pub(crate) fn persist_snapshot(path: &str, snapshot: &DaemonSnapshot) -> Result<String, VmError> {
-    let path_buf = Path::new(path);
-    if let Some(parent) = path_buf.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| VmError::Runtime(format!("daemon snapshot mkdir error: {error}")))?;
-    }
-    let json = serde_json::to_string_pretty(&snapshot.clone().normalize())
-        .map_err(|error| VmError::Runtime(format!("daemon snapshot encode error: {error}")))?;
-    let tmp = path_buf.with_extension("json.tmp");
-    std::fs::write(&tmp, json)
-        .map_err(|error| VmError::Runtime(format!("daemon snapshot write error: {error}")))?;
-    std::fs::rename(&tmp, path_buf)
-        .map_err(|error| VmError::Runtime(format!("daemon snapshot finalize error: {error}")))?;
-    append_daemon_state_event(path, "snapshot_persisted", &snapshot.clone().normalize());
-    Ok(path.to_string())
-}
-
 pub(crate) fn load_snapshot(path: &str) -> Result<DaemonSnapshot, VmError> {
     let content = std::fs::read_to_string(path)
         .map_err(|error| VmError::Runtime(format!("daemon snapshot read error: {error}")))?;
@@ -202,60 +52,6 @@ pub(crate) fn load_snapshot(path: &str) -> Result<DaemonSnapshot, VmError> {
     append_daemon_state_event(path, "snapshot_loaded", &snapshot);
     Ok(snapshot)
 }
-
-pub(crate) fn parse_daemon_loop_config(
-    options: Option<&BTreeMap<String, VmValue>>,
-) -> DaemonLoopConfig {
-    let Some(options) = options else {
-        return DaemonLoopConfig::default();
-    };
-
-    let watch_paths = match options.get("watch_paths") {
-        Some(VmValue::List(items)) => items
-            .iter()
-            .map(VmValue::display)
-            .filter(|path| !path.is_empty())
-            .collect(),
-        Some(VmValue::String(path)) if !path.is_empty() => vec![path.to_string()],
-        Some(value) => {
-            let path = value.display();
-            if path.is_empty() {
-                Vec::new()
-            } else {
-                vec![path]
-            }
-        }
-        None => Vec::new(),
-    };
-
-    DaemonLoopConfig {
-        persist_path: options
-            .get("persist_path")
-            .map(VmValue::display)
-            .filter(|value| !value.is_empty()),
-        resume_path: options
-            .get("resume_path")
-            .map(VmValue::display)
-            .filter(|value| !value.is_empty()),
-        wake_interval_ms: options
-            .get("wake_interval_ms")
-            .and_then(|value| value.as_int())
-            .map(|value| value as u64)
-            .filter(|value| *value > 0),
-        watch_paths,
-        consolidate_on_idle: options
-            .get("consolidate_on_idle")
-            .is_some_and(|value| matches!(value, VmValue::Bool(true))),
-        idle_watchdog_attempts: options
-            .get("idle_watchdog_attempts")
-            .and_then(|value| value.as_int())
-            .and_then(|value| usize::try_from(value).ok()),
-    }
-}
-
-#[cfg(test)]
-#[path = "daemon_tests.rs"]
-mod tests;
 
 fn append_daemon_state_event(path: &str, kind: &str, snapshot: &DaemonSnapshot) {
     let Some(log) = crate::event_log::active_event_log() else {

@@ -104,42 +104,6 @@ pub(crate) fn build_assistant_response_message(
     message
 }
 
-/// Build a tool result message for the conversation history.
-pub(crate) fn build_tool_result_message(
-    tool_call_id: &str,
-    tool_name: &str,
-    result: &str,
-    provider: &str,
-) -> serde_json::Value {
-    let resolved = super::super::helpers::ResolvedProvider::resolve(provider);
-    let is_anthropic = resolved.is_anthropic_style;
-    let is_ollama = provider == "ollama" || resolved.endpoint.contains("/api/chat");
-    if is_anthropic {
-        // Anthropic: tool_result inside a user message
-        serde_json::json!({
-            "role": "user",
-            "content": [{
-                "type": "tool_result",
-                "tool_use_id": tool_call_id,
-                "content": result,
-            }]
-        })
-    } else if is_ollama {
-        serde_json::json!({
-            "role": "tool",
-            "tool_name": tool_name,
-            "content": result,
-        })
-    } else {
-        // OpenAI-compatible: distinct "tool" role
-        serde_json::json!({
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "content": result,
-        })
-    }
-}
-
 /// Normalize tool call arguments before dispatch.
 ///
 /// The VM walks the active policy's

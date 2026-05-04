@@ -173,22 +173,6 @@ impl VmMcpClientHandle {
         Ok(())
     }
 
-    pub(crate) fn start_disconnect(&self) {
-        let Ok(mut guard) = self.inner.try_lock() else {
-            return;
-        };
-        if let Some(inner) = guard.take() {
-            match inner {
-                McpClientInner::Stdio(mut inner) => {
-                    let _ = inner.child.start_kill();
-                }
-                McpClientInner::Http(mut inner) => {
-                    inner.abort_get_stream();
-                }
-            }
-        }
-    }
-
     async fn notify_roots_list_changed_if_needed(&self) -> Result<(), VmError> {
         let roots = current_mcp_roots();
         let mut last_roots = self.last_roots.lock().await;

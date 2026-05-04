@@ -757,7 +757,7 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
         let (tx, rx) = tokio::sync::mpsc::channel(capacity);
         // Arc is deliberate: refcount ownership within a single-threaded tokio
         // LocalSet (VmValue is !Send because it holds Rc). The Arc never crosses
-        // threads — see the thread-local invariant on crate::llm::agent::emit_agent_event.
+        // threads — see the thread-local invariant on crate::llm::agent_runtime::emit_agent_event.
         #[allow(clippy::arc_with_non_send_sync)]
         Ok(VmValue::Channel(VmChannelHandle {
             name: Rc::from(name),

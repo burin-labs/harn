@@ -13,9 +13,7 @@ pub(crate) use messages::{
     json_messages_to_vm, vm_add_role_message, vm_message_value, vm_messages_to_json,
 };
 pub(crate) use opt_get::{opt_bool, opt_float, opt_int, opt_str};
-pub(crate) use options::{
-    expects_structured_output, extract_json, extract_llm_options, opt_str_list,
-};
+pub(crate) use options::{expects_structured_output, extract_json, extract_llm_options};
 #[cfg(test)]
 pub(crate) use provider::reset_provider_key_cache;
 pub use provider::resolve_api_key;
