@@ -5,11 +5,33 @@ use crate::chunk::{Chunk, CompiledFunction};
 use crate::value::{VmClosure, VmEnv, VmValue};
 
 use super::convert::{annotations_to_json, prompt_value_to_messages};
-use super::defs::McpResourceDef;
+use super::defs::{
+    McpCompletionSource, McpPromptArgDef, McpPromptDef, McpResourceDef, McpResourceTemplateDef,
+};
 use super::tool_registry_to_mcp_tools;
 use super::tools_schema::params_to_json_schema;
 use super::uri::match_uri_template;
 use super::McpServer;
+
+fn empty_closure(name: &str) -> VmClosure {
+    VmClosure {
+        func: Rc::new(CompiledFunction {
+            name: name.to_string(),
+            type_params: Vec::new(),
+            nominal_type_names: Vec::new(),
+            params: Vec::new(),
+            default_start: None,
+            chunk: Rc::new(Chunk::new()),
+            is_generator: false,
+            is_stream: false,
+            has_rest_param: false,
+        }),
+        env: VmEnv::new(),
+        source_dir: None,
+        module_functions: None,
+        module_state: None,
+    }
+}
 
 #[test]
 fn test_params_to_json_schema_empty() {
@@ -70,23 +92,7 @@ fn test_tool_registry_to_mcp_tools_empty() {
 
 #[test]
 fn test_tool_registry_to_mcp_tools_preserves_metadata() {
-    let handler = VmValue::Closure(Rc::new(VmClosure {
-        func: Rc::new(CompiledFunction {
-            name: "echo".to_string(),
-            type_params: Vec::new(),
-            nominal_type_names: Vec::new(),
-            params: Vec::new(),
-            default_start: None,
-            chunk: Rc::new(Chunk::new()),
-            is_generator: false,
-            is_stream: false,
-            has_rest_param: false,
-        }),
-        env: VmEnv::new(),
-        source_dir: None,
-        module_functions: None,
-        module_state: None,
-    }));
+    let handler = VmValue::Closure(Rc::new(empty_closure("echo")));
 
     let mut annotations = BTreeMap::new();
     annotations.insert("readOnlyHint".into(), VmValue::Bool(true));
@@ -373,6 +379,107 @@ async fn server_advertises_elicitation_capability() {
     assert!(
         response["result"]["capabilities"]["elicitation"].is_object(),
         "expected elicitation capability, got {response:?}"
+    );
+}
+
+#[tokio::test]
+async fn server_completion_complete_returns_prompt_and_resource_suggestions() {
+    let mut resource_completions = BTreeMap::new();
+    resource_completions.insert(
+        "key".to_string(),
+        McpCompletionSource {
+            values: vec!["name".to_string(), "version".to_string()],
+            handler: None,
+        },
+    );
+    let server = McpServer::new(
+        "test".to_string(),
+        Vec::new(),
+        Vec::new(),
+        vec![McpResourceTemplateDef {
+            uri_template: "config://{key}".to_string(),
+            name: "Configuration".to_string(),
+            title: None,
+            description: None,
+            mime_type: Some("text/plain".to_string()),
+            completions: resource_completions,
+            handler: empty_closure("resource"),
+        }],
+        vec![McpPromptDef {
+            name: "review".to_string(),
+            title: None,
+            description: None,
+            arguments: Some(vec![McpPromptArgDef {
+                name: "language".to_string(),
+                description: None,
+                required: false,
+                completion: Some(McpCompletionSource {
+                    values: vec![
+                        "rust".to_string(),
+                        "ruby".to_string(),
+                        "typescript".to_string(),
+                    ],
+                    handler: None,
+                }),
+            }]),
+            handler: empty_closure("prompt"),
+        }],
+    );
+    let mut vm = crate::Vm::new();
+
+    let init = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(1, "initialize", serde_json::json!({})),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert!(init["result"]["capabilities"]["completions"].is_object());
+
+    let prompt = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                2,
+                crate::mcp_protocol::METHOD_COMPLETION_COMPLETE,
+                serde_json::json!({
+                    "ref": {"type": "ref/prompt", "name": "review"},
+                    "argument": {"name": "language", "value": "ru"},
+                }),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        prompt["result"]["completion"]["values"],
+        serde_json::json!(["ruby", "rust"])
+    );
+    assert_eq!(
+        prompt["result"]["completion"]["total"],
+        serde_json::json!(2)
+    );
+    assert_eq!(
+        prompt["result"]["completion"]["hasMore"],
+        serde_json::json!(false)
+    );
+
+    let resource = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                3,
+                crate::mcp_protocol::METHOD_COMPLETION_COMPLETE,
+                serde_json::json!({
+                    "ref": {"type": "ref/resource", "uri": "config://{key}"},
+                    "argument": {"name": "key", "value": "ver"},
+                }),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        resource["result"]["completion"]["values"],
+        serde_json::json!(["version"])
     );
 }
 

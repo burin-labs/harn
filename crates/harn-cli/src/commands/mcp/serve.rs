@@ -496,6 +496,9 @@ impl McpOrchestratorService {
             "resources/templates/list" => self.handle_resource_templates_list(id, &params),
             "prompts/list" => self.handle_prompts_list(id, &params),
             "prompts/get" => self.handle_prompts_get(id, &params),
+            mcp_protocol::METHOD_COMPLETION_COMPLETE => {
+                self.handle_completion_complete(id, &params)
+            }
             _ if mcp_protocol::unsupported_latest_spec_method(method).is_some() => {
                 mcp_protocol::unsupported_latest_spec_method_response(id, method)
                     .expect("checked unsupported MCP method")
@@ -554,6 +557,7 @@ impl McpOrchestratorService {
                     "prompts": { "listChanged": true },
                     "logging": {},
                     "tasks": mcp_protocol::tasks_capability(),
+                    "completions": mcp_protocol::completions_capability(),
                 },
                 "serverInfo": {
                     "name": "harn-orchestrator",
@@ -598,6 +602,54 @@ impl McpOrchestratorService {
                 harn_vm::jsonrpc::error_response(id, -32602, &error)
             }
             Err(error) => harn_vm::jsonrpc::error_response(id, -32603, &error),
+        }
+    }
+
+    fn handle_completion_complete(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
+        let Some(ref_type) = params.pointer("/ref/type").and_then(JsonValue::as_str) else {
+            return harn_vm::jsonrpc::error_response(id, -32602, "completion ref.type is required");
+        };
+        match ref_type {
+            "ref/prompt" => self.handle_prompt_completion(id, params),
+            "ref/resource" => {
+                harn_vm::jsonrpc::error_response(id, -32602, "Unknown resource template")
+            }
+            other => harn_vm::jsonrpc::error_response(
+                id,
+                -32602,
+                &format!("Unsupported completion ref.type: {other}"),
+            ),
+        }
+    }
+
+    fn handle_prompt_completion(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
+        let name = params
+            .pointer("/ref/name")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default();
+        let Some(argument_name) = params
+            .pointer("/argument/name")
+            .and_then(JsonValue::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            return harn_vm::jsonrpc::error_response(
+                id,
+                -32602,
+                "completion argument.name is required",
+            );
+        };
+        let value = params
+            .pointer("/argument/value")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default();
+        let result = self
+            .prompt_catalog
+            .lock()
+            .expect("prompt catalog poisoned")
+            .complete(name, argument_name, value);
+        match result {
+            Ok(completion) => harn_vm::jsonrpc::response(id, json!({ "completion": completion })),
+            Err(error) => harn_vm::jsonrpc::error_response(id, -32602, &error),
         }
     }
 
@@ -3510,8 +3562,12 @@ images = [{ path = "pixel.png", mime_type = "image/png" }]
 name = "code"
 description = "Code to review"
 required = true
+[[arguments]]
+name = "language"
+required = false
+suggestions = ["rust", "ruby", "typescript"]
 ---
-Review this: {{ code }}
+Review this {{ language }}: {{ code }}
 "#,
         );
         let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -3529,6 +3585,26 @@ Review this: {{ code }}
             prompts["result"]["prompts"][0]["arguments"][0]["description"],
             json!("Code to review")
         );
+
+        let completion = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(
+                    19,
+                    mcp_protocol::METHOD_COMPLETION_COMPLETE,
+                    json!({
+                        "ref": {"type": "ref/prompt", "name": "review"},
+                        "argument": {"name": "language", "value": "ru"},
+                    }),
+                ),
+            )
+            .await;
+        assert_eq!(
+            completion["result"]["completion"]["values"],
+            json!(["ruby", "rust"])
+        );
+        assert_eq!(completion["result"]["completion"]["total"], json!(2));
+        assert_eq!(completion["result"]["completion"]["hasMore"], json!(false));
 
         let missing = service
             .handle_request(

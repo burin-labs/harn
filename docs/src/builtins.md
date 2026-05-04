@@ -1972,8 +1972,8 @@ tool registry dict.
 | `tool_synthesis_clear()` | — | nil | Clear the current run's synthesized tool cache |
 | `mcp_tools(registry)` | registry: dict | nil | Register tools for MCP serving |
 | `mcp_resource(config)` | config: dict | nil | Register a static resource (`{uri, name, text, description?, mime_type?}`) |
-| `mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, description?, mime_type?}`) |
-| `mcp_prompt(config)` | config: dict | nil | Register a prompt (`{name, handler, description?, arguments?}`) |
+| `mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, description?, mime_type?, completions?}`); `completions` maps URI variable names to static suggestion lists or completion closures |
+| `mcp_prompt(config)` | config: dict | nil | Register a prompt (`{name, handler, description?, arguments?}`); prompt arguments may include `suggestions`/`completions` or a `complete` closure for MCP `completion/complete` |
 
 `tool_synthesize(config)` is the guarded natural-language tool bootstrapper. It
 returns a callable closure and pins the synthesis in an in-memory cache keyed by

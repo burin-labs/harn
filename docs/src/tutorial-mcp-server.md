@@ -59,6 +59,7 @@ pipeline main(task) {
     uri_template: "config://{key}",
     name: "Configuration values",
     mime_type: "text/plain",
+    completions: { key: ["name", "version"] },
     handler: { args ->
       if args.key == "version" {
         "0.6.0"
@@ -86,7 +87,11 @@ pipeline main(task) {
     description: "Review code for correctness and maintainability",
     arguments: [
       { name: "code", description: "The code to review", required: true },
-      { name: "language", description: "Programming language" }
+      {
+        name: "language",
+        description: "Programming language",
+        suggestions: ["rust", "typescript", "python"]
+      }
     ],
     handler: { args ->
       let lang = args.language ?? "unknown"

@@ -7,6 +7,7 @@ pub const METHOD_TASKS_GET: &str = "tasks/get";
 pub const METHOD_TASKS_RESULT: &str = "tasks/result";
 pub const METHOD_TASKS_LIST: &str = "tasks/list";
 pub const METHOD_TASKS_CANCEL: &str = "tasks/cancel";
+pub const METHOD_COMPLETION_COMPLETE: &str = "completion/complete";
 pub const METHOD_TASK_STATUS_NOTIFICATION: &str = "notifications/tasks/status";
 pub const METHOD_ROOTS_LIST: &str = "roots/list";
 pub const METHOD_ROOTS_LIST_CHANGED_NOTIFICATION: &str = "notifications/roots/list_changed";
@@ -31,12 +32,6 @@ pub struct UnsupportedMcpMethod {
 }
 
 pub const UNSUPPORTED_LATEST_SPEC_METHODS: &[UnsupportedMcpMethod] = &[
-    UnsupportedMcpMethod {
-        method: "completion/complete",
-        feature: "completions",
-        role: "server",
-        reason: "Harn does not expose prompt or resource-template argument completion.",
-    },
     // `sampling/createMessage` (client) is supported — handled in
     // `mcp::handle_inbound_client_request` via
     // `mcp_sampling::dispatch_inbound_sampling`, which routes the
@@ -52,6 +47,8 @@ pub const UNSUPPORTED_LATEST_SPEC_METHODS: &[UnsupportedMcpMethod] = &[
     // inbound server-to-client root discovery requests. It is intentionally
     // omitted from this gap list.
 ];
+
+pub const MCP_COMPLETION_MAX_VALUES: usize = 100;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum McpTaskStatus {
@@ -163,6 +160,58 @@ pub fn tasks_capability() -> JsonValue {
     })
 }
 
+pub fn completions_capability() -> JsonValue {
+    json!({})
+}
+
+pub fn completion_result(
+    id: impl Into<JsonValue>,
+    candidates: Vec<String>,
+    value: &str,
+) -> JsonValue {
+    crate::jsonrpc::response(
+        id,
+        json!({ "completion": completion_payload(candidates, value) }),
+    )
+}
+
+pub fn completion_payload(candidates: Vec<String>, value: &str) -> JsonValue {
+    let needle = value.to_ascii_lowercase();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut ranked = candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            let candidate = candidate.trim().to_string();
+            if candidate.is_empty() || !seen.insert(candidate.clone()) {
+                return None;
+            }
+            let haystack = candidate.to_ascii_lowercase();
+            if !needle.is_empty() && !haystack.contains(&needle) {
+                return None;
+            }
+            let rank = if needle.is_empty() || haystack.starts_with(&needle) {
+                0
+            } else {
+                1
+            };
+            Some((rank, haystack, candidate))
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+
+    let total = ranked.len();
+    let values = ranked
+        .into_iter()
+        .take(MCP_COMPLETION_MAX_VALUES)
+        .map(|(_, _, candidate)| candidate)
+        .collect::<Vec<_>>();
+    json!({
+        "values": values,
+        "total": total,
+        "hasMore": total > MCP_COMPLETION_MAX_VALUES,
+    })
+}
+
 pub fn tool_execution(task_support: McpToolTaskSupport) -> JsonValue {
     json!({
         "taskSupport": task_support.as_str(),
@@ -243,13 +292,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn latest_spec_gap_methods_are_explicit() {
-        let method = "completion/complete";
-        let response = unsupported_latest_spec_method_response(json!(1), method)
-            .expect("expected explicit unsupported method");
-        assert_eq!(response["error"]["code"], json!(-32601));
-        assert_eq!(response["error"]["data"]["method"], json!(method));
-        assert_eq!(response["error"]["data"]["status"], json!("unsupported"));
+    fn completion_complete_is_no_longer_in_the_unsupported_gap_list() {
+        assert!(unsupported_latest_spec_method(METHOD_COMPLETION_COMPLETE).is_none());
+        let response = completion_result(
+            json!(1),
+            vec![
+                "typescript".to_string(),
+                "rust".to_string(),
+                "ruby".to_string(),
+                "rust".to_string(),
+            ],
+            "ru",
+        );
+        assert_eq!(
+            response["result"]["completion"]["values"],
+            json!(["ruby", "rust"])
+        );
+        assert_eq!(response["result"]["completion"]["total"], json!(2));
+        assert_eq!(response["result"]["completion"]["hasMore"], json!(false));
     }
 
     #[test]
