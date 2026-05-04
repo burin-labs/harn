@@ -1974,6 +1974,7 @@ tool registry dict.
 | `mcp_resource(config)` | config: dict | nil | Register a static resource (`{uri, name, text, description?, mime_type?}`) |
 | `mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, description?, mime_type?, completions?}`); `completions` maps URI variable names to static suggestion lists or completion closures |
 | `mcp_prompt(config)` | config: dict | nil | Register a prompt (`{name, handler, description?, arguments?}`); prompt arguments may include `suggestions`/`completions` or a `complete` closure for MCP `completion/complete` |
+| `mcp_report_progress(progress, opts?)` | progress: number, opts?: dict | bool | Emit a `notifications/progress` update for the in-flight MCP tool call (no-op when the client did not opt in via `_meta.progressToken`). `opts`: `{total?: number, message?: string, token?: string\|number}` |
 
 `tool_synthesize(config)` is the guarded natural-language tool bootstrapper. It
 returns a callable closure and pins the synthesis in an in-memory cache keyed by

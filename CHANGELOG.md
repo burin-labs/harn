@@ -25,6 +25,16 @@ condensed series summaries instead of full per-patch history.
   [MCP logging spec](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/logging).
   `logging/setLevel` is now honored per session and filters notifications by severity;
   events can override the assigned level via a `severity` header.
+- **MCP `notifications/progress` from long-running tools.** Tool handlers
+  can call the new `mcp_report_progress(progress, opts?)` builtin to
+  emit `notifications/progress` updates for the in-flight call. The
+  builtin no-ops when the client did not opt in via
+  `_meta.progressToken`, so scripts can sprinkle it without preflight
+  checks. Both stdio and HTTP MCP transports thread the token through
+  to script-defined tools (`mcp_tools`) and exported-function tools
+  (`harn serve mcp <script>`). The orchestrator-mode
+  `harn.trigger.fire` tool also emits its own milestones (loading
+  runtime, preparing event, firing trigger, complete). Closes #885.
 
 ## v0.7.57
 

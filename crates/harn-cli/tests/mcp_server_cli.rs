@@ -380,6 +380,102 @@ fn mcp_server_stdio_roundtrips_tools_and_resources() {
 }
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
+#[test]
+fn mcp_server_stdio_emits_progress_for_trigger_fire() {
+    let _guard = lock_mcp_cli_tests();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+
+    let mut child = harn_e2e_command()
+        .current_dir(temp.path())
+        .arg("mcp")
+        .arg("serve")
+        .arg("--config")
+        .arg("harn.toml")
+        .arg("--state-dir")
+        .arg("./state")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    let _init = send_request(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": { "name": "progress-test", "version": "1.0.0" }
+            }
+        }),
+    );
+
+    // Drain everything for id=2 while collecting any earlier
+    // notifications/progress lines for the same token.
+    writeln!(
+        &mut stdin,
+        "{}",
+        serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "harn.trigger.fire",
+                "arguments": { "trigger_id": "cron-ok", "payload": {} },
+                "_meta": { "progressToken": "fire-1" }
+            }
+        }))
+        .unwrap()
+    )
+    .unwrap();
+    stdin.flush().unwrap();
+
+    let mut progress_messages = Vec::new();
+    let response = loop {
+        let mut line = String::new();
+        stdout.read_line(&mut line).unwrap();
+        let value: JsonValue = serde_json::from_str(line.trim()).unwrap();
+        if value.get("method") == Some(&json!("notifications/progress"))
+            && value["params"]["progressToken"] == json!("fire-1")
+        {
+            progress_messages.push(value);
+            continue;
+        }
+        if value.get("id") == Some(&json!(2)) {
+            break value;
+        }
+    };
+    assert_eq!(
+        response["result"]["structuredContent"]["status"],
+        json!("dispatched")
+    );
+    assert!(
+        !progress_messages.is_empty(),
+        "expected at least one progress notification for fire-1"
+    );
+    let progress_values: Vec<f64> = progress_messages
+        .iter()
+        .map(|message| message["params"]["progress"].as_f64().unwrap())
+        .collect();
+    assert!(
+        progress_values.windows(2).all(|w| w[1] > w[0]),
+        "progress values must strictly increase, got {progress_values:?}"
+    );
+
+    drop(stdin);
+    let status = child.wait().unwrap();
+    assert!(status.success(), "status={status}");
+}
+
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn mcp_server_http_roundtrips_initialize_and_fire() {
     let _guard = lock_mcp_cli_tests();

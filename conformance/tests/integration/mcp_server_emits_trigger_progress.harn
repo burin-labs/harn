@@ -1,0 +1,31 @@
+import "../_common"
+
+pipeline default() {
+  let root = path_join(temp_dir(), "harn-mcp-progress-" + uuid())
+  mkdir(root)
+  write_file(
+    path_join(root, "harn.toml"),
+    "[package]\nname = \"fixture\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"cron-ok\"\nkind = \"cron\"\nprovider = \"cron\"\nschedule = \"* * * * *\"\nmatch = { events = [\"cron.tick\"] }\nhandler = \"handlers::on_ok\"\n",
+  )
+  write_file(
+    path_join(root, "lib.harn"),
+    "import \"std/triggers\"\n\npub fn on_ok(event: TriggerEvent) -> dict {\n  return {kind: event.kind, event_id: event.id}\n}\n",
+  )
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let harn_bin = resolve_harn_bin(repo_root)
+  let helper = path_join(repo_root, "conformance/helpers/mcp_stdio_progress.py")
+  let result = exec(
+    "python3",
+    helper,
+    harn_bin,
+    path_join(root, "harn.toml"),
+    path_join(root, "state"),
+    "harn.trigger.fire",
+    "{\"trigger_id\":\"cron-ok\",\"payload\":{}}",
+    "fire-progress",
+  )
+  assert(result.success, "mcp helper failed")
+  let payload = json_parse(result.stdout.trim())
+  println(payload.result.status == "dispatched")
+  println(payload.progress_count >= 1)
+}

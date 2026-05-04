@@ -4,6 +4,10 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
 use crate::mcp_elicit::{install_bus, ElicitationBus};
+use crate::mcp_progress::{
+    active_bus as active_progress_bus, install_active_bus as install_active_progress_bus,
+    is_valid_progress_token, scope_context, ProgressBus, ProgressContext,
+};
 use crate::stdlib::json_to_vm_value;
 use crate::value::VmError;
 use crate::vm::Vm;
@@ -72,6 +76,7 @@ impl McpServer {
         let (out_tx, mut out_rx) = mpsc::unbounded_channel::<serde_json::Value>();
         let (in_tx, mut in_rx) = mpsc::unbounded_channel::<serde_json::Value>();
         let bus = ElicitationBus::new(out_tx.clone());
+        let progress_bus = ProgressBus::from_mpsc(out_tx.clone());
 
         let bus_for_reader = bus.clone();
         let in_tx_reader = in_tx.clone();
@@ -124,6 +129,7 @@ impl McpServer {
 
         // Make the bus visible to tool handlers running on this thread.
         let previous_bus = install_bus(Some(bus));
+        let previous_progress = install_active_progress_bus(Some(progress_bus));
 
         while let Some(msg) = in_rx.recv().await {
             if let Some(response) = self.handle_json_rpc(msg, vm).await {
@@ -138,6 +144,7 @@ impl McpServer {
         // keeps nested usages well-defined if they ever appear.
         drop(out_tx);
         install_bus(previous_bus);
+        install_active_progress_bus(previous_progress);
 
         // Best-effort wait so the writer flushes any tail responses
         // before the function returns. Reader task exits naturally
@@ -323,7 +330,23 @@ impl McpServer {
             .unwrap_or(serde_json::json!({}));
         let args_vm = json_to_vm_value(&arguments);
 
-        let result = vm.call_closure_pub(&tool.handler, &[args_vm]).await;
+        // Bind a per-call progress context so the handler (and any
+        // helpers it calls) can emit `notifications/progress` via
+        // `mcp_report_progress(...)`. The context is wired only when
+        // both the connection has a progress bus installed AND the
+        // client opted in via `_meta.progressToken`. Using
+        // `scope_context` (a tokio task-local) rather than a
+        // thread-local guard keeps concurrent tool calls isolated even
+        // when they share an OS thread via a `LocalSet`.
+        let progress_token = params
+            .pointer("/_meta/progressToken")
+            .cloned()
+            .filter(is_valid_progress_token);
+        let progress_ctx = progress_token
+            .and_then(|token| active_progress_bus().map(|bus| ProgressContext::new(bus, token)));
+
+        let result =
+            scope_context(progress_ctx, vm.call_closure_pub(&tool.handler, &[args_vm])).await;
 
         match result {
             Ok(value) => {

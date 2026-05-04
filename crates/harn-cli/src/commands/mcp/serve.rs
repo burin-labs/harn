@@ -263,6 +263,12 @@ struct RpcRequest {
     session: ConnectionState,
     request: JsonValue,
     response_tx: oneshot::Sender<(ConnectionState, JsonValue)>,
+    /// Optional SSE sender already attached to the calling session.
+    /// When present, the worker installs a [`harn_vm::mcp_progress::ProgressBus`]
+    /// pointing at it for the duration of `handle_request`, allowing
+    /// long-running tools to emit `notifications/progress` updates that
+    /// stream out the session's open GET endpoint.
+    progress_sender: Option<UnboundedSender<JsonValue>>,
 }
 
 #[derive(Clone)]
@@ -1034,9 +1040,28 @@ impl McpOrchestratorService {
             .unwrap_or_else(|| json!({}));
         let trace_id = format!("mcp_{}", Uuid::now_v7().simple());
 
-        let result = self
-            .execute_tool_call(name, session, &trace_id, arguments)
-            .await;
+        // Bind the request's progressToken to the active outbound bus
+        // (installed by the transport) for the duration of the tool
+        // call. Built-in tool implementations and any nested Harn
+        // handlers can then call `mcp_report_progress(...)` without
+        // taking a token argument.
+        let progress_ctx = params
+            .pointer("/_meta/progressToken")
+            .cloned()
+            .filter(harn_vm::mcp_progress::is_valid_progress_token)
+            .and_then(|token| {
+                harn_vm::mcp_progress::active_bus()
+                    .map(|bus| harn_vm::mcp_progress::ProgressContext::new(bus, token))
+            });
+
+        // Box-pin the tool-call future before scoping it: handle_tools_call
+        // is a deep async state machine and adding another async wrapper
+        // grew the stack frame past the test runtime's 2 MiB budget.
+        let result = harn_vm::mcp_progress::scope_context(
+            progress_ctx,
+            Box::pin(self.execute_tool_call(name, session, &trace_id, arguments)),
+        )
+        .await;
 
         let _ = self
             .record_tool_call(name, &trace_id, &session.client_identity, &result)
@@ -1470,11 +1495,15 @@ impl McpOrchestratorService {
     ) -> Result<JsonValue, String> {
         let request: TriggerFireRequest =
             serde_json::from_value(arguments).map_err(|error| error.to_string())?;
+        report_milestone(0.1, "loading runtime");
         let mut ctx = load_local_runtime(&self.local_args()).await?;
+        report_milestone(0.3, "preparing event");
         let mut event = synthetic_event_for_binding(&ctx, &request.trigger_id)?;
         merge_json_object(&mut event, request.payload);
         inject_trace_headers(&mut event, &session.client_identity, trace_id);
+        report_milestone(0.5, "firing trigger");
         let handle = trigger_fire(&mut ctx, &request.trigger_id, event).await?;
+        report_milestone(0.95, "trigger complete");
         self.notify_topic_resource_changed(TRIGGER_OUTBOX_TOPIC);
         Ok(json!({
             "event_id": handle.event_id,
@@ -1998,13 +2027,32 @@ fn parse_trust_query_timestamp(raw: &str) -> Result<OffsetDateTime, String> {
 
 async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
     let stdin = BufReader::new(tokio::io::stdin());
-    let mut stdout = tokio::io::stdout();
     let mut lines = stdin.lines();
     let mut session = ConnectionState::default();
     let mut list_notifications = service.subscribe_list_notifications();
     let mut resource_notifications = service.subscribe_resource_notifications();
     let mut task_notifications = service.subscribe_task_notifications();
     let mut log_notifications = service.subscribe_log_notifications();
+
+    // Single mpsc fan-in for everything we write to stdout: per-request
+    // responses, broadcast notifications, and progress updates emitted
+    // by tool handlers via `harn_vm::mcp_progress`. Funnelling all
+    // outbound JSON through one writer task means progress lines and
+    // their final response can never interleave mid-line, and the
+    // ProgressBus can hand its sender to handle_tools_call without a
+    // separate channel per request.
+    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<JsonValue>();
+    let writer = tokio::spawn(async move {
+        let mut stdout = tokio::io::stdout();
+        while let Some(message) = out_rx.recv().await {
+            if write_stdio_json(&mut stdout, &message).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let progress_bus = harn_vm::mcp_progress::ProgressBus::from_mpsc(out_tx.clone());
+    let _bus_guard = harn_vm::mcp_progress::ActiveBusGuard::install(Some(progress_bus));
 
     eprintln!("[harn] MCP stdio server ready");
 
@@ -2024,12 +2072,12 @@ async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
                 };
                 let response = service.handle_request(&mut session, request).await;
                 if !response.is_null() {
-                    write_stdio_json(&mut stdout, &response).await?;
+                    let _ = out_tx.send(response);
                 }
             }
             notification = list_notifications.recv() => {
                 match notification {
-                    Ok(notification) => write_stdio_json(&mut stdout, &notification).await?,
+                    Ok(notification) => { let _ = out_tx.send(notification); }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
@@ -2037,7 +2085,7 @@ async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
             notification = resource_notifications.recv() => {
                 match notification {
                     Ok(notification) if session.subscribed_resources.contains(&notification.uri) => {
-                        write_stdio_json(&mut stdout, &notification.message).await?;
+                        let _ = out_tx.send(notification.message);
                     }
                     Ok(_) => continue,
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -2047,7 +2095,7 @@ async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
             notification = task_notifications.recv() => {
                 match notification {
                     Ok(notification) if notification.owner == session.client_identity => {
-                        write_stdio_json(&mut stdout, &notification.message).await?;
+                        let _ = out_tx.send(notification.message);
                     }
                     Ok(_) => continue,
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -2057,7 +2105,7 @@ async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
             notification = log_notifications.recv() => {
                 match notification {
                     Ok(notification) if notification.level >= session.log_level => {
-                        write_stdio_json(&mut stdout, &notification.message).await?;
+                        let _ = out_tx.send(notification.message);
                     }
                     Ok(_) => continue,
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -2067,6 +2115,13 @@ async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
         }
     }
 
+    // Drop both senders for `out_tx` (the loop's clone and the
+    // ProgressBus's clone, held by the install guard) so the writer
+    // task observes a closed channel and exits — otherwise it would
+    // block on `recv()` forever and the awaited join would hang.
+    drop(_bus_guard);
+    drop(out_tx);
+    let _ = writer.await;
     Ok(())
 }
 
@@ -2320,7 +2375,21 @@ async fn http_post_request(
     if authenticated {
         current.authenticated = true;
     }
-    let (updated, response_json) = match state.rpc.call(current, request).await {
+    // If the client opened a session-wide SSE (GET /mcp), wire the
+    // active progress bus to it so per-request progress notifications
+    // stream through the same channel as broadcast notifications.
+    // Without an open SSE, progress is silently dropped (the spec
+    // permits this — clients that want updates open the stream).
+    let progress_sender = session
+        .sse_tx
+        .lock()
+        .expect("HTTP session SSE sender poisoned")
+        .clone();
+    let (updated, response_json) = match state
+        .rpc
+        .call_with_progress(current, request, progress_sender)
+        .await
+    {
         Ok(result) => result,
         Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
     };
@@ -2674,6 +2743,12 @@ impl RpcBridge {
             runtime.block_on(async move {
                 while let Some(request) = rx.recv().await {
                     let mut session = request.session;
+                    let progress_bus = request.progress_sender.map(|sender| {
+                        harn_vm::mcp_progress::ProgressBus::new(Arc::new(move |message| {
+                            let _ = sender.unbounded_send(message);
+                        }))
+                    });
+                    let _bus_guard = harn_vm::mcp_progress::ActiveBusGuard::install(progress_bus);
                     let response = service.handle_request(&mut session, request.request).await;
                     let _ = request.response_tx.send((session, response));
                 }
@@ -2687,12 +2762,22 @@ impl RpcBridge {
         session: ConnectionState,
         request: JsonValue,
     ) -> Result<(ConnectionState, JsonValue), String> {
+        self.call_with_progress(session, request, None).await
+    }
+
+    async fn call_with_progress(
+        &self,
+        session: ConnectionState,
+        request: JsonValue,
+        progress_sender: Option<UnboundedSender<JsonValue>>,
+    ) -> Result<(ConnectionState, JsonValue), String> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
             .send(RpcRequest {
                 session,
                 request,
                 response_tx,
+                progress_sender,
             })
             .map_err(|_| "MCP worker is not running".to_string())?;
         response_rx
@@ -3321,6 +3406,15 @@ fn now_rfc3339() -> String {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
+/// Emit a `notifications/progress` update from a built-in tool when the
+/// caller opted in via `_meta.progressToken`. Silently no-ops otherwise,
+/// so call sites can sprinkle milestones without conditional logic.
+fn report_milestone(progress: f64, message: &str) {
+    if let Some(ctx) = harn_vm::mcp_progress::current_context() {
+        ctx.report(progress, Some(1.0), Some(message.to_string()));
+    }
 }
 
 fn tool_call_changes_resources(name: &str) -> bool {

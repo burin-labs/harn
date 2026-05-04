@@ -54,7 +54,10 @@ pub fn fail(kind: string) -> string {
 }
 
 pub fn spin(label: string) -> string {
+  var ticks = 0
   while !is_cancelled() {
+    ticks = ticks + 1
+    mcp_report_progress(ticks, {message: "spinning " + label})
     sleep(1ms)
   }
   return "cancelled:" + label
@@ -76,6 +79,21 @@ pipeline main(task) {
     handler: { args -> args.text },
     annotations: {title: "Echo Tool", readOnlyHint: true, idempotentHint: true, openWorldHint: false},
     icons: [{src: "https://example.com/echo.png", mimeType: "image/png", sizes: ["48x48"]}]
+  })
+  tools = tool_define(tools, "ramp", "Emit progress milestones and return a summary", {
+    parameters: {steps: "int"},
+    returns: {type: "string"},
+    handler: { args ->
+      var sent = 0
+      var i = 0
+      while i < args.steps {
+        i = i + 1
+        if mcp_report_progress(i, {total: args.steps, message: "step " + to_string(i)}) {
+          sent = sent + 1
+        }
+      }
+      "ramp:" + to_string(args.steps) + ":sent=" + to_string(sent)
+    }
   })
   mcp_tools(tools)
 
@@ -406,6 +424,14 @@ fn serve_mcp_stdio_exposes_script_registered_surface() {
         &rx,
         json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}),
     );
+    let tool_names: Vec<&str> = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    assert!(tool_names.contains(&"echo"), "tools={tool_names:?}");
+    assert!(tool_names.contains(&"ramp"), "tools={tool_names:?}");
     assert_eq!(tools["result"]["tools"][0]["name"], "echo");
     assert_eq!(
         tools["result"]["tools"][0]["outputSchema"]["type"],
@@ -511,6 +537,66 @@ fn serve_mcp_stdio_exposes_script_registered_surface() {
         .as_str()
         .unwrap()
         .contains("fn main"));
+
+    // Script-defined `ramp` tool emits N progress notifications per
+    // call when the client opts in via _meta.progressToken.
+    writeln!(
+        &mut stdin,
+        "{}",
+        serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "ramp",
+                "arguments": {"steps": 3},
+                "_meta": {"progressToken": "ramp-token"}
+            }
+        }))
+        .unwrap()
+    )
+    .unwrap();
+    stdin.flush().unwrap();
+    let mut ramp_progress: Vec<JsonValue> = Vec::new();
+    let ramp_response = loop {
+        let message = recv_until(&rx, TEST_TIMEOUT, |message| {
+            message["id"] == 7
+                || (message["method"] == "notifications/progress"
+                    && message["params"]["progressToken"] == "ramp-token")
+        });
+        if message["id"] == 7 {
+            break message;
+        }
+        ramp_progress.push(message);
+    };
+    assert_eq!(ramp_progress.len(), 3);
+    assert_eq!(ramp_progress[0]["params"]["progress"], json!(1.0));
+    assert_eq!(ramp_progress[2]["params"]["progress"], json!(3.0));
+    assert_eq!(ramp_progress[2]["params"]["total"], json!(3.0));
+    assert_eq!(
+        ramp_response["result"]["structuredContent"],
+        json!("ramp:3:sent=3")
+    );
+
+    // Without a progressToken, mcp_report_progress no-ops — the
+    // structuredContent reports zero notifications were sent.
+    let no_progress = send_stdio_request(
+        &mut stdin,
+        &rx,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {
+                "name": "ramp",
+                "arguments": {"steps": 2}
+            }
+        }),
+    );
+    assert_eq!(
+        no_progress["result"]["structuredContent"],
+        json!("ramp:2:sent=0")
+    );
 
     drop(stdin);
     let status = child.wait().unwrap();

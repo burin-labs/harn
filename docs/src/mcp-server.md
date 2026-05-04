@@ -385,6 +385,47 @@ request, Harn dispatches it to the embedder via the `HostCallBridge`
 up, Harn responds with `{ action: "decline" }` so the server can fall
 back to a sensible default rather than blocking forever.
 
+## Progress notifications
+
+Per the [MCP progress utility][mcp-progress], a client may opt into
+progress updates by attaching `_meta.progressToken` to a request. While
+the matching tool call is in flight, Harn's `mcp_report_progress(...)`
+builtin emits `notifications/progress` notifications carrying that
+token:
+
+```harn,ignore
+pub fn import_records(rows: list) -> string {
+  var i = 0
+  for row in rows {
+    i = i + 1
+    process(row)
+    mcp_report_progress(i, {total: len(rows), message: "imported " + to_string(i)})
+  }
+  return "imported " + to_string(i) + " records"
+}
+```
+
+The builtin returns `true` when a notification was emitted and `false`
+when it was dropped — either because the client did not opt in via
+`_meta.progressToken`, the call sits outside an MCP tool handler, or
+the value would not strictly increase per the spec's monotonicity
+requirement. Scripts can therefore call it unconditionally without a
+preflight check.
+
+`opts` is optional; supported keys:
+
+- `total`: numeric ceiling so the client can render a progress bar
+- `message`: human-readable status string
+- `token`: override the ambient request token (rarely needed; useful
+  only when fanning progress out for nested work)
+
+The orchestrator-mode `harn.trigger.fire` tool also emits its own
+milestones (`loading runtime`, `preparing event`, `firing trigger`,
+`trigger complete`) so MCP clients can render meaningful progress for
+long trigger fan-outs without any user-side wiring.
+
+[mcp-progress]: https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/progress
+
 ## Observability
 
 Every MCP tool call appends an `observability.action_graph` event and emits a
