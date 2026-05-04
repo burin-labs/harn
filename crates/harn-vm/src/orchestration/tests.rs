@@ -129,7 +129,10 @@ fn workflow_normalization_accepts_tool_registry_nodes() {
     }));
     let graph = normalize_workflow_value(&value).unwrap();
     let node = graph.nodes.get("implement").unwrap();
-    assert_eq!(workflow_tool_names(&node.tools), vec!["read", "run"]);
+    assert_eq!(
+        crate::tool_surface::tool_names_from_spec(&node.tools),
+        vec!["read", "run"]
+    );
 }
 
 #[test]

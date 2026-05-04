@@ -5,13 +5,13 @@ use std::rc::Rc;
 
 use crate::orchestration::{
     append_audit_entry, builtin_ceiling, install_current_mutation_session,
-    install_workflow_skill_context, load_run_record, next_nodes_for, normalize_run_record,
+    install_workflow_skill_context, load_run_record, normalize_run_record,
     normalize_workflow_value, pop_execution_policy, push_execution_policy, validate_workflow,
     workflow_verification_contracts, ArtifactRecord, MutationSessionRecord, RunRecord,
     RunStageRecord, RunTransitionRecord, WorkflowEdge, WorkflowGraph, WorkflowSkillContext,
     WorkflowSkillContextGuard,
 };
-use crate::stdlib::harn_entry::{register_harn_async_entrypoints, HarnAsyncEntrypoint};
+use crate::stdlib::harn_entry::{register_harn_module_entrypoints, HarnEntrypointModule};
 use crate::stdlib::registration::{
     boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
 };
@@ -33,15 +33,10 @@ use super::policy::{
 use super::stage::{execute_stage_attempts, replay_stage};
 use super::usage::{llm_usage_delta, llm_usage_snapshot};
 
-const WORKFLOW_STDLIB_ENTRYPOINTS: &[HarnAsyncEntrypoint] = &[HarnAsyncEntrypoint::new(
-    "workflow_execute",
+const WORKFLOW_STDLIB_ENTRYPOINT_MODULES: &[HarnEntrypointModule] = &[HarnEntrypointModule::new(
     "std/workflow/execute",
-    "workflow_execute",
-)
-.signature("workflow_execute(task, graph, artifacts?, options?)")
-.arity(VmBuiltinArity::Range { min: 2, max: 4 })
-.category("workflow.stdlib")
-.doc("Dispatch the public workflow execution facade through the Harn stdlib.")];
+    "workflow.stdlib",
+)];
 const HOST_WORKFLOW_GRAPH_RUN_BUILTIN: &str = "__host_workflow_graph_run";
 type PostHookFn = Rc<dyn Fn(&str, &str) -> crate::orchestration::PostToolAction>;
 
@@ -174,6 +169,46 @@ const WORKFLOW_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     .category("workflow.host")
     .doc("Apply the workflow/agent transcript auto-compaction primitive to a message list."),
 ];
+
+#[derive(Debug, serde::Deserialize)]
+struct WorkflowJoinReadiness {
+    ready: bool,
+}
+
+async fn workflow_join_ready(
+    graph: &WorkflowGraph,
+    node_id: &str,
+    node: &crate::orchestration::WorkflowNode,
+    completed_nodes: &BTreeSet<String>,
+) -> Result<bool, VmError> {
+    let payload = serde_json::json!({
+        "graph": graph,
+        "node_id": node_id,
+        "node": node,
+        "completed_nodes": completed_nodes.iter().cloned().collect::<Vec<_>>(),
+    });
+    let readiness: WorkflowJoinReadiness = crate::stdlib::call_harn_stdlib_typed(
+        "std/workflow/schedule",
+        "workflow_join_readiness",
+        payload,
+    )
+    .await?;
+    Ok(readiness.ready)
+}
+
+async fn workflow_next_edges(
+    graph: &WorkflowGraph,
+    current: &str,
+    branch: Option<&str>,
+) -> Result<Vec<WorkflowEdge>, VmError> {
+    let payload = serde_json::json!({
+        "graph": graph,
+        "current": current,
+        "branch": branch,
+    });
+    crate::stdlib::call_harn_stdlib_typed("std/workflow/schedule", "workflow_next_edges", payload)
+        .await
+}
 
 fn parse_trigger_event_option(
     value: Option<&VmValue>,
@@ -544,28 +579,11 @@ pub(in crate::stdlib) async fn execute_workflow(
             graph.nodes.get(&current).cloned().ok_or_else(|| {
                 VmError::Runtime(format!("workflow_execute: missing node {current}"))
             })?;
-        if node.kind == "join" {
-            let incoming = graph
-                .edges
-                .iter()
-                .filter(|edge| edge.to == current)
-                .map(|edge| edge.from.clone())
-                .collect::<Vec<_>>();
-            let required = node.join_policy.min_completed.unwrap_or(
-                if node.join_policy.require_all_inputs || node.join_policy.strategy == "all" {
-                    incoming.len()
-                } else {
-                    1
-                },
-            );
-            let completed_inputs = incoming
-                .iter()
-                .filter(|input| completed_nodes.contains(*input))
-                .count();
-            if completed_inputs < required {
-                super::artifact::enqueue_unique(&mut ready_nodes, current.clone());
-                continue;
-            }
+        if node.kind == "join"
+            && !workflow_join_ready(&graph, &current, &node, &completed_nodes).await?
+        {
+            super::artifact::enqueue_unique(&mut ready_nodes, current.clone());
+            continue;
         }
         let mut node = apply_runtime_node_overrides(node, &options);
         crate::orchestration::inject_workflow_verification_contracts(
@@ -738,7 +756,7 @@ pub(in crate::stdlib) async fn execute_workflow(
         append_child_run_record(&mut run, &stage_id, &executed.result);
         completed_nodes.insert(current.clone());
 
-        let next_edges = next_nodes_for(&graph, &current, executed.branch.as_deref());
+        let next_edges = workflow_next_edges(&graph, &current, executed.branch.as_deref()).await?;
         for edge in next_edges {
             super::artifact::enqueue_unique(&mut ready_nodes, edge.to.clone());
             run.transitions.push(RunTransitionRecord {
@@ -794,7 +812,7 @@ pub(in crate::stdlib) async fn execute_workflow(
 pub(crate) fn register_workflow_builtins(vm: &mut Vm) {
     register_sync_builtins(vm, WORKFLOW_SYNC_PRIMITIVES);
     register_async_builtins(vm, WORKFLOW_ASYNC_PRIMITIVES);
-    register_harn_async_entrypoints(vm, WORKFLOW_STDLIB_ENTRYPOINTS);
+    register_harn_module_entrypoints(vm, WORKFLOW_STDLIB_ENTRYPOINT_MODULES);
 }
 
 fn workflow_graph_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

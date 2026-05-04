@@ -33,9 +33,6 @@ pub use command_policy::*;
 mod compaction;
 pub use compaction::*;
 
-mod stdlib_bridge;
-pub(crate) use stdlib_bridge::*;
-
 mod artifacts;
 pub use artifacts::*;
 

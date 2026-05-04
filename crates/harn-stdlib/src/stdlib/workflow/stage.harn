@@ -1,0 +1,319 @@
+fn __stage_list(value) {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __stage_string(value, fallback = "") {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __stage_bool(value, fallback = false) {
+  if type_of(value) == "bool" {
+    return value
+  }
+  return fallback
+}
+
+fn __stage_i64(value) {
+  if type_of(value) == "int" {
+    return value
+  }
+  return nil
+}
+
+fn __stage_visible_text(result) {
+  return __stage_string(result?.visible_text ?? result?.text, "")
+}
+
+fn __stage_exit_status(result) {
+  let value = result?.exit_status ?? result?.status_code ?? result?.status
+  return __stage_i64(value)
+}
+
+fn __stage_artifact_ids(artifacts) {
+  var ids = []
+  for artifact in artifacts {
+    if type_of(artifact?.id) == "string" {
+      ids = ids.push(artifact.id)
+    }
+  }
+  return ids
+}
+
+fn __stage_first_string(values, fallback) {
+  if type_of(values) != "list" || len(values) == 0 || type_of(values[0]) != "string" {
+    return fallback
+  }
+  return values[0]
+}
+
+fn __stage_artifact_from_value(node_id, kind, index, value, lineage, title) {
+  return {
+    _type: "artifact",
+    kind: kind,
+    title: title,
+    text: if type_of(value) == "string" {
+      value
+    } else {
+      nil
+    },
+    data: value,
+    source: node_id,
+    freshness: "fresh",
+    relevance: 1.0,
+    lineage: lineage,
+    stage: node_id,
+    metadata: {index: index},
+  }
+}
+
+fn __stage_texts(artifacts) {
+  var texts = []
+  for artifact in artifacts {
+    if type_of(artifact?.text) == "string" {
+      texts = texts.push(artifact.text)
+    }
+  }
+  return texts
+}
+
+fn __stage_artifacts_contain_text(artifacts, needle) {
+  for artifact in artifacts {
+    if type_of(artifact?.text) == "string" && contains(artifact.text, needle) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __stage_artifacts_contain_kind(artifacts, kind) {
+  for artifact in artifacts {
+    if artifact?.kind == kind {
+      return true
+    }
+  }
+  return false
+}
+
+fn __stage_prepare_fork() {
+  return {
+    handled: true,
+    result: {status: "completed", text: "forked"},
+    artifacts: [],
+    outcome: "forked",
+    branch: "fork",
+  }
+}
+
+fn __stage_prepare_join() {
+  return {
+    handled: true,
+    result: {status: "completed", text: "joined"},
+    artifacts: [],
+    outcome: "joined",
+    branch: "join",
+  }
+}
+
+fn __stage_prepare_condition(node, artifacts) {
+  let condition = workflow_evaluate_condition({metadata: node?.metadata ?? {}, artifacts: artifacts})
+  return {
+    handled: true,
+    result: {
+      status: "completed",
+      text: if condition.matched {
+        "true"
+      } else {
+        "false"
+      },
+    },
+    artifacts: [],
+    outcome: if condition.matched {
+      "condition_true"
+    } else {
+      "condition_false"
+    },
+    branch: if condition.matched {
+      "true"
+    } else {
+      "false"
+    },
+  }
+}
+
+fn __stage_prepare_reduce(node_id, node, artifacts) {
+  let separator = node?.reduce_policy?.separator ?? "\n\n"
+  let reduced_text = __stage_texts(artifacts).join(separator)
+  let output_kind = __stage_first_string(node?.output_contract?.output_kinds, "summary")
+  return {
+    handled: true,
+    result: {status: "completed", text: reduced_text},
+    artifacts: [
+      __stage_artifact_from_value(
+        node_id,
+        output_kind,
+        0,
+        reduced_text,
+        __stage_artifact_ids(artifacts),
+        "reduce " + node_id + " output",
+      ),
+    ],
+    outcome: "reduced",
+    branch: "reduced",
+  }
+}
+
+fn __stage_prepare_escalation(node_id, node, consumed_artifact_ids) {
+  let reason = node?.escalation_policy?.reason ?? "manual review required"
+  let output_kind = __stage_first_string(node?.output_contract?.output_kinds, "plan")
+  return {
+    handled: true,
+    result: {status: "completed", text: reason},
+    artifacts: [
+      __stage_artifact_from_value(
+        node_id,
+        output_kind,
+        0,
+        {queue: node?.escalation_policy?.queue, level: node?.escalation_policy?.level, reason: reason},
+        consumed_artifact_ids,
+        "escalation " + node_id,
+      ),
+    ],
+    outcome: "escalated",
+    branch: "escalated",
+  }
+}
+
+/** workflow_evaluate_verification. */
+pub fn workflow_evaluate_verification(config = nil) {
+  let verify = config?.verify
+  let result = config?.result ?? {}
+  if type_of(verify) != "dict" {
+    return {kind: "none", ok: true}
+  }
+  let visible_text = __stage_visible_text(result)
+  let exit_status = __stage_exit_status(result)
+  var checks = []
+  if type_of(verify?.assert_text) == "string" {
+    checks = checks
+      .push(
+      {kind: "assert_text", ok: contains(visible_text, verify.assert_text), expected: verify.assert_text},
+    )
+  }
+  if type_of(verify?.expect_status) == "int" {
+    checks = checks
+      .push(
+      {
+        kind: "expect_status",
+        ok: exit_status == verify.expect_status,
+        expected: verify.expect_status,
+        actual: exit_status,
+      },
+    )
+  }
+  if len(checks) == 0 {
+    return {kind: "none", ok: true}
+  }
+  var ok = true
+  for check in checks {
+    if !__stage_bool(check?.ok, false) {
+      ok = false
+    }
+  }
+  return {kind: "composite", ok: ok, checks: checks}
+}
+
+/** workflow_evaluate_condition. */
+pub fn workflow_evaluate_condition(config = nil) {
+  let artifacts = __stage_list(config?.artifacts)
+  let metadata = config?.metadata ?? {}
+  let consumed = __stage_artifact_ids(artifacts)
+  if type_of(metadata?.contains_text) == "string" {
+    return {
+      matched: __stage_artifacts_contain_text(artifacts, metadata.contains_text),
+      consumed_artifact_ids: consumed,
+    }
+  }
+  if type_of(metadata?.artifact_kind) == "string" {
+    return {
+      matched: __stage_artifacts_contain_kind(artifacts, metadata.artifact_kind),
+      consumed_artifact_ids: consumed,
+    }
+  }
+  return {matched: len(artifacts) > 0, consumed_artifact_ids: consumed}
+}
+
+/** workflow_classify_stage_outcome. */
+pub fn workflow_classify_stage_outcome(config = nil) {
+  let node_kind = __stage_string(config?.node_kind, "")
+  let result = config?.result ?? {}
+  let verification = config?.verification ?? {}
+  let verified_ok = __stage_bool(verification?.ok, true)
+  let result_status = __stage_string(result?.status, "completed")
+  let stage_succeeded = if node_kind == "verify" {
+    verified_ok
+  } else {
+    result_status == "done" || result_status == "completed"
+  }
+  let outcome = if node_kind == "verify" {
+    if verified_ok {
+      "verified"
+    } else {
+      "verification_failed"
+    }
+  } else {
+    if !stage_succeeded {
+      result_status
+    } else {
+      if node_kind == "subagent" {
+        "subagent_completed"
+      } else {
+        "success"
+      }
+    }
+  }
+  let branch = if node_kind == "verify" {
+    if verified_ok {
+      "passed"
+    } else {
+      "failed"
+    }
+  } else {
+    if stage_succeeded {
+      "success"
+    } else {
+      "failed"
+    }
+  }
+  return {outcome: outcome, branch: branch}
+}
+
+/** workflow_prepare_static_stage. */
+pub fn workflow_prepare_static_stage(config = nil) {
+  let node_id = __stage_string(config?.node_id, "stage")
+  let node = config?.node ?? {}
+  let kind = __stage_string(node?.kind, "")
+  let artifacts = __stage_list(config?.artifacts)
+  let consumed_artifact_ids = __stage_artifact_ids(artifacts)
+  if kind == "fork" {
+    return __stage_prepare_fork()
+  }
+  if kind == "join" {
+    return __stage_prepare_join()
+  }
+  if kind == "condition" {
+    return __stage_prepare_condition(node, artifacts)
+  }
+  if kind == "reduce" {
+    return __stage_prepare_reduce(node_id, node, artifacts)
+  }
+  if kind == "escalation" {
+    return __stage_prepare_escalation(node_id, node, consumed_artifact_ids)
+  }
+  return {handled: false}
+}

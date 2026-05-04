@@ -3,9 +3,9 @@
 use std::collections::BTreeMap;
 
 use crate::orchestration::{
-    append_audit_entry, builtin_ceiling, normalize_workflow_value, workflow_tool_policy_from_tools,
-    CapabilityPolicy, WorkflowGraph,
+    append_audit_entry, builtin_ceiling, normalize_workflow_value, CapabilityPolicy, WorkflowGraph,
 };
+use crate::tool_surface::tool_capability_policy_from_spec;
 use crate::value::{VmError, VmValue};
 
 use super::convert::{filter_workflow_tools, filter_workflow_tools_vm, workflow_graph_to_vm};
@@ -105,7 +105,7 @@ pub(super) fn effective_node_policy(
         .intersect(&node.capability_policy)
         .map_err(VmError::Runtime)?;
     node_policy
-        .intersect(&workflow_tool_policy_from_tools(&node.tools))
+        .intersect(&tool_capability_policy_from_spec(&node.tools))
         .map_err(VmError::Runtime)
 }
 

@@ -11,7 +11,7 @@ use super::{
     ModelPolicy, NativeToolFallbackPolicy, ReducePolicy, RetryPolicy, StageContract,
 };
 use crate::llm::{extract_llm_options, vm_call_llm_full, vm_value_to_json};
-use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolArgSchema, ToolKind};
+use crate::tool_surface::{tool_capability_policy_from_spec, tool_names_from_spec};
 use crate::value::{VmError, VmValue};
 
 pub const WORKFLOW_VERIFICATION_CONTRACTS_METADATA_KEY: &str = "workflow_verification_contracts";
@@ -453,233 +453,6 @@ pub fn stage_verification_contracts(
         push_unique_contract(&mut contracts, local_contract);
     }
     Ok(contracts)
-}
-
-pub fn workflow_tool_names(value: &serde_json::Value) -> Vec<String> {
-    match value {
-        serde_json::Value::Null => Vec::new(),
-        serde_json::Value::Array(items) => items
-            .iter()
-            .filter_map(|item| match item {
-                serde_json::Value::Object(map) => map
-                    .get("name")
-                    .and_then(|value| value.as_str())
-                    .filter(|name| !name.is_empty())
-                    .map(|name| name.to_string()),
-                _ => None,
-            })
-            .collect(),
-        serde_json::Value::Object(map) => {
-            if map.get("_type").and_then(|value| value.as_str()) == Some("tool_registry") {
-                return map
-                    .get("tools")
-                    .map(workflow_tool_names)
-                    .unwrap_or_default();
-            }
-            map.get("name")
-                .and_then(|value| value.as_str())
-                .filter(|name| !name.is_empty())
-                .map(|name| vec![name.to_string()])
-                .unwrap_or_default()
-        }
-        _ => Vec::new(),
-    }
-}
-
-fn max_side_effect_level(levels: impl Iterator<Item = String>) -> Option<String> {
-    fn rank(v: &str) -> usize {
-        match v {
-            "none" => 0,
-            "read_only" => 1,
-            "workspace_write" => 2,
-            "process_exec" => 3,
-            "network" => 4,
-            _ => 5,
-        }
-    }
-    levels.max_by_key(|level| rank(level))
-}
-
-fn parse_tool_kind(value: Option<&serde_json::Value>) -> ToolKind {
-    match value.and_then(|v| v.as_str()).unwrap_or("") {
-        "read" => ToolKind::Read,
-        "edit" => ToolKind::Edit,
-        "delete" => ToolKind::Delete,
-        "move" => ToolKind::Move,
-        "search" => ToolKind::Search,
-        "execute" => ToolKind::Execute,
-        "think" => ToolKind::Think,
-        "fetch" => ToolKind::Fetch,
-        _ => ToolKind::Other,
-    }
-}
-
-fn parse_tool_annotations(map: &serde_json::Map<String, serde_json::Value>) -> ToolAnnotations {
-    let policy = map
-        .get("policy")
-        .and_then(|value| value.as_object())
-        .cloned()
-        .unwrap_or_default();
-
-    let capabilities = policy
-        .get("capabilities")
-        .and_then(|value| value.as_object())
-        .map(|caps| {
-            caps.iter()
-                .map(|(capability, ops)| {
-                    let values = ops
-                        .as_array()
-                        .map(|items| {
-                            items
-                                .iter()
-                                .filter_map(|item| item.as_str().map(|s| s.to_string()))
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default();
-                    (capability.clone(), values)
-                })
-                .collect::<BTreeMap<_, _>>()
-        })
-        .unwrap_or_default();
-
-    // Accept both the structured `policy.arg_schema` object and the legacy
-    // flat fields on `policy` so pipelines can migrate gradually.
-    let arg_schema = if let Some(schema) = policy.get("arg_schema") {
-        serde_json::from_value::<ToolArgSchema>(schema.clone()).unwrap_or_default()
-    } else {
-        ToolArgSchema {
-            path_params: policy
-                .get("path_params")
-                .and_then(|value| value.as_array())
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(|item| item.as_str().map(|s| s.to_string()))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default(),
-            arg_aliases: policy
-                .get("arg_aliases")
-                .and_then(|value| value.as_object())
-                .map(|aliases| {
-                    aliases
-                        .iter()
-                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                        .collect::<BTreeMap<_, _>>()
-                })
-                .unwrap_or_default(),
-            required: policy
-                .get("required")
-                .and_then(|value| value.as_array())
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(|item| item.as_str().map(|s| s.to_string()))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default(),
-        }
-    };
-
-    let kind = parse_tool_kind(policy.get("kind"));
-    let side_effect_level = policy
-        .get("side_effect_level")
-        .and_then(|value| value.as_str())
-        .map(SideEffectLevel::parse)
-        .unwrap_or_default();
-
-    ToolAnnotations {
-        kind,
-        side_effect_level,
-        arg_schema,
-        capabilities,
-        emits_artifacts: policy
-            .get("emits_artifacts")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false),
-        result_readers: policy
-            .get("result_readers")
-            .or_else(|| policy.get("readable_result_routes"))
-            .and_then(|value| value.as_array())
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| item.as_str().map(|s| s.to_string()))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default(),
-        inline_result: policy
-            .get("inline_result")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false),
-    }
-}
-
-pub fn workflow_tool_annotations(value: &serde_json::Value) -> BTreeMap<String, ToolAnnotations> {
-    match value {
-        serde_json::Value::Null => BTreeMap::new(),
-        serde_json::Value::Array(items) => items
-            .iter()
-            .filter_map(|item| match item {
-                serde_json::Value::Object(map) => map
-                    .get("name")
-                    .and_then(|value| value.as_str())
-                    .filter(|name| !name.is_empty())
-                    .map(|name| (name.to_string(), parse_tool_annotations(map))),
-                _ => None,
-            })
-            .collect(),
-        serde_json::Value::Object(map) => {
-            if map.get("_type").and_then(|value| value.as_str()) == Some("tool_registry") {
-                return map
-                    .get("tools")
-                    .map(workflow_tool_annotations)
-                    .unwrap_or_default();
-            }
-            map.get("name")
-                .and_then(|value| value.as_str())
-                .filter(|name| !name.is_empty())
-                .map(|name| {
-                    let mut annotations = BTreeMap::new();
-                    annotations.insert(name.to_string(), parse_tool_annotations(map));
-                    annotations
-                })
-                .unwrap_or_default()
-        }
-        _ => BTreeMap::new(),
-    }
-}
-
-pub fn workflow_tool_policy_from_tools(value: &serde_json::Value) -> CapabilityPolicy {
-    let tools = workflow_tool_names(value);
-    let tool_annotations = workflow_tool_annotations(value);
-    let mut capabilities: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for annotations in tool_annotations.values() {
-        for (capability, ops) in &annotations.capabilities {
-            let entry = capabilities.entry(capability.clone()).or_default();
-            for op in ops {
-                if !entry.contains(op) {
-                    entry.push(op.clone());
-                }
-            }
-            entry.sort();
-        }
-    }
-    let side_effect_level = max_side_effect_level(
-        tool_annotations
-            .values()
-            .map(|annotations| annotations.side_effect_level.as_str().to_string())
-            .filter(|level| level != "none"),
-    );
-    CapabilityPolicy {
-        tools,
-        capabilities,
-        workspace_roots: Vec::new(),
-        side_effect_level,
-        recursion_limit: None,
-        tool_arg_constraints: Vec::new(),
-        tool_annotations,
-    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1318,7 +1091,7 @@ pub async fn execute_stage_node(
     let rendered_context = prepared_prompt.rendered_context;
     let rendered_verification = prepared_prompt.rendered_verification;
 
-    let tool_names = workflow_tool_names(&node.tools);
+    let tool_names = tool_names_from_spec(&node.tools);
     let stage_agent_options = super::prepare_workflow_stage_agent_options(
         node,
         &stage_session_id,
@@ -1408,7 +1181,7 @@ pub async fn execute_stage_node(
 
         if stage_agent_options.run_agent_loop {
             let agent_loop_options = Some(stage_agent_options.agent_loop_options_vm_dict());
-            let tool_policy = workflow_tool_policy_from_tools(&node.tools);
+            let tool_policy = tool_capability_policy_from_spec(&node.tools);
             let effective_policy = tool_policy
                 .intersect(&node.capability_policy)
                 .map_err(VmError::Runtime)?;
@@ -1723,35 +1496,6 @@ pub async fn execute_stage_node(
     .normalize();
 
     Ok((llm_result, vec![artifact], transcript))
-}
-
-pub fn next_nodes_for(
-    graph: &WorkflowGraph,
-    current: &str,
-    branch: Option<&str>,
-) -> Vec<WorkflowEdge> {
-    let mut matching: Vec<WorkflowEdge> = graph
-        .edges
-        .iter()
-        .filter(|edge| edge.from == current && edge.branch.as_deref() == branch)
-        .cloned()
-        .collect();
-    if matching.is_empty() {
-        matching = graph
-            .edges
-            .iter()
-            .filter(|edge| edge.from == current && edge.branch.is_none())
-            .cloned()
-            .collect();
-    }
-    matching
-}
-
-pub fn next_node_for(graph: &WorkflowGraph, current: &str, branch: &str) -> Option<String> {
-    next_nodes_for(graph, current, Some(branch))
-        .into_iter()
-        .next()
-        .map(|edge| edge.to)
 }
 
 pub fn append_audit_entry(

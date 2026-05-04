@@ -1,0 +1,24 @@
+composite
+true
+2
+false
+0
+true
+["a","b"]
+true
+verification_failed
+failed
+stuck
+failed
+success
+success
+subagent_completed
+success
+true
+condition_true
+one / two
+plan
+["a","b"]
+needs owner
+review
+escalated

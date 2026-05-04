@@ -608,17 +608,34 @@ fn parse_structured_sub_agent_data(
     })
 }
 
-fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoopConfig, VmError> {
-    let options = Some(spec.options.clone());
-    let profile_defaults = crate::llm::agent_loop_profile_defaults(&options, "sub_agent_run")?;
+async fn resolve_sub_agent_loop_options(
+    spec: &SubAgentRunSpec,
+) -> Result<BTreeMap<String, VmValue>, VmError> {
+    let resolved = crate::stdlib::call_harn_stdlib_function(
+        "std/agent/options",
+        "agent_loop_options",
+        &[VmValue::Dict(Rc::new(spec.options.clone()))],
+    )
+    .await?;
+    resolved
+        .as_dict()
+        .cloned()
+        .ok_or_else(|| VmError::Runtime("agent_loop_options must return a dict".to_string()))
+}
+
+async fn sub_agent_loop_options(
+    spec: &SubAgentRunSpec,
+) -> Result<crate::llm::AgentLoopConfig, VmError> {
+    let options = Some(resolve_sub_agent_loop_options(spec).await?);
     let max_iterations = crate::llm::helpers::opt_int(&options, "max_iterations")
-        .unwrap_or(profile_defaults.max_iterations);
-    let max_nudges =
-        crate::llm::helpers::opt_int(&options, "max_nudges").unwrap_or(profile_defaults.max_nudges);
+        .ok_or_else(|| VmError::Runtime("agent_loop_options omitted max_iterations".to_string()))?;
+    let max_nudges = crate::llm::helpers::opt_int(&options, "max_nudges")
+        .ok_or_else(|| VmError::Runtime("agent_loop_options omitted max_nudges".to_string()))?;
     let tool_retries = crate::llm::helpers::opt_int(&options, "tool_retries")
-        .unwrap_or(profile_defaults.tool_retries);
+        .ok_or_else(|| VmError::Runtime("agent_loop_options omitted tool_retries".to_string()))?;
     let schema_retries = crate::llm::helpers::opt_int(&options, "schema_retries")
-        .unwrap_or(profile_defaults.schema_retries) as usize;
+        .ok_or_else(|| VmError::Runtime("agent_loop_options omitted schema_retries".to_string()))?
+        as usize;
     let tool_backoff_ms = crate::llm::helpers::opt_int(&options, "tool_backoff_ms").unwrap_or(1000);
     let provider = crate::llm::helpers::opt_str(&options, "provider").unwrap_or_default();
     let model = crate::llm::helpers::opt_str(&options, "model").unwrap_or_default();
@@ -686,7 +703,8 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
         daemon: false,
         daemon_config: Default::default(),
         llm_retries: crate::llm::helpers::opt_int(&options, "llm_retries")
-            .unwrap_or(profile_defaults.llm_retries) as usize,
+            .ok_or_else(|| VmError::Runtime("agent_loop_options omitted llm_retries".to_string()))?
+            as usize,
         llm_backoff_ms: crate::llm::helpers::opt_int(&options, "llm_backoff_ms").unwrap_or(2000)
             as u64,
         token_budget: crate::llm::helpers::opt_int(&options, "token_budget"),
@@ -763,7 +781,7 @@ pub(super) async fn execute_sub_agent(
         VmValue::Dict(Rc::new(spec.options.clone())),
     ];
     let mut llm_opts = crate::llm::helpers::extract_llm_options(&args)?;
-    let config = sub_agent_loop_options(&spec)?;
+    let config = sub_agent_loop_options(&spec).await?;
     let result = crate::llm::run_agent_loop_internal(&mut llm_opts, config).await;
 
     let (result, transcript) = match result {

@@ -16,6 +16,16 @@ pub struct StdlibPromptAsset {
     pub source: &'static str,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StdlibPublicFunction {
+    pub name: String,
+    pub signature: String,
+    pub required_params: usize,
+    pub total_params: usize,
+    pub variadic: bool,
+    pub doc: Option<String>,
+}
+
 pub const STDLIB_SOURCES: &[StdlibSource] = &[
     StdlibSource {
         module: "text",
@@ -214,6 +224,18 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/workflow/options.harn"),
     },
     StdlibSource {
+        module: "workflow/stage",
+        source: include_str!("stdlib/workflow/stage.harn"),
+    },
+    StdlibSource {
+        module: "workflow/map",
+        source: include_str!("stdlib/workflow/map.harn"),
+    },
+    StdlibSource {
+        module: "workflow/schedule",
+        source: include_str!("stdlib/workflow/schedule.harn"),
+    },
+    StdlibSource {
         module: "workflow/execute",
         source: include_str!("stdlib/workflow/execute.harn"),
     },
@@ -345,11 +367,149 @@ pub fn get_stdlib_prompt_asset(path: &str) -> Option<&'static str> {
         .find_map(|entry| (entry.path == path).then_some(entry.source))
 }
 
+pub fn public_functions_for_module(module: &str) -> Vec<StdlibPublicFunction> {
+    let Some(source) = get_stdlib_source(module) else {
+        return Vec::new();
+    };
+    public_functions_from_source(source)
+}
+
+fn public_functions_from_source(source: &str) -> Vec<StdlibPublicFunction> {
+    let mut out = Vec::new();
+    let mut doc: Option<String> = None;
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let line = lines[index].trim();
+        if line.starts_with("/**") {
+            let (parsed, next) = parse_harndoc(&lines, index);
+            doc = parsed;
+            index = next;
+            continue;
+        }
+        if let Some(function) = parse_public_function_line(line, doc.take()) {
+            out.push(function);
+        } else if !line.is_empty() && !line.starts_with("//") {
+            doc = None;
+        }
+        index += 1;
+    }
+    out
+}
+
+fn parse_harndoc(lines: &[&str], start: usize) -> (Option<String>, usize) {
+    let mut parts = Vec::new();
+    let mut index = start;
+    while index < lines.len() {
+        let mut line = lines[index].trim();
+        if index == start {
+            line = line.trim_start_matches("/**").trim();
+        }
+        let done = line.ends_with("*/");
+        line = line.trim_end_matches("*/").trim();
+        line = line.trim_start_matches('*').trim();
+        if !line.is_empty() {
+            parts.push(line.to_string());
+        }
+        index += 1;
+        if done {
+            break;
+        }
+    }
+    let text = parts.join("\n").trim().to_string();
+    ((!text.is_empty()).then_some(text), index)
+}
+
+fn parse_public_function_line(line: &str, doc: Option<String>) -> Option<StdlibPublicFunction> {
+    let rest = line.strip_prefix("pub fn ")?.trim();
+    let name_end = rest.find('(')?;
+    let name = rest[..name_end].trim();
+    if name.is_empty() {
+        return None;
+    }
+    let params_start = name_end + 1;
+    let params_len = matching_paren_len(&rest[params_start..])?;
+    let params = &rest[params_start..params_start + params_len];
+    let after = rest[params_start + params_len + 1..].trim();
+    let return_type = after
+        .strip_prefix("->")
+        .and_then(|tail| tail.split('{').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let signature = match return_type {
+        Some(ret) => format!("{name}({params}) -> {ret}"),
+        None => format!("{name}({params})"),
+    };
+    let param_parts = split_top_level_params(params);
+    let total_params = param_parts
+        .iter()
+        .filter(|param| !param.trim().is_empty())
+        .count();
+    let variadic = param_parts
+        .iter()
+        .any(|param| param.trim_start().starts_with("..."));
+    let required_params = param_parts
+        .iter()
+        .filter(|param| {
+            let param = param.trim();
+            !param.is_empty() && !param.contains('=') && !param.starts_with("...")
+        })
+        .count();
+    Some(StdlibPublicFunction {
+        name: name.to_string(),
+        signature,
+        required_params,
+        total_params,
+        variadic,
+        doc,
+    })
+}
+
+fn matching_paren_len(input: &str) -> Option<usize> {
+    let mut depth = 1usize;
+    for (offset, ch) in input.char_indices() {
+        match ch {
+            '(' | '[' | '{' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(offset);
+                }
+            }
+            ']' | '}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn split_top_level_params(params: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0isize;
+    let mut start = 0usize;
+    for (offset, ch) in params.char_indices() {
+        match ch {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(&params[start..offset]);
+                start = offset + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&params[start..]);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::{get_stdlib_prompt_asset, get_stdlib_source, STDLIB_PROMPT_ASSETS, STDLIB_SOURCES};
+    use super::{
+        get_stdlib_prompt_asset, get_stdlib_source, public_functions_for_module,
+        STDLIB_PROMPT_ASSETS, STDLIB_SOURCES,
+    };
 
     #[test]
     fn stdlib_sources_are_non_empty() {
@@ -422,5 +582,18 @@ mod tests {
                 "{path} should resolve"
             );
         }
+    }
+
+    #[test]
+    fn public_function_catalog_derives_signatures_from_harn_source() {
+        let exports = public_functions_for_module("workflow/execute");
+        assert_eq!(exports.len(), 1);
+        assert_eq!(exports[0].name, "workflow_execute");
+        assert_eq!(
+            exports[0].signature,
+            "workflow_execute(task, graph, artifacts = nil, options = nil)"
+        );
+        assert_eq!(exports[0].required_params, 2);
+        assert_eq!(exports[0].total_params, 4);
     }
 }

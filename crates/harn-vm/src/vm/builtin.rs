@@ -79,6 +79,11 @@ impl VmBuiltinMetadata {
         self
     }
 
+    pub fn signature_owned(mut self, signature: impl Into<Cow<'static, str>>) -> Self {
+        self.signature = Some(signature.into());
+        self
+    }
+
     pub fn arity(mut self, arity: VmBuiltinArity) -> Self {
         self.arity = Some(arity);
         self
@@ -89,8 +94,18 @@ impl VmBuiltinMetadata {
         self
     }
 
+    pub fn category_owned(mut self, category: impl Into<Cow<'static, str>>) -> Self {
+        self.category = Some(category.into());
+        self
+    }
+
     pub fn doc_static(mut self, doc: &'static str) -> Self {
         self.doc = Some(Cow::Borrowed(doc));
+        self
+    }
+
+    pub fn doc_owned(mut self, doc: impl Into<Cow<'static, str>>) -> Self {
+        self.doc = Some(doc.into());
         self
     }
 

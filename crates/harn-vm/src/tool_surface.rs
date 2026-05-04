@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::llm::tools::text_tool_call_tag_pairs;
 use crate::orchestration::{CapabilityPolicy, ToolApprovalPolicy};
-use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolKind};
+use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolArgSchema, ToolKind};
 use crate::value::VmValue;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -75,6 +75,231 @@ impl ToolSurfaceReport {
             .iter()
             .all(|d| d.severity != ToolSurfaceSeverity::Error);
         Self { valid, diagnostics }
+    }
+}
+
+pub fn tool_names_from_spec(value: &serde_json::Value) -> Vec<String> {
+    match value {
+        serde_json::Value::Null => Vec::new(),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .filter_map(|item| match item {
+                serde_json::Value::Object(map) => map
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .filter(|name| !name.is_empty())
+                    .map(ToOwned::to_owned),
+                _ => None,
+            })
+            .collect(),
+        serde_json::Value::Object(map) => {
+            if map.get("_type").and_then(|value| value.as_str()) == Some("tool_registry") {
+                return map
+                    .get("tools")
+                    .map(tool_names_from_spec)
+                    .unwrap_or_default();
+            }
+            map.get("name")
+                .and_then(|value| value.as_str())
+                .filter(|name| !name.is_empty())
+                .map(|name| vec![name.to_string()])
+                .unwrap_or_default()
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn max_side_effect_level(levels: impl Iterator<Item = String>) -> Option<String> {
+    fn rank(v: &str) -> usize {
+        match v {
+            "none" => 0,
+            "read_only" => 1,
+            "workspace_write" => 2,
+            "process_exec" => 3,
+            "network" => 4,
+            _ => 5,
+        }
+    }
+    levels.max_by_key(|level| rank(level))
+}
+
+fn parse_tool_kind(value: Option<&serde_json::Value>) -> ToolKind {
+    match value.and_then(|v| v.as_str()).unwrap_or("") {
+        "read" => ToolKind::Read,
+        "edit" => ToolKind::Edit,
+        "delete" => ToolKind::Delete,
+        "move" => ToolKind::Move,
+        "search" => ToolKind::Search,
+        "execute" => ToolKind::Execute,
+        "think" => ToolKind::Think,
+        "fetch" => ToolKind::Fetch,
+        _ => ToolKind::Other,
+    }
+}
+
+fn parse_tool_annotations(map: &serde_json::Map<String, serde_json::Value>) -> ToolAnnotations {
+    let policy = map
+        .get("policy")
+        .and_then(|value| value.as_object())
+        .cloned()
+        .unwrap_or_default();
+
+    let capabilities = policy
+        .get("capabilities")
+        .and_then(|value| value.as_object())
+        .map(|caps| {
+            caps.iter()
+                .map(|(capability, ops)| {
+                    let values = ops
+                        .as_array()
+                        .map(|items| {
+                            items
+                                .iter()
+                                .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    (capability.clone(), values)
+                })
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
+
+    let arg_schema = if let Some(schema) = policy.get("arg_schema") {
+        serde_json::from_value::<ToolArgSchema>(schema.clone()).unwrap_or_default()
+    } else {
+        ToolArgSchema {
+            path_params: policy
+                .get("path_params")
+                .and_then(|value| value.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+            arg_aliases: policy
+                .get("arg_aliases")
+                .and_then(|value| value.as_object())
+                .map(|aliases| {
+                    aliases
+                        .iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect::<BTreeMap<_, _>>()
+                })
+                .unwrap_or_default(),
+            required: policy
+                .get("required")
+                .and_then(|value| value.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+        }
+    };
+
+    let kind = parse_tool_kind(policy.get("kind"));
+    let side_effect_level = policy
+        .get("side_effect_level")
+        .and_then(|value| value.as_str())
+        .map(SideEffectLevel::parse)
+        .unwrap_or_default();
+
+    ToolAnnotations {
+        kind,
+        side_effect_level,
+        arg_schema,
+        capabilities,
+        emits_artifacts: policy
+            .get("emits_artifacts")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
+        result_readers: policy
+            .get("result_readers")
+            .or_else(|| policy.get("readable_result_routes"))
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+        inline_result: policy
+            .get("inline_result")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
+    }
+}
+
+pub fn tool_annotations_from_spec(value: &serde_json::Value) -> BTreeMap<String, ToolAnnotations> {
+    match value {
+        serde_json::Value::Null => BTreeMap::new(),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .filter_map(|item| match item {
+                serde_json::Value::Object(map) => map
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .filter(|name| !name.is_empty())
+                    .map(|name| (name.to_string(), parse_tool_annotations(map))),
+                _ => None,
+            })
+            .collect(),
+        serde_json::Value::Object(map) => {
+            if map.get("_type").and_then(|value| value.as_str()) == Some("tool_registry") {
+                return map
+                    .get("tools")
+                    .map(tool_annotations_from_spec)
+                    .unwrap_or_default();
+            }
+            map.get("name")
+                .and_then(|value| value.as_str())
+                .filter(|name| !name.is_empty())
+                .map(|name| {
+                    let mut annotations = BTreeMap::new();
+                    annotations.insert(name.to_string(), parse_tool_annotations(map));
+                    annotations
+                })
+                .unwrap_or_default()
+        }
+        _ => BTreeMap::new(),
+    }
+}
+
+pub fn tool_capability_policy_from_spec(value: &serde_json::Value) -> CapabilityPolicy {
+    let tools = tool_names_from_spec(value);
+    let tool_annotations = tool_annotations_from_spec(value);
+    let mut capabilities: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for annotations in tool_annotations.values() {
+        for (capability, ops) in &annotations.capabilities {
+            let entry = capabilities.entry(capability.clone()).or_default();
+            for op in ops {
+                if !entry.contains(op) {
+                    entry.push(op.clone());
+                }
+            }
+            entry.sort();
+        }
+    }
+    let side_effect_level = max_side_effect_level(
+        tool_annotations
+            .values()
+            .map(|annotations| annotations.side_effect_level.as_str().to_string())
+            .filter(|level| level != "none"),
+    );
+    CapabilityPolicy {
+        tools,
+        capabilities,
+        workspace_roots: Vec::new(),
+        side_effect_level,
+        recursion_limit: None,
+        tool_arg_constraints: Vec::new(),
+        tool_annotations,
     }
 }
 

@@ -4,7 +4,10 @@ use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::orchestration::{select_artifacts, ArtifactRecord, LlmUsageRecord};
+use serde::Deserialize;
+
+use crate::orchestration::{ArtifactRecord, LlmUsageRecord};
+use crate::value::VmError;
 
 use super::artifact::artifact_from_value;
 
@@ -33,22 +36,9 @@ pub(super) enum MapWorkItem {
     },
 }
 
-pub(super) fn map_completion_target(
-    strategy: &str,
-    total: usize,
-    min_completed: Option<usize>,
-) -> usize {
-    match strategy {
-        "first" => total.min(1),
-        "quorum" => min_completed.unwrap_or(1).max(1).min(total),
-        _ => total,
-    }
-}
-
-pub(super) async fn execute_join_policy<T: 'static>(
+pub(super) async fn execute_join_tasks<T: 'static>(
     tasks: Vec<LocalTask<T>>,
-    strategy: &str,
-    min_completed: Option<usize>,
+    target: usize,
     max_concurrent: Option<usize>,
 ) -> Vec<Result<T, String>> {
     if tasks.is_empty() {
@@ -56,7 +46,7 @@ pub(super) async fn execute_join_policy<T: 'static>(
     }
 
     let total = tasks.len();
-    let target = map_completion_target(strategy, total, min_completed);
+    let target = target.max(1).min(total);
     let concurrency = max_concurrent.unwrap_or(total).max(1).min(total);
     let mut pending = VecDeque::from(tasks);
     let mut join_set = tokio::task::JoinSet::new();
@@ -90,6 +80,52 @@ pub(super) async fn execute_join_policy<T: 'static>(
     results
 }
 
+pub(super) async fn map_join_target(
+    node: &crate::orchestration::WorkflowNode,
+    total: usize,
+) -> Result<usize, VmError> {
+    let payload = serde_json::json!({
+        "join_policy": node.join_policy.clone(),
+        "total": total,
+    });
+    let target = crate::stdlib::call_harn_stdlib_json(
+        "std/workflow/map",
+        "workflow_map_join_target",
+        payload,
+    )
+    .await?;
+    target.as_u64().map(|value| value as usize).ok_or_else(|| {
+        VmError::Runtime("workflow_map_join_target must return an integer".to_string())
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkflowMapFinalization {
+    result: serde_json::Value,
+    outcome: String,
+    branch: Option<String>,
+}
+
+pub(super) async fn map_finalize(
+    strategy: &str,
+    total_items: usize,
+    produced_count: usize,
+    completed: Vec<serde_json::Value>,
+    failures: Vec<serde_json::Value>,
+) -> Result<(serde_json::Value, String, Option<String>), VmError> {
+    let payload = serde_json::json!({
+        "strategy": strategy,
+        "total_items": total_items,
+        "produced_count": produced_count,
+        "completed": completed,
+        "failures": failures,
+    });
+    let finalized: WorkflowMapFinalization =
+        crate::stdlib::call_harn_stdlib_typed("std/workflow/map", "workflow_map_finalize", payload)
+            .await?;
+    Ok((finalized.result, finalized.outcome, finalized.branch))
+}
+
 pub(super) fn map_branch_artifact(
     node_id: &str,
     item: &MapWorkItem,
@@ -112,62 +148,85 @@ pub(super) fn map_branch_artifact(
     }
 }
 
-pub(super) fn map_executes_stage(node: &crate::orchestration::WorkflowNode) -> bool {
-    node.mode.is_some()
-        || node.prompt.is_some()
-        || node.system.is_some()
-        || !crate::orchestration::workflow_tool_names(&node.tools).is_empty()
-        || node.model_policy != crate::orchestration::ModelPolicy::default()
+#[derive(Debug, Deserialize)]
+struct WorkflowMapStagePlan {
+    runs_stage: bool,
+    output_kind: String,
+    stage_node: Option<crate::orchestration::WorkflowNode>,
 }
 
-pub(super) fn map_stage_node(
+pub(super) async fn map_stage_plan(
     node: &crate::orchestration::WorkflowNode,
-) -> crate::orchestration::WorkflowNode {
-    let mut stage_node = node.clone();
-    stage_node.kind = "stage".to_string();
-    stage_node.map_policy = Default::default();
-    stage_node.join_policy = Default::default();
-    if let Some(output_kind) = &node.map_policy.output_kind {
-        stage_node.output_contract.output_kinds = vec![output_kind.clone()];
-    }
-    stage_node
+) -> Result<(Option<crate::orchestration::WorkflowNode>, String), VmError> {
+    let payload = serde_json::json!({
+        "node": node,
+    });
+    let planned: WorkflowMapStagePlan = crate::stdlib::call_harn_stdlib_typed(
+        "std/workflow/map",
+        "workflow_map_stage_plan",
+        payload,
+    )
+    .await?;
+    let stage_node = if planned.runs_stage {
+        Some(planned.stage_node.ok_or_else(|| {
+            VmError::Runtime("workflow_map_stage_plan omitted stage_node".to_string())
+        })?)
+    } else {
+        None
+    };
+    Ok((stage_node, planned.output_kind))
 }
 
-pub(super) fn map_work_items(
+#[derive(Debug, Deserialize)]
+struct WorkflowMapWorkItems {
+    items: Vec<WorkflowMapWorkItem>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum WorkflowMapWorkItem {
+    Artifact {
+        index: usize,
+        artifact: Box<ArtifactRecord>,
+    },
+    Value {
+        index: usize,
+        value: serde_json::Value,
+        artifact_kind: String,
+    },
+}
+
+pub(super) async fn map_work_items(
     node: &crate::orchestration::WorkflowNode,
     artifacts: &[ArtifactRecord],
-) -> Vec<MapWorkItem> {
-    let mut inputs = select_artifacts(artifacts.to_vec(), &node.context_policy);
-    if let Some(kind) = &node.map_policy.item_artifact_kind {
-        inputs.retain(|artifact| &artifact.kind == kind);
-    }
-    let mut explicit_items = node.map_policy.items.clone();
-    if let Some(max_items) = node.map_policy.max_items {
-        explicit_items.truncate(max_items);
-        inputs.truncate(max_items);
-    }
-    if !explicit_items.is_empty() {
-        let item_kind = node
-            .map_policy
-            .item_artifact_kind
-            .clone()
-            .unwrap_or_else(|| "artifact".to_string());
-        return explicit_items
-            .into_iter()
-            .enumerate()
-            .map(|(index, value)| MapWorkItem::Value {
+) -> Result<Vec<MapWorkItem>, VmError> {
+    let payload = serde_json::json!({
+        "node": node,
+        "artifacts": artifacts,
+    });
+    let planned: WorkflowMapWorkItems = crate::stdlib::call_harn_stdlib_typed(
+        "std/workflow/map",
+        "workflow_map_work_items",
+        payload,
+    )
+    .await?;
+    Ok(planned
+        .items
+        .into_iter()
+        .map(|item| match item {
+            WorkflowMapWorkItem::Artifact { index, artifact } => MapWorkItem::Artifact {
+                index,
+                artifact: Box::new(artifact.normalize()),
+            },
+            WorkflowMapWorkItem::Value {
                 index,
                 value,
-                artifact_kind: item_kind.clone(),
-            })
-            .collect();
-    }
-    inputs
-        .into_iter()
-        .enumerate()
-        .map(|(index, artifact)| MapWorkItem::Artifact {
-            index,
-            artifact: Box::new(artifact),
+                artifact_kind,
+            } => MapWorkItem::Value {
+                index,
+                value,
+                artifact_kind,
+            },
         })
-        .collect()
+        .collect())
 }

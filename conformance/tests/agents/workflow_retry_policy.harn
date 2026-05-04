@@ -1,0 +1,42 @@
+pipeline default() {
+  let failing = workflow_graph(
+    {
+      entry: "verify",
+      nodes: {
+        verify: {
+          kind: "verify",
+          retry_policy: {max_attempts: 5, backoff_ms: 1},
+          verify: {command: "echo nope && exit 7", expect_status: 0},
+          output_contract: {output_kinds: ["verification_result"]},
+        },
+      },
+      edges: [],
+    },
+  )
+  let failed = workflow_execute("verify once", failing, [], {max_steps: 1})
+  println(failed.run.stages[0].status)
+  println(failed.run.stages[0].outcome)
+  println(failed.run.stages[0].branch)
+  println(len(failed.run.stages[0].attempts))
+  println(len(failed.run.stages[0].artifacts))
+  println(contains(failed.run.stages[0].visible_text, "nope"))
+  let verify_ok = failed.run.stages[0].verification?.ok ?? false
+  println(!verify_ok)
+  let passing = workflow_graph(
+    {
+      entry: "verify",
+      nodes: {
+        verify: {
+          kind: "verify",
+          retry_policy: {max_attempts: 3},
+          verify: {command: "echo ok", expect_status: 0},
+          output_contract: {output_kinds: ["verification_result"]},
+        },
+      },
+      edges: [],
+    },
+  )
+  let passed = workflow_execute("verify once", passing, [], {max_steps: 1})
+  println(passed.run.stages[0].status)
+  println(len(passed.run.stages[0].attempts))
+}
