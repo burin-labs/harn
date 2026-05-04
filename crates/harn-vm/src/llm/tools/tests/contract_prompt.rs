@@ -219,6 +219,64 @@ fn contract_prompt_includes_tool_examples_before_schemas() {
 }
 
 #[test]
+fn compact_tool_schema_keeps_cross_field_constraints() {
+    let tool = super::vm_dict(&[
+        ("name", super::vm_str("look")),
+        (
+            "description",
+            super::vm_str(
+                "Unified path-centric read/inspect tool. The `full_text` intent requires both `file` and `query`; use `read` with `offset` and `limit` for raw file text.",
+            ),
+        ),
+        ("compact", super::vm_bool(true)),
+        (
+            "parameters",
+            super::vm_dict(&[
+                (
+                    "file",
+                    super::vm_dict(&[
+                        ("type", super::vm_str("string")),
+                        ("required", super::vm_bool(false)),
+                    ]),
+                ),
+                (
+                    "query",
+                    super::vm_dict(&[
+                        ("type", super::vm_str("string")),
+                        ("required", super::vm_bool(false)),
+                    ]),
+                ),
+                (
+                    "intent",
+                    super::vm_dict(&[
+                        ("type", super::vm_str("string")),
+                        ("required", super::vm_bool(false)),
+                    ]),
+                ),
+            ]),
+        ),
+    ]);
+    let tools = super::vm_dict(&[("tools", super::vm_list(vec![tool]))]);
+    let prompt = build_tool_calling_contract_prompt(
+        Some(&tools),
+        None,
+        "text",
+        false,
+        None,
+        false,
+        "##DONE##",
+    );
+    assert!(
+        prompt.contains("full_text` intent requires both `file` and `query`"),
+        "compact schema rendering must not drop cross-field constraints: {prompt}"
+    );
+    assert!(
+        prompt.contains("use `read` with `offset` and `limit`"),
+        "compact schema rendering should keep the immediate recovery path: {prompt}"
+    );
+}
+
+#[test]
 fn contract_prompt_omits_examples_section_when_none() {
     let tools = sample_tool_registry();
     let prompt = build_tool_calling_contract_prompt(

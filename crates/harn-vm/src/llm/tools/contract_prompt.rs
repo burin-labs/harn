@@ -95,18 +95,57 @@ fn render_text_tool_schema(schema: &ToolSchema) -> String {
 
 fn render_compact_text_tool_schema(schema: &ToolSchema) -> String {
     let args_type = build_tool_args_type(&schema.params);
-    let summary = schema
-        .description
-        .split(&['.', '\n'][..])
-        .next()
-        .unwrap_or("")
-        .trim();
+    let summary = compact_schema_summary(&schema.description);
     format!(
         "- `{}({})` — {}\n",
         schema.name,
         args_type.render(),
         summary,
     )
+}
+
+fn compact_schema_summary(description: &str) -> String {
+    let normalized = description.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        return String::new();
+    }
+
+    let mut summary = String::new();
+    let mut sentence_count = 0usize;
+    for sentence in normalized.split_inclusive(&['.', '!', '?'][..]) {
+        let sentence = sentence.trim();
+        if sentence.is_empty() {
+            continue;
+        }
+        if !summary.is_empty() {
+            summary.push(' ');
+        }
+        summary.push_str(sentence);
+        sentence_count += 1;
+        if sentence_count >= 3 || summary.chars().count() >= 360 {
+            break;
+        }
+    }
+    if summary.is_empty() {
+        summary = normalized;
+    }
+
+    let max_chars = 420usize;
+    if summary.chars().count() <= max_chars {
+        return summary;
+    }
+    let mut truncated = summary.chars().take(max_chars).collect::<String>();
+    if let Some((idx, _)) = truncated
+        .char_indices()
+        .rev()
+        .find(|(_, ch)| ch.is_whitespace())
+    {
+        truncated.truncate(idx);
+    }
+    truncated
+        .trim_end_matches(&['.', ',', ';', ':'][..])
+        .to_string()
+        + "..."
 }
 
 /// Build the single-arg TypeScript object type that a tool takes. Each
