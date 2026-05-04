@@ -106,12 +106,14 @@ pub(super) async fn stage_attempt_outcome(
         "result": result,
         "verification": verification,
     });
-    let classified: WorkflowStageAttemptOutcome = crate::stdlib::call_harn_stdlib_typed(
-        "std/workflow/stage",
-        "workflow_stage_attempt_outcome",
-        payload,
-    )
-    .await?;
+    let classified: WorkflowStageAttemptOutcome =
+        crate::stdlib::harn_entry::call_harn_export_typed(
+            "std/workflow/stage",
+            "workflow_stage_attempt_outcome",
+            "workflow_stage_attempt_outcome",
+            payload,
+        )
+        .await?;
     Ok((
         classified.outcome,
         classified.branch,
@@ -140,8 +142,9 @@ async fn prepare_static_stage(
         "node": node,
         "artifacts": artifacts,
     });
-    let planned: WorkflowStaticStagePlan = crate::stdlib::call_harn_stdlib_typed(
+    let planned: WorkflowStaticStagePlan = crate::stdlib::harn_entry::call_harn_export_typed(
         "std/workflow/stage",
+        "workflow_prepare_static_stage",
         "workflow_prepare_static_stage",
         payload,
     )

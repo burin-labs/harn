@@ -22,7 +22,6 @@ pub(crate) mod files;
 mod flow;
 mod fs;
 mod git;
-pub(crate) mod harn_call;
 pub(crate) mod harn_entry;
 pub(crate) mod hitl;
 mod hitl_read;
@@ -75,7 +74,6 @@ use crate::mcp_server::register_mcp_server_builtins;
 use crate::vm::Vm;
 
 pub(crate) use crate::schema::{json_to_vm_value, schema_result_value};
-pub(crate) use harn_call::*;
 pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
     process::set_thread_source_dir(dir);
 }

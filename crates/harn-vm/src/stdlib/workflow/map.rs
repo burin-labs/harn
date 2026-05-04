@@ -114,9 +114,13 @@ pub(super) async fn map_finalize(
         "completed": completed,
         "failures": failures,
     });
-    let finalized: WorkflowMapFinalization =
-        crate::stdlib::call_harn_stdlib_typed("std/workflow/map", "workflow_map_finalize", payload)
-            .await?;
+    let finalized: WorkflowMapFinalization = crate::stdlib::harn_entry::call_harn_export_typed(
+        "std/workflow/map",
+        "workflow_map_finalize",
+        "workflow_map_finalize",
+        payload,
+    )
+    .await?;
     Ok((finalized.result, finalized.outcome, finalized.branch))
 }
 
@@ -150,8 +154,9 @@ pub(super) async fn map_execution_plan(
         "node": node,
         "artifacts": artifacts,
     });
-    let mut planned: MapExecutionPlan = crate::stdlib::call_harn_stdlib_typed(
+    let mut planned: MapExecutionPlan = crate::stdlib::harn_entry::call_harn_export_typed(
         "std/workflow/map",
+        "workflow_map_execution_plan",
         "workflow_map_execution_plan",
         payload,
     )
