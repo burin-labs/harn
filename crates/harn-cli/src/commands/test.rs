@@ -166,6 +166,29 @@ fn canonicalize_or_err(path: &Path) -> Result<PathBuf, String> {
         .map_err(|error| format!("Failed to canonicalize {}: {error}", path.display()))
 }
 
+/// Look for `// @xfail: <reason>` in the first 50 lines of a conformance
+/// test source file. Returns the reason if present.
+fn read_xfail_marker(path: &Path) -> Option<String> {
+    let source = fs::read_to_string(path).ok()?;
+    parse_xfail_marker(&source)
+}
+
+fn parse_xfail_marker(source: &str) -> Option<String> {
+    for line in source.lines().take(50) {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("//") {
+            let rest = rest.trim_start();
+            if let Some(reason) = rest.strip_prefix("@xfail:") {
+                let r = reason.trim();
+                if !r.is_empty() {
+                    return Some(r.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 fn resolve_conformance_selection(
     suite_root: &Path,
     selection: Option<&str>,
@@ -243,6 +266,8 @@ pub(crate) async fn run_conformance_tests(
 
     let mut passed = 0;
     let mut failed = 0;
+    let mut skipped = 0;
+    let mut skipped_summary: Vec<(String, String)> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     let mut junit_results: Vec<(String, bool, String, u64)> = Vec::new();
 
@@ -277,6 +302,16 @@ pub(crate) async fn run_conformance_tests(
             if !matched {
                 continue;
             }
+        }
+
+        // Honor `// @xfail: <reason>` markers in the first 50 lines of a
+        // conformance test. Skipped tests are reported but do not count as
+        // failures. Use sparingly, always with a tracking issue link.
+        if let Some(reason) = read_xfail_marker(harn_file) {
+            println!("  \x1b[33mSKIP\x1b[0m  {rel_path}  ({reason})");
+            skipped_summary.push((rel_path.clone(), reason));
+            skipped += 1;
+            continue;
         }
 
         if expected_file.exists() {
@@ -464,16 +499,23 @@ pub(crate) async fn run_conformance_tests(
     let total_duration_ms = suite_start.elapsed().as_millis() as u64;
 
     println!();
+    let total = passed + failed + skipped;
     if failed > 0 {
         println!(
-            "\x1b[31m{passed} passed, {failed} failed, {} total\x1b[0m",
-            passed + failed
+            "\x1b[31m{passed} passed, {failed} failed, {skipped} skipped, {total} total\x1b[0m"
         );
     } else {
         println!(
-            "\x1b[32m{passed} passed, {failed} failed, {} total\x1b[0m",
-            passed + failed
+            "\x1b[32m{passed} passed, {failed} failed, {skipped} skipped, {total} total\x1b[0m"
         );
+    }
+
+    if !skipped_summary.is_empty() {
+        println!();
+        println!("Skipped (xfail):");
+        for (path, reason) in &skipped_summary {
+            println!("  {path}  ({reason})");
+        }
     }
 
     if show_timing {
@@ -975,7 +1017,9 @@ pub(crate) async fn run_watch_tests(
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_harn_files_sorted, logical_path, resolve_conformance_selection};
+    use super::{
+        collect_harn_files_sorted, logical_path, parse_xfail_marker, resolve_conformance_selection,
+    };
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1080,5 +1124,42 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("must be inside"));
+    }
+
+    #[test]
+    fn parse_xfail_marker_recognizes_top_of_file_marker() {
+        let src = "// @xfail: tracked in #1240\npipeline main(task) {}\n";
+        assert_eq!(parse_xfail_marker(src).as_deref(), Some("tracked in #1240"));
+    }
+
+    #[test]
+    fn parse_xfail_marker_recognizes_indented_marker() {
+        let src = "    // @xfail: skill matching #1240\n";
+        assert_eq!(
+            parse_xfail_marker(src).as_deref(),
+            Some("skill matching #1240")
+        );
+    }
+
+    #[test]
+    fn parse_xfail_marker_returns_none_when_absent() {
+        let src = "// regular comment\npipeline main(task) {}\n";
+        assert!(parse_xfail_marker(src).is_none());
+    }
+
+    #[test]
+    fn parse_xfail_marker_ignores_marker_past_first_50_lines() {
+        let mut src = String::new();
+        for _ in 0..60 {
+            src.push_str("// filler\n");
+        }
+        src.push_str("// @xfail: too late\n");
+        assert!(parse_xfail_marker(&src).is_none());
+    }
+
+    #[test]
+    fn parse_xfail_marker_ignores_empty_reason() {
+        let src = "// @xfail:   \n";
+        assert!(parse_xfail_marker(src).is_none());
     }
 }

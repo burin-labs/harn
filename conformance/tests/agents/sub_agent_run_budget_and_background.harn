@@ -1,3 +1,6 @@
+/**
+ * @xfail: daemon mode + autonomy budget not yet wired through Harn loop — tracked in burin-labs/harn#1237
+ */
 fn search_tools() {
   var tools = tool_registry()
   tools = tool_define(

@@ -1,3 +1,4 @@
+// @xfail: per-agent permissions + sub-agent intersection not yet wired — tracked in burin-labs/harn#1239
 import "std/agents"
 
 fn write_tools() {

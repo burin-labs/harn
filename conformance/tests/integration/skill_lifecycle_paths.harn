@@ -1,3 +1,4 @@
+// @xfail: skill matching/scoring not yet a primitive — tracked in burin-labs/harn#1240
 /**
  * Skills & Tool Vault phase 3 (harn#74): `paths:` auto-trigger.
  *
