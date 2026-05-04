@@ -1,0 +1,86 @@
+// @harn-entrypoint-category agent.stdlib
+import { filter_nil } from "std/collections"
+
+fn __worker_dict(value) {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __worker_list(value) {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __worker_mode(config) {
+  if config?.graph != nil {
+    return "workflow"
+  }
+  return "stage"
+}
+
+fn __worker_workflow_config(config) {
+  let options = __worker_dict(config?.options)
+  return filter_nil(
+    config
+      + {graph: workflow_graph(config.graph), artifacts: __worker_list(config?.artifacts), options: options},
+  )
+}
+
+fn __worker_stage_config(config) {
+  return filter_nil(
+    config + {artifacts: __worker_list(config?.artifacts), options: __worker_dict(config?.options)},
+  )
+}
+
+fn __worker_config(config) {
+  let cfg = __worker_dict(config)
+  let mode = __worker_mode(cfg)
+  if mode == "workflow" {
+    return __worker_workflow_config(cfg)
+  }
+  return __worker_stage_config(cfg)
+}
+
+/** spawn_agent. */
+pub fn spawn_agent(config) {
+  return __host_worker_spawn(__worker_config(config))
+}
+
+/** send_input. */
+pub fn send_input(worker, task) {
+  return __host_worker_send_input(worker, task)
+}
+
+/** worker_trigger. */
+pub fn worker_trigger(worker, payload) {
+  return __host_worker_trigger(worker, payload)
+}
+
+/** wait_agent. */
+pub fn wait_agent(worker_or_workers) {
+  return __host_worker_wait(worker_or_workers)
+}
+
+/** close_agent. */
+pub fn close_agent(worker) {
+  return __host_worker_close(worker)
+}
+
+/** resume_agent. */
+pub fn resume_agent(worker_or_snapshot) {
+  return __host_worker_resume(worker_or_snapshot)
+}
+
+/** list_agents. */
+pub fn list_agents() {
+  return __host_worker_list()
+}
+
+/** sub_agent_run. */
+pub fn sub_agent_run(task, options = nil) {
+  return __host_sub_agent_run(task, options ?? {})
+}

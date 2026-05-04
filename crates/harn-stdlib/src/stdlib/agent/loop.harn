@@ -3,5 +3,13 @@ import { agent_loop_options } from "std/agent/options"
 
 /** agent_loop. */
 pub fn agent_loop(message, system_prompt = nil, options = nil) {
-  return __host_llm_session_run(message, system_prompt, agent_loop_options(options))
+  let opts = agent_loop_options(options)
+  var state = __host_agent_session_prepare(message, system_prompt, opts)
+  if state.done {
+    return state.result
+  }
+  while !state.done && state.iteration < state.max_iterations {
+    state = __host_agent_session_step(state.state_id)
+  }
+  return __host_agent_session_finalize(state.state_id)
 }

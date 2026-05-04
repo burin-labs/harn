@@ -1,7 +1,68 @@
 // @harn-entrypoint-category workflow.stdlib
 import "std/workflow/prompts"
+import { workflow_join_readiness, workflow_next_edges } from "std/workflow/schedule"
+
+fn __workflow_execute_list(value) {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __workflow_execute_enqueue_unique(queue, node_id) {
+  for queued in __workflow_execute_list(queue) {
+    if queued == node_id {
+      return queue
+    }
+  }
+  return queue.push(node_id)
+}
+
+fn __workflow_execute_pop_front(queue) {
+  if len(queue) <= 1 {
+    return []
+  }
+  return queue.slice(1, len(queue))
+}
+
+fn __workflow_execute_enqueue_edges(queue, edges) {
+  var next = queue
+  for edge in __workflow_execute_list(edges) {
+    if type_of(edge?.to) == "string" {
+      next = __workflow_execute_enqueue_unique(next, edge.to)
+    }
+  }
+  return next
+}
 
 /** workflow_execute. */
 pub fn workflow_execute(task, graph, artifacts = nil, options = nil) {
-  return __host_workflow_graph_run(task, graph, artifacts ?? [], options ?? {})
+  let opts = options ?? {}
+  var state = __host_workflow_prepare_run(task, graph, artifacts ?? [], opts)
+  let state_id = state.state_id
+  let workflow_graph = state.graph
+  var ready = __workflow_execute_list(state?.ready_nodes)
+  var steps = 0
+  while steps < state.max_steps && len(ready) > 0 {
+    steps = steps + 1
+    let current = ready[0]
+    ready = __workflow_execute_pop_front(ready)
+    let node = workflow_graph.nodes[current]
+    if node?.kind == "join" {
+      let readiness = workflow_join_readiness(
+        {graph: workflow_graph, node_id: current, node: node, completed_nodes: state.completed_nodes},
+      )
+      if !readiness.ready {
+        ready = __workflow_execute_enqueue_unique(ready, current)
+        continue
+      }
+    }
+    let executed = __host_workflow_execute_stage(state_id, current, ready, opts)
+    state = executed.state
+    let edges = workflow_next_edges({graph: workflow_graph, current: current, branch: executed.branch})
+    ready = __workflow_execute_enqueue_edges(__workflow_execute_list(state?.ready_nodes), edges)
+    state = __host_workflow_record_transitions(state_id, ready, executed.stage, edges)
+    ready = __workflow_execute_list(state?.ready_nodes)
+  }
+  return __host_workflow_finalize_run(state_id, ready)
 }

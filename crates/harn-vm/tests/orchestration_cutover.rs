@@ -11,6 +11,14 @@ fn stdlib_facades_and_host_primitives_are_discoverable() {
         "agent_parse_tool_calls",
         "agent_dispatch_tool_call",
         "agent_dispatch_tool_batch",
+        "spawn_agent",
+        "sub_agent_run",
+        "send_input",
+        "worker_trigger",
+        "wait_agent",
+        "close_agent",
+        "resume_agent",
+        "list_agents",
     ] {
         let entry = metadata
             .get(name)
@@ -30,12 +38,25 @@ fn stdlib_facades_and_host_primitives_are_discoverable() {
     assert_eq!(workflow_execute.category(), Some("workflow.stdlib"));
 
     for name in [
-        "__host_llm_session_run",
+        "__host_agent_session_prepare",
+        "__host_agent_session_step",
+        "__host_agent_session_finalize",
         "__host_agent_capture_events",
         "__host_agent_parse_tool_calls",
         "__host_agent_dispatch_tool_call",
         "__host_agent_dispatch_tool_batch",
-        "__host_workflow_graph_run",
+        "__host_sub_agent_run",
+        "__host_worker_spawn",
+        "__host_worker_send_input",
+        "__host_worker_trigger",
+        "__host_worker_wait",
+        "__host_worker_close",
+        "__host_worker_resume",
+        "__host_worker_list",
+        "__host_workflow_prepare_run",
+        "__host_workflow_execute_stage",
+        "__host_workflow_record_transitions",
+        "__host_workflow_finalize_run",
         "host_call",
         "host_tool_call",
         "agent_session_compact",

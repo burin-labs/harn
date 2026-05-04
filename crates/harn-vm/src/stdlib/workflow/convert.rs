@@ -11,7 +11,7 @@ pub(super) fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> 
     Ok(crate::stdlib::json_to_vm_value(&json))
 }
 
-pub(super) fn workflow_graph_to_vm(graph: &WorkflowGraph) -> Result<VmValue, VmError> {
+pub(in crate::stdlib) fn workflow_graph_to_vm(graph: &WorkflowGraph) -> Result<VmValue, VmError> {
     let base = to_vm(graph)?;
     let VmValue::Dict(base_dict) = base else {
         return Err(VmError::Runtime(

@@ -2,7 +2,7 @@
 
 use crate::orchestration::LlmUsageRecord;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(super) struct UsageSnapshot {
     pub(super) input_tokens: i64,
     pub(super) output_tokens: i64,

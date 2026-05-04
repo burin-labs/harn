@@ -449,12 +449,10 @@ pub use self::agent::{
     register_session_end_hook, wait_for_global_pending_feedback,
 };
 pub(crate) use self::agent::{
-    current_host_bridge, emit_agent_event as emit_live_agent_event, parse_mcp_server_specs,
-    parse_skill_config, run_agent_loop_internal,
+    current_host_bridge, emit_agent_event as emit_live_agent_event, run_agent_loop_internal,
 };
 pub(crate) use self::agent_config::{
-    agent_loop_result_from_llm, parse_command_policy_from_options, AgentLoopConfig,
-    DEFAULT_MAX_VERIFY_ATTEMPTS,
+    agent_loop_result_from_llm, AgentLoopConfig, DEFAULT_MAX_VERIFY_ATTEMPTS,
 };
 pub use self::agent_config::{
     register_agent_loop_with_bridge, register_llm_call_structured_with_bridge,

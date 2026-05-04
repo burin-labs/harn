@@ -115,6 +115,10 @@ pub(in super::super) fn ensure_worker_config_session_ids(
 
 fn restore_worker_transcript(config: &WorkerConfig, transcript: Option<&VmValue>) {
     let Some(transcript) = transcript.cloned() else {
+        if let WorkerConfig::SubAgent { spec } = config {
+            crate::agent_sessions::open_or_create(Some(spec.session_id.clone()));
+            crate::agent_sessions::reset_transcript(&spec.session_id);
+        }
         return;
     };
     match config {
@@ -130,6 +134,14 @@ fn restore_worker_transcript(config: &WorkerConfig, transcript: Option<&VmValue>
         }
         WorkerConfig::Workflow { .. } => {}
     }
+}
+
+async fn call_worker_harn_export(
+    module: &str,
+    function: &str,
+    args: &[VmValue],
+) -> Result<VmValue, VmError> {
+    crate::stdlib::harn_entry::call_harn_export_by_name(module, function, function, args).await
 }
 
 async fn execute_worker_config(
@@ -190,8 +202,19 @@ async fn execute_worker_config(
                 ),
             );
             options.insert("delegated".to_string(), VmValue::Bool(true));
-            let result =
-                super::super::workflow::execute_workflow(task, *graph, artifacts, options).await;
+            let result = call_worker_harn_export(
+                "std/workflow/execute",
+                "workflow_execute",
+                &[
+                    VmValue::String(Rc::from(task)),
+                    super::super::workflow::workflow_graph_to_vm(&graph)?,
+                    crate::stdlib::json_to_vm_value(
+                        &serde_json::to_value(&artifacts).unwrap_or_default(),
+                    ),
+                    VmValue::Dict(Rc::new(options)),
+                ],
+            )
+            .await;
             crate::stdlib::process::set_thread_execution_context(None);
             cleanup_worker_execution(&execution);
             let result = result?;
