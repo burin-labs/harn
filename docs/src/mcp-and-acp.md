@@ -787,6 +787,42 @@ the legacy `a2a.*`, `tasks/send`, and `tasks/send_and_wait` names for one minor
 cycle and marks those HTTP responses with a `Deprecation` header. If the served
 file exports exactly one function, the function selector can be omitted.
 
+### Canonical HTTP+JSON/REST binding
+
+The same task lifecycle is also exposed over the canonical A2A 0.3.0
+HTTP+JSON/REST binding under `/v1`. The agent card advertises this
+transport in `additionalInterfaces` alongside the JSON-RPC entry, e.g.
+
+```json
+"additionalInterfaces": [
+  {"url": "https://agent.example", "transport": "JSONRPC"},
+  {"url": "https://agent.example/v1", "transport": "HTTP+JSON"}
+]
+```
+
+REST endpoints (per the spec's AIP-136 custom-method form):
+
+| Method                                             | Path                                                       | Body                          |
+| -------------------------------------------------- | ---------------------------------------------------------- | ----------------------------- |
+| `POST`                                             | `/v1/message:send`                                         | `MessageSendParams`           |
+| `POST`                                             | `/v1/message:stream`                                       | `MessageSendParams` (returns SSE) |
+| `GET`                                              | `/v1/tasks/{id}`                                           | —                             |
+| `POST`                                             | `/v1/tasks/{id}:cancel`                                    | —                             |
+| `POST`                                             | `/v1/tasks/{id}:subscribe`                                 | — (returns SSE)               |
+| `POST`                                             | `/v1/tasks/{id}/pushNotificationConfigs`                   | `PushNotificationConfig`      |
+| `GET`                                              | `/v1/tasks/{id}/pushNotificationConfigs`                   | —                             |
+| `GET`                                              | `/v1/tasks/{id}/pushNotificationConfigs/{configId}`        | —                             |
+| `DELETE`                                           | `/v1/tasks/{id}/pushNotificationConfigs/{configId}`        | —                             |
+| `GET`                                              | `/v1/card`                                                 | — (authenticated extended card) |
+
+REST responses return the bare result payload (e.g. a `Task` object)
+rather than a JSON-RPC envelope. Errors are returned with an HTTP 4xx/5xx
+status and a JSON-RPC error body. The legacy non-canonical paths
+(`/message/send`, `/message/stream`, `/tasks/send`, `/tasks/send_and_wait`,
+`/tasks/cancel`, `/tasks/resubscribe`) keep working for one minor cycle
+and emit a `Deprecation: true` header plus a `Warning: 299 …` advisory
+that points to the canonical replacement.
+
 ### Task status
 
 Check the status of a submitted task:
