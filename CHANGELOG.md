@@ -6,6 +6,20 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **A2A canonical HTTP+JSON/REST binding.** The A2A server now exposes the spec-blessed
+  REST surface under `/v1` (`POST /v1/message:send`, `POST /v1/message:stream`,
+  `GET /v1/tasks/{id}`, `POST /v1/tasks/{id}:cancel`, `POST /v1/tasks/{id}:subscribe`,
+  push-notification-config CRUD under `/v1/tasks/{id}/pushNotificationConfigs`, and
+  `GET /v1/card`). The agent card advertises both `JSONRPC` and `HTTP+JSON` transports
+  in `additionalInterfaces`. The previous non-canonical paths (`/message/send`,
+  `/message/stream`, `/tasks/send`, `/tasks/send_and_wait`, `/tasks/cancel`,
+  `/tasks/resubscribe`) keep working for one minor cycle and now emit a `Deprecation`
+  header pointing at the canonical replacement.
+
 ## v0.7.57
 
 ### Added

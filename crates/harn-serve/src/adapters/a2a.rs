@@ -36,6 +36,16 @@ const A2A_VERSION_HEADER: &str = "a2a-version";
 const A2A_TRACE_HEADER: &str = "a2a-trace-id";
 const A2A_DEPRECATION_HEADER: &str = "deprecation";
 const A2A_AGENT_CARD_PATH: &str = "/.well-known/agent-card.json";
+/// Base path for the canonical A2A 0.3 HTTP+JSON/REST surface.
+const A2A_REST_BASE: &str = "/v1";
+
+const REST_DEPRECATED_MESSAGE_SEND: &str = "Use A2A 0.3.0 REST path `POST /v1/message:send`.";
+const REST_DEPRECATED_MESSAGE_STREAM: &str = "Use A2A 0.3.0 REST path `POST /v1/message:stream`.";
+const REST_DEPRECATED_CANCEL: &str = "Use A2A 0.3.0 REST path `POST /v1/tasks/{id}:cancel`.";
+const REST_DEPRECATED_RESUBSCRIBE: &str =
+    "Use A2A 0.3.0 REST path `POST /v1/tasks/{id}:subscribe`.";
+const REST_DEPRECATED_SEND: &str =
+    "Use A2A 0.3.0 REST path `POST /v1/message:send` (use `configuration.blocking = true` for synchronous waits).";
 const A2A_AUTH_REALM: &str = "harn-a2a";
 
 const A2A_TASK_NOT_FOUND: i64 = -32001;
@@ -262,12 +272,30 @@ impl A2aServer {
             .route("/agent/card", get(agent_card_request))
             .route("/.well-known/a2a-agent", get(agent_card_request))
             .route("/.well-known/agent.json", get(agent_card_request))
-            .route("/message/send", post(rest_message_send))
-            .route("/message/stream", post(rest_message_stream))
-            .route("/tasks/send", post(rest_send_task))
-            .route("/tasks/send_and_wait", post(rest_send_and_wait_task))
-            .route("/tasks/cancel", post(rest_cancel_task))
-            .route("/tasks/resubscribe", post(rest_resubscribe_task))
+            // Canonical A2A 0.3.0 HTTP+JSON/REST binding.
+            .route("/v1/message:send", post(rest_v1_message_send))
+            .route("/v1/message:stream", post(rest_v1_message_stream))
+            .route("/v1/card", get(rest_v1_card))
+            .route(
+                "/v1/tasks/{id_action}",
+                get(rest_v1_get_task).post(rest_v1_task_action),
+            )
+            .route(
+                "/v1/tasks/{id}/pushNotificationConfigs",
+                post(rest_v1_push_config_set).get(rest_v1_push_config_list),
+            )
+            .route(
+                "/v1/tasks/{id}/pushNotificationConfigs/{config_id}",
+                get(rest_v1_push_config_get).delete(rest_v1_push_config_delete),
+            )
+            // Legacy non-canonical REST aliases (deprecated; will be
+            // removed one minor cycle after the canonical /v1 surface ships).
+            .route("/message/send", post(rest_legacy_message_send))
+            .route("/message/stream", post(rest_legacy_message_stream))
+            .route("/tasks/send", post(rest_legacy_send_task))
+            .route("/tasks/send_and_wait", post(rest_legacy_send_and_wait_task))
+            .route("/tasks/cancel", post(rest_legacy_cancel_task))
+            .route("/tasks/resubscribe", post(rest_legacy_resubscribe_task))
             .with_state(state)
     }
 
@@ -294,6 +322,10 @@ impl A2aServer {
                 {
                     "url": public_url,
                     "transport": "JSONRPC",
+                },
+                {
+                    "url": format!("{}{}", public_url.trim_end_matches('/'), A2A_REST_BASE),
+                    "transport": "HTTP+JSON",
                 }
             ],
             "version": env!("CARGO_PKG_VERSION"),
@@ -1696,25 +1728,49 @@ async fn jsonrpc_request(
     rpc_response(processed)
 }
 
-async fn rest_message_send(
+// ---- Legacy REST aliases (non-canonical; emit deprecation warnings).
+//
+// These paths predate the canonical 0.3.0 HTTP+JSON binding under
+// `/v1`. They will be removed one minor cycle after the canonical
+// surface ships; in the meantime each one emits a `Deprecation: true`
+// header plus a `Warning: 299 ...` advisory pointing at the canonical
+// replacement.
+
+async fn rest_legacy_message_send(
     State(state): State<HttpState>,
     method: Method,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    rest_task_request(state, method, headers, body, "message/send", None).await
+    rest_task_request(
+        state,
+        method,
+        headers,
+        body,
+        "message/send",
+        Some(REST_DEPRECATED_MESSAGE_SEND),
+    )
+    .await
 }
 
-async fn rest_message_stream(
+async fn rest_legacy_message_stream(
     State(state): State<HttpState>,
     method: Method,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    rest_task_request(state, method, headers, body, "message/stream", None).await
+    rest_task_request(
+        state,
+        method,
+        headers,
+        body,
+        "message/stream",
+        Some(REST_DEPRECATED_MESSAGE_STREAM),
+    )
+    .await
 }
 
-async fn rest_send_task(
+async fn rest_legacy_send_task(
     State(state): State<HttpState>,
     method: Method,
     headers: HeaderMap,
@@ -1726,12 +1782,12 @@ async fn rest_send_task(
         headers,
         body,
         "tasks/send",
-        Some("Use A2A 0.3.0 REST path `/message/send`."),
+        Some(REST_DEPRECATED_SEND),
     )
     .await
 }
 
-async fn rest_send_and_wait_task(
+async fn rest_legacy_send_and_wait_task(
     State(state): State<HttpState>,
     method: Method,
     headers: HeaderMap,
@@ -1743,27 +1799,286 @@ async fn rest_send_and_wait_task(
         headers,
         body,
         "tasks/send_and_wait",
-        Some("Use A2A 0.3.0 REST path `/message/send` with `configuration.blocking = true`."),
+        Some(REST_DEPRECATED_SEND),
     )
     .await
 }
 
-async fn rest_cancel_task(
+async fn rest_legacy_cancel_task(
     State(state): State<HttpState>,
     method: Method,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    rest_task_request(state, method, headers, body, "tasks/cancel", None).await
+    rest_task_request(
+        state,
+        method,
+        headers,
+        body,
+        "tasks/cancel",
+        Some(REST_DEPRECATED_CANCEL),
+    )
+    .await
 }
 
-async fn rest_resubscribe_task(
+async fn rest_legacy_resubscribe_task(
     State(state): State<HttpState>,
     method: Method,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    rest_task_request(state, method, headers, body, "tasks/resubscribe", None).await
+    rest_task_request(
+        state,
+        method,
+        headers,
+        body,
+        "tasks/resubscribe",
+        Some(REST_DEPRECATED_RESUBSCRIBE),
+    )
+    .await
+}
+
+// ---- Canonical A2A 0.3.0 HTTP+JSON/REST binding.
+
+async fn rest_v1_message_send(
+    State(state): State<HttpState>,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    rest_task_request(state, method, headers, body, "message/send", None).await
+}
+
+async fn rest_v1_message_stream(
+    State(state): State<HttpState>,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    rest_task_request(state, method, headers, body, "message/stream", None).await
+}
+
+async fn rest_v1_get_task(
+    State(state): State<HttpState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response {
+    if id.contains(':') {
+        // matchit shares the path pattern with `POST /v1/tasks/{id}:cancel` etc.; GET on a
+        // custom-method segment is not in the spec.
+        return (
+            StatusCode::METHOD_NOT_ALLOWED,
+            "use POST for task custom methods",
+        )
+            .into_response();
+    }
+    rest_dispatch_no_body(
+        state,
+        method,
+        headers,
+        &format!("/v1/tasks/{id}"),
+        "tasks/get",
+        json!({"id": id}),
+    )
+    .await
+}
+
+/// Handles `POST /v1/tasks/{id}:cancel` and `POST /v1/tasks/{id}:subscribe`.
+///
+/// matchit/axum cannot match a literal suffix inside the same path
+/// segment as a parameter, so we capture the full segment and parse the
+/// `:action` suffix here.
+async fn rest_v1_task_action(
+    State(state): State<HttpState>,
+    axum::extract::Path(id_action): axum::extract::Path<String>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response {
+    let Some((id, action)) = id_action.rsplit_once(':') else {
+        return (StatusCode::NOT_FOUND, "unknown task action").into_response();
+    };
+    if id.is_empty() {
+        return (StatusCode::BAD_REQUEST, "task id required").into_response();
+    }
+    let rpc_method = match action {
+        "cancel" => "tasks/cancel",
+        "subscribe" => "tasks/resubscribe",
+        _ => return (StatusCode::NOT_FOUND, "unknown task action").into_response(),
+    };
+    rest_dispatch_no_body(
+        state,
+        method,
+        headers,
+        &format!("/v1/tasks/{id_action}"),
+        rpc_method,
+        json!({"id": id}),
+    )
+    .await
+}
+
+async fn rest_v1_card(
+    State(state): State<HttpState>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response {
+    rest_dispatch_no_body(
+        state,
+        method,
+        headers,
+        "/v1/card",
+        "agent/getAuthenticatedExtendedCard",
+        json!({}),
+    )
+    .await
+}
+
+async fn rest_v1_push_config_set(
+    State(state): State<HttpState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let config = if body.is_empty() {
+        JsonValue::Object(Default::default())
+    } else {
+        match serde_json::from_slice::<JsonValue>(body.as_ref()) {
+            Ok(value) => value,
+            Err(error) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(error_response(
+                        JsonValue::Null,
+                        -32700,
+                        &format!("Parse error: {error}"),
+                    )),
+                )
+                    .into_response()
+            }
+        }
+    };
+    let auth_path = format!("/v1/tasks/{id}/pushNotificationConfigs");
+    let params = json!({
+        "taskId": id,
+        "pushNotificationConfig": config,
+    });
+    rest_dispatch_with_body(
+        state,
+        method,
+        headers,
+        &auth_path,
+        body,
+        "tasks/pushNotificationConfig/set",
+        params,
+    )
+    .await
+}
+
+async fn rest_v1_push_config_list(
+    State(state): State<HttpState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response {
+    rest_dispatch_no_body(
+        state,
+        method,
+        headers,
+        &format!("/v1/tasks/{id}/pushNotificationConfigs"),
+        "tasks/pushNotificationConfig/list",
+        json!({"id": id}),
+    )
+    .await
+}
+
+async fn rest_v1_push_config_get(
+    State(state): State<HttpState>,
+    axum::extract::Path((id, config_id)): axum::extract::Path<(String, String)>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response {
+    rest_dispatch_no_body(
+        state,
+        method,
+        headers,
+        &format!("/v1/tasks/{id}/pushNotificationConfigs/{config_id}"),
+        "tasks/pushNotificationConfig/get",
+        json!({"id": id, "pushNotificationConfigId": config_id}),
+    )
+    .await
+}
+
+async fn rest_v1_push_config_delete(
+    State(state): State<HttpState>,
+    axum::extract::Path((id, config_id)): axum::extract::Path<(String, String)>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response {
+    rest_dispatch_no_body(
+        state,
+        method,
+        headers,
+        &format!("/v1/tasks/{id}/pushNotificationConfigs/{config_id}"),
+        "tasks/pushNotificationConfig/delete",
+        json!({"id": id, "pushNotificationConfigId": config_id}),
+    )
+    .await
+}
+
+async fn rest_dispatch_no_body(
+    state: HttpState,
+    method: Method,
+    headers: HeaderMap,
+    auth_path: &str,
+    rpc_method: &str,
+    params: JsonValue,
+) -> Response {
+    log_legacy_version_header(&headers);
+    let auth = http_auth_request(method, auth_path, Vec::new(), &headers);
+    let request = harn_vm::jsonrpc::request(Uuid::now_v7().to_string(), rpc_method, params);
+    let processed = state
+        .server
+        .process_rpc_with_public_url(request, auth, &state.public_url)
+        .await;
+    rest_response(processed)
+}
+
+async fn rest_dispatch_with_body(
+    state: HttpState,
+    method: Method,
+    headers: HeaderMap,
+    auth_path: &str,
+    body: Bytes,
+    rpc_method: &str,
+    params: JsonValue,
+) -> Response {
+    log_legacy_version_header(&headers);
+    let auth = http_auth_request(method, auth_path, body.to_vec(), &headers);
+    let request = harn_vm::jsonrpc::request(Uuid::now_v7().to_string(), rpc_method, params);
+    let processed = state
+        .server
+        .process_rpc_with_public_url(request, auth, &state.public_url)
+        .await;
+    rest_response(processed)
+}
+
+fn rest_response(processed: ProcessedRpc) -> Response {
+    let auth_challenge = processed.auth_challenge.clone();
+    let response = match processed.outcome {
+        RpcOutcome::Json(response) if response.get("error").is_some() => {
+            let status = processed.status.unwrap_or(StatusCode::BAD_REQUEST);
+            response_with_deprecation(
+                (status, Json(response)).into_response(),
+                processed.deprecation,
+            )
+        }
+        RpcOutcome::Json(response) => {
+            response_with_deprecation(Json(response["result"].clone()), processed.deprecation)
+        }
+        RpcOutcome::Sse(rx) => response_with_deprecation(sse_response(rx), processed.deprecation),
+    };
+    apply_auth_challenge(response, auth_challenge)
 }
 
 async fn rest_task_request(
@@ -1796,22 +2111,12 @@ async fn rest_task_request(
         .server
         .process_rpc_with_public_url(request, auth, &state.public_url)
         .await;
-    processed.deprecation = processed.deprecation.or(rest_deprecation);
-    let auth_challenge = processed.auth_challenge.clone();
-    let response = match processed.outcome {
-        RpcOutcome::Json(response) if response.get("error").is_some() => {
-            let status = processed.status.unwrap_or(StatusCode::BAD_REQUEST);
-            response_with_deprecation(
-                (status, Json(response)).into_response(),
-                processed.deprecation,
-            )
-        }
-        RpcOutcome::Json(response) => {
-            response_with_deprecation(Json(response["result"].clone()), processed.deprecation)
-        }
-        RpcOutcome::Sse(rx) => response_with_deprecation(sse_response(rx), processed.deprecation),
-    };
-    apply_auth_challenge(response, auth_challenge)
+    // The caller is on a REST path, so a REST-specific advisory is more
+    // actionable than the JSON-RPC method-rename advice the dispatcher
+    // already attached. Keep the dispatcher's advice only when the
+    // transport doesn't have its own.
+    processed.deprecation = rest_deprecation.or(processed.deprecation);
+    rest_response(processed)
 }
 
 fn rpc_response(processed: ProcessedRpc) -> Response {
@@ -3566,10 +3871,13 @@ mod tests {
         );
         assert_eq!(
             card["additionalInterfaces"],
-            json!([{
-                "url": public_url,
-                "transport": "JSONRPC",
-            }])
+            json!([
+                {"url": public_url, "transport": "JSONRPC"},
+                {
+                    "url": format!("{}{}", public_url.trim_end_matches('/'), A2A_REST_BASE),
+                    "transport": "HTTP+JSON",
+                }
+            ])
         );
         assert_eq!(card["securitySchemes"], json!({}));
         assert_eq!(card["security"], json!([]));
@@ -3864,6 +4172,318 @@ pub fn triage(task: string) -> string {
         assert!(response["result"].is_null());
     }
 
+    /// End-to-end exercise of the canonical A2A 0.3.0 HTTP+JSON/REST
+    /// transport. Walks the full task lifecycle (send, get, list-push,
+    /// cancel, agent card) and asserts that no canonical path emits a
+    /// deprecation header.
+    #[tokio::test]
+    async fn rest_v1_full_task_lifecycle_uses_canonical_paths() {
+        let (_dir, server) = test_server(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+        );
+        let public_url = "http://localhost:8080";
+        let router = A2aServer::http_router(HttpState {
+            server,
+            public_url: public_url.to_string(),
+        });
+
+        // POST /v1/message:send (returnImmediately=true keeps the task
+        // pending so the subsequent get/cancel calls have something to
+        // observe).
+        let send_body = serde_json::to_vec(&json!({
+            "function": "triage",
+            "configuration": {"returnImmediately": true},
+            "message": {
+                "parts": [{"type": "text", "text": "hello"}]
+            }
+        }))
+        .expect("send body");
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/v1/message:send")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(send_body))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            response.headers().get(A2A_DEPRECATION_HEADER).is_none(),
+            "canonical /v1 path must not emit a deprecation header"
+        );
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let task: JsonValue = serde_json::from_slice(&bytes).expect("task json");
+        // The body is the bare Task, not a JSON-RPC envelope.
+        assert!(task.get("jsonrpc").is_none());
+        assert!(task.get("result").is_none());
+        let task_id = task["id"].as_str().expect("task id").to_string();
+
+        // GET /v1/tasks/{id}
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(format!("/v1/tasks/{task_id}"))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let fetched: JsonValue = serde_json::from_slice(&bytes).expect("task json");
+        assert_eq!(fetched["id"], task_id);
+
+        // POST /v1/tasks/{id}/pushNotificationConfigs
+        let config_body = serde_json::to_vec(&json!({
+            "id": "rest-push-1",
+            "url": "https://client.example/a2a/push"
+        }))
+        .expect("config body");
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/v1/tasks/{task_id}/pushNotificationConfigs"))
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(config_body))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let config: JsonValue = serde_json::from_slice(&bytes).expect("config json");
+        assert_eq!(config["id"], "rest-push-1");
+        assert_eq!(config["taskId"], task_id);
+
+        // GET /v1/tasks/{id}/pushNotificationConfigs
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(format!("/v1/tasks/{task_id}/pushNotificationConfigs"))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let configs: JsonValue = serde_json::from_slice(&bytes).expect("config list");
+        assert_eq!(configs.as_array().expect("array").len(), 1);
+
+        // GET /v1/tasks/{id}/pushNotificationConfigs/{configId}
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(format!(
+                        "/v1/tasks/{task_id}/pushNotificationConfigs/rest-push-1"
+                    ))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // DELETE /v1/tasks/{id}/pushNotificationConfigs/{configId}
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri(format!(
+                        "/v1/tasks/{task_id}/pushNotificationConfigs/rest-push-1"
+                    ))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // POST /v1/tasks/{id}:cancel — exercises the AIP-136 custom-method form.
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/v1/tasks/{task_id}:cancel"))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let cancelled: JsonValue = serde_json::from_slice(&bytes).expect("task json");
+        assert_eq!(cancelled["id"], task_id);
+        assert_eq!(cancelled["status"]["state"], "cancelled");
+
+        // POST /v1/tasks/{id}:subscribe — empty resubscribe yields an SSE
+        // stream; we just validate the content-type since the task is
+        // already terminal.
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/v1/tasks/{task_id}:subscribe"))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let content_type = response
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            content_type.starts_with("text/event-stream"),
+            "expected SSE response, got {content_type}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rest_v1_card_unauthenticated_returns_401_with_www_authenticate() {
+        let (_dir, server) = server_with_api_key_policy(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+            "secret",
+        );
+        let router = A2aServer::http_router(HttpState {
+            server,
+            public_url: "https://agent.example".to_string(),
+        });
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/v1/card")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(
+            response
+                .headers()
+                .get(axum::http::header::WWW_AUTHENTICATE)
+                .is_some(),
+            "401 must carry a WWW-Authenticate challenge"
+        );
+    }
+
+    #[tokio::test]
+    async fn rest_v1_unknown_task_action_returns_404() {
+        let (_dir, server) = test_server(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+        );
+        let router = A2aServer::http_router(HttpState {
+            server,
+            public_url: "http://localhost:8080".to_string(),
+        });
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/v1/tasks/abc:explode")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn rest_legacy_message_send_emits_deprecation_advisory() {
+        let (_dir, server) = test_server(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+        );
+        let router = A2aServer::http_router(HttpState {
+            server,
+            public_url: "http://localhost:8080".to_string(),
+        });
+        let send_body = serde_json::to_vec(&json!({
+            "function": "triage",
+            "configuration": {"returnImmediately": true},
+            "message": {
+                "parts": [{"type": "text", "text": "legacy"}]
+            }
+        }))
+        .expect("body");
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/message/send")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(send_body))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(A2A_DEPRECATION_HEADER),
+            Some(&HeaderValue::from_static("true"))
+        );
+        let warning = response
+            .headers()
+            .get(axum::http::header::WARNING)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        assert!(
+            warning.contains("/v1/message:send"),
+            "advisory should point at canonical path, got {warning}"
+        );
+    }
+
     #[tokio::test]
     async fn push_notification_configs_survive_server_restart() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -4092,6 +4712,11 @@ pub fn triage(task: string) -> string {
         assert_eq!(
             card["additionalInterfaces"][0]["url"],
             "https://agent.example"
+        );
+        assert_eq!(card["additionalInterfaces"][1]["transport"], "HTTP+JSON");
+        assert_eq!(
+            card["additionalInterfaces"][1]["url"],
+            "https://agent.example/v1"
         );
         assert!(card.get("supportedInterfaces").is_none());
         assert_eq!(card["metadata"]["extendedAgentCard"], true);
