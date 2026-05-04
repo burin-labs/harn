@@ -6,7 +6,7 @@ use std::time::Instant;
 use serde_json::Value as JsonValue;
 
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
+    async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::clone_async_builtin_child_vm;
@@ -44,24 +44,18 @@ const HOST_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
 ];
 
 const HOST_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    AsyncBuiltin::new("host_call", |args| {
-        boxed_async_builtin(host_call_builtin(args))
-    })
-    .signature("host_call(name, args)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-    .doc("Invoke a host capability operation by capability.operation name."),
-    AsyncBuiltin::new("host_tool_list", |args| {
-        boxed_async_builtin(host_tool_list_builtin(args))
-    })
-    .signature("host_tool_list()")
-    .arity(VmBuiltinArity::Exact(0))
-    .doc("List host tools exposed by the active bridge."),
-    AsyncBuiltin::new("host_tool_call", |args| {
-        boxed_async_builtin(host_tool_call_builtin(args))
-    })
-    .signature("host_tool_call(name, args?)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-    .doc("Call a host tool exposed by the active bridge."),
+    async_builtin!("host_call", host_call_builtin)
+        .signature("host_call(name, args)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .doc("Invoke a host capability operation by capability.operation name."),
+    async_builtin!("host_tool_list", host_tool_list_builtin)
+        .signature("host_tool_list()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("List host tools exposed by the active bridge."),
+    async_builtin!("host_tool_call", host_tool_call_builtin)
+        .signature("host_tool_call(name, args?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .doc("Call a host tool exposed by the active bridge."),
 ];
 
 const HOST_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()

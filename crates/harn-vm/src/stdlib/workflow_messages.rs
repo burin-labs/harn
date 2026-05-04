@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::stdlib::process::runtime_root_base;
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
+    async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
@@ -59,12 +59,10 @@ const WORKFLOW_MESSAGE_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
 ];
 
 const WORKFLOW_MESSAGE_ASYNC_PRIMITIVES: &[AsyncBuiltin] =
-    &[AsyncBuiltin::new("workflow.update", |args| {
-        boxed_async_builtin(workflow_update_builtin(args))
-    })
-    .signature("workflow.update(target, name, payload?, options?)")
-    .arity(VmBuiltinArity::Range { min: 2, max: 4 })
-    .doc("Enqueue a workflow update and wait for a response.")];
+    &[async_builtin!("workflow.update", workflow_update_builtin)
+        .signature("workflow.update(target, name, payload?, options?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 4 })
+        .doc("Enqueue a workflow update and wait for a response.")];
 
 const WORKFLOW_MESSAGE_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
     .category("workflow.messages")

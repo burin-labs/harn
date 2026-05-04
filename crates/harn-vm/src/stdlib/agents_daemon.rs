@@ -10,7 +10,7 @@ use crate::bridge::HostBridge;
 use crate::llm::daemon::{load_snapshot, DaemonSnapshot};
 use crate::orchestration::DaemonEventKindRecord;
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
+    async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
@@ -28,30 +28,22 @@ const DAEMON_SYNC_PRIMITIVES: &[SyncBuiltin] =
         .doc("Refresh and return a daemon snapshot with queued event state.")];
 
 const DAEMON_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    AsyncBuiltin::new("daemon_spawn", |args| {
-        boxed_async_builtin(daemon_spawn_builtin(args))
-    })
-    .signature("daemon_spawn(config)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc("Spawn a persistent daemon agent worker."),
-    AsyncBuiltin::new("daemon_trigger", |args| {
-        boxed_async_builtin(daemon_trigger_builtin(args))
-    })
-    .signature("daemon_trigger(handle, payload)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc("Queue an event payload for a running daemon."),
-    AsyncBuiltin::new("daemon_stop", |args| {
-        boxed_async_builtin(daemon_stop_builtin(args))
-    })
-    .signature("daemon_stop(handle)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc("Stop a running daemon and persist its latest snapshot."),
-    AsyncBuiltin::new("daemon_resume", |args| {
-        boxed_async_builtin(daemon_resume_builtin(args))
-    })
-    .signature("daemon_resume(path)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc("Resume a daemon from persisted state."),
+    async_builtin!("daemon_spawn", daemon_spawn_builtin)
+        .signature("daemon_spawn(config)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Spawn a persistent daemon agent worker."),
+    async_builtin!("daemon_trigger", daemon_trigger_builtin)
+        .signature("daemon_trigger(handle, payload)")
+        .arity(VmBuiltinArity::Exact(2))
+        .doc("Queue an event payload for a running daemon."),
+    async_builtin!("daemon_stop", daemon_stop_builtin)
+        .signature("daemon_stop(handle)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Stop a running daemon and persist its latest snapshot."),
+    async_builtin!("daemon_resume", daemon_resume_builtin)
+        .signature("daemon_resume(path)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Resume a daemon from persisted state."),
 ];
 
 const DAEMON_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()

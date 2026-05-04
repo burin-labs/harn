@@ -123,6 +123,16 @@ where
     Box::pin(future)
 }
 
+macro_rules! async_builtin {
+    ($name:expr, $handler:path) => {
+        $crate::stdlib::registration::AsyncBuiltin::new($name, |args| {
+            $crate::stdlib::registration::boxed_async_builtin($handler(args))
+        })
+    };
+}
+
+pub(crate) use async_builtin;
+
 #[derive(Clone, Copy)]
 pub(crate) struct BuiltinGroup<'a> {
     category: Option<&'static str>,
