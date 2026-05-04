@@ -22,6 +22,26 @@
 
 use std::collections::BTreeSet;
 
+const LLM_CONFIG_BUILTINS: &[&str] = &[
+    "llm_available_providers",
+    "llm_config",
+    "llm_healthcheck",
+    "llm_infer_provider",
+    "llm_known_models",
+    "llm_model_info",
+    "llm_model_tier",
+    "llm_pick_model",
+    "llm_provider_catalog",
+    "llm_providers",
+    "llm_qc_default_model",
+    "llm_rate_limit",
+    "llm_resolve_model",
+    "provider_capabilities",
+    "provider_capabilities_clear",
+    "provider_capabilities_install",
+    "provider_register",
+];
+
 /// Builtins that appear in the parser registry but are not registered with
 /// the VM's `builtin_names()` because they resolve through method dispatch,
 /// opcode handling, or are registered as math constants rather than through
@@ -130,5 +150,43 @@ fn every_parser_builtin_exists_at_runtime() {
          or, if they're intentionally parser-only (e.g. polymorphic method calls),\n\
          add them to `PARSER_ONLY_EXCEPTIONS` in this test:\n  {:#?}",
         stale,
+    );
+}
+
+#[test]
+fn llm_config_builtins_publish_runtime_metadata() {
+    let metadata = harn_vm::stdlib::stdlib_builtin_metadata()
+        .into_iter()
+        .map(|entry| (entry.name().to_string(), entry))
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    for name in LLM_CONFIG_BUILTINS {
+        let entry = metadata
+            .get(*name)
+            .unwrap_or_else(|| panic!("{name} must be registered"));
+        assert!(
+            entry.signature().is_some(),
+            "{name} should carry registration metadata"
+        );
+        assert!(
+            entry.category().is_some(),
+            "{name} should carry category metadata"
+        );
+        assert!(entry.doc().is_some(), "{name} should carry doc metadata");
+    }
+
+    assert_eq!(
+        metadata
+            .get("llm_healthcheck")
+            .expect("llm_healthcheck metadata")
+            .kind(),
+        harn_vm::VmBuiltinKind::Async
+    );
+    assert_eq!(
+        metadata
+            .get("llm_rate_limit")
+            .expect("llm_rate_limit metadata")
+            .category(),
+        Some("llm.rate_limit")
     );
 }
