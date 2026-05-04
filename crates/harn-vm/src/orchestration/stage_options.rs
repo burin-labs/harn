@@ -44,19 +44,12 @@ pub async fn prepare_workflow_stage_agent_options(
             "default_tool_format": default_stage_tool_format(&node.model_policy),
         },
     });
-    let prepared = super::call_workflow_stdlib_function(
+    let prepared: WorkflowStageAgentOptions = crate::stdlib::call_harn_stdlib_typed(
         "std/workflow/options",
         "workflow_stage_agent_options",
-        &[crate::stdlib::json_to_vm_value(&payload)],
+        payload,
     )
     .await?;
-    let prepared = crate::llm::vm_value_to_json(&prepared);
-    let prepared: WorkflowStageAgentOptions =
-        serde_json::from_value(prepared).map_err(|error| {
-            VmError::Runtime(format!(
-                "workflow_stage_agent_options returned invalid shape: {error}"
-            ))
-        })?;
     if prepared.tool_format.trim().is_empty() {
         return Err(VmError::Runtime(
             "workflow_stage_agent_options returned empty tool_format".to_string(),

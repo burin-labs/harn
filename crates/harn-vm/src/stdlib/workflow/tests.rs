@@ -1,11 +1,9 @@
 use super::artifact::{load_run_tree, snapshot_trace_spans};
-use super::map::{execute_join_policy, LocalTask};
+use super::map::{execute_join_tasks, LocalTask};
 use super::register::execute_workflow;
-use super::stage::{classify_stage_outcome, execute_stage_attempts, replay_stage};
+use super::stage::{execute_stage_attempts, replay_stage};
 use crate::orchestration::{
-    inject_workflow_verification_contracts, prepare_workflow_stage_agent_options,
-    prepare_workflow_stage_prompt, render_artifacts_context, save_run_record,
-    select_workflow_stage_artifacts, workflow_verification_contracts, ContextPolicy,
+    inject_workflow_verification_contracts, save_run_record, workflow_verification_contracts,
     RunChildRecord, RunExecutionRecord, RunRecord, RunStageRecord, VerificationContract,
     VerificationRequirement, WorkflowEdge, WorkflowGraph, WorkflowNode,
 };
@@ -14,39 +12,6 @@ use crate::value::VmValue;
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
-
-#[test]
-fn classify_stage_outcome_fails_when_agent_loop_is_stuck() {
-    let (outcome, branch) = classify_stage_outcome(
-        "stage",
-        &serde_json::json!({"status": "stuck"}),
-        &serde_json::json!({"ok": true}),
-    );
-    assert_eq!(outcome, "stuck");
-    assert_eq!(branch.as_deref(), Some("failed"));
-}
-
-#[test]
-fn classify_stage_outcome_accepts_done_status_for_mutating_stage() {
-    let (outcome, branch) = classify_stage_outcome(
-        "stage",
-        &serde_json::json!({"status": "done"}),
-        &serde_json::json!({"ok": true}),
-    );
-    assert_eq!(outcome, "success");
-    assert_eq!(branch.as_deref(), Some("success"));
-}
-
-#[test]
-fn classify_stage_outcome_fails_when_required_write_never_succeeds() {
-    let (outcome, branch) = classify_stage_outcome(
-        "stage",
-        &serde_json::json!({"status": "failed"}),
-        &serde_json::json!({"ok": true}),
-    );
-    assert_eq!(outcome, "failed");
-    assert_eq!(branch.as_deref(), Some("failed"));
-}
 
 #[test]
 fn load_run_tree_recurses_into_child_runs() {
@@ -184,221 +149,20 @@ fn snapshot_trace_spans_returns_completed_trace_tree() {
     set_tracing_enabled(false);
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn prepare_workflow_stage_prompt_puts_task_before_context() {
-    let prepared = prepare_workflow_stage_prompt(
-        "Create the missing test file with one edit call.",
-        Some("Create Required Outputs"),
-        &[],
-        &ContextPolicy::default(),
-        Some("<artifact>\n<title>tests/unit/test_example.py</title>\n<body>\npass\n</body>\n</artifact>"),
-        &[],
-    )
-    .await
-    .expect("workflow stage prompt renders");
-    let prompt = prepared.prompt;
-    let task_index = prompt
-        .find("<workflow_task>")
-        .expect("workflow task block should exist");
-    let context_index = prompt
-        .find("<workflow_context>")
-        .expect("workflow context block should exist");
-    assert!(
-        task_index < context_index,
-        "task block should precede context block"
-    );
-    assert!(prompt.contains("<label>Create Required Outputs</label>"));
-    assert!(prompt.contains("Create the missing test file with one edit call."));
-    assert!(prompt.contains("<workflow_response_contract>"));
-    assert!(
-        prompt.trim_end().ends_with("</workflow_response_contract>"),
-        "prompt should end on the response contract instead of artifact text"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn prepare_workflow_stage_prompt_places_verification_before_context() {
-    let contracts = vec![VerificationContract {
-        required_identifiers: vec!["rateLimit".to_string()],
-        ..Default::default()
-    }];
-    let prepared = prepare_workflow_stage_prompt(
-        "Implement the verifier-exact wiring.",
-        Some("Implement"),
-        &[],
-        &ContextPolicy::default(),
-        Some(
-            "<artifact>\n<title>src/server.ts</title>\n<body>\nexisting code\n</body>\n</artifact>",
-        ),
-        &contracts,
-    )
-    .await
-    .expect("workflow stage prompt renders");
-    let prompt = prepared.prompt;
-
-    let verification_index = prompt
-        .find("<workflow_verification>")
-        .expect("verification block should exist");
-    let context_index = prompt
-        .find("<workflow_context>")
-        .expect("context block should exist");
-    assert!(
-        verification_index < context_index,
-        "verification block should precede artifact context"
-    );
-    assert!(prompt.contains("rateLimit"));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn prepare_workflow_stage_prompt_makes_current_stage_scope_authoritative() {
-    let prepared = prepare_workflow_stage_prompt(
-        "Only update src/current.ts.",
-        Some("Execute Current Batch"),
-        &[],
-        &ContextPolicy::default(),
-        Some("<artifact>\n<title>Action graph</title>\n<body>\nFuture step: run final verification\n</body>\n</artifact>"),
-        &[],
-    )
-    .await
-    .expect("workflow stage prompt renders");
-    let prompt = prepared.prompt;
-
-    assert!(prompt.contains("Treat `<workflow_context>` as supporting evidence"));
-    assert!(prompt.contains("do only what the current workflow task and system prompt authorize"));
-    assert!(prompt.contains("When the current stage is complete, stop"));
-}
-
-#[test]
-fn render_artifacts_context_uses_structured_artifact_blocks() {
-    let artifacts = vec![crate::orchestration::ArtifactRecord {
-        kind: "workspace_file".to_string(),
-        title: Some("tests/unit/test_example.py".to_string()),
-        text: Some("def test_example():\n    assert True\n".to_string()),
-        source: Some("required_output_phase".to_string()),
-        freshness: Some("fresh".to_string()),
-        priority: Some(70),
-        ..Default::default()
-    }];
-    let rendered =
-        render_artifacts_context(&artifacts, &crate::orchestration::ContextPolicy::default());
-    assert!(rendered.contains("<artifact>"));
-    assert!(rendered.contains("<title>tests/unit/test_example.py</title>"));
-    assert!(rendered.contains("<body>\ndef test_example():"));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn prepare_workflow_stage_agent_options_runs_policy_in_harn() {
-    let mut node = WorkflowNode {
-        mode: Some("agent".to_string()),
-        done_sentinel: Some("DONE".to_string()),
-        exit_when_verified: true,
-        ..Default::default()
-    };
-    node.model_policy.tool_format = Some(" native ".to_string());
-    node.model_policy.max_iterations = Some(4);
-    node.model_policy.max_nudges = Some(1);
-    node.model_policy.nudge = Some("use a tool".to_string());
-    node.model_policy.native_tool_fallback =
-        crate::orchestration::NativeToolFallbackPolicy::AllowOnce;
-    node.model_policy.tool_examples = Some("example".to_string());
-    node.model_policy.stop_after_successful_tools = Some(vec!["edit".to_string()]);
-    node.model_policy.require_successful_tools = Some(vec!["test".to_string()]);
-
-    let prepared = prepare_workflow_stage_agent_options(&node, "stage-session", true)
-        .await
-        .expect("workflow stage options compose");
-    assert!(prepared.run_agent_loop);
-    assert_eq!(prepared.tool_format, "native");
-    assert_eq!(prepared.llm_options["session_id"], "stage-session");
-    assert_eq!(prepared.llm_options["tool_format"], "native");
-    assert_eq!(prepared.agent_loop_options["max_iterations"], 4);
-    assert_eq!(prepared.agent_loop_options["max_nudges"], 1);
-    assert_eq!(prepared.agent_loop_options["nudge"], "use a tool");
-    assert_eq!(
-        prepared.agent_loop_options["native_tool_fallback"],
-        "allow_once"
-    );
-    assert_eq!(prepared.agent_loop_options["done_sentinel"], "DONE");
-    assert_eq!(prepared.agent_loop_options["exit_when_verified"], true);
-    assert_eq!(
-        prepared.agent_loop_options["stop_after_successful_tools"][0],
-        "edit"
-    );
-    assert_eq!(
-        prepared.agent_loop_options["require_successful_tools"][0],
-        "test"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn select_workflow_stage_artifacts_applies_input_kind_fallback_in_harn() {
-    let mut node = WorkflowNode::default();
-    node.input_contract.input_kinds = vec!["summary".to_string()];
-    let artifacts = vec![
-        crate::orchestration::ArtifactRecord {
-            id: "summary".to_string(),
-            kind: "summary".to_string(),
-            text: Some("summary".to_string()),
-            ..Default::default()
-        },
-        crate::orchestration::ArtifactRecord {
-            id: "file".to_string(),
-            kind: "workspace_file".to_string(),
-            text: Some("file".to_string()),
-            ..Default::default()
-        },
-    ];
-    let selected =
-        select_workflow_stage_artifacts(&artifacts, &node.context_policy, &node.input_contract)
-            .await
-            .expect("stage artifact selector runs");
-    assert_eq!(selected.context_policy.include_kinds, vec!["summary"]);
-    assert_eq!(selected.artifacts.len(), 1);
-    assert_eq!(selected.artifacts[0].id, "summary");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn select_workflow_stage_artifacts_keeps_highest_priority_duplicate_text() {
-    let node = WorkflowNode::default();
-    let artifacts = vec![
-        crate::orchestration::ArtifactRecord {
-            id: "low".to_string(),
-            kind: "summary".to_string(),
-            text: Some("same".to_string()),
-            priority: Some(1),
-            ..Default::default()
-        },
-        crate::orchestration::ArtifactRecord {
-            id: "high".to_string(),
-            kind: "summary".to_string(),
-            text: Some("same".to_string()),
-            priority: Some(10),
-            ..Default::default()
-        },
-    ];
-    let selected =
-        select_workflow_stage_artifacts(&artifacts, &node.context_policy, &node.input_contract)
-            .await
-            .expect("stage artifact selector runs");
-    assert_eq!(selected.artifacts.len(), 1);
-    assert_eq!(selected.artifacts[0].id, "high");
-}
-
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn execute_join_policy_stops_after_first_completion() {
+async fn execute_join_tasks_stops_after_first_completion() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let tasks: Vec<LocalTask<i32>> = vec![
                 Box::pin(async {
-                    // Never resolves on its own; the "first" join policy
-                    // must abort this branch once the immediate winner
-                    // completes.
+                    // Never resolves on its own; the target count must
+                    // abort this branch once the immediate winner completes.
                     std::future::pending::<()>().await;
                     1
                 }),
                 Box::pin(async { 2 }),
             ];
-            let results = execute_join_policy(tasks, "first", None, None).await;
+            let results = execute_join_tasks(tasks, 1, None).await;
             assert_eq!(results.len(), 1);
             assert_eq!(results[0].as_ref().ok().copied(), Some(2));
         })
@@ -406,7 +170,7 @@ async fn execute_join_policy_stops_after_first_completion() {
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn execute_join_policy_honors_quorum_and_concurrency_limit() {
+async fn execute_join_tasks_honors_target_and_concurrency_limit() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let active = Rc::new(Cell::new(0usize));
@@ -429,7 +193,7 @@ async fn execute_join_policy_honors_quorum_and_concurrency_limit() {
                     }) as LocalTask<i32>
                 })
                 .collect::<Vec<_>>();
-            let results = execute_join_policy(tasks, "quorum", Some(2), Some(2)).await;
+            let results = execute_join_tasks(tasks, 2, Some(2)).await;
             assert_eq!(results.len(), 2);
             assert!(
                 max_seen.get() <= 2,
@@ -438,57 +202,6 @@ async fn execute_join_policy_honors_quorum_and_concurrency_limit() {
             );
         })
         .await;
-}
-
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn failed_verify_stage_preserves_verification_artifact_and_result() {
-    let node = crate::orchestration::WorkflowNode {
-        id: Some("verify".to_string()),
-        kind: "verify".to_string(),
-        retry_policy: crate::orchestration::RetryPolicy {
-            max_attempts: 1,
-            ..Default::default()
-        },
-        verify: Some(serde_json::json!({
-            "command": failing_verify_command(),
-            "expect_status": 0,
-        })),
-        output_contract: crate::orchestration::StageContract {
-            output_kinds: vec!["verification_result".to_string()],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    let executed = execute_stage_attempts("run verification", "verify", &node, &[], None)
-        .await
-        .expect("stage executes");
-
-    assert_eq!(executed.status, "failed");
-    assert_eq!(executed.outcome, "verification_failed");
-    assert_eq!(executed.branch.as_deref(), Some("failed"));
-    assert_eq!(executed.artifacts.len(), 1);
-    assert_eq!(executed.artifacts[0].kind, "verification_result");
-    assert!(executed.result["visible_text"]
-        .as_str()
-        .unwrap_or("")
-        .contains("nope"));
-    assert_eq!(
-        executed
-            .verification
-            .as_ref()
-            .and_then(|value| value.get("ok"))
-            .and_then(|value| value.as_bool()),
-        Some(false)
-    );
-}
-
-fn failing_verify_command() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "echo nope && exit /b 1"
-    } else {
-        "printf nope; exit 1"
-    }
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
@@ -546,98 +259,6 @@ async fn verify_stage_reads_transcript_from_session_store() {
         _ => panic!("transcript must have a messages list"),
     };
     assert_eq!(msg_list.len(), 3);
-}
-
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn failing_stage_records_exactly_one_attempt_regardless_of_max_attempts() {
-    // `retry_policy.max_attempts` is a no-op. A stage that fails runs once;
-    // iteration lives at the workflow-graph level.
-    let node = crate::orchestration::WorkflowNode {
-        id: Some("verify".to_string()),
-        kind: "verify".to_string(),
-        retry_policy: crate::orchestration::RetryPolicy {
-            max_attempts: 5,
-            backoff_ms: Some(1),
-            ..Default::default()
-        },
-        verify: Some(serde_json::json!({
-            "command": "exit 7",
-            "expect_status": 0,
-        })),
-        output_contract: crate::orchestration::StageContract {
-            output_kinds: vec!["verification_result".to_string()],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    let executed = execute_stage_attempts("verify", "verify", &node, &[], None)
-        .await
-        .expect("stage executes");
-
-    assert_eq!(
-        executed.attempts.len(),
-        1,
-        "failing stage must record exactly one attempt; retry-loop is removed"
-    );
-    assert_eq!(executed.status, "failed");
-    assert_eq!(executed.branch.as_deref(), Some("failed"));
-}
-
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn succeeding_stage_records_single_attempt() {
-    let node = crate::orchestration::WorkflowNode {
-        id: Some("verify".to_string()),
-        kind: "verify".to_string(),
-        retry_policy: crate::orchestration::RetryPolicy {
-            max_attempts: 3,
-            ..Default::default()
-        },
-        verify: Some(serde_json::json!({
-            "command": "echo ok",
-            "expect_status": 0,
-        })),
-        output_contract: crate::orchestration::StageContract {
-            output_kinds: vec!["verification_result".to_string()],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    let executed = execute_stage_attempts("verify", "verify", &node, &[], None)
-        .await
-        .expect("stage executes");
-
-    assert_eq!(executed.attempts.len(), 1);
-    assert_eq!(executed.status, "completed");
-}
-
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn stage_task_reaches_execution_verbatim() {
-    let node = crate::orchestration::WorkflowNode {
-        id: Some("verify".to_string()),
-        kind: "verify".to_string(),
-        retry_policy: crate::orchestration::RetryPolicy {
-            max_attempts: 3,
-            ..Default::default()
-        },
-        verify: Some(serde_json::json!({
-            "command": "echo 'verification'; exit 1",
-            "expect_status": 0,
-        })),
-        output_contract: crate::orchestration::StageContract {
-            output_kinds: vec!["verification_result".to_string()],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    let executed =
-        execute_stage_attempts("the original task, pristine", "verify", &node, &[], None)
-            .await
-            .expect("stage executes");
-
-    assert_eq!(executed.attempts.len(), 1);
 }
 
 #[test]

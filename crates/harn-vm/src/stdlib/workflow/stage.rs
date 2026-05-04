@@ -2,16 +2,18 @@
 
 use std::collections::VecDeque;
 
+use serde::Deserialize;
+
 use crate::orchestration::{
-    pop_execution_policy, push_execution_policy, select_artifacts, ArtifactRecord, LlmUsageRecord,
-    RunStageAttemptRecord, RunStageRecord,
+    pop_execution_policy, push_execution_policy, select_workflow_stage_artifacts, ArtifactRecord,
+    LlmUsageRecord, RunStageAttemptRecord, RunStageRecord,
 };
 use crate::value::{VmError, VmValue};
 
 use super::artifact::artifact_from_value;
 use super::map::{
-    execute_join_policy, map_branch_artifact, map_executes_stage, map_stage_node, map_work_items,
-    LocalTask, MapBranchResult, MapWorkItem,
+    execute_join_tasks, map_branch_artifact, map_finalize, map_join_target, map_stage_plan,
+    map_work_items, LocalTask, MapBranchResult, MapWorkItem,
 };
 use super::usage::{llm_usage_delta, llm_usage_snapshot, merge_usage};
 
@@ -87,137 +89,105 @@ pub(super) fn replay_stage(
     })
 }
 
-pub(super) fn evaluate_verification(
+pub(super) async fn evaluate_verification(
     node: &crate::orchestration::WorkflowNode,
     result: &serde_json::Value,
-) -> serde_json::Value {
-    let visible_text = result
-        .get("visible_text")
-        .or_else(|| result.get("text"))
-        .and_then(|value| value.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let exit_status = result
-        .get("exit_status")
-        .or_else(|| result.get("status_code"))
-        .or_else(|| result.get("status"))
-        .and_then(|value| value.as_i64());
-    let Some(verify) = node.verify.as_ref().and_then(|verify| verify.as_object()) else {
-        return serde_json::json!({"kind": "none", "ok": true});
-    };
-
-    let mut checks = Vec::new();
-    if let Some(needle) = verify.get("assert_text").and_then(|value| value.as_str()) {
-        checks.push(serde_json::json!({
-            "kind": "assert_text",
-            "ok": visible_text.contains(needle),
-            "expected": needle,
-        }));
-    }
-    if let Some(expected_status) = verify.get("expect_status").and_then(|value| value.as_i64()) {
-        checks.push(serde_json::json!({
-            "kind": "expect_status",
-            "ok": exit_status == Some(expected_status),
-            "expected": expected_status,
-            "actual": exit_status,
-        }));
-    }
-    if checks.is_empty() {
-        return serde_json::json!({"kind": "none", "ok": true});
-    }
-
-    let ok = checks.iter().all(|check| {
-        check
-            .get("ok")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false)
+) -> Result<serde_json::Value, VmError> {
+    let payload = serde_json::json!({
+        "verify": node.verify.clone(),
+        "result": result,
     });
-    serde_json::json!({
-        "kind": "composite",
-        "ok": ok,
-        "checks": checks,
-    })
+    crate::stdlib::call_harn_stdlib_json(
+        "std/workflow/stage",
+        "workflow_evaluate_verification",
+        payload,
+    )
+    .await
 }
 
-pub(super) fn evaluate_condition(
-    node: &crate::orchestration::WorkflowNode,
-    artifacts: &[ArtifactRecord],
-) -> (bool, Vec<String>) {
-    let consumed = artifacts
-        .iter()
-        .map(|artifact| artifact.id.clone())
-        .collect();
-    if let Some(needle) = node
-        .metadata
-        .get("contains_text")
-        .and_then(|value| value.as_str())
-    {
-        let matched = artifacts.iter().any(|artifact| {
-            artifact
-                .text
-                .as_ref()
-                .is_some_and(|text| text.contains(needle))
-        });
-        return (matched, consumed);
-    }
-    if let Some(expected) = node
-        .metadata
-        .get("artifact_kind")
-        .and_then(|value| value.as_str())
-    {
-        let matched = artifacts.iter().any(|artifact| artifact.kind == expected);
-        return (matched, consumed);
-    }
-    (!artifacts.is_empty(), consumed)
+#[derive(Debug, Deserialize)]
+struct WorkflowStageOutcome {
+    outcome: String,
+    branch: Option<String>,
 }
 
-pub(super) fn classify_stage_outcome(
+pub(super) async fn classify_stage_outcome(
     node_kind: &str,
     result: &serde_json::Value,
     verification: &serde_json::Value,
-) -> (String, Option<String>) {
-    let verified_ok = verification
-        .get("ok")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(true);
-    let result_status = result
-        .get("status")
-        .and_then(|value| value.as_str())
-        .unwrap_or("completed");
-    let stage_succeeded = if node_kind == "verify" {
-        verified_ok
-    } else {
-        result_status == "done" || result_status == "completed"
-    };
-
-    let outcome = if node_kind == "verify" {
-        if verified_ok {
-            "verified".to_string()
-        } else {
-            "verification_failed".to_string()
-        }
-    } else if !stage_succeeded {
-        result_status.to_string()
-    } else if node_kind == "subagent" {
-        "subagent_completed".to_string()
-    } else {
-        "success".to_string()
-    };
-
-    let branch = if node_kind == "verify" {
-        Some(if verified_ok {
-            "passed".to_string()
-        } else {
-            "failed".to_string()
-        })
-    } else if stage_succeeded {
-        Some("success".to_string())
-    } else {
-        Some("failed".to_string())
-    };
-
-    (outcome, branch)
+) -> Result<(String, Option<String>), VmError> {
+    let payload = serde_json::json!({
+        "node_kind": node_kind,
+        "result": result,
+        "verification": verification,
+    });
+    let classified: WorkflowStageOutcome = crate::stdlib::call_harn_stdlib_typed(
+        "std/workflow/stage",
+        "workflow_classify_stage_outcome",
+        payload,
+    )
+    .await?;
+    Ok((classified.outcome, classified.branch))
 }
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct WorkflowStaticStagePlan {
+    handled: bool,
+    result: Option<serde_json::Value>,
+    artifacts: Vec<ArtifactRecord>,
+    outcome: Option<String>,
+    branch: Option<String>,
+    verification: Option<serde_json::Value>,
+}
+
+async fn prepare_static_stage(
+    node_id: &str,
+    node: &crate::orchestration::WorkflowNode,
+    artifacts: &[ArtifactRecord],
+) -> Result<Option<StageAttemptResult>, VmError> {
+    let payload = serde_json::json!({
+        "node_id": node_id,
+        "node": node,
+        "artifacts": artifacts,
+    });
+    let planned: WorkflowStaticStagePlan = crate::stdlib::call_harn_stdlib_typed(
+        "std/workflow/stage",
+        "workflow_prepare_static_stage",
+        payload,
+    )
+    .await?;
+    if !planned.handled {
+        return Ok(None);
+    }
+    let result = planned.result.ok_or_else(|| {
+        VmError::Runtime("workflow_prepare_static_stage omitted result".to_string())
+    })?;
+    let outcome = planned.outcome.ok_or_else(|| {
+        VmError::Runtime("workflow_prepare_static_stage omitted outcome".to_string())
+    })?;
+    Ok(Some((
+        result,
+        planned
+            .artifacts
+            .into_iter()
+            .map(ArtifactRecord::normalize)
+            .collect(),
+        None,
+        outcome,
+        planned.branch,
+        planned.verification,
+    )))
+}
+
+type StageAttemptResult = (
+    serde_json::Value,
+    Vec<ArtifactRecord>,
+    Option<VmValue>,
+    String,
+    Option<String>,
+    Option<serde_json::Value>,
+);
 
 pub(super) async fn execute_stage_attempts(
     task: &str,
@@ -226,17 +196,13 @@ pub(super) async fn execute_stage_attempts(
     artifacts: &[ArtifactRecord],
     transcript: Option<VmValue>,
 ) -> Result<ExecutedStage, VmError> {
-    type StageAttemptResult = (
-        serde_json::Value,
-        Vec<ArtifactRecord>,
-        Option<VmValue>,
-        String,
-        Option<String>,
-        Option<serde_json::Value>,
-    );
-    let consumed_artifact_ids = select_artifacts(artifacts.to_vec(), &node.context_policy)
-        .into_iter()
-        .map(|artifact| artifact.id)
+    let selected_stage_artifacts =
+        select_workflow_stage_artifacts(artifacts, &node.context_policy, &node.input_contract)
+            .await?
+            .artifacts;
+    let consumed_artifact_ids = selected_stage_artifacts
+        .iter()
+        .map(|artifact| artifact.id.clone())
         .collect::<Vec<_>>();
     // A stage runs once. Iteration is expressed at two levels: loop-back
     // edges in the workflow graph (for cross-stage retry) and
@@ -249,49 +215,24 @@ pub(super) async fn execute_stage_attempts(
     let attempt = 1usize;
     let attempt_task = task.to_string();
     let execution_future = async {
+        if let Some((result, produced, _, outcome, branch, verification)) =
+            prepare_static_stage(node_id, node, &selected_stage_artifacts).await?
+        {
+            return Ok((
+                result,
+                produced,
+                transcript.clone(),
+                outcome,
+                branch,
+                verification,
+            ));
+        }
         let r: Result<StageAttemptResult, VmError> = match node.kind.as_str() {
-            "fork" => Ok((
-                serde_json::json!({"status": "completed", "text": "forked"}),
-                Vec::new(),
-                transcript.clone(),
-                "forked".to_string(),
-                Some("fork".to_string()),
-                None,
-            )),
-            "join" => Ok((
-                serde_json::json!({"status": "completed", "text": "joined"}),
-                Vec::new(),
-                transcript.clone(),
-                "joined".to_string(),
-                Some("join".to_string()),
-                None,
-            )),
-            "condition" => {
-                let selected = select_artifacts(artifacts.to_vec(), &node.context_policy);
-                let (matched, _) = evaluate_condition(node, &selected);
-                Ok((
-                    serde_json::json!({"status": "completed", "text": if matched { "true" } else { "false" }}),
-                    Vec::new(),
-                    transcript.clone(),
-                    if matched {
-                        "condition_true".to_string()
-                    } else {
-                        "condition_false".to_string()
-                    },
-                    Some(if matched {
-                        "true".to_string()
-                    } else {
-                        "false".to_string()
-                    }),
-                    None,
-                ))
-            }
             "map" => {
-                let items = map_work_items(node, artifacts);
+                let items = map_work_items(node, artifacts).await?;
                 let total_items = items.len();
                 let branch_policy = crate::orchestration::current_execution_policy();
-                let runs_stage = map_executes_stage(node);
-                let stage_template = runs_stage.then(|| map_stage_node(node));
+                let (stage_template, output_kind) = map_stage_plan(node).await?;
                 let shared_lineage = items
                     .iter()
                     .flat_map(|item| match item {
@@ -312,12 +253,7 @@ pub(super) async fn execute_stage_attempts(
                         let task_label = task.to_string();
                         let stage_template = stage_template.clone();
                         let node_id = node_id.to_string();
-                        let output_kind = node
-                            .map_policy
-                            .output_kind
-                            .clone()
-                            .or_else(|| node.output_contract.output_kinds.first().cloned())
-                            .unwrap_or_else(|| "artifact".to_string());
+                        let output_kind = output_kind.clone();
                         let lineage = shared_lineage.clone();
                         Box::pin(async move {
                             if let Some(policy) = branch_policy.clone() {
@@ -409,10 +345,9 @@ pub(super) async fn execute_stage_attempts(
                     })
                     .collect::<Vec<_>>();
 
-                let branch_results = execute_join_policy(
+                let branch_results = execute_join_tasks(
                     tasks,
-                    &strategy,
-                    node.join_policy.min_completed,
+                    map_join_target(node, total_items).await?,
                     node.map_policy.max_concurrent,
                 )
                 .await;
@@ -464,105 +399,10 @@ pub(super) async fn execute_stage_attempts(
                         .unwrap_or(u64::MAX);
                     left_index.cmp(&right_index)
                 });
-                let status = if failures.is_empty() {
-                    "completed"
-                } else if produced.is_empty() {
-                    "failed"
-                } else {
-                    "partial"
-                };
-                let text = if status == "failed" {
-                    format!("map failed after {} branch failures", failures.len())
-                } else {
-                    format!("mapped {} of {} items", produced.len(), total_items)
-                };
-                let branch = if status == "failed" {
-                    Some("failed".to_string())
-                } else {
-                    Some("mapped".to_string())
-                };
-                let result = serde_json::json!({
-                    "status": status,
-                    "text": text,
-                    "join_strategy": strategy,
-                    "completed": completed,
-                    "failures": failures,
-                });
-                Ok((
-                    result,
-                    produced,
-                    transcript.clone(),
-                    "mapped".to_string(),
-                    branch,
-                    None,
-                ))
-            }
-            "reduce" => {
-                let selected = select_artifacts(artifacts.to_vec(), &node.context_policy);
-                let separator = node
-                    .reduce_policy
-                    .separator
-                    .clone()
-                    .unwrap_or_else(|| "\n\n".to_string());
-                let reduced_text = selected
-                    .iter()
-                    .filter_map(|artifact| artifact.text.clone())
-                    .collect::<Vec<_>>()
-                    .join(&separator);
-                let reduced = artifact_from_value(
-                    node_id,
-                    node.output_contract
-                        .output_kinds
-                        .first()
-                        .map(|kind| kind.as_str())
-                        .unwrap_or("summary"),
-                    0,
-                    serde_json::Value::String(reduced_text.clone()),
-                    &selected
-                        .iter()
-                        .map(|artifact| artifact.id.clone())
-                        .collect::<Vec<_>>(),
-                    format!("reduce {} output", node_id),
-                );
-                Ok((
-                    serde_json::json!({"status": "completed", "text": reduced_text}),
-                    vec![reduced],
-                    transcript.clone(),
-                    "reduced".to_string(),
-                    Some("reduced".to_string()),
-                    None,
-                ))
-            }
-            "escalation" => {
-                let reason = node
-                    .escalation_policy
-                    .reason
-                    .clone()
-                    .unwrap_or_else(|| "manual review required".to_string());
-                let produced = artifact_from_value(
-                    node_id,
-                    node.output_contract
-                        .output_kinds
-                        .first()
-                        .map(|kind| kind.as_str())
-                        .unwrap_or("plan"),
-                    0,
-                    serde_json::json!({
-                        "queue": node.escalation_policy.queue,
-                        "level": node.escalation_policy.level,
-                        "reason": reason,
-                    }),
-                    &consumed_artifact_ids,
-                    format!("escalation {}", node_id),
-                );
-                Ok((
-                    serde_json::json!({"status": "completed", "text": reason}),
-                    vec![produced],
-                    transcript.clone(),
-                    "escalated".to_string(),
-                    Some("escalated".to_string()),
-                    None,
-                ))
+                let (result, outcome, branch) =
+                    map_finalize(&strategy, total_items, produced.len(), completed, failures)
+                        .await?;
+                Ok((result, produced, transcript.clone(), outcome, branch, None))
             }
             "subagent" => {
                 let (result, produced, next_transcript) =
@@ -574,14 +414,10 @@ pub(super) async fn execute_stage_attempts(
                         transcript.clone(),
                     )
                     .await?;
-                Ok((
-                    result,
-                    produced,
-                    next_transcript,
-                    "subagent_completed".to_string(),
-                    Some("success".to_string()),
-                    None,
-                ))
+                let verification = serde_json::json!({"kind": "none", "ok": true});
+                let (outcome, branch) =
+                    classify_stage_outcome(&node.kind, &result, &verification).await?;
+                Ok((result, produced, next_transcript, outcome, branch, None))
             }
             _ => {
                 let (result, produced, next_transcript) = crate::orchestration::execute_stage_node(
@@ -591,8 +427,9 @@ pub(super) async fn execute_stage_attempts(
                     artifacts,
                 )
                 .await?;
-                let verification = evaluate_verification(node, &result);
-                let (outcome, branch) = classify_stage_outcome(&node.kind, &result, &verification);
+                let verification = evaluate_verification(node, &result).await?;
+                let (outcome, branch) =
+                    classify_stage_outcome(&node.kind, &result, &verification).await?;
                 Ok((
                     result,
                     produced,

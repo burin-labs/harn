@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::agent_events::AgentEventSink;
-use crate::stdlib::harn_entry::{register_harn_async_entrypoints, HarnAsyncEntrypoint};
+use crate::stdlib::harn_entry::{register_harn_module_entrypoints, HarnEntrypointModule};
 use crate::stdlib::registration::{register_sync_builtins, SyncBuiltin};
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
@@ -28,49 +28,10 @@ const DEFAULT_AGENT_LOOP_TOOL_RETRIES: i64 = 0;
 const DEFAULT_AGENT_LOOP_SCHEMA_RETRIES: i64 = 0;
 const HOST_LLM_SESSION_RUN_BUILTIN: &str = "__host_llm_session_run";
 
-const AGENT_STDLIB_ENTRYPOINTS: &[HarnAsyncEntrypoint] = &[
-    HarnAsyncEntrypoint::new("agent_loop", "std/agent/loop", "agent_loop")
-        .signature("agent_loop(prompt, system?, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-        .category("agent.stdlib")
-        .doc("Dispatch the public agent loop facade through the Harn stdlib."),
-    HarnAsyncEntrypoint::new("agent_turn", "std/agent/turn", "agent_turn")
-        .signature("agent_turn(prompt, system?, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-        .category("agent.stdlib")
-        .doc("Dispatch the public agent turn facade through the Harn stdlib."),
-    HarnAsyncEntrypoint::new("agent_llm_turn", "std/agent/primitives", "agent_llm_turn")
-        .signature("agent_llm_turn(prompt, system?, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-        .category("agent.stdlib")
-        .doc("Dispatch the agent LLM-turn helper through the Harn stdlib."),
-    HarnAsyncEntrypoint::new(
-        "agent_parse_tool_calls",
-        "std/agent/primitives",
-        "agent_parse_tool_calls",
-    )
-    .signature("agent_parse_tool_calls(text, tools?)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-    .category("agent.stdlib")
-    .doc("Dispatch the agent tool-call parser facade through the Harn stdlib."),
-    HarnAsyncEntrypoint::new(
-        "agent_dispatch_tool_call",
-        "std/agent/primitives",
-        "agent_dispatch_tool_call",
-    )
-    .signature("agent_dispatch_tool_call(call, tools?, options?)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-    .category("agent.stdlib")
-    .doc("Dispatch the single tool-call facade through the Harn stdlib."),
-    HarnAsyncEntrypoint::new(
-        "agent_dispatch_tool_batch",
-        "std/agent/primitives",
-        "agent_dispatch_tool_batch",
-    )
-    .signature("agent_dispatch_tool_batch(calls, tools?, options?)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-    .category("agent.stdlib")
-    .doc("Dispatch the batch tool-call facade through the Harn stdlib."),
+const AGENT_STDLIB_ENTRYPOINT_MODULES: &[HarnEntrypointModule] = &[
+    HarnEntrypointModule::new("std/agent/loop", "agent.stdlib"),
+    HarnEntrypointModule::new("std/agent/turn", "agent.stdlib"),
+    HarnEntrypointModule::new("std/agent/primitives", "agent.stdlib"),
 ];
 
 const AGENT_CONTROL_PRIMITIVES: &[SyncBuiltin] = &[
@@ -85,63 +46,6 @@ const AGENT_CONTROL_PRIMITIVES: &[SyncBuiltin] = &[
         .category("agent.host")
         .doc("Inject pending feedback into an agent session."),
 ];
-
-#[derive(Clone, Copy)]
-pub(crate) struct AgentLoopProfileDefaults {
-    pub max_iterations: i64,
-    pub max_nudges: i64,
-    pub tool_retries: i64,
-    pub llm_retries: i64,
-    pub schema_retries: i64,
-}
-
-impl AgentLoopProfileDefaults {
-    fn for_name(name: &str) -> Option<Self> {
-        match name {
-            "tool_using" => Some(Self {
-                max_iterations: 50,
-                max_nudges: 8,
-                tool_retries: 0,
-                llm_retries: DEFAULT_AGENT_LOOP_LLM_RETRIES as i64,
-                schema_retries: 0,
-            }),
-            "researcher" => Some(Self {
-                max_iterations: 30,
-                max_nudges: 4,
-                tool_retries: 0,
-                llm_retries: 2,
-                schema_retries: 0,
-            }),
-            "verifier" => Some(Self {
-                max_iterations: 5,
-                max_nudges: 0,
-                tool_retries: 0,
-                llm_retries: 2,
-                schema_retries: 3,
-            }),
-            "completer" => Some(Self {
-                max_iterations: 1,
-                max_nudges: 0,
-                tool_retries: 0,
-                llm_retries: 2,
-                schema_retries: 0,
-            }),
-            _ => None,
-        }
-    }
-}
-
-pub(crate) fn agent_loop_profile_defaults(
-    options: &Option<std::collections::BTreeMap<String, VmValue>>,
-    label: &str,
-) -> Result<AgentLoopProfileDefaults, crate::value::VmError> {
-    let profile = opt_str(options, "profile").unwrap_or_else(|| "tool_using".to_string());
-    AgentLoopProfileDefaults::for_name(&profile).ok_or_else(|| {
-        crate::value::VmError::Runtime(format!(
-            "{label}: profile must be one of tool_using, researcher, verifier, completer; got `{profile}`"
-        ))
-    })
-}
 
 #[derive(Clone)]
 pub struct AgentLoopConfig {
@@ -733,12 +637,12 @@ fn register_llm_turn_loop_driver(vm: &mut Vm, bridge: Option<Rc<crate::bridge::H
 
 pub(crate) fn register_agent_loop(vm: &mut Vm) {
     register_llm_turn_loop_driver(vm, None);
-    register_harn_async_entrypoints(vm, AGENT_STDLIB_ENTRYPOINTS);
+    register_harn_module_entrypoints(vm, AGENT_STDLIB_ENTRYPOINT_MODULES);
 }
 
 pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
     register_llm_turn_loop_driver(vm, Some(bridge));
-    register_harn_async_entrypoints(vm, AGENT_STDLIB_ENTRYPOINTS);
+    register_harn_module_entrypoints(vm, AGENT_STDLIB_ENTRYPOINT_MODULES);
 }
 
 pub(crate) fn register_agent_control_primitives(vm: &mut Vm) {

@@ -1,0 +1,34 @@
+import { workflow_join_readiness, workflow_next_edges } from "std/workflow/schedule"
+
+pipeline default() {
+  let graph = {
+    edges: [
+      {from: "a", to: "join"},
+      {from: "b", to: "join"},
+      {from: "gate", to: "pass", branch: "true"},
+      {from: "gate", to: "fallback"},
+    ],
+  }
+  let wait_all = workflow_join_readiness(
+    {graph: graph, node_id: "join", node: {join_policy: {strategy: "all"}}, completed_nodes: ["a"]},
+  )
+  println(wait_all.ready)
+  println(wait_all.required)
+  println(wait_all.completed_inputs)
+  let quorum = workflow_join_readiness(
+    {
+      graph: graph,
+      node_id: "join",
+      node: {join_policy: {strategy: "quorum", min_completed: 1}},
+      completed_nodes: ["a"],
+    },
+  )
+  println(quorum.ready)
+  println(quorum.required)
+  let exact = workflow_next_edges({graph: graph, current: "gate", branch: "true"})
+  println(len(exact))
+  println(exact[0].to)
+  let fallback = workflow_next_edges({graph: graph, current: "gate", branch: "false"})
+  println(len(fallback))
+  println(fallback[0].to)
+}

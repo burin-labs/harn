@@ -51,6 +51,30 @@ pipeline default() {
   println(contains(prepared.prompt, "Ship it"))
   println(prepared.rendered_context == xml_context)
   println(prepared.rendered_verification == "")
+  let ordered = workflow_prepare_stage_prompt(
+    {
+      task: "Create the missing test file with one edit call.",
+      task_label: "Create Required Outputs",
+      rendered_context: "<artifact>\n<title>tests/unit/test_example.py</title>\n<body>\npass\n</body>\n</artifact>",
+      verification_contracts: [{required_identifiers: ["rateLimit"]}],
+    },
+  )
+  println(
+    ordered.prompt.index_of("<workflow_task>") < ordered.prompt.index_of("<workflow_verification>"),
+  )
+  println(
+    ordered.prompt.index_of("<workflow_verification>")
+      < ordered.prompt.index_of("<workflow_context>"),
+  )
+  println(contains(ordered.prompt, "<label>Create Required Outputs</label>"))
+  println(contains(ordered.prompt, "Create the missing test file with one edit call."))
+  println(contains(ordered.prompt, "rateLimit"))
+  println(trim(ordered.prompt).ends_with("</workflow_response_contract>"))
+  println(contains(ordered.prompt, "Treat `<workflow_context>` as supporting evidence"))
+  println(
+    contains(ordered.prompt, "do only what the current workflow task and system prompt authorize"),
+  )
+  println(contains(ordered.prompt, "When the current stage is complete, stop"))
   let prepared_override = workflow_prepare_stage_prompt(
     {task: "Task", rendered_context: "override", verification_contracts: []},
   )

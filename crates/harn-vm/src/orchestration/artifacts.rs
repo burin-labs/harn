@@ -4,10 +4,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::stdlib::{call_harn_stdlib_json, call_harn_stdlib_typed};
+
 use super::{
-    call_workflow_stdlib_function, handoff_artifact_record, handoff_from_json_value,
-    microcompact_tool_output, new_id, normalize_handoff_artifact_json, now_rfc3339, ContextPolicy,
-    StageContract, VerificationContract,
+    handoff_artifact_record, handoff_from_json_value, microcompact_tool_output, new_id,
+    normalize_handoff_artifact_json, now_rfc3339, ContextPolicy, StageContract,
+    VerificationContract,
 };
 
 /// Snip an artifact's text to fit within a token budget.
@@ -364,20 +366,12 @@ pub async fn select_workflow_stage_artifacts(
         "context_policy": context_policy,
         "input_contract": input_contract,
     });
-    let config = crate::stdlib::json_to_vm_value(&payload);
-    let selected = call_workflow_stdlib_function(
+    let mut selected: SelectedWorkflowStageArtifacts = call_harn_stdlib_typed(
         "std/workflow/context",
         "workflow_select_stage_artifacts",
-        &[config],
+        payload,
     )
     .await?;
-    let selected_json = crate::llm::vm_value_to_json(&selected);
-    let mut selected: SelectedWorkflowStageArtifacts = serde_json::from_value(selected_json)
-        .map_err(|error| {
-            crate::value::VmError::Runtime(format!(
-                "workflow_select_stage_artifacts returned invalid shape: {error}"
-            ))
-        })?;
     selected.artifacts = selected
         .artifacts
         .into_iter()
@@ -409,14 +403,12 @@ pub async fn prepare_workflow_stage_prompt(
         "rendered_context": rendered_context,
         "verification_contracts": verification_contracts,
     });
-    let config = crate::stdlib::json_to_vm_value(&payload);
-    let prepared = call_workflow_stdlib_function(
+    let prepared = call_harn_stdlib_json(
         "std/workflow/prompts",
         "workflow_prepare_stage_prompt",
-        &[config],
+        payload,
     )
     .await?;
-    let prepared = crate::llm::vm_value_to_json(&prepared);
     let prepared = prepared.as_object().ok_or_else(|| {
         crate::value::VmError::Runtime(
             "workflow_prepare_stage_prompt must return a dict".to_string(),

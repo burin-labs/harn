@@ -452,8 +452,8 @@ pub(crate) use self::agent::{
     parse_skill_config, run_agent_loop_internal,
 };
 pub(crate) use self::agent_config::{
-    agent_loop_profile_defaults, agent_loop_result_from_llm, parse_command_policy_from_options,
-    AgentLoopConfig, DEFAULT_MAX_VERIFY_ATTEMPTS,
+    agent_loop_result_from_llm, parse_command_policy_from_options, AgentLoopConfig,
+    DEFAULT_MAX_VERIFY_ATTEMPTS,
 };
 pub use self::agent_config::{
     register_agent_loop_with_bridge, register_llm_call_structured_with_bridge,
