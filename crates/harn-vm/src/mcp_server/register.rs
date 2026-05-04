@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use serde_json::Value as JsonValue;
@@ -7,7 +8,9 @@ use crate::mcp_elicit::current_bus;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-use super::defs::{McpPromptArgDef, McpPromptDef, McpResourceDef, McpResourceTemplateDef};
+use super::defs::{
+    McpCompletionSource, McpPromptArgDef, McpPromptDef, McpResourceDef, McpResourceTemplateDef,
+};
 
 thread_local! {
     /// Stores the tool registry set by `mcp_tools` / `mcp_serve`.
@@ -125,6 +128,9 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
                 ));
             }
         };
+        let completions = completion_sources_from_dict(
+            dict.get("completions").or_else(|| dict.get("suggestions")),
+        );
 
         MCP_SERVE_RESOURCE_TEMPLATES.with(|cell| {
             cell.borrow_mut().push(McpResourceTemplateDef {
@@ -133,6 +139,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
                 title,
                 description,
                 mime_type,
+                completions,
                 handler,
             });
         });
@@ -177,6 +184,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
                                 name: d.get("name").map(|v| v.display()).unwrap_or_default(),
                                 description: d.get("description").map(|v| v.display()),
                                 required: matches!(d.get("required"), Some(VmValue::Bool(true))),
+                                completion: completion_source_from_argument_dict(d),
                             })
                         } else {
                             None
@@ -251,6 +259,68 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
 
         bus.elicit(message, requested_schema_json).await
     });
+}
+
+fn completion_sources_from_dict(value: Option<&VmValue>) -> BTreeMap<String, McpCompletionSource> {
+    let Some(VmValue::Dict(sources)) = value else {
+        return BTreeMap::new();
+    };
+    sources
+        .iter()
+        .filter_map(|(name, value)| {
+            completion_source_from_value(value).map(|source| (name.clone(), source))
+        })
+        .collect()
+}
+
+fn completion_source_from_argument_dict(
+    dict: &BTreeMap<String, VmValue>,
+) -> Option<McpCompletionSource> {
+    let mut source = McpCompletionSource::default();
+    for key in ["suggestions", "completions", "values"] {
+        if let Some(value) = dict.get(key) {
+            source.values.extend(completion_values_from_value(value));
+        }
+    }
+    for key in ["complete", "completion", "handler"] {
+        if let Some(VmValue::Closure(closure)) = dict.get(key) {
+            source.handler = Some((**closure).clone());
+            break;
+        }
+    }
+    (!source.values.is_empty() || source.handler.is_some()).then_some(source)
+}
+
+fn completion_source_from_value(value: &VmValue) -> Option<McpCompletionSource> {
+    match value {
+        VmValue::Closure(closure) => Some(McpCompletionSource {
+            values: Vec::new(),
+            handler: Some((**closure).clone()),
+        }),
+        VmValue::Dict(dict) => completion_source_from_argument_dict(dict),
+        _ => {
+            let values = completion_values_from_value(value);
+            (!values.is_empty()).then_some(McpCompletionSource {
+                values,
+                handler: None,
+            })
+        }
+    }
+}
+
+fn completion_values_from_value(value: &VmValue) -> Vec<String> {
+    match value {
+        VmValue::List(items) => items.iter().map(completion_value_to_string).collect(),
+        VmValue::String(value) => vec![value.to_string()],
+        _ => Vec::new(),
+    }
+}
+
+fn completion_value_to_string(value: &VmValue) -> String {
+    match value {
+        VmValue::String(value) => value.to_string(),
+        _ => value.display(),
+    }
 }
 
 // Thread-local accessors used by the CLI after pipeline execution.

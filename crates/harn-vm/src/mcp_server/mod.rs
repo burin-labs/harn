@@ -18,7 +18,10 @@ mod uri;
 mod tests;
 
 const PROTOCOL_VERSION: &str = "2025-11-25";
-pub use defs::{McpPromptArgDef, McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpToolDef};
+pub use defs::{
+    McpCompletionSource, McpPromptArgDef, McpPromptDef, McpResourceDef, McpResourceTemplateDef,
+    McpToolDef,
+};
 pub use register::{
     register_mcp_server_builtins, take_mcp_serve_prompts, take_mcp_serve_registry,
     take_mcp_serve_resource_templates, take_mcp_serve_resources,

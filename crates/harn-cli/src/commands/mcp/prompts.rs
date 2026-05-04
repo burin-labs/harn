@@ -29,6 +29,7 @@ struct FilePromptArgument {
     name: String,
     description: Option<String>,
     required: bool,
+    suggestions: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -61,6 +62,8 @@ struct PromptArgumentFrontMatter {
     description: Option<String>,
     #[serde(default = "default_required")]
     required: bool,
+    #[serde(default, alias = "completions", alias = "values")]
+    suggestions: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -143,6 +146,28 @@ impl FilePromptCatalog {
             .find(|prompt| prompt.name == name)
             .ok_or_else(|| format!("Unknown prompt: {name}"))?;
         prompt.render(arguments)
+    }
+
+    pub(crate) fn complete(
+        &self,
+        name: &str,
+        argument_name: &str,
+        value: &str,
+    ) -> Result<JsonValue, String> {
+        let prompt = self
+            .prompts
+            .iter()
+            .find(|prompt| prompt.name == name)
+            .ok_or_else(|| format!("Unknown prompt: {name}"))?;
+        let argument = prompt
+            .arguments
+            .iter()
+            .find(|argument| argument.name == argument_name)
+            .ok_or_else(|| format!("Unknown prompt argument: {argument_name}"))?;
+        Ok(harn_vm::mcp_protocol::completion_payload(
+            argument.suggestions.clone(),
+            value,
+        ))
     }
 }
 
@@ -282,6 +307,7 @@ fn load_prompt_file(
                 name: argument.name,
                 description: argument.description,
                 required: argument.required,
+                suggestions: argument.suggestions,
             })
             .collect()
     };
@@ -415,6 +441,7 @@ fn infer_arguments(body: &str) -> Vec<FilePromptArgument> {
             name,
             description: None,
             required: true,
+            suggestions: Vec::new(),
         })
         .collect()
 }

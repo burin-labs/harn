@@ -411,6 +411,9 @@ impl McpServer {
                 -32602,
                 "Unknown prompt",
             )),
+            mcp_protocol::METHOD_COMPLETION_COMPLETE => ImmediateResult::Response(
+                harn_vm::jsonrpc::error_response(id, -32602, "Unknown completion reference"),
+            ),
             _ if mcp_protocol::unsupported_latest_spec_method(method).is_some() => {
                 ImmediateResult::Response(
                     mcp_protocol::unsupported_latest_spec_method_response(id, method)
@@ -468,6 +471,10 @@ impl McpServer {
             capabilities.insert("resources".to_string(), json!({}));
         }
         capabilities.insert("logging".to_string(), json!({}));
+        capabilities.insert(
+            "completions".to_string(),
+            mcp_protocol::completions_capability(),
+        );
 
         let mut server_info = json!({
             "name": self.server_name,

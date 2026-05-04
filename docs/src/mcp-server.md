@@ -293,12 +293,18 @@ description = "Review code"
 name = "code"
 description = "Code to review"
 required = true
+[[arguments]]
+name = "language"
+required = false
+suggestions = ["rust", "typescript", "python"]
 ---
 Review this:
 {{ code }}
 ```
 
 `prompts/get` renders the template with the supplied `arguments` object.
+`completion/complete` uses the optional `suggestions`/`completions` list on
+front-matter arguments when a client asks for prompt argument completions.
 The server advertises `tools.listChanged`, `resources.listChanged`, and
 `prompts.listChanged`. It emits the corresponding `notifications/*/list_changed`
 messages when watched manifest, prompt, lockfile, or package metadata changes.
@@ -325,8 +331,8 @@ clients accept inbound sampling — see the
 | `resources/subscribe`, `resources/unsubscribe` | Supported for EventLog topic resources; updates emit `notifications/resources/updated` |
 | `prompts/list` | Supported for `.harn.prompt` files in the project and prompt-library packages |
 | `prompts/get` | Supported; renders prompt templates with supplied arguments |
+| `completion/complete` | Supported for prompt arguments with front-matter suggestions |
 | `elicitation/create` | Supported on script-driven `harn run --serve mcp` surfaces via the `mcp_elicit(...)` builtin (see [Elicitation](#elicitation)). The orchestrator-mode tool catalog does not currently issue elicitations. |
-| `completion/complete` | Explicitly unsupported |
 | `roots/list` | Explicitly unsupported |
 | `sampling/createMessage` | Server-initiated sampling against the connected client is not emitted by the orchestrator catalog. Harn-as-MCP-client *does* accept inbound `sampling/createMessage` (routed to `llm_call` via the host bridge) — see the [client matrix](mcp-and-acp.html#mcp-client-support-matrix). |
 | `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Explicitly unsupported |

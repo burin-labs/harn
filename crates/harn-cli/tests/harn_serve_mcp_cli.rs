@@ -92,13 +92,17 @@ pipeline main(task) {
     name: "Config",
     description: "Config values",
     mime_type: "text/plain",
+    completions: {key: {values: ["name"], complete: { request -> ["version"] }}},
     handler: { args -> "value:" + args.key }
   })
 
   mcp_prompt({
     name: "review",
     description: "Review prompt",
-    arguments: [{name: "code", required: true}],
+    arguments: [
+      {name: "code", required: true},
+      {name: "language", required: false, suggestions: ["rust", "ruby", "typescript"]},
+    ],
     handler: { args -> "Review this: " + args.code }
   })
 }
@@ -456,6 +460,42 @@ fn serve_mcp_stdio_exposes_script_registered_surface() {
         json!({"jsonrpc": "2.0", "id": 5, "method": "prompts/list", "params": {}}),
     );
     assert_eq!(prompts["result"]["prompts"][0]["name"], "review");
+
+    let prompt_completion = send_stdio_request(
+        &mut stdin,
+        &rx,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 16,
+            "method": "completion/complete",
+            "params": {
+                "ref": {"type": "ref/prompt", "name": "review"},
+                "argument": {"name": "language", "value": "ru"}
+            }
+        }),
+    );
+    assert_eq!(
+        prompt_completion["result"]["completion"]["values"],
+        json!(["ruby", "rust"])
+    );
+
+    let resource_completion = send_stdio_request(
+        &mut stdin,
+        &rx,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 17,
+            "method": "completion/complete",
+            "params": {
+                "ref": {"type": "ref/resource", "uri": "config://{key}"},
+                "argument": {"name": "key", "value": "ver"}
+            }
+        }),
+    );
+    assert_eq!(
+        resource_completion["result"]["completion"]["values"],
+        json!(["version"])
+    );
 
     let prompt = send_stdio_request(
         &mut stdin,

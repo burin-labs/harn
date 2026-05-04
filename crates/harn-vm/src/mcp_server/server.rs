@@ -8,9 +8,11 @@ use crate::stdlib::json_to_vm_value;
 use crate::value::VmError;
 use crate::vm::Vm;
 
-use super::convert::{prompt_value_to_messages, vm_value_to_content};
-use super::defs::{McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpToolDef};
-use super::uri::match_uri_template;
+use super::convert::{prompt_value_to_messages, vm_value_to_content, vm_value_to_json};
+use super::defs::{
+    McpCompletionSource, McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpToolDef,
+};
+use super::uri::{match_uri_template, uri_template_variables};
 use super::PROTOCOL_VERSION;
 
 /// MCP server that exposes Harn tools, resources, and prompts over MCP JSON-RPC.
@@ -173,6 +175,9 @@ impl McpServer {
             "resources/templates/list" => self.handle_resource_templates_list(&id, &params),
             "prompts/list" => self.handle_prompts_list(&id, &params),
             "prompts/get" => self.handle_prompts_get(&id, &params, vm).await,
+            crate::mcp_protocol::METHOD_COMPLETION_COMPLETE => {
+                self.handle_completion_complete(&id, &params, vm).await
+            }
             _ if crate::mcp_protocol::unsupported_latest_spec_method(method).is_some() => {
                 crate::mcp_protocol::unsupported_latest_spec_method_response(id.clone(), method)
                     .expect("checked unsupported MCP method")
@@ -207,6 +212,10 @@ impl McpServer {
         }
         capabilities.insert("logging".into(), serde_json::json!({}));
         capabilities.insert("tasks".into(), crate::mcp_protocol::tasks_capability());
+        capabilities.insert(
+            "completions".into(),
+            crate::mcp_protocol::completions_capability(),
+        );
         // Always advertise elicitation: any registered tool may decide
         // at runtime whether to call `mcp_elicit(...)`, so capability
         // negotiation can't be tied to a static check.
@@ -721,5 +730,184 @@ impl McpServer {
                 "error": { "code": -32603, "message": format!("{e}") }
             }),
         }
+    }
+
+    async fn handle_completion_complete(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+        vm: &mut Vm,
+    ) -> serde_json::Value {
+        let Some(ref_type) = params.pointer("/ref/type").and_then(|value| value.as_str()) else {
+            return crate::jsonrpc::error_response(
+                id.clone(),
+                -32602,
+                "completion ref.type is required",
+            );
+        };
+        match ref_type {
+            "ref/prompt" => self.complete_prompt_argument(id, params, vm).await,
+            "ref/resource" => {
+                self.complete_resource_template_argument(id, params, vm)
+                    .await
+            }
+            other => crate::jsonrpc::error_response(
+                id.clone(),
+                -32602,
+                &format!("Unsupported completion ref.type: {other}"),
+            ),
+        }
+    }
+
+    async fn complete_prompt_argument(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+        vm: &mut Vm,
+    ) -> serde_json::Value {
+        let name = params
+            .pointer("/ref/name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let argument_name = match completion_argument_name(params) {
+            Ok(name) => name,
+            Err(error) => return crate::jsonrpc::error_response(id.clone(), -32602, &error),
+        };
+        let value = completion_argument_value(params);
+        let prompt = match self.prompts.iter().find(|prompt| prompt.name == name) {
+            Some(prompt) => prompt,
+            None => {
+                return crate::jsonrpc::error_response(
+                    id.clone(),
+                    -32602,
+                    &format!("Unknown prompt: {name}"),
+                );
+            }
+        };
+        let Some(argument) = prompt
+            .arguments
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .find(|argument| argument.name == argument_name)
+        else {
+            return crate::jsonrpc::error_response(
+                id.clone(),
+                -32602,
+                &format!("Unknown prompt argument: {argument_name}"),
+            );
+        };
+        let candidates =
+            match completion_source_candidates(argument.completion.as_ref(), params, vm).await {
+                Ok(candidates) => candidates,
+                Err(error) => return crate::jsonrpc::error_response(id.clone(), -32603, &error),
+            };
+        crate::mcp_protocol::completion_result(id.clone(), candidates, value)
+    }
+
+    async fn complete_resource_template_argument(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+        vm: &mut Vm,
+    ) -> serde_json::Value {
+        let uri = params
+            .pointer("/ref/uri")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let argument_name = match completion_argument_name(params) {
+            Ok(name) => name,
+            Err(error) => return crate::jsonrpc::error_response(id.clone(), -32602, &error),
+        };
+        let value = completion_argument_value(params);
+        let template = match self
+            .resource_templates
+            .iter()
+            .find(|template| template.uri_template == uri)
+        {
+            Some(template) => template,
+            None => {
+                return crate::jsonrpc::error_response(
+                    id.clone(),
+                    -32602,
+                    &format!("Unknown resource template: {uri}"),
+                );
+            }
+        };
+        if !uri_template_variables(&template.uri_template)
+            .iter()
+            .any(|name| name == argument_name)
+        {
+            return crate::jsonrpc::error_response(
+                id.clone(),
+                -32602,
+                &format!("Unknown resource template argument: {argument_name}"),
+            );
+        }
+        let candidates =
+            match completion_source_candidates(template.completions.get(argument_name), params, vm)
+                .await
+            {
+                Ok(candidates) => candidates,
+                Err(error) => return crate::jsonrpc::error_response(id.clone(), -32603, &error),
+            };
+        crate::mcp_protocol::completion_result(id.clone(), candidates, value)
+    }
+}
+
+fn completion_argument_name(params: &serde_json::Value) -> Result<&str, String> {
+    params
+        .pointer("/argument/name")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "completion argument.name is required".to_string())
+}
+
+fn completion_argument_value(params: &serde_json::Value) -> &str {
+    params
+        .pointer("/argument/value")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+}
+
+async fn completion_source_candidates(
+    source: Option<&McpCompletionSource>,
+    params: &serde_json::Value,
+    vm: &mut Vm,
+) -> Result<Vec<String>, String> {
+    let Some(source) = source else {
+        return Ok(Vec::new());
+    };
+    let mut candidates = source.values.clone();
+    if let Some(handler) = source.handler.as_ref() {
+        let request = json_to_vm_value(params);
+        let value = vm
+            .call_closure_pub(handler, &[request])
+            .await
+            .map_err(|error| format!("{error}"))?;
+        candidates.extend(completion_candidates_from_json(&vm_value_to_json(&value)));
+    }
+    Ok(candidates)
+}
+
+fn completion_candidates_from_json(value: &serde_json::Value) -> Vec<String> {
+    match value {
+        serde_json::Value::Array(items) => {
+            items.iter().filter_map(json_completion_string).collect()
+        }
+        serde_json::Value::Object(map) => map
+            .get("values")
+            .or_else(|| map.get("completion").and_then(|value| value.get("values")))
+            .map(completion_candidates_from_json)
+            .unwrap_or_default(),
+        _ => json_completion_string(value).into_iter().collect(),
+    }
+}
+
+fn json_completion_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(value) => Some(value.clone()),
+        serde_json::Value::Number(_) | serde_json::Value::Bool(_) => Some(value.to_string()),
+        _ => None,
     }
 }

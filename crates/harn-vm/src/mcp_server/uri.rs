@@ -55,3 +55,20 @@ pub(super) fn match_uri_template(
         None
     }
 }
+
+pub(super) fn uri_template_variables(template: &str) -> Vec<String> {
+    let mut variables = Vec::new();
+    let mut cursor = template;
+    while let Some(open) = cursor.find('{') {
+        cursor = &cursor[open + 1..];
+        let Some(close) = cursor.find('}') else {
+            break;
+        };
+        let name = cursor[..close].trim();
+        if !name.is_empty() && !variables.iter().any(|variable| variable == name) {
+            variables.push(name.to_string());
+        }
+        cursor = &cursor[close + 1..];
+    }
+    variables
+}

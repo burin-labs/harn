@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::value::VmClosure;
 
 /// A tool extracted from a Harn tool_registry, ready to serve over MCP.
@@ -29,7 +31,15 @@ pub struct McpResourceTemplateDef {
     pub title: Option<String>,
     pub description: Option<String>,
     pub mime_type: Option<String>,
+    pub completions: BTreeMap<String, McpCompletionSource>,
     pub handler: VmClosure,
+}
+
+/// Static or computed suggestions for a prompt/resource-template argument.
+#[derive(Default)]
+pub struct McpCompletionSource {
+    pub values: Vec<String>,
+    pub handler: Option<VmClosure>,
 }
 
 /// A prompt argument definition.
@@ -37,6 +47,7 @@ pub struct McpPromptArgDef {
     pub name: String,
     pub description: Option<String>,
     pub required: bool,
+    pub completion: Option<McpCompletionSource>,
 }
 
 /// A prompt template to serve over MCP.
