@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use crate::agent_sessions;
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
+    async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
@@ -85,12 +85,12 @@ const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
 ];
 
 const AGENT_SESSION_ASYNC_PRIMITIVES: &[AsyncBuiltin] =
-    &[AsyncBuiltin::new("agent_session_compact", |args| {
-        boxed_async_builtin(agent_session_compact_builtin(args))
-    })
-    .signature("agent_session_compact(id, opts?)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-    .doc("Compact an agent session transcript with the host compaction runtime.")];
+    &[
+        async_builtin!("agent_session_compact", agent_session_compact_builtin)
+            .signature("agent_session_compact(id, opts?)")
+            .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+            .doc("Compact an agent session transcript with the host compaction runtime."),
+    ];
 
 const AGENT_SESSION_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
     .category("agent.session")

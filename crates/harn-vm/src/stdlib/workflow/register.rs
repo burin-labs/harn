@@ -13,7 +13,7 @@ use crate::orchestration::{
 };
 use crate::stdlib::harn_entry::{register_harn_module_entrypoints, HarnEntrypointModule};
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
+    async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
@@ -135,18 +135,17 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
 ];
 
 const WORKFLOW_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    AsyncBuiltin::new(HOST_WORKFLOW_GRAPH_RUN_BUILTIN, |args| {
-        boxed_async_builtin(host_workflow_graph_run_builtin(args))
-    })
+    async_builtin!(
+        HOST_WORKFLOW_GRAPH_RUN_BUILTIN,
+        host_workflow_graph_run_builtin
+    )
     .signature("__host_workflow_graph_run(task, graph, artifacts?, options?)")
     .arity(VmBuiltinArity::Range { min: 2, max: 4 })
     .doc("Execute the low-level workflow graph primitive used by Harn stdlib workflow facades."),
-    AsyncBuiltin::new("transcript_auto_compact", |args| {
-        boxed_async_builtin(transcript_auto_compact_builtin(args))
-    })
-    .signature("transcript_auto_compact(messages, options?)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-    .doc("Apply the workflow/agent transcript auto-compaction primitive to a message list."),
+    async_builtin!("transcript_auto_compact", transcript_auto_compact_builtin)
+        .signature("transcript_auto_compact(messages, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .doc("Apply the workflow/agent transcript auto-compaction primitive to a message list."),
 ];
 
 const WORKFLOW_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()

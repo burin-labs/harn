@@ -29,7 +29,7 @@ use self::agents_workers::{
 };
 use self::sub_agent::{execute_sub_agent, parse_sub_agent_request};
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
+    async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
@@ -58,42 +58,30 @@ const AGENT_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
 ];
 
 const AGENT_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    AsyncBuiltin::new("sub_agent_run", |args| {
-        boxed_async_builtin(sub_agent_run_builtin(args))
-    })
-    .signature("sub_agent_run(config)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc("Run or spawn a sub-agent worker."),
-    AsyncBuiltin::new("spawn_agent", |args| {
-        boxed_async_builtin(spawn_agent_builtin(args))
-    })
-    .signature("spawn_agent(config)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc("Spawn a workflow, stage, or sub-agent worker."),
-    AsyncBuiltin::new("send_input", |args| {
-        boxed_async_builtin(send_input_builtin(args))
-    })
-    .signature("send_input(worker, task)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc("Resume a stopped worker with new task input."),
-    AsyncBuiltin::new("worker_trigger", |args| {
-        boxed_async_builtin(worker_trigger_builtin(args))
-    })
-    .signature("worker_trigger(worker, payload)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc("Trigger an awaiting retriggerable worker."),
-    AsyncBuiltin::new("wait_agent", |args| {
-        boxed_async_builtin(wait_agent_builtin(args))
-    })
-    .signature("wait_agent(worker_or_workers)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc("Wait for one or more workers to reach a terminal state."),
-    AsyncBuiltin::new("close_agent", |args| {
-        boxed_async_builtin(close_agent_builtin(args))
-    })
-    .signature("close_agent(worker)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc("Cancel a worker and emit the cancellation lifecycle event."),
+    async_builtin!("sub_agent_run", sub_agent_run_builtin)
+        .signature("sub_agent_run(config)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Run or spawn a sub-agent worker."),
+    async_builtin!("spawn_agent", spawn_agent_builtin)
+        .signature("spawn_agent(config)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Spawn a workflow, stage, or sub-agent worker."),
+    async_builtin!("send_input", send_input_builtin)
+        .signature("send_input(worker, task)")
+        .arity(VmBuiltinArity::Exact(2))
+        .doc("Resume a stopped worker with new task input."),
+    async_builtin!("worker_trigger", worker_trigger_builtin)
+        .signature("worker_trigger(worker, payload)")
+        .arity(VmBuiltinArity::Exact(2))
+        .doc("Trigger an awaiting retriggerable worker."),
+    async_builtin!("wait_agent", wait_agent_builtin)
+        .signature("wait_agent(worker_or_workers)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Wait for one or more workers to reach a terminal state."),
+    async_builtin!("close_agent", close_agent_builtin)
+        .signature("close_agent(worker)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Cancel a worker and emit the cancellation lifecycle event."),
 ];
 
 const AGENT_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()

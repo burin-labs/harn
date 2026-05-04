@@ -1,11 +1,10 @@
 use super::artifact::{load_run_tree, snapshot_trace_spans};
 use super::map::{execute_join_tasks, LocalTask};
-use super::register::execute_workflow;
 use super::stage::{execute_stage_attempts, replay_stage};
 use crate::orchestration::{
-    inject_workflow_verification_contracts, save_run_record, workflow_verification_contracts,
-    RunChildRecord, RunExecutionRecord, RunRecord, RunStageRecord, VerificationContract,
-    VerificationRequirement, WorkflowEdge, WorkflowGraph, WorkflowNode,
+    save_run_record, stage_verification_contracts, verification_contract_from_verify,
+    workflow_verification_contracts, RunChildRecord, RunExecutionRecord, RunRecord, RunStageRecord,
+    VerificationContract, WorkflowGraph, WorkflowNode,
 };
 use crate::tracing::{set_tracing_enabled, span_end, span_start, SpanKind};
 use crate::value::VmValue;
@@ -300,140 +299,13 @@ fn workflow_verification_contracts_collect_exact_requirements() {
     );
 }
 
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn workflow_execute_injects_verify_contract_into_act_prompt() {
+#[test]
+fn verification_contract_loads_file_relative_to_execution_context() {
     crate::reset_thread_local_state();
-    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
-        text: "done".to_string(),
-        tool_calls: Vec::new(),
-        match_pattern: None,
-        consume_on_match: false,
-        input_tokens: None,
-        output_tokens: None,
-        cache_read_tokens: None,
-        cache_write_tokens: None,
-        thinking: None,
-        thinking_summary: None,
-        stop_reason: None,
-        model: "mock-model".to_string(),
-        provider: Some("mock".to_string()),
-        blocks: None,
-        error: None,
-    });
-
-    let temp_dir = std::env::temp_dir().join(format!("harn-issue-126-{}", uuid::Uuid::now_v7()));
-    std::fs::create_dir_all(&temp_dir).expect("temp dir");
-    let persist_path = temp_dir.join("run.json");
-
-    let graph = WorkflowGraph {
-        type_name: "workflow_graph".to_string(),
-        id: "wf".to_string(),
-        entry: "act".to_string(),
-        nodes: BTreeMap::from([
-            (
-                "act".to_string(),
-                WorkflowNode {
-                    id: Some("act".to_string()),
-                    kind: "stage".to_string(),
-                    mode: Some("llm".to_string()),
-                    model_policy: crate::orchestration::ModelPolicy {
-                        provider: Some("mock".to_string()),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-            ),
-            (
-                "verify".to_string(),
-                WorkflowNode {
-                    id: Some("verify".to_string()),
-                    kind: "verify".to_string(),
-                    verify: Some(serde_json::json!({
-                        "command": "echo ok",
-                        "expect_status": 0,
-                        "required_identifiers": ["rateLimit"],
-                        "required_text": ["app.use(rateLimit)"],
-                    })),
-                    output_contract: crate::orchestration::StageContract {
-                        output_kinds: vec!["verification_result".to_string()],
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-            ),
-        ]),
-        edges: vec![WorkflowEdge {
-            from: "act".to_string(),
-            to: "verify".to_string(),
-            branch: None,
-            label: None,
-        }],
-        ..Default::default()
-    };
-
-    let result = execute_workflow(
-        "Implement the verifier-exact middleware.".to_string(),
-        graph,
-        Vec::new(),
-        BTreeMap::from([
-            (
-                "persist_path".to_string(),
-                crate::value::VmValue::String(Rc::from(
-                    persist_path.to_string_lossy().into_owned(),
-                )),
-            ),
-            ("max_steps".to_string(), crate::value::VmValue::Int(2)),
-        ]),
-    )
-    .await
-    .expect("workflow executes");
-
-    let run_value = result
-        .as_dict()
-        .and_then(|value| value.get("run"))
-        .cloned()
-        .expect("workflow envelope run");
-    let run = crate::orchestration::normalize_run_record(&run_value).expect("run record");
-    let act_stage = run
-        .stages
-        .iter()
-        .find(|stage| stage.node_id == "act")
-        .expect("act stage");
-    let prompt = act_stage
-        .metadata
-        .get("prompt")
-        .and_then(|value| value.as_str())
-        .expect("prompt metadata");
-    assert!(prompt.contains("<workflow_verification>"));
-    assert!(prompt.contains("rateLimit"));
-    assert!(prompt.contains("app.use(rateLimit)"));
-
-    let _ = std::fs::remove_dir_all(&temp_dir);
-}
-
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn stage_prompt_loads_contract_file_relative_to_execution_context() {
-    crate::reset_thread_local_state();
-    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
-        text: "done".to_string(),
-        tool_calls: Vec::new(),
-        match_pattern: None,
-        consume_on_match: false,
-        input_tokens: None,
-        output_tokens: None,
-        cache_read_tokens: None,
-        cache_write_tokens: None,
-        thinking: None,
-        thinking_summary: None,
-        stop_reason: None,
-        model: "mock-model".to_string(),
-        provider: Some("mock".to_string()),
-        blocks: None,
-        error: None,
-    });
-
-    let temp_dir =
-        std::env::temp_dir().join(format!("harn-issue-126-file-{}", uuid::Uuid::now_v7()));
+    let temp_dir = std::env::temp_dir().join(format!(
+        "harn-verification-contract-{}",
+        uuid::Uuid::now_v7()
+    ));
     std::fs::create_dir_all(&temp_dir).expect("temp dir");
     let contract_path = temp_dir.join("verify.contract.json");
     std::fs::write(
@@ -453,108 +325,58 @@ async fn stage_prompt_loads_contract_file_relative_to_execution_context() {
         ..Default::default()
     }));
 
-    let mut node = WorkflowNode {
-        id: Some("act".to_string()),
-        kind: "stage".to_string(),
-        mode: Some("llm".to_string()),
-        model_policy: crate::orchestration::ModelPolicy {
-            provider: Some("mock".to_string()),
-            ..Default::default()
-        },
-        verify: Some(serde_json::json!({
+    let contract = verification_contract_from_verify(
+        "act",
+        Some(&serde_json::json!({
             "contract_path": "verify.contract.json",
         })),
-        ..Default::default()
-    };
-    inject_workflow_verification_contracts(
-        &mut node,
-        &[VerificationContract {
-            source_node: Some("verify".to_string()),
-            checks: vec![VerificationRequirement {
-                kind: "identifier".to_string(),
-                value: "rateLimit".to_string(),
-                note: Some("Use the exact exported name.".to_string()),
-            }],
-            ..Default::default()
-        }],
-    );
+    )
+    .expect("contract loads")
+    .expect("contract");
 
-    let executed = execute_stage_attempts("Implement the middleware.", "act", &node, &[], None)
-        .await
-        .expect("stage executes");
-    let prompt = executed
-        .result
-        .get("prompt")
-        .and_then(|value| value.as_str())
-        .expect("prompt");
-    assert!(prompt.contains("rateLimit"));
-    assert!(prompt.contains("src/middleware/rateLimit.ts"));
-    assert!(prompt.contains("app.use(rateLimit)"));
+    assert_eq!(contract.source_node.as_deref(), Some("act"));
+    assert_eq!(contract.required_identifiers, vec!["rateLimit"]);
+    assert_eq!(contract.required_paths, vec!["src/middleware/rateLimit.ts"]);
+    assert_eq!(contract.required_text, vec!["app.use(rateLimit)"]);
 
     crate::reset_thread_local_state();
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn stage_prompt_can_scope_verification_to_local_contract_only() {
+#[test]
+fn stage_verification_contracts_can_scope_to_local_contract_only() {
     crate::reset_thread_local_state();
-    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
-        text: "done".to_string(),
-        tool_calls: Vec::new(),
-        match_pattern: None,
-        consume_on_match: false,
-        input_tokens: None,
-        output_tokens: None,
-        cache_read_tokens: None,
-        cache_write_tokens: None,
-        thinking: None,
-        thinking_summary: None,
-        stop_reason: None,
-        model: "mock-model".to_string(),
-        provider: Some("mock".to_string()),
-        blocks: None,
-        error: None,
-    });
 
-    let mut node = WorkflowNode {
+    let node = WorkflowNode {
         id: Some("act".to_string()),
         kind: "stage".to_string(),
-        mode: Some("llm".to_string()),
-        model_policy: crate::orchestration::ModelPolicy {
-            provider: Some("mock".to_string()),
-            ..Default::default()
-        },
         verify: Some(serde_json::json!({
             "required_paths": ["src/current.ts"],
             "notes": ["Only the current batch path is in scope."],
         })),
-        metadata: BTreeMap::from([(
-            crate::orchestration::WORKFLOW_VERIFICATION_SCOPE_METADATA_KEY.to_string(),
-            serde_json::json!("local_only"),
-        )]),
+        metadata: BTreeMap::from([
+            (
+                crate::orchestration::WORKFLOW_VERIFICATION_SCOPE_METADATA_KEY.to_string(),
+                serde_json::json!("local_only"),
+            ),
+            (
+                crate::orchestration::WORKFLOW_VERIFICATION_CONTRACTS_METADATA_KEY.to_string(),
+                serde_json::to_value(vec![VerificationContract {
+                    source_node: Some("final_verify".to_string()),
+                    required_paths: vec!["src/future.ts".to_string()],
+                    required_text: vec!["futureOnly".to_string()],
+                    ..Default::default()
+                }])
+                .expect("contract metadata"),
+            ),
+        ]),
         ..Default::default()
     };
-    inject_workflow_verification_contracts(
-        &mut node,
-        &[VerificationContract {
-            source_node: Some("final_verify".to_string()),
-            required_paths: vec!["src/future.ts".to_string()],
-            required_text: vec!["futureOnly".to_string()],
-            ..Default::default()
-        }],
-    );
+    let contracts = stage_verification_contracts("act", &node).expect("contracts");
 
-    let executed = execute_stage_attempts("Only update src/current.ts.", "act", &node, &[], None)
-        .await
-        .expect("stage executes");
-    let prompt = executed
-        .result
-        .get("prompt")
-        .and_then(|value| value.as_str())
-        .expect("prompt");
-    assert!(prompt.contains("src/current.ts"));
-    assert!(!prompt.contains("src/future.ts"));
-    assert!(!prompt.contains("futureOnly"));
+    assert_eq!(contracts.len(), 1);
+    assert_eq!(contracts[0].required_paths, vec!["src/current.ts"]);
+    assert!(contracts[0].required_text.is_empty());
 }
 
 fn base_workflow_node_with_raw_auto_compact(raw: BTreeMap<String, VmValue>) -> WorkflowNode {

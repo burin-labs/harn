@@ -153,8 +153,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_builtin_group, register_builtin_groups, AsyncBuiltin,
-    BuiltinGroup, SyncBuiltin,
+    async_builtin, register_builtin_group, register_builtin_groups, AsyncBuiltin, BuiltinGroup,
+    SyncBuiltin,
 };
 use crate::stdlib::{json_to_vm_value, schema_result_value};
 use crate::value::{VmChannelHandle, VmError, VmStream, VmStreamCancel, VmValue};
@@ -1453,109 +1453,96 @@ const LLM_TRACE_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
 ];
 
 const AGENT_HOST_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    AsyncBuiltin::new("__host_agent_capture_events", |args| {
-        boxed_async_builtin(host_agent_capture_events_impl(args))
-    })
+    async_builtin!(
+        "__host_agent_capture_events",
+        host_agent_capture_events_impl
+    )
     .signature("__host_agent_capture_events(session_id, body)")
     .arity(VmBuiltinArity::Exact(2))
     .doc("Capture agent events emitted while executing a Harn closure."),
-    AsyncBuiltin::new("__host_agent_parse_tool_calls", |args| {
-        boxed_async_builtin(host_agent_parse_tool_calls_impl(args))
-    })
+    async_builtin!(
+        "__host_agent_parse_tool_calls",
+        host_agent_parse_tool_calls_impl
+    )
     .signature("__host_agent_parse_tool_calls(text, tools?)")
     .arity(VmBuiltinArity::Range { min: 1, max: 2 })
     .doc("Parse model text into normalized agent tool-call records."),
-    AsyncBuiltin::new("__host_agent_dispatch_tool_call", |args| {
-        boxed_async_builtin(host_agent_dispatch_tool_call_impl(args))
-    })
+    async_builtin!(
+        "__host_agent_dispatch_tool_call",
+        host_agent_dispatch_tool_call_impl
+    )
     .signature("__host_agent_dispatch_tool_call(call, tools?, options?)")
     .arity(VmBuiltinArity::Range { min: 1, max: 3 })
     .doc("Dispatch one normalized agent tool call through the host tool runtime."),
-    AsyncBuiltin::new("__host_agent_dispatch_tool_batch", |args| {
-        boxed_async_builtin(host_agent_dispatch_tool_batch_impl(args))
-    })
+    async_builtin!(
+        "__host_agent_dispatch_tool_batch",
+        host_agent_dispatch_tool_batch_impl
+    )
     .signature("__host_agent_dispatch_tool_batch(calls, tools?, options?)")
     .arity(VmBuiltinArity::Range { min: 1, max: 3 })
     .doc("Dispatch a batch of normalized agent tool calls through the host tool runtime."),
 ];
 
 const LLM_HOST_CORE_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    AsyncBuiltin::new("__cost_route", |args| {
-        boxed_async_builtin(cost_route::cost_route_impl(args))
-    })
-    .signature("__cost_route(options)")
-    .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-    .doc("Route an LLM request by cost and capability metadata."),
-    AsyncBuiltin::new("llm_call", |args| boxed_async_builtin(llm_call_impl(args)))
+    async_builtin!("__cost_route", cost_route::cost_route_impl)
+        .signature("__cost_route(options)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
+        .doc("Route an LLM request by cost and capability metadata."),
+    async_builtin!("llm_call", llm_call_impl)
         .signature("llm_call(prompt, system?, options?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 3 })
         .doc("Execute one LLM call and return the normalized Harn result dict."),
-    AsyncBuiltin::new("llm_stream_call", |args| {
-        boxed_async_builtin(llm_stream_call_impl(args))
-    })
-    .signature("llm_stream_call(prompt, system?, options?)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-    .doc("Execute one streaming LLM call and return the normalized Harn result dict."),
-    AsyncBuiltin::new("llm_call_safe", |args| {
-        boxed_async_builtin(llm_call_safe_builtin(args))
-    })
-    .signature("llm_call_safe(prompt, system?, options?)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-    .doc("Execute one LLM call and return a non-throwing safe envelope."),
+    async_builtin!("llm_stream_call", llm_stream_call_impl)
+        .signature("llm_stream_call(prompt, system?, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+        .doc("Execute one streaming LLM call and return the normalized Harn result dict."),
+    async_builtin!("llm_call_safe", llm_call_safe_builtin)
+        .signature("llm_call_safe(prompt, system?, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+        .doc("Execute one LLM call and return a non-throwing safe envelope."),
 ];
 
 const LLM_STRUCTURED_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    AsyncBuiltin::new("llm_call_structured", |args| {
-        boxed_async_builtin(llm_call_structured_builtin(args))
-    })
-    .signature("llm_call_structured(prompt, schema, options?)")
-    .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-    .doc("Call an LLM for JSON data and return parsed schema-valid data."),
-    AsyncBuiltin::new("llm_call_structured_safe", |args| {
-        boxed_async_builtin(llm_call_structured_safe_builtin(args))
-    })
-    .signature("llm_call_structured_safe(prompt, schema, options?)")
-    .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-    .doc("Call an LLM for JSON data and return a non-throwing schema envelope."),
-    AsyncBuiltin::new("llm_call_structured_result", |args| {
-        boxed_async_builtin(llm_call_structured_result_builtin(args))
-    })
+    async_builtin!("llm_call_structured", llm_call_structured_builtin)
+        .signature("llm_call_structured(prompt, schema, options?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+        .doc("Call an LLM for JSON data and return parsed schema-valid data."),
+    async_builtin!("llm_call_structured_safe", llm_call_structured_safe_builtin)
+        .signature("llm_call_structured_safe(prompt, schema, options?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+        .doc("Call an LLM for JSON data and return a non-throwing schema envelope."),
+    async_builtin!(
+        "llm_call_structured_result",
+        llm_call_structured_result_builtin
+    )
     .signature("llm_call_structured_result(prompt, schema, options?)")
     .arity(VmBuiltinArity::Range { min: 2, max: 3 })
     .doc("Call an LLM for JSON data and return a diagnostic structured-output envelope."),
 ];
 
-const SCHEMA_RECOVERY_ASYNC_PRIMITIVES: &[AsyncBuiltin] =
-    &[AsyncBuiltin::new("schema_recover", |args| {
-        boxed_async_builtin(schema_recover_builtin(args))
-    })
-    .signature("schema_recover(text, schema, options?)")
-    .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-    .doc(
-        "Recover malformed JSON text against a schema using deterministic and optional LLM repair.",
-    )];
+const SCHEMA_RECOVERY_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[async_builtin!(
+    "schema_recover",
+    schema_recover_builtin
+)
+.signature("schema_recover(text, schema, options?)")
+.arity(VmBuiltinArity::Range { min: 2, max: 3 })
+.doc("Recover malformed JSON text against a schema using deterministic and optional LLM repair.")];
 
 const LLM_RATE_LIMIT_ASYNC_PRIMITIVES: &[AsyncBuiltin] =
-    &[AsyncBuiltin::new("with_rate_limit", |args| {
-        boxed_async_builtin(with_rate_limit_builtin(args))
-    })
-    .signature("with_rate_limit(provider, callback, options?)")
-    .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-    .doc("Run a closure behind the provider rate limiter with retryable-error backoff.")];
+    &[async_builtin!("with_rate_limit", with_rate_limit_builtin)
+        .signature("with_rate_limit(provider, callback, options?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+        .doc("Run a closure behind the provider rate limiter with retryable-error backoff.")];
 
 const LLM_HOST_COMPLETION_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    AsyncBuiltin::new("llm_completion", |args| {
-        boxed_async_builtin(llm_completion_builtin(args))
-    })
-    .signature("llm_completion(prefix, suffix?, system?, options?)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 4 })
-    .doc("Execute a fill-in-the-middle LLM completion request."),
-    AsyncBuiltin::new("llm_stream", |args| {
-        boxed_async_builtin(llm_stream_builtin(args))
-    })
-    .signature("llm_stream(prompt, system?, options?)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-    .doc("Execute a legacy channel-based streaming LLM request."),
+    async_builtin!("llm_completion", llm_completion_builtin)
+        .signature("llm_completion(prefix, suffix?, system?, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 4 })
+        .doc("Execute a fill-in-the-middle LLM completion request."),
+    async_builtin!("llm_stream", llm_stream_builtin)
+        .signature("llm_stream(prompt, system?, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+        .doc("Execute a legacy channel-based streaming LLM request."),
 ];
 
 const LLM_MOCK_SYNC_PRIMITIVES: &[SyncBuiltin] = &[

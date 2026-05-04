@@ -4,7 +4,7 @@ use std::rc::Rc;
 use crate::llm_config;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_builtin_groups, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
+    async_builtin, register_builtin_groups, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
@@ -92,12 +92,10 @@ const LLM_RATE_LIMIT_SYNC_BUILTINS: &[SyncBuiltin] =
         .doc("Set, query, or clear per-provider requests-per-minute rate limits.")];
 
 const LLM_CONFIG_ASYNC_BUILTINS: &[AsyncBuiltin] =
-    &[AsyncBuiltin::new("llm_healthcheck", |args| {
-        boxed_async_builtin(llm_healthcheck_builtin(args))
-    })
-    .signature("llm_healthcheck(provider_or_options?, options?)")
-    .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-    .doc("Validate provider health, API key reachability, and optional model readiness.")];
+    &[async_builtin!("llm_healthcheck", llm_healthcheck_builtin)
+        .signature("llm_healthcheck(provider_or_options?, options?)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 2 })
+        .doc("Validate provider health, API key reachability, and optional model readiness.")];
 
 const LLM_CONFIG_BUILTINS: BuiltinGroup<'static> = BuiltinGroup::new()
     .category("llm.config")
