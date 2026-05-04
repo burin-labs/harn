@@ -53,8 +53,6 @@ INSTANT_NOW_WHILE_ALLOWLIST=(
   "crates/harn-cli/tests/orchestrator_http/support.rs"
   "crates/harn-cli/tests/orchestrator_http/admin.rs"
   "crates/harn-cli/tests/orchestrator_http/observability.rs"
-  "crates/harn-cli/tests/harn_serve_mcp_cli.rs"
-  "crates/harn-cli/tests/support/mcp.rs"
   "crates/harn-cli/tests/support/mod.rs"
   "crates/harn-cli/tests/test_util/process.rs"
 )
@@ -71,11 +69,9 @@ SYSTEM_TIME_ALLOWLIST=(
 )
 
 # recv_timeout with an explicit sub-second Duration literal.
-# Named-constant variants (for example MCP_LOG_RECV_INTERVAL) are not caught here
-# because the constant value cannot be resolved by a static text search.
-RECV_TIMEOUT_MILLIS_ALLOWLIST=(
-  "crates/harn-cli/tests/harn_serve_mcp_cli.rs"
-)
+# Named-constant variants are not caught here because the constant value
+# cannot be resolved by a static text search.
+RECV_TIMEOUT_MILLIS_ALLOWLIST=()
 
 # ---------------------------------------------------------------------------
 # Helpers

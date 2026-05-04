@@ -157,14 +157,18 @@ where
 {
     let deadline = Instant::now() + timeout;
     let mut observed: Vec<JsonValue> = Vec::new();
-    while Instant::now() < deadline {
-        match rx.recv_timeout(Duration::from_millis(25)) {
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match rx.recv_timeout(remaining) {
             Ok(message) if predicate(&message) => return message,
             Ok(message) => {
                 observed.push(message);
                 continue;
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Timeout) => break,
             Err(error) => panic!("stdout reader disconnected: {error}"),
         }
     }
