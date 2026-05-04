@@ -22,6 +22,9 @@
 //!   tool_format, max_tokens, temperature, tool_choice}` — slim metadata
 //!   for a single model call. No `messages`, `system`, or `tool_schemas`
 //!   fields; those are reconstructable from prior events.
+//!   Set `HARN_LLM_TRANSCRIPT_VERBOSE=1` to include a `request_snapshot`
+//!   object with the exact system prompt, message list, and tool schemas
+//!   attached to each request for debugging provider-context issues.
 //! - `provider_call_response` `{call_id, iteration, model, text,
 //!   tool_calls, input_tokens, output_tokens, cache_*, thinking,
 //!   response_ms}` — slim response metadata.
@@ -105,6 +108,16 @@ fn hash_json(value: &serde_json::Value) -> u64 {
     // Dedup only needs intra-process stability; built-in key ordering is fine.
     let encoded = serde_json::to_string(value).unwrap_or_default();
     hash_str(&encoded)
+}
+
+fn verbose_llm_transcript_enabled() -> bool {
+    std::env::var("HARN_LLM_TRANSCRIPT_VERBOSE")
+        .ok()
+        .map(|value| {
+            let normalized = value.trim().to_ascii_lowercase();
+            matches!(normalized.as_str(), "1" | "true" | "yes" | "on" | "full")
+        })
+        .unwrap_or(false)
 }
 
 /// Clear the dedup state. Call at the start of a new stage so the first
@@ -467,7 +480,7 @@ pub(super) fn dump_llm_request(
             "alternatives": decision.alternatives.clone(),
         }));
     }
-    append_llm_transcript_entry(&serde_json::json!({
+    let mut request_event = serde_json::json!({
         "type": "provider_call_request",
         "iteration": iteration,
         "call_id": call_id,
@@ -508,7 +521,16 @@ pub(super) fn dump_llm_request(
         "route_policy": opts.route_policy.as_label(),
         "fallback_chain": opts.fallback_chain.clone(),
         "routing_decision": opts.routing_decision.clone(),
-    }));
+    });
+    if verbose_llm_transcript_enabled() {
+        request_event["request_snapshot"] = serde_json::json!({
+            "system": opts.system,
+            "messages": opts.messages,
+            "tool_schemas": tool_schemas,
+            "native_tools": opts.native_tools,
+        });
+    }
+    append_llm_transcript_entry(&request_event);
 }
 
 pub(super) fn dump_llm_response(
