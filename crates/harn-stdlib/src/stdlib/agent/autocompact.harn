@@ -1,0 +1,16 @@
+/** agent_autocompact_if_needed. */
+pub fn agent_autocompact_if_needed(session, opts) {
+  let cfg = opts?.auto_compact
+  if cfg == nil || !cfg {
+    return nil
+  }
+  let enabled = if type_of(cfg) == "bool" {
+    cfg
+  } else {
+    cfg?.enabled ?? true
+  }
+  if !enabled {
+    return nil
+  }
+  return __host_agent_session_compact_if_needed(session.session_id, cfg)
+}

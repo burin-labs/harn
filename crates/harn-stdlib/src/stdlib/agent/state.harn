@@ -1,0 +1,57 @@
+// Thin Harn wrappers over host session-state primitives. These are CRUD only;
+// no decision logic lives here. The agent loop holds the session dict locally
+// and passes session_id into the host for any mutation.
+/** agent_session_init. */
+pub fn agent_session_init(message, system_prompt, opts) {
+  return __host_agent_session_init(message, system_prompt, opts)
+}
+
+/** agent_session_finalize. */
+pub fn agent_session_finalize(session_id, status) {
+  return __host_agent_session_finalize(session_id, status)
+}
+
+/** agent_session_messages. */
+pub fn agent_session_messages(session_id) {
+  return __host_agent_session_messages(session_id)
+}
+
+/** agent_session_record_assistant. */
+pub fn agent_session_record_assistant(session_id, llm_result) {
+  return __host_agent_session_record_assistant(session_id, llm_result)
+}
+
+/** agent_session_record_tool_results. */
+pub fn agent_session_record_tool_results(session_id, dispatch) {
+  return __host_agent_session_record_tool_results(session_id, dispatch)
+}
+
+/** agent_session_record_usage. */
+pub fn agent_session_record_usage(session_id, llm_result) {
+  return __host_agent_session_record_usage(session_id, llm_result)
+}
+
+/** agent_session_drain_feedback. */
+pub fn agent_session_drain_feedback(session_id) {
+  return __host_agent_session_drain_feedback(session_id)
+}
+
+/** agent_session_totals. */
+pub fn agent_session_totals(session_id) {
+  return __host_agent_session_totals(session_id)
+}
+
+/** agent_session_inject_feedback. */
+pub fn agent_session_inject_feedback(session_id, kind, content) {
+  return __host_agent_session_inject_feedback(session_id, kind, content)
+}
+
+/** agent_session_set_active_skills. */
+pub fn agent_session_set_active_skills(session_id, skills) {
+  return __host_agent_session_set_active_skills(session_id, skills)
+}
+
+/** agent_session_active_skills. */
+pub fn agent_session_active_skills(session_id) {
+  return __host_agent_session_active_skills(session_id)
+}

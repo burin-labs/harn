@@ -134,6 +134,34 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/workers.harn"),
     },
     StdlibSource {
+        module: "agent/state",
+        source: include_str!("stdlib/agent/state.harn"),
+    },
+    StdlibSource {
+        module: "agent/skills",
+        source: include_str!("stdlib/agent/skills.harn"),
+    },
+    StdlibSource {
+        module: "agent/autocompact",
+        source: include_str!("stdlib/agent/autocompact.harn"),
+    },
+    StdlibSource {
+        module: "agent/budget",
+        source: include_str!("stdlib/agent/budget.harn"),
+    },
+    StdlibSource {
+        module: "agent/preflight",
+        source: include_str!("stdlib/agent/preflight.harn"),
+    },
+    StdlibSource {
+        module: "agent/postturn",
+        source: include_str!("stdlib/agent/postturn.harn"),
+    },
+    StdlibSource {
+        module: "agent/judge",
+        source: include_str!("stdlib/agent/judge.harn"),
+    },
+    StdlibSource {
         module: "agent_state",
         source: include_str!("stdlib/stdlib_agent_state.harn"),
     },

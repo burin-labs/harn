@@ -1,0 +1,44 @@
+import { agent_session_active_skills, agent_session_set_active_skills } from "std/agent/state"
+
+fn __skills_should_match(opts, iteration) {
+  let cfg = opts?.skill_match ?? {}
+  let sticky = cfg?.sticky ?? true
+  if iteration == 0 {
+    return true
+  }
+  return !sticky
+}
+
+fn __skills_active_changed(prev, next) {
+  if len(prev) != len(next) {
+    return true
+  }
+  for (index, item) in iter(next).enumerate() {
+    if prev[index]?.id != item?.id {
+      return true
+    }
+  }
+  return false
+}
+
+/** agent_skills_match. */
+pub fn agent_skills_match(session, opts, iteration) {
+  let registry = opts?.skill_registry
+  if registry == nil || len(registry) == 0 {
+    return nil
+  }
+  if !__skills_should_match(opts, iteration) {
+    return nil
+  }
+  let scored = __host_skill_score(
+    {task: session?.task ?? "", working_files: opts?.working_files ?? [], iteration: iteration},
+    registry,
+    opts?.skill_match ?? {},
+  )
+  let active = scored?.active ?? []
+  let prev = agent_session_active_skills(session.session_id) ?? []
+  if __skills_active_changed(prev, active) {
+    agent_session_set_active_skills(session.session_id, active)
+  }
+  return active
+}

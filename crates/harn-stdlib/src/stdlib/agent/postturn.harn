@@ -1,0 +1,143 @@
+import { agent_session_inject_feedback } from "std/agent/state"
+
+fn __default_done_sentinel(opts) {
+  let sentinel = opts?.done_sentinel
+  if sentinel == nil {
+    return "##DONE##"
+  }
+  if type_of(sentinel) == "bool" {
+    return if sentinel {
+      "##DONE##"
+    } else {
+      ""
+    }
+  }
+  return sentinel
+}
+
+fn __sentinel_hit(text, sentinel) {
+  if sentinel == "" {
+    return false
+  }
+  return contains(text, sentinel)
+}
+
+fn __post_turn_callback_verdict(opts, payload) {
+  let cb = opts?.post_turn_callback
+  if cb == nil {
+    return {kind: "none"}
+  }
+  let verdict = cb(payload)
+  return __interpret_verdict(verdict)
+}
+
+fn __interpret_verdict(verdict) {
+  if verdict == nil || verdict == "" {
+    return {kind: "none"}
+  }
+  if type_of(verdict) == "bool" {
+    return if verdict {
+      {kind: "stop"}
+    } else {
+      {kind: "none"}
+    }
+  }
+  if type_of(verdict) == "string" {
+    return {kind: "inject", message: verdict}
+  }
+  if type_of(verdict) == "dict" {
+    let stop = verdict?.stop ?? false
+    let message = verdict?.message
+    let inject = verdict?.inject
+    return {kind: "rich", stop: stop, message: message, inject: inject}
+  }
+  return {kind: "none"}
+}
+
+fn __successful_tool_names(dispatch) {
+  if dispatch == nil {
+    return []
+  }
+  let results = dispatch?.results ?? []
+  var names = []
+  for result in results {
+    if result?.success {
+      names = names.push(result?.name ?? "")
+    }
+  }
+  return names
+}
+
+fn __stop_after_successful_tools(opts, dispatch) {
+  let names = opts?.stop_after_successful_tools
+  if names == nil || len(names) == 0 {
+    return false
+  }
+  let successful = __successful_tool_names(dispatch)
+  for required in names {
+    if contains(successful, required) {
+      return true
+    }
+  }
+  return false
+}
+
+/** agent_extract_tool_calls. */
+pub fn agent_extract_tool_calls(llm_result, opts) {
+  if len(llm_result?.tool_calls ?? []) > 0 {
+    return llm_result.tool_calls
+  }
+  if opts?.tools == nil {
+    return []
+  }
+  let parsed = agent_parse_tool_calls(llm_result?.text ?? "", opts.tools)
+  return parsed?.calls ?? []
+}
+
+/** agent_compute_post_turn. */
+pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
+  let sentinel = __default_done_sentinel(opts)
+  let text = llm_result?.text ?? ""
+  let has_tool_calls = len(llm_result?.tool_calls ?? []) > 0 || (dispatch != nil && len(dispatch?.results ?? []) > 0)
+  if __sentinel_hit(text, sentinel) {
+    return {
+      kind: "break",
+      stop_reason: "sentinel",
+      needs_verify: opts?.done_judge != nil || opts?.verify_completion != nil
+        || opts?.verify_completion_judge != nil,
+    }
+  }
+  if __stop_after_successful_tools(opts, dispatch) {
+    return {kind: "break", stop_reason: "natural", needs_verify: false}
+  }
+  let payload = {
+    iteration: iteration,
+    has_tool_calls: has_tool_calls,
+    dispatch: dispatch,
+    text: text,
+    visible_text: text,
+  }
+  let verdict = __post_turn_callback_verdict(opts, payload)
+  if verdict.kind == "stop" {
+    return {kind: "break", stop_reason: "post_turn_stop", needs_verify: opts?.verify_completion != nil}
+  }
+  if verdict.kind == "inject" {
+    agent_session_inject_feedback(session.session_id, "post_turn", verdict.message)
+    return {kind: "continue"}
+  }
+  if verdict.kind == "rich" && verdict.message != nil {
+    agent_session_inject_feedback(session.session_id, "post_turn", verdict.message)
+  }
+  if verdict.kind == "rich" && verdict.stop {
+    return {kind: "break", stop_reason: "post_turn_stop", needs_verify: opts?.verify_completion != nil}
+  }
+  let persistent = opts?.persistent ?? true
+  if !has_tool_calls && !persistent {
+    return {
+      kind: "break",
+      stop_reason: "natural",
+      needs_verify: opts?.done_judge != nil || opts?.verify_completion != nil,
+    }
+  }
+  return {kind: "continue"}
+}

@@ -14,6 +14,7 @@
 mod agent;
 mod agent_config;
 mod agent_observe;
+mod agent_session_host;
 mod agent_tools;
 pub(crate) mod api;
 pub(crate) mod autonomy_budget;
@@ -1741,6 +1742,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     agent_config::register_agent_control_primitives(vm);
     register_builtin_groups(vm, LLM_RUNTIME_PRIMITIVE_GROUPS);
     agent_config::register_agent_loop(vm);
+    agent_session_host::register_agent_session_host_primitives(vm);
 
     conversation::register_conversation_builtins(vm);
     config_builtins::register_config_builtins(vm);

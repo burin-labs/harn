@@ -10,10 +10,7 @@ use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuil
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
-use super::agent::{
-    finalize_agent_loop_session, prepare_agent_loop_session, step_agent_loop_session,
-    AgentLoopControl,
-};
+use super::agent::AgentLoopControl;
 use super::agent_observe::{
     observed_llm_call, LlmRetryConfig, DEFAULT_LLM_CALL_BACKOFF_MS, DEFAULT_LLM_CALL_RETRIES,
 };
@@ -29,10 +26,6 @@ const DEFAULT_AGENT_LOOP_MAX_ITERATIONS: i64 = 50;
 const DEFAULT_AGENT_LOOP_MAX_NUDGES: i64 = 8;
 const DEFAULT_AGENT_LOOP_TOOL_RETRIES: i64 = 0;
 const DEFAULT_AGENT_LOOP_SCHEMA_RETRIES: i64 = 0;
-const HOST_AGENT_SESSION_PREPARE_BUILTIN: &str = "__host_agent_session_prepare";
-const HOST_AGENT_SESSION_STEP_BUILTIN: &str = "__host_agent_session_step";
-const HOST_AGENT_SESSION_FINALIZE_BUILTIN: &str = "__host_agent_session_finalize";
-
 const AGENT_STDLIB_ENTRYPOINT_CATEGORY: &str = "agent.stdlib";
 
 const AGENT_CONTROL_PRIMITIVES: &[SyncBuiltin] = &[
@@ -479,6 +472,7 @@ fn push_structured_output_candidate(candidates: &mut Vec<String>, candidate: Str
     candidates.push(candidate);
 }
 
+#[allow(dead_code)]
 async fn agent_loop_inputs_from_args(
     args: Vec<VmValue>,
 ) -> Result<(super::api::LlmCallOptions, AgentLoopConfig), VmError> {
@@ -618,6 +612,7 @@ async fn agent_loop_inputs_from_args(
     ))
 }
 
+#[allow(dead_code)]
 fn agent_loop_control_to_vm(control: AgentLoopControl) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
     dict.insert(
@@ -646,82 +641,12 @@ fn agent_loop_control_to_vm(control: AgentLoopControl) -> VmValue {
     VmValue::Dict(Rc::new(dict))
 }
 
-async fn host_agent_session_prepare(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let (opts, config) = agent_loop_inputs_from_args(args).await?;
-    prepare_agent_loop_session(opts, config)
-        .await
-        .map(agent_loop_control_to_vm)
-}
-
-async fn host_agent_session_step(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let state_id = args
-        .first()
-        .map(|value| value.display())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            VmError::Runtime("__host_agent_session_step: missing state id".to_string())
-        })?;
-    step_agent_loop_session(&state_id)
-        .await
-        .map(agent_loop_control_to_vm)
-}
-
-async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let state_id = args
-        .first()
-        .map(|value| value.display())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            VmError::Runtime("__host_agent_session_finalize: missing state id".to_string())
-        })?;
-    let result = finalize_agent_loop_session(&state_id).await?;
-    Ok(crate::stdlib::json_to_vm_value(&result))
-}
-
-fn register_agent_session_primitives(vm: &mut Vm, bridge: Option<Rc<crate::bridge::HostBridge>>) {
-    if let Some(b) = bridge.as_ref() {
-        super::agent::install_current_host_bridge(b.clone());
-    }
-    let prepare_metadata = VmBuiltinMetadata::async_static(HOST_AGENT_SESSION_PREPARE_BUILTIN)
-        .signature_static("__host_agent_session_prepare(task, prompt, system?, options?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 4 })
-        .category_static("agent.host")
-        .doc_static("Prepare an opaque low-level agent session for Harn-owned loop execution.");
-    let prepare_bridge = bridge.clone();
-    vm.register_async_builtin_with_metadata(prepare_metadata, move |args| {
-        let captured_bridge = prepare_bridge.clone();
-        Box::pin(async move {
-            std::mem::drop(captured_bridge);
-            host_agent_session_prepare(args).await
-        })
-    });
-
-    let step_metadata = VmBuiltinMetadata::async_static(HOST_AGENT_SESSION_STEP_BUILTIN)
-        .signature_static("__host_agent_session_step(state_id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .category_static("agent.host")
-        .doc_static("Execute one low-level agent session turn for Harn-owned loop execution.");
-    vm.register_async_builtin_with_metadata(step_metadata, |args| {
-        Box::pin(async move { host_agent_session_step(args).await })
-    });
-
-    let finalize_metadata = VmBuiltinMetadata::async_static(HOST_AGENT_SESSION_FINALIZE_BUILTIN)
-        .signature_static("__host_agent_session_finalize(state_id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .category_static("agent.host")
-        .doc_static("Finalize an opaque low-level agent session and return its result.");
-    vm.register_async_builtin_with_metadata(finalize_metadata, |args| {
-        Box::pin(async move { host_agent_session_finalize(args).await })
-    });
-}
-
 pub(crate) fn register_agent_loop(vm: &mut Vm) {
-    register_agent_session_primitives(vm, None);
     register_harn_entrypoint_category(vm, AGENT_STDLIB_ENTRYPOINT_CATEGORY);
 }
 
 pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
-    register_agent_session_primitives(vm, Some(bridge));
+    super::agent::install_current_host_bridge(bridge);
     register_harn_entrypoint_category(vm, AGENT_STDLIB_ENTRYPOINT_CATEGORY);
 }
 
