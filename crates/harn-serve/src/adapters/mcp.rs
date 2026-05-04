@@ -3,7 +3,6 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use axum::body::Bytes;
 use axum::extract::{Query, State};
@@ -535,7 +534,7 @@ impl McpServer {
         let progress_token = params
             .pointer("/_meta/progressToken")
             .cloned()
-            .filter(is_valid_progress_token);
+            .filter(harn_vm::mcp_progress::is_valid_progress_token);
         let request_key = request_key(&request_id);
         Ok(StreamJob {
             request_id: request_id.clone(),
@@ -566,20 +565,10 @@ impl McpServer {
             },
         );
 
-        let progress_stop = if let Some(progress_token) = job.progress_token.clone() {
-            notify(progress_notification(
-                progress_token.clone(),
-                0.0,
-                format!("Starting {}", job.tool_name),
-            ));
-            Some(spawn_progress_notifier(
-                progress_token,
-                job.tool_name.clone(),
-                notify.clone(),
-            ))
-        } else {
-            None
-        };
+        let progress_ctx = job.progress_token.clone().map(|token| {
+            let bus = harn_vm::mcp_progress::ProgressBus::new(notify.clone());
+            harn_vm::mcp_progress::ProgressContext::new(bus, token)
+        });
 
         let request = match build_call_request(
             &self.descriptor.id,
@@ -588,13 +577,11 @@ impl McpServer {
             job.arguments,
             job.context.auth,
             cancel_token,
+            progress_ctx,
         ) {
             Ok(request) => request,
             Err(error) => {
                 job.context.session.remove_call(&job.request_key);
-                if let Some(stop) = progress_stop {
-                    let _ = stop.send(());
-                }
                 notify(harn_vm::jsonrpc::error_response(
                     job.request_id,
                     -32602,
@@ -606,9 +593,6 @@ impl McpServer {
 
         let result = self.executor.call(request).await;
         job.context.session.remove_call(&job.request_key);
-        if let Some(stop) = progress_stop {
-            let _ = stop.send(());
-        }
         if cancelled.load(Ordering::SeqCst) {
             return;
         }
@@ -1015,32 +999,6 @@ fn sse_events(
     })
 }
 
-fn spawn_progress_notifier(
-    progress_token: JsonValue,
-    tool_name: String,
-    notify: Arc<dyn Fn(JsonValue) + Send + Sync>,
-) -> oneshot::Sender<()> {
-    let (stop_tx, mut stop_rx) = oneshot::channel();
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(Duration::from_secs(1));
-        let mut progress = 0.0;
-        loop {
-            tokio::select! {
-                _ = &mut stop_rx => break,
-                _ = ticker.tick() => {
-                    progress += 1.0;
-                    notify(progress_notification(
-                        progress_token.clone(),
-                        progress,
-                        format!("Running {tool_name}"),
-                    ));
-                }
-            }
-        }
-    });
-    stop_tx
-}
-
 fn notify_channel<F>(notify: F) -> Arc<dyn Fn(JsonValue) + Send + Sync>
 where
     F: Fn(JsonValue) + Send + Sync + 'static,
@@ -1055,6 +1013,7 @@ fn build_call_request(
     arguments: JsonValue,
     auth: AuthRequest,
     cancel_token: Arc<AtomicBool>,
+    progress: Option<harn_vm::mcp_progress::ProgressContext>,
 ) -> Result<CallRequest, String> {
     let arguments = match arguments {
         JsonValue::Null => CallArguments::Named(BTreeMap::new()),
@@ -1080,6 +1039,7 @@ fn build_call_request(
         metadata: BTreeMap::new(),
         cancel_token: Some(cancel_token),
         agent_session_id: None,
+        progress,
     })
 }
 
@@ -1166,27 +1126,12 @@ fn content_blocks(value: &JsonValue) -> JsonValue {
     }
 }
 
-fn progress_notification(progress_token: JsonValue, progress: f64, message: String) -> JsonValue {
-    harn_vm::jsonrpc::notification(
-        "notifications/progress",
-        json!({
-            "progressToken": progress_token,
-            "progress": progress,
-            "message": message,
-        }),
-    )
-}
-
 fn request_key(id: &JsonValue) -> String {
     serde_json::to_string(id).unwrap_or_else(|_| "null".to_string())
 }
 
 fn parse_error_response(message: &str) -> JsonValue {
     harn_vm::jsonrpc::error_response(JsonValue::Null, -32700, &format!("Parse error: {message}"))
-}
-
-fn is_valid_progress_token(value: &JsonValue) -> bool {
-    matches!(value, JsonValue::String(_) | JsonValue::Number(_))
 }
 
 fn derived_server_name(catalog: &ExportCatalog) -> String {
@@ -1519,6 +1464,7 @@ pub fn greet(name: string) -> string {
             json!({"name": "alice"}),
             AuthRequest::default(),
             Arc::new(AtomicBool::new(false)),
+            None,
         )
         .expect("call request");
         match request.arguments {

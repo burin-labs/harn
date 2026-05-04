@@ -761,6 +761,7 @@ impl A2aServer {
                 metadata: BTreeMap::new(),
                 cancel_token: Some(task.cancel_token.clone()),
                 agent_session_id: Some(session_id.clone()),
+                progress: None,
             })
             .await;
 

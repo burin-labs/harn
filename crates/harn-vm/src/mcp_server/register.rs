@@ -5,6 +5,7 @@ use std::rc::Rc;
 use serde_json::Value as JsonValue;
 
 use crate::mcp_elicit::current_bus;
+use crate::mcp_progress::{current_context as current_progress_context, is_valid_progress_token};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -259,6 +260,88 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
 
         bus.elicit(message, requested_schema_json).await
     });
+
+    // mcp_report_progress(progress, opts?) -> bool
+    //
+    // Emit a `notifications/progress` notification for the in-flight
+    // tool call. Returns `true` when the notification was sent and
+    // `false` when it was dropped (no client opt-in via
+    // `_meta.progressToken`, or progress would not strictly increase).
+    //
+    // `opts` is an optional dict supporting:
+    //   - `total`: optional ceiling so the client can render a bar
+    //   - `message`: human-readable status string
+    //   - `token`: override the ambient request token (rarely needed;
+    //     useful only when manually fanning out progress for nested work)
+    //
+    // Spec:
+    //   https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/progress
+    vm.register_builtin("mcp_report_progress", |args, _out| {
+        let progress = match args.first() {
+            Some(value) => coerce_progress_number(value).ok_or_else(|| {
+                VmError::Runtime(format!(
+                    "mcp_report_progress: 'progress' must be a number (got {})",
+                    value.display()
+                ))
+            })?,
+            None => {
+                return Err(VmError::Runtime(
+                    "mcp_report_progress: 'progress' is required".into(),
+                ));
+            }
+        };
+
+        let mut total: Option<f64> = None;
+        let mut message: Option<String> = None;
+        let mut explicit_token: Option<JsonValue> = None;
+        if let Some(VmValue::Dict(opts)) = args.get(1) {
+            if let Some(value) = opts.get("total") {
+                match value {
+                    VmValue::Nil => {}
+                    other => {
+                        total = Some(coerce_progress_number(other).ok_or_else(|| {
+                            VmError::Runtime(format!(
+                                "mcp_report_progress: 'total' must be a number (got {})",
+                                other.display()
+                            ))
+                        })?);
+                    }
+                }
+            }
+            if let Some(value) = opts.get("message") {
+                match value {
+                    VmValue::String(s) => message = Some(s.to_string()),
+                    VmValue::Nil => {}
+                    other => message = Some(other.display()),
+                }
+            }
+            if let Some(value) = opts.get("token") {
+                let candidate = crate::mcp::vm_value_to_serde(value);
+                if !is_valid_progress_token(&candidate) {
+                    return Err(VmError::Runtime(
+                        "mcp_report_progress: 'token' must be a string or number".into(),
+                    ));
+                }
+                explicit_token = Some(candidate);
+            }
+        }
+
+        let Some(ctx) = current_progress_context() else {
+            // No active per-call context — either the client didn't opt
+            // in with `_meta.progressToken` or the call originates
+            // outside an MCP tool handler. Either way, silently drop:
+            // scripts can sprinkle this builtin liberally without
+            // checking.
+            return Ok(VmValue::Bool(false));
+        };
+
+        let sent = if let Some(token) = explicit_token {
+            ctx.bus.report(&token, progress, total, message)
+        } else {
+            ctx.report(progress, total, message)
+        };
+        Ok(VmValue::Bool(sent))
+    });
 }
 
 fn completion_sources_from_dict(value: Option<&VmValue>) -> BTreeMap<String, McpCompletionSource> {
@@ -313,6 +396,14 @@ fn completion_values_from_value(value: &VmValue) -> Vec<String> {
         VmValue::List(items) => items.iter().map(completion_value_to_string).collect(),
         VmValue::String(value) => vec![value.to_string()],
         _ => Vec::new(),
+    }
+}
+
+fn coerce_progress_number(value: &VmValue) -> Option<f64> {
+    match value {
+        VmValue::Int(n) => Some(*n as f64),
+        VmValue::Float(n) => Some(*n),
+        _ => None,
     }
 }
 

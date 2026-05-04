@@ -2,7 +2,7 @@
 
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_BYTES_OR_NIL, TY_CLOSURE, TY_DICT,
-    TY_DICT_OR_NIL, TY_INT, TY_LIST, TY_NIL, TY_STRING, TY_STRING_OR_NIL,
+    TY_DICT_OR_NIL, TY_INT, TY_LIST, TY_NIL, TY_NUMBER, TY_STRING, TY_STRING_OR_NIL,
 };
 
 const TY_STRING_OR_DICT: Ty = Ty::Union(&[TY_STRING, TY_DICT]);
@@ -792,6 +792,17 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         name: "mcp_release",
         params: &[Param::new("name", TY_STRING)],
         returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "mcp_report_progress",
+        params: &[
+            Param::new("progress", TY_NUMBER),
+            Param::optional("opts", TY_DICT),
+        ],
+        returns: TY_BOOL,
         type_params: &[],
         has_rest: false,
         where_clauses: &[],

@@ -10,6 +10,7 @@ use harn_vm::event_log::{
     active_event_log, install_active_event_log, install_default_for_base_dir, AnyEventLog,
 };
 use harn_vm::llm::vm_value_to_json;
+use harn_vm::mcp_progress::ProgressContext;
 use harn_vm::trust_graph::{append_trust_record, AutonomyTier, TrustOutcome, TrustRecord};
 use harn_vm::{TraceId, Vm, VmValue};
 use tokio::task::LocalSet;
@@ -68,6 +69,12 @@ pub struct CallRequest {
     /// session id and registers a sink that publishes worker updates
     /// onto the task event stream).
     pub agent_session_id: Option<String>,
+    /// Optional progress context — when supplied, the dispatched
+    /// function can call the `mcp_report_progress` builtin to emit
+    /// `notifications/progress` for the bound `progressToken`. Only
+    /// the MCP transport adapter populates this today; other adapters
+    /// leave it `None` and the builtin is a no-op.
+    pub progress: Option<ProgressContext>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -295,10 +302,11 @@ impl DispatchCore {
             .clone()
             .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
         let agent_session_id = request.agent_session_id.clone();
+        let progress = request.progress.clone();
 
         let local = LocalSet::new();
         local
-            .run_until(async move {
+            .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
                 let _event_log = install_scoped_event_log(self.event_log.clone());
                 let _session_guard = agent_session_id.as_deref().map(|session_id| {
                     harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()));
@@ -340,7 +348,7 @@ impl DispatchCore {
                         }
                     }
                 }
-            })
+            }))
             .await
     }
 
@@ -373,10 +381,11 @@ impl DispatchCore {
             .clone()
             .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
         let agent_session_id = request.agent_session_id.clone();
+        let progress = request.progress.clone();
 
         let local = LocalSet::new();
         local
-            .run_until(async move {
+            .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
                 let _event_log = install_scoped_event_log(self.event_log.clone());
                 let _session_guard = agent_session_id.as_deref().map(|session_id| {
                     harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()));
@@ -412,7 +421,7 @@ impl DispatchCore {
                         }
                     }
                 }
-            })
+            }))
             .await
     }
 
@@ -598,6 +607,7 @@ pub fn greet(name: string) -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                progress: None,
             })
             .await
             .expect("dispatch");
@@ -637,6 +647,7 @@ pipeline default(task) {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                progress: None,
             })
             .await
             .expect("dispatch");
@@ -693,6 +704,7 @@ pub fn greet(name: string) -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                progress: None,
             })
             .await
             .expect("dispatch");
@@ -732,6 +744,7 @@ pub fn greet(name: string) -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                progress: None,
             })
             .await
             .expect("dispatch");
@@ -779,6 +792,7 @@ pub fn spin() -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: Some(cancel_token),
                 agent_session_id: None,
+                progress: None,
             })
             .await
             .expect("dispatch");
