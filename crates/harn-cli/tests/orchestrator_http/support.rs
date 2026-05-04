@@ -603,6 +603,24 @@ pub(super) async fn await_pump_dispatch_count(harness: &OrchestratorHarness, cou
     .unwrap_or_else(|_| panic!("timed out waiting for {count} pump dispatches; got {total}"));
 }
 
+/// Wait until `path` exists, polling at the approved cadence. The
+/// orchestrator emits filesystem markers via the
+/// `HARN_ORCHESTRATOR_TEST_*_FILE` env hooks for tests that need to
+/// gate on handler-side state for which there is no lifecycle event
+/// (e.g. a request has entered the handler body). Wrapping the poll
+/// in [`tokio::time::timeout`] gives the same fail-fast ceiling as
+/// [`await_topic_event`] without the wall-clock deadline pattern the
+/// lint forbids.
+pub(super) async fn wait_for_path(path: &Path) {
+    tokio::time::timeout(EVENT_FAIL_FAST_TIMEOUT, async {
+        while !path.exists() {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for path {}", path.display()));
+}
+
 /// Read the on-disk state snapshot. The harness writes this file at
 /// startup, during drain, and on shutdown — so callers should either
 /// shut down the harness first or wait for the relevant lifecycle
