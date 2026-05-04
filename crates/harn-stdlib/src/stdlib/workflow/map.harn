@@ -61,6 +61,16 @@ fn __map_artifact_ids(artifacts) {
   return ids
 }
 
+fn __map_item_lineage(items) {
+  var ids = []
+  for item in items {
+    if item?.kind == "artifact" && type_of(item?.artifact?.id) == "string" {
+      ids = ids.push(item.artifact.id)
+    }
+  }
+  return ids
+}
+
 fn __map_artifact_items(artifacts) {
   var items = []
   for (index, artifact) in iter(artifacts).enumerate() {
@@ -178,6 +188,29 @@ pub fn workflow_map_work_items(config = nil) {
     }
   }
   return {items: __map_artifact_items(inputs), selected_artifact_ids: __map_artifact_ids(inputs)}
+}
+
+/** workflow_map_execution_plan. */
+pub fn workflow_map_execution_plan(config = nil) {
+  let node = config?.node ?? {}
+  let stage_plan = workflow_map_stage_plan({node: node})
+  let work = workflow_map_work_items({node: node, artifacts: config?.artifacts ?? []})
+  let items = __map_list(work?.items)
+  let strategy = __map_string(node?.join_policy?.strategy, "all")
+  return {
+    items: items,
+    total_items: len(items),
+    strategy: if trim(strategy) == "" {
+      "all"
+    } else {
+      strategy
+    },
+    join_target: workflow_map_join_target({join_policy: node?.join_policy ?? {}, total: len(items)}),
+    max_concurrent: node?.map_policy?.max_concurrent,
+    stage_node: stage_plan.stage_node,
+    output_kind: stage_plan.output_kind,
+    lineage: __map_item_lineage(items),
+  }
 }
 
 /** workflow_map_join_target. */
