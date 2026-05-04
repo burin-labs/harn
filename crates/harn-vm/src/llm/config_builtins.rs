@@ -3,323 +3,404 @@ use std::rc::Rc;
 
 use crate::llm_config;
 use crate::stdlib::json_to_vm_value;
-use crate::value::VmValue;
-use crate::vm::Vm;
+use crate::stdlib::registration::{
+    boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
+};
+use crate::value::{VmError, VmValue};
+use crate::vm::{Vm, VmBuiltinArity};
 
 use super::helpers::vm_value_to_json;
 
 /// Register config-based LLM builtins (llm_infer_provider, llm_resolve_model, etc.).
 pub(crate) fn register_config_builtins(vm: &mut Vm) {
-    vm.register_builtin("provider_capabilities", |args, _out| {
-        // provider_capabilities(provider, model) -> dict of capabilities.
-        //
-        // Returns a dict with every capability the (provider, model)
-        // pair advertises in the loaded matrix. Scripts can branch on
-        // the returned values without caring which vendor they're
-        // pointed at (e.g. `if "bm25" in caps.tool_search { ... }`).
-        //
-        // Unknown provider/model pairs return an all-default dict
-        // (everything off, empty tool_search, no max_tools). This is
-        // the same shape the defaults trait impl uses.
-        let provider = args.first().map(|a| a.display()).unwrap_or_default();
-        let model = args.get(1).map(|a| a.display()).unwrap_or_default();
-        if provider.is_empty() {
-            return Err(crate::value::VmError::Runtime(
-                "provider_capabilities: provider name is required".to_string(),
-            ));
-        }
-        let caps = super::capabilities::lookup(&provider, &model);
-        Ok(capabilities_to_vm_value(&provider, &model, &caps))
-    });
+    register_sync_builtins(vm, LLM_CONFIG_SYNC_BUILTINS);
+    register_async_builtins(vm, LLM_CONFIG_ASYNC_BUILTINS);
+}
 
-    // provider_capabilities_install(toml_src) — install capability
-    // overrides from a raw TOML source (same layout as the shipped
-    // `capabilities.toml`: top-level `[[provider.<name>]]` arrays plus
-    // an optional `[provider_family]` table). Mirrors harn.toml's
-    // `[capabilities]` section but in-script, so conformance tests and
-    // scripts that autodetect proxied endpoints can exercise the
-    // override path without editing the manifest. Returns true on
-    // success, throws a runtime error on parse failure.
-    vm.register_builtin("provider_capabilities_install", |args, _out| {
-        let src = args.first().map(|a| a.display()).unwrap_or_default();
-        if src.is_empty() {
-            return Err(crate::value::VmError::Runtime(
-                "provider_capabilities_install: TOML source string required".to_string(),
-            ));
-        }
-        super::capabilities::set_user_overrides_toml(&src).map_err(|e| {
-            crate::value::VmError::Runtime(format!(
-                "provider_capabilities_install: parse error: {e}"
-            ))
-        })?;
-        Ok(VmValue::Bool(true))
-    });
+const LLM_CONFIG_SYNC_BUILTINS: &[SyncBuiltin] = &[
+    SyncBuiltin::new("provider_capabilities", provider_capabilities_builtin)
+        .signature("provider_capabilities(provider, model?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .category("llm.config")
+        .doc("Return provider/model capability metadata from the loaded capability matrix."),
+    SyncBuiltin::new(
+        "provider_capabilities_install",
+        provider_capabilities_install_builtin,
+    )
+    .signature("provider_capabilities_install(toml_src)")
+    .arity(VmBuiltinArity::Exact(1))
+    .category("llm.config")
+    .doc("Install raw TOML capability overrides for provider/model capability lookup."),
+    SyncBuiltin::new(
+        "provider_capabilities_clear",
+        provider_capabilities_clear_builtin,
+    )
+    .signature("provider_capabilities_clear()")
+    .arity(VmBuiltinArity::Exact(0))
+    .category("llm.config")
+    .doc("Clear installed provider/model capability overrides."),
+    SyncBuiltin::new("llm_infer_provider", llm_infer_provider_builtin)
+        .signature("llm_infer_provider(model_id)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("llm.config")
+        .doc("Infer the configured provider name for a model identifier."),
+    SyncBuiltin::new("llm_model_tier", llm_model_tier_builtin)
+        .signature("llm_model_tier(model_id)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("llm.config")
+        .doc("Return the configured capability tier for a model identifier."),
+    SyncBuiltin::new("llm_resolve_model", llm_resolve_model_builtin)
+        .signature("llm_resolve_model(alias)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("llm.config")
+        .doc("Resolve a model alias or selector to full model metadata."),
+    SyncBuiltin::new("llm_model_info", llm_model_info_builtin)
+        .signature("llm_model_info(selector)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("llm.config")
+        .doc("Return catalog metadata for a resolved model selector."),
+    SyncBuiltin::new("llm_known_models", llm_known_models_builtin)
+        .signature("llm_known_models()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("llm.config")
+        .doc("List configured model alias names."),
+    SyncBuiltin::new("llm_available_providers", llm_available_providers_builtin)
+        .signature("llm_available_providers()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("llm.config")
+        .doc("List providers usable in the current environment."),
+    SyncBuiltin::new("llm_qc_default_model", llm_qc_default_model_builtin)
+        .signature("llm_qc_default_model(provider)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("llm.config")
+        .doc("Return the configured cheap QC/repair model for a provider."),
+    SyncBuiltin::new("llm_provider_catalog", llm_provider_catalog_builtin)
+        .signature("llm_provider_catalog()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("llm.config")
+        .doc("Return the loaded provider, alias, model, pricing, and availability catalog."),
+    SyncBuiltin::new("llm_pick_model", llm_pick_model_builtin)
+        .signature("llm_pick_model(target, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .category("llm.config")
+        .doc("Resolve a model alias or tier to an `{id, provider, tier}` dict."),
+    SyncBuiltin::new("llm_providers", llm_providers_builtin)
+        .signature("llm_providers()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("llm.config")
+        .doc("List all configured and runtime-registered LLM provider names."),
+    SyncBuiltin::new("provider_register", provider_register_builtin)
+        .signature("provider_register(name)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("llm.config")
+        .doc("Register a custom OpenAI-compatible provider name for runtime dispatch."),
+    SyncBuiltin::new("llm_config", llm_config_builtin)
+        .signature("llm_config(provider?)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
+        .category("llm.config")
+        .doc("Return configured provider settings, or all provider settings when no provider is passed."),
+    SyncBuiltin::new("llm_rate_limit", llm_rate_limit_builtin)
+        .signature("llm_rate_limit(provider, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .category("llm.rate_limit")
+        .doc("Set, query, or clear per-provider requests-per-minute rate limits."),
+];
 
-    vm.register_builtin("provider_capabilities_clear", |_args, _out| {
-        super::capabilities::clear_user_overrides();
-        Ok(VmValue::Bool(true))
-    });
+const LLM_CONFIG_ASYNC_BUILTINS: &[AsyncBuiltin] =
+    &[AsyncBuiltin::new("llm_healthcheck", |args| {
+        boxed_async_builtin(llm_healthcheck_builtin(args))
+    })
+    .signature("llm_healthcheck(provider_or_options?, options?)")
+    .arity(VmBuiltinArity::Range { min: 0, max: 2 })
+    .category("llm.config")
+    .doc("Validate provider health, API key reachability, and optional model readiness.")];
 
-    vm.register_builtin("llm_infer_provider", |args, _out| {
-        let model_id = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(llm_config::infer_provider(
-            &model_id,
-        ))))
-    });
+fn provider_capabilities_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let provider = args.first().map(|a| a.display()).unwrap_or_default();
+    let model = args.get(1).map(|a| a.display()).unwrap_or_default();
+    if provider.is_empty() {
+        return Err(VmError::Runtime(
+            "provider_capabilities: provider name is required".to_string(),
+        ));
+    }
+    let caps = super::capabilities::lookup(&provider, &model);
+    Ok(capabilities_to_vm_value(&provider, &model, &caps))
+}
 
-    vm.register_builtin("llm_model_tier", |args, _out| {
-        let model_id = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(llm_config::model_tier(&model_id))))
-    });
+fn provider_capabilities_install_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let src = args.first().map(|a| a.display()).unwrap_or_default();
+    if src.is_empty() {
+        return Err(VmError::Runtime(
+            "provider_capabilities_install: TOML source string required".to_string(),
+        ));
+    }
+    super::capabilities::set_user_overrides_toml(&src).map_err(|e| {
+        VmError::Runtime(format!("provider_capabilities_install: parse error: {e}"))
+    })?;
+    Ok(VmValue::Bool(true))
+}
 
-    vm.register_builtin("llm_resolve_model", |args, _out| {
-        let alias = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(resolved_model_to_vm_value(&llm_config::resolve_model_info(
-            &alias,
-        )))
-    });
+fn provider_capabilities_clear_builtin(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    super::capabilities::clear_user_overrides();
+    Ok(VmValue::Bool(true))
+}
 
-    vm.register_builtin("llm_model_info", |args, _out| {
-        let selector = args.first().map(|a| a.display()).unwrap_or_default();
-        let resolved = llm_config::resolve_model_info(&selector);
-        Ok(model_info_to_vm_value(&resolved))
-    });
+fn llm_infer_provider_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let model_id = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(llm_config::infer_provider(
+        &model_id,
+    ))))
+}
 
-    vm.register_builtin("llm_known_models", |_args, _out| {
-        Ok(string_list_to_vm_value(llm_config::known_model_names()))
-    });
+fn llm_model_tier_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let model_id = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(llm_config::model_tier(&model_id))))
+}
 
-    vm.register_builtin("llm_available_providers", |_args, _out| {
-        Ok(string_list_to_vm_value(
-            llm_config::available_provider_names(),
-        ))
-    });
+fn llm_resolve_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let alias = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(resolved_model_to_vm_value(&llm_config::resolve_model_info(
+        &alias,
+    )))
+}
 
-    vm.register_builtin("llm_qc_default_model", |args, _out| {
-        let provider = args.first().map(|a| a.display()).unwrap_or_default();
-        if provider.is_empty() {
-            return Err(crate::value::VmError::Runtime(
-                "llm_qc_default_model: provider name is required".to_string(),
-            ));
-        }
-        Ok(llm_config::qc_default_model(&provider)
-            .map(|model| VmValue::String(Rc::from(model)))
-            .unwrap_or(VmValue::Nil))
-    });
+fn llm_model_info_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let selector = args.first().map(|a| a.display()).unwrap_or_default();
+    let resolved = llm_config::resolve_model_info(&selector);
+    Ok(model_info_to_vm_value(&resolved))
+}
 
-    vm.register_builtin("llm_provider_catalog", |_args, _out| {
-        Ok(provider_catalog_to_vm_value())
-    });
+fn llm_known_models_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(string_list_to_vm_value(llm_config::known_model_names()))
+}
 
-    vm.register_builtin("llm_pick_model", |args, _out| {
-        let target = args.first().map(|a| a.display()).unwrap_or_default();
-        let options = args.get(1).and_then(|v| v.as_dict());
-        let preferred_provider = options.and_then(|d| d.get("provider")).map(|v| v.display());
+fn llm_available_providers_builtin(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    Ok(string_list_to_vm_value(
+        llm_config::available_provider_names(),
+    ))
+}
 
-        let (id, provider) = if let Some((id, provider)) =
-            llm_config::resolve_tier_model(&target, preferred_provider.as_deref())
-        {
-            (id, provider)
-        } else {
-            let (id, provider) = llm_config::resolve_model(&target);
-            (
-                id.clone(),
-                provider.unwrap_or_else(|| llm_config::infer_provider(&id)),
-            )
-        };
+fn llm_qc_default_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let provider = args.first().map(|a| a.display()).unwrap_or_default();
+    if provider.is_empty() {
+        return Err(VmError::Runtime(
+            "llm_qc_default_model: provider name is required".to_string(),
+        ));
+    }
+    Ok(llm_config::qc_default_model(&provider)
+        .map(|model| VmValue::String(Rc::from(model)))
+        .unwrap_or(VmValue::Nil))
+}
 
-        let mut dict = BTreeMap::new();
-        dict.insert("id".to_string(), VmValue::String(Rc::from(id.clone())));
-        dict.insert(
-            "provider".to_string(),
-            VmValue::String(Rc::from(provider.clone())),
-        );
-        dict.insert(
-            "tier".to_string(),
-            VmValue::String(Rc::from(llm_config::model_tier(&id))),
-        );
-        Ok(VmValue::Dict(Rc::new(dict)))
-    });
+fn llm_provider_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(provider_catalog_to_vm_value())
+}
 
-    vm.register_builtin("llm_providers", |_args, _out| {
-        let config_names = llm_config::provider_names();
-        let registry_names = super::provider::registered_provider_names();
-        // Merge config-defined and registry-defined provider names
-        let mut all: std::collections::BTreeSet<String> = config_names.into_iter().collect();
-        all.extend(registry_names);
-        let list: Vec<VmValue> = all
-            .into_iter()
-            .map(|n| VmValue::String(Rc::from(n)))
-            .collect();
-        Ok(VmValue::List(Rc::new(list)))
-    });
+fn llm_pick_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let target = args.first().map(|a| a.display()).unwrap_or_default();
+    let options = args.get(1).and_then(|v| v.as_dict());
+    let preferred_provider = options.and_then(|d| d.get("provider")).map(|v| v.display());
 
-    // provider_register — register a custom provider name at runtime so
-    // `llm_call` can dispatch to it. The provider must be OpenAI-compatible
-    // and configured via llm_config or environment variables.
-    vm.register_builtin("provider_register", |args, _out| {
-        let name = args.first().map(|a| a.display()).unwrap_or_default();
-        if name.is_empty() {
-            return Err(crate::value::VmError::Runtime(
-                "provider_register: name is required".to_string(),
-            ));
-        }
-        super::provider::register_provider_name(&name);
-        Ok(VmValue::Bool(true))
-    });
-
-    vm.register_builtin("llm_config", |args, _out| {
-        let provider_name = args.first().map(|a| a.display());
-        match provider_name {
-            Some(name) => {
-                if let Some(pdef) = llm_config::provider_config(&name) {
-                    Ok(provider_def_to_vm_value(Some(&name), &pdef))
-                } else {
-                    Ok(VmValue::Nil)
-                }
-            }
-            None => {
-                // Return all providers as a dict
-                let mut dict = BTreeMap::new();
-                for name in llm_config::provider_names() {
-                    if let Some(pdef) = llm_config::provider_config(&name) {
-                        dict.insert(name.clone(), provider_def_to_vm_value(Some(&name), &pdef));
-                    }
-                }
-                Ok(VmValue::Dict(Rc::new(dict)))
-            }
-        }
-    });
-
-    // llm_rate_limit — set, query, or clear per-provider RPM rate limits.
-    //   llm_rate_limit("together", {rpm: 600})  -> set
-    //   llm_rate_limit("together")              -> query (returns Int or Nil)
-    //   llm_rate_limit("together", {rpm: 0})    -> clear
-    vm.register_builtin("llm_rate_limit", |args, _out| {
-        let provider = args.first().map(|a| a.display()).unwrap_or_default();
-        if provider.is_empty() {
-            return Err(crate::value::VmError::Runtime(
-                "llm_rate_limit: provider name is required".to_string(),
-            ));
-        }
-        if let Some(VmValue::Int(rpm)) = args
-            .get(1)
-            .and_then(|a| a.as_dict())
-            .and_then(|o| o.get("rpm").cloned())
-        {
-            if rpm <= 0 {
-                super::rate_limit::clear_rate_limit(&provider);
-            } else {
-                super::rate_limit::set_rate_limit(&provider, rpm as u32);
-            }
-            return Ok(VmValue::Bool(true));
-        }
-        if args.get(1).and_then(|a| a.as_dict()).is_some() {
-            return Err(crate::value::VmError::Runtime(
-                "llm_rate_limit: options must include 'rpm' (integer)".to_string(),
-            ));
-        }
-        // Query mode
-        match super::rate_limit::get_rate_limit(&provider) {
-            Some(rpm) => Ok(VmValue::Int(rpm as i64)),
-            None => Ok(VmValue::Nil),
-        }
-    });
-
-    vm.register_async_builtin("llm_healthcheck", |args| async move {
-        let (provider_name, api_key) = parse_healthcheck_args(&args);
-
-        // Ollama-specific readiness probe (issue #675): supports `model`,
-        // `warm`, `base_url`, and `keep_alive` options to verify the daemon
-        // and optionally pre-warm a tag before the first chat call.
-        if provider_name == "ollama" {
-            let options = args
-                .iter()
-                .filter_map(|value| value.as_dict())
-                .find(|dict| {
-                    dict.contains_key("model")
-                        || dict.contains_key("warm")
-                        || dict.contains_key("preload")
-                        || dict.contains_key("base_url")
-                        || dict.contains_key("url")
-                        || dict.contains_key("keep_alive")
-                });
-            let model = options
-                .and_then(|opts| opts.get("model"))
-                .map(|value| value.display())
-                .or_else(|| std::env::var("HARN_LLM_MODEL").ok())
-                .or_else(|| std::env::var("LOCAL_LLM_MODEL").ok());
-            let warm = options
-                .and_then(|opts| opts.get("warm").or_else(|| opts.get("preload")))
-                .is_some_and(|value| matches!(value, VmValue::Bool(true)));
-
-            if warm && model.as_deref().unwrap_or("").is_empty() {
-                return Ok(json_to_vm_value(&serde_json::json!({
-                    "valid": false,
-                    "status": "invalid_request",
-                    "message": "Ollama warmup requires options.model",
-                })));
-            }
-
-            if let Some(model) = model.filter(|model| !model.trim().is_empty()) {
-                let (resolved_model, _) = llm_config::resolve_model(&model);
-                let mut readiness = super::api::OllamaReadinessOptions::new(resolved_model);
-                readiness.warm = warm;
-                readiness.base_url = options
-                    .and_then(|opts| opts.get("base_url").or_else(|| opts.get("url")))
-                    .map(|value| value.display())
-                    .filter(|value| !value.trim().is_empty());
-                readiness.keep_alive =
-                    options
-                        .and_then(|opts| opts.get("keep_alive"))
-                        .map(|value| match value {
-                            VmValue::String(raw) => super::api::normalize_ollama_keep_alive(raw)
-                                .unwrap_or_else(|| vm_value_to_json(value)),
-                            _ => vm_value_to_json(value),
-                        });
-                let result = super::api::ollama_readiness(readiness).await;
-                return Ok(json_to_vm_value(
-                    &serde_json::to_value(&result).unwrap_or_else(|_| {
-                        serde_json::json!({
-                            "valid": false,
-                            "status": "serialization_error",
-                            "message": "failed to serialize Ollama readiness result",
-                        })
-                    }),
-                ));
-            }
-        }
-
-        let requested_model = healthcheck_model_arg(&args)
-            .or_else(|| super::selected_model_for_provider(&provider_name));
-
-        if let Some(model) = requested_model.filter(|model| !model.trim().is_empty()) {
-            if let Some(pdef) = llm_config::provider_config(&provider_name) {
-                if super::supports_model_readiness_probe(&pdef) {
-                    let key = api_key
-                        .clone()
-                        .or_else(|| super::resolve_api_key(&provider_name).ok())
-                        .unwrap_or_default();
-                    let readiness =
-                        super::probe_openai_compatible_model(&provider_name, &model, &key).await;
-                    return Ok(readiness_result(&readiness));
-                }
-            }
-        }
-
-        let result = super::run_provider_healthcheck_with_options(
-            &provider_name,
-            super::ProviderHealthcheckOptions {
-                api_key,
-                client: Some(super::shared_utility_client().clone()),
-            },
+    let (id, provider) = if let Some((id, provider)) =
+        llm_config::resolve_tier_model(&target, preferred_provider.as_deref())
+    {
+        (id, provider)
+    } else {
+        let (id, provider) = llm_config::resolve_model(&target);
+        (
+            id.clone(),
+            provider.unwrap_or_else(|| llm_config::infer_provider(&id)),
         )
-        .await;
-        let json = serde_json::to_value(result).map_err(|error| {
-            crate::value::VmError::Runtime(format!("llm_healthcheck: serialize result: {error}"))
-        })?;
-        Ok(crate::schema::json_to_vm_value(&json))
-    });
+    };
+
+    let mut dict = BTreeMap::new();
+    dict.insert("id".to_string(), VmValue::String(Rc::from(id.clone())));
+    dict.insert(
+        "provider".to_string(),
+        VmValue::String(Rc::from(provider.clone())),
+    );
+    dict.insert(
+        "tier".to_string(),
+        VmValue::String(Rc::from(llm_config::model_tier(&id))),
+    );
+    Ok(VmValue::Dict(Rc::new(dict)))
+}
+
+fn llm_providers_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let config_names = llm_config::provider_names();
+    let registry_names = super::provider::registered_provider_names();
+    let mut all: std::collections::BTreeSet<String> = config_names.into_iter().collect();
+    all.extend(registry_names);
+    let list: Vec<VmValue> = all
+        .into_iter()
+        .map(|n| VmValue::String(Rc::from(n)))
+        .collect();
+    Ok(VmValue::List(Rc::new(list)))
+}
+
+fn provider_register_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let name = args.first().map(|a| a.display()).unwrap_or_default();
+    if name.is_empty() {
+        return Err(VmError::Runtime(
+            "provider_register: name is required".to_string(),
+        ));
+    }
+    super::provider::register_provider_name(&name);
+    Ok(VmValue::Bool(true))
+}
+
+fn llm_config_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let provider_name = args.first().map(|a| a.display());
+    match provider_name {
+        Some(name) => {
+            if let Some(pdef) = llm_config::provider_config(&name) {
+                Ok(provider_def_to_vm_value(Some(&name), &pdef))
+            } else {
+                Ok(VmValue::Nil)
+            }
+        }
+        None => {
+            let mut dict = BTreeMap::new();
+            for name in llm_config::provider_names() {
+                if let Some(pdef) = llm_config::provider_config(&name) {
+                    dict.insert(name.clone(), provider_def_to_vm_value(Some(&name), &pdef));
+                }
+            }
+            Ok(VmValue::Dict(Rc::new(dict)))
+        }
+    }
+}
+
+fn llm_rate_limit_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let provider = args.first().map(|a| a.display()).unwrap_or_default();
+    if provider.is_empty() {
+        return Err(VmError::Runtime(
+            "llm_rate_limit: provider name is required".to_string(),
+        ));
+    }
+    if let Some(VmValue::Int(rpm)) = args
+        .get(1)
+        .and_then(|a| a.as_dict())
+        .and_then(|o| o.get("rpm").cloned())
+    {
+        if rpm <= 0 {
+            super::rate_limit::clear_rate_limit(&provider);
+        } else {
+            super::rate_limit::set_rate_limit(&provider, rpm as u32);
+        }
+        return Ok(VmValue::Bool(true));
+    }
+    if args.get(1).and_then(|a| a.as_dict()).is_some() {
+        return Err(VmError::Runtime(
+            "llm_rate_limit: options must include 'rpm' (integer)".to_string(),
+        ));
+    }
+    match super::rate_limit::get_rate_limit(&provider) {
+        Some(rpm) => Ok(VmValue::Int(rpm as i64)),
+        None => Ok(VmValue::Nil),
+    }
+}
+
+async fn llm_healthcheck_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let (provider_name, api_key) = parse_healthcheck_args(&args);
+
+    // Ollama-specific readiness probe (issue #675): supports `model`,
+    // `warm`, `base_url`, and `keep_alive` options to verify the daemon
+    // and optionally pre-warm a tag before the first chat call.
+    if provider_name == "ollama" {
+        let options = args
+            .iter()
+            .filter_map(|value| value.as_dict())
+            .find(|dict| {
+                dict.contains_key("model")
+                    || dict.contains_key("warm")
+                    || dict.contains_key("preload")
+                    || dict.contains_key("base_url")
+                    || dict.contains_key("url")
+                    || dict.contains_key("keep_alive")
+            });
+        let model = options
+            .and_then(|opts| opts.get("model"))
+            .map(|value| value.display())
+            .or_else(|| std::env::var("HARN_LLM_MODEL").ok())
+            .or_else(|| std::env::var("LOCAL_LLM_MODEL").ok());
+        let warm = options
+            .and_then(|opts| opts.get("warm").or_else(|| opts.get("preload")))
+            .is_some_and(|value| matches!(value, VmValue::Bool(true)));
+
+        if warm && model.as_deref().unwrap_or("").is_empty() {
+            return Ok(json_to_vm_value(&serde_json::json!({
+                "valid": false,
+                "status": "invalid_request",
+                "message": "Ollama warmup requires options.model",
+            })));
+        }
+
+        if let Some(model) = model.filter(|model| !model.trim().is_empty()) {
+            let (resolved_model, _) = llm_config::resolve_model(&model);
+            let mut readiness = super::api::OllamaReadinessOptions::new(resolved_model);
+            readiness.warm = warm;
+            readiness.base_url = options
+                .and_then(|opts| opts.get("base_url").or_else(|| opts.get("url")))
+                .map(|value| value.display())
+                .filter(|value| !value.trim().is_empty());
+            readiness.keep_alive = options
+                .and_then(|opts| opts.get("keep_alive"))
+                .map(|value| match value {
+                    VmValue::String(raw) => super::api::normalize_ollama_keep_alive(raw)
+                        .unwrap_or_else(|| vm_value_to_json(value)),
+                    _ => vm_value_to_json(value),
+                });
+            let result = super::api::ollama_readiness(readiness).await;
+            return Ok(json_to_vm_value(
+                &serde_json::to_value(&result).unwrap_or_else(|_| {
+                    serde_json::json!({
+                        "valid": false,
+                        "status": "serialization_error",
+                        "message": "failed to serialize Ollama readiness result",
+                    })
+                }),
+            ));
+        }
+    }
+
+    let requested_model =
+        healthcheck_model_arg(&args).or_else(|| super::selected_model_for_provider(&provider_name));
+
+    if let Some(model) = requested_model.filter(|model| !model.trim().is_empty()) {
+        if let Some(pdef) = llm_config::provider_config(&provider_name) {
+            if super::supports_model_readiness_probe(&pdef) {
+                let key = api_key
+                    .clone()
+                    .or_else(|| super::resolve_api_key(&provider_name).ok())
+                    .unwrap_or_default();
+                let readiness =
+                    super::probe_openai_compatible_model(&provider_name, &model, &key).await;
+                return Ok(readiness_result(&readiness));
+            }
+        }
+    }
+
+    let result = super::run_provider_healthcheck_with_options(
+        &provider_name,
+        super::ProviderHealthcheckOptions {
+            api_key,
+            client: Some(super::shared_utility_client().clone()),
+        },
+    )
+    .await;
+    let json = serde_json::to_value(result)
+        .map_err(|error| VmError::Runtime(format!("llm_healthcheck: serialize result: {error}")))?;
+    Ok(crate::schema::json_to_vm_value(&json))
 }
 
 fn parse_healthcheck_args(args: &[VmValue]) -> (String, Option<String>) {

@@ -1001,3 +1001,40 @@ pub(crate) fn keyword_doc(name: &str) -> Option<String> {
     };
     Some(doc.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{builtin_doc, builtin_signature, is_builtin};
+
+    #[test]
+    fn lsp_registry_includes_runtime_metadata_only_llm_config_builtins() {
+        assert!(is_builtin("provider_capabilities"));
+        assert_eq!(
+            builtin_signature("provider_capabilities"),
+            Some("provider_capabilities(provider, model?)")
+        );
+        assert!(builtin_doc("provider_capabilities")
+            .expect("provider_capabilities doc")
+            .contains("capability metadata"),);
+
+        assert!(is_builtin("llm_available_providers"));
+        assert_eq!(
+            builtin_signature("llm_available_providers"),
+            Some("llm_available_providers()")
+        );
+        assert!(builtin_doc("llm_available_providers")
+            .expect("llm_available_providers doc")
+            .contains("providers usable"),);
+    }
+
+    #[test]
+    fn lsp_registry_preserves_curated_overrides_for_existing_llm_config_builtins() {
+        assert_eq!(
+            builtin_signature("llm_healthcheck"),
+            Some("llm_healthcheck(provider?, options?) -> dict")
+        );
+        assert!(builtin_doc("llm_healthcheck")
+            .expect("llm_healthcheck doc")
+            .contains("Ollama accepts"),);
+    }
+}
