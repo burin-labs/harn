@@ -20,6 +20,8 @@ use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
 use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{json, Value as JsonValue};
 use sha2::Sha256;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::LocalSet;
 use uuid::Uuid;
@@ -2950,10 +2952,57 @@ fn a2a_artifact_from_harn_artifact(artifact: &JsonValue) -> JsonValue {
             .unwrap_or("artifact"),
         "parts": [part],
     });
-    if let Some(metadata) = artifact.get("metadata") {
-        value["metadata"] = metadata.clone();
+    let mut metadata = artifact
+        .get("metadata")
+        .and_then(JsonValue::as_object)
+        .cloned()
+        .unwrap_or_default();
+    metadata
+        .entry("timestamp")
+        .or_insert_with(|| JsonValue::String(current_timestamp_rfc3339()));
+    if !metadata.contains_key("artifact_kind") {
+        if let Some(kind) = artifact.get("kind").and_then(JsonValue::as_str) {
+            metadata.insert(
+                "artifact_kind".to_string(),
+                JsonValue::String(kind.to_string()),
+            );
+        }
     }
+    value["metadata"] = JsonValue::Object(metadata);
     value
+}
+
+/// Current wall-clock time as an RFC3339 / ISO-8601 UTC string. Used to
+/// stamp each A2A `Artifact.metadata.timestamp` so downstream consumers
+/// can order outputs even when several artifacts share a task.
+fn current_timestamp_rfc3339() -> String {
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| String::new())
+}
+
+/// Wrap a tool call's `raw_output` in an A2A `Artifact`. The stable id
+/// is derived from the model-issued `tool_call_id` so a streaming
+/// `artifact-update` event and the artifact stored on the task share
+/// the same identity. String outputs become a single text part; every
+/// other JSON shape becomes a single data part — matching what
+/// `response_parts` would produce for the same value at task
+/// completion.
+fn tool_output_artifact(tool_call_id: &str, tool_name: &str, output: &JsonValue) -> JsonValue {
+    let part = match output {
+        JsonValue::String(text) => json!({"type": "text", "text": text}),
+        _ => json!({"type": "data", "data": output.clone()}),
+    };
+    json!({
+        "artifactId": format!("tool-{tool_call_id}"),
+        "name": tool_name,
+        "parts": [part],
+        "metadata": {
+            "timestamp": current_timestamp_rfc3339(),
+            "tool_call_id": tool_call_id,
+            "artifact_kind": "tool_output",
+        }
+    })
 }
 
 fn public_skill_card(function: &crate::ExportedFunction) -> JsonValue {
@@ -3157,6 +3206,16 @@ struct A2aWorkerSink {
 impl harn_vm::agent_events::AgentEventSink for A2aWorkerSink {
     fn handle_event(&self, event: &harn_vm::agent_events::AgentEvent) {
         let payload = match event {
+            harn_vm::agent_events::AgentEvent::ToolCallUpdate {
+                tool_call_id,
+                tool_name,
+                status,
+                raw_output: Some(output),
+                ..
+            } if *status == harn_vm::agent_events::ToolCallStatus::Completed => {
+                self.emit_tool_artifact(tool_call_id, tool_name, output);
+                return;
+            }
             harn_vm::agent_events::AgentEvent::WorkerUpdate {
                 worker_id,
                 worker_name,
@@ -3234,6 +3293,41 @@ impl harn_vm::agent_events::AgentEventSink for A2aWorkerSink {
 }
 
 impl A2aWorkerSink {
+    /// Translate a completed tool call's output into an A2A
+    /// `TaskArtifactUpdateEvent` and append the resulting artifact to
+    /// the task's stored artifact list. Each tool call materialises as
+    /// a single artifact (`lastChunk: true`, `append: false`) keyed by
+    /// the model-issued `tool_call_id` so streaming subscribers and
+    /// `tasks/get` callers see the same canonical shape.
+    fn emit_tool_artifact(&self, tool_call_id: &str, tool_name: &str, output: &JsonValue) {
+        let artifact = tool_output_artifact(tool_call_id, tool_name, output);
+        let context_id = {
+            let tasks = self.tasks.lock().expect("tasks poisoned");
+            tasks
+                .get(&self.task_id)
+                .and_then(|task| task.context_id.clone())
+        };
+        let mut event = json!({
+            "kind": "artifact-update",
+            "taskId": self.task_id,
+            "artifact": artifact.clone(),
+            "append": false,
+            "lastChunk": true,
+        });
+        if let Some(context_id) = context_id {
+            event["contextId"] = JsonValue::String(context_id);
+        }
+        let mut tasks = self.tasks.lock().expect("tasks poisoned");
+        let Some(task) = tasks.get_mut(&self.task_id) else {
+            return;
+        };
+        if task.status.is_terminal() {
+            return;
+        }
+        task.artifacts.push(artifact);
+        publish_locked(task, event);
+    }
+
     /// Flip the task into `input-required` while a HITL primitive is
     /// blocked waiting for a response. The script remains suspended on
     /// a waitpoint; subscribers see two events — a structured `hitl`
@@ -5623,6 +5717,274 @@ pub fn triage(task: string) -> string {
         assert_eq!(
             response["result"]["status"]["state"], "auth-required",
             "got: {response}"
+        );
+    }
+
+    #[test]
+    fn artifact_metadata_includes_timestamp_and_kind() {
+        let harn_artifact = json!({
+            "_type": "artifact",
+            "id": "report",
+            "kind": "file",
+            "title": "report.bin",
+            "data": {
+                "bytes": "AAEC/w==",
+                "mimeType": "application/octet-stream",
+                "name": "report.bin"
+            }
+        });
+
+        let a2a_artifact = super::a2a_artifact_from_harn_artifact(&harn_artifact);
+        let metadata = a2a_artifact["metadata"]
+            .as_object()
+            .expect("metadata object");
+        let timestamp = metadata
+            .get("timestamp")
+            .and_then(JsonValue::as_str)
+            .expect("timestamp string");
+        // RFC3339: "YYYY-MM-DDTHH:MM:SS" plus zone — at minimum 19 chars.
+        assert!(
+            timestamp.len() >= 19 && timestamp.contains('T'),
+            "timestamp not RFC3339: {timestamp}"
+        );
+        assert_eq!(
+            metadata.get("artifact_kind").and_then(JsonValue::as_str),
+            Some("file")
+        );
+        assert_eq!(a2a_artifact["artifactId"], "report");
+        assert_eq!(a2a_artifact["name"], "report.bin");
+    }
+
+    #[tokio::test]
+    async fn send_message_surfaces_text_and_binary_outputs_as_separate_artifacts() {
+        // Acceptance criterion for harn#892: a script that produces both
+        // text and binary outputs must surface them as separate
+        // `Artifact` objects on the resulting task — not collapse them
+        // into the legacy empty `[]`.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r#"
+pub fn render_report(task: string) -> dict {
+  return {
+    visible_text: "summary for " + task,
+    artifacts: [
+      artifact({
+        kind: "file",
+        id: "report-bin",
+        title: "report.bin",
+        data: {
+          bytes: "AAEC/w==",
+          mimeType: "application/octet-stream",
+          name: "report.bin"
+        }
+      }),
+      artifact({
+        kind: "data",
+        id: "report-summary",
+        title: "summary",
+        data: {rows: 3, status: "ok"}
+      })
+    ]
+  }
+}
+"#,
+        )
+        .expect("write script");
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+        let request = harn_vm::jsonrpc::request(
+            "artifacts-1",
+            "message/send",
+            json!({
+                "message": {
+                    "metadata": {"target_agent": "render_report"},
+                    "parts": [{"type": "text", "text": "audit-2026-05"}]
+                }
+            }),
+        );
+
+        let processed = server.process_rpc(request, AuthRequest::default()).await;
+        let RpcOutcome::Json(response) = processed.outcome else {
+            panic!("expected json response");
+        };
+
+        assert_eq!(response["result"]["status"]["state"], "completed");
+        let artifacts = response["result"]["artifacts"]
+            .as_array()
+            .expect("artifacts array");
+        assert_eq!(artifacts.len(), 2, "got: {response}");
+
+        let by_id: BTreeMap<&str, &JsonValue> = artifacts
+            .iter()
+            .map(|artifact| {
+                (
+                    artifact["artifactId"].as_str().expect("artifactId"),
+                    artifact,
+                )
+            })
+            .collect();
+
+        let file_artifact = by_id.get("report-bin").expect("file artifact");
+        assert_eq!(file_artifact["name"], "report.bin");
+        assert_eq!(file_artifact["parts"][0]["type"], "file");
+        assert_eq!(file_artifact["parts"][0]["file"]["bytes"], "AAEC/w==");
+        assert_eq!(
+            file_artifact["parts"][0]["file"]["mimeType"],
+            "application/octet-stream"
+        );
+        assert!(
+            file_artifact["metadata"]["timestamp"].is_string(),
+            "missing timestamp on file artifact"
+        );
+
+        let data_artifact = by_id.get("report-summary").expect("data artifact");
+        assert_eq!(data_artifact["parts"][0]["type"], "data");
+        assert_eq!(data_artifact["parts"][0]["data"]["rows"], 3);
+        assert!(
+            data_artifact["metadata"]["timestamp"].is_string(),
+            "missing timestamp on data artifact"
+        );
+    }
+
+    #[test]
+    fn tool_call_completed_emits_artifact_update_event() {
+        // A `ToolCallUpdate` with `status: completed` and a `raw_output`
+        // must materialise as an A2A `TaskArtifactUpdateEvent` on the
+        // task's event stream and as an entry on `task.artifacts`. The
+        // canonical `tool_call_id` becomes the artifact's stable id so
+        // the streaming event and the eventual `tasks/get` shape share
+        // identity.
+        let task_id = "task-tool-output".to_string();
+        let task = TaskState {
+            id: task_id.clone(),
+            context_id: Some("ctx-1".into()),
+            status: TaskStatus::Working,
+            history: Vec::new(),
+            artifacts: Vec::new(),
+            metadata: BTreeMap::new(),
+            events: Vec::new(),
+            subscribers: Vec::new(),
+            cancel_token: None,
+        };
+        let tasks: TaskStore = Arc::new(Mutex::new(HashMap::from([(task_id.clone(), task)])));
+        let sink = super::A2aWorkerSink {
+            task_id: task_id.clone(),
+            tasks: tasks.clone(),
+        };
+
+        sink.handle_event(&harn_vm::agent_events::AgentEvent::ToolCallUpdate {
+            session_id: super::a2a_worker_session_id(&task_id),
+            tool_call_id: "tc-42".into(),
+            tool_name: "search_files".into(),
+            status: harn_vm::agent_events::ToolCallStatus::Completed,
+            raw_output: Some(json!({"matches": ["a.rs", "b.rs"]})),
+            error: None,
+            duration_ms: Some(12),
+            execution_duration_ms: Some(10),
+            error_category: None,
+            executor: None,
+            parsing: None,
+            raw_input: None,
+            raw_input_partial: None,
+            audit: None,
+        });
+
+        let tasks = tasks.lock().expect("tasks");
+        let task = tasks.get(&task_id).expect("task");
+        assert_eq!(task.artifacts.len(), 1, "tool output not stored");
+        let stored = &task.artifacts[0];
+        assert_eq!(stored["artifactId"], "tool-tc-42");
+        assert_eq!(stored["name"], "search_files");
+        assert_eq!(stored["parts"][0]["type"], "data");
+        assert_eq!(stored["parts"][0]["data"]["matches"][0], "a.rs");
+        assert_eq!(stored["metadata"]["tool_call_id"], "tc-42");
+        assert!(stored["metadata"]["timestamp"].is_string());
+
+        let event = task
+            .events
+            .iter()
+            .find(|event| event.get("kind").and_then(JsonValue::as_str) == Some("artifact-update"))
+            .expect("artifact-update event");
+        assert_eq!(event["taskId"], task_id);
+        assert_eq!(event["contextId"], "ctx-1");
+        assert_eq!(event["append"], false);
+        assert_eq!(event["lastChunk"], true);
+        assert_eq!(event["artifact"]["artifactId"], "tool-tc-42");
+    }
+
+    #[test]
+    fn tool_call_pending_does_not_emit_artifact_update() {
+        // Only terminal `Completed` updates with a `raw_output` payload
+        // map to artifacts; intermediate streaming chunks (Pending /
+        // InProgress / partial-parse) must stay silent so we don't pollute
+        // the artifact list with placeholders.
+        let task_id = "task-tool-pending".to_string();
+        let task = TaskState {
+            id: task_id.clone(),
+            context_id: None,
+            status: TaskStatus::Working,
+            history: Vec::new(),
+            artifacts: Vec::new(),
+            metadata: BTreeMap::new(),
+            events: Vec::new(),
+            subscribers: Vec::new(),
+            cancel_token: None,
+        };
+        let tasks: TaskStore = Arc::new(Mutex::new(HashMap::from([(task_id.clone(), task)])));
+        let sink = super::A2aWorkerSink {
+            task_id: task_id.clone(),
+            tasks: tasks.clone(),
+        };
+
+        sink.handle_event(&harn_vm::agent_events::AgentEvent::ToolCallUpdate {
+            session_id: super::a2a_worker_session_id(&task_id),
+            tool_call_id: "tc-99".into(),
+            tool_name: "search_files".into(),
+            status: harn_vm::agent_events::ToolCallStatus::InProgress,
+            raw_output: None,
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+            executor: None,
+            parsing: None,
+            raw_input: None,
+            raw_input_partial: None,
+            audit: None,
+        });
+
+        sink.handle_event(&harn_vm::agent_events::AgentEvent::ToolCallUpdate {
+            session_id: super::a2a_worker_session_id(&task_id),
+            tool_call_id: "tc-100".into(),
+            tool_name: "search_files".into(),
+            status: harn_vm::agent_events::ToolCallStatus::Failed,
+            raw_output: None,
+            error: Some("boom".into()),
+            duration_ms: Some(1),
+            execution_duration_ms: Some(1),
+            error_category: None,
+            executor: None,
+            parsing: None,
+            raw_input: None,
+            raw_input_partial: None,
+            audit: None,
+        });
+
+        let tasks = tasks.lock().expect("tasks");
+        let task = tasks.get(&task_id).expect("task");
+        assert!(
+            task.artifacts.is_empty(),
+            "non-terminal tool calls must not emit artifacts"
+        );
+        assert!(
+            !task
+                .events
+                .iter()
+                .any(|event| event.get("kind").and_then(JsonValue::as_str)
+                    == Some("artifact-update")),
+            "no artifact-update events should be emitted for non-Completed tool updates",
         );
     }
 }
