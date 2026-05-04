@@ -62,7 +62,7 @@ jobs:
             --output-dir "${RUNNER_TEMP}/generated-sdks"
 
       - name: Upload generated SDK artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: harn-sdk-${{ matrix.language }}-${{ github.sha }}
           path: ${{ runner.temp }}/generated-sdks/${{ matrix.language }}
