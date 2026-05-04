@@ -6,7 +6,7 @@ use std::time::Instant;
 use serde_json::Value as JsonValue;
 
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
+    boxed_async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::clone_async_builtin_child_vm;
@@ -16,37 +16,30 @@ const HOST_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("host_mock", host_mock_builtin)
         .signature("host_mock(capability, op, response_or_config, params?)")
         .arity(VmBuiltinArity::Range { min: 3, max: 4 })
-        .category("host")
         .doc("Register a typed host mock for tests."),
     SyncBuiltin::new("host_mock_clear", host_mock_clear_builtin)
         .signature("host_mock_clear()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("host")
         .doc("Clear typed host mocks and recorded calls."),
     SyncBuiltin::new("host_mock_calls", host_mock_calls_builtin)
         .signature("host_mock_calls()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("host")
         .doc("Return typed host mock invocations."),
     SyncBuiltin::new("host_mock_push_scope", host_mock_push_scope_builtin)
         .signature("host_mock_push_scope()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("host")
         .doc("Push an isolated host mock scope."),
     SyncBuiltin::new("host_mock_pop_scope", host_mock_pop_scope_builtin)
         .signature("host_mock_pop_scope()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("host")
         .doc("Pop the current isolated host mock scope."),
     SyncBuiltin::new("host_capabilities", host_capabilities_builtin)
         .signature("host_capabilities()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("host")
         .doc("Return the typed host capability manifest."),
     SyncBuiltin::new("host_has", host_has_builtin)
         .signature("host_has(capability, op?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .category("host")
         .doc("Return whether a host capability or operation is available."),
 ];
 
@@ -56,23 +49,25 @@ const HOST_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     })
     .signature("host_call(name, args)")
     .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-    .category("host")
     .doc("Invoke a host capability operation by capability.operation name."),
     AsyncBuiltin::new("host_tool_list", |args| {
         boxed_async_builtin(host_tool_list_builtin(args))
     })
     .signature("host_tool_list()")
     .arity(VmBuiltinArity::Exact(0))
-    .category("host")
     .doc("List host tools exposed by the active bridge."),
     AsyncBuiltin::new("host_tool_call", |args| {
         boxed_async_builtin(host_tool_call_builtin(args))
     })
     .signature("host_tool_call(name, args?)")
     .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-    .category("host")
     .doc("Call a host tool exposed by the active bridge."),
 ];
+
+const HOST_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
+    .category("host")
+    .sync(HOST_SYNC_PRIMITIVES)
+    .async_(HOST_ASYNC_PRIMITIVES);
 
 #[derive(Clone)]
 struct HostMock {
@@ -910,8 +905,7 @@ fn vm_string(value: &VmValue) -> Option<&str> {
 }
 
 pub(crate) fn register_host_builtins(vm: &mut Vm) {
-    register_sync_builtins(vm, HOST_SYNC_PRIMITIVES);
-    register_async_builtins(vm, HOST_ASYNC_PRIMITIVES);
+    register_builtin_group(vm, HOST_PRIMITIVES);
 }
 
 fn host_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

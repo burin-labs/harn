@@ -4,7 +4,7 @@ use std::rc::Rc;
 use crate::llm_config;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
+    boxed_async_builtin, register_builtin_groups, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
@@ -13,15 +13,13 @@ use super::helpers::vm_value_to_json;
 
 /// Register config-based LLM builtins (llm_infer_provider, llm_resolve_model, etc.).
 pub(crate) fn register_config_builtins(vm: &mut Vm) {
-    register_sync_builtins(vm, LLM_CONFIG_SYNC_BUILTINS);
-    register_async_builtins(vm, LLM_CONFIG_ASYNC_BUILTINS);
+    register_builtin_groups(vm, LLM_CONFIG_GROUPS);
 }
 
 const LLM_CONFIG_SYNC_BUILTINS: &[SyncBuiltin] = &[
     SyncBuiltin::new("provider_capabilities", provider_capabilities_builtin)
         .signature("provider_capabilities(provider, model?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .category("llm.config")
         .doc("Return provider/model capability metadata from the loaded capability matrix."),
     SyncBuiltin::new(
         "provider_capabilities_install",
@@ -29,7 +27,6 @@ const LLM_CONFIG_SYNC_BUILTINS: &[SyncBuiltin] = &[
     )
     .signature("provider_capabilities_install(toml_src)")
     .arity(VmBuiltinArity::Exact(1))
-    .category("llm.config")
     .doc("Install raw TOML capability overrides for provider/model capability lookup."),
     SyncBuiltin::new(
         "provider_capabilities_clear",
@@ -37,74 +34,62 @@ const LLM_CONFIG_SYNC_BUILTINS: &[SyncBuiltin] = &[
     )
     .signature("provider_capabilities_clear()")
     .arity(VmBuiltinArity::Exact(0))
-    .category("llm.config")
     .doc("Clear installed provider/model capability overrides."),
     SyncBuiltin::new("llm_infer_provider", llm_infer_provider_builtin)
         .signature("llm_infer_provider(model_id)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("llm.config")
         .doc("Infer the configured provider name for a model identifier."),
     SyncBuiltin::new("llm_model_tier", llm_model_tier_builtin)
         .signature("llm_model_tier(model_id)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("llm.config")
         .doc("Return the configured capability tier for a model identifier."),
     SyncBuiltin::new("llm_resolve_model", llm_resolve_model_builtin)
         .signature("llm_resolve_model(alias)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("llm.config")
         .doc("Resolve a model alias or selector to full model metadata."),
     SyncBuiltin::new("llm_model_info", llm_model_info_builtin)
         .signature("llm_model_info(selector)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("llm.config")
         .doc("Return catalog metadata for a resolved model selector."),
     SyncBuiltin::new("llm_known_models", llm_known_models_builtin)
         .signature("llm_known_models()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("llm.config")
         .doc("List configured model alias names."),
     SyncBuiltin::new("llm_available_providers", llm_available_providers_builtin)
         .signature("llm_available_providers()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("llm.config")
         .doc("List providers usable in the current environment."),
     SyncBuiltin::new("llm_qc_default_model", llm_qc_default_model_builtin)
         .signature("llm_qc_default_model(provider)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("llm.config")
         .doc("Return the configured cheap QC/repair model for a provider."),
     SyncBuiltin::new("llm_provider_catalog", llm_provider_catalog_builtin)
         .signature("llm_provider_catalog()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("llm.config")
         .doc("Return the loaded provider, alias, model, pricing, and availability catalog."),
     SyncBuiltin::new("llm_pick_model", llm_pick_model_builtin)
         .signature("llm_pick_model(target, options?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .category("llm.config")
         .doc("Resolve a model alias or tier to an `{id, provider, tier}` dict."),
     SyncBuiltin::new("llm_providers", llm_providers_builtin)
         .signature("llm_providers()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("llm.config")
         .doc("List all configured and runtime-registered LLM provider names."),
     SyncBuiltin::new("provider_register", provider_register_builtin)
         .signature("provider_register(name)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("llm.config")
         .doc("Register a custom OpenAI-compatible provider name for runtime dispatch."),
     SyncBuiltin::new("llm_config", llm_config_builtin)
         .signature("llm_config(provider?)")
         .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .category("llm.config")
         .doc("Return configured provider settings, or all provider settings when no provider is passed."),
-    SyncBuiltin::new("llm_rate_limit", llm_rate_limit_builtin)
+];
+
+const LLM_RATE_LIMIT_SYNC_BUILTINS: &[SyncBuiltin] =
+    &[SyncBuiltin::new("llm_rate_limit", llm_rate_limit_builtin)
         .signature("llm_rate_limit(provider, options?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .category("llm.rate_limit")
-        .doc("Set, query, or clear per-provider requests-per-minute rate limits."),
-];
+        .doc("Set, query, or clear per-provider requests-per-minute rate limits.")];
 
 const LLM_CONFIG_ASYNC_BUILTINS: &[AsyncBuiltin] =
     &[AsyncBuiltin::new("llm_healthcheck", |args| {
@@ -112,8 +97,18 @@ const LLM_CONFIG_ASYNC_BUILTINS: &[AsyncBuiltin] =
     })
     .signature("llm_healthcheck(provider_or_options?, options?)")
     .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-    .category("llm.config")
     .doc("Validate provider health, API key reachability, and optional model readiness.")];
+
+const LLM_CONFIG_BUILTINS: BuiltinGroup<'static> = BuiltinGroup::new()
+    .category("llm.config")
+    .sync(LLM_CONFIG_SYNC_BUILTINS)
+    .async_(LLM_CONFIG_ASYNC_BUILTINS);
+
+const LLM_RATE_LIMIT_BUILTINS: BuiltinGroup<'static> = BuiltinGroup::new()
+    .category("llm.rate_limit")
+    .sync(LLM_RATE_LIMIT_SYNC_BUILTINS);
+
+const LLM_CONFIG_GROUPS: &[BuiltinGroup<'static>] = &[LLM_CONFIG_BUILTINS, LLM_RATE_LIMIT_BUILTINS];
 
 fn provider_capabilities_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let provider = args.first().map(|a| a.display()).unwrap_or_default();

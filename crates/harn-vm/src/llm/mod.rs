@@ -153,7 +153,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
+    boxed_async_builtin, register_builtin_group, register_builtin_groups, AsyncBuiltin,
+    BuiltinGroup, SyncBuiltin,
 };
 use crate::stdlib::{json_to_vm_value, schema_result_value};
 use crate::value::{VmChannelHandle, VmError, VmStream, VmStreamCancel, VmValue};
@@ -1440,124 +1441,120 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
     }
 }
 
-const LLM_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
+const LLM_TRACE_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("agent_trace", agent_trace_builtin)
         .signature("agent_trace()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("agent.trace")
         .doc("Return captured agent trace events for the current process."),
     SyncBuiltin::new("agent_trace_summary", agent_trace_summary_builtin)
         .signature("agent_trace_summary()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("agent.trace")
         .doc("Return a summarized view of captured agent trace events."),
 ];
 
-const LLM_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
+const AGENT_HOST_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     AsyncBuiltin::new("__host_agent_capture_events", |args| {
         boxed_async_builtin(host_agent_capture_events_impl(args))
     })
     .signature("__host_agent_capture_events(session_id, body)")
     .arity(VmBuiltinArity::Exact(2))
-    .category("agent.host")
     .doc("Capture agent events emitted while executing a Harn closure."),
     AsyncBuiltin::new("__host_agent_parse_tool_calls", |args| {
         boxed_async_builtin(host_agent_parse_tool_calls_impl(args))
     })
     .signature("__host_agent_parse_tool_calls(text, tools?)")
     .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-    .category("agent.host")
     .doc("Parse model text into normalized agent tool-call records."),
     AsyncBuiltin::new("__host_agent_dispatch_tool_call", |args| {
         boxed_async_builtin(host_agent_dispatch_tool_call_impl(args))
     })
     .signature("__host_agent_dispatch_tool_call(call, tools?, options?)")
     .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-    .category("agent.host")
     .doc("Dispatch one normalized agent tool call through the host tool runtime."),
     AsyncBuiltin::new("__host_agent_dispatch_tool_batch", |args| {
         boxed_async_builtin(host_agent_dispatch_tool_batch_impl(args))
     })
     .signature("__host_agent_dispatch_tool_batch(calls, tools?, options?)")
     .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-    .category("agent.host")
     .doc("Dispatch a batch of normalized agent tool calls through the host tool runtime."),
+];
+
+const LLM_HOST_CORE_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     AsyncBuiltin::new("__cost_route", |args| {
         boxed_async_builtin(cost_route::cost_route_impl(args))
     })
     .signature("__cost_route(options)")
     .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-    .category("llm.host")
     .doc("Route an LLM request by cost and capability metadata."),
     AsyncBuiltin::new("llm_call", |args| boxed_async_builtin(llm_call_impl(args)))
         .signature("llm_call(prompt, system?, options?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-        .category("llm.host")
         .doc("Execute one LLM call and return the normalized Harn result dict."),
     AsyncBuiltin::new("llm_stream_call", |args| {
         boxed_async_builtin(llm_stream_call_impl(args))
     })
     .signature("llm_stream_call(prompt, system?, options?)")
     .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-    .category("llm.host")
     .doc("Execute one streaming LLM call and return the normalized Harn result dict."),
     AsyncBuiltin::new("llm_call_safe", |args| {
         boxed_async_builtin(llm_call_safe_builtin(args))
     })
     .signature("llm_call_safe(prompt, system?, options?)")
     .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-    .category("llm.host")
     .doc("Execute one LLM call and return a non-throwing safe envelope."),
+];
+
+const LLM_STRUCTURED_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     AsyncBuiltin::new("llm_call_structured", |args| {
         boxed_async_builtin(llm_call_structured_builtin(args))
     })
     .signature("llm_call_structured(prompt, schema, options?)")
     .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-    .category("llm.structured")
     .doc("Call an LLM for JSON data and return parsed schema-valid data."),
     AsyncBuiltin::new("llm_call_structured_safe", |args| {
         boxed_async_builtin(llm_call_structured_safe_builtin(args))
     })
     .signature("llm_call_structured_safe(prompt, schema, options?)")
     .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-    .category("llm.structured")
     .doc("Call an LLM for JSON data and return a non-throwing schema envelope."),
     AsyncBuiltin::new("llm_call_structured_result", |args| {
         boxed_async_builtin(llm_call_structured_result_builtin(args))
     })
     .signature("llm_call_structured_result(prompt, schema, options?)")
     .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-    .category("llm.structured")
     .doc("Call an LLM for JSON data and return a diagnostic structured-output envelope."),
-    AsyncBuiltin::new("schema_recover", |args| {
+];
+
+const SCHEMA_RECOVERY_ASYNC_PRIMITIVES: &[AsyncBuiltin] =
+    &[AsyncBuiltin::new("schema_recover", |args| {
         boxed_async_builtin(schema_recover_builtin(args))
     })
     .signature("schema_recover(text, schema, options?)")
     .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-    .category("schema.recovery")
     .doc(
         "Recover malformed JSON text against a schema using deterministic and optional LLM repair.",
-    ),
-    AsyncBuiltin::new("with_rate_limit", |args| {
+    )];
+
+const LLM_RATE_LIMIT_ASYNC_PRIMITIVES: &[AsyncBuiltin] =
+    &[AsyncBuiltin::new("with_rate_limit", |args| {
         boxed_async_builtin(with_rate_limit_builtin(args))
     })
     .signature("with_rate_limit(provider, callback, options?)")
     .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-    .category("llm.rate_limit")
-    .doc("Run a closure behind the provider rate limiter with retryable-error backoff."),
+    .doc("Run a closure behind the provider rate limiter with retryable-error backoff.")];
+
+const LLM_HOST_COMPLETION_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     AsyncBuiltin::new("llm_completion", |args| {
         boxed_async_builtin(llm_completion_builtin(args))
     })
     .signature("llm_completion(prefix, suffix?, system?, options?)")
     .arity(VmBuiltinArity::Range { min: 1, max: 4 })
-    .category("llm.host")
     .doc("Execute a fill-in-the-middle LLM completion request."),
     AsyncBuiltin::new("llm_stream", |args| {
         boxed_async_builtin(llm_stream_builtin(args))
     })
     .signature("llm_stream(prompt, system?, options?)")
     .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-    .category("llm.host")
     .doc("Execute a legacy channel-based streaming LLM request."),
 ];
 
@@ -1565,29 +1562,52 @@ const LLM_MOCK_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("llm_mock", llm_mock_builtin)
         .signature("llm_mock(config)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("llm.mock")
         .doc("Register a deterministic LLM mock response for tests."),
     SyncBuiltin::new("llm_mock_calls", llm_mock_calls_builtin)
         .signature("llm_mock_calls()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("llm.mock")
         .doc("Return recorded LLM mock calls."),
     SyncBuiltin::new("llm_mock_clear", llm_mock_clear_builtin)
         .signature("llm_mock_clear()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("llm.mock")
         .doc("Clear deterministic LLM mocks and recorded calls."),
     SyncBuiltin::new("llm_mock_push_scope", llm_mock_push_scope_builtin)
         .signature("llm_mock_push_scope()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("llm.mock")
         .doc("Push an isolated LLM mock scope."),
     SyncBuiltin::new("llm_mock_pop_scope", llm_mock_pop_scope_builtin)
         .signature("llm_mock_pop_scope()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("llm.mock")
         .doc("Pop the current isolated LLM mock scope."),
 ];
+
+const LLM_RUNTIME_PRIMITIVE_GROUPS: &[BuiltinGroup<'static>] = &[
+    BuiltinGroup::new()
+        .category("agent.trace")
+        .sync(LLM_TRACE_SYNC_PRIMITIVES),
+    BuiltinGroup::new()
+        .category("agent.host")
+        .async_(AGENT_HOST_ASYNC_PRIMITIVES),
+    BuiltinGroup::new()
+        .category("llm.host")
+        .async_(LLM_HOST_CORE_ASYNC_PRIMITIVES),
+    BuiltinGroup::new()
+        .category("llm.structured")
+        .async_(LLM_STRUCTURED_ASYNC_PRIMITIVES),
+    BuiltinGroup::new()
+        .category("schema.recovery")
+        .async_(SCHEMA_RECOVERY_ASYNC_PRIMITIVES),
+    BuiltinGroup::new()
+        .category("llm.rate_limit")
+        .async_(LLM_RATE_LIMIT_ASYNC_PRIMITIVES),
+    BuiltinGroup::new()
+        .category("llm.host")
+        .async_(LLM_HOST_COMPLETION_ASYNC_PRIMITIVES),
+];
+
+const LLM_MOCK_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
+    .category("llm.mock")
+    .sync(LLM_MOCK_SYNC_PRIMITIVES);
 
 async fn llm_call_safe_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     match llm_call_impl(args).await {
@@ -1743,8 +1763,7 @@ fn agent_trace_summary_builtin(_args: &[VmValue], _out: &mut String) -> Result<V
 pub fn register_llm_builtins(vm: &mut Vm) {
     rate_limit::init_from_config();
     agent_config::register_agent_control_primitives(vm);
-    register_sync_builtins(vm, LLM_SYNC_PRIMITIVES);
-    register_async_builtins(vm, LLM_ASYNC_PRIMITIVES);
+    register_builtin_groups(vm, LLM_RUNTIME_PRIMITIVE_GROUPS);
     agent_config::register_agent_loop(vm);
 
     conversation::register_conversation_builtins(vm);
@@ -1756,7 +1775,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
 
 /// Register llm_mock / llm_mock_calls / llm_mock_clear builtins.
 fn register_llm_mock_builtins(vm: &mut Vm) {
-    register_sync_builtins(vm, LLM_MOCK_SYNC_PRIMITIVES);
+    register_builtin_group(vm, LLM_MOCK_PRIMITIVES);
 }
 
 fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

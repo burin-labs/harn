@@ -10,7 +10,7 @@ use crate::bridge::HostBridge;
 use crate::llm::daemon::{load_snapshot, DaemonSnapshot};
 use crate::orchestration::DaemonEventKindRecord;
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
+    boxed_async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
@@ -25,7 +25,6 @@ const DAEMON_SYNC_PRIMITIVES: &[SyncBuiltin] =
     &[SyncBuiltin::new("daemon_snapshot", daemon_snapshot_builtin)
         .signature("daemon_snapshot(handle)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("agent.daemon")
         .doc("Refresh and return a daemon snapshot with queued event state.")];
 
 const DAEMON_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
@@ -34,30 +33,31 @@ const DAEMON_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     })
     .signature("daemon_spawn(config)")
     .arity(VmBuiltinArity::Exact(1))
-    .category("agent.daemon")
     .doc("Spawn a persistent daemon agent worker."),
     AsyncBuiltin::new("daemon_trigger", |args| {
         boxed_async_builtin(daemon_trigger_builtin(args))
     })
     .signature("daemon_trigger(handle, payload)")
     .arity(VmBuiltinArity::Exact(2))
-    .category("agent.daemon")
     .doc("Queue an event payload for a running daemon."),
     AsyncBuiltin::new("daemon_stop", |args| {
         boxed_async_builtin(daemon_stop_builtin(args))
     })
     .signature("daemon_stop(handle)")
     .arity(VmBuiltinArity::Exact(1))
-    .category("agent.daemon")
     .doc("Stop a running daemon and persist its latest snapshot."),
     AsyncBuiltin::new("daemon_resume", |args| {
         boxed_async_builtin(daemon_resume_builtin(args))
     })
     .signature("daemon_resume(path)")
     .arity(VmBuiltinArity::Exact(1))
-    .category("agent.daemon")
     .doc("Resume a daemon from persisted state."),
 ];
+
+const DAEMON_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
+    .category("agent.daemon")
+    .sync(DAEMON_SYNC_PRIMITIVES)
+    .async_(DAEMON_ASYNC_PRIMITIVES);
 
 fn default_event_queue_capacity() -> usize {
     DEFAULT_EVENT_QUEUE_CAPACITY
@@ -135,8 +135,7 @@ thread_local! {
 }
 
 pub fn register_daemon_builtins(vm: &mut Vm) {
-    register_sync_builtins(vm, DAEMON_SYNC_PRIMITIVES);
-    register_async_builtins(vm, DAEMON_ASYNC_PRIMITIVES);
+    register_builtin_group(vm, DAEMON_PRIMITIVES);
 }
 
 async fn daemon_spawn_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {

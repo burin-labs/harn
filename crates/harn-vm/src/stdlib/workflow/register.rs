@@ -13,7 +13,7 @@ use crate::orchestration::{
 };
 use crate::stdlib::harn_entry::{register_harn_module_entrypoints, HarnEntrypointModule};
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
+    boxed_async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
@@ -44,42 +44,34 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("workflow_graph", workflow_graph_builtin)
         .signature("workflow_graph(input?)")
         .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .category("workflow.host")
         .doc("Normalize a workflow value and return the canonical workflow graph dict."),
     SyncBuiltin::new("workflow_validate", workflow_validate_builtin)
         .signature("workflow_validate(input?, ceiling?)")
         .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-        .category("workflow.host")
         .doc("Validate a workflow graph against a capability policy ceiling."),
     SyncBuiltin::new("workflow_inspect", workflow_inspect_builtin)
         .signature("workflow_inspect(input?, ceiling?)")
         .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-        .category("workflow.host")
         .doc("Return normalized workflow graph shape and validation details."),
     SyncBuiltin::new("workflow_policy_report", workflow_policy_report_builtin)
         .signature("workflow_policy_report(graph, ceiling?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .category("workflow.host")
         .doc("Report workflow and node policies against an effective ceiling."),
     SyncBuiltin::new("workflow_clone", workflow_clone_builtin)
         .signature("workflow_clone(graph)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("workflow.host")
         .doc("Clone a workflow graph and append audit metadata."),
     SyncBuiltin::new("workflow_insert_node", workflow_insert_node_builtin)
         .signature("workflow_insert_node(graph, node, edge?)")
         .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .category("workflow.host")
         .doc("Insert a node and optional edge into a workflow graph."),
     SyncBuiltin::new("workflow_replace_node", workflow_replace_node_builtin)
         .signature("workflow_replace_node(graph, node_id, node)")
         .arity(VmBuiltinArity::Exact(3))
-        .category("workflow.host")
         .doc("Replace one node in a workflow graph."),
     SyncBuiltin::new("workflow_rewire", workflow_rewire_builtin)
         .signature("workflow_rewire(graph, from, to, branch?)")
         .arity(VmBuiltinArity::Range { min: 3, max: 4 })
-        .category("workflow.host")
         .doc("Replace outgoing edge wiring for one workflow graph node."),
     SyncBuiltin::new(
         "workflow_set_model_policy",
@@ -87,7 +79,6 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     )
     .signature("workflow_set_model_policy(graph, node_id, policy)")
     .arity(VmBuiltinArity::Exact(3))
-    .category("workflow.host")
     .doc("Set one node's model policy."),
     SyncBuiltin::new(
         "workflow_set_context_policy",
@@ -95,7 +86,6 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     )
     .signature("workflow_set_context_policy(graph, node_id, policy)")
     .arity(VmBuiltinArity::Exact(3))
-    .category("workflow.host")
     .doc("Set one node's context policy."),
     SyncBuiltin::new(
         "workflow_set_auto_compact",
@@ -103,7 +93,6 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     )
     .signature("workflow_set_auto_compact(graph, node_id, policy)")
     .arity(VmBuiltinArity::Exact(3))
-    .category("workflow.host")
     .doc("Set one node's auto-compaction policy."),
     SyncBuiltin::new(
         "workflow_set_output_visibility",
@@ -111,27 +100,22 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     )
     .signature("workflow_set_output_visibility(graph, node_id, visibility)")
     .arity(VmBuiltinArity::Exact(3))
-    .category("workflow.host")
     .doc("Set one node's output visibility policy."),
     SyncBuiltin::new("workflow_diff", workflow_diff_builtin)
         .signature("workflow_diff(left, right)")
         .arity(VmBuiltinArity::Exact(2))
-        .category("workflow.host")
         .doc("Compare two workflow graph values for canonical JSON changes."),
     SyncBuiltin::new("workflow_commit", workflow_commit_builtin)
         .signature("workflow_commit(graph, reason?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .category("workflow.host")
         .doc("Validate and commit workflow graph audit metadata."),
     SyncBuiltin::new("register_tool_hook", register_tool_hook_builtin)
         .signature("register_tool_hook(config?)")
         .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .category("workflow.host")
         .doc("Register low-level pre/post tool hooks for workflow execution."),
     SyncBuiltin::new("clear_tool_hooks", clear_tool_hooks_builtin)
         .signature("clear_tool_hooks()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("workflow.host")
         .doc("Clear registered low-level workflow tool hooks."),
     SyncBuiltin::new(
         "select_artifacts_adaptive",
@@ -139,17 +123,14 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     )
     .signature("select_artifacts_adaptive(artifacts?, policy?)")
     .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-    .category("workflow.host")
     .doc("Select workflow artifacts according to a context policy."),
     SyncBuiltin::new("estimate_tokens", estimate_tokens_builtin)
         .signature("estimate_tokens(messages?)")
         .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .category("workflow.host")
         .doc("Estimate tokens for a list of message objects."),
     SyncBuiltin::new("microcompact", microcompact_builtin)
         .signature("microcompact(text, max_chars?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .category("workflow.host")
         .doc("Compact long tool output with the host microcompaction primitive."),
 ];
 
@@ -159,16 +140,19 @@ const WORKFLOW_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     })
     .signature("__host_workflow_graph_run(task, graph, artifacts?, options?)")
     .arity(VmBuiltinArity::Range { min: 2, max: 4 })
-    .category("workflow.host")
     .doc("Execute the low-level workflow graph primitive used by Harn stdlib workflow facades."),
     AsyncBuiltin::new("transcript_auto_compact", |args| {
         boxed_async_builtin(transcript_auto_compact_builtin(args))
     })
     .signature("transcript_auto_compact(messages, options?)")
     .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-    .category("workflow.host")
     .doc("Apply the workflow/agent transcript auto-compaction primitive to a message list."),
 ];
+
+const WORKFLOW_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
+    .category("workflow.host")
+    .sync(WORKFLOW_SYNC_PRIMITIVES)
+    .async_(WORKFLOW_ASYNC_PRIMITIVES);
 
 #[derive(Debug, serde::Deserialize)]
 struct WorkflowJoinReadiness {
@@ -810,8 +794,7 @@ pub(in crate::stdlib) async fn execute_workflow(
 }
 
 pub(crate) fn register_workflow_builtins(vm: &mut Vm) {
-    register_sync_builtins(vm, WORKFLOW_SYNC_PRIMITIVES);
-    register_async_builtins(vm, WORKFLOW_ASYNC_PRIMITIVES);
+    register_builtin_group(vm, WORKFLOW_PRIMITIVES);
     register_harn_module_entrypoints(vm, WORKFLOW_STDLIB_ENTRYPOINT_MODULES);
 }
 
