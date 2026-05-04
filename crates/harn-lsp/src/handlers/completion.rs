@@ -5,7 +5,7 @@ use harn_parser::{format_type, ShapeField, TypeExpr};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
-use crate::constants::{BUILTINS, DICT_METHODS, KEYWORDS, LIST_METHODS, STRING_METHODS};
+use crate::constants::{builtin_details, DICT_METHODS, KEYWORDS, LIST_METHODS, STRING_METHODS};
 use crate::helpers::{
     char_before_position, infer_dot_receiver_name, infer_dot_receiver_type, lsp_position_to_offset,
     position_in_span,
@@ -84,11 +84,11 @@ impl HarnLsp {
             });
         }
 
-        for &(name, detail) in BUILTINS {
+        for detail in builtin_details() {
             items.push(CompletionItem {
-                label: name.to_string(),
+                label: detail.name.clone(),
                 kind: Some(CompletionItemKind::FUNCTION),
-                detail: Some(detail.to_string()),
+                detail: Some(detail.signature.clone()),
                 ..Default::default()
             });
         }

@@ -1,0 +1,150 @@
+//! Compact registration DSL for low-level stdlib host primitives.
+
+use std::future::Future;
+use std::pin::Pin;
+
+use crate::value::{VmError, VmValue};
+use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
+
+pub(crate) type AsyncBuiltinFuture = Pin<Box<dyn Future<Output = Result<VmValue, VmError>>>>;
+pub(crate) type SyncBuiltinHandler = fn(&[VmValue], &mut String) -> Result<VmValue, VmError>;
+pub(crate) type AsyncBuiltinHandler = fn(Vec<VmValue>) -> AsyncBuiltinFuture;
+
+#[derive(Clone)]
+pub(crate) struct SyncBuiltin {
+    name: &'static str,
+    signature: Option<&'static str>,
+    arity: Option<VmBuiltinArity>,
+    category: Option<&'static str>,
+    doc: Option<&'static str>,
+    handler: SyncBuiltinHandler,
+}
+
+impl SyncBuiltin {
+    pub(crate) const fn new(name: &'static str, handler: SyncBuiltinHandler) -> Self {
+        Self {
+            name,
+            signature: None,
+            arity: None,
+            category: None,
+            doc: None,
+            handler,
+        }
+    }
+
+    pub(crate) const fn signature(mut self, signature: &'static str) -> Self {
+        self.signature = Some(signature);
+        self
+    }
+
+    pub(crate) const fn arity(mut self, arity: VmBuiltinArity) -> Self {
+        self.arity = Some(arity);
+        self
+    }
+
+    pub(crate) const fn category(mut self, category: &'static str) -> Self {
+        self.category = Some(category);
+        self
+    }
+
+    pub(crate) const fn doc(mut self, doc: &'static str) -> Self {
+        self.doc = Some(doc);
+        self
+    }
+
+    fn metadata(&self) -> VmBuiltinMetadata {
+        let mut metadata = VmBuiltinMetadata::sync_static(self.name);
+        if let Some(signature) = self.signature {
+            metadata = metadata.signature_static(signature);
+        }
+        if let Some(arity) = self.arity {
+            metadata = metadata.arity(arity);
+        }
+        if let Some(category) = self.category {
+            metadata = metadata.category_static(category);
+        }
+        if let Some(doc) = self.doc {
+            metadata = metadata.doc_static(doc);
+        }
+        metadata
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct AsyncBuiltin {
+    name: &'static str,
+    signature: Option<&'static str>,
+    arity: Option<VmBuiltinArity>,
+    category: Option<&'static str>,
+    doc: Option<&'static str>,
+    handler: AsyncBuiltinHandler,
+}
+
+impl AsyncBuiltin {
+    pub(crate) const fn new(name: &'static str, handler: AsyncBuiltinHandler) -> Self {
+        Self {
+            name,
+            signature: None,
+            arity: None,
+            category: None,
+            doc: None,
+            handler,
+        }
+    }
+
+    pub(crate) const fn signature(mut self, signature: &'static str) -> Self {
+        self.signature = Some(signature);
+        self
+    }
+
+    pub(crate) const fn arity(mut self, arity: VmBuiltinArity) -> Self {
+        self.arity = Some(arity);
+        self
+    }
+
+    pub(crate) const fn category(mut self, category: &'static str) -> Self {
+        self.category = Some(category);
+        self
+    }
+
+    pub(crate) const fn doc(mut self, doc: &'static str) -> Self {
+        self.doc = Some(doc);
+        self
+    }
+
+    fn metadata(&self) -> VmBuiltinMetadata {
+        let mut metadata = VmBuiltinMetadata::async_static(self.name);
+        if let Some(signature) = self.signature {
+            metadata = metadata.signature_static(signature);
+        }
+        if let Some(arity) = self.arity {
+            metadata = metadata.arity(arity);
+        }
+        if let Some(category) = self.category {
+            metadata = metadata.category_static(category);
+        }
+        if let Some(doc) = self.doc {
+            metadata = metadata.doc_static(doc);
+        }
+        metadata
+    }
+}
+
+pub(crate) fn boxed_async_builtin<Fut>(future: Fut) -> AsyncBuiltinFuture
+where
+    Fut: Future<Output = Result<VmValue, VmError>> + 'static,
+{
+    Box::pin(future)
+}
+
+pub(crate) fn register_sync_builtins(vm: &mut Vm, builtins: &[SyncBuiltin]) {
+    for builtin in builtins {
+        vm.register_builtin_with_metadata(builtin.metadata(), builtin.handler);
+    }
+}
+
+pub(crate) fn register_async_builtins(vm: &mut Vm, builtins: &[AsyncBuiltin]) {
+    for builtin in builtins {
+        vm.register_async_builtin_with_metadata(builtin.metadata(), builtin.handler);
+    }
+}

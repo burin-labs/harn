@@ -6,8 +6,9 @@ use std::sync::Arc;
 
 use crate::agent_events::AgentEventSink;
 use crate::stdlib::harn_entry::{register_harn_async_entrypoints, HarnAsyncEntrypoint};
+use crate::stdlib::registration::{register_sync_builtins, SyncBuiltin};
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
 use super::agent::run_agent_loop_internal;
 use super::agent_observe::{
@@ -28,24 +29,61 @@ const DEFAULT_AGENT_LOOP_SCHEMA_RETRIES: i64 = 0;
 const HOST_LLM_SESSION_RUN_BUILTIN: &str = "__host_llm_session_run";
 
 const AGENT_STDLIB_ENTRYPOINTS: &[HarnAsyncEntrypoint] = &[
-    HarnAsyncEntrypoint::new("agent_loop", "std/agent/loop", "agent_loop"),
-    HarnAsyncEntrypoint::new("agent_turn", "std/agent/turn", "agent_turn"),
-    HarnAsyncEntrypoint::new("agent_llm_turn", "std/agent/primitives", "agent_llm_turn"),
+    HarnAsyncEntrypoint::new("agent_loop", "std/agent/loop", "agent_loop")
+        .signature("agent_loop(prompt, system?, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+        .category("agent.stdlib")
+        .doc("Dispatch the public agent loop facade through the Harn stdlib."),
+    HarnAsyncEntrypoint::new("agent_turn", "std/agent/turn", "agent_turn")
+        .signature("agent_turn(prompt, system?, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+        .category("agent.stdlib")
+        .doc("Dispatch the public agent turn facade through the Harn stdlib."),
+    HarnAsyncEntrypoint::new("agent_llm_turn", "std/agent/primitives", "agent_llm_turn")
+        .signature("agent_llm_turn(prompt, system?, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+        .category("agent.stdlib")
+        .doc("Dispatch the agent LLM-turn helper through the Harn stdlib."),
     HarnAsyncEntrypoint::new(
         "agent_parse_tool_calls",
         "std/agent/primitives",
         "agent_parse_tool_calls",
-    ),
+    )
+    .signature("agent_parse_tool_calls(text, tools?)")
+    .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+    .category("agent.stdlib")
+    .doc("Dispatch the agent tool-call parser facade through the Harn stdlib."),
     HarnAsyncEntrypoint::new(
         "agent_dispatch_tool_call",
         "std/agent/primitives",
         "agent_dispatch_tool_call",
-    ),
+    )
+    .signature("agent_dispatch_tool_call(call, tools?, options?)")
+    .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+    .category("agent.stdlib")
+    .doc("Dispatch the single tool-call facade through the Harn stdlib."),
     HarnAsyncEntrypoint::new(
         "agent_dispatch_tool_batch",
         "std/agent/primitives",
         "agent_dispatch_tool_batch",
-    ),
+    )
+    .signature("agent_dispatch_tool_batch(calls, tools?, options?)")
+    .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+    .category("agent.stdlib")
+    .doc("Dispatch the batch tool-call facade through the Harn stdlib."),
+];
+
+const AGENT_CONTROL_PRIMITIVES: &[SyncBuiltin] = &[
+    SyncBuiltin::new("agent_subscribe", agent_subscribe_builtin)
+        .signature("agent_subscribe(session_id, callback)")
+        .arity(VmBuiltinArity::Exact(2))
+        .category("agent.host")
+        .doc("Subscribe a Harn callback to events for an agent session."),
+    SyncBuiltin::new("agent_inject_feedback", agent_inject_feedback_builtin)
+        .signature("agent_inject_feedback(session_id, kind, content)")
+        .arity(VmBuiltinArity::Exact(3))
+        .category("agent.host")
+        .doc("Inject pending feedback into an agent session."),
 ];
 
 #[derive(Clone, Copy)]
@@ -677,7 +715,14 @@ fn register_llm_turn_loop_driver(vm: &mut Vm, bridge: Option<Rc<crate::bridge::H
     if let Some(b) = bridge.as_ref() {
         super::agent::install_current_host_bridge(b.clone());
     }
-    vm.register_async_builtin(HOST_LLM_SESSION_RUN_BUILTIN, move |args| {
+    let metadata = VmBuiltinMetadata::async_static(HOST_LLM_SESSION_RUN_BUILTIN)
+        .signature_static("__host_llm_session_run(task, prompt, system?, options?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 4 })
+        .category_static("llm.host")
+        .doc_static(
+            "Run the low-level LLM turn-loop session primitive used by Harn stdlib agent facades.",
+        );
+    vm.register_async_builtin_with_metadata(metadata, move |args| {
         let captured_bridge = bridge.clone();
         Box::pin(async move {
             std::mem::drop(captured_bridge);
@@ -696,61 +741,59 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
     register_harn_async_entrypoints(vm, AGENT_STDLIB_ENTRYPOINTS);
 }
 
-pub fn register_agent_subscribe(vm: &mut Vm) {
-    vm.register_builtin("agent_subscribe", |args, _out| {
-        let session_id = match args.first() {
-            Some(VmValue::String(s)) => s.to_string(),
-            _ => {
-                return Err(crate::value::VmError::Runtime(
-                    "agent_subscribe(session_id, callback): session_id must be a string".into(),
-                ))
-            }
-        };
-        let callback = args.get(1).cloned().ok_or_else(|| {
-            crate::value::VmError::Runtime(
-                "agent_subscribe(session_id, callback): callback closure required".into(),
-            )
-        })?;
-        if !matches!(callback, VmValue::Closure(_)) {
-            return Err(crate::value::VmError::Runtime(
-                "agent_subscribe(session_id, callback): callback must be a closure".into(),
-            ));
-        }
-        crate::agent_sessions::append_subscriber(&session_id, callback);
-        Ok(VmValue::Nil)
-    });
+pub(crate) fn register_agent_control_primitives(vm: &mut Vm) {
+    register_sync_builtins(vm, AGENT_CONTROL_PRIMITIVES);
 }
 
-pub fn register_agent_inject_feedback(vm: &mut Vm) {
-    vm.register_builtin("agent_inject_feedback", |args, _out| {
-        let session_id =
-            match args.first() {
-                Some(VmValue::String(s)) => s.to_string(),
-                _ => return Err(crate::value::VmError::Runtime(
-                    "agent_inject_feedback(session_id, kind, content): session_id must be a string"
-                        .into(),
-                )),
-            };
-        let kind = match args.get(1) {
-            Some(VmValue::String(s)) => s.to_string(),
-            _ => {
-                return Err(crate::value::VmError::Runtime(
-                    "agent_inject_feedback(session_id, kind, content): kind must be a string"
-                        .into(),
-                ))
-            }
-        };
-        let content =
-            match args.get(2) {
-                Some(VmValue::String(s)) => s.to_string(),
-                _ => return Err(crate::value::VmError::Runtime(
-                    "agent_inject_feedback(session_id, kind, content): content must be a string"
-                        .into(),
-                )),
-            };
-        super::agent::push_pending_feedback(&session_id, &kind, &content);
-        Ok(VmValue::Nil)
-    });
+fn agent_subscribe_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(
+                "agent_subscribe(session_id, callback): session_id must be a string".into(),
+            ))
+        }
+    };
+    let callback = args.get(1).cloned().ok_or_else(|| {
+        VmError::Runtime("agent_subscribe(session_id, callback): callback closure required".into())
+    })?;
+    if !matches!(callback, VmValue::Closure(_)) {
+        return Err(VmError::Runtime(
+            "agent_subscribe(session_id, callback): callback must be a closure".into(),
+        ));
+    }
+    crate::agent_sessions::append_subscriber(&session_id, callback);
+    Ok(VmValue::Nil)
+}
+
+fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(
+                "agent_inject_feedback(session_id, kind, content): session_id must be a string"
+                    .into(),
+            ))
+        }
+    };
+    let kind = match args.get(1) {
+        Some(VmValue::String(s)) => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(
+                "agent_inject_feedback(session_id, kind, content): kind must be a string".into(),
+            ))
+        }
+    };
+    let content = match args.get(2) {
+        Some(VmValue::String(s)) => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(
+                "agent_inject_feedback(session_id, kind, content): content must be a string".into(),
+            ))
+        }
+    };
+    super::agent::push_pending_feedback(&session_id, &kind, &content);
+    Ok(VmValue::Nil)
 }
 
 fn parse_task_ledger_from_options(
@@ -771,7 +814,12 @@ fn parse_task_ledger_from_options(
 /// Register a bridge-aware `llm_call` that emits call_start/call_end notifications.
 pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
     let b = bridge;
-    vm.register_async_builtin("llm_call", move |args| {
+    let metadata = VmBuiltinMetadata::async_static("llm_call")
+        .signature_static("llm_call(prompt, system?, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+        .category_static("llm.host")
+        .doc_static("Execute one bridge-observed LLM call and return the normalized result dict.");
+    vm.register_async_builtin_with_metadata(metadata, move |args| {
         let bridge = b.clone();
         async move {
             let mut opts = extract_llm_options(&args)?;
@@ -823,7 +871,12 @@ pub fn register_llm_call_structured_with_bridge(
     bridge: Rc<crate::bridge::HostBridge>,
 ) {
     let b1 = bridge.clone();
-    vm.register_async_builtin("llm_call_structured", move |args| {
+    let structured = VmBuiltinMetadata::async_static("llm_call_structured")
+        .signature_static("llm_call_structured(prompt, schema, options?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+        .category_static("llm.structured")
+        .doc_static("Call an LLM through the bridge for schema-valid JSON data.");
+    vm.register_async_builtin_with_metadata(structured, move |args| {
         let bridge = b1.clone();
         async move {
             let rewritten = crate::llm::rewrite_structured_args(args)?;
@@ -834,7 +887,12 @@ pub fn register_llm_call_structured_with_bridge(
         }
     });
     let b2 = bridge.clone();
-    vm.register_async_builtin("llm_call_structured_safe", move |args| {
+    let structured_safe = VmBuiltinMetadata::async_static("llm_call_structured_safe")
+        .signature_static("llm_call_structured_safe(prompt, schema, options?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+        .category_static("llm.structured")
+        .doc_static("Call an LLM through the bridge and return a non-throwing schema envelope.");
+    vm.register_async_builtin_with_metadata(structured_safe, move |args| {
         let bridge = b2.clone();
         async move {
             let rewritten = match crate::llm::rewrite_structured_args(args) {
@@ -855,7 +913,14 @@ pub fn register_llm_call_structured_with_bridge(
         }
     });
     let b3 = bridge;
-    vm.register_async_builtin("llm_call_structured_result", move |args| {
+    let structured_result = VmBuiltinMetadata::async_static("llm_call_structured_result")
+        .signature_static("llm_call_structured_result(prompt, schema, options?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+        .category_static("llm.structured")
+        .doc_static(
+            "Call an LLM through the bridge and return a diagnostic structured-output envelope.",
+        );
+    vm.register_async_builtin_with_metadata(structured_result, move |args| {
         let bridge = b3.clone();
         async move {
             crate::llm::structured_envelope::llm_call_structured_result_impl(args, Some(&bridge))

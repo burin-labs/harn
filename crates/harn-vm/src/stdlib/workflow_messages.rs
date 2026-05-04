@@ -6,11 +6,76 @@ use std::time::Duration as StdDuration;
 use serde::{Deserialize, Serialize};
 
 use crate::stdlib::process::runtime_root_base;
+use crate::stdlib::registration::{
+    boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
+};
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{Vm, VmBuiltinArity};
 
 const DEFAULT_UPDATE_TIMEOUT_MS: u64 = 30_000;
 const UPDATE_POLL_INTERVAL_MS: u64 = 25;
+
+const WORKFLOW_MESSAGE_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
+    SyncBuiltin::new("workflow.signal", workflow_signal_builtin)
+        .signature("workflow.signal(target, name, payload?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+        .category("workflow.messages")
+        .doc("Enqueue a workflow signal message."),
+    SyncBuiltin::new("workflow.query", workflow_query_builtin)
+        .signature("workflow.query(target, name)")
+        .arity(VmBuiltinArity::Exact(2))
+        .category("workflow.messages")
+        .doc("Read the latest published workflow query value."),
+    SyncBuiltin::new("workflow.publish_query", workflow_publish_query_builtin)
+        .signature("workflow.publish_query(target, name, value?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+        .category("workflow.messages")
+        .doc("Publish a workflow query value."),
+    SyncBuiltin::new("workflow.receive", workflow_receive_builtin)
+        .signature("workflow.receive(target)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("workflow.messages")
+        .doc("Receive the next workflow mailbox message."),
+    SyncBuiltin::new("workflow.respond_update", workflow_respond_update_builtin)
+        .signature("workflow.respond_update(target, request_id, value?, name?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 4 })
+        .category("workflow.messages")
+        .doc("Respond to a pending workflow update request."),
+    SyncBuiltin::new("workflow.pause", workflow_pause_builtin)
+        .signature("workflow.pause(target)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("workflow.messages")
+        .doc("Pause a workflow mailbox."),
+    SyncBuiltin::new("workflow.resume", workflow_resume_builtin)
+        .signature("workflow.resume(target)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("workflow.messages")
+        .doc("Resume a workflow mailbox."),
+    SyncBuiltin::new("workflow.status", workflow_status_builtin)
+        .signature("workflow.status(target)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("workflow.messages")
+        .doc("Return workflow mailbox status."),
+    SyncBuiltin::new("workflow.continue_as_new", workflow_continue_as_new_builtin)
+        .signature("workflow.continue_as_new(target)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("workflow.messages")
+        .doc("Advance a workflow mailbox generation."),
+    SyncBuiltin::new("continue_as_new", continue_as_new_builtin)
+        .signature("continue_as_new(target)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("workflow.messages")
+        .doc("Advance a workflow mailbox generation."),
+];
+
+const WORKFLOW_MESSAGE_ASYNC_PRIMITIVES: &[AsyncBuiltin] =
+    &[AsyncBuiltin::new("workflow.update", |args| {
+        boxed_async_builtin(workflow_update_builtin(args))
+    })
+    .signature("workflow.update(target, name, payload?, options?)")
+    .arity(VmBuiltinArity::Range { min: 2, max: 4 })
+    .category("workflow.messages")
+    .doc("Enqueue a workflow update and wait for a response.")];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkflowMessageRecord {
@@ -473,179 +538,183 @@ pub(crate) fn register_workflow_message_builtins(vm: &mut Vm) {
         ]))),
     );
 
-    vm.register_builtin("workflow.signal", |args, _out| {
-        let target = parse_target_vm(args.first(), None, "workflow.signal")?;
-        let name = args
-            .get(1)
-            .map(|value| value.display())
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| VmError::Runtime("workflow.signal: missing name".to_string()))?;
-        let payload = args
-            .get(2)
-            .map(crate::llm::vm_value_to_json)
-            .unwrap_or(serde_json::Value::Null);
-        let result =
-            enqueue_message(&target, "signal", &name, payload, None).map_err(VmError::Runtime)?;
-        Ok(crate::stdlib::json_to_vm_value(&result))
-    });
+    register_sync_builtins(vm, WORKFLOW_MESSAGE_SYNC_PRIMITIVES);
+    register_async_builtins(vm, WORKFLOW_MESSAGE_ASYNC_PRIMITIVES);
+}
 
-    vm.register_builtin("workflow.query", |args, _out| {
-        let target = parse_target_vm(args.first(), None, "workflow.query")?;
-        let name = args
-            .get(1)
-            .map(|value| value.display())
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| VmError::Runtime("workflow.query: missing name".to_string()))?;
-        let state = load_state(&target).map_err(VmError::Runtime)?;
-        Ok(crate::stdlib::json_to_vm_value(
-            &state
-                .queries
-                .get(&name)
-                .map(|record| record.value.clone())
-                .unwrap_or(serde_json::Value::Null),
-        ))
-    });
+fn workflow_signal_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let target = parse_target_vm(args.first(), None, "workflow.signal")?;
+    let name = args
+        .get(1)
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| VmError::Runtime("workflow.signal: missing name".to_string()))?;
+    let payload = args
+        .get(2)
+        .map(crate::llm::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let result =
+        enqueue_message(&target, "signal", &name, payload, None).map_err(VmError::Runtime)?;
+    Ok(crate::stdlib::json_to_vm_value(&result))
+}
 
-    vm.register_async_builtin("workflow.update", |args| async move {
-        let target = parse_target_vm(args.first(), None, "workflow.update")?;
-        let name = args
-            .get(1)
-            .map(|value| value.display())
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| VmError::Runtime("workflow.update: missing name".to_string()))?;
-        let payload = args
-            .get(2)
-            .map(crate::llm::vm_value_to_json)
-            .unwrap_or(serde_json::Value::Null);
-        let timeout_ms = args
-            .get(3)
-            .and_then(|value| value.as_dict())
-            .and_then(|dict| dict.get("timeout_ms"))
-            .and_then(VmValue::as_int)
-            .unwrap_or(DEFAULT_UPDATE_TIMEOUT_MS as i64)
-            .max(1) as u64;
-        let result = workflow_update_for_base(
-            &target.base_dir,
-            &target.workflow_id,
-            &name,
-            payload,
-            StdDuration::from_millis(timeout_ms),
-        )
-        .await
-        .map_err(VmError::Runtime)?;
-        Ok(crate::stdlib::json_to_vm_value(&result))
-    });
+fn workflow_query_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let target = parse_target_vm(args.first(), None, "workflow.query")?;
+    let name = args
+        .get(1)
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| VmError::Runtime("workflow.query: missing name".to_string()))?;
+    let state = load_state(&target).map_err(VmError::Runtime)?;
+    Ok(crate::stdlib::json_to_vm_value(
+        &state
+            .queries
+            .get(&name)
+            .map(|record| record.value.clone())
+            .unwrap_or(serde_json::Value::Null),
+    ))
+}
 
-    vm.register_builtin("workflow.publish_query", |args, _out| {
-        let target = parse_target_vm(args.first(), None, "workflow.publish_query")?;
-        let name = args
-            .get(1)
-            .map(|value| value.display())
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| VmError::Runtime("workflow.publish_query: missing name".to_string()))?;
-        let value = args
-            .get(2)
-            .map(crate::llm::vm_value_to_json)
-            .unwrap_or(serde_json::Value::Null);
-        let result =
-            workflow_publish_query_for_base(&target.base_dir, &target.workflow_id, &name, value)
-                .map_err(VmError::Runtime)?;
-        Ok(crate::stdlib::json_to_vm_value(&result))
-    });
+async fn workflow_update_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let target = parse_target_vm(args.first(), None, "workflow.update")?;
+    let name = args
+        .get(1)
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| VmError::Runtime("workflow.update: missing name".to_string()))?;
+    let payload = args
+        .get(2)
+        .map(crate::llm::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let timeout_ms = args
+        .get(3)
+        .and_then(|value| value.as_dict())
+        .and_then(|dict| dict.get("timeout_ms"))
+        .and_then(VmValue::as_int)
+        .unwrap_or(DEFAULT_UPDATE_TIMEOUT_MS as i64)
+        .max(1) as u64;
+    let result = workflow_update_for_base(
+        &target.base_dir,
+        &target.workflow_id,
+        &name,
+        payload,
+        StdDuration::from_millis(timeout_ms),
+    )
+    .await
+    .map_err(VmError::Runtime)?;
+    Ok(crate::stdlib::json_to_vm_value(&result))
+}
 
-    vm.register_builtin("workflow.receive", |args, _out| {
-        let target = parse_target_vm(args.first(), None, "workflow.receive")?;
-        let mut state = load_state(&target).map_err(VmError::Runtime)?;
-        let Some(message) = state.mailbox.pop_front() else {
-            return Ok(VmValue::Nil);
-        };
-        save_state(&target, &state).map_err(VmError::Runtime)?;
-        Ok(crate::stdlib::json_to_vm_value(&serde_json::json!({
-            "workflow_id": target.workflow_id,
-            "seq": message.seq,
-            "kind": message.kind,
-            "name": message.name,
-            "request_id": message.request_id,
-            "payload": message.payload,
-            "enqueued_at": message.enqueued_at,
-        })))
-    });
-
-    vm.register_builtin("workflow.respond_update", |args, _out| {
-        let target = parse_target_vm(args.first(), None, "workflow.respond_update")?;
-        let request_id = args
-            .get(1)
-            .map(|value| value.display())
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                VmError::Runtime("workflow.respond_update: missing request id".to_string())
-            })?;
-        let value = args
-            .get(2)
-            .map(crate::llm::vm_value_to_json)
-            .unwrap_or(serde_json::Value::Null);
-        let name = args
-            .get(3)
-            .map(|value| value.display())
-            .filter(|value| !value.is_empty());
-        let result = workflow_respond_update_for_base(
-            &target.base_dir,
-            &target.workflow_id,
-            &request_id,
-            name.as_deref(),
-            value,
-        )
-        .map_err(VmError::Runtime)?;
-        Ok(crate::stdlib::json_to_vm_value(&result))
-    });
-
-    vm.register_builtin("workflow.pause", |args, _out| {
-        let target = parse_target_vm(args.first(), None, "workflow.pause")?;
-        let result = workflow_pause_for_base(&target.base_dir, &target.workflow_id)
+fn workflow_publish_query_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let target = parse_target_vm(args.first(), None, "workflow.publish_query")?;
+    let name = args
+        .get(1)
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| VmError::Runtime("workflow.publish_query: missing name".to_string()))?;
+    let value = args
+        .get(2)
+        .map(crate::llm::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let result =
+        workflow_publish_query_for_base(&target.base_dir, &target.workflow_id, &name, value)
             .map_err(VmError::Runtime)?;
-        Ok(crate::stdlib::json_to_vm_value(&result))
-    });
+    Ok(crate::stdlib::json_to_vm_value(&result))
+}
 
-    vm.register_builtin("workflow.resume", |args, _out| {
-        let target = parse_target_vm(args.first(), None, "workflow.resume")?;
-        let result = workflow_resume_for_base(&target.base_dir, &target.workflow_id)
-            .map_err(VmError::Runtime)?;
-        Ok(crate::stdlib::json_to_vm_value(&result))
-    });
+fn workflow_receive_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let target = parse_target_vm(args.first(), None, "workflow.receive")?;
+    let mut state = load_state(&target).map_err(VmError::Runtime)?;
+    let Some(message) = state.mailbox.pop_front() else {
+        return Ok(VmValue::Nil);
+    };
+    save_state(&target, &state).map_err(VmError::Runtime)?;
+    Ok(crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "workflow_id": target.workflow_id,
+        "seq": message.seq,
+        "kind": message.kind,
+        "name": message.name,
+        "request_id": message.request_id,
+        "payload": message.payload,
+        "enqueued_at": message.enqueued_at,
+    })))
+}
 
-    vm.register_builtin("workflow.status", |args, _out| {
-        let target = parse_target_vm(args.first(), None, "workflow.status")?;
-        let state = load_state(&target).map_err(VmError::Runtime)?;
-        Ok(crate::stdlib::json_to_vm_value(&workflow_status_json(
-            &target, &state,
-        )))
-    });
+fn workflow_respond_update_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let target = parse_target_vm(args.first(), None, "workflow.respond_update")?;
+    let request_id = args
+        .get(1)
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            VmError::Runtime("workflow.respond_update: missing request id".to_string())
+        })?;
+    let value = args
+        .get(2)
+        .map(crate::llm::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let name = args
+        .get(3)
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty());
+    let result = workflow_respond_update_for_base(
+        &target.base_dir,
+        &target.workflow_id,
+        &request_id,
+        name.as_deref(),
+        value,
+    )
+    .map_err(VmError::Runtime)?;
+    Ok(crate::stdlib::json_to_vm_value(&result))
+}
 
-    vm.register_builtin("workflow.continue_as_new", |args, _out| {
-        let target = parse_target_vm(args.first(), None, "workflow.continue_as_new")?;
-        let mut state = load_state(&target).map_err(VmError::Runtime)?;
-        state.generation += 1;
-        state.continue_as_new_count += 1;
-        state.last_continue_as_new_at = Some(now_rfc3339());
-        state.responses.clear();
-        save_state(&target, &state).map_err(VmError::Runtime)?;
-        Ok(crate::stdlib::json_to_vm_value(&workflow_status_json(
-            &target, &state,
-        )))
-    });
+fn workflow_pause_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let target = parse_target_vm(args.first(), None, "workflow.pause")?;
+    let result =
+        workflow_pause_for_base(&target.base_dir, &target.workflow_id).map_err(VmError::Runtime)?;
+    Ok(crate::stdlib::json_to_vm_value(&result))
+}
 
-    vm.register_builtin("continue_as_new", |args, _out| {
-        let target = parse_target_vm(args.first(), None, "continue_as_new")?;
-        let mut state = load_state(&target).map_err(VmError::Runtime)?;
-        state.generation += 1;
-        state.continue_as_new_count += 1;
-        state.last_continue_as_new_at = Some(now_rfc3339());
-        state.responses.clear();
-        save_state(&target, &state).map_err(VmError::Runtime)?;
-        Ok(crate::stdlib::json_to_vm_value(&workflow_status_json(
-            &target, &state,
-        )))
-    });
+fn workflow_resume_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let target = parse_target_vm(args.first(), None, "workflow.resume")?;
+    let result = workflow_resume_for_base(&target.base_dir, &target.workflow_id)
+        .map_err(VmError::Runtime)?;
+    Ok(crate::stdlib::json_to_vm_value(&result))
+}
+
+fn workflow_status_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let target = parse_target_vm(args.first(), None, "workflow.status")?;
+    let state = load_state(&target).map_err(VmError::Runtime)?;
+    Ok(crate::stdlib::json_to_vm_value(&workflow_status_json(
+        &target, &state,
+    )))
+}
+
+fn workflow_continue_as_new_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    continue_as_new_for_label(args, "workflow.continue_as_new")
+}
+
+fn continue_as_new_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    continue_as_new_for_label(args, "continue_as_new")
+}
+
+fn continue_as_new_for_label(args: &[VmValue], label: &str) -> Result<VmValue, VmError> {
+    let target = parse_target_vm(args.first(), None, label)?;
+    let mut state = load_state(&target).map_err(VmError::Runtime)?;
+    state.generation += 1;
+    state.continue_as_new_count += 1;
+    state.last_continue_as_new_at = Some(now_rfc3339());
+    state.responses.clear();
+    save_state(&target, &state).map_err(VmError::Runtime)?;
+    Ok(crate::stdlib::json_to_vm_value(&workflow_status_json(
+        &target, &state,
+    )))
 }
 
 #[cfg(test)]

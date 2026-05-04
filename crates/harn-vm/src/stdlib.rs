@@ -44,6 +44,7 @@ mod project;
 mod project_catalog;
 mod project_enrich;
 mod regex;
+pub(crate) mod registration;
 mod review;
 mod runtime_scope;
 pub(crate) mod sandbox;
@@ -162,19 +163,24 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     register_agent_stdlib(vm);
 }
 
-/// Return the canonical list of all stdlib builtin names. Used by
-/// harn-lint and harn-lsp to avoid hardcoded duplicate lists.
-pub fn stdlib_builtin_names() -> Vec<String> {
+fn stdlib_probe_vm() -> Vm {
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);
-    // Name-only introspection — the path is never accessed, but passing
-    // a real per-platform temp dir keeps the registration logic honest
-    // when the callee someday decides it needs a valid parent.
+    // Name-only/metadata introspection never accesses this path, but passing
+    // a real per-platform temp dir keeps registration logic honest if a
+    // callee someday validates its parent.
     let tmp = std::env::temp_dir();
     crate::store::register_store_builtins(&mut vm, &tmp);
     crate::checkpoint::register_checkpoint_builtins(&mut vm, &tmp, "default");
     crate::metadata::register_metadata_builtins(&mut vm, &tmp);
     crate::metadata::register_scan_builtins(&mut vm);
+    vm
+}
+
+/// Return the canonical list of all stdlib builtin names. Used by
+/// harn-lint and harn-lsp to avoid hardcoded duplicate lists.
+pub fn stdlib_builtin_names() -> Vec<String> {
+    let vm = stdlib_probe_vm();
     let mut names = vm.builtin_names();
     // Special opcodes/keywords, not registered builtins, but linter
     // should recognize them as valid function calls.
@@ -188,6 +194,11 @@ pub fn stdlib_builtin_names() -> Vec<String> {
         names.push(extra.to_string());
     }
     names
+}
+
+/// Return discoverable metadata for registered stdlib builtins.
+pub fn stdlib_builtin_metadata() -> Vec<crate::vm::VmBuiltinMetadata> {
+    stdlib_probe_vm().builtin_metadata()
 }
 
 /// Reset thread-local stdlib state. Call between test runs.

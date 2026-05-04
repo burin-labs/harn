@@ -1,7 +1,7 @@
 use harn_lexer::{Span, Token, TokenKind};
 use tower_lsp::lsp_types::*;
 
-use crate::constants::{BUILTINS, TYPE_NAMES};
+use crate::constants::{is_builtin, TYPE_NAMES};
 use crate::helpers::{offset_to_position, utf16_len};
 use crate::symbols::{HarnSymbolKind, SymbolInfo};
 
@@ -391,7 +391,7 @@ fn classify_identifier(name: &str, span: &Span, symbols: &[SymbolInfo], source: 
         },
         None => {
             // Check if it's a builtin function
-            if BUILTINS.iter().any(|(n, _)| *n == name) {
+            if is_builtin(name) {
                 sem::FUNCTION
             } else if TYPE_NAMES.contains(&name) {
                 sem::TYPE

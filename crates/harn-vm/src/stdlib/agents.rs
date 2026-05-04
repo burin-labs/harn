@@ -28,8 +28,84 @@ use self::agents_workers::{
     WORKER_REGISTRY,
 };
 use self::sub_agent::{execute_sub_agent, parse_sub_agent_request};
+use crate::stdlib::registration::{
+    boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
+};
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{Vm, VmBuiltinArity};
+
+const AGENT_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
+    SyncBuiltin::new("agent", agent_builtin)
+        .signature("agent(name, config?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .category("agent.worker")
+        .doc("Build a low-level agent spec dict."),
+    SyncBuiltin::new("agent_config", agent_config_builtin)
+        .signature("agent_config(agent, prompt)")
+        .arity(VmBuiltinArity::Exact(2))
+        .category("agent.worker")
+        .doc("Build low-level agent prompt/system/options config."),
+    SyncBuiltin::new("agent_name", agent_name_builtin)
+        .signature("agent_name(agent)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("agent.worker")
+        .doc("Read an agent spec name."),
+    SyncBuiltin::new("resume_agent", resume_agent_builtin)
+        .signature("resume_agent(worker_or_snapshot)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category("agent.worker")
+        .doc("Resume a persisted worker into the local worker registry."),
+    SyncBuiltin::new("list_agents", list_agents_builtin)
+        .signature("list_agents()")
+        .arity(VmBuiltinArity::Exact(0))
+        .category("agent.worker")
+        .doc("List local worker summaries."),
+];
+
+const AGENT_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
+    AsyncBuiltin::new("sub_agent_run", |args| {
+        boxed_async_builtin(sub_agent_run_builtin(args))
+    })
+    .signature("sub_agent_run(config)")
+    .arity(VmBuiltinArity::Exact(1))
+    .category("agent.worker")
+    .doc("Run or spawn a sub-agent worker."),
+    AsyncBuiltin::new("spawn_agent", |args| {
+        boxed_async_builtin(spawn_agent_builtin(args))
+    })
+    .signature("spawn_agent(config)")
+    .arity(VmBuiltinArity::Exact(1))
+    .category("agent.worker")
+    .doc("Spawn a workflow, stage, or sub-agent worker."),
+    AsyncBuiltin::new("send_input", |args| {
+        boxed_async_builtin(send_input_builtin(args))
+    })
+    .signature("send_input(worker, task)")
+    .arity(VmBuiltinArity::Exact(2))
+    .category("agent.worker")
+    .doc("Resume a stopped worker with new task input."),
+    AsyncBuiltin::new("worker_trigger", |args| {
+        boxed_async_builtin(worker_trigger_builtin(args))
+    })
+    .signature("worker_trigger(worker, payload)")
+    .arity(VmBuiltinArity::Exact(2))
+    .category("agent.worker")
+    .doc("Trigger an awaiting retriggerable worker."),
+    AsyncBuiltin::new("wait_agent", |args| {
+        boxed_async_builtin(wait_agent_builtin(args))
+    })
+    .signature("wait_agent(worker_or_workers)")
+    .arity(VmBuiltinArity::Exact(1))
+    .category("agent.worker")
+    .doc("Wait for one or more workers to reach a terminal state."),
+    AsyncBuiltin::new("close_agent", |args| {
+        boxed_async_builtin(close_agent_builtin(args))
+    })
+    .signature("close_agent(worker)")
+    .arity(VmBuiltinArity::Exact(1))
+    .category("agent.worker")
+    .doc("Cancel a worker and emit the cancellation lifecycle event."),
+];
 
 pub(crate) use self::records::{parse_artifact_list, parse_context_policy};
 fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> {
@@ -150,400 +226,402 @@ async fn wait_for_worker_terminal(
 }
 
 pub(crate) fn register_agent_builtins(vm: &mut Vm) {
-    vm.register_builtin("agent", |args, _out| {
-        let name = args.first().map(|a| a.display()).unwrap_or_default();
-        let config = match args.get(1) {
-            Some(VmValue::Dict(map)) => (**map).clone(),
-            Some(_) => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "agent: second argument must be a config dict",
-                ))));
-            }
-            None => BTreeMap::new(),
-        };
-
-        let mut agent = config;
-        agent.insert("_type".to_string(), VmValue::String(Rc::from("agent")));
-        agent.insert("name".to_string(), VmValue::String(Rc::from(name)));
-
-        Ok(VmValue::Dict(Rc::new(agent)))
-    });
-
-    vm.register_builtin("agent_config", |args, _out| {
-        if args.len() < 2 {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "agent_config: requires agent and prompt",
-            ))));
-        }
-
-        let agent = match &args[0] {
-            VmValue::Dict(map) => map,
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "agent_config: first argument must be an agent",
-                ))));
-            }
-        };
-
-        match agent.get("_type") {
-            Some(VmValue::String(t)) if &**t == "agent" => {}
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "agent_config: first argument must be an agent (created with agent())",
-                ))));
-            }
-        }
-
-        let mut options = BTreeMap::new();
-        for key in [
-            "provider",
-            "model",
-            "thinking",
-            "tools",
-            "max_iterations",
-            "tool_format",
-            "structural_experiment",
-            "context_callback",
-            "context_filter",
-            "tool_retries",
-            "tool_backoff_ms",
-        ] {
-            if let Some(val) = agent.get(key) {
-                options.insert(key.to_string(), val.clone());
-            }
-        }
-
-        let prompt = args[1].clone();
-        let system = agent.get("system").cloned().unwrap_or(VmValue::Nil);
-
-        let mut result = BTreeMap::new();
-        result.insert("prompt".to_string(), prompt);
-        result.insert("system".to_string(), system);
-        result.insert("options".to_string(), VmValue::Dict(Rc::new(options)));
-
-        Ok(VmValue::Dict(Rc::new(result)))
-    });
-
-    vm.register_builtin("agent_name", |args, _out| {
-        let agent = match args.first() {
-            Some(VmValue::Dict(map)) => map,
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "agent_name: argument must be an agent",
-                ))));
-            }
-        };
-        Ok(agent.get("name").cloned().unwrap_or(VmValue::Nil))
-    });
-
-    vm.register_async_builtin("sub_agent_run", |args| async move {
-        let request = parse_sub_agent_request(&args)?;
-        if !request.background {
-            let result = execute_sub_agent(request.spec).await?;
-            return Ok(crate::stdlib::json_to_vm_value(&result.payload));
-        }
-
-        let worker_id = next_worker_id();
-        let created_at = uuid::Uuid::now_v7().to_string();
-        let mut audit = agents_workers::inherited_worker_audit("sub_agent");
-        audit.worker_id = Some(worker_id.clone());
-        let execution = request.execution;
-        let worker_policy = request.worker_policy;
-        let mut carry_policy = request.carry_policy;
-        carry_policy.policy = worker_policy;
-        let spec = request.spec;
-        let worker_name = spec.name.clone();
-        let worker_task = spec.task.clone();
-        let mut config = WorkerConfig::SubAgent {
-            spec: Box::new(spec),
-        };
-        ensure_worker_config_session_ids(&mut config, &worker_id);
-        let original_request = worker_request_for_config(&worker_task, &config);
-        let state = Rc::new(RefCell::new(WorkerState {
-            id: worker_id.clone(),
-            name: worker_name,
-            task: worker_task.clone(),
-            status: "running".to_string(),
-            created_at: created_at.clone(),
-            started_at: created_at,
-            finished_at: None,
-            awaiting_started_at: None,
-            awaiting_since: None,
-            mode: "sub_agent".to_string(),
-            history: vec![worker_task],
-            config,
-            handle: None,
-            cancel_token: Arc::new(AtomicBool::new(false)),
-            request: original_request,
-            latest_payload: None,
-            latest_error: None,
-            transcript: None,
-            artifacts: Vec::new(),
-            parent_worker_id: None,
-            parent_stage_id: None,
-            child_run_id: None,
-            child_run_path: None,
-            carry_policy,
-            execution,
-            snapshot_path: worker_snapshot_path(&worker_id),
-            audit,
-        }));
-        {
-            let worker = state.borrow();
-            if worker.carry_policy.persist_state {
-                persist_worker_state_snapshot(&worker)?;
-            }
-        }
-        WORKER_REGISTRY.with(|registry| {
-            registry
-                .borrow_mut()
-                .insert(worker_id.clone(), state.clone());
-        });
-        spawn_worker_task(state.clone());
-        let summary = worker_summary(&state.borrow())?;
-        Ok(summary)
-    });
-
-    vm.register_async_builtin("spawn_agent", |args| async move {
-        let config = args
-            .first()
-            .ok_or_else(|| VmError::Runtime("spawn_agent: missing config".to_string()))?;
-        let mut init = parse_worker_config(config)?;
-        let worker_id = next_worker_id();
-        let created_at = uuid::Uuid::now_v7().to_string();
-        ensure_worker_config_session_ids(&mut init.config, &worker_id);
-        let mode = match &init.config {
-            WorkerConfig::Workflow { .. } => "workflow",
-            WorkerConfig::Stage { .. } => "stage",
-            WorkerConfig::SubAgent { .. } => "sub_agent",
-        }
-        .to_string();
-        let mut audit = init.audit.clone().normalize();
-        audit.worker_id = Some(worker_id.clone());
-        audit.execution_kind = Some(mode.clone());
-        let original_request = worker_request_for_config(&init.task, &init.config);
-        let state = Rc::new(RefCell::new(WorkerState {
-            id: worker_id.clone(),
-            name: init.name,
-            task: init.task.clone(),
-            status: "running".to_string(),
-            created_at: created_at.clone(),
-            started_at: created_at,
-            finished_at: None,
-            awaiting_started_at: None,
-            awaiting_since: None,
-            mode,
-            history: vec![init.task],
-            config: init.config,
-            handle: None,
-            cancel_token: Arc::new(AtomicBool::new(false)),
-            request: original_request,
-            latest_payload: None,
-            latest_error: None,
-            transcript: None,
-            artifacts: Vec::new(),
-            parent_worker_id: None,
-            parent_stage_id: None,
-            child_run_id: None,
-            child_run_path: None,
-            carry_policy: init.carry_policy,
-            execution: init.execution,
-            snapshot_path: worker_snapshot_path(&worker_id),
-            audit,
-        }));
-        {
-            let worker = state.borrow();
-            if worker.carry_policy.persist_state {
-                persist_worker_state_snapshot(&worker)?;
-            }
-        }
-        WORKER_REGISTRY.with(|registry| {
-            registry
-                .borrow_mut()
-                .insert(worker_id.clone(), state.clone());
-        });
-        spawn_worker_task(state.clone());
-        if init.wait {
-            wait_for_worker_terminal(state.clone(), "spawn_agent worker").await?;
-        }
-        let summary = worker_summary(&state.borrow())?;
-        Ok(summary)
-    });
-
-    vm.register_async_builtin("send_input", |args| async move {
-        if args.len() < 2 {
-            return Err(VmError::Runtime(
-                "send_input: requires worker handle and task text".to_string(),
-            ));
-        }
-        let worker_id = worker_id_from_value(&args[0])?;
-        let next_task = args[1].display();
-        if next_task.is_empty() {
-            return Err(VmError::Runtime(
-                "send_input: task text must not be empty".to_string(),
-            ));
-        }
-        with_worker_state(&worker_id, |state| {
-            let mut worker = state.borrow_mut();
-            if worker.status == "running" {
-                return Err(VmError::Runtime(format!(
-                    "send_input: worker {} is still running",
-                    worker.id
-                )));
-            }
-            restart_worker_run(&mut worker, &next_task, true)?;
-            if worker.carry_policy.persist_state {
-                persist_worker_state_snapshot(&worker)?;
-            }
-            drop(worker);
-            spawn_worker_task(state.clone());
-            let summary = worker_summary(&state.borrow())?;
-            Ok(summary)
-        })
-    });
-
-    vm.register_async_builtin("worker_trigger", |args| async move {
-        if args.len() < 2 {
-            return Err(VmError::Runtime(
-                "worker_trigger: requires worker handle and payload".to_string(),
-            ));
-        }
-        let worker_id = worker_id_from_value(&args[0])?;
-        let next_task = worker_trigger_payload_text(&args[1]);
-        if next_task.trim().is_empty() {
-            return Err(VmError::Runtime(
-                "worker_trigger: payload must not be empty".to_string(),
-            ));
-        }
-        // Snapshot the about-to-resume worker state and validate
-        // preconditions in a `with_worker_state` borrow that also
-        // restarts the run. The borrow has to be dropped before we
-        // await the lifecycle event emission, so we pull the snapshot
-        // out and run `emit_worker_event` after the closure returns.
-        let progressed_snapshot = with_worker_state(&worker_id, |state| {
-            let mut worker = state.borrow_mut();
-            if !worker.carry_policy.retriggerable {
-                return Err(VmError::Runtime(format!(
-                    "worker_trigger: worker {} is not retriggerable",
-                    worker.id
-                )));
-            }
-            if worker.status == "running" {
-                return Err(VmError::Runtime(format!(
-                    "worker_trigger: worker {} is still running",
-                    worker.id
-                )));
-            }
-            if worker.status != "awaiting" {
-                return Err(VmError::Runtime(format!(
-                    "worker_trigger: worker {} is not awaiting (status={})",
-                    worker.id, worker.status
-                )));
-            }
-            restart_worker_run(&mut worker, &next_task, false)?;
-            if worker.carry_policy.persist_state {
-                persist_worker_state_snapshot(&worker)?;
-            }
-            let snapshot = worker_event_snapshot(&worker);
-            drop(worker);
-            spawn_worker_task(state.clone());
-            Ok(snapshot)
-        })?;
-        // Emit the progressed lifecycle *after* the new cycle has been
-        // spawned. Hosts see `progressed` (re-arming the run) followed
-        // by `running` from the inner `WorkerSpawned` emission.
-        emit_worker_event(
-            &progressed_snapshot,
-            crate::agent_events::WorkerEvent::WorkerProgressed,
-        )
-        .await?;
-        with_worker_state(&worker_id, |state| worker_summary(&state.borrow()))
-    });
-
-    vm.register_builtin("resume_agent", |args, _out| {
-        let target = args
-            .first()
-            .map(|value| value.display())
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                VmError::Runtime("resume_agent: missing worker id or snapshot path".to_string())
-            })?;
-        let state = Rc::new(RefCell::new(load_worker_state_snapshot(&target)?));
-        let worker_id = state.borrow().id.clone();
-        {
-            let mut worker = state.borrow_mut();
-            ensure_worker_config_session_ids(&mut worker.config, &worker_id);
-        }
-        WORKER_REGISTRY.with(|registry| {
-            registry.borrow_mut().insert(worker_id, state.clone());
-        });
-        if state.borrow().carry_policy.persist_state {
-            persist_worker_state_snapshot(&state.borrow())?;
-        }
-        let summary = worker_summary(&state.borrow())?;
-        Ok(summary)
-    });
-
-    vm.register_async_builtin("wait_agent", |args| async move {
-        let target = args
-            .first()
-            .ok_or_else(|| VmError::Runtime("wait_agent: missing worker handle".to_string()))?;
-        if let VmValue::List(list) = target {
-            let mut results = Vec::new();
-            for item in list.iter() {
-                let worker_id = worker_id_from_value(item)?;
-                let state = with_worker_state(&worker_id, Ok)?;
-                wait_for_worker_terminal(state.clone(), "wait_agent").await?;
-                results.push(worker_summary(&state.borrow())?);
-            }
-            return Ok(VmValue::List(Rc::new(results)));
-        }
-        let worker_id = worker_id_from_value(target)?;
-        let state = with_worker_state(&worker_id, Ok)?;
-        wait_for_worker_terminal(state.clone(), "wait_agent").await?;
-        let summary = worker_summary(&state.borrow())?;
-        Ok(summary)
-    });
-
-    vm.register_async_builtin("close_agent", |args| async move {
-        let target = args
-            .first()
-            .ok_or_else(|| VmError::Runtime("close_agent: missing worker handle".to_string()))?;
-        let worker_id = worker_id_from_value(target)?;
-        let state = with_worker_state(&worker_id, |state| Ok(state.clone()))?;
-        let (snapshot, summary) = {
-            let mut worker = state.borrow_mut();
-            worker.cancel_token.store(true, Ordering::SeqCst);
-            if let Some(handle) = worker.handle.take() {
-                handle.abort();
-            }
-            worker.status = "cancelled".to_string();
-            worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
-            worker.awaiting_started_at = None;
-            worker.awaiting_since = None;
-            worker.latest_error = Some("worker cancelled".to_string());
-            if worker.carry_policy.persist_state {
-                persist_worker_state_snapshot(&worker)?;
-            }
-            let snapshot = worker_event_snapshot(&worker);
-            let summary = worker_summary(&worker)?;
-            (snapshot, summary)
-        };
-        emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerCancelled).await?;
-        Ok(summary)
-    });
-
-    vm.register_builtin("list_agents", |_args, _out| {
-        let workers = WORKER_REGISTRY.with(|registry| {
-            registry
-                .borrow()
-                .values()
-                .map(|state| worker_summary(&state.borrow()))
-                .collect::<Result<Vec<_>, _>>()
-        })?;
-        Ok(VmValue::List(Rc::new(workers)))
-    });
-
+    register_sync_builtins(vm, AGENT_SYNC_PRIMITIVES);
+    register_async_builtins(vm, AGENT_ASYNC_PRIMITIVES);
     records::register_record_builtins(vm);
     workflow::register_workflow_builtins(vm);
+}
+
+fn agent_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let name = args.first().map(|a| a.display()).unwrap_or_default();
+    let config = match args.get(1) {
+        Some(VmValue::Dict(map)) => (**map).clone(),
+        Some(_) => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "agent: second argument must be a config dict",
+            ))));
+        }
+        None => BTreeMap::new(),
+    };
+
+    let mut agent = config;
+    agent.insert("_type".to_string(), VmValue::String(Rc::from("agent")));
+    agent.insert("name".to_string(), VmValue::String(Rc::from(name)));
+
+    Ok(VmValue::Dict(Rc::new(agent)))
+}
+
+fn agent_config_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.len() < 2 {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "agent_config: requires agent and prompt",
+        ))));
+    }
+
+    let agent = match &args[0] {
+        VmValue::Dict(map) => map,
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "agent_config: first argument must be an agent",
+            ))));
+        }
+    };
+
+    match agent.get("_type") {
+        Some(VmValue::String(t)) if &**t == "agent" => {}
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "agent_config: first argument must be an agent (created with agent())",
+            ))));
+        }
+    }
+
+    let mut options = BTreeMap::new();
+    for key in [
+        "provider",
+        "model",
+        "thinking",
+        "tools",
+        "max_iterations",
+        "tool_format",
+        "structural_experiment",
+        "context_callback",
+        "context_filter",
+        "tool_retries",
+        "tool_backoff_ms",
+    ] {
+        if let Some(val) = agent.get(key) {
+            options.insert(key.to_string(), val.clone());
+        }
+    }
+
+    let prompt = args[1].clone();
+    let system = agent.get("system").cloned().unwrap_or(VmValue::Nil);
+
+    let mut result = BTreeMap::new();
+    result.insert("prompt".to_string(), prompt);
+    result.insert("system".to_string(), system);
+    result.insert("options".to_string(), VmValue::Dict(Rc::new(options)));
+
+    Ok(VmValue::Dict(Rc::new(result)))
+}
+
+fn agent_name_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let agent = match args.first() {
+        Some(VmValue::Dict(map)) => map,
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "agent_name: argument must be an agent",
+            ))));
+        }
+    };
+    Ok(agent.get("name").cloned().unwrap_or(VmValue::Nil))
+}
+
+async fn sub_agent_run_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let request = parse_sub_agent_request(&args)?;
+    if !request.background {
+        let result = execute_sub_agent(request.spec).await?;
+        return Ok(crate::stdlib::json_to_vm_value(&result.payload));
+    }
+
+    let worker_id = next_worker_id();
+    let created_at = uuid::Uuid::now_v7().to_string();
+    let mut audit = agents_workers::inherited_worker_audit("sub_agent");
+    audit.worker_id = Some(worker_id.clone());
+    let execution = request.execution;
+    let worker_policy = request.worker_policy;
+    let mut carry_policy = request.carry_policy;
+    carry_policy.policy = worker_policy;
+    let spec = request.spec;
+    let worker_name = spec.name.clone();
+    let worker_task = spec.task.clone();
+    let mut config = WorkerConfig::SubAgent {
+        spec: Box::new(spec),
+    };
+    ensure_worker_config_session_ids(&mut config, &worker_id);
+    let original_request = worker_request_for_config(&worker_task, &config);
+    let state = Rc::new(RefCell::new(WorkerState {
+        id: worker_id.clone(),
+        name: worker_name,
+        task: worker_task.clone(),
+        status: "running".to_string(),
+        created_at: created_at.clone(),
+        started_at: created_at,
+        finished_at: None,
+        awaiting_started_at: None,
+        awaiting_since: None,
+        mode: "sub_agent".to_string(),
+        history: vec![worker_task],
+        config,
+        handle: None,
+        cancel_token: Arc::new(AtomicBool::new(false)),
+        request: original_request,
+        latest_payload: None,
+        latest_error: None,
+        transcript: None,
+        artifacts: Vec::new(),
+        parent_worker_id: None,
+        parent_stage_id: None,
+        child_run_id: None,
+        child_run_path: None,
+        carry_policy,
+        execution,
+        snapshot_path: worker_snapshot_path(&worker_id),
+        audit,
+    }));
+    {
+        let worker = state.borrow();
+        if worker.carry_policy.persist_state {
+            persist_worker_state_snapshot(&worker)?;
+        }
+    }
+    WORKER_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .insert(worker_id.clone(), state.clone());
+    });
+    spawn_worker_task(state.clone());
+    let summary = worker_summary(&state.borrow())?;
+    Ok(summary)
+}
+
+async fn spawn_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let config = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("spawn_agent: missing config".to_string()))?;
+    let mut init = parse_worker_config(config)?;
+    let worker_id = next_worker_id();
+    let created_at = uuid::Uuid::now_v7().to_string();
+    ensure_worker_config_session_ids(&mut init.config, &worker_id);
+    let mode = match &init.config {
+        WorkerConfig::Workflow { .. } => "workflow",
+        WorkerConfig::Stage { .. } => "stage",
+        WorkerConfig::SubAgent { .. } => "sub_agent",
+    }
+    .to_string();
+    let mut audit = init.audit.clone().normalize();
+    audit.worker_id = Some(worker_id.clone());
+    audit.execution_kind = Some(mode.clone());
+    let original_request = worker_request_for_config(&init.task, &init.config);
+    let state = Rc::new(RefCell::new(WorkerState {
+        id: worker_id.clone(),
+        name: init.name,
+        task: init.task.clone(),
+        status: "running".to_string(),
+        created_at: created_at.clone(),
+        started_at: created_at,
+        finished_at: None,
+        awaiting_started_at: None,
+        awaiting_since: None,
+        mode,
+        history: vec![init.task],
+        config: init.config,
+        handle: None,
+        cancel_token: Arc::new(AtomicBool::new(false)),
+        request: original_request,
+        latest_payload: None,
+        latest_error: None,
+        transcript: None,
+        artifacts: Vec::new(),
+        parent_worker_id: None,
+        parent_stage_id: None,
+        child_run_id: None,
+        child_run_path: None,
+        carry_policy: init.carry_policy,
+        execution: init.execution,
+        snapshot_path: worker_snapshot_path(&worker_id),
+        audit,
+    }));
+    {
+        let worker = state.borrow();
+        if worker.carry_policy.persist_state {
+            persist_worker_state_snapshot(&worker)?;
+        }
+    }
+    WORKER_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .insert(worker_id.clone(), state.clone());
+    });
+    spawn_worker_task(state.clone());
+    if init.wait {
+        wait_for_worker_terminal(state.clone(), "spawn_agent worker").await?;
+    }
+    let summary = worker_summary(&state.borrow())?;
+    Ok(summary)
+}
+
+async fn send_input_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    if args.len() < 2 {
+        return Err(VmError::Runtime(
+            "send_input: requires worker handle and task text".to_string(),
+        ));
+    }
+    let worker_id = worker_id_from_value(&args[0])?;
+    let next_task = args[1].display();
+    if next_task.is_empty() {
+        return Err(VmError::Runtime(
+            "send_input: task text must not be empty".to_string(),
+        ));
+    }
+    with_worker_state(&worker_id, |state| {
+        let mut worker = state.borrow_mut();
+        if worker.status == "running" {
+            return Err(VmError::Runtime(format!(
+                "send_input: worker {} is still running",
+                worker.id
+            )));
+        }
+        restart_worker_run(&mut worker, &next_task, true)?;
+        if worker.carry_policy.persist_state {
+            persist_worker_state_snapshot(&worker)?;
+        }
+        drop(worker);
+        spawn_worker_task(state.clone());
+        let summary = worker_summary(&state.borrow())?;
+        Ok(summary)
+    })
+}
+
+async fn worker_trigger_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    if args.len() < 2 {
+        return Err(VmError::Runtime(
+            "worker_trigger: requires worker handle and payload".to_string(),
+        ));
+    }
+    let worker_id = worker_id_from_value(&args[0])?;
+    let next_task = worker_trigger_payload_text(&args[1]);
+    if next_task.trim().is_empty() {
+        return Err(VmError::Runtime(
+            "worker_trigger: payload must not be empty".to_string(),
+        ));
+    }
+    // Snapshot the about-to-resume worker state and validate
+    // preconditions in a `with_worker_state` borrow that also
+    // restarts the run. The borrow has to be dropped before we
+    // await the lifecycle event emission, so we pull the snapshot
+    // out and run `emit_worker_event` after the closure returns.
+    let progressed_snapshot = with_worker_state(&worker_id, |state| {
+        let mut worker = state.borrow_mut();
+        if !worker.carry_policy.retriggerable {
+            return Err(VmError::Runtime(format!(
+                "worker_trigger: worker {} is not retriggerable",
+                worker.id
+            )));
+        }
+        if worker.status == "running" {
+            return Err(VmError::Runtime(format!(
+                "worker_trigger: worker {} is still running",
+                worker.id
+            )));
+        }
+        if worker.status != "awaiting" {
+            return Err(VmError::Runtime(format!(
+                "worker_trigger: worker {} is not awaiting (status={})",
+                worker.id, worker.status
+            )));
+        }
+        restart_worker_run(&mut worker, &next_task, false)?;
+        if worker.carry_policy.persist_state {
+            persist_worker_state_snapshot(&worker)?;
+        }
+        let snapshot = worker_event_snapshot(&worker);
+        drop(worker);
+        spawn_worker_task(state.clone());
+        Ok(snapshot)
+    })?;
+    // Emit the progressed lifecycle *after* the new cycle has been
+    // spawned. Hosts see `progressed` (re-arming the run) followed
+    // by `running` from the inner `WorkerSpawned` emission.
+    emit_worker_event(
+        &progressed_snapshot,
+        crate::agent_events::WorkerEvent::WorkerProgressed,
+    )
+    .await?;
+    with_worker_state(&worker_id, |state| worker_summary(&state.borrow()))
+}
+
+fn resume_agent_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let target = args
+        .first()
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            VmError::Runtime("resume_agent: missing worker id or snapshot path".to_string())
+        })?;
+    let state = Rc::new(RefCell::new(load_worker_state_snapshot(&target)?));
+    let worker_id = state.borrow().id.clone();
+    {
+        let mut worker = state.borrow_mut();
+        ensure_worker_config_session_ids(&mut worker.config, &worker_id);
+    }
+    WORKER_REGISTRY.with(|registry| {
+        registry.borrow_mut().insert(worker_id, state.clone());
+    });
+    if state.borrow().carry_policy.persist_state {
+        persist_worker_state_snapshot(&state.borrow())?;
+    }
+    let summary = worker_summary(&state.borrow())?;
+    Ok(summary)
+}
+
+async fn wait_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let target = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("wait_agent: missing worker handle".to_string()))?;
+    if let VmValue::List(list) = target {
+        let mut results = Vec::new();
+        for item in list.iter() {
+            let worker_id = worker_id_from_value(item)?;
+            let state = with_worker_state(&worker_id, Ok)?;
+            wait_for_worker_terminal(state.clone(), "wait_agent").await?;
+            results.push(worker_summary(&state.borrow())?);
+        }
+        return Ok(VmValue::List(Rc::new(results)));
+    }
+    let worker_id = worker_id_from_value(target)?;
+    let state = with_worker_state(&worker_id, Ok)?;
+    wait_for_worker_terminal(state.clone(), "wait_agent").await?;
+    let summary = worker_summary(&state.borrow())?;
+    Ok(summary)
+}
+
+async fn close_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let target = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("close_agent: missing worker handle".to_string()))?;
+    let worker_id = worker_id_from_value(target)?;
+    let state = with_worker_state(&worker_id, |state| Ok(state.clone()))?;
+    let (snapshot, summary) = {
+        let mut worker = state.borrow_mut();
+        worker.cancel_token.store(true, Ordering::SeqCst);
+        if let Some(handle) = worker.handle.take() {
+            handle.abort();
+        }
+        worker.status = "cancelled".to_string();
+        worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
+        worker.awaiting_started_at = None;
+        worker.awaiting_since = None;
+        worker.latest_error = Some("worker cancelled".to_string());
+        if worker.carry_policy.persist_state {
+            persist_worker_state_snapshot(&worker)?;
+        }
+        let snapshot = worker_event_snapshot(&worker);
+        let summary = worker_summary(&worker)?;
+        (snapshot, summary)
+    };
+    emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerCancelled).await?;
+    Ok(summary)
+}
+
+fn list_agents_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let workers = WORKER_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .values()
+            .map(|state| worker_summary(&state.borrow()))
+            .collect::<Result<Vec<_>, _>>()
+    })?;
+    Ok(VmValue::List(Rc::new(workers)))
 }
