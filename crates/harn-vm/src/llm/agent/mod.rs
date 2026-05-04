@@ -22,7 +22,7 @@ mod tool_search_client;
 mod turn_preflight;
 
 pub(crate) use agent_mcp::parse_mcp_server_specs;
-pub use skill_match::{parse_skill_config, parse_skill_match_config_public};
+pub use skill_match::parse_skill_config;
 pub use state::SkillMatchConfig;
 #[allow(unused_imports)]
 pub use state::{ActiveSkill, SkillMatchStrategy};
@@ -942,6 +942,7 @@ pub(crate) async fn finalize_agent_loop_session(
     state.finalize().await
 }
 
+#[cfg(test)]
 pub async fn run_agent_loop_internal(
     opts: &mut super::api::LlmCallOptions,
     config: AgentLoopConfig,

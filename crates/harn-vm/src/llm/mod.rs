@@ -439,21 +439,12 @@ fn join_limited_keys(keys: &[String]) -> String {
     )
 }
 
-pub(crate) use self::agent::completion_judge::{
-    parse_completion_judge_option, parse_done_judge_option,
-};
-pub(crate) use self::agent::parse_skill_match_config_public as parse_skill_match_config_dict;
-pub(crate) use self::agent::SkillMatchConfig;
 pub use self::agent::{
     current_agent_session_id, drain_global_pending_feedback, push_pending_feedback_global,
     register_session_end_hook, wait_for_global_pending_feedback,
 };
-pub(crate) use self::agent::{
-    current_host_bridge, emit_agent_event as emit_live_agent_event, run_agent_loop_internal,
-};
-pub(crate) use self::agent_config::{
-    agent_loop_result_from_llm, AgentLoopConfig, DEFAULT_MAX_VERIFY_ATTEMPTS,
-};
+pub(crate) use self::agent::{current_host_bridge, emit_agent_event as emit_live_agent_event};
+pub(crate) use self::agent_config::agent_loop_result_from_llm;
 pub use self::agent_config::{
     register_agent_loop_with_bridge, register_llm_call_structured_with_bridge,
     register_llm_call_with_bridge,
