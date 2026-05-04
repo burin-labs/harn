@@ -174,15 +174,33 @@ fn read_xfail_marker(path: &Path) -> Option<String> {
 }
 
 fn parse_xfail_marker(source: &str) -> Option<String> {
+    // Accept the marker in any of these comment forms within the first 50 lines:
+    //   // @xfail: reason
+    //   /** @xfail: reason */
+    //   /**
+    //    * @xfail: reason
+    //    */
+    // The Harn formatter sometimes converts a leading `//` comment that
+    // precedes a `fn` or `pipeline` declaration into a `/** ... */` doc
+    // comment, so we tolerate both shapes.
     for line in source.lines().take(50) {
-        let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix("//") {
-            let rest = rest.trim_start();
-            if let Some(reason) = rest.strip_prefix("@xfail:") {
-                let r = reason.trim();
-                if !r.is_empty() {
-                    return Some(r.to_string());
-                }
+        let mut s = line.trim_start();
+        if let Some(rest) = s.strip_prefix("//") {
+            s = rest;
+        } else if let Some(rest) = s.strip_prefix("/**") {
+            s = rest.strip_suffix("*/").unwrap_or(rest);
+        } else if let Some(rest) = s.strip_prefix("/*") {
+            s = rest.strip_suffix("*/").unwrap_or(rest);
+        } else if let Some(rest) = s.strip_prefix('*') {
+            s = rest.strip_suffix("*/").unwrap_or(rest);
+        } else {
+            continue;
+        }
+        let s = s.trim();
+        if let Some(reason) = s.strip_prefix("@xfail:") {
+            let r = reason.trim().trim_end_matches("*/").trim();
+            if !r.is_empty() {
+                return Some(r.to_string());
             }
         }
     }
@@ -1161,5 +1179,23 @@ mod tests {
     fn parse_xfail_marker_ignores_empty_reason() {
         let src = "// @xfail:   \n";
         assert!(parse_xfail_marker(src).is_none());
+    }
+
+    #[test]
+    fn parse_xfail_marker_recognizes_one_line_doc_comment() {
+        let src = "/** @xfail: tracked in #1240 */\npipeline test() {}\n";
+        assert_eq!(parse_xfail_marker(src).as_deref(), Some("tracked in #1240"));
+    }
+
+    #[test]
+    fn parse_xfail_marker_recognizes_multi_line_doc_comment() {
+        let src = "/**\n * @xfail: tracked in #1238\n */\nfn foo() {}\n";
+        assert_eq!(parse_xfail_marker(src).as_deref(), Some("tracked in #1238"));
+    }
+
+    #[test]
+    fn parse_xfail_marker_recognizes_block_comment() {
+        let src = "/* @xfail: tracked in #1239 */\nfn foo() {}\n";
+        assert_eq!(parse_xfail_marker(src).as_deref(), Some("tracked in #1239"));
     }
 }
