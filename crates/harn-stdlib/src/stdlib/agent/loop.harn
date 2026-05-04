@@ -1,7 +1,7 @@
+// @harn-entrypoint-category agent.stdlib
 import { agent_autocompact_if_needed } from "std/agent/autocompact"
 import { agent_budget_post_call_blocked, agent_budget_pre_call_blocked } from "std/agent/budget"
 import { agent_verify_or_continue } from "std/agent/judge"
-// @harn-entrypoint-category agent.stdlib
 import { agent_loop_options } from "std/agent/options"
 import { agent_compute_post_turn, agent_extract_tool_calls } from "std/agent/postturn"
 import { agent_build_turn_messages, agent_build_turn_system } from "std/agent/preflight"
@@ -27,7 +27,9 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
   var stop_reason = nil
   var final_status = ""
   var verify_attempts = 0
-  while iteration < opts.max_iterations {
+  let max_verify_attempts = opts?.max_verify_attempts ?? 20
+  let max_iterations = opts?.max_iterations ?? 50
+  while iteration < max_iterations {
     if agent_budget_pre_call_blocked(session, opts) {
       final_status = "budget_exhausted"
       break
@@ -66,7 +68,7 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
     }
     let needs_verify = outcome.needs_verify
     if needs_verify {
-      if verify_attempts >= opts.max_verify_attempts {
+      if verify_attempts >= max_verify_attempts {
         final_status = "verify_exhausted"
         stop_reason = outcome.stop_reason
         break
@@ -81,7 +83,7 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
     stop_reason = outcome.stop_reason
     break
   }
-  if final_status == "" && iteration >= opts.max_iterations && stop_reason == nil {
+  if final_status == "" && iteration >= max_iterations && stop_reason == nil {
     final_status = "budget_exhausted"
   }
   return agent_session_finalize(

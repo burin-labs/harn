@@ -35,8 +35,8 @@ fn __judge_invoke_structured(judge_cfg, opts, payload) {
   let user = completion_judge_user_prompt(payload)
   let schema = {
     type: "object",
-    properties: {pass: {type: "boolean"}, feedback: {type: "string"}},
-    required: ["pass"],
+    properties: {verdict: {type: "string"}, reasoning: {type: "string"}, next_step: {type: "string"}},
+    required: ["verdict"],
   }
   let base = opts?.llm_options ?? {}
   let llm_opts = base
@@ -45,13 +45,15 @@ fn __judge_invoke_structured(judge_cfg, opts, payload) {
     provider: judge_cfg?.provider ?? opts?.provider,
     output_schema: schema,
     session_id: payload.session_id,
+    system: system,
   }
-  let result = llm_call_structured(user, schema, llm_opts + {system: system})
-  let pass = result?.pass ?? true
-  let feedback = result?.feedback ?? (judge_cfg?.feedback_fallback ?? "")
-  if pass {
+  let result = llm_call_structured(user, schema, llm_opts)
+  let verdict = result?.verdict ?? "done"
+  if verdict == "done" {
     return {vetoed: false}
   }
+  let feedback = result?.next_step ?? result?.reasoning
+    ?? (judge_cfg?.feedback_fallback ?? "")
   return {vetoed: true, feedback: feedback}
 }
 

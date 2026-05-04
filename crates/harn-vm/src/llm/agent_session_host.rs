@@ -42,7 +42,13 @@ struct AgentHostSession {
     task: String,
     tokens_used: i64,
     cost_used: f64,
+    input_tokens: i64,
+    output_tokens: i64,
     active_skills: Vec<String>,
+    tool_calls: Vec<serde_json::Value>,
+    successful_tools: Vec<serde_json::Value>,
+    rejected_tools: Vec<serde_json::Value>,
+    tool_mode: String,
     started_at: String,
 }
 
@@ -138,7 +144,13 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         task: message.clone(),
         tokens_used: 0,
         cost_used: 0.0,
+        input_tokens: 0,
+        output_tokens: 0,
         active_skills: Vec::new(),
+        tool_calls: Vec::new(),
+        successful_tools: Vec::new(),
+        rejected_tools: Vec::new(),
+        tool_mode: String::new(),
         started_at: now_id(),
     };
 
@@ -196,6 +208,7 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
         .unwrap_or_default();
 
     let iterations = opt_int(&status_dict, "iterations").unwrap_or(0);
+    let tool_mode = opt_str(&status_dict, "tool_mode").unwrap_or(session.tool_mode);
     let result = serde_json::json!({
         "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
         "final_status": final_status,
@@ -204,18 +217,17 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
         "visible_text": visible_text,
         "private_reasoning": serde_json::Value::Null,
         "thinking_summary": serde_json::Value::Null,
-        "iterations": iterations,
         "llm": {
             "iterations": iterations,
             "duration_ms": 0,
-            "input_tokens": 0,
-            "output_tokens": 0,
+            "input_tokens": session.input_tokens,
+            "output_tokens": session.output_tokens,
         },
         "tools": {
-            "calls": [],
-            "successful": [],
-            "rejected": [],
-            "mode": "",
+            "calls": session.tool_calls,
+            "successful": session.successful_tools,
+            "rejected": session.rejected_tools,
+            "mode": tool_mode,
         },
         "transcript": transcript_json,
         "tokens_used": session.tokens_used,
@@ -264,6 +276,17 @@ fn host_agent_session_record_assistant_builtin(
     let text = dict_get(&llm_result, "text")
         .map(|v| v.display())
         .unwrap_or_default();
+    let raw_tool_calls = dict_get(&llm_result, "tool_calls")
+        .cloned()
+        .unwrap_or(VmValue::Nil);
+    let calls_json = list_items(&raw_tool_calls)
+        .iter()
+        .map(vm_to_json)
+        .collect::<Vec<_>>();
+    let _ = with_session(&session_id, HOST_SESSION_RECORD_ASSISTANT, |session| {
+        session.tool_calls.extend(calls_json);
+        Ok(())
+    });
     let mut msg = BTreeMap::new();
     msg.insert("role".to_string(), VmValue::String(Rc::from("assistant")));
     msg.insert("content".to_string(), VmValue::String(Rc::from(text)));
@@ -280,6 +303,8 @@ fn host_agent_session_record_tool_results_builtin(
     let results_value = dict_get(&dispatch, "results")
         .cloned()
         .unwrap_or(VmValue::Nil);
+    let mut successful = Vec::new();
+    let mut rejected = Vec::new();
     for result in list_items(&results_value).iter() {
         let name = dict_get(result, "name")
             .map(|v| v.display())
@@ -289,6 +314,15 @@ fn host_agent_session_record_tool_results_builtin(
             .or_else(|| dict_get(result, "content"))
             .map(|v| v.display())
             .unwrap_or_default();
+        let success = dict_get(result, "success")
+            .map(|v| matches!(v, VmValue::Bool(true)))
+            .unwrap_or(true);
+        let summary = serde_json::json!({"name": name, "observation": observation});
+        if success {
+            successful.push(summary);
+        } else {
+            rejected.push(summary);
+        }
         let mut msg = BTreeMap::new();
         msg.insert("role".to_string(), VmValue::String(Rc::from("tool")));
         msg.insert(
@@ -298,6 +332,11 @@ fn host_agent_session_record_tool_results_builtin(
         msg.insert("name".to_string(), VmValue::String(Rc::from(name)));
         let _ = crate::agent_sessions::inject_message(&session_id, VmValue::Dict(Rc::new(msg)));
     }
+    let _ = with_session(&session_id, HOST_SESSION_RECORD_TOOL_RESULTS, |session| {
+        session.successful_tools.extend(successful);
+        session.rejected_tools.extend(rejected);
+        Ok(())
+    });
     Ok(VmValue::Nil)
 }
 
@@ -337,6 +376,8 @@ fn host_agent_session_record_usage_builtin(
             .tokens_used
             .saturating_add(input_tokens)
             .saturating_add(output_tokens);
+        session.input_tokens = session.input_tokens.saturating_add(input_tokens);
+        session.output_tokens = session.output_tokens.saturating_add(output_tokens);
         session.cost_used += cost;
         Ok((session.tokens_used, session.cost_used))
     })?;
