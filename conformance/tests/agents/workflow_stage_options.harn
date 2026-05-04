@@ -1,0 +1,50 @@
+import { workflow_stage_agent_options } from "std/workflow/options"
+
+pipeline default() {
+  let explicit = workflow_stage_agent_options(
+    {
+      mode: "agent",
+      has_tools: true,
+      session_id: "stage-1",
+      done_sentinel: "DONE",
+      exit_when_verified: true,
+      model_policy: {
+        provider: "mock",
+        model: "mock-model",
+        tool_format: " native ",
+        max_iterations: 4,
+        max_nudges: 1,
+        nudge: "use a tool",
+        native_tool_fallback: "allow_once",
+        tool_examples: "example",
+        stop_after_successful_tools: ["edit"],
+        require_successful_tools: ["test"],
+      },
+      host: {env_tool_format: "text", default_tool_format: "text"},
+    },
+  )
+  println(explicit.tool_format)
+  println(explicit.run_agent_loop)
+  println(explicit.llm_options.provider)
+  println(explicit.llm_options.tool_format)
+  println(explicit.agent_loop_options.max_iterations)
+  println(explicit.agent_loop_options.session_id)
+  println(explicit.agent_loop_options.native_tool_fallback)
+  println(explicit.agent_loop_options.done_sentinel)
+  println(explicit.agent_loop_options.exit_when_verified)
+  println(explicit.agent_loop_options.stop_after_successful_tools[0])
+  let env = workflow_stage_agent_options(
+    {
+      has_tools: true,
+      model_policy: {tool_format: "   "},
+      host: {env_tool_format: "native", default_tool_format: "text"},
+    },
+  )
+  println(env.tool_format)
+  let defaulted = workflow_stage_agent_options(
+    {has_tools: false, model_policy: {}, host: {env_tool_format: "", default_tool_format: "native"}},
+  )
+  println(defaulted.tool_format)
+  println(defaulted.run_agent_loop)
+  println(defaulted.agent_loop_options.max_iterations)
+}

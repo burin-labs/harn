@@ -376,8 +376,8 @@ pub struct ModelPolicy {
     /// `"native"` routes user tools through the provider's native
     /// function-call channel; `"text"` embeds the `<tool_call>` contract
     /// prompt. Mirrors the top-level `agent_loop(..., {tool_format: ...})`
-    /// option. When `None`, the workflow falls back to `HARN_AGENT_TOOL_FORMAT`
-    /// env / the provider-model default.
+    /// option. When `None`, std/workflow/options.harn composes the fallback
+    /// from host-provided env/default facts.
     pub tool_format: Option<String>,
     /// Policy for native-tool stages when a provider emits text-mode
     /// `<tool_call>` output instead of native tool calls.
