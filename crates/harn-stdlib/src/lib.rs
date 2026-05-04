@@ -26,6 +26,12 @@ pub struct StdlibPublicFunction {
     pub doc: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StdlibEntrypointModule {
+    pub import_path: String,
+    pub category: String,
+}
+
 pub const STDLIB_SOURCES: &[StdlibSource] = &[
     StdlibSource {
         module: "text",
@@ -374,6 +380,35 @@ pub fn public_functions_for_module(module: &str) -> Vec<StdlibPublicFunction> {
     public_functions_from_source(source)
 }
 
+pub fn entrypoint_modules() -> Vec<StdlibEntrypointModule> {
+    STDLIB_SOURCES
+        .iter()
+        .filter_map(|entry| {
+            entrypoint_category_from_source(entry.source).map(|category| StdlibEntrypointModule {
+                import_path: format!("std/{}", entry.module),
+                category,
+            })
+        })
+        .collect()
+}
+
+fn entrypoint_category_from_source(source: &str) -> Option<String> {
+    for line in source.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(category) = line.strip_prefix("// @harn-entrypoint-category ") {
+            let category = category.trim();
+            return (!category.is_empty()).then(|| category.to_string());
+        }
+        if !line.starts_with("//") {
+            return None;
+        }
+    }
+    None
+}
+
 fn public_functions_from_source(source: &str) -> Vec<StdlibPublicFunction> {
     let mut out = Vec::new();
     let mut doc: Option<String> = None;
@@ -507,8 +542,8 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        get_stdlib_prompt_asset, get_stdlib_source, public_functions_for_module,
-        STDLIB_PROMPT_ASSETS, STDLIB_SOURCES,
+        entrypoint_modules, get_stdlib_prompt_asset, get_stdlib_source,
+        public_functions_for_module, STDLIB_PROMPT_ASSETS, STDLIB_SOURCES,
     };
 
     #[test]
@@ -595,5 +630,22 @@ mod tests {
         );
         assert_eq!(exports[0].required_params, 2);
         assert_eq!(exports[0].total_params, 4);
+    }
+
+    #[test]
+    fn harn_entrypoint_catalog_is_declared_by_stdlib_sources() {
+        let modules = entrypoint_modules();
+        let entries = modules
+            .iter()
+            .map(|module| (module.import_path.as_str(), module.category.as_str()))
+            .collect::<BTreeSet<_>>();
+        for entry in [
+            ("std/agent/loop", "agent.stdlib"),
+            ("std/agent/turn", "agent.stdlib"),
+            ("std/agent/primitives", "agent.stdlib"),
+            ("std/workflow/execute", "workflow.stdlib"),
+        ] {
+            assert!(entries.contains(&entry), "{entry:?} should be declared");
+        }
     }
 }

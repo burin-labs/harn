@@ -1,3 +1,4 @@
+// @harn-entrypoint-category agent.stdlib
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { agent_loop_options } from "std/agent/options"

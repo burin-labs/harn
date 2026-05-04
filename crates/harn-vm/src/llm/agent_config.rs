@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::agent_events::AgentEventSink;
-use crate::stdlib::harn_entry::{register_harn_module_entrypoints, HarnEntrypointModule};
+use crate::stdlib::harn_entry::register_harn_entrypoint_category;
 use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuiltin};
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
@@ -28,11 +28,7 @@ const DEFAULT_AGENT_LOOP_TOOL_RETRIES: i64 = 0;
 const DEFAULT_AGENT_LOOP_SCHEMA_RETRIES: i64 = 0;
 const HOST_LLM_SESSION_RUN_BUILTIN: &str = "__host_llm_session_run";
 
-const AGENT_STDLIB_ENTRYPOINT_MODULES: &[HarnEntrypointModule] = &[
-    HarnEntrypointModule::new("std/agent/loop", "agent.stdlib"),
-    HarnEntrypointModule::new("std/agent/turn", "agent.stdlib"),
-    HarnEntrypointModule::new("std/agent/primitives", "agent.stdlib"),
-];
+const AGENT_STDLIB_ENTRYPOINT_CATEGORY: &str = "agent.stdlib";
 
 const AGENT_CONTROL_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("agent_subscribe", agent_subscribe_builtin)
@@ -639,12 +635,12 @@ fn register_llm_turn_loop_driver(vm: &mut Vm, bridge: Option<Rc<crate::bridge::H
 
 pub(crate) fn register_agent_loop(vm: &mut Vm) {
     register_llm_turn_loop_driver(vm, None);
-    register_harn_module_entrypoints(vm, AGENT_STDLIB_ENTRYPOINT_MODULES);
+    register_harn_entrypoint_category(vm, AGENT_STDLIB_ENTRYPOINT_CATEGORY);
 }
 
 pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
     register_llm_turn_loop_driver(vm, Some(bridge));
-    register_harn_module_entrypoints(vm, AGENT_STDLIB_ENTRYPOINT_MODULES);
+    register_harn_entrypoint_category(vm, AGENT_STDLIB_ENTRYPOINT_CATEGORY);
 }
 
 pub(crate) fn register_agent_control_primitives(vm: &mut Vm) {
