@@ -320,6 +320,46 @@ async fn agent_loop_option_writes_llm_transcript_jsonl() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn agent_loop_verbose_transcript_includes_request_snapshot_when_enabled() {
+    reset_llm_mock_state();
+    let dir = std::env::temp_dir().join(format!(
+        "harn-agent-loop-verbose-transcript-{}",
+        uuid::Uuid::now_v7()
+    ));
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "write a verbose transcript sidecar",
+    })]);
+    opts.system = Some("diagnostic system prompt".to_string());
+    let mut config = base_agent_config();
+    config.llm_transcript_dir = Some(dir.to_string_lossy().into_owned());
+
+    unsafe { std::env::set_var("HARN_LLM_TRANSCRIPT_VERBOSE", "1") };
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    unsafe { std::env::remove_var("HARN_LLM_TRANSCRIPT_VERBOSE") };
+    assert_eq!(result["status"], "done");
+
+    let transcript_path = dir.join("llm_transcript.jsonl");
+    let transcript = std::fs::read_to_string(&transcript_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", transcript_path.display()));
+    assert!(
+        transcript.contains("\"request_snapshot\""),
+        "verbose request snapshot missing from transcript:\n{transcript}"
+    );
+    assert!(
+        transcript.contains("diagnostic system prompt"),
+        "verbose request snapshot should include exact system prompt:\n{transcript}"
+    );
+    assert!(
+        transcript.contains("write a verbose transcript sidecar"),
+        "verbose request snapshot should include exact message list:\n{transcript}"
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+    reset_llm_mock_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn daemon_timer_wake_persists_snapshot_and_compacts_on_idle() {
     let dir = std::env::temp_dir().join(format!("harn-agent-daemon-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -923,6 +963,86 @@ async fn done_judge_does_not_run_on_plain_natural_stop() {
         Some("A plain one-shot answer.")
     );
     assert_eq!(get_llm_mock_calls().len(), 1);
+    reset_llm_mock_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn done_judge_can_verify_natural_stop_when_done_sentinel_is_disabled() {
+    use crate::agent_events::{AgentEvent, AgentEventSink};
+
+    #[derive(Clone)]
+    struct CapturingSink(Arc<Mutex<Vec<AgentEvent>>>);
+    impl AgentEventSink for CapturingSink {
+        fn handle_event(&self, event: &AgentEvent) {
+            self.0.lock().unwrap().push(event.clone());
+        }
+    }
+
+    reset_llm_mock_state();
+    for text in [
+        "Done.",
+        "{\"verdict\":\"continue\",\"reasoning\":\"answer is too thin\",\"next_step\":\"Give the actual answer before yielding.\"}",
+        "The answer is 4.",
+        "{\"verdict\":\"done\",\"reasoning\":\"the answer is now explicit\"}",
+    ] {
+        crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+            text: text.to_string(),
+            tool_calls: Vec::new(),
+            match_pattern: None,
+            consume_on_match: true,
+            input_tokens: None,
+            output_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            thinking: None,
+            thinking_summary: None,
+            stop_reason: None,
+            model: "mock".to_string(),
+            provider: None,
+            blocks: None,
+            error: None,
+        });
+    }
+
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "What is 2 + 2?",
+    })]);
+    let mut config = base_agent_config();
+    config.persistent = false;
+    config.max_iterations = 3;
+    config.max_verify_attempts = 3;
+    config.done_sentinel = Some(String::new());
+    config.done_judge = Some(crate::llm::agent::completion_judge::CompletionJudgeConfig::default());
+    config.event_sink = Some(Arc::new(CapturingSink(captured.clone())));
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    assert_eq!(result["status"], "done");
+    assert_eq!(result["llm"]["iterations"].as_u64(), Some(2));
+    assert_eq!(result["visible_text"].as_str(), Some("The answer is 4."));
+
+    let decisions: Vec<(String, Option<String>)> = captured
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::JudgeDecision {
+                verdict, next_step, ..
+            } => Some((verdict.clone(), next_step.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        decisions,
+        vec![
+            (
+                "continue".to_string(),
+                Some("Give the actual answer before yielding.".to_string())
+            ),
+            ("done".to_string(), None),
+        ]
+    );
     reset_llm_mock_state();
 }
 

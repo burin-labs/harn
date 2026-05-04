@@ -664,7 +664,9 @@ impl AgentLoopRunState {
                 // done" gets one more turn instead of yielding to the
                 // caller. Bounded by max_verify_attempts to prevent a
                 // buggy judge from holding the loop open.
-                let done_judge_applies = stop_reason == "sentinel" && done_judge.is_some();
+                let done_judge_applies = done_judge.is_some()
+                    && (stop_reason == "sentinel"
+                        || (stop_reason == "natural" && done_sentinel.is_empty()));
                 if verify_completion.is_some()
                     || verify_completion_judge.is_some()
                     || done_judge_applies
@@ -710,7 +712,7 @@ impl AgentLoopRunState {
                             .await?;
                         }
                     }
-                    if !veto && stop_reason == "sentinel" {
+                    if !veto && done_judge_applies {
                         if let Some(judge) = done_judge.as_ref() {
                             veto = completion_judge::run_completion_judge(
                                 &mut self.state,
