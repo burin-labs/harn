@@ -202,6 +202,10 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
         })?;
     // Pair with the push in init so subsequent loops see the right stack.
     crate::agent_sessions::pop_current_session();
+    // Fire registered session-end hooks (e.g. cancelling orphaned
+    // long-running handles) after the session has been removed from
+    // the active map so hooks observe a fully-quiesced session.
+    super::agent_runtime::fire_session_end_hooks(&session_id);
 
     let snapshot = crate::agent_sessions::snapshot(&session_id);
     let transcript_json = snapshot

@@ -207,38 +207,6 @@ pub fn microcompact_tool_output(output: &str, max_chars: usize) -> String {
     format!("{head}\n\n[... {snipped} characters snipped ...]\n\n{tail}")
 }
 
-/// Invoke the compress_callback to compress a tool result via pipeline-defined
-/// logic (typically an LLM call). Returns the compressed output, or falls back
-/// to `microcompact_tool_output` on error.
-pub(crate) async fn invoke_compress_callback(
-    callback: &VmValue,
-    tool_name: &str,
-    output: &str,
-    max_chars: usize,
-) -> String {
-    let VmValue::Closure(closure) = callback.clone() else {
-        return microcompact_tool_output(output, max_chars);
-    };
-    let mut vm = match crate::vm::clone_async_builtin_child_vm() {
-        Some(vm) => vm,
-        None => return microcompact_tool_output(output, max_chars),
-    };
-    let args_dict = VmValue::Dict(Rc::new({
-        let mut dict = std::collections::BTreeMap::new();
-        dict.insert(
-            "tool_name".to_string(),
-            VmValue::String(Rc::from(tool_name)),
-        );
-        dict.insert("output".to_string(), VmValue::String(Rc::from(output)));
-        dict.insert("max_chars".to_string(), VmValue::Int(max_chars as i64));
-        dict
-    }));
-    match vm.call_closure_pub(&closure, &[args_dict]).await {
-        Ok(VmValue::String(s)) if !s.is_empty() => s.to_string(),
-        _ => microcompact_tool_output(output, max_chars),
-    }
-}
-
 /// Snap a byte offset to the nearest preceding line boundary (end of a complete line).
 /// Returns the substring from the start up to and including the last complete line
 /// that fits within `max_bytes`. Never cuts mid-line.

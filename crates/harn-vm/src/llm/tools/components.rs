@@ -43,21 +43,6 @@ impl ComponentRegistry {
     pub(super) fn finish_resolution(&mut self, name: &str) {
         self.in_progress.remove(name);
     }
-
-    /// Render all registered types as `type Name = Expr;` lines in insertion
-    /// order. Returns an empty string when the registry is empty.
-    pub(crate) fn render_aliases(&self) -> String {
-        if self.order.is_empty() {
-            return String::new();
-        }
-        let mut out = String::new();
-        for name in &self.order {
-            if let Some(ty) = self.types.get(name) {
-                out.push_str(&format!("type {} = {};\n", name, ty.render()));
-            }
-        }
-        out
-    }
 }
 
 /// Extract the short name from a JSON Pointer `$ref`. Supports common shapes:

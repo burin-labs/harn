@@ -77,8 +77,6 @@ pub struct HostBridge {
     visible_call_streams: std::sync::Mutex<HashMap<String, bool>>,
     /// Optional in-process host-module backend used by `harn playground`.
     in_process: Option<InProcessHost>,
-    #[cfg(test)]
-    recorded_notifications: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
 }
 
 struct InProcessHost {
@@ -340,8 +338,6 @@ impl HostBridge {
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
             in_process: None,
-            #[cfg(test)]
-            recorded_notifications: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -379,8 +375,6 @@ impl HostBridge {
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
             in_process: None,
-            #[cfg(test)]
-            recorded_notifications: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -406,8 +400,6 @@ impl HostBridge {
                 exported_functions,
                 vm,
             }),
-            #[cfg(test)]
-            recorded_notifications: Arc::new(std::sync::Mutex::new(Vec::new())),
         })
     }
 
@@ -513,25 +505,12 @@ impl HostBridge {
     /// Serialized through the stdout mutex to prevent interleaving.
     pub fn notify(&self, method: &str, params: serde_json::Value) {
         let notification = crate::jsonrpc::notification(method, params);
-        #[cfg(test)]
-        self.recorded_notifications
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(notification.clone());
         if self.in_process.is_some() {
             return;
         }
         if let Ok(line) = serde_json::to_string(&notification) {
             let _ = self.write_line(&line);
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn recorded_notifications(&self) -> Vec<serde_json::Value> {
-        self.recorded_notifications
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
     }
 
     /// Check if the host has sent a cancel notification.

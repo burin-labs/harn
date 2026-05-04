@@ -50,51 +50,15 @@ use super::agent_tools::next_call_id;
 thread_local! {
     /// Last-emitted hash for the current transcript's system prompt and
     /// tool schemas. Used to dedup identical payloads across turns so we
-    /// write them once per stage instead of once per request. Cleared on
-    /// stage boundaries via `reset_transcript_dedup()`.
+    /// write them once per stage instead of once per request.
     static LAST_SYSTEM_PROMPT_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
     static LAST_TOOL_SCHEMAS_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
-    /// Current iteration index for any `message` events emitted outside
-    /// the main LLM request path (e.g. nudges appended before the first
-    /// call, tool results between iterations). Set at the top of each
-    /// iteration and cleared on loop exit.
-    static CURRENT_ITERATION: RefCell<Option<usize>> = const { RefCell::new(None) };
-    static TRANSCRIPT_DIR_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-}
-
-pub(crate) struct LlmTranscriptDirGuard {
-    pushed: bool,
-}
-
-impl Drop for LlmTranscriptDirGuard {
-    fn drop(&mut self) {
-        if self.pushed {
-            TRANSCRIPT_DIR_STACK.with(|stack| {
-                let _ = stack.borrow_mut().pop();
-            });
-        }
-    }
-}
-
-pub(crate) fn push_llm_transcript_dir(dir: Option<String>) -> LlmTranscriptDirGuard {
-    let Some(dir) = dir else {
-        return LlmTranscriptDirGuard { pushed: false };
-    };
-    if dir.trim().is_empty() {
-        return LlmTranscriptDirGuard { pushed: false };
-    }
-    TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow_mut().push(dir));
-    LlmTranscriptDirGuard { pushed: true }
 }
 
 fn current_transcript_dir() -> Option<String> {
-    TRANSCRIPT_DIR_STACK
-        .with(|stack| stack.borrow().last().cloned())
-        .or_else(|| {
-            std::env::var("HARN_LLM_TRANSCRIPT_DIR")
-                .ok()
-                .filter(|d| !d.is_empty())
-        })
+    std::env::var("HARN_LLM_TRANSCRIPT_DIR")
+        .ok()
+        .filter(|d| !d.is_empty())
 }
 
 fn hash_str(value: &str) -> u64 {
@@ -118,25 +82,6 @@ fn verbose_llm_transcript_enabled() -> bool {
             matches!(normalized.as_str(), "1" | "true" | "yes" | "on" | "full")
         })
         .unwrap_or(false)
-}
-
-/// Clear the dedup state. Call at the start of a new stage so the first
-/// turn always emits system_prompt and tool_schemas events.
-pub(crate) fn reset_transcript_dedup() {
-    LAST_SYSTEM_PROMPT_HASH.with(|cell| *cell.borrow_mut() = None);
-    LAST_TOOL_SCHEMAS_HASH.with(|cell| *cell.borrow_mut() = None);
-    CURRENT_ITERATION.with(|cell| *cell.borrow_mut() = None);
-}
-
-/// Record the iteration index that applies to any `message` events
-/// emitted until the next call. Message events emitted before any
-/// iteration has started carry `iteration: null`.
-pub(crate) fn set_current_iteration(iteration: Option<usize>) {
-    CURRENT_ITERATION.with(|cell| *cell.borrow_mut() = iteration);
-}
-
-fn current_iteration() -> Option<usize> {
-    CURRENT_ITERATION.with(|cell| *cell.borrow())
 }
 
 /// Classify whether a VmError from an LLM call is transient and worth
@@ -365,38 +310,6 @@ pub(crate) fn append_llm_observability_entry(
     append_llm_transcript_entry(&serde_json::Value::Object(fields));
 }
 
-/// Emit a `message` event for an assistant/user/tool message that was just
-/// appended to the visible transcript. One row per message keeps the log
-/// append-only: reconstructing the prompt at turn N is a replay, not a
-/// snapshot diff.
-pub(crate) fn emit_message_event_with_iteration(
-    message: &serde_json::Value,
-    iteration: Option<usize>,
-) {
-    let role = message
-        .get("role")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
-    append_llm_transcript_entry(&serde_json::json!({
-        "type": "message",
-        "timestamp": chrono_now(),
-        "span_id": crate::tracing::current_span_id(),
-        "iteration": iteration,
-        "role": role,
-        "content": message.get("content").cloned().unwrap_or(serde_json::Value::Null),
-        "tool_calls": message.get("tool_calls").cloned(),
-        "tool_call_id": message.get("tool_call_id").cloned(),
-        "name": message.get("name").cloned(),
-    }));
-}
-
-/// Emit a `message` event using the thread-local current iteration.
-/// Preferred entry point for the agent loop; for tests or other callers
-/// that need an explicit iteration, use `emit_message_event_with_iteration`.
-pub(crate) fn emit_message_event(message: &serde_json::Value) {
-    emit_message_event_with_iteration(message, current_iteration());
-}
-
 fn emit_system_prompt_if_changed(system: Option<&str>) {
     let content = system.unwrap_or("");
     let current = hash_str(content);
@@ -583,27 +496,6 @@ pub(super) fn dump_llm_response(
         "thinking_summary": result.thinking_summary,
         "response_ms": response_ms,
         "structural_experiment": structural_experiment,
-    }));
-}
-
-pub(super) fn dump_llm_interpreted_response(
-    iteration: usize,
-    call_id: &str,
-    tool_format: &str,
-    prose: &str,
-    tool_calls: &[serde_json::Value],
-    tool_parse_errors: &[String],
-) {
-    append_llm_transcript_entry(&serde_json::json!({
-        "type": "interpreted_response",
-        "iteration": iteration,
-        "call_id": call_id,
-        "span_id": crate::tracing::current_span_id(),
-        "timestamp": chrono_now(),
-        "tool_format": tool_format,
-        "prose": prose,
-        "tool_calls": tool_calls,
-        "tool_parse_errors": tool_parse_errors,
     }));
 }
 

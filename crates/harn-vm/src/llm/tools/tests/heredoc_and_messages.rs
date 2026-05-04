@@ -1,7 +1,7 @@
 use super::{
-    build_assistant_response_message, build_assistant_tool_message, build_tool_result_message,
-    json, known_tools_set, normalize_tool_args, parse_bare_calls_in_body,
-    parse_native_json_tool_calls, sample_tool_registry,
+    build_assistant_response_message, build_assistant_tool_message, json, known_tools_set,
+    normalize_tool_args, parse_bare_calls_in_body, parse_native_json_tool_calls,
+    sample_tool_registry,
 };
 
 #[test]
@@ -662,16 +662,6 @@ fn assistant_tool_message_uses_ollama_openai_compatible_arguments() {
         message["tool_calls"][0]["function"]["arguments"],
         "{\"path\":\"main.rs\"}"
     );
-}
-
-#[test]
-fn tool_result_message_uses_ollama_tool_name() {
-    let message = build_tool_result_message("call_001", "read", "contents", "ollama");
-
-    assert_eq!(message["role"], "tool");
-    assert_eq!(message["tool_name"], "read");
-    assert_eq!(message["content"], "contents");
-    assert!(message.get("tool_call_id").is_none());
 }
 
 #[test]

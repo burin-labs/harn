@@ -507,7 +507,7 @@ fn try_emit_partial_tool_args(
 
         parsing: None,
     };
-    crate::llm::agent::emit_agent_event_sync(&event);
+    crate::llm::agent_runtime::emit_agent_event_sync(&event);
 }
 
 async fn send_stream_request_with_ollama_warmup(
@@ -693,17 +693,19 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                                 let tool_kind =
                                     crate::orchestration::current_tool_annotations(&name)
                                         .map(|a| a.kind);
-                                crate::llm::agent::emit_agent_event_sync(&AgentEvent::ToolCall {
-                                    session_id: sid.to_string(),
-                                    tool_call_id: tool_call_id.clone(),
-                                    tool_name: name.clone(),
-                                    kind: tool_kind,
-                                    status: ToolCallStatus::Pending,
-                                    raw_input: serde_json::Value::Object(Default::default()),
-                                    audit: crate::orchestration::current_mutation_session(),
+                                crate::llm::agent_runtime::emit_agent_event_sync(
+                                    &AgentEvent::ToolCall {
+                                        session_id: sid.to_string(),
+                                        tool_call_id: tool_call_id.clone(),
+                                        tool_name: name.clone(),
+                                        kind: tool_kind,
+                                        status: ToolCallStatus::Pending,
+                                        raw_input: serde_json::Value::Object(Default::default()),
+                                        audit: crate::orchestration::current_mutation_session(),
 
-                                    parsing: None,
-                                });
+                                        parsing: None,
+                                    },
+                                );
                             }
                             current_tool = Some(ToolBlock {
                                 id,
@@ -948,17 +950,19 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                             let tool_kind =
                                 crate::orchestration::current_tool_annotations(&entry.name)
                                     .map(|a| a.kind);
-                            crate::llm::agent::emit_agent_event_sync(&AgentEvent::ToolCall {
-                                session_id: sid.to_string(),
-                                tool_call_id: entry.tool_call_id.clone(),
-                                tool_name: entry.name.clone(),
-                                kind: tool_kind,
-                                status: ToolCallStatus::Pending,
-                                raw_input: serde_json::Value::Object(Default::default()),
-                                audit: crate::orchestration::current_mutation_session(),
+                            crate::llm::agent_runtime::emit_agent_event_sync(
+                                &AgentEvent::ToolCall {
+                                    session_id: sid.to_string(),
+                                    tool_call_id: entry.tool_call_id.clone(),
+                                    tool_name: entry.name.clone(),
+                                    kind: tool_kind,
+                                    status: ToolCallStatus::Pending,
+                                    raw_input: serde_json::Value::Object(Default::default()),
+                                    audit: crate::orchestration::current_mutation_session(),
 
-                                parsing: None,
-                            });
+                                    parsing: None,
+                                },
+                            );
                             entry.announced = true;
                         }
                     }

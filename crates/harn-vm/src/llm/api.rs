@@ -31,7 +31,6 @@ use super::mock::{
 
 pub(crate) use auth::apply_auth_headers;
 pub(crate) use completion::vm_call_completion_full;
-pub(crate) use context_window::adapt_auto_compact_to_provider;
 pub use context_window::fetch_provider_max_context;
 pub(crate) use errors::{
     classify_llm_error, classify_provider_http_error, LlmErrorInfo, LlmErrorKind, LlmErrorReason,
@@ -44,7 +43,7 @@ pub use ollama::{
     OllamaReadinessResult, OllamaRuntimeSettings, OllamaWarmupResult, HARN_OLLAMA_KEEP_ALIVE_ENV,
     HARN_OLLAMA_NUM_CTX_ENV, OLLAMA_DEFAULT_KEEP_ALIVE, OLLAMA_DEFAULT_NUM_CTX, OLLAMA_HOST_ENV,
 };
-pub(crate) use openai_normalize::{debug_log_message_shapes, normalize_openai_style_messages};
+pub(crate) use openai_normalize::normalize_openai_style_messages;
 pub(crate) use options::{
     push_unique_anthropic_beta_feature, DeltaSender, LlmCallOptions, LlmRequestPayload,
     LlmRouteAlternative, LlmRouteFallback, LlmRoutePolicy, LlmRoutingDecision, OutputFormat,

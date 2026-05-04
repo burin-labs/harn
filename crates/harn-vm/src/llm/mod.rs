@@ -11,15 +11,13 @@
 //! - `conversation`: Conversation management builtins
 //! - `config_builtins`: Provider configuration query builtins
 
-mod agent;
 mod agent_config;
 mod agent_observe;
+mod agent_runtime;
 mod agent_session_host;
 mod agent_tools;
 pub(crate) mod api;
-pub(crate) mod autonomy_budget;
 pub mod capabilities;
-mod compaction;
 mod config_builtins;
 pub(crate) mod content;
 mod conversation;
@@ -28,7 +26,6 @@ pub(crate) mod cost_route;
 pub(crate) mod daemon;
 pub(crate) mod fake;
 pub(crate) mod helpers;
-pub(crate) mod ledger;
 pub(crate) mod mock;
 pub(crate) mod permissions;
 pub mod plan;
@@ -36,7 +33,6 @@ pub mod readiness;
 pub(crate) mod schema_recover;
 pub(crate) mod structural_experiments;
 pub(crate) mod structured_envelope;
-pub(crate) mod tool_search;
 mod transcript_stats;
 
 use std::sync::OnceLock;
@@ -106,9 +102,7 @@ pub use fake::{
     fake_llm_captured_calls, install_fake_llm_script, FakeLlmCall, FakeLlmError, FakeLlmEvent,
     FakeLlmGuard, FakeLlmScript, FakeLlmTurn, FakeStopReason,
 };
-pub use mock::{
-    drain_tool_recordings, load_tool_replay_fixtures, set_tool_recording_mode, ToolRecordingMode,
-};
+pub use mock::drain_tool_recordings;
 mod healthcheck;
 pub(crate) mod provider;
 pub(crate) mod providers;
@@ -173,11 +167,11 @@ pub use self::api::{
 };
 
 pub fn install_current_host_bridge(bridge: Rc<crate::bridge::HostBridge>) {
-    agent::install_current_host_bridge(bridge);
+    agent_runtime::install_current_host_bridge(bridge);
 }
 
 pub fn clear_current_host_bridge() {
-    agent::clear_current_host_bridge();
+    agent_runtime::clear_current_host_bridge();
 }
 
 pub(crate) fn append_observability_sidecar_entry(
@@ -440,22 +434,23 @@ fn join_limited_keys(keys: &[String]) -> String {
     )
 }
 
-pub use self::agent::{
-    current_agent_session_id, drain_global_pending_feedback, push_pending_feedback_global,
-    register_session_end_hook, wait_for_global_pending_feedback,
-};
-pub(crate) use self::agent::{current_host_bridge, emit_agent_event as emit_live_agent_event};
 pub(crate) use self::agent_config::agent_loop_result_from_llm;
 pub use self::agent_config::{
     register_agent_loop_with_bridge, register_llm_call_structured_with_bridge,
     register_llm_call_with_bridge,
+};
+pub use self::agent_runtime::{
+    current_agent_session_id, drain_global_pending_feedback, push_pending_feedback_global,
+    register_session_end_hook, wait_for_global_pending_feedback,
+};
+pub(crate) use self::agent_runtime::{
+    current_host_bridge, emit_agent_event as emit_live_agent_event,
 };
 pub(crate) use self::api::vm_call_llm_full;
 pub use self::api::{
     fetch_provider_max_context, probe_openai_compatible_model, selected_model_for_provider,
     supports_model_readiness_probe, ModelReadiness,
 };
-pub(crate) use self::compaction::resolve_agent_loop_auto_compact;
 pub use self::cost::{calculate_cost_for_provider, peek_total_cost};
 pub use self::healthcheck::{
     build_healthcheck_url, run_provider_healthcheck, run_provider_healthcheck_with_options,
@@ -483,7 +478,6 @@ pub fn reset_llm_state() {
     mock::reset_llm_mock_state();
     trigger_predicate::reset_trigger_predicate_state();
     capabilities::clear_user_overrides();
-    autonomy_budget::reset_autonomy_budget_state();
     // Per-`@step` registry, active stack, and completed-step log are
     // thread-local; clear them between runs to prevent stale step
     // metadata from one program leaking into the next.
@@ -982,7 +976,7 @@ async fn host_agent_capture_events_impl(args: Vec<VmValue>) -> Result<VmValue, V
         session_id,
         events: captured_events.clone(),
     });
-    let _guard = agent::LoopSinkGuard::install(Some(sink));
+    let _guard = agent_runtime::LoopSinkGuard::install(Some(sink));
     let mut child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
         VmError::Runtime(
             "__host_agent_capture_events requires an async builtin VM context".to_string(),
@@ -1235,7 +1229,7 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
     .await?
     {
         match permission {
-            permissions::PermissionCheck::Granted { .. } => {}
+            permissions::PermissionCheck::Granted => {}
             permissions::PermissionCheck::Denied { reason, .. } => {
                 return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                     &tool_name,

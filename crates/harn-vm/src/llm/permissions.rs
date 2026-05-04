@@ -33,7 +33,7 @@ enum PermissionMatcher {
 }
 
 pub(crate) enum PermissionCheck {
-    Granted { reason: String, escalated: bool },
+    Granted,
     Denied { reason: String, escalated: bool },
 }
 
@@ -212,7 +212,7 @@ pub(crate) async fn check_dynamic_permission(
             PermissionCheck::Denied { reason, escalated } => {
                 return Ok(Some(PermissionCheck::Denied { reason, escalated }));
             }
-            grant @ PermissionCheck::Granted { .. } => {
+            grant @ PermissionCheck::Granted => {
                 grant_result = Some(grant);
             }
         }
@@ -230,10 +230,7 @@ async fn check_one_dynamic_permission(
 ) -> Result<PermissionCheck, VmError> {
     let grant_key = session_grant_key(scope_index, tool_name, args);
     if session_grants.contains(&grant_key) {
-        return Ok(PermissionCheck::Granted {
-            reason: "session grant".to_string(),
-            escalated: false,
-        });
+        return Ok(PermissionCheck::Granted);
     }
 
     let denied = first_matching_rule(&policy.deny, tool_name, args).await?;
@@ -255,10 +252,7 @@ async fn check_one_dynamic_permission(
     };
 
     let Some(reason) = denial_reason else {
-        return Ok(PermissionCheck::Granted {
-            reason: "permission allow rule matched".to_string(),
-            escalated: false,
-        });
+        return Ok(PermissionCheck::Granted);
     };
 
     let Some(on_escalation) = policy.on_escalation.as_ref() else {
@@ -275,12 +269,7 @@ async fn check_one_dynamic_permission(
         if matches!(response.scope, GrantScope::Session) {
             session_grants.insert(grant_key);
         }
-        Ok(PermissionCheck::Granted {
-            reason: response
-                .reason
-                .unwrap_or_else(|| "permission escalation granted".to_string()),
-            escalated: true,
-        })
+        Ok(PermissionCheck::Granted)
     } else {
         Ok(PermissionCheck::Denied {
             reason: response
@@ -591,27 +580,6 @@ async fn emit_tier_promotion_if_needed(
             &format!("failed to append permission escalation trust record: {error}"),
         );
     }
-}
-
-pub(crate) fn permission_transcript_event(
-    kind: &str,
-    tool_name: &str,
-    args: &serde_json::Value,
-    reason: &str,
-    escalated: bool,
-) -> VmValue {
-    crate::llm::helpers::transcript_event(
-        kind,
-        "tool",
-        "internal",
-        reason,
-        Some(serde_json::json!({
-            "tool_name": tool_name,
-            "arguments": args,
-            "reason": reason,
-            "escalated": escalated,
-        })),
-    )
 }
 
 fn session_grant_key(scope_index: usize, tool_name: &str, args: &serde_json::Value) -> String {
