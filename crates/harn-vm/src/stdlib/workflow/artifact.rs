@@ -141,9 +141,3 @@ pub(super) fn append_child_run_record(
         .retain(|existing| existing.worker_id != child.worker_id);
     run.child_runs.push(child);
 }
-
-pub(super) fn enqueue_unique(queue: &mut VecDeque<String>, node_id: String) {
-    if !queue.iter().any(|queued| queued == &node_id) {
-        queue.push_back(node_id);
-    }
-}

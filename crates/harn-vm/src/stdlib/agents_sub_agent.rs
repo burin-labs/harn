@@ -608,157 +608,6 @@ fn parse_structured_sub_agent_data(
     })
 }
 
-async fn resolve_sub_agent_loop_options(
-    spec: &SubAgentRunSpec,
-) -> Result<BTreeMap<String, VmValue>, VmError> {
-    let resolved = crate::stdlib::call_harn_stdlib_function(
-        "std/agent/options",
-        "agent_loop_options",
-        &[VmValue::Dict(Rc::new(spec.options.clone()))],
-    )
-    .await?;
-    resolved
-        .as_dict()
-        .cloned()
-        .ok_or_else(|| VmError::Runtime("agent_loop_options must return a dict".to_string()))
-}
-
-async fn sub_agent_loop_options(
-    spec: &SubAgentRunSpec,
-) -> Result<crate::llm::AgentLoopConfig, VmError> {
-    let options = Some(resolve_sub_agent_loop_options(spec).await?);
-    let max_iterations = crate::llm::helpers::opt_int(&options, "max_iterations")
-        .ok_or_else(|| VmError::Runtime("agent_loop_options omitted max_iterations".to_string()))?;
-    let max_nudges = crate::llm::helpers::opt_int(&options, "max_nudges")
-        .ok_or_else(|| VmError::Runtime("agent_loop_options omitted max_nudges".to_string()))?;
-    let tool_retries = crate::llm::helpers::opt_int(&options, "tool_retries")
-        .ok_or_else(|| VmError::Runtime("agent_loop_options omitted tool_retries".to_string()))?;
-    let schema_retries = crate::llm::helpers::opt_int(&options, "schema_retries")
-        .ok_or_else(|| VmError::Runtime("agent_loop_options omitted schema_retries".to_string()))?
-        as usize;
-    let tool_backoff_ms = crate::llm::helpers::opt_int(&options, "tool_backoff_ms").unwrap_or(1000);
-    let provider = crate::llm::helpers::opt_str(&options, "provider").unwrap_or_default();
-    let model = crate::llm::helpers::opt_str(&options, "model").unwrap_or_default();
-    let tool_format = crate::llm::helpers::opt_str(&options, "tool_format")
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| crate::llm_config::default_tool_format(&model, &provider));
-    let done_sentinel = crate::llm::helpers::opt_str(&options, "done_sentinel");
-    let break_unless_phase = crate::llm::helpers::opt_str(&options, "break_unless_phase");
-    let policy = options.as_ref().and_then(|o| o.get("policy")).map(|v| {
-        serde_json::from_value::<CapabilityPolicy>(crate::llm::helpers::vm_value_to_json(v))
-            .unwrap_or_default()
-    });
-    let approval_policy = options
-        .as_ref()
-        .and_then(|o| o.get("approval_policy"))
-        .map(|v| {
-            serde_json::from_value::<crate::orchestration::ToolApprovalPolicy>(
-                crate::llm::helpers::vm_value_to_json(v),
-            )
-            .unwrap_or_default()
-        });
-    let permissions = crate::llm::permissions::parse_dynamic_permission_policy(
-        options.as_ref().and_then(|o| o.get("permissions")),
-        "sub_agent_run",
-    )?;
-    let turn_policy = options
-        .as_ref()
-        .and_then(|o| o.get("turn_policy"))
-        .map(|v| {
-            serde_json::from_value::<crate::orchestration::TurnPolicy>(
-                crate::llm::helpers::vm_value_to_json(v),
-            )
-            .unwrap_or_default()
-        });
-    let native_tool_fallback = crate::llm::helpers::opt_str(&options, "native_tool_fallback")
-        .map(|value| {
-            crate::orchestration::NativeToolFallbackPolicy::parse(&value).ok_or_else(|| {
-                VmError::Runtime(format!(
-                    "sub_agent_run: native_tool_fallback must be one of allow, allow_once, reject; got `{value}`"
-                ))
-            })
-        })
-        .transpose()?
-        .unwrap_or_default();
-    let (skill_registry, skill_match, working_files) = crate::llm::parse_skill_config(&options);
-    let mcp_servers = crate::llm::parse_mcp_server_specs(&options)?;
-    Ok(crate::llm::AgentLoopConfig {
-        persistent: crate::llm::helpers::opt_bool(&options, "persistent"),
-        max_iterations: max_iterations as usize,
-        max_nudges: max_nudges as usize,
-        nudge: crate::llm::helpers::opt_str(&options, "nudge"),
-        done_sentinel,
-        break_unless_phase,
-        tool_retries: tool_retries as usize,
-        tool_backoff_ms: tool_backoff_ms as u64,
-        schema_retries,
-        schema_retry_nudge: crate::llm::parse_schema_nudge(&options),
-        tool_format,
-        native_tool_fallback,
-        auto_compact: None,
-        policy,
-        command_policy: crate::llm::parse_command_policy_from_options(&options, "sub_agent_run")?,
-        permissions,
-        approval_policy,
-        daemon: false,
-        daemon_config: Default::default(),
-        llm_retries: crate::llm::helpers::opt_int(&options, "llm_retries")
-            .ok_or_else(|| VmError::Runtime("agent_loop_options omitted llm_retries".to_string()))?
-            as usize,
-        llm_backoff_ms: crate::llm::helpers::opt_int(&options, "llm_backoff_ms").unwrap_or(2000)
-            as u64,
-        token_budget: crate::llm::helpers::opt_int(&options, "token_budget"),
-        budget: crate::llm::cost::parse_budget_envelope(options.as_ref())?,
-        exit_when_verified: crate::llm::helpers::opt_bool(&options, "exit_when_verified"),
-        loop_detect_warn: crate::llm::helpers::opt_int(&options, "loop_detect_warn").unwrap_or(2)
-            as usize,
-        loop_detect_block: crate::llm::helpers::opt_int(&options, "loop_detect_block").unwrap_or(3)
-            as usize,
-        loop_detect_skip: crate::llm::helpers::opt_int(&options, "loop_detect_skip").unwrap_or(4)
-            as usize,
-        tool_examples: crate::llm::helpers::opt_str(&options, "tool_examples"),
-        turn_policy,
-        stop_after_successful_tools: crate::llm::helpers::opt_str_list(
-            &options,
-            "stop_after_successful_tools",
-        ),
-        require_successful_tools: crate::llm::helpers::opt_str_list(
-            &options,
-            "require_successful_tools",
-        ),
-        session_id: spec.session_id.clone(),
-        event_sink: None,
-        task_ledger: Default::default(),
-        post_turn_callback: options
-            .as_ref()
-            .and_then(|o| o.get("post_turn_callback"))
-            .filter(|v| matches!(v, VmValue::Closure(_)))
-            .cloned(),
-        verify_completion: options
-            .as_ref()
-            .and_then(|o| o.get("verify_completion"))
-            .filter(|v| matches!(v, VmValue::Closure(_)))
-            .cloned(),
-        verify_completion_judge: crate::llm::parse_completion_judge_option(&options)?,
-        done_judge: crate::llm::parse_done_judge_option(&options)?,
-        max_verify_attempts: crate::llm::helpers::opt_int(&options, "max_verify_attempts")
-            .filter(|n| *n >= 0)
-            .map(|n| n as usize)
-            .unwrap_or(crate::llm::DEFAULT_MAX_VERIFY_ATTEMPTS),
-        llm_transcript_dir: crate::llm::helpers::opt_str(&options, "llm_transcript_dir"),
-        skill_registry,
-        skill_match,
-        working_files,
-        mcp_servers,
-        mcp_clients: Default::default(),
-        autonomy_budget: crate::llm::autonomy_budget::parse_autonomy_budget(
-            options.as_ref(),
-            &spec.session_id,
-            "sub_agent_run",
-        )?,
-    })
-}
-
 pub(super) async fn execute_sub_agent(
     spec: SubAgentRunSpec,
 ) -> Result<SubAgentExecutionResult, VmError> {
@@ -772,20 +621,30 @@ pub(super) async fn execute_sub_agent(
         sub_agent_start_event(&spec),
     );
 
+    let mut loop_options = spec.options.clone();
+    loop_options.insert(
+        "session_id".to_string(),
+        VmValue::String(Rc::from(spec.session_id.clone())),
+    );
     let args = vec![
         VmValue::String(Rc::from(spec.task.clone())),
         spec.system
             .as_ref()
             .map(|system| VmValue::String(Rc::from(system.clone())))
             .unwrap_or(VmValue::Nil),
-        VmValue::Dict(Rc::new(spec.options.clone())),
+        VmValue::Dict(Rc::new(loop_options)),
     ];
-    let mut llm_opts = crate::llm::helpers::extract_llm_options(&args)?;
-    let config = sub_agent_loop_options(&spec).await?;
-    let result = crate::llm::run_agent_loop_internal(&mut llm_opts, config).await;
+    let result = crate::stdlib::harn_entry::call_harn_export_by_name(
+        "std/agent/loop",
+        "agent_loop",
+        "sub_agent_run",
+        &args,
+    )
+    .await;
 
     let (result, transcript) = match result {
-        Ok(result) => {
+        Ok(result_value) => {
+            let result = crate::llm::vm_value_to_json(&result_value);
             let transcript_json = result.get("transcript").cloned().unwrap_or_default();
             (result, crate::stdlib::json_to_vm_value(&transcript_json))
         }
@@ -1083,6 +942,9 @@ mod tests {
             parent_session_id: Some(parent.clone()),
         };
 
+        let mut vm = crate::Vm::new();
+        crate::register_vm_stdlib(&mut vm);
+        let _vm_context = crate::vm::install_async_builtin_child_vm(vm);
         let result = execute_sub_agent(spec).await.unwrap();
         assert_eq!(result.payload["ok"].as_bool(), Some(true));
 

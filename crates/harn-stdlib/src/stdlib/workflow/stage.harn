@@ -293,6 +293,21 @@ pub fn workflow_classify_stage_outcome(config = nil) {
   return {outcome: outcome, branch: branch}
 }
 
+/** workflow_stage_attempt_outcome. */
+pub fn workflow_stage_attempt_outcome(config = nil) {
+  let node = config?.node ?? {}
+  let result = config?.result ?? {}
+  let verification = if config?.verification != nil {
+    config.verification
+  } else {
+    workflow_evaluate_verification({verify: node?.verify, result: result})
+  }
+  let classified = workflow_classify_stage_outcome(
+    {node_kind: __stage_string(node?.kind, ""), result: result, verification: verification},
+  )
+  return {outcome: classified.outcome, branch: classified.branch, verification: verification}
+}
+
 /** workflow_prepare_static_stage. */
 pub fn workflow_prepare_static_stage(config = nil) {
   let node_id = __stage_string(config?.node_id, "stage")

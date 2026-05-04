@@ -1,5 +1,6 @@
 //! Top-level workflow executor and builtin registration.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 
@@ -8,8 +9,8 @@ use crate::orchestration::{
     install_workflow_skill_context, load_run_record, normalize_run_record,
     normalize_workflow_value, pop_execution_policy, push_execution_policy, validate_workflow,
     workflow_verification_contracts, ArtifactRecord, MutationSessionRecord, RunRecord,
-    RunStageRecord, RunTransitionRecord, WorkflowEdge, WorkflowGraph, WorkflowSkillContext,
-    WorkflowSkillContextGuard,
+    RunStageRecord, RunTransitionRecord, VerificationContract, WorkflowEdge, WorkflowGraph,
+    WorkflowSkillContext, WorkflowSkillContextGuard,
 };
 use crate::stdlib::harn_entry::register_harn_entrypoint_category;
 use crate::stdlib::registration::{
@@ -30,12 +31,20 @@ use super::policy::{
     apply_runtime_node_overrides, effective_node_approval_policy, effective_node_policy,
     normalize_policy, set_node_policy,
 };
-use super::stage::{execute_stage_attempts, replay_stage};
-use super::usage::{llm_usage_delta, llm_usage_snapshot};
+use super::stage::{execute_stage_attempts, replay_stage, ExecutedStage};
+use super::usage::{llm_usage_delta, llm_usage_snapshot, UsageSnapshot};
 
 const WORKFLOW_STDLIB_ENTRYPOINT_CATEGORY: &str = "workflow.stdlib";
-const HOST_WORKFLOW_GRAPH_RUN_BUILTIN: &str = "__host_workflow_graph_run";
+const HOST_WORKFLOW_PREPARE_RUN_BUILTIN: &str = "__host_workflow_prepare_run";
+const HOST_WORKFLOW_EXECUTE_STAGE_BUILTIN: &str = "__host_workflow_execute_stage";
+const HOST_WORKFLOW_RECORD_TRANSITIONS_BUILTIN: &str = "__host_workflow_record_transitions";
+const HOST_WORKFLOW_FINALIZE_RUN_BUILTIN: &str = "__host_workflow_finalize_run";
 type PostHookFn = Rc<dyn Fn(&str, &str) -> crate::orchestration::PostToolAction>;
+
+thread_local! {
+    static WORKFLOW_RUN_STATES: RefCell<BTreeMap<String, WorkflowRunState>> =
+        const { RefCell::new(BTreeMap::new()) };
+}
 
 const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("workflow_graph", workflow_graph_builtin)
@@ -129,16 +138,37 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("microcompact(text, max_chars?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
         .doc("Compact long tool output with the host microcompaction primitive."),
+    SyncBuiltin::new(
+        HOST_WORKFLOW_PREPARE_RUN_BUILTIN,
+        host_workflow_prepare_run_builtin,
+    )
+    .signature("__host_workflow_prepare_run(task, graph, artifacts?, options?)")
+    .arity(VmBuiltinArity::Range { min: 2, max: 4 })
+    .doc("Prepare low-level workflow run state for the Harn stdlib workflow executor."),
+    SyncBuiltin::new(
+        HOST_WORKFLOW_RECORD_TRANSITIONS_BUILTIN,
+        host_workflow_record_transitions_builtin,
+    )
+    .signature("__host_workflow_record_transitions(state_id, ready_nodes, stage, edges)")
+    .arity(VmBuiltinArity::Exact(4))
+    .doc("Record workflow stage transitions and checkpoint low-level run state."),
+    SyncBuiltin::new(
+        HOST_WORKFLOW_FINALIZE_RUN_BUILTIN,
+        host_workflow_finalize_run_builtin,
+    )
+    .signature("__host_workflow_finalize_run(state_id, ready_nodes)")
+    .arity(VmBuiltinArity::Exact(2))
+    .doc("Finalize low-level workflow run state and persist the final checkpoint."),
 ];
 
 const WORKFLOW_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     async_builtin!(
-        HOST_WORKFLOW_GRAPH_RUN_BUILTIN,
-        host_workflow_graph_run_builtin
+        HOST_WORKFLOW_EXECUTE_STAGE_BUILTIN,
+        host_workflow_execute_stage_builtin
     )
-    .signature("__host_workflow_graph_run(task, graph, artifacts?, options?)")
-    .arity(VmBuiltinArity::Range { min: 2, max: 4 })
-    .doc("Execute the low-level workflow graph primitive used by Harn stdlib workflow facades."),
+    .signature("__host_workflow_execute_stage(state_id, node_id, ready_nodes, options?)")
+    .arity(VmBuiltinArity::Range { min: 3, max: 4 })
+    .doc("Execute one low-level workflow stage primitive for the Harn stdlib workflow executor."),
     async_builtin!("transcript_auto_compact", transcript_auto_compact_builtin)
         .signature("transcript_auto_compact(messages, options?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
@@ -149,46 +179,6 @@ const WORKFLOW_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
     .category("workflow.host")
     .sync(WORKFLOW_SYNC_PRIMITIVES)
     .async_(WORKFLOW_ASYNC_PRIMITIVES);
-
-#[derive(Debug, serde::Deserialize)]
-struct WorkflowJoinReadiness {
-    ready: bool,
-}
-
-async fn workflow_join_ready(
-    graph: &WorkflowGraph,
-    node_id: &str,
-    node: &crate::orchestration::WorkflowNode,
-    completed_nodes: &BTreeSet<String>,
-) -> Result<bool, VmError> {
-    let payload = serde_json::json!({
-        "graph": graph,
-        "node_id": node_id,
-        "node": node,
-        "completed_nodes": completed_nodes.iter().cloned().collect::<Vec<_>>(),
-    });
-    let readiness: WorkflowJoinReadiness = crate::stdlib::call_harn_stdlib_typed(
-        "std/workflow/schedule",
-        "workflow_join_readiness",
-        payload,
-    )
-    .await?;
-    Ok(readiness.ready)
-}
-
-async fn workflow_next_edges(
-    graph: &WorkflowGraph,
-    current: &str,
-    branch: Option<&str>,
-) -> Result<Vec<WorkflowEdge>, VmError> {
-    let payload = serde_json::json!({
-        "graph": graph,
-        "current": current,
-        "branch": branch,
-    });
-    crate::stdlib::call_harn_stdlib_typed("std/workflow/schedule", "workflow_next_edges", payload)
-        .await
-}
 
 fn parse_trigger_event_option(
     value: Option<&VmValue>,
@@ -236,12 +226,158 @@ fn validate_workflow_skill_registry(value: VmValue) -> Option<VmValue> {
     }
 }
 
-pub(in crate::stdlib) async fn execute_workflow(
+#[derive(Clone, Debug)]
+struct WorkflowRunState {
+    state_id: String,
+    graph: WorkflowGraph,
+    run: RunRecord,
+    artifacts: Vec<ArtifactRecord>,
+    transcript: Option<serde_json::Value>,
+    ready_nodes: Vec<String>,
+    completed_nodes: Vec<String>,
+    persist_path: String,
+    replay_mode: Option<String>,
+    replay_stages: Option<Vec<RunStageRecord>>,
+    workflow_verification_contracts: Vec<VerificationContract>,
+    mutation_session: MutationSessionRecord,
+    run_usage_before: UsageSnapshot,
+    workflow_span_id: u64,
+    max_steps: usize,
+}
+
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct WorkflowExecutedStageRecord {
+    stage_id: String,
+    node_id: String,
+    branch: Option<String>,
+    consumed_artifact_ids: Vec<String>,
+    produced_artifact_ids: Vec<String>,
+}
+
+fn parse_options_arg(args: &[VmValue], index: usize) -> BTreeMap<String, VmValue> {
+    args.get(index)
+        .and_then(|v| v.as_dict())
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn string_list_to_vm(values: &[String]) -> VmValue {
+    VmValue::List(Rc::new(
+        values
+            .iter()
+            .map(|value| VmValue::String(Rc::from(value.as_str())))
+            .collect(),
+    ))
+}
+
+fn parse_state_id_arg(value: Option<&VmValue>, context: &str) -> Result<String, VmError> {
+    value
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| VmError::Runtime(format!("{context}: missing workflow state id")))
+}
+
+fn parse_string_list_arg(value: Option<&VmValue>, context: &str) -> Result<Vec<String>, VmError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    match value {
+        VmValue::Nil => Ok(Vec::new()),
+        VmValue::List(values) => values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| match value {
+                VmValue::String(text) => Ok(text.to_string()),
+                _ => Err(VmError::Runtime(format!(
+                    "{context}: expected string at index {index}"
+                ))),
+            })
+            .collect(),
+        _ => Err(VmError::Runtime(format!("{context}: expected list"))),
+    }
+}
+
+fn workflow_control_to_vm(
+    state: &WorkflowRunState,
+    include_graph: bool,
+) -> Result<VmValue, VmError> {
+    let mut dict = BTreeMap::new();
+    dict.insert(
+        "state_id".to_string(),
+        VmValue::String(Rc::from(state.state_id.as_str())),
+    );
+    dict.insert(
+        "run_id".to_string(),
+        VmValue::String(Rc::from(state.run.id.as_str())),
+    );
+    dict.insert(
+        "ready_nodes".to_string(),
+        string_list_to_vm(&state.ready_nodes),
+    );
+    dict.insert(
+        "completed_nodes".to_string(),
+        string_list_to_vm(&state.completed_nodes),
+    );
+    dict.insert(
+        "max_steps".to_string(),
+        VmValue::Int(state.max_steps as i64),
+    );
+    if include_graph {
+        dict.insert("graph".to_string(), workflow_graph_to_vm(&state.graph)?);
+    }
+    Ok(VmValue::Dict(Rc::new(dict)))
+}
+
+fn insert_workflow_state(state: WorkflowRunState) {
+    WORKFLOW_RUN_STATES.with(|states| {
+        states.borrow_mut().insert(state.state_id.clone(), state);
+    });
+}
+
+fn remove_workflow_state(state_id: &str, context: &str) -> Result<WorkflowRunState, VmError> {
+    WORKFLOW_RUN_STATES.with(|states| {
+        states.borrow_mut().remove(state_id).ok_or_else(|| {
+            VmError::Runtime(format!("{context}: unknown workflow state id {state_id}"))
+        })
+    })
+}
+
+fn parse_executed_stage_record(
+    value: &VmValue,
+    context: &str,
+) -> Result<WorkflowExecutedStageRecord, VmError> {
+    serde_json::from_value(crate::llm::vm_value_to_json(value))
+        .map_err(|error| VmError::Runtime(format!("{context}: invalid stage record: {error}")))
+}
+
+fn checkpoint_workflow_state(
+    state: &mut WorkflowRunState,
+    last_stage_id: Option<String>,
+    reason: &str,
+) -> Result<(), VmError> {
+    let ready_nodes = VecDeque::from(state.ready_nodes.clone());
+    let completed_nodes = state
+        .completed_nodes
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    checkpoint_run(
+        &mut state.run,
+        &ready_nodes,
+        &completed_nodes,
+        last_stage_id,
+        reason,
+        &state.persist_path,
+    )
+}
+
+fn prepare_workflow_state(
     task: String,
     graph: WorkflowGraph,
     mut artifacts: Vec<ArtifactRecord>,
-    options: BTreeMap<String, VmValue>,
-) -> Result<VmValue, VmError> {
+    options: &BTreeMap<String, VmValue>,
+) -> Result<WorkflowRunState, VmError> {
     crate::llm::enable_tracing();
     crate::tracing::set_tracing_enabled(true);
     let workflow_span_id = crate::tracing::span_start(
@@ -262,14 +398,14 @@ pub(in crate::stdlib) async fn execute_workflow(
     }
     let workflow_verification_contracts = workflow_verification_contracts(&graph)?;
 
-    let resumed_run = match optional_string_option(&options, "resume_path") {
+    let resumed_run = match optional_string_option(options, "resume_path") {
         Some(path) if !path.is_empty() => Some(load_run_record(std::path::Path::new(&path))?),
         _ => match options.get("resume_run") {
             Some(value) => Some(normalize_run_record(value)?),
             None => None,
         },
     };
-    let replay_source = match optional_string_option(&options, "replay_path") {
+    let replay_source = match optional_string_option(options, "replay_path") {
         Some(path) if !path.is_empty() => Some(load_run_record(std::path::Path::new(&path))?),
         _ => match options.get("replay_run") {
             Some(value) => Some(normalize_run_record(value)?),
@@ -288,8 +424,8 @@ pub(in crate::stdlib) async fn execute_workflow(
         }
     });
 
-    let persist_path = optional_string_option(&options, "persist_path")
-        .or_else(|| optional_string_option(&options, "resume_path"))
+    let persist_path = optional_string_option(options, "persist_path")
+        .or_else(|| optional_string_option(options, "resume_path"))
         .unwrap_or_else(|| {
             match std::env::var(crate::runtime_paths::HARN_RUN_DIR_ENV) {
                 Ok(value) if !value.trim().is_empty() => crate::orchestration::default_run_dir(),
@@ -300,9 +436,9 @@ pub(in crate::stdlib) async fn execute_workflow(
             .to_string()
         });
     let execution = parse_execution_record(options.get("execution"))?;
-    let parent_run_id = optional_string_option(&options, "parent_run_id");
+    let parent_run_id = optional_string_option(options, "parent_run_id");
     let root_run_id =
-        optional_string_option(&options, "root_run_id").or_else(|| parent_run_id.clone());
+        optional_string_option(options, "root_run_id").or_else(|| parent_run_id.clone());
 
     let mut run = resumed_run.unwrap_or_else(|| RunRecord {
         type_name: "run_record".to_string(),
@@ -335,7 +471,7 @@ pub(in crate::stdlib) async fn execute_workflow(
         metadata: BTreeMap::new(),
         persisted_path: None,
     });
-    let requested_mutation_scope = optional_string_option(&options, "mutation_scope")
+    let requested_mutation_scope = optional_string_option(options, "mutation_scope")
         .unwrap_or_else(|| {
             execution
                 .as_ref()
@@ -467,20 +603,16 @@ pub(in crate::stdlib) async fn execute_workflow(
         );
     }
 
-    let mut transcript = run
-        .transcript
-        .clone()
-        .map(|value| crate::stdlib::json_to_vm_value(&value));
+    let transcript = run.transcript.clone();
     if !run.artifacts.is_empty() {
         artifacts = run.artifacts.clone();
     }
-    let mut ready_nodes: VecDeque<String> = if run.pending_nodes.is_empty() {
-        VecDeque::from(vec![graph.entry.clone()])
+    let ready_nodes = if run.pending_nodes.is_empty() {
+        vec![graph.entry.clone()]
     } else {
-        VecDeque::from(run.pending_nodes.clone())
+        run.pending_nodes.clone()
     };
-    let mut completed_nodes: BTreeSet<String> = run.completed_nodes.iter().cloned().collect();
-    let mut steps = 0usize;
+    let completed_nodes = run.completed_nodes.clone();
     let max_steps = options
         .get("max_steps")
         .and_then(|v| v.as_int())
@@ -510,18 +642,133 @@ pub(in crate::stdlib) async fn execute_workflow(
             serde_json::json!(replay_source.id.clone()),
         );
     }
-    let mut replay_stages = replay_source
-        .as_ref()
-        .map(|source| VecDeque::from(source.stages.clone()));
-    install_current_mutation_session(Some(mutation_session.clone()));
+
+    let mut state = WorkflowRunState {
+        state_id: uuid::Uuid::now_v7().to_string(),
+        graph,
+        run,
+        artifacts,
+        transcript,
+        ready_nodes,
+        completed_nodes,
+        persist_path,
+        replay_mode,
+        replay_stages: replay_source.map(|source| source.stages),
+        workflow_verification_contracts,
+        mutation_session,
+        run_usage_before,
+        workflow_span_id,
+        max_steps,
+    };
+    checkpoint_workflow_state(&mut state, None, "start")?;
+    Ok(state)
+}
+
+fn stage_metadata(
+    node: &crate::orchestration::WorkflowNode,
+    stage_policy: &crate::orchestration::CapabilityPolicy,
+    executed: &ExecutedStage,
+) -> BTreeMap<String, serde_json::Value> {
+    let mut metadata = [
+        (
+            "model_policy",
+            serde_json::to_value(&node.model_policy).unwrap_or_default(),
+        ),
+        (
+            "auto_compact",
+            serde_json::to_value(&node.auto_compact).unwrap_or_default(),
+        ),
+        (
+            "context_policy",
+            serde_json::to_value(&node.context_policy).unwrap_or_default(),
+        ),
+        (
+            "retry_policy",
+            serde_json::to_value(&node.retry_policy).unwrap_or_default(),
+        ),
+        (
+            "effective_capability_policy",
+            serde_json::to_value(stage_policy).unwrap_or_default(),
+        ),
+        (
+            "input_contract",
+            serde_json::to_value(&node.input_contract).unwrap_or_default(),
+        ),
+        (
+            "output_contract",
+            serde_json::to_value(&node.output_contract).unwrap_or_default(),
+        ),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_string(), value))
+    .collect::<BTreeMap<_, _>>();
+    if let Some(visibility) = &node.output_visibility {
+        metadata.insert(
+            "output_visibility".to_string(),
+            serde_json::json!(visibility),
+        );
+    }
+    if let Some(worker) = executed.result.get("worker") {
+        metadata.insert("worker".to_string(), worker.clone());
+        if let Some(worker_id) = worker.get("id") {
+            metadata.insert("worker_id".to_string(), worker_id.clone());
+        }
+    }
+    if let Some(error) = executed.error.clone() {
+        metadata.insert("error".to_string(), serde_json::json!(error));
+    }
+    for key in [
+        "prompt",
+        "system_prompt",
+        "rendered_context",
+        "verification_contracts",
+        "rendered_verification_context",
+        "selected_artifact_ids",
+        "selected_artifact_titles",
+    ] {
+        if let Some(value) = executed.result.get(key) {
+            metadata.insert(key.to_string(), value.clone());
+        }
+    }
+    if let Some(tool_calling_mode) = executed
+        .result
+        .get("tools")
+        .and_then(|tools| tools.get("mode"))
+    {
+        metadata.insert("tool_calling_mode".to_string(), tool_calling_mode.clone());
+    }
+    metadata
+}
+
+async fn execute_workflow_stage_state(
+    mut state: WorkflowRunState,
+    node_id: String,
+    options: &BTreeMap<String, VmValue>,
+) -> Result<(WorkflowRunState, WorkflowExecutedStageRecord), VmError> {
+    let raw_node = state
+        .graph
+        .nodes
+        .get(&node_id)
+        .cloned()
+        .ok_or_else(|| VmError::Runtime(format!("workflow_execute: missing node {node_id}")))?;
+    let mut node = apply_runtime_node_overrides(raw_node, options);
+    crate::orchestration::inject_workflow_verification_contracts(
+        &mut node,
+        &state.workflow_verification_contracts,
+    );
+    let stage_policy = effective_node_policy(&state.graph, &node)?;
+    let stage_approval = effective_node_approval_policy(&state.graph, &node);
+    let stage_id = format!(
+        "{}:{}:{}",
+        state.run.id,
+        node_id,
+        state.run.stages.len() + 1
+    );
+    let started_at = uuid::Uuid::now_v7().to_string();
+
+    install_current_mutation_session(Some(state.mutation_session.clone()));
     let _mutation_session_guard = MutationSessionResetGuard;
 
-    // Install workflow-level skill wiring so each per-stage agent loop
-    // (execute / verify / plan / subagent — every kind that constructs
-    // an `AgentLoopConfig` through `execute_stage_node`) picks up the
-    // same registry without a new parameter on every signature. Before
-    // this, only direct `agent_loop(...)` callers received `skills:` —
-    // the workflow path silently dropped it.
     let workflow_skill_registry = options
         .get("skills")
         .cloned()
@@ -535,7 +782,7 @@ pub(in crate::stdlib) async fn execute_workflow(
     }
     let _workflow_skill_guard = WorkflowSkillContextGuard;
 
-    let workflow_approval_guard = match mutation_session.approval_policy.clone() {
+    let workflow_approval_guard = match state.mutation_session.approval_policy.clone() {
         Some(policy) => {
             crate::orchestration::push_approval_policy(policy);
             WorkflowApprovalPolicyGuard(true)
@@ -543,250 +790,247 @@ pub(in crate::stdlib) async fn execute_workflow(
         None => WorkflowApprovalPolicyGuard(false),
     };
     let _workflow_approval_guard = workflow_approval_guard;
-    checkpoint_run(
-        &mut run,
-        &ready_nodes,
-        &completed_nodes,
-        None,
-        "start",
-        &persist_path,
-    )?;
 
-    while steps < max_steps && !ready_nodes.is_empty() {
-        steps += 1;
-        let current = ready_nodes.pop_front().unwrap_or_default();
-        let node =
-            graph.nodes.get(&current).cloned().ok_or_else(|| {
-                VmError::Runtime(format!("workflow_execute: missing node {current}"))
-            })?;
-        if node.kind == "join"
-            && !workflow_join_ready(&graph, &current, &node, &completed_nodes).await?
-        {
-            super::artifact::enqueue_unique(&mut ready_nodes, current.clone());
-            continue;
-        }
-        let mut node = apply_runtime_node_overrides(node, &options);
-        crate::orchestration::inject_workflow_verification_contracts(
-            &mut node,
-            &workflow_verification_contracts,
-        );
-        let stage_policy = effective_node_policy(&graph, &node)?;
-        let stage_approval = effective_node_approval_policy(&graph, &node);
-
-        let stage_id = format!("{}:{}:{}", run.id, current, run.stages.len() + 1);
-        let started_at = uuid::Uuid::now_v7().to_string();
-        push_execution_policy(stage_policy.clone());
-        crate::orchestration::push_approval_policy(stage_approval.clone());
-        let _runtime_context_guard = crate::runtime_context::install_runtime_context_overlay(
-            crate::runtime_context::RuntimeContextOverlay {
-                workflow_id: Some(run.workflow_id.clone()),
-                run_id: Some(run.id.clone()),
-                stage_id: Some(stage_id.clone()),
-                worker_id: None,
-            },
-        );
-        let executed_result = if replay_mode.as_deref() == Some("deterministic") {
-            match replay_stages.as_mut() {
-                Some(stages) => replay_stage(&current, stages),
-                None => Err(VmError::Runtime(
-                    "replay_mode requires replay_run or replay_path".to_string(),
-                )),
+    push_execution_policy(stage_policy.clone());
+    crate::orchestration::push_approval_policy(stage_approval.clone());
+    let _runtime_context_guard = crate::runtime_context::install_runtime_context_overlay(
+        crate::runtime_context::RuntimeContextOverlay {
+            workflow_id: Some(state.run.workflow_id.clone()),
+            run_id: Some(state.run.id.clone()),
+            stage_id: Some(stage_id.clone()),
+            worker_id: None,
+        },
+    );
+    let transcript = state
+        .transcript
+        .as_ref()
+        .map(crate::stdlib::json_to_vm_value);
+    let executed_result = if state.replay_mode.as_deref() == Some("deterministic") {
+        match state.replay_stages.take() {
+            Some(stages) => {
+                let mut stages = VecDeque::from(stages);
+                let result = replay_stage(&node_id, &mut stages);
+                state.replay_stages = Some(stages.into_iter().collect());
+                result
             }
-        } else {
-            execute_stage_attempts(&task, &current, &node, &artifacts, transcript.clone()).await
-        };
-        crate::orchestration::pop_approval_policy();
-        pop_execution_policy();
-        let executed = match executed_result {
-            Ok(executed) => executed,
-            Err(error) => return Err(error),
-        };
+            None => Err(VmError::Runtime(
+                "replay_mode requires replay_run or replay_path".to_string(),
+            )),
+        }
+    } else {
+        execute_stage_attempts(
+            &state.run.task,
+            &node_id,
+            &node,
+            &state.artifacts,
+            transcript,
+        )
+        .await
+    };
+    crate::orchestration::pop_approval_policy();
+    pop_execution_policy();
+    let executed = executed_result?;
 
-        transcript = executed.transcript.clone();
-        artifacts.extend(executed.artifacts.clone());
-        run.artifacts = artifacts.clone();
-        run.transcript = transcript
-            .clone()
-            .map(|value| crate::llm::vm_value_to_json(&value));
+    state.transcript = executed
+        .transcript
+        .as_ref()
+        .map(crate::llm::vm_value_to_json);
+    state.artifacts.extend(executed.artifacts.clone());
+    state.run.artifacts = state.artifacts.clone();
+    state.run.transcript = state.transcript.clone();
 
-        let mut stage_metadata = BTreeMap::new();
-        stage_metadata.insert(
-            "model_policy".to_string(),
-            serde_json::to_value(&node.model_policy).unwrap_or_default(),
-        );
-        stage_metadata.insert(
-            "auto_compact".to_string(),
-            serde_json::to_value(&node.auto_compact).unwrap_or_default(),
-        );
-        if let Some(ref visibility) = node.output_visibility {
-            stage_metadata.insert(
-                "output_visibility".to_string(),
-                serde_json::Value::String(visibility.clone()),
-            );
-        }
-        stage_metadata.insert(
-            "context_policy".to_string(),
-            serde_json::to_value(&node.context_policy).unwrap_or_default(),
-        );
-        stage_metadata.insert(
-            "retry_policy".to_string(),
-            serde_json::to_value(&node.retry_policy).unwrap_or_default(),
-        );
-        stage_metadata.insert(
-            "effective_capability_policy".to_string(),
-            serde_json::to_value(&stage_policy).unwrap_or_default(),
-        );
-        stage_metadata.insert(
-            "input_contract".to_string(),
-            serde_json::to_value(&node.input_contract).unwrap_or_default(),
-        );
-        stage_metadata.insert(
-            "output_contract".to_string(),
-            serde_json::to_value(&node.output_contract).unwrap_or_default(),
-        );
-        if let Some(worker) = executed.result.get("worker") {
-            stage_metadata.insert("worker".to_string(), worker.clone());
-            if let Some(worker_id) = worker.get("id") {
-                stage_metadata.insert("worker_id".to_string(), worker_id.clone());
-            }
-        }
-        if let Some(error) = executed.error.clone() {
-            stage_metadata.insert("error".to_string(), serde_json::json!(error));
-        }
-        if let Some(prompt) = executed.result.get("prompt") {
-            stage_metadata.insert("prompt".to_string(), prompt.clone());
-        }
-        if let Some(system_prompt) = executed.result.get("system_prompt") {
-            stage_metadata.insert("system_prompt".to_string(), system_prompt.clone());
-        }
-        if let Some(rendered_context) = executed.result.get("rendered_context") {
-            stage_metadata.insert("rendered_context".to_string(), rendered_context.clone());
-        }
-        if let Some(verification_contracts) = executed.result.get("verification_contracts") {
-            stage_metadata.insert(
-                "verification_contracts".to_string(),
-                verification_contracts.clone(),
-            );
-        }
-        if let Some(rendered_verification_context) =
-            executed.result.get("rendered_verification_context")
-        {
-            stage_metadata.insert(
-                "rendered_verification_context".to_string(),
-                rendered_verification_context.clone(),
-            );
-        }
-        if let Some(selected_artifact_ids) = executed.result.get("selected_artifact_ids") {
-            stage_metadata.insert(
-                "selected_artifact_ids".to_string(),
-                selected_artifact_ids.clone(),
-            );
-        }
-        if let Some(selected_artifact_titles) = executed.result.get("selected_artifact_titles") {
-            stage_metadata.insert(
-                "selected_artifact_titles".to_string(),
-                selected_artifact_titles.clone(),
-            );
-        }
-        if let Some(tool_calling_mode) = executed
+    let produced_artifact_ids = executed
+        .artifacts
+        .iter()
+        .map(|artifact| artifact.id.clone())
+        .collect::<Vec<_>>();
+    let metadata = stage_metadata(&node, &stage_policy, &executed);
+    state.run.stages.push(RunStageRecord {
+        id: stage_id.clone(),
+        node_id: node_id.clone(),
+        kind: node.kind.clone(),
+        status: executed.status.clone(),
+        outcome: executed.outcome.clone(),
+        branch: executed.branch.clone(),
+        started_at,
+        finished_at: Some(uuid::Uuid::now_v7().to_string()),
+        visible_text: executed
             .result
-            .get("tools")
-            .and_then(|tools| tools.get("mode"))
-        {
-            stage_metadata.insert("tool_calling_mode".to_string(), tool_calling_mode.clone());
-        }
-
-        let produced_artifact_ids = executed
-            .artifacts
-            .iter()
-            .map(|artifact| artifact.id.clone())
-            .collect::<Vec<_>>();
-        run.stages.push(RunStageRecord {
-            id: stage_id.clone(),
-            node_id: current.clone(),
-            kind: node.kind.clone(),
-            status: executed.status.clone(),
-            outcome: executed.outcome.clone(),
-            branch: executed.branch.clone(),
-            started_at,
-            finished_at: Some(uuid::Uuid::now_v7().to_string()),
-            visible_text: executed
-                .result
-                .get("visible_text")
-                .or_else(|| executed.result.get("text"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            private_reasoning: executed
-                .result
-                .get("private_reasoning")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            transcript: executed
-                .transcript
-                .as_ref()
-                .map(crate::llm::vm_value_to_json),
-            verification: executed.verification.clone(),
-            usage: Some(executed.usage.clone()),
-            artifacts: executed.artifacts.clone(),
-            consumed_artifact_ids: executed.consumed_artifact_ids.clone(),
-            produced_artifact_ids: produced_artifact_ids.clone(),
-            attempts: executed.attempts,
-            metadata: stage_metadata,
-        });
-        append_child_run_record(&mut run, &stage_id, &executed.result);
-        completed_nodes.insert(current.clone());
-
-        let next_edges = workflow_next_edges(&graph, &current, executed.branch.as_deref()).await?;
-        for edge in next_edges {
-            super::artifact::enqueue_unique(&mut ready_nodes, edge.to.clone());
-            run.transitions.push(RunTransitionRecord {
-                id: uuid::Uuid::now_v7().to_string(),
-                from_stage_id: Some(stage_id.clone()),
-                from_node_id: Some(current.clone()),
-                to_node_id: edge.to,
-                branch: edge.branch.clone(),
-                timestamp: uuid::Uuid::now_v7().to_string(),
-                consumed_artifact_ids: executed.consumed_artifact_ids.clone(),
-                produced_artifact_ids: produced_artifact_ids.clone(),
-            });
-        }
-        checkpoint_run(
-            &mut run,
-            &ready_nodes,
-            &completed_nodes,
-            Some(stage_id),
-            "stage_complete",
-            &persist_path,
-        )?;
+            .get("visible_text")
+            .or_else(|| executed.result.get("text"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        private_reasoning: executed
+            .result
+            .get("private_reasoning")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        transcript: executed
+            .transcript
+            .as_ref()
+            .map(crate::llm::vm_value_to_json),
+        verification: executed.verification.clone(),
+        usage: Some(executed.usage.clone()),
+        artifacts: executed.artifacts.clone(),
+        consumed_artifact_ids: executed.consumed_artifact_ids.clone(),
+        produced_artifact_ids: produced_artifact_ids.clone(),
+        attempts: executed.attempts,
+        metadata,
+    });
+    append_child_run_record(&mut state.run, &stage_id, &executed.result);
+    if !state
+        .completed_nodes
+        .iter()
+        .any(|completed| completed == &node_id)
+    {
+        state.completed_nodes.push(node_id.clone());
     }
 
-    run.status = if ready_nodes.is_empty() {
+    let stage = WorkflowExecutedStageRecord {
+        stage_id,
+        node_id,
+        branch: executed.branch,
+        consumed_artifact_ids: executed.consumed_artifact_ids,
+        produced_artifact_ids,
+    };
+    Ok((state, stage))
+}
+
+fn record_workflow_transitions(
+    mut state: WorkflowRunState,
+    stage: WorkflowExecutedStageRecord,
+    edges: Vec<WorkflowEdge>,
+) -> Result<WorkflowRunState, VmError> {
+    for edge in edges {
+        state.run.transitions.push(RunTransitionRecord {
+            id: uuid::Uuid::now_v7().to_string(),
+            from_stage_id: Some(stage.stage_id.clone()),
+            from_node_id: Some(stage.node_id.clone()),
+            to_node_id: edge.to,
+            branch: edge.branch.clone(),
+            timestamp: uuid::Uuid::now_v7().to_string(),
+            consumed_artifact_ids: stage.consumed_artifact_ids.clone(),
+            produced_artifact_ids: stage.produced_artifact_ids.clone(),
+        });
+    }
+    checkpoint_workflow_state(&mut state, Some(stage.stage_id), "stage_complete")?;
+    Ok(state)
+}
+
+fn finalize_workflow_state(mut state: WorkflowRunState) -> Result<VmValue, VmError> {
+    state.run.status = if state.ready_nodes.is_empty() {
         "completed".to_string()
     } else {
         "paused".to_string()
     };
-    run.finished_at = Some(uuid::Uuid::now_v7().to_string());
-    run.usage = Some(llm_usage_delta(&run_usage_before, &llm_usage_snapshot()));
-    run.replay_fixture = Some(crate::orchestration::replay_fixture_from_run(&run));
-    crate::tracing::span_end(workflow_span_id);
-    run.trace_spans = snapshot_trace_spans();
-    run.tool_recordings = crate::llm::mock::drain_tool_recordings();
-    checkpoint_run(
-        &mut run,
-        &ready_nodes,
-        &completed_nodes,
-        None,
-        "finalize",
-        &persist_path,
-    )?;
+    state.run.finished_at = Some(uuid::Uuid::now_v7().to_string());
+    state.run.usage = Some(llm_usage_delta(
+        &state.run_usage_before,
+        &llm_usage_snapshot(),
+    ));
+    state.run.replay_fixture = Some(crate::orchestration::replay_fixture_from_run(&state.run));
+    crate::tracing::span_end(state.workflow_span_id);
+    state.run.trace_spans = snapshot_trace_spans();
+    state.run.tool_recordings = crate::llm::mock::drain_tool_recordings();
+    checkpoint_workflow_state(&mut state, None, "finalize")?;
 
     to_vm(&serde_json::json!({
-        "status": run.status,
-        "run": run,
-        "artifacts": artifacts,
-        "transcript": transcript.map(|value| crate::llm::vm_value_to_json(&value)),
-        "path": persist_path,
+        "status": state.run.status,
+        "run": state.run,
+        "artifacts": state.artifacts,
+        "transcript": state.transcript,
+        "path": state.persist_path,
     }))
+}
+
+fn host_workflow_prepare_run_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let task = args
+        .first()
+        .map(|value| value.display())
+        .unwrap_or_default();
+    let graph = normalize_workflow_value(
+        args.get(1)
+            .ok_or_else(|| VmError::Runtime("workflow_execute: missing workflow".to_string()))?,
+    )?;
+    let artifacts = parse_artifact_list(args.get(2))?;
+    let options = parse_options_arg(args, 3);
+    let state = prepare_workflow_state(task, graph, artifacts, &options)?;
+    let control = workflow_control_to_vm(&state, true)?;
+    insert_workflow_state(state);
+    Ok(control)
+}
+
+async fn host_workflow_execute_stage_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let state_id = parse_state_id_arg(args.first(), "__host_workflow_execute_stage")?;
+    let mut state = remove_workflow_state(&state_id, "__host_workflow_execute_stage")?;
+    let node_id = args
+        .get(1)
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            VmError::Runtime("__host_workflow_execute_stage: missing node id".to_string())
+        })?;
+    state.ready_nodes =
+        parse_string_list_arg(args.get(2), "__host_workflow_execute_stage ready_nodes")?;
+    let options = parse_options_arg(&args, 3);
+    let (state, stage) = execute_workflow_stage_state(state, node_id, &options).await?;
+    let branch = stage.branch.clone();
+    let control = workflow_control_to_vm(&state, false)?;
+    insert_workflow_state(state);
+    let mut dict = BTreeMap::new();
+    dict.insert("state".to_string(), control);
+    dict.insert("stage".to_string(), to_vm(&stage)?);
+    dict.insert(
+        "branch".to_string(),
+        branch
+            .map(|branch| VmValue::String(Rc::from(branch)))
+            .unwrap_or(VmValue::Nil),
+    );
+    Ok(VmValue::Dict(Rc::new(dict)))
+}
+
+fn host_workflow_record_transitions_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let state_id = parse_state_id_arg(args.first(), "__host_workflow_record_transitions")?;
+    let mut state = remove_workflow_state(&state_id, "__host_workflow_record_transitions")?;
+    state.ready_nodes = parse_string_list_arg(
+        args.get(1),
+        "__host_workflow_record_transitions ready_nodes",
+    )?;
+    let stage = parse_executed_stage_record(
+        args.get(2).ok_or_else(|| {
+            VmError::Runtime("__host_workflow_record_transitions: missing stage".to_string())
+        })?,
+        "__host_workflow_record_transitions",
+    )?;
+    let edges: Vec<WorkflowEdge> = serde_json::from_value(crate::llm::vm_value_to_json(
+        args.get(3).unwrap_or(&VmValue::Nil),
+    ))
+    .map_err(|error| {
+        VmError::Runtime(format!(
+            "__host_workflow_record_transitions: invalid edges: {error}"
+        ))
+    })?;
+    state = record_workflow_transitions(state, stage, edges)?;
+    let control = workflow_control_to_vm(&state, false)?;
+    insert_workflow_state(state);
+    Ok(control)
+}
+
+fn host_workflow_finalize_run_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let state_id = parse_state_id_arg(args.first(), "__host_workflow_finalize_run")?;
+    let mut state = remove_workflow_state(&state_id, "__host_workflow_finalize_run")?;
+    state.ready_nodes =
+        parse_string_list_arg(args.get(1), "__host_workflow_finalize_run ready_nodes")?;
+    finalize_workflow_state(state)
 }
 
 pub(crate) fn register_workflow_builtins(vm: &mut Vm) {
@@ -1042,21 +1286,6 @@ fn workflow_commit_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
     }
     append_audit_entry(&mut graph, "commit", None, reason, BTreeMap::new());
     workflow_graph_to_vm(&graph)
-}
-
-async fn host_workflow_graph_run_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let task = args.first().map(|v| v.display()).unwrap_or_default();
-    let graph = normalize_workflow_value(
-        args.get(1)
-            .ok_or_else(|| VmError::Runtime("workflow_execute: missing workflow".to_string()))?,
-    )?;
-    let artifacts = parse_artifact_list(args.get(2))?;
-    let options = args
-        .get(3)
-        .and_then(|v| v.as_dict())
-        .cloned()
-        .unwrap_or_default();
-    execute_workflow(task, graph, artifacts, options).await
 }
 
 fn register_tool_hook_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

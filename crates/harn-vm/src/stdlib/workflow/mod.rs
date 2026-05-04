@@ -10,7 +10,7 @@ mod stage;
 mod usage;
 
 pub(in crate::stdlib) use self::artifact::load_run_tree;
-pub(in crate::stdlib) use self::register::execute_workflow;
+pub(in crate::stdlib) use self::convert::workflow_graph_to_vm;
 pub(crate) use self::register::register_workflow_builtins;
 
 #[cfg(test)]

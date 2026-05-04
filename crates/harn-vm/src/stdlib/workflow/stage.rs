@@ -12,8 +12,8 @@ use crate::value::{VmError, VmValue};
 
 use super::artifact::artifact_from_value;
 use super::map::{
-    execute_join_tasks, map_branch_artifact, map_finalize, map_join_target, map_stage_plan,
-    map_work_items, LocalTask, MapBranchResult, MapWorkItem,
+    execute_join_tasks, map_branch_artifact, map_execution_plan, map_finalize, LocalTask,
+    MapBranchResult, MapWorkItem,
 };
 use super::usage::{llm_usage_delta, llm_usage_snapshot, merge_usage};
 
@@ -89,45 +89,34 @@ pub(super) fn replay_stage(
     })
 }
 
-pub(super) async fn evaluate_verification(
-    node: &crate::orchestration::WorkflowNode,
-    result: &serde_json::Value,
-) -> Result<serde_json::Value, VmError> {
-    let payload = serde_json::json!({
-        "verify": node.verify.clone(),
-        "result": result,
-    });
-    crate::stdlib::call_harn_stdlib_json(
-        "std/workflow/stage",
-        "workflow_evaluate_verification",
-        payload,
-    )
-    .await
-}
-
 #[derive(Debug, Deserialize)]
-struct WorkflowStageOutcome {
+struct WorkflowStageAttemptOutcome {
     outcome: String,
     branch: Option<String>,
+    verification: serde_json::Value,
 }
 
-pub(super) async fn classify_stage_outcome(
-    node_kind: &str,
+pub(super) async fn stage_attempt_outcome(
+    node: &crate::orchestration::WorkflowNode,
     result: &serde_json::Value,
-    verification: &serde_json::Value,
-) -> Result<(String, Option<String>), VmError> {
+    verification: Option<serde_json::Value>,
+) -> Result<(String, Option<String>, serde_json::Value), VmError> {
     let payload = serde_json::json!({
-        "node_kind": node_kind,
+        "node": node,
         "result": result,
         "verification": verification,
     });
-    let classified: WorkflowStageOutcome = crate::stdlib::call_harn_stdlib_typed(
+    let classified: WorkflowStageAttemptOutcome = crate::stdlib::call_harn_stdlib_typed(
         "std/workflow/stage",
-        "workflow_classify_stage_outcome",
+        "workflow_stage_attempt_outcome",
         payload,
     )
     .await?;
-    Ok((classified.outcome, classified.branch))
+    Ok((
+        classified.outcome,
+        classified.branch,
+        classified.verification,
+    ))
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -229,23 +218,17 @@ pub(super) async fn execute_stage_attempts(
         }
         let r: Result<StageAttemptResult, VmError> = match node.kind.as_str() {
             "map" => {
-                let items = map_work_items(node, artifacts).await?;
-                let total_items = items.len();
+                let plan = map_execution_plan(node, artifacts).await?;
+                let total_items = plan.total_items;
+                let join_target = plan.join_target;
+                let max_concurrent = plan.max_concurrent;
+                let stage_template = plan.stage_node;
+                let output_kind = plan.output_kind;
+                let lineage = plan.lineage;
+                let strategy = plan.strategy;
                 let branch_policy = crate::orchestration::current_execution_policy();
-                let (stage_template, output_kind) = map_stage_plan(node).await?;
-                let shared_lineage = items
-                    .iter()
-                    .flat_map(|item| match item {
-                        MapWorkItem::Artifact { artifact, .. } => vec![artifact.id.clone()],
-                        MapWorkItem::Value { .. } => Vec::new(),
-                    })
-                    .collect::<Vec<_>>();
-                let strategy = if node.join_policy.strategy.is_empty() {
-                    "all".to_string()
-                } else {
-                    node.join_policy.strategy.clone()
-                };
-                let tasks = items
+                let tasks = plan
+                    .items
                     .into_iter()
                     .map(|item| {
                         let branch_policy = branch_policy.clone();
@@ -254,7 +237,7 @@ pub(super) async fn execute_stage_attempts(
                         let stage_template = stage_template.clone();
                         let node_id = node_id.to_string();
                         let output_kind = output_kind.clone();
-                        let lineage = shared_lineage.clone();
+                        let lineage = lineage.clone();
                         Box::pin(async move {
                             if let Some(policy) = branch_policy.clone() {
                                 push_execution_policy(policy);
@@ -345,12 +328,7 @@ pub(super) async fn execute_stage_attempts(
                     })
                     .collect::<Vec<_>>();
 
-                let branch_results = execute_join_tasks(
-                    tasks,
-                    map_join_target(node, total_items).await?,
-                    node.map_policy.max_concurrent,
-                )
-                .await;
+                let branch_results = execute_join_tasks(tasks, join_target, max_concurrent).await;
 
                 let mut completed = Vec::new();
                 let mut failures = Vec::new();
@@ -414,10 +392,20 @@ pub(super) async fn execute_stage_attempts(
                         transcript.clone(),
                     )
                     .await?;
-                let verification = serde_json::json!({"kind": "none", "ok": true});
-                let (outcome, branch) =
-                    classify_stage_outcome(&node.kind, &result, &verification).await?;
-                Ok((result, produced, next_transcript, outcome, branch, None))
+                let (outcome, branch, verification) = stage_attempt_outcome(
+                    node,
+                    &result,
+                    Some(serde_json::json!({"kind": "none", "ok": true})),
+                )
+                .await?;
+                Ok((
+                    result,
+                    produced,
+                    next_transcript,
+                    outcome,
+                    branch,
+                    Some(verification),
+                ))
             }
             _ => {
                 let (result, produced, next_transcript) = crate::orchestration::execute_stage_node(
@@ -427,9 +415,8 @@ pub(super) async fn execute_stage_attempts(
                     artifacts,
                 )
                 .await?;
-                let verification = evaluate_verification(node, &result).await?;
-                let (outcome, branch) =
-                    classify_stage_outcome(&node.kind, &result, &verification).await?;
+                let (outcome, branch, verification) =
+                    stage_attempt_outcome(node, &result, None).await?;
                 Ok((
                     result,
                     produced,

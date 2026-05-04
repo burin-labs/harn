@@ -47,41 +47,41 @@ const AGENT_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("agent_name(agent)")
         .arity(VmBuiltinArity::Exact(1))
         .doc("Read an agent spec name."),
-    SyncBuiltin::new("resume_agent", resume_agent_builtin)
-        .signature("resume_agent(worker_or_snapshot)")
+    SyncBuiltin::new("__host_worker_resume", resume_agent_builtin)
+        .signature("__host_worker_resume(worker_or_snapshot)")
         .arity(VmBuiltinArity::Exact(1))
-        .doc("Resume a persisted worker into the local worker registry."),
-    SyncBuiltin::new("list_agents", list_agents_builtin)
-        .signature("list_agents()")
+        .doc("Resume a persisted worker into the local host worker registry."),
+    SyncBuiltin::new("__host_worker_list", list_agents_builtin)
+        .signature("__host_worker_list()")
         .arity(VmBuiltinArity::Exact(0))
-        .doc("List local worker summaries."),
+        .doc("List local host worker summaries."),
 ];
 
 const AGENT_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    async_builtin!("sub_agent_run", sub_agent_run_builtin)
-        .signature("sub_agent_run(config)")
+    async_builtin!("__host_sub_agent_run", sub_agent_run_builtin)
+        .signature("__host_sub_agent_run(task, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .doc("Run or spawn a sub-agent through the low-level host worker runtime."),
+    async_builtin!("__host_worker_spawn", spawn_agent_builtin)
+        .signature("__host_worker_spawn(config)")
         .arity(VmBuiltinArity::Exact(1))
-        .doc("Run or spawn a sub-agent worker."),
-    async_builtin!("spawn_agent", spawn_agent_builtin)
-        .signature("spawn_agent(config)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Spawn a workflow, stage, or sub-agent worker."),
-    async_builtin!("send_input", send_input_builtin)
-        .signature("send_input(worker, task)")
+        .doc("Spawn a workflow, stage, or sub-agent host worker."),
+    async_builtin!("__host_worker_send_input", send_input_builtin)
+        .signature("__host_worker_send_input(worker, task)")
         .arity(VmBuiltinArity::Exact(2))
-        .doc("Resume a stopped worker with new task input."),
-    async_builtin!("worker_trigger", worker_trigger_builtin)
-        .signature("worker_trigger(worker, payload)")
+        .doc("Resume a stopped host worker with new task input."),
+    async_builtin!("__host_worker_trigger", worker_trigger_builtin)
+        .signature("__host_worker_trigger(worker, payload)")
         .arity(VmBuiltinArity::Exact(2))
-        .doc("Trigger an awaiting retriggerable worker."),
-    async_builtin!("wait_agent", wait_agent_builtin)
-        .signature("wait_agent(worker_or_workers)")
+        .doc("Trigger an awaiting retriggerable host worker."),
+    async_builtin!("__host_worker_wait", wait_agent_builtin)
+        .signature("__host_worker_wait(worker_or_workers)")
         .arity(VmBuiltinArity::Exact(1))
-        .doc("Wait for one or more workers to reach a terminal state."),
-    async_builtin!("close_agent", close_agent_builtin)
-        .signature("close_agent(worker)")
+        .doc("Wait for one or more host workers to reach a terminal state."),
+    async_builtin!("__host_worker_close", close_agent_builtin)
+        .signature("__host_worker_close(worker)")
         .arity(VmBuiltinArity::Exact(1))
-        .doc("Cancel a worker and emit the cancellation lifecycle event."),
+        .doc("Cancel a host worker and emit the cancellation lifecycle event."),
 ];
 
 const AGENT_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
@@ -182,6 +182,10 @@ fn restart_worker_run(
                 "fork" | "reset"
             ) {
                 spec.session_id = format!("sub_agent_session_{}", uuid::Uuid::now_v7());
+                spec.options.insert(
+                    "session_id".to_string(),
+                    VmValue::String(Rc::from(spec.session_id.clone())),
+                );
             }
         }
     }

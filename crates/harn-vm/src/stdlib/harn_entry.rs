@@ -75,25 +75,33 @@ async fn call_harn_export(
     entrypoint: HarnEntrypoint,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
+    call_harn_export_by_name(
+        &entrypoint.import_path,
+        &entrypoint.export_name,
+        &entrypoint.public_name,
+        &args,
+    )
+    .await
+}
+
+pub(crate) async fn call_harn_export_by_name(
+    import_path: &str,
+    export_name: &str,
+    label: &str,
+    args: &[VmValue],
+) -> Result<VmValue, VmError> {
     let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
         VmError::Runtime(format!(
-            "{}: Harn stdlib dispatch requires an async VM context",
-            entrypoint.public_name
+            "{label}: Harn stdlib dispatch requires an async VM context"
         ))
     })?;
-    let exports = vm
-        .load_module_exports_from_import(&entrypoint.import_path)
-        .await?;
-    let closure = exports
-        .get(&entrypoint.export_name)
-        .cloned()
-        .ok_or_else(|| {
-            VmError::Runtime(format!(
-                "{}: stdlib module {} did not export `{}`",
-                entrypoint.public_name, entrypoint.import_path, entrypoint.export_name
-            ))
-        })?;
-    let result = vm.call_closure_pub(&closure, &args).await;
+    let exports = vm.load_module_exports_from_import(import_path).await?;
+    let closure = exports.get(export_name).cloned().ok_or_else(|| {
+        VmError::Runtime(format!(
+            "{label}: stdlib module {import_path} did not export `{export_name}`"
+        ))
+    })?;
+    let result = vm.call_closure_pub(&closure, args).await;
     let output = vm.take_output();
     crate::vm::forward_child_output_to_parent(&output);
     result

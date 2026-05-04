@@ -23,7 +23,8 @@ pub(super) struct MapBranchResult {
     pub(super) error: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub(super) enum MapWorkItem {
     Artifact {
         index: usize,
@@ -34,6 +35,18 @@ pub(super) enum MapWorkItem {
         value: serde_json::Value,
         artifact_kind: String,
     },
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct MapExecutionPlan {
+    pub(super) items: Vec<MapWorkItem>,
+    pub(super) total_items: usize,
+    pub(super) strategy: String,
+    pub(super) join_target: usize,
+    pub(super) max_concurrent: Option<usize>,
+    pub(super) stage_node: Option<crate::orchestration::WorkflowNode>,
+    pub(super) output_kind: String,
+    pub(super) lineage: Vec<String>,
 }
 
 pub(super) async fn execute_join_tasks<T: 'static>(
@@ -78,25 +91,6 @@ pub(super) async fn execute_join_tasks<T: 'static>(
     }
 
     results
-}
-
-pub(super) async fn map_join_target(
-    node: &crate::orchestration::WorkflowNode,
-    total: usize,
-) -> Result<usize, VmError> {
-    let payload = serde_json::json!({
-        "join_policy": node.join_policy.clone(),
-        "total": total,
-    });
-    let target = crate::stdlib::call_harn_stdlib_json(
-        "std/workflow/map",
-        "workflow_map_join_target",
-        payload,
-    )
-    .await?;
-    target.as_u64().map(|value| value as usize).ok_or_else(|| {
-        VmError::Runtime("workflow_map_join_target must return an integer".to_string())
-    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,77 +142,29 @@ pub(super) fn map_branch_artifact(
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct WorkflowMapStagePlan {
-    runs_stage: bool,
-    output_kind: String,
-    stage_node: Option<crate::orchestration::WorkflowNode>,
-}
-
-pub(super) async fn map_stage_plan(
-    node: &crate::orchestration::WorkflowNode,
-) -> Result<(Option<crate::orchestration::WorkflowNode>, String), VmError> {
-    let payload = serde_json::json!({
-        "node": node,
-    });
-    let planned: WorkflowMapStagePlan = crate::stdlib::call_harn_stdlib_typed(
-        "std/workflow/map",
-        "workflow_map_stage_plan",
-        payload,
-    )
-    .await?;
-    let stage_node = if planned.runs_stage {
-        Some(planned.stage_node.ok_or_else(|| {
-            VmError::Runtime("workflow_map_stage_plan omitted stage_node".to_string())
-        })?)
-    } else {
-        None
-    };
-    Ok((stage_node, planned.output_kind))
-}
-
-#[derive(Debug, Deserialize)]
-struct WorkflowMapWorkItems {
-    items: Vec<WorkflowMapWorkItem>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum WorkflowMapWorkItem {
-    Artifact {
-        index: usize,
-        artifact: Box<ArtifactRecord>,
-    },
-    Value {
-        index: usize,
-        value: serde_json::Value,
-        artifact_kind: String,
-    },
-}
-
-pub(super) async fn map_work_items(
+pub(super) async fn map_execution_plan(
     node: &crate::orchestration::WorkflowNode,
     artifacts: &[ArtifactRecord],
-) -> Result<Vec<MapWorkItem>, VmError> {
+) -> Result<MapExecutionPlan, VmError> {
     let payload = serde_json::json!({
         "node": node,
         "artifacts": artifacts,
     });
-    let planned: WorkflowMapWorkItems = crate::stdlib::call_harn_stdlib_typed(
+    let mut planned: MapExecutionPlan = crate::stdlib::call_harn_stdlib_typed(
         "std/workflow/map",
-        "workflow_map_work_items",
+        "workflow_map_execution_plan",
         payload,
     )
     .await?;
-    Ok(planned
+    planned.items = planned
         .items
         .into_iter()
         .map(|item| match item {
-            WorkflowMapWorkItem::Artifact { index, artifact } => MapWorkItem::Artifact {
+            MapWorkItem::Artifact { index, artifact } => MapWorkItem::Artifact {
                 index,
                 artifact: Box::new(artifact.normalize()),
             },
-            WorkflowMapWorkItem::Value {
+            MapWorkItem::Value {
                 index,
                 value,
                 artifact_kind,
@@ -228,5 +174,6 @@ pub(super) async fn map_work_items(
                 artifact_kind,
             },
         })
-        .collect())
+        .collect();
+    Ok(planned)
 }

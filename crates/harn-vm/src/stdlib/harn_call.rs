@@ -1,4 +1,4 @@
-//! Cached dispatch for Rust-owned host primitives that delegate policy to Harn stdlib code.
+//! Cached dispatch for Rust host primitives that delegate pure helpers to Harn stdlib code.
 
 use std::cell::RefCell;
 
