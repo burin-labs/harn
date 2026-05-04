@@ -244,6 +244,9 @@ async fn verify_stage_reads_transcript_from_session_store() {
         ..Default::default()
     };
 
+    let mut vm = crate::Vm::new();
+    crate::register_vm_stdlib(&mut vm);
+    let _vm_context = crate::vm::install_async_builtin_child_vm(vm);
     let executed = execute_stage_attempts("run tests", "verify", &node, &[], None)
         .await
         .expect("stage executes");

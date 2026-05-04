@@ -44,8 +44,9 @@ pub async fn prepare_workflow_stage_agent_options(
             "default_tool_format": default_stage_tool_format(&node.model_policy),
         },
     });
-    let prepared: WorkflowStageAgentOptions = crate::stdlib::call_harn_stdlib_typed(
+    let prepared: WorkflowStageAgentOptions = crate::stdlib::harn_entry::call_harn_export_typed(
         "std/workflow/options",
+        "workflow_stage_agent_options",
         "workflow_stage_agent_options",
         payload,
     )

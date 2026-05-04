@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::stdlib::{call_harn_stdlib_json, call_harn_stdlib_typed};
+use crate::stdlib::harn_entry::{call_harn_export_json, call_harn_export_typed};
 
 use super::{
     handoff_artifact_record, handoff_from_json_value, microcompact_tool_output, new_id,
@@ -366,8 +366,9 @@ pub async fn select_workflow_stage_artifacts(
         "context_policy": context_policy,
         "input_contract": input_contract,
     });
-    let mut selected: SelectedWorkflowStageArtifacts = call_harn_stdlib_typed(
+    let mut selected: SelectedWorkflowStageArtifacts = call_harn_export_typed(
         "std/workflow/context",
+        "workflow_select_stage_artifacts",
         "workflow_select_stage_artifacts",
         payload,
     )
@@ -403,8 +404,9 @@ pub async fn prepare_workflow_stage_prompt(
         "rendered_context": rendered_context,
         "verification_contracts": verification_contracts,
     });
-    let prepared = call_harn_stdlib_json(
+    let prepared = call_harn_export_json(
         "std/workflow/prompts",
+        "workflow_prepare_stage_prompt",
         "workflow_prepare_stage_prompt",
         payload,
     )
