@@ -49,7 +49,6 @@ TOKIO_SLEEP_ALLOWLIST=(
 # real process output; they will be refactored by Tier 1A/1B of #1057.
 INSTANT_NOW_WHILE_ALLOWLIST=(
   "crates/harn-vm/src/triggers/dispatcher/tests/retry.rs"
-  "crates/harn-cli/tests/orchestrator_cli.rs"
   "crates/harn-cli/tests/orchestrator_inbox_dedupe.rs"
   "crates/harn-cli/tests/orchestrator_http/support.rs"
   "crates/harn-cli/tests/orchestrator_http/admin.rs"

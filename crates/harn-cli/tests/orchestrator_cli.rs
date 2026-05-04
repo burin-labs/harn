@@ -193,20 +193,26 @@ async fn wait_for_consumer_cursor(
     at_least: u64,
 ) {
     let topic = Topic::new(topic_name).unwrap();
-    let consumer = ConsumerId::new(consumer).unwrap();
-    let deadline = tokio::time::Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
-    while tokio::time::Instant::now() < deadline {
-        let cursor = event_log
-            .consumer_cursor(&topic, &consumer)
-            .await
-            .unwrap()
-            .unwrap_or(0);
-        if cursor >= at_least {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
+    let consumer_id = ConsumerId::new(consumer).unwrap();
+    let cursor = event_log
+        .consumer_cursor(&topic, &consumer_id)
+        .await
+        .unwrap()
+        .unwrap_or(0);
+    if cursor >= at_least {
+        return;
     }
-    panic!("timed out waiting for consumer cursor {consumer} on {topic_name} to reach {at_least}");
+    let topic_owned = topic_name.to_string();
+    await_topic_event(event_log, "orchestrator.lifecycle", move |event| {
+        event.kind == "pump_acked"
+            && event.payload.get("topic").and_then(|v| v.as_str()) == Some(topic_owned.as_str())
+            && event
+                .payload
+                .get("cursor")
+                .and_then(|v| v.as_u64())
+                .is_some_and(|c| c >= at_least)
+    })
+    .await;
 }
 
 fn open_state_event_log(state_dir: &Path) -> Arc<AnyEventLog> {
@@ -243,23 +249,24 @@ async fn wait_for_metrics_contains(
     base_url: &str,
     needles: &[&str],
 ) -> String {
-    let deadline = tokio::time::Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
-    let mut last = String::new();
-    while tokio::time::Instant::now() < deadline {
-        last = client
-            .get(format!("{base_url}/metrics"))
-            .send()
-            .await
-            .unwrap()
-            .text()
-            .await
-            .unwrap();
-        if needles.iter().all(|needle| last.contains(needle)) {
-            return last;
+    let url = format!("{base_url}/metrics");
+    let last = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let last_capture = last.clone();
+    let result = tokio::time::timeout(EVENT_FAIL_FAST_TIMEOUT, async move {
+        loop {
+            let body = client.get(&url).send().await.unwrap().text().await.unwrap();
+            if needles.iter().all(|needle| body.contains(needle)) {
+                return body;
+            }
+            *last_capture.lock().unwrap() = body;
+            tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    panic!("timed out waiting for metrics samples {needles:?}; last={last}");
+    })
+    .await;
+    result.unwrap_or_else(|_| {
+        let snapshot = last.lock().unwrap().clone();
+        panic!("timed out waiting for metrics samples {needles:?}; last={snapshot}")
+    })
 }
 
 fn run_harn_with_env(temp: &TempDir, args: &[&str], envs: &[(&str, &str)]) -> Output {
@@ -1115,13 +1122,11 @@ pub fn on_task(event: TriggerEvent) -> dict {
 }
 
 async fn wait_for_path_async(path: &Path) {
-    let deadline = tokio::time::Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
-    while !path.exists() {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "timed out waiting for path {}",
-            path.display()
-        );
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+    tokio::time::timeout(EVENT_FAIL_FAST_TIMEOUT, async {
+        while !path.exists() {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for path {}", path.display()));
 }
