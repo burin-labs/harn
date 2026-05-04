@@ -29,7 +29,7 @@ use self::agents_workers::{
 };
 use self::sub_agent::{execute_sub_agent, parse_sub_agent_request};
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
+    boxed_async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
@@ -38,27 +38,22 @@ const AGENT_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("agent", agent_builtin)
         .signature("agent(name, config?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .category("agent.worker")
         .doc("Build a low-level agent spec dict."),
     SyncBuiltin::new("agent_config", agent_config_builtin)
         .signature("agent_config(agent, prompt)")
         .arity(VmBuiltinArity::Exact(2))
-        .category("agent.worker")
         .doc("Build low-level agent prompt/system/options config."),
     SyncBuiltin::new("agent_name", agent_name_builtin)
         .signature("agent_name(agent)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("agent.worker")
         .doc("Read an agent spec name."),
     SyncBuiltin::new("resume_agent", resume_agent_builtin)
         .signature("resume_agent(worker_or_snapshot)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("agent.worker")
         .doc("Resume a persisted worker into the local worker registry."),
     SyncBuiltin::new("list_agents", list_agents_builtin)
         .signature("list_agents()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("agent.worker")
         .doc("List local worker summaries."),
 ];
 
@@ -68,44 +63,43 @@ const AGENT_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     })
     .signature("sub_agent_run(config)")
     .arity(VmBuiltinArity::Exact(1))
-    .category("agent.worker")
     .doc("Run or spawn a sub-agent worker."),
     AsyncBuiltin::new("spawn_agent", |args| {
         boxed_async_builtin(spawn_agent_builtin(args))
     })
     .signature("spawn_agent(config)")
     .arity(VmBuiltinArity::Exact(1))
-    .category("agent.worker")
     .doc("Spawn a workflow, stage, or sub-agent worker."),
     AsyncBuiltin::new("send_input", |args| {
         boxed_async_builtin(send_input_builtin(args))
     })
     .signature("send_input(worker, task)")
     .arity(VmBuiltinArity::Exact(2))
-    .category("agent.worker")
     .doc("Resume a stopped worker with new task input."),
     AsyncBuiltin::new("worker_trigger", |args| {
         boxed_async_builtin(worker_trigger_builtin(args))
     })
     .signature("worker_trigger(worker, payload)")
     .arity(VmBuiltinArity::Exact(2))
-    .category("agent.worker")
     .doc("Trigger an awaiting retriggerable worker."),
     AsyncBuiltin::new("wait_agent", |args| {
         boxed_async_builtin(wait_agent_builtin(args))
     })
     .signature("wait_agent(worker_or_workers)")
     .arity(VmBuiltinArity::Exact(1))
-    .category("agent.worker")
     .doc("Wait for one or more workers to reach a terminal state."),
     AsyncBuiltin::new("close_agent", |args| {
         boxed_async_builtin(close_agent_builtin(args))
     })
     .signature("close_agent(worker)")
     .arity(VmBuiltinArity::Exact(1))
-    .category("agent.worker")
     .doc("Cancel a worker and emit the cancellation lifecycle event."),
 ];
+
+const AGENT_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
+    .category("agent.worker")
+    .sync(AGENT_SYNC_PRIMITIVES)
+    .async_(AGENT_ASYNC_PRIMITIVES);
 
 pub(crate) use self::records::{parse_artifact_list, parse_context_policy};
 fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> {
@@ -226,8 +220,7 @@ async fn wait_for_worker_terminal(
 }
 
 pub(crate) fn register_agent_builtins(vm: &mut Vm) {
-    register_sync_builtins(vm, AGENT_SYNC_PRIMITIVES);
-    register_async_builtins(vm, AGENT_ASYNC_PRIMITIVES);
+    register_builtin_group(vm, AGENT_PRIMITIVES);
     records::register_record_builtins(vm);
     workflow::register_workflow_builtins(vm);
 }

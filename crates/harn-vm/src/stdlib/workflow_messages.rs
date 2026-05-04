@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::stdlib::process::runtime_root_base;
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
+    boxed_async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
@@ -19,52 +19,42 @@ const WORKFLOW_MESSAGE_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("workflow.signal", workflow_signal_builtin)
         .signature("workflow.signal(target, name, payload?)")
         .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .category("workflow.messages")
         .doc("Enqueue a workflow signal message."),
     SyncBuiltin::new("workflow.query", workflow_query_builtin)
         .signature("workflow.query(target, name)")
         .arity(VmBuiltinArity::Exact(2))
-        .category("workflow.messages")
         .doc("Read the latest published workflow query value."),
     SyncBuiltin::new("workflow.publish_query", workflow_publish_query_builtin)
         .signature("workflow.publish_query(target, name, value?)")
         .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .category("workflow.messages")
         .doc("Publish a workflow query value."),
     SyncBuiltin::new("workflow.receive", workflow_receive_builtin)
         .signature("workflow.receive(target)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("workflow.messages")
         .doc("Receive the next workflow mailbox message."),
     SyncBuiltin::new("workflow.respond_update", workflow_respond_update_builtin)
         .signature("workflow.respond_update(target, request_id, value?, name?)")
         .arity(VmBuiltinArity::Range { min: 2, max: 4 })
-        .category("workflow.messages")
         .doc("Respond to a pending workflow update request."),
     SyncBuiltin::new("workflow.pause", workflow_pause_builtin)
         .signature("workflow.pause(target)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("workflow.messages")
         .doc("Pause a workflow mailbox."),
     SyncBuiltin::new("workflow.resume", workflow_resume_builtin)
         .signature("workflow.resume(target)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("workflow.messages")
         .doc("Resume a workflow mailbox."),
     SyncBuiltin::new("workflow.status", workflow_status_builtin)
         .signature("workflow.status(target)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("workflow.messages")
         .doc("Return workflow mailbox status."),
     SyncBuiltin::new("workflow.continue_as_new", workflow_continue_as_new_builtin)
         .signature("workflow.continue_as_new(target)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("workflow.messages")
         .doc("Advance a workflow mailbox generation."),
     SyncBuiltin::new("continue_as_new", continue_as_new_builtin)
         .signature("continue_as_new(target)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("workflow.messages")
         .doc("Advance a workflow mailbox generation."),
 ];
 
@@ -74,8 +64,12 @@ const WORKFLOW_MESSAGE_ASYNC_PRIMITIVES: &[AsyncBuiltin] =
     })
     .signature("workflow.update(target, name, payload?, options?)")
     .arity(VmBuiltinArity::Range { min: 2, max: 4 })
-    .category("workflow.messages")
     .doc("Enqueue a workflow update and wait for a response.")];
+
+const WORKFLOW_MESSAGE_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
+    .category("workflow.messages")
+    .sync(WORKFLOW_MESSAGE_SYNC_PRIMITIVES)
+    .async_(WORKFLOW_MESSAGE_ASYNC_PRIMITIVES);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkflowMessageRecord {
@@ -538,8 +532,7 @@ pub(crate) fn register_workflow_message_builtins(vm: &mut Vm) {
         ]))),
     );
 
-    register_sync_builtins(vm, WORKFLOW_MESSAGE_SYNC_PRIMITIVES);
-    register_async_builtins(vm, WORKFLOW_MESSAGE_ASYNC_PRIMITIVES);
+    register_builtin_group(vm, WORKFLOW_MESSAGE_PRIMITIVES);
 }
 
 fn workflow_signal_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

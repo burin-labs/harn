@@ -10,46 +10,39 @@ use std::rc::Rc;
 
 use crate::agent_sessions;
 use crate::stdlib::registration::{
-    boxed_async_builtin, register_async_builtins, register_sync_builtins, AsyncBuiltin, SyncBuiltin,
+    boxed_async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
 
 pub fn register_agent_session_builtins(vm: &mut Vm) {
-    register_sync_builtins(vm, AGENT_SESSION_SYNC_PRIMITIVES);
-    register_async_builtins(vm, AGENT_SESSION_ASYNC_PRIMITIVES);
+    register_builtin_group(vm, AGENT_SESSION_PRIMITIVES);
 }
 
 const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("agent_session_open", agent_session_open_builtin)
         .signature("agent_session_open(id?)")
         .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .category("agent.session")
         .doc("Open or create a first-class agent session."),
     SyncBuiltin::new("agent_session_exists", agent_session_exists_builtin)
         .signature("agent_session_exists(id)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("agent.session")
         .doc("Return whether an agent session exists."),
     SyncBuiltin::new("agent_session_length", agent_session_length_builtin)
         .signature("agent_session_length(id)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("agent.session")
         .doc("Return the number of messages in an agent session."),
     SyncBuiltin::new("agent_session_snapshot", agent_session_snapshot_builtin)
         .signature("agent_session_snapshot(id)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("agent.session")
         .doc("Return the current transcript snapshot for an agent session."),
     SyncBuiltin::new("agent_session_ancestry", agent_session_ancestry_builtin)
         .signature("agent_session_ancestry(id)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("agent.session")
         .doc("Return parent, child, and root lineage for an agent session."),
     SyncBuiltin::new("agent_session_current_id", agent_session_current_id_builtin)
         .signature("agent_session_current_id()")
         .arity(VmBuiltinArity::Exact(0))
-        .category("agent.session")
         .doc("Return the innermost active agent session id."),
     SyncBuiltin::new(
         "agent_session_tool_format",
@@ -57,7 +50,6 @@ const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     )
     .signature("agent_session_tool_format(id)")
     .arity(VmBuiltinArity::Exact(1))
-    .category("agent.session")
     .doc("Return the claimed tool format for an agent session."),
     SyncBuiltin::new(
         "agent_session_claim_tool_format",
@@ -65,37 +57,30 @@ const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     )
     .signature("agent_session_claim_tool_format(id, tool_format)")
     .arity(VmBuiltinArity::Exact(2))
-    .category("agent.session")
     .doc("Claim the tool format for an agent session."),
     SyncBuiltin::new("agent_session_reset", agent_session_reset_builtin)
         .signature("agent_session_reset(id)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("agent.session")
         .doc("Reset an agent session transcript."),
     SyncBuiltin::new("agent_session_fork", agent_session_fork_builtin)
         .signature("agent_session_fork(src, dst?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .category("agent.session")
         .doc("Fork an agent session transcript."),
     SyncBuiltin::new("agent_session_fork_at", agent_session_fork_at_builtin)
         .signature("agent_session_fork_at(src, keep_first, dst?)")
         .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .category("agent.session")
         .doc("Fork an agent session at a message boundary."),
     SyncBuiltin::new("agent_session_close", agent_session_close_builtin)
         .signature("agent_session_close(id)")
         .arity(VmBuiltinArity::Exact(1))
-        .category("agent.session")
         .doc("Close an agent session."),
     SyncBuiltin::new("agent_session_trim", agent_session_trim_builtin)
         .signature("agent_session_trim(id, keep_last)")
         .arity(VmBuiltinArity::Exact(2))
-        .category("agent.session")
         .doc("Trim an agent session to the last N messages."),
     SyncBuiltin::new("agent_session_inject", agent_session_inject_builtin)
         .signature("agent_session_inject(id, message)")
         .arity(VmBuiltinArity::Exact(2))
-        .category("agent.session")
         .doc("Inject one message into an agent session."),
 ];
 
@@ -105,8 +90,12 @@ const AGENT_SESSION_ASYNC_PRIMITIVES: &[AsyncBuiltin] =
     })
     .signature("agent_session_compact(id, opts?)")
     .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-    .category("agent.session")
     .doc("Compact an agent session transcript with the host compaction runtime.")];
+
+const AGENT_SESSION_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
+    .category("agent.session")
+    .sync(AGENT_SESSION_SYNC_PRIMITIVES)
+    .async_(AGENT_SESSION_ASYNC_PRIMITIVES);
 
 fn err(msg: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::String(Rc::from(msg.into())))

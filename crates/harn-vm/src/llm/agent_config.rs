@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::agent_events::AgentEventSink;
 use crate::stdlib::harn_entry::{register_harn_module_entrypoints, HarnEntrypointModule};
-use crate::stdlib::registration::{register_sync_builtins, SyncBuiltin};
+use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuiltin};
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
@@ -38,14 +38,16 @@ const AGENT_CONTROL_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("agent_subscribe", agent_subscribe_builtin)
         .signature("agent_subscribe(session_id, callback)")
         .arity(VmBuiltinArity::Exact(2))
-        .category("agent.host")
         .doc("Subscribe a Harn callback to events for an agent session."),
     SyncBuiltin::new("agent_inject_feedback", agent_inject_feedback_builtin)
         .signature("agent_inject_feedback(session_id, kind, content)")
         .arity(VmBuiltinArity::Exact(3))
-        .category("agent.host")
         .doc("Inject pending feedback into an agent session."),
 ];
+
+const AGENT_CONTROL_GROUP: BuiltinGroup<'static> = BuiltinGroup::new()
+    .category("agent.host")
+    .sync(AGENT_CONTROL_PRIMITIVES);
 
 #[derive(Clone)]
 pub struct AgentLoopConfig {
@@ -646,7 +648,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
 }
 
 pub(crate) fn register_agent_control_primitives(vm: &mut Vm) {
-    register_sync_builtins(vm, AGENT_CONTROL_PRIMITIVES);
+    register_builtin_group(vm, AGENT_CONTROL_GROUP);
 }
 
 fn agent_subscribe_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
