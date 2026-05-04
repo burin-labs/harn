@@ -73,7 +73,7 @@ pub use connectors::{
     harn_module::{
         load_contract as load_harn_connector_contract, HarnConnector, HarnConnectorContract,
     },
-    hmac::verify_hmac_signed,
+    hmac::{verify_hmac_signed, SIGNATURE_VERIFY_AUDIT_TOPIC},
     install_active_connector_clients, install_active_metrics_registry,
     is_rust_provider_connector_compat_provider, load_pending_webhook_handshakes,
     postprocess_normalized_event, ActivationHandle, ClientError, Connector, ConnectorClient,

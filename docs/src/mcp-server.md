@@ -323,7 +323,7 @@ clients accept inbound sampling — see the
 | Method or feature | Status |
 |---|---|
 | `initialize`, `notifications/initialized`, `ping` | Supported |
-| `logging/setLevel` | Accepted |
+| `logging/setLevel`, `notifications/message` | Supported; see [Logging notifications](#logging-notifications) |
 | `tools/list`, `tools/call` | Supported for the Harn tool catalog above |
 | `notifications/progress`, `notifications/cancelled` | Supported for cancellable work |
 | `resources/list`, `resources/read` | Supported for manifest, EventLog topic, event, and DLQ resources |
@@ -402,3 +402,34 @@ calling MCP client.
 `harn.secret_scan` additionally appends `audit.secret_scan` records with only
 redacted findings plus stable fingerprints so future trust-graph consumers can
 reason about scan hygiene without storing raw secret material.
+
+## Logging notifications
+
+The server advertises the `logging` capability and forwards Harn's structured
+audit and observability streams as MCP `notifications/message` envelopes. Each
+notification carries `level`, `logger`, and `data` fields per the
+[MCP logging spec](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/logging).
+The `data` payload is the raw event-log entry: `event_id`, `kind`,
+`occurred_at_ms`, `headers`, and `payload`.
+
+`logging/setLevel` updates the per-session minimum severity. Subsequent
+notifications below the requested level are dropped before they hit the wire;
+the default is `info`. Levels follow RFC 5424 ordering: `debug`, `info`,
+`notice`, `warning`, `error`, `critical`, `alert`, `emergency`. The server
+returns `-32602` for an unknown or missing level.
+
+The streams the orchestrator currently surfaces:
+
+| Logger | Source topic | Default level |
+|---|---|---|
+| `harn.audit.secret_scan` | `audit.secret_scan` | `notice` |
+| `harn.audit.signature_verify` | `audit.signature_verify` | `notice` |
+| `harn.connectors.egress.audit` | `connectors.egress.audit` | `notice` |
+| `harn.trigger.operations.audit` | `trigger.operations.audit` | `notice` |
+| `harn.trigger.dlq` | `trigger.dlq` | `warning` |
+| `harn.observability.action_graph` | `observability.action_graph` | `debug` |
+
+A producer can override the level for a specific event by setting an explicit
+`severity` header on the event-log entry; otherwise the server escalates events
+whose `kind` contains `error`/`panic` to `error` and `fail`/`denied`/`blocked`/
+`rejected`/`dropped`/`dlq` to `warning`.

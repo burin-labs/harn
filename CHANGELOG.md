@@ -19,6 +19,12 @@ condensed series summaries instead of full per-patch history.
   `/message/stream`, `/tasks/send`, `/tasks/send_and_wait`, `/tasks/cancel`,
   `/tasks/resubscribe`) keep working for one minor cycle and now emit a `Deprecation`
   header pointing at the canonical replacement.
+- **MCP logging notifications.** `harn mcp serve` now forwards Harn's structured audit
+  and observability event-log streams (signature-verify, secret-scan, egress, trigger
+  operations, DLQ, action graph) as MCP `notifications/message` per the
+  [MCP logging spec](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/logging).
+  `logging/setLevel` is now honored per session and filters notifications by severity;
+  events can override the assigned level via a `severity` header.
 
 ## v0.7.57
 

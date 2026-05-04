@@ -50,6 +50,50 @@ const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
 const TRIGGER_EVENTS_TOPIC: &str = "triggers.events";
 const DEFAULT_TASK_TTL_MS: u64 = 10 * 60 * 1000;
 const MAX_TASK_TTL_MS: u64 = 60 * 60 * 1000;
+const LOG_NOTIFICATION_CAPACITY: usize = 256;
+
+/// Audit and observability topics surfaced to MCP clients via
+/// `notifications/message`. Each binding gives the topic a stable
+/// `logger` name (per the MCP logging spec) and a fallback severity
+/// for events whose kind/headers do not signal a more specific level.
+struct McpLogStreamBinding {
+    topic: &'static str,
+    logger: &'static str,
+    default_level: mcp_protocol::McpLogLevel,
+}
+
+const LOG_STREAM_BINDINGS: &[McpLogStreamBinding] = &[
+    McpLogStreamBinding {
+        topic: harn_vm::SECRET_SCAN_AUDIT_TOPIC,
+        logger: "harn.audit.secret_scan",
+        default_level: mcp_protocol::McpLogLevel::Notice,
+    },
+    McpLogStreamBinding {
+        topic: harn_vm::SIGNATURE_VERIFY_AUDIT_TOPIC,
+        logger: "harn.audit.signature_verify",
+        default_level: mcp_protocol::McpLogLevel::Notice,
+    },
+    McpLogStreamBinding {
+        topic: harn_vm::egress::EGRESS_AUDIT_TOPIC,
+        logger: "harn.connectors.egress.audit",
+        default_level: mcp_protocol::McpLogLevel::Notice,
+    },
+    McpLogStreamBinding {
+        topic: harn_vm::TRIGGER_OPERATION_AUDIT_TOPIC,
+        logger: "harn.trigger.operations.audit",
+        default_level: mcp_protocol::McpLogLevel::Notice,
+    },
+    McpLogStreamBinding {
+        topic: TRIGGER_DLQ_TOPIC,
+        logger: "harn.trigger.dlq",
+        default_level: mcp_protocol::McpLogLevel::Warning,
+    },
+    McpLogStreamBinding {
+        topic: ACTION_GRAPH_TOPIC,
+        logger: "harn.observability.action_graph",
+        default_level: mcp_protocol::McpLogLevel::Debug,
+    },
+];
 
 #[derive(Clone)]
 pub(crate) struct McpOrchestratorService {
@@ -62,9 +106,15 @@ pub(crate) struct McpOrchestratorService {
     list_notify_tx: broadcast::Sender<JsonValue>,
     resource_notify_tx: broadcast::Sender<McpResourceNotification>,
     task_notify_tx: broadcast::Sender<McpTaskNotification>,
+    log_notify_tx: broadcast::Sender<McpLogNotification>,
+    #[allow(dead_code)]
+    log_event_log: Option<Arc<harn_vm::event_log::AnyEventLog>>,
+    #[allow(dead_code)]
+    log_watchers_ready: Arc<LogWatcherReadiness>,
     tasks: Arc<Mutex<BTreeMap<String, McpTaskRecord>>>,
     resource_watchers: Arc<Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>>,
     _list_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
+    _log_watchers: Arc<AbortOnDrop>,
 }
 
 #[derive(Clone, Debug)]
@@ -77,6 +127,45 @@ struct McpResourceNotification {
 struct McpTaskNotification {
     owner: String,
     message: JsonValue,
+}
+
+#[derive(Clone, Debug)]
+struct McpLogNotification {
+    level: mcp_protocol::McpLogLevel,
+    message: JsonValue,
+}
+
+/// Counts the log topic watchers that have finished registering with
+/// the event log so callers (currently tests) can deterministically
+/// wait until the broadcast subscription is in place before publishing
+/// events. Production code never blocks on this.
+#[derive(Default)]
+struct LogWatcherReadiness {
+    ready: std::sync::atomic::AtomicUsize,
+    expected: std::sync::atomic::AtomicUsize,
+    notify: tokio::sync::Notify,
+}
+
+impl LogWatcherReadiness {
+    fn record_ready(&self) {
+        self.ready.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.notify.notify_waiters();
+    }
+}
+
+/// Owns spawned tokio tasks and aborts them when the wrapper is
+/// dropped. The log topic watchers each hold an `Arc<AnyEventLog>` and
+/// would otherwise outlive a dropped service, leaking tasks across
+/// test cases that build and drop multiple `McpOrchestratorService`
+/// instances on the same runtime.
+struct AbortOnDrop(Vec<tokio::task::JoinHandle<()>>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        for handle in self.0.drain(..) {
+            handle.abort();
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -135,6 +224,7 @@ struct ConnectionState {
     client_identity: String,
     protocol_version: String,
     subscribed_resources: BTreeSet<String>,
+    log_level: mcp_protocol::McpLogLevel,
 }
 
 impl Default for ConnectionState {
@@ -145,6 +235,7 @@ impl Default for ConnectionState {
             client_identity: "unknown".to_string(),
             protocol_version: MCP_PROTOCOL_VERSION.to_string(),
             subscribed_resources: BTreeSet::new(),
+            log_level: mcp_protocol::McpLogLevel::Info,
         }
     }
 }
@@ -384,12 +475,19 @@ impl McpOrchestratorService {
         let (list_notify_tx, _) = broadcast::channel(64);
         let (resource_notify_tx, _) = broadcast::channel(128);
         let (task_notify_tx, _) = broadcast::channel(64);
+        let (log_notify_tx, _) = broadcast::channel(LOG_NOTIFICATION_CAPACITY);
         let list_watcher = start_list_change_watcher(
             project_root,
             local.config.clone(),
             manifest_source.clone(),
             prompt_catalog.clone(),
             list_notify_tx.clone(),
+        );
+        let log_watchers_ready = Arc::new(LogWatcherReadiness::default());
+        let (log_event_log, log_watchers) = spawn_log_topic_watchers(
+            &local.state_dir,
+            log_notify_tx.clone(),
+            log_watchers_ready.clone(),
         );
         Ok(Self {
             config_path: local.config,
@@ -401,9 +499,13 @@ impl McpOrchestratorService {
             list_notify_tx,
             resource_notify_tx,
             task_notify_tx,
+            log_notify_tx,
+            log_event_log,
+            log_watchers_ready,
             tasks: Arc::new(Mutex::new(BTreeMap::new())),
             resource_watchers: Arc::new(Mutex::new(BTreeMap::new())),
             _list_watcher: Arc::new(Mutex::new(list_watcher)),
+            _log_watchers: Arc::new(AbortOnDrop(log_watchers)),
         })
     }
 
@@ -457,6 +559,25 @@ impl McpOrchestratorService {
         self.task_notify_tx.subscribe()
     }
 
+    fn subscribe_log_notifications(&self) -> broadcast::Receiver<McpLogNotification> {
+        self.log_notify_tx.subscribe()
+    }
+
+    #[cfg(test)]
+    async fn wait_for_log_watchers_ready(&self) {
+        use std::sync::atomic::Ordering;
+        loop {
+            let notified = self.log_watchers_ready.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let expected = self.log_watchers_ready.expected.load(Ordering::SeqCst);
+            if expected > 0 && self.log_watchers_ready.ready.load(Ordering::SeqCst) >= expected {
+                return;
+            }
+            notified.await;
+        }
+    }
+
     async fn handle_request(&self, session: &mut ConnectionState, request: JsonValue) -> JsonValue {
         let id = request.get("id").cloned().unwrap_or(JsonValue::Null);
         let method = request
@@ -480,7 +601,9 @@ impl McpOrchestratorService {
         match method {
             "initialized" => JsonValue::Null,
             "ping" => harn_vm::jsonrpc::response(id, json!({})),
-            "logging/setLevel" => harn_vm::jsonrpc::response(id, json!({})),
+            mcp_protocol::METHOD_LOGGING_SET_LEVEL => {
+                self.handle_logging_set_level(id, session, &params)
+            }
             "tools/list" => self.handle_tools_list(id, &params),
             "tools/call" => self.handle_tools_call(id, session, &params).await,
             mcp_protocol::METHOD_TASKS_GET => self.handle_tasks_get(id, session, &params),
@@ -555,7 +678,7 @@ impl McpOrchestratorService {
                     "tools": { "listChanged": true },
                     "resources": { "listChanged": true, "subscribe": true },
                     "prompts": { "listChanged": true },
-                    "logging": {},
+                    "logging": mcp_protocol::logging_capability(),
                     "tasks": mcp_protocol::tasks_capability(),
                     "completions": mcp_protocol::completions_capability(),
                 },
@@ -603,6 +726,30 @@ impl McpOrchestratorService {
             }
             Err(error) => harn_vm::jsonrpc::error_response(id, -32603, &error),
         }
+    }
+
+    fn handle_logging_set_level(
+        &self,
+        id: JsonValue,
+        session: &mut ConnectionState,
+        params: &JsonValue,
+    ) -> JsonValue {
+        let Some(level_str) = params.get("level").and_then(JsonValue::as_str) else {
+            return harn_vm::jsonrpc::error_response(
+                id,
+                -32602,
+                "logging/setLevel requires params.level",
+            );
+        };
+        let Some(level) = mcp_protocol::McpLogLevel::from_str_ci(level_str) else {
+            return harn_vm::jsonrpc::error_response(
+                id,
+                -32602,
+                &format!("logging/setLevel: unsupported level '{level_str}'"),
+            );
+        };
+        session.log_level = level;
+        harn_vm::jsonrpc::response(id, json!({}))
     }
 
     fn handle_completion_complete(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
@@ -1857,6 +2004,7 @@ async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
     let mut list_notifications = service.subscribe_list_notifications();
     let mut resource_notifications = service.subscribe_resource_notifications();
     let mut task_notifications = service.subscribe_task_notifications();
+    let mut log_notifications = service.subscribe_log_notifications();
 
     eprintln!("[harn] MCP stdio server ready");
 
@@ -1899,6 +2047,16 @@ async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
             notification = task_notifications.recv() => {
                 match notification {
                     Ok(notification) if notification.owner == session.client_identity => {
+                        write_stdio_json(&mut stdout, &notification.message).await?;
+                    }
+                    Ok(_) => continue,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            notification = log_notifications.recv() => {
+                match notification {
+                    Ok(notification) if notification.level >= session.log_level => {
                         write_stdio_json(&mut stdout, &notification.message).await?;
                     }
                     Ok(_) => continue,
@@ -2249,6 +2407,15 @@ async fn http_get_stream(State(state): State<HttpState>, headers: HeaderMap) -> 
     {
         spawn_task_notification_forwarder(state.service.clone(), sender, session.clone());
     }
+    if let Some(sender) = session
+        .sse_tx
+        .lock()
+        .expect("SSE sender poisoned")
+        .as_ref()
+        .cloned()
+    {
+        spawn_log_notification_forwarder(state.service.clone(), sender, session.clone());
+    }
     let mut response = sse_response(rx).into_response();
     attach_streamable_headers(&mut response, None, MCP_PROTOCOL_VERSION);
     response
@@ -2343,6 +2510,15 @@ async fn legacy_sse_stream(State(state): State<HttpState>, headers: HeaderMap) -
         .cloned();
     if let Some(task_tx) = task_tx {
         spawn_task_notification_forwarder(state.service.clone(), task_tx, session.clone());
+    }
+    let log_tx = session
+        .sse_tx
+        .lock()
+        .expect("legacy SSE sender poisoned")
+        .as_ref()
+        .cloned();
+    if let Some(log_tx) = log_tx {
+        spawn_log_notification_forwarder(state.service.clone(), log_tx, session.clone());
     }
     state
         .sessions
@@ -2632,6 +2808,168 @@ fn spawn_task_notification_forwarder(
             }
         }
     });
+}
+
+fn spawn_log_notification_forwarder(
+    service: Arc<McpOrchestratorService>,
+    sender: UnboundedSender<JsonValue>,
+    session: Arc<HttpSession>,
+) {
+    let mut notifications = service.subscribe_log_notifications();
+    tokio::spawn(async move {
+        loop {
+            match notifications.recv().await {
+                Ok(notification) => {
+                    let subscribed_level = session
+                        .state
+                        .lock()
+                        .expect("MCP session poisoned")
+                        .log_level;
+                    if notification.level < subscribed_level {
+                        continue;
+                    }
+                    if sender.unbounded_send(notification.message).is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
+/// Open the orchestrator event log and subscribe to each
+/// `LOG_STREAM_BINDINGS` topic, fanning new events out as MCP
+/// `notifications/message` envelopes on `log_notify_tx`.
+///
+/// Returns the spawned handles so the service can keep them alive for
+/// its lifetime; the watchers terminate when the broadcast sender is
+/// dropped.
+fn spawn_log_topic_watchers(
+    state_dir: &Path,
+    log_notify_tx: broadcast::Sender<McpLogNotification>,
+    readiness: Arc<LogWatcherReadiness>,
+) -> (
+    Option<Arc<harn_vm::event_log::AnyEventLog>>,
+    Vec<tokio::task::JoinHandle<()>>,
+) {
+    let event_log = match auth_event_log(state_dir) {
+        Ok(log) => log,
+        Err(error) => {
+            eprintln!("[harn] warning: MCP log stream disabled: {error}");
+            return (None, Vec::new());
+        }
+    };
+    let watchers: Vec<_> = LOG_STREAM_BINDINGS
+        .iter()
+        .filter_map(|binding| {
+            spawn_log_topic_watcher(
+                event_log.clone(),
+                binding,
+                log_notify_tx.clone(),
+                readiness.clone(),
+            )
+        })
+        .collect();
+    readiness
+        .expected
+        .store(watchers.len(), std::sync::atomic::Ordering::SeqCst);
+    readiness.notify.notify_waiters();
+    (Some(event_log), watchers)
+}
+
+fn spawn_log_topic_watcher(
+    event_log: Arc<harn_vm::event_log::AnyEventLog>,
+    binding: &'static McpLogStreamBinding,
+    log_notify_tx: broadcast::Sender<McpLogNotification>,
+    readiness: Arc<LogWatcherReadiness>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    let topic = match Topic::new(binding.topic) {
+        Ok(topic) => topic,
+        Err(error) => {
+            eprintln!(
+                "[harn] warning: MCP log stream skipped invalid topic {}: {error}",
+                binding.topic
+            );
+            return None;
+        }
+    };
+    Some(tokio::spawn(async move {
+        let start_from = match event_log.latest(&topic).await {
+            Ok(latest) => latest,
+            Err(error) => {
+                eprintln!(
+                    "[harn] warning: MCP log stream cannot read topic {}: {error}",
+                    binding.topic
+                );
+                return;
+            }
+        };
+        let mut stream = match event_log.clone().subscribe(&topic, start_from).await {
+            Ok(stream) => stream,
+            Err(error) => {
+                eprintln!(
+                    "[harn] warning: MCP log stream cannot subscribe to topic {}: {error}",
+                    binding.topic
+                );
+                return;
+            }
+        };
+        readiness.record_ready();
+        while let Some(item) = stream.next().await {
+            let Ok((event_id, event)) = item else {
+                continue;
+            };
+            let level = severity_for_event(binding, &event);
+            let data = json!({
+                "event_id": event_id,
+                "kind": event.kind,
+                "occurred_at_ms": event.occurred_at_ms,
+                "headers": event.headers,
+                "payload": event.payload,
+            });
+            let message =
+                mcp_protocol::logging_message_notification(level, Some(binding.logger), data);
+            if log_notify_tx
+                .send(McpLogNotification { level, message })
+                .is_err()
+            {
+                continue;
+            }
+        }
+    }))
+}
+
+/// Pick the MCP severity for an event_log entry. Honors an explicit
+/// `severity` header when present so producers can opt into a specific
+/// level; otherwise heuristics on the event kind elevate failures and
+/// errors above the topic's default level.
+fn severity_for_event(
+    binding: &McpLogStreamBinding,
+    event: &LogEvent,
+) -> mcp_protocol::McpLogLevel {
+    if let Some(level) = event
+        .headers
+        .get("severity")
+        .and_then(|value| mcp_protocol::McpLogLevel::from_str_ci(value))
+    {
+        return level;
+    }
+    let kind = event.kind.to_ascii_lowercase();
+    if kind.contains("error") || kind.contains("panic") {
+        return mcp_protocol::McpLogLevel::Error;
+    }
+    if kind.contains("fail")
+        || kind.contains("denied")
+        || kind.contains("blocked")
+        || kind.contains("rejected")
+        || kind.contains("dropped")
+        || kind.contains("dlq")
+    {
+        return mcp_protocol::McpLogLevel::Warning;
+    }
+    binding.default_level
 }
 
 fn attach_streamable_headers(response: &mut Response, session_id: Option<&str>, protocol: &str) {
@@ -3486,6 +3824,140 @@ pub fn on_fail(event: TriggerEvent) -> any {
                 }
             }
         }
+    }
+
+    async fn recv_next_log_notification(
+        notifications: &mut broadcast::Receiver<McpLogNotification>,
+    ) -> McpLogNotification {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "timed out waiting for log notification"
+            );
+            match tokio::time::timeout(remaining, notifications.recv())
+                .await
+                .expect("timed out waiting for log notification")
+            {
+                Ok(msg) => return msg,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => {
+                    panic!("log notification channel closed")
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn severity_for_event_honors_explicit_header_then_kind_then_default() {
+        let binding = &LOG_STREAM_BINDINGS[0];
+        let mut event = LogEvent::new("scan_completed", json!({}));
+        assert_eq!(severity_for_event(binding, &event), binding.default_level);
+
+        event.kind = "scan_failed".to_string();
+        assert_eq!(
+            severity_for_event(binding, &event),
+            mcp_protocol::McpLogLevel::Warning
+        );
+
+        event.kind = "scan_error".to_string();
+        assert_eq!(
+            severity_for_event(binding, &event),
+            mcp_protocol::McpLogLevel::Error
+        );
+
+        event.kind = "scan_completed".to_string();
+        event
+            .headers
+            .insert("severity".to_string(), "alert".to_string());
+        assert_eq!(
+            severity_for_event(binding, &event),
+            mcp_protocol::McpLogLevel::Alert
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn logging_set_level_updates_session_and_validates_input() {
+        let _guard = lock_harn_state();
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+        let mut session = init_session(&service).await;
+        assert_eq!(session.log_level, mcp_protocol::McpLogLevel::Info);
+
+        let response = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(
+                    50,
+                    mcp_protocol::METHOD_LOGGING_SET_LEVEL,
+                    json!({"level": "warning"}),
+                ),
+            )
+            .await;
+        assert_eq!(response["result"], json!({}));
+        assert_eq!(session.log_level, mcp_protocol::McpLogLevel::Warning);
+
+        let bad_level = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(
+                    51,
+                    mcp_protocol::METHOD_LOGGING_SET_LEVEL,
+                    json!({"level": "loud"}),
+                ),
+            )
+            .await;
+        assert_eq!(bad_level["error"]["code"], json!(-32602));
+        assert_eq!(session.log_level, mcp_protocol::McpLogLevel::Warning);
+
+        let missing = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(52, mcp_protocol::METHOD_LOGGING_SET_LEVEL, json!({})),
+            )
+            .await;
+        assert_eq!(missing["error"]["code"], json!(-32602));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn audit_events_emit_log_notifications_with_logger_and_level() {
+        let _guard = lock_harn_state();
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+        let _session = init_session(&service).await;
+        let mut notifications = service.subscribe_log_notifications();
+        service.wait_for_log_watchers_ready().await;
+
+        let event_log = service
+            .log_event_log
+            .as_ref()
+            .expect("log event log present in tests")
+            .clone();
+        let topic = Topic::new(harn_vm::SIGNATURE_VERIFY_AUDIT_TOPIC).unwrap();
+        let mut headers = std::collections::BTreeMap::new();
+        headers.insert("severity".to_string(), "warning".to_string());
+        event_log
+            .append(
+                &topic,
+                LogEvent::new(
+                    "verify_failed",
+                    json!({"provider": "github", "reason": "bad signature"}),
+                )
+                .with_headers(headers),
+            )
+            .await
+            .unwrap();
+
+        let notification = recv_next_log_notification(&mut notifications).await;
+        assert_eq!(notification.level, mcp_protocol::McpLogLevel::Warning);
+        let params = &notification.message["params"];
+        assert_eq!(params["level"], json!("warning"));
+        assert_eq!(params["logger"], json!("harn.audit.signature_verify"));
+        assert_eq!(params["data"]["kind"], json!("verify_failed"));
+        assert_eq!(params["data"]["payload"]["provider"], json!("github"));
     }
 
     #[tokio::test(flavor = "current_thread")]
