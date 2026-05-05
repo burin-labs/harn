@@ -1669,7 +1669,24 @@ fn test_parses_skill_provenance_subcommands() {
     assert_eq!(sign.skill, "SKILL.md");
     assert_eq!(sign.key, "signer.pem");
 
-    let cli = Cli::parse_from(["harn", "skill", "verify", "SKILL.md"]);
+    let cli = Cli::parse_from([
+        "harn",
+        "skill",
+        "endorse",
+        "SKILL.md",
+        "--key",
+        "auditor.pem",
+    ]);
+    let Command::Skill(args) = cli.command.unwrap() else {
+        panic!("expected skill command");
+    };
+    let SkillCommand::Endorse(endorse) = args.command else {
+        panic!("expected skill endorse");
+    };
+    assert_eq!(endorse.skill, "SKILL.md");
+    assert_eq!(endorse.key, "auditor.pem");
+
+    let cli = Cli::parse_from(["harn", "skill", "verify", "SKILL.md", "--json"]);
     let Command::Skill(args) = cli.command.unwrap() else {
         panic!("expected skill command");
     };
@@ -1677,6 +1694,17 @@ fn test_parses_skill_provenance_subcommands() {
         panic!("expected skill verify");
     };
     assert_eq!(verify.skill, "SKILL.md");
+    assert!(verify.json);
+
+    let cli = Cli::parse_from(["harn", "skill", "who-signed", "SKILL.md", "--json"]);
+    let Command::Skill(args) = cli.command.unwrap() else {
+        panic!("expected skill command");
+    };
+    let SkillCommand::WhoSigned(who_signed) = args.command else {
+        panic!("expected skill who-signed");
+    };
+    assert_eq!(who_signed.skill, "SKILL.md");
+    assert!(who_signed.json);
 
     let cli = Cli::parse_from([
         "harn",

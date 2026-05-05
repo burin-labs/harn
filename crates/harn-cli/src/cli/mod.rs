@@ -108,8 +108,9 @@ pub(crate) use serve::{
     ServeTlsMode,
 };
 pub(crate) use skill::{
-    SkillArgs, SkillCommand, SkillKeyCommand, SkillKeyGenerateArgs, SkillSignArgs,
-    SkillTrustAddArgs, SkillTrustCommand, SkillTrustListArgs, SkillVerifyArgs,
+    SkillArgs, SkillCommand, SkillEndorseArgs, SkillKeyCommand, SkillKeyGenerateArgs,
+    SkillSignArgs, SkillTrustAddArgs, SkillTrustCommand, SkillTrustListArgs, SkillVerifyArgs,
+    SkillWhoSignedArgs,
 };
 pub(crate) use skills::{
     SkillsArgs, SkillsCommand, SkillsInspectArgs, SkillsInstallArgs, SkillsListArgs,

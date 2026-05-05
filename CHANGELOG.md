@@ -10,6 +10,11 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Skill provenance endorsement chains (#933).** Skill signatures now use
+  `harn-skill-sig/v2` with an author signature plus one or more trusted
+  endorsement signatures. Added `harn skill endorse`, `harn skill who-signed`,
+  Harn-visible `skill_who_signed(...)` registry queries, and transcript metadata
+  that exposes signer trust-policy inputs for `trust.query`.
 - **Merge Captain cheap-model prompt pack (#1016).** Added a Harn-native
   value-model prompt pack with narrow prompts for PR classification,
   deterministic action choice, CI diagnosis, repair summaries, approval

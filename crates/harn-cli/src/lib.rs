@@ -89,7 +89,11 @@ async fn async_main() {
                 SkillKeyCommand::Generate(generate) => commands::skill::run_key_generate(&generate),
             },
             SkillCommand::Sign(sign) => commands::skill::run_sign(&sign),
+            SkillCommand::Endorse(endorse) => commands::skill::run_endorse(&endorse),
             SkillCommand::Verify(verify) => commands::skill::run_verify(&verify),
+            SkillCommand::WhoSigned(who_signed) => {
+                commands::skill::run_who_signed(&who_signed).await
+            }
             SkillCommand::Trust(trust_args) => match trust_args.command {
                 SkillTrustCommand::Add(add) => commands::skill::run_trust_add(&add),
                 SkillTrustCommand::List(list) => commands::skill::run_trust_list(&list),

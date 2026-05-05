@@ -1022,6 +1022,17 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         where_clauses: &[],
     },
     BuiltinSignature {
+        name: "skill_who_signed",
+        params: &[
+            Param::new("registry", TY_DICT),
+            Param::new("name", TY_STRING),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "skills_catalog_entries",
         params: &[Param::new("registry", TY_DICT)],
         returns: TY_LIST,
