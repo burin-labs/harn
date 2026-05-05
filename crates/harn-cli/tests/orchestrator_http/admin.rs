@@ -256,6 +256,11 @@ async fn tls_listener_serves_https_with_supplied_cert_and_key() {
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &base_manifest(None));
     write_file(temp.path(), "lib.harn", handler_module());
+    write_file(
+        temp.path(),
+        "github_connector.harn",
+        github_connector_module(),
+    );
 
     let cert = generate_simple_self_signed(vec!["localhost".to_string(), "127.0.0.1".to_string()])
         .unwrap();
@@ -309,6 +314,11 @@ allowed_origins = ["https://allowed.example"]"#,
         )),
     );
     write_file(temp.path(), "lib.harn", handler_module());
+    write_file(
+        temp.path(),
+        "github_connector.harn",
+        github_connector_module(),
+    );
 
     let secret = "origin-secret";
     let _envs = lock_env_with(&[
@@ -341,6 +351,11 @@ async fn oversized_request_body_is_rejected() {
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &base_manifest(None));
     write_file(temp.path(), "lib.harn", handler_module());
+    write_file(
+        temp.path(),
+        "github_connector.harn",
+        github_connector_module(),
+    );
 
     let secret = "body-limit-secret";
     let _envs = lock_env_with(&[
@@ -373,6 +388,11 @@ async fn graceful_shutdown_waits_for_in_flight_request() {
     let request_release_value = request_release_path.to_string_lossy().into_owned();
     write_file(temp.path(), "harn.toml", &base_manifest(None));
     write_file(temp.path(), "lib.harn", handler_module());
+    write_file(
+        temp.path(),
+        "github_connector.harn",
+        github_connector_module(),
+    );
 
     let secret = "shutdown-secret";
     let _envs = lock_env_with(&[

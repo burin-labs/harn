@@ -9,6 +9,11 @@ async fn slack_webhook_acknowledges_before_handler_finishes() {
     let release_path_value = release_path.to_string_lossy().into_owned();
     write_file(temp.path(), "harn.toml", &slack_manifest(None));
     write_file(temp.path(), "lib.harn", &slack_handler_module(&marker_path));
+    write_file(
+        temp.path(),
+        "slack_connector.harn",
+        slack_connector_module(),
+    );
 
     let secret = "slack-signing-secret";
     let _envs = lock_env_with(&[
@@ -93,6 +98,11 @@ async fn slack_url_verification_returns_plaintext_challenge() {
         "lib.harn",
         &slack_handler_module(&temp.path().join("unused-slack-marker.txt")),
     );
+    write_file(
+        temp.path(),
+        "slack_connector.harn",
+        slack_connector_module(),
+    );
 
     let secret = "slack-signing-secret";
     let _envs = lock_env_with(&[
@@ -135,6 +145,11 @@ async fn slack_bad_requests_set_no_retry_header_and_export_delivery_metrics() {
         temp.path(),
         "lib.harn",
         &slack_handler_module(&temp.path().join("unused-slack-marker.txt")),
+    );
+    write_file(
+        temp.path(),
+        "slack_connector.harn",
+        slack_connector_module(),
     );
 
     let secret = "slack-signing-secret";

@@ -30,6 +30,8 @@ pub(super) use tempfile::TempDir;
 pub(super) use time::OffsetDateTime;
 pub(super) use tokio::sync::MutexGuard;
 
+pub(super) use crate::test_util::connectors::github_connector_module;
+
 type HmacSha256 = Hmac<Sha256>;
 
 /// Hard fail-fast ceiling for event-log waits. The broadcast channel
@@ -63,6 +65,10 @@ name = "fixture"
 
 [exports]
 handlers = "lib.harn"
+
+[[providers]]
+id = "github"
+connector = { harn = "github_connector.harn" }
 
 [[triggers]]
 id = "github-new-issue"
@@ -141,6 +147,10 @@ name = "fixture"
 [exports]
 handlers = "lib.harn"
 
+[[providers]]
+id = "slack"
+connector = { harn = "slack_connector.harn" }
+
 [[triggers]]
 id = "slack-mentions"
 kind = "webhook"
@@ -165,6 +175,10 @@ name = "fixture"
 
 [exports]
 handlers = "lib.harn"
+
+[[providers]]
+id = "notion"
+connector = { harn = "notion_connector.harn" }
 
 [[triggers]]
 id = "notion-pages"
@@ -420,6 +434,132 @@ pub fn normalize_inbound(raw) {
       dedupe_key: "harn-github:" + body.id,
       payload: body,
       signature_status: {state: "unsigned"},
+    },
+  }
+}
+
+pub fn call(method, _args) {
+  throw "method_not_found:" + method
+}
+"#
+}
+
+pub(super) fn slack_connector_module() -> &'static str {
+    r#"
+pub fn provider_id() {
+  return "slack"
+}
+
+pub fn kinds() {
+  return ["webhook"]
+}
+
+pub fn payload_schema() {
+  return "SlackEventPayload"
+}
+
+pub fn normalize_inbound(raw) {
+  let decoded = base64_decode(raw.body_base64)
+  let timestamp = raw.headers["X-Slack-Request-Timestamp"] ?? raw.headers["x-slack-request-timestamp"] ?? ""
+  let signature = raw.headers["X-Slack-Signature"] ?? raw.headers["x-slack-signature"] ?? ""
+  let secret = secret_get("slack/signing-secret")
+  let expected = "v0=" + hmac_sha256(secret, "v0:" + timestamp + ":" + decoded)
+  if !constant_time_eq(signature, expected) {
+    return {
+      type: "reject",
+      reject: {
+        status: 400,
+        body: {error: "invalid_signature"},
+      },
+    }
+  }
+
+  let body = raw.body_json ?? json_parse(decoded)
+  if body.type == "url_verification" {
+    return {
+      type: "immediate_response",
+      immediate_response: {
+        status: 200,
+        headers: {"content-type": "text/plain; charset=utf-8"},
+        body: body.challenge,
+      },
+    }
+  }
+
+  let event_type = body.event.type ?? "event_callback"
+  let channel_type = body.event.channel_type ?? ""
+  let kind = if event_type == "message" && channel_type != "" {
+    event_type + "." + channel_type
+  } else {
+    event_type
+  }
+  return {
+    type: "event",
+    event: {
+      kind: kind,
+      dedupe_key: "slack:" + (body.event_id ?? sha256(decoded)),
+      payload: body,
+      signature_status: {state: "verified"},
+    },
+  }
+}
+
+pub fn call(method, _args) {
+  throw "method_not_found:" + method
+}
+"#
+}
+
+pub(super) fn notion_connector_module() -> &'static str {
+    r#"
+pub fn provider_id() {
+  return "notion"
+}
+
+pub fn kinds() {
+  return ["webhook"]
+}
+
+pub fn payload_schema() {
+  return "NotionEventPayload"
+}
+
+pub fn normalize_inbound(raw) {
+  let decoded = base64_decode(raw.body_base64)
+  let body = raw.body_json ?? json_parse(decoded)
+  if (body.verification_token ?? "") != "" {
+    return {
+      type: "immediate_response",
+      immediate_response: {
+        status: 200,
+        body: {
+          status: "handshake_captured",
+          verification_token: body.verification_token,
+        },
+      },
+    }
+  }
+
+  let secret = secret_get("notion/verification-token")
+  let signature = raw.headers["X-Notion-Signature"] ?? raw.headers["x-notion-signature"] ?? ""
+  let expected = "sha256=" + hmac_sha256(secret, decoded)
+  if !constant_time_eq(signature, expected) {
+    return {
+      type: "reject",
+      reject: {
+        status: 400,
+        body: {error: "invalid_signature"},
+      },
+    }
+  }
+
+  return {
+    type: "event",
+    event: {
+      kind: body.type,
+      dedupe_key: "notion:" + (body.id ?? sha256(decoded)),
+      payload: body,
+      signature_status: {state: "verified"},
     },
   }
 }

@@ -11,6 +11,11 @@ async fn notion_webhook_handshake_is_captured_and_reported_by_doctor() {
         "lib.harn",
         &notion_handler_module(&temp.path().join("unused-notion-marker.txt")),
     );
+    write_file(
+        temp.path(),
+        "notion_connector.harn",
+        notion_connector_module(),
+    );
 
     let _envs = lock_env_with(&[("HARN_SECRET_PROVIDERS", "env")]).await;
     let harness = start_harness(&temp).await;
@@ -76,6 +81,11 @@ async fn notion_webhook_signed_delivery_is_dispatched() {
         temp.path(),
         "lib.harn",
         &notion_handler_module(&marker_path),
+    );
+    write_file(
+        temp.path(),
+        "notion_connector.harn",
+        notion_connector_module(),
     );
 
     let secret = "secret-notion-live-token";
