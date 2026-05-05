@@ -500,7 +500,7 @@ async fn acp_websocket_parallel_clients_get_distinct_sessions_and_can_load_activ
         }),
     )
     .await;
-    assert_eq!(prompted["result"]["stopReason"], "completed");
+    assert_eq!(prompted["result"]["stopReason"], "end_turn");
 
     listener
         .shutdown(Duration::from_secs(5))
@@ -624,7 +624,7 @@ async fn acp_websocket_reconnect_replays_pending_host_request_and_completes_prom
                 assert_eq!(message["result"]["session"]["sessionId"], json!(session_id));
                 saw_load_response = true;
             } else if message.get("id").and_then(JsonValue::as_u64) == Some(2) {
-                assert_eq!(message["result"]["stopReason"], json!("completed"));
+                assert_eq!(message["result"]["stopReason"], json!("end_turn"));
                 saw_prompt_response = true;
             }
         }

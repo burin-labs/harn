@@ -241,7 +241,7 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
     // adapter can populate `session/prompt`'s `stopReason`. The bridge
     // is opt-in: pipelines that don't run under ACP simply leave the
     // slot unset.
-    if let Some(bridge) = super::agent::current_host_bridge() {
+    if let Some(bridge) = super::agent_runtime::current_host_bridge() {
         bridge.set_prompt_stop_reason(acp_stop_reason);
     }
     let result = serde_json::json!({
