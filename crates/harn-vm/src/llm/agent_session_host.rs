@@ -20,7 +20,9 @@ use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
 use super::cost::calculate_cost_for_provider;
+use super::helpers::ResolvedProvider;
 use super::permissions;
+use super::tools::build_assistant_response_message;
 
 const HOST_SESSION_INIT: &str = "__host_agent_session_init";
 const HOST_SESSION_FINALIZE: &str = "__host_agent_session_finalize";
@@ -64,6 +66,8 @@ struct AgentHostSession {
     successful_tools: Vec<String>,
     rejected_tools: Vec<String>,
     tool_mode: String,
+    last_provider: Option<String>,
+    pushed_transcript_dir: bool,
     started_at: String,
     /// Iteration cap from `agent_loop(options.max_iterations)`. Captured
     /// here so finalize can disambiguate `final_status == "budget_exhausted"`
@@ -216,6 +220,11 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         crate::agent_sessions::claim_tool_format(&resolved, &tool_format)
             .map_err(VmError::Runtime)?;
     }
+    let llm_transcript_dir = opt_str(&opts_map, "llm_transcript_dir").unwrap_or_default();
+    let pushed_transcript_dir = !llm_transcript_dir.is_empty();
+    if pushed_transcript_dir {
+        super::agent_observe::push_llm_transcript_dir(&llm_transcript_dir);
+    }
 
     let session = AgentHostSession {
         session_id: resolved.clone(),
@@ -229,6 +238,8 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         successful_tools: Vec::new(),
         rejected_tools: Vec::new(),
         tool_mode: tool_format,
+        last_provider: None,
+        pushed_transcript_dir,
         started_at: now_id(),
         max_iterations,
         daemon_state: None,
@@ -347,6 +358,9 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
     // order — outer scopes (workflow stage, parent agent) survive intact.
     release_session_policies(&session.installed_policies);
     permissions::clear_session_grants(&session_id);
+    if session.pushed_transcript_dir {
+        super::agent_observe::pop_llm_transcript_dir();
+    }
     // Pair with the push in init so subsequent loops see the right stack.
     crate::agent_sessions::pop_current_session();
     // Fire registered session-end hooks (e.g. cancelling orphaned
@@ -478,13 +492,47 @@ fn host_agent_session_messages_builtin(
     Ok(messages)
 }
 
+fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
+    let text = dict_get(llm_result, "text")
+        .map(|v| v.display())
+        .unwrap_or_default();
+    let provider = dict_get(llm_result, "provider")
+        .map(|v| v.display())
+        .unwrap_or_default();
+    // Only attach provider-native tool calls to the assistant envelope.
+    // Text-mode calls remain inline in `text` and are parsed from there.
+    let native_calls_value = dict_get(llm_result, "native_tool_calls")
+        .cloned()
+        .unwrap_or(VmValue::Nil);
+    let native_calls_json = list_items(&native_calls_value)
+        .iter()
+        .map(vm_to_json)
+        .collect::<Vec<_>>();
+    if native_calls_json.is_empty() {
+        let mut msg = BTreeMap::new();
+        msg.insert("role".to_string(), VmValue::String(Rc::from("assistant")));
+        msg.insert("content".to_string(), VmValue::String(Rc::from(text)));
+        return VmValue::Dict(Rc::new(msg));
+    }
+
+    let thinking = dict_get(llm_result, "thinking").map(|v| v.display());
+    let msg = build_assistant_response_message(
+        &text,
+        &[],
+        &native_calls_json,
+        thinking.as_deref(),
+        &provider,
+    );
+    json_to_vm(&msg)
+}
+
 fn host_agent_session_record_assistant_builtin(
     args: &[VmValue],
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let llm_result = args.get(1).cloned().unwrap_or(VmValue::Nil);
-    let text = dict_get(&llm_result, "text")
+    let provider = dict_get(&llm_result, "provider")
         .map(|v| v.display())
         .unwrap_or_default();
     let raw_tool_calls = dict_get(&llm_result, "tool_calls")
@@ -496,27 +544,46 @@ fn host_agent_session_record_assistant_builtin(
         .collect::<Vec<_>>();
     let _ = with_session(&session_id, HOST_SESSION_RECORD_ASSISTANT, |session| {
         session.tool_calls.extend(calls_json);
+        if !provider.is_empty() {
+            session.last_provider = Some(provider);
+        }
         Ok(())
     });
-    // Only attach `tool_calls` to the assistant transcript message when the
-    // provider produced them via the native channel. Text-mode tool calls are
-    // inline `<tool_call>` blocks in the assistant text and must not be
-    // duplicated on the message envelope.
-    let native_calls_value = dict_get(&llm_result, "native_tool_calls")
-        .cloned()
-        .unwrap_or(VmValue::Nil);
-    let native_calls_items = list_items(&native_calls_value);
-    let mut msg = BTreeMap::new();
-    msg.insert("role".to_string(), VmValue::String(Rc::from("assistant")));
-    msg.insert("content".to_string(), VmValue::String(Rc::from(text)));
-    if !native_calls_items.is_empty() {
-        msg.insert(
-            "tool_calls".to_string(),
-            VmValue::List(Rc::new(native_calls_items)),
-        );
-    }
-    let _ = crate::agent_sessions::inject_message(&session_id, VmValue::Dict(Rc::new(msg)));
+    let _ = crate::agent_sessions::inject_message(
+        &session_id,
+        assistant_message_from_llm_result(&llm_result),
+    );
     Ok(VmValue::Nil)
+}
+
+fn tool_result_message_for_provider(
+    provider: &str,
+    name: &str,
+    tool_call_id: &str,
+    observation: &str,
+) -> VmValue {
+    let mut msg = BTreeMap::new();
+    if ResolvedProvider::resolve(provider).is_anthropic_style {
+        msg.insert("role".to_string(), VmValue::String(Rc::from("tool_result")));
+        msg.insert(
+            "tool_use_id".to_string(),
+            VmValue::String(Rc::from(tool_call_id)),
+        );
+    } else {
+        msg.insert("role".to_string(), VmValue::String(Rc::from("tool")));
+        msg.insert("name".to_string(), VmValue::String(Rc::from(name)));
+        if !tool_call_id.is_empty() {
+            msg.insert(
+                "tool_call_id".to_string(),
+                VmValue::String(Rc::from(tool_call_id)),
+            );
+        }
+    }
+    msg.insert(
+        "content".to_string(),
+        VmValue::String(Rc::from(observation)),
+    );
+    VmValue::Dict(Rc::new(msg))
 }
 
 /// Recover the plan artifact from a dispatched emit_plan/update_plan result.
@@ -557,6 +624,10 @@ fn host_agent_session_record_tool_results_builtin(
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let dispatch = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let provider = with_session(&session_id, HOST_SESSION_RECORD_TOOL_RESULTS, |session| {
+        Ok(session.last_provider.clone().unwrap_or_default())
+    })
+    .unwrap_or_default();
     // dispatch may be either a flat list of results (as returned by
     // agent_dispatch_tool_batch) or a dict with a `results` key (legacy
     // shape some callers still synthesize). Handle both.
@@ -577,6 +648,10 @@ fn host_agent_session_record_tool_results_builtin(
             .or_else(|| dict_get(result, "rendered_result"))
             .or_else(|| dict_get(result, "output"))
             .or_else(|| dict_get(result, "content"))
+            .map(|v| v.display())
+            .unwrap_or_default();
+        let tool_call_id = dict_get(result, "tool_call_id")
+            .or_else(|| dict_get(result, "tool_use_id"))
             .map(|v| v.display())
             .unwrap_or_default();
         let ok = match dict_get(result, "ok") {
@@ -611,14 +686,10 @@ fn host_agent_session_record_tool_results_builtin(
                 });
             }
         }
-        let mut msg = BTreeMap::new();
-        msg.insert("role".to_string(), VmValue::String(Rc::from("tool")));
-        msg.insert(
-            "content".to_string(),
-            VmValue::String(Rc::from(observation)),
+        let _ = crate::agent_sessions::inject_message(
+            &session_id,
+            tool_result_message_for_provider(&provider, &name, &tool_call_id, &observation),
         );
-        msg.insert("name".to_string(), VmValue::String(Rc::from(name)));
-        let _ = crate::agent_sessions::inject_message(&session_id, VmValue::Dict(Rc::new(msg)));
     }
     let _ = with_session(&session_id, HOST_SESSION_RECORD_TOOL_RESULTS, |session| {
         session.successful_tools.extend(successful);
@@ -1732,7 +1803,57 @@ pub fn register_agent_session_host_primitives(vm: &mut Vm) {
 
 #[cfg(test)]
 mod tests {
-    use super::canonical_acp_stop_reason;
+    use serde_json::json;
+
+    use super::{
+        assistant_message_from_llm_result, canonical_acp_stop_reason,
+        tool_result_message_for_provider, vm_to_json,
+    };
+
+    #[test]
+    fn native_tool_calls_replay_with_openai_wire_shape() {
+        let result = crate::stdlib::json_to_vm_value(&json!({
+            "provider": "local",
+            "text": "",
+            "native_tool_calls": [{
+                "id": "call_001",
+                "name": "release_run",
+                "arguments": {"command": "git status --short"}
+            }],
+        }));
+        let message = vm_to_json(&assistant_message_from_llm_result(&result));
+
+        assert_eq!(message["role"], "assistant");
+        assert_eq!(message["tool_calls"][0]["id"], "call_001");
+        assert_eq!(message["tool_calls"][0]["type"], "function");
+        assert_eq!(message["tool_calls"][0]["function"]["name"], "release_run");
+        assert_eq!(
+            message["tool_calls"][0]["function"]["arguments"],
+            r#"{"command":"git status --short"}"#
+        );
+    }
+
+    #[test]
+    fn tool_results_replay_with_provider_appropriate_ids() {
+        let local = vm_to_json(&tool_result_message_for_provider(
+            "local",
+            "release_run",
+            "call_001",
+            "ok",
+        ));
+        assert_eq!(local["role"], "tool");
+        assert_eq!(local["name"], "release_run");
+        assert_eq!(local["tool_call_id"], "call_001");
+
+        let anthropic = vm_to_json(&tool_result_message_for_provider(
+            "anthropic",
+            "release_run",
+            "call_002",
+            "ok",
+        ));
+        assert_eq!(anthropic["role"], "tool_result");
+        assert_eq!(anthropic["tool_use_id"], "call_002");
+    }
 
     #[test]
     fn iteration_cap_maps_to_max_turn_requests() {

@@ -1073,6 +1073,7 @@ fn emit_permission_event(
 
 fn agent_primitive_denied_tool(
     tool_name: &str,
+    tool_call_id: &str,
     tool_args: &serde_json::Value,
     reason: impl Into<String>,
     category: crate::agent_events::ToolCallErrorCategory,
@@ -1083,6 +1084,7 @@ fn agent_primitive_denied_tool(
         "ok": false,
         "status": "error",
         "tool_name": tool_name,
+        "tool_call_id": tool_call_id,
         "arguments": tool_args,
         "result": result,
         "rendered_result": agent_tools::render_tool_result(&result),
@@ -1246,6 +1248,7 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
         );
         return Ok(json_to_vm_value(&agent_primitive_denied_tool(
             &tool_name,
+            &tool_id,
             &tool_args,
             reason,
             crate::agent_events::ToolCallErrorCategory::PermissionDenied,
@@ -1304,6 +1307,7 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
                 );
                 return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                     &tool_name,
+                    &tool_id,
                     &tool_args,
                     reason,
                     crate::agent_events::ToolCallErrorCategory::PermissionDenied,
@@ -1328,6 +1332,7 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
             );
             return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                 &tool_name,
+                &tool_id,
                 &tool_args,
                 reason,
                 crate::agent_events::ToolCallErrorCategory::PermissionDenied,
@@ -1346,6 +1351,7 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
                 );
                 return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                     &tool_name,
+                    &tool_id,
                     &tool_args,
                     reason,
                     crate::agent_events::ToolCallErrorCategory::PermissionDenied,
@@ -1420,6 +1426,7 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
                         );
                         return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                             &tool_name,
+                            &tool_id,
                             &tool_args,
                             reason,
                             crate::agent_events::ToolCallErrorCategory::PermissionDenied,
@@ -1439,6 +1446,7 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
                     );
                     return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                         &tool_name,
+                        &tool_id,
                         &tool_args,
                         reason,
                         crate::agent_events::ToolCallErrorCategory::PermissionDenied,
@@ -1453,6 +1461,7 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
         crate::orchestration::PreToolAction::Deny(reason) => {
             return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                 &tool_name,
+                &tool_id,
                 &tool_args,
                 reason,
                 crate::agent_events::ToolCallErrorCategory::PermissionDenied,
@@ -1467,6 +1476,7 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
     if let Err(message) = tools::validate_tool_args(&tool_name, &tool_args, &tool_schemas) {
         return Ok(json_to_vm_value(&agent_primitive_denied_tool(
             &tool_name,
+            &tool_id,
             &tool_args,
             message,
             crate::agent_events::ToolCallErrorCategory::SchemaValidation,
