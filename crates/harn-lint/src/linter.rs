@@ -44,6 +44,10 @@ pub(crate) struct Linter<'a> {
     pub(super) function_calls: Vec<(String, Span)>,
     /// Function names declared with `@step`.
     pub(super) step_functions: HashSet<String>,
+    /// Static step name declared for each `@step` function.
+    pub(super) step_names_by_function: HashMap<String, String>,
+    /// Static step names called by each `@persona` function.
+    pub(super) persona_steps: HashMap<String, HashSet<String>>,
     /// Function calls made from `@persona` bodies.
     pub(super) persona_body_calls: Vec<(String, Span, String)>,
     /// Opt-in function names allowed directly inside `@persona` bodies.
@@ -116,6 +120,8 @@ impl<'a> Linter<'a> {
             builtin_functions: Self::builtin_names(),
             function_calls: Vec::new(),
             step_functions: HashSet::new(),
+            step_names_by_function: HashMap::new(),
+            persona_steps: HashMap::new(),
             persona_body_calls: Vec::new(),
             persona_step_allowlist: HashSet::new(),
             has_wildcard_import: false,
@@ -1179,12 +1185,35 @@ impl<'a> Linter<'a> {
             if is_step {
                 if let Node::FnDecl { name, .. } = &inner.node {
                     self.step_functions.insert(name.clone());
+                    let step_name = attributes
+                        .iter()
+                        .find(|attr| attr.name == "step")
+                        .and_then(|attr| attr.named_arg("name"))
+                        .and_then(Self::string_literal_value)
+                        .unwrap_or(name)
+                        .to_string();
+                    self.step_names_by_function.insert(name.clone(), step_name);
                 }
             }
             if is_persona {
                 if let Node::FnDecl { name, body, .. } = &inner.node {
-                    self.collect_persona_calls(name, body);
+                    let persona_name = attributes
+                        .iter()
+                        .find(|attr| attr.name == "persona")
+                        .and_then(|attr| attr.named_arg("name"))
+                        .and_then(Self::string_literal_value)
+                        .unwrap_or(name)
+                        .to_string();
+                    self.collect_persona_calls(&persona_name, body);
                 }
+            }
+        }
+        for (call, _, persona) in &self.persona_body_calls {
+            if let Some(step_name) = self.step_names_by_function.get(call) {
+                self.persona_steps
+                    .entry(persona.clone())
+                    .or_default()
+                    .insert(step_name.clone());
             }
         }
     }
@@ -1381,6 +1410,64 @@ impl<'a> Linter<'a> {
             }
             _ => {}
         }
+    }
+
+    pub(super) fn validate_step_hook_target(&mut self, args: &[SNode], span: Span) {
+        let Some(persona_pattern) = args.first().and_then(Self::string_literal_value) else {
+            return;
+        };
+        let Some(step_name) = args.get(1).and_then(Self::string_literal_value) else {
+            return;
+        };
+        let matching_personas: Vec<_> = self
+            .persona_steps
+            .iter()
+            .filter(|(persona, _)| Self::simple_glob_match(persona_pattern, persona))
+            .collect();
+        if matching_personas.is_empty() {
+            self.diagnostics.push(LintDiagnostic {
+                rule: "persona-hook-target",
+                message: format!(
+                    "`register_step_hook` pattern `{persona_pattern}` does not match a statically declared `@persona`"
+                ),
+                span,
+                severity: LintSeverity::Error,
+                suggestion: Some("register hooks against a declared persona name or glob".to_string()),
+                fix: None,
+            });
+            return;
+        }
+        let missing: Vec<_> = matching_personas
+            .into_iter()
+            .filter_map(|(persona, steps)| (!steps.contains(step_name)).then_some(persona.clone()))
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+        self.diagnostics.push(LintDiagnostic {
+            rule: "persona-hook-target",
+            message: format!(
+                "`register_step_hook` targets step `{step_name}`, but it is not declared by persona(s): {}",
+                missing.join(", ")
+            ),
+            span,
+            severity: LintSeverity::Error,
+            suggestion: Some("use a step name declared with `@step(name: ...)` and called by the matching `@persona`".to_string()),
+            fix: None,
+        });
+    }
+
+    fn simple_glob_match(pattern: &str, value: &str) -> bool {
+        if pattern == "*" {
+            return true;
+        }
+        if let Some(prefix) = pattern.strip_suffix('*') {
+            return value.starts_with(prefix);
+        }
+        if let Some(suffix) = pattern.strip_prefix('*') {
+            return value.ends_with(suffix);
+        }
+        pattern == value
     }
 
     /// Lint a block of statements, flagging unreachable code after a

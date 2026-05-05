@@ -283,6 +283,9 @@ impl<'a> Linter<'a> {
                         self.warn_mcp_tools_missing_annotations(registry);
                     }
                 }
+                if name == "register_step_hook" {
+                    self.validate_step_hook_target(args, snode.span);
+                }
                 if Self::is_assert_builtin(name) && !self.in_test_pipeline() {
                     self.diagnostics.push(LintDiagnostic {
                         rule: "assert-outside-test",

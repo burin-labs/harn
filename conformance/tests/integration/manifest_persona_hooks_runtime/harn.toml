@@ -1,0 +1,13 @@
+[package]
+name = "manifest_persona_hooks"
+version = "0.1.0"
+
+[[hooks]]
+event = "PreStep"
+pattern = "merge_captain.admin_merge"
+handler = "manifest_persona_hooks::manifest_pre_step"
+
+[[hooks]]
+event = "PostStep"
+pattern = "merge_captain.admin_merge"
+handler = "manifest_persona_hooks::manifest_post_step"

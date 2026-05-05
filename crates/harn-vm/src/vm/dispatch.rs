@@ -144,6 +144,8 @@ impl Vm {
             let saved_handlers = std::mem::take(&mut self.exception_handlers);
             let saved_iterators = std::mem::take(&mut self.iterators);
             let saved_deadlines = std::mem::take(&mut self.deadlines);
+            let active_context = (!crate::step_runtime::is_tracked_function(&closure.func.name))
+                .then(crate::step_runtime::take_active_context);
 
             call_env.push_scope();
 
@@ -174,6 +176,9 @@ impl Vm {
             self.exception_handlers = saved_handlers;
             self.iterators = saved_iterators;
             self.deadlines = saved_deadlines;
+            if let Some(active_context) = active_context {
+                crate::step_runtime::restore_active_context(active_context);
+            }
 
             result
         })

@@ -135,6 +135,18 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("clear_tool_hooks()")
         .arity(VmBuiltinArity::Exact(0))
         .doc("Clear registered low-level workflow tool hooks."),
+    SyncBuiltin::new("register_persona_hook", register_persona_hook_builtin)
+        .signature("register_persona_hook(persona_pattern, event, handler)")
+        .arity(VmBuiltinArity::Exact(3))
+        .doc("Register a persona lifecycle hook for matching persona names."),
+    SyncBuiltin::new("register_step_hook", register_step_hook_builtin)
+        .signature("register_step_hook(persona_pattern, step_name, event, handler)")
+        .arity(VmBuiltinArity::Exact(4))
+        .doc("Register a persona step lifecycle hook for one named step."),
+    SyncBuiltin::new("clear_persona_hooks", clear_persona_hooks_builtin)
+        .signature("clear_persona_hooks()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Clear registered persona and step lifecycle hooks."),
     SyncBuiltin::new(
         "select_artifacts_adaptive",
         select_artifacts_adaptive_builtin,
@@ -2019,6 +2031,101 @@ fn register_tool_hook_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
 
 fn clear_tool_hooks_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     crate::orchestration::clear_tool_hooks();
+    Ok(VmValue::Nil)
+}
+
+fn parse_persona_hook_event(
+    value: &VmValue,
+    builtin: &str,
+) -> Result<(crate::orchestration::HookEvent, Option<f64>), VmError> {
+    let raw = value.display();
+    let event = raw.trim();
+    if let Some(pct) = event
+        .strip_prefix("OnBudgetThreshold(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        let pct = pct.trim().parse::<f64>().map_err(|_| {
+            VmError::Runtime(format!("{builtin}: invalid budget threshold `{pct}`"))
+        })?;
+        return Ok((
+            crate::orchestration::HookEvent::OnBudgetThreshold,
+            Some(pct),
+        ));
+    }
+    let event = match event {
+        "PreStep" => crate::orchestration::HookEvent::PreStep,
+        "PostStep" => crate::orchestration::HookEvent::PostStep,
+        "OnBudgetThreshold" => crate::orchestration::HookEvent::OnBudgetThreshold,
+        "OnApprovalRequested" => crate::orchestration::HookEvent::OnApprovalRequested,
+        "OnHandoffEmitted" => crate::orchestration::HookEvent::OnHandoffEmitted,
+        "OnPersonaPaused" => crate::orchestration::HookEvent::OnPersonaPaused,
+        "OnPersonaResumed" => crate::orchestration::HookEvent::OnPersonaResumed,
+        other => {
+            return Err(VmError::Runtime(format!(
+                "{builtin}: unknown persona hook event `{other}`"
+            )))
+        }
+    };
+    Ok((event, None))
+}
+
+fn required_hook_closure(
+    args: &[VmValue],
+    index: usize,
+    builtin: &str,
+) -> Result<Rc<crate::value::VmClosure>, VmError> {
+    match args.get(index) {
+        Some(VmValue::Closure(closure)) => Ok(closure.clone()),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: handler must be a closure, got {}",
+            other.type_name()
+        ))),
+        None => Err(VmError::Runtime(format!("{builtin}: missing handler"))),
+    }
+}
+
+fn register_persona_hook_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let persona_pattern = args
+        .first()
+        .map(VmValue::display)
+        .unwrap_or_else(|| "*".to_string());
+    let (event, threshold_pct) = parse_persona_hook_event(
+        args.get(1)
+            .ok_or_else(|| VmError::Runtime("register_persona_hook: missing event".to_string()))?,
+        "register_persona_hook",
+    )?;
+    let handler = required_hook_closure(args, 2, "register_persona_hook")?;
+    crate::step_runtime::register_persona_hook(persona_pattern, event, threshold_pct, handler);
+    Ok(VmValue::Nil)
+}
+
+fn register_step_hook_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let persona_pattern = args
+        .first()
+        .map(VmValue::display)
+        .unwrap_or_else(|| "*".to_string());
+    let step_name = args
+        .get(1)
+        .map(VmValue::display)
+        .ok_or_else(|| VmError::Runtime("register_step_hook: missing step name".to_string()))?;
+    let (event, threshold_pct) = parse_persona_hook_event(
+        args.get(2)
+            .ok_or_else(|| VmError::Runtime("register_step_hook: missing event".to_string()))?,
+        "register_step_hook",
+    )?;
+    let handler = required_hook_closure(args, 3, "register_step_hook")?;
+    crate::step_runtime::register_step_hook(
+        persona_pattern,
+        step_name,
+        event,
+        threshold_pct,
+        handler,
+    );
+    Ok(VmValue::Nil)
+}
+
+fn clear_persona_hooks_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    crate::step_runtime::clear_persona_hooks();
     Ok(VmValue::Nil)
 }
 

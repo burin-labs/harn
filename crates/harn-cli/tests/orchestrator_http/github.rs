@@ -5,6 +5,11 @@ async fn github_webhook_delivery_is_accepted_and_persisted() {
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &base_manifest(None));
     write_file(temp.path(), "lib.harn", handler_module());
+    write_file(
+        temp.path(),
+        "github_connector.harn",
+        github_connector_module(),
+    );
 
     let secret = "integration-test-secret";
     let _envs = lock_env_with(&[

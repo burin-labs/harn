@@ -1,0 +1,14 @@
+@persona(name: "merge_captain")
+fn merge_pr(pr) {
+  return admin_merge(pr)
+}
+
+@step(name: "admin_merge")
+fn admin_merge(pr) {
+  return "body:" + pr
+}
+
+pipeline default() {
+  let result = merge_pr("PR-9")
+  log(result)
+}

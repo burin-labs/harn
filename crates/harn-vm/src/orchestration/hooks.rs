@@ -32,6 +32,20 @@ pub enum HookEvent {
     WorkerFailed,
     #[serde(rename = "WorkerCancelled")]
     WorkerCancelled,
+    #[serde(rename = "PreStep")]
+    PreStep,
+    #[serde(rename = "PostStep")]
+    PostStep,
+    #[serde(rename = "OnBudgetThreshold")]
+    OnBudgetThreshold,
+    #[serde(rename = "OnApprovalRequested")]
+    OnApprovalRequested,
+    #[serde(rename = "OnHandoffEmitted")]
+    OnHandoffEmitted,
+    #[serde(rename = "OnPersonaPaused")]
+    OnPersonaPaused,
+    #[serde(rename = "OnPersonaResumed")]
+    OnPersonaResumed,
 }
 
 impl HookEvent {
@@ -47,6 +61,13 @@ impl HookEvent {
             Self::WorkerCompleted => "WorkerCompleted",
             Self::WorkerFailed => "WorkerFailed",
             Self::WorkerCancelled => "WorkerCancelled",
+            Self::PreStep => "PreStep",
+            Self::PostStep => "PostStep",
+            Self::OnBudgetThreshold => "OnBudgetThreshold",
+            Self::OnApprovalRequested => "OnApprovalRequested",
+            Self::OnHandoffEmitted => "OnHandoffEmitted",
+            Self::OnPersonaPaused => "OnPersonaPaused",
+            Self::OnPersonaResumed => "OnPersonaResumed",
         }
     }
 
@@ -152,6 +173,11 @@ struct RuntimeHook {
     event: HookEvent,
     matcher: PatternMatcher,
     handler: RuntimeHookHandler,
+}
+
+#[derive(Clone, Debug)]
+pub struct VmLifecycleHookInvocation {
+    pub closure: Rc<VmClosure>,
 }
 
 thread_local! {
@@ -276,6 +302,11 @@ fn expression_matches(pattern: &str, payload: &serde_json::Value) -> bool {
     let pattern = pattern.trim();
     if pattern.is_empty() || pattern == "*" {
         return true;
+    }
+    if let Some(target) = value_at_path(payload, "target").and_then(serde_json::Value::as_str) {
+        if glob_match(pattern, target) {
+            return true;
+        }
     }
     if let Some((lhs, rhs)) = pattern.split_once("=~") {
         let value = value_to_pattern_string(value_at_path(payload, lhs.trim()));
@@ -456,4 +487,22 @@ pub async fn run_lifecycle_hooks(
         }
     }
     Ok(())
+}
+
+pub fn matching_vm_lifecycle_hooks(
+    event: HookEvent,
+    payload: &serde_json::Value,
+) -> Vec<VmLifecycleHookInvocation> {
+    let hooks = RUNTIME_HOOKS.with(|hooks| hooks.borrow().clone());
+    hooks
+        .iter()
+        .filter(|hook| hook.event == event)
+        .filter(|hook| hook_matches(hook, None, payload))
+        .filter_map(|hook| match &hook.handler {
+            RuntimeHookHandler::Vm { closure, .. } => Some(VmLifecycleHookInvocation {
+                closure: closure.clone(),
+            }),
+            RuntimeHookHandler::NativePreTool(_) | RuntimeHookHandler::NativePostTool(_) => None,
+        })
+        .collect()
 }

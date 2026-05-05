@@ -606,6 +606,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         where_clauses: &[],
     },
     BuiltinSignature {
+        name: "clear_persona_hooks",
+        params: &[],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "close_channel",
         params: &[Param::new("channel", Ty::Named("channel"))],
         returns: TY_NIL,
@@ -2704,6 +2712,31 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         returns: TY_NIL,
         type_params: &[],
         has_rest: true,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "register_persona_hook",
+        params: &[
+            Param::new("persona_pattern", TY_STRING),
+            Param::new("event", TY_STRING),
+            Param::new("handler", TY_ANY),
+        ],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "register_step_hook",
+        params: &[
+            Param::new("persona_pattern", TY_STRING),
+            Param::new("step_name", TY_STRING),
+            Param::new("event", TY_STRING),
+            Param::new("handler", TY_ANY),
+        ],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
         where_clauses: &[],
     },
     BuiltinSignature {

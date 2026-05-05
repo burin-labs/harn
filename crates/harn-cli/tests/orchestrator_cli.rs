@@ -29,6 +29,7 @@ use harn_vm::event_log::{
 };
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use tempfile::TempDir;
+use test_util::connectors::github_connector_module;
 use test_util::process::harn_e2e_command;
 use tokio::sync::MutexGuard;
 
@@ -785,6 +786,10 @@ name = "fixture"
 [exports]
 handlers = "lib.harn"
 
+[[providers]]
+id = "github"
+connector = { harn = "github_connector.harn" }
+
 [[triggers]]
 id = "github-new-issue"
 kind = "webhook"
@@ -804,6 +809,11 @@ pub fn on_event(event: TriggerEvent) {
   log(event.kind)
 }
 "#,
+    );
+    write_file(
+        temp.path(),
+        "github_connector.harn",
+        github_connector_module(),
     );
     // Acquire env_lock + harn_state_lock so concurrent tests can't
     // flip `HARN_EVENT_LOG_BACKEND` or leak `HARN_STATE_DIR`

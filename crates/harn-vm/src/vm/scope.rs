@@ -130,7 +130,8 @@ impl Vm {
         // tokens, cost, and budget exhaustion to it. The push is keyed
         // off the function name registered by compiler-emitted
         // `__register_step` calls.
-        crate::step_runtime::maybe_push_active_step(&closure.func.name, self.frames.len());
+        crate::step_runtime::maybe_push_active_persona(&closure.func.name, self.frames.len());
+        crate::step_runtime::maybe_push_active_step(&closure.func.name, self.frames.len(), args);
 
         Ok(())
     }

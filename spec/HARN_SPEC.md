@@ -4893,6 +4893,49 @@ Installed package manifests do not auto-merge runtime extensions such as
 project. Package code is importable; host runtime configuration remains
 root-manifest-owned by default.
 
+### Persona and step lifecycle hooks
+
+Persona scripts can install lifecycle hooks without forking the bundled
+persona source:
+
+```harn
+@persona(name: "merge_captain")
+fn merge_captain(ctx) {
+  return admin_merge(ctx)
+}
+
+@step(name: "admin_merge")
+fn admin_merge(ctx) {
+  return ctx
+}
+
+pipeline default() {
+  register_persona_hook("merge_*", "PreStep", { ctx -> nil })
+  register_step_hook("merge_captain", "admin_merge", "PostStep", { ctx ->
+    {output: ctx.output}
+  })
+}
+```
+
+`register_persona_hook(persona_pattern, event, handler)` matches a
+glob-style persona name and fires for matching lifecycle events.
+`register_step_hook(persona_pattern, step_name, event, handler)` further
+narrows the hook to one statically declared `@step(name: ...)`. `harn
+check` rejects literal step-hook targets whose persona pattern matches a
+statically declared `@persona` but whose step name is not declared by
+that persona.
+
+Accepted event strings are `PreStep`, `PostStep`,
+`OnBudgetThreshold(<pct>)`, `OnApprovalRequested`, `OnHandoffEmitted`,
+`OnPersonaPaused`, and `OnPersonaResumed`.
+
+The core VM emits normalized hook payloads with `event`, `target`,
+`persona`, and `step` fields. `target` is `persona.step` for step events.
+`PreStep` handlers return `nil`, `{deny: "reason"}`, or `{args: [...]}`.
+`PostStep` handlers return `nil` or `{output: value}`. Tool hooks still
+run inside the step body, so low-level tool policy and high-level
+persona policy compose in execution order.
+
 ### `[lint]` — lint configuration
 
 ```toml

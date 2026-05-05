@@ -55,3 +55,52 @@ fn helper(ctx) {
     let diagnostics = lint_with_options(&program, &[], Some(source), &HashSet::new(), &options);
     assert!(!has_rule(&diagnostics, "persona-body-must-call-steps"));
 }
+
+#[test]
+fn step_hook_target_must_exist_in_matching_persona() {
+    let source = r#"
+@persona(name: "merge_captain")
+fn merge_captain(ctx) {
+  plan(ctx)
+}
+
+@step(name: "plan")
+fn plan(ctx) {
+  return ctx
+}
+
+pipeline default() {
+  register_step_hook("merge_*", "publish", "PreStep", { ctx -> nil })
+}
+"#;
+
+    let diagnostics = lint_source(source);
+    let target_diags: Vec<_> = diagnostics
+        .iter()
+        .filter(|diag| diag.rule == "persona-hook-target")
+        .collect();
+    assert_eq!(target_diags.len(), 1);
+    assert!(target_diags[0].message.contains("publish"));
+}
+
+#[test]
+fn step_hook_target_accepts_declared_persona_step() {
+    let source = r#"
+@persona(name: "merge_captain")
+fn merge_captain(ctx) {
+  plan(ctx)
+}
+
+@step(name: "plan")
+fn plan(ctx) {
+  return ctx
+}
+
+pipeline default() {
+  register_step_hook("merge_*", "plan", "PreStep", { ctx -> nil })
+}
+"#;
+
+    let diagnostics = lint_source(source);
+    assert!(!has_rule(&diagnostics, "persona-hook-target"));
+}
