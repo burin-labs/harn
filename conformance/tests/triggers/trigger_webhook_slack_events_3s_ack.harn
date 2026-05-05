@@ -1,4 +1,0 @@
-pipeline test(task) {
-  let result = trigger_test_harness("slack_events_3s_ack")
-  println(result.ok)
-}

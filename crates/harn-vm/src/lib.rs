@@ -76,15 +76,12 @@ pub use connectors::{
     },
     hmac::{verify_hmac_signed, SIGNATURE_VERIFY_AUDIT_TOPIC},
     install_active_connector_clients, install_active_metrics_registry,
-    is_rust_provider_connector_compat_provider, load_pending_webhook_handshakes,
     postprocess_normalized_event, ActivationHandle, ClientError, Connector, ConnectorClient,
     ConnectorCtx, ConnectorError, ConnectorExportEffectClass, ConnectorHttpResponse,
     ConnectorMetricsSnapshot, ConnectorNormalizeResult, ConnectorRegistry, GenericWebhookConnector,
-    GitHubConnector, HarnConnectorEffectPolicies, LinearConnector, MetricsRegistry,
-    NotionConnector, PersistedNotionWebhookHandshake, PostNormalizeOutcome, ProviderPayloadSchema,
-    RateLimitConfig, RateLimiterFactory, RawInbound, SlackConnector, StreamConnector,
-    TriggerBinding, TriggerKind, TriggerRegistry, WebhookSignatureVariant,
-    RUST_PROVIDER_CONNECTOR_COMPAT_PROVIDERS,
+    HarnConnectorEffectPolicies, MetricsRegistry, PostNormalizeOutcome, ProviderPayloadSchema,
+    RateLimitConfig, RateLimiterFactory, RawInbound, StreamConnector, TriggerBinding, TriggerKind,
+    TriggerRegistry, WebhookSignatureVariant,
 };
 pub use corrections::{
     append_correction_record, apply_corrections_to_policy, correction_query_filters_from_json,

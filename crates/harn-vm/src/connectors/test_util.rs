@@ -88,22 +88,6 @@ impl FakeHttpResponse {
         }
     }
 
-    /// Empty body with no headers (callers add their own).
-    pub(crate) fn empty(status: u16) -> Self {
-        Self {
-            status,
-            headers: Vec::new(),
-            body: Vec::new(),
-            disconnect: false,
-        }
-    }
-
-    /// Append a header.
-    pub(crate) fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.headers.push((name.into(), value.into()));
-        self
-    }
-
     /// Replace the entire header list.
     #[allow(dead_code)]
     pub(crate) fn with_headers<I, K, V>(mut self, headers: I) -> Self

@@ -62,18 +62,18 @@ Poll-based packages should also run:
 harn connector test . --run-poll-tick
 ```
 
-## Rust compatibility shims
+## Provider packages
 
-The in-repo Rust GitHub, Slack, Linear, and Notion connectors are compatibility
-shims during the pure-Harn package soak. Their sunset and removal use the same
-migration path as the pure-Harn package rollout.
+GitHub, Slack, Linear, Notion, and additional forge integrations live in
+pure-Harn connector package repositories. Harn core should not grow
+provider-specific transport consumers or outbound API clients unless the change
+is a reusable host transport primitive with no provider policy.
 
-For new provider work, use:
+For provider work, use:
 
 - the pure-Harn connector package track for provider packages
-- the Rust-provider deprecation path for shim removal
-- The external provider package repos for provider-specific event support,
-  outbound methods, scopes, fixtures, and release readiness.
+- the external package repos for provider-specific event support, outbound
+  methods, scopes, fixtures, and release readiness
 - the additional forge package track for GitLab and similar providers
 
 ## Core closure checklist

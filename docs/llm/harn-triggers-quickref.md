@@ -50,20 +50,20 @@ This table is generated from `std/triggers::list_providers()` / `ProviderCatalog
 | `a2a-push` | `a2a-push` | `A2aPushPayload` | builtin `a2a-push` | none | - | - |
 | `cron` | `cron` | `CronEventPayload` | builtin `cron` | none | - | - |
 | `email` | `stream` | `StreamEventPayload` | builtin `stream` | none | - | - |
-| `github` | `webhook` | `GitHubEventPayload` | builtin `webhook` / `github` signatures | HMAC `github`, header `X-Hub-Signature-256`, sha256/hex, id `X-GitHub-Delivery` | `github/signing_secret` (required) | - |
+| `github` | `webhook` | `GitHubEventPayload` | placeholder | HMAC `github`, header `X-Hub-Signature-256`, sha256/hex, id `X-GitHub-Delivery` | `github/signing_secret` (required) | - |
 | `kafka` | `stream` | `StreamEventPayload` | builtin `stream` | none | - | - |
-| `linear` | `webhook` | `LinearEventPayload` | builtin `linear` / `linear` signatures | HMAC `linear`, header `Linear-Signature`, sha256/hex, id `Linear-Delivery`, 75s tolerance | `linear/signing_secret` (required), `linear/access_token` (optional) | `list_issues`, `update_issue`, `create_comment`, `search`, `graphql` |
+| `linear` | `webhook` | `LinearEventPayload` | placeholder | HMAC `linear`, header `Linear-Signature`, sha256/hex, id `Linear-Delivery`, 75s tolerance | `linear/signing_secret` (required), `linear/access_token` (optional) | `list_issues`, `update_issue`, `create_comment`, `search`, `graphql` |
 | `nats` | `stream` | `StreamEventPayload` | builtin `stream` | none | - | - |
-| `notion` | `webhook`, `poll` | `NotionEventPayload` | builtin `notion` / `notion` signatures | HMAC `notion`, header `X-Notion-Signature`, sha256/hex | `notion/verification_token` (required) | `get_page`, `update_page`, `append_blocks`, `query_database`, `search`, `create_comment`, `api_call` |
+| `notion` | `webhook`, `poll` | `NotionEventPayload` | placeholder | HMAC `notion`, header `X-Notion-Signature`, sha256/hex | `notion/verification_token` (required) | `get_page`, `update_page`, `append_blocks`, `query_database`, `search`, `create_comment`, `api_call` |
 | `postgres-cdc` | `stream` | `StreamEventPayload` | builtin `stream` | none | - | - |
 | `pulsar` | `stream` | `StreamEventPayload` | builtin `stream` | none | - | - |
-| `slack` | `webhook` | `SlackEventPayload` | builtin `slack` / `slack` signatures | HMAC `slack`, header `X-Slack-Signature`, sha256/hex, ts `X-Slack-Request-Timestamp`, 300s tolerance | `slack/signing_secret` (required) | `post_message`, `update_message`, `add_reaction`, `open_view`, `user_info`, `api_call`, `upload_file` |
+| `slack` | `webhook` | `SlackEventPayload` | placeholder | HMAC `slack`, header `X-Slack-Signature`, sha256/hex, ts `X-Slack-Request-Timestamp`, 300s tolerance | `slack/signing_secret` (required) | `post_message`, `update_message`, `add_reaction`, `open_view`, `user_info`, `api_call`, `upload_file` |
 | `webhook` | `webhook` | `GenericWebhookPayload` | builtin `webhook` / `standard` signatures | HMAC `standard`, header `webhook-signature`, sha256/base64, ts `webhook-timestamp`, id `webhook-id`, 300s tolerance | `webhook/signing_secret` (required) | - |
 | `websocket` | `stream` | `StreamEventPayload` | builtin `stream` | none | - | - |
 
 ## First-party Connector Packages
 
-Prefer pure-Harn packages for provider business logic. The Rust providers remain compatibility defaults while the pure-Harn packages soak.
+Provider business logic ships as pure-Harn packages. The Rust runtime keeps only core connector primitives such as webhook intake, cron, A2A push, and stream ingress.
 
 | Provider | Package | Install | Package gate |
 |---|---|---|---|

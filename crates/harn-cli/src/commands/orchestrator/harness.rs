@@ -2069,22 +2069,22 @@ async fn initialize_connectors(
     let mut handles = Vec::new();
     for (provider, kinds) in grouped_kinds {
         let provider_name = provider.as_str().to_string();
-        let used_harn_override =
-            if let Some(connector) = connector_override_for(&provider, provider_overrides).await? {
-                registry.remove(&provider);
-                registry
-                    .register(connector)
-                    .map_err(|error| error.to_string())?;
-                true
-            } else {
-                false
-            };
-        if !used_harn_override {
-            if let Some(message) = rust_deprecated_provider_warning(provider.as_str()) {
-                eprintln!("{message}");
-            }
+        if let Some(connector) = connector_override_for(&provider, provider_overrides).await? {
+            registry.remove(&provider);
+            registry
+                .register(connector)
+                .map_err(|error| error.to_string())?;
         }
         if registry.get(&provider).is_none() {
+            if provider_requires_harn_connector(provider.as_str()) {
+                return Err(format!(
+                    "provider '{}' is package-backed; add [[providers]] id = \"{}\" with \
+                     connector = {{ harn = \"...\" }} to the manifest",
+                    provider.as_str(),
+                    provider.as_str()
+                )
+                .into());
+            }
             let connector = connector_for(&provider, kinds);
             registry
                 .register(connector)
@@ -2193,18 +2193,6 @@ fn connector_for(
     }
 }
 
-fn rust_deprecated_provider_warning(provider: &str) -> Option<String> {
-    if !harn_vm::is_rust_provider_connector_compat_provider(provider) {
-        return None;
-    }
-    Some(format!(
-        "warning: provider '{provider}' is using the deprecated Rust-side connector. \
-         Set `connector = {{ harn = \"...\" }}` on the [[providers]] table to use the \
-         pure-Harn `harn-{provider}-connector` package; see \
-         docs/migrations/rust-connectors-to-harn-packages.md (issue #350)."
-    ))
-}
-
 async fn connector_override_for(
     provider: &harn_vm::ProviderId,
     provider_overrides: &[ResolvedProviderConnectorConfig],
@@ -2292,11 +2280,19 @@ fn connector_owns_ingress(
     provider: &str,
     provider_overrides: &[ResolvedProviderConnectorConfig],
 ) -> bool {
-    matches!(provider, "linear" | "notion" | "slack")
-        || provider_overrides.iter().any(|entry| {
-            entry.id.as_str() == provider
-                && matches!(entry.connector, ResolvedProviderConnectorKind::Harn { .. })
-        })
+    provider_overrides.iter().any(|entry| {
+        entry.id.as_str() == provider
+            && matches!(entry.connector, ResolvedProviderConnectorKind::Harn { .. })
+    })
+}
+
+fn provider_requires_harn_connector(provider: &str) -> bool {
+    harn_vm::provider_metadata(provider).is_some_and(|metadata| {
+        matches!(
+            metadata.runtime,
+            harn_vm::ProviderRuntimeMetadata::Placeholder
+        )
+    })
 }
 
 fn live_manifest_binding_versions() -> BTreeMap<String, u32> {

@@ -474,16 +474,16 @@ async fn github_profile_normalizes_events_under_the_github_provider() {
 }
 
 #[test]
-fn connector_registry_default_lists_github_slack_and_webhook_connectors() {
+fn connector_registry_default_lists_core_webhook_connector() {
     let registry = ConnectorRegistry::default();
     let providers = registry.list();
     assert!(providers
         .iter()
+        .any(|provider| provider.as_str() == "webhook"));
+    assert!(!providers
+        .iter()
         .any(|provider| provider.as_str() == "github"));
-    assert!(providers
+    assert!(!providers
         .iter()
         .any(|provider| provider.as_str() == "slack"));
-    assert!(providers
-        .iter()
-        .any(|provider| provider.as_str() == "webhook"));
 }
