@@ -27,19 +27,6 @@ pub(super) fn llm_usage_snapshot() -> UsageSnapshot {
     }
 }
 
-pub(super) fn merge_usage(total: &mut LlmUsageRecord, usage: &LlmUsageRecord) {
-    total.input_tokens += usage.input_tokens;
-    total.output_tokens += usage.output_tokens;
-    total.total_duration_ms += usage.total_duration_ms;
-    total.call_count += usage.call_count;
-    total.total_cost += usage.total_cost;
-    for model in &usage.models {
-        if !total.models.iter().any(|existing| existing == model) {
-            total.models.push(model.clone());
-        }
-    }
-}
-
 pub(super) fn llm_usage_delta(before: &UsageSnapshot, after: &UsageSnapshot) -> LlmUsageRecord {
     let trace = crate::llm::peek_trace();
     let start = before.trace_len.min(trace.len());

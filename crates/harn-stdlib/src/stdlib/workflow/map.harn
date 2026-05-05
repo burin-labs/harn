@@ -71,6 +71,71 @@ fn __map_item_lineage(items) {
   return ids
 }
 
+fn __map_item_index(item) {
+  if type_of(item?.index) == "int" {
+    return item.index
+  }
+  return 0
+}
+
+fn __map_join_target(plan) {
+  let total = len(__map_list(plan?.items))
+  if total == 0 {
+    return 0
+  }
+  if type_of(plan?.join_target) == "int" {
+    return min(total, max(plan.join_target, 1))
+  }
+  return total
+}
+
+fn __map_execute_branch(node_id, plan, opts, item) {
+  let branch_artifact = __host_workflow_map_branch_artifact(node_id, item, __map_list(plan?.lineage))
+  return __host_workflow_map_execute_branch(node_id, plan, item, branch_artifact, opts ?? {})
+}
+
+fn __map_collect_branch_outcomes(branches, join_target) {
+  var completed = []
+  var failures = []
+  var produced = []
+  if join_target == 0 {
+    return {completed: completed, failures: failures, produced: produced}
+  }
+  var observed = 0
+  for result in branches {
+    observed = observed + 1
+    if result?.ok {
+      let branch = result.branch
+      if branch?.status == "completed" && branch?.error == nil {
+        let artifacts = __map_list(branch?.artifacts)
+        for artifact in artifacts {
+          produced = produced.push(artifact)
+        }
+        completed = completed
+          .push(
+          {
+            index: __map_item_index(branch),
+            status: branch.status,
+            result: branch?.result,
+            artifact_count: len(artifacts),
+          },
+        )
+      } else {
+        failures = failures
+          .push(
+          {index: __map_item_index(branch), status: branch?.status ?? "failed", error: branch?.error},
+        )
+      }
+    } else {
+      failures = failures.push({status: "failed", error: result?.error})
+    }
+    if observed >= join_target {
+      break
+    }
+  }
+  return {completed: completed, failures: failures, produced: produced}
+}
+
 fn __map_artifact_items(artifacts) {
   var items = []
   for (index, artifact) in iter(artifacts).enumerate() {
@@ -260,5 +325,31 @@ pub fn workflow_map_finalize(config = nil) {
     result: {status: status, text: text, join_strategy: strategy, completed: completed, failures: failures},
     outcome: "mapped",
     branch: branch,
+  }
+}
+
+/** workflow_execute_map_stage. */
+pub fn workflow_execute_map_stage(node_id, node, artifacts = nil, opts = nil) {
+  let plan = __host_workflow_map_plan(node, __map_list(artifacts))
+  let branches = parallel each plan.items with { max_concurrent: plan.max_concurrent } { item ->
+    try {
+      {ok: true, branch: __map_execute_branch(node_id, plan, opts, item)}
+    } catch (e) {
+      {ok: false, error: to_string(e)}
+    }
+  } as stream
+  let collected = __map_collect_branch_outcomes(branches, __map_join_target(plan))
+  let finalized = __host_workflow_map_finalize(
+    plan.strategy,
+    plan.total_items,
+    collected.completed,
+    collected.failures,
+    collected.produced,
+  )
+  return {
+    result: finalized.result,
+    artifacts: collected.produced,
+    outcome: finalized.outcome,
+    branch: finalized.branch,
   }
 }

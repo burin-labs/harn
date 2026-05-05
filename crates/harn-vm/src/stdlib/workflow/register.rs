@@ -22,11 +22,15 @@ use crate::vm::{Vm, VmBuiltinArity};
 use super::super::{parse_artifact_list, parse_context_policy};
 
 use super::artifact::{
-    append_child_run_record, checkpoint_run, optional_string_option, parse_execution_record,
-    snapshot_trace_spans,
+    append_child_run_record, artifact_from_value, checkpoint_run, optional_string_option,
+    parse_execution_record, snapshot_trace_spans,
 };
 use super::convert::{to_vm, workflow_graph_to_vm};
 use super::guards::{MutationSessionResetGuard, WorkflowApprovalPolicyGuard};
+use super::map::{
+    map_branch_artifact, map_execution_plan, map_finalize, MapBranchResult, MapExecutionPlan,
+    MapWorkItem,
+};
 use super::policy::{
     apply_runtime_node_overrides, effective_node_approval_policy, effective_node_policy,
     normalize_policy, set_node_policy,
@@ -39,6 +43,10 @@ const HOST_WORKFLOW_PREPARE_RUN_BUILTIN: &str = "__host_workflow_prepare_run";
 const HOST_WORKFLOW_EXECUTE_STAGE_BUILTIN: &str = "__host_workflow_execute_stage";
 const HOST_WORKFLOW_RECORD_TRANSITIONS_BUILTIN: &str = "__host_workflow_record_transitions";
 const HOST_WORKFLOW_FINALIZE_RUN_BUILTIN: &str = "__host_workflow_finalize_run";
+const HOST_WORKFLOW_MAP_PLAN_BUILTIN: &str = "__host_workflow_map_plan";
+const HOST_WORKFLOW_MAP_BRANCH_ARTIFACT_BUILTIN: &str = "__host_workflow_map_branch_artifact";
+const HOST_WORKFLOW_MAP_EXECUTE_BRANCH_BUILTIN: &str = "__host_workflow_map_execute_branch";
+const HOST_WORKFLOW_MAP_FINALIZE_BUILTIN: &str = "__host_workflow_map_finalize";
 type PostHookFn = Rc<dyn Fn(&str, &str) -> crate::orchestration::PostToolAction>;
 
 thread_local! {
@@ -159,6 +167,13 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     .signature("__host_workflow_finalize_run(state_id, ready_nodes)")
     .arity(VmBuiltinArity::Exact(2))
     .doc("Finalize low-level workflow run state and persist the final checkpoint."),
+    SyncBuiltin::new(
+        HOST_WORKFLOW_MAP_BRANCH_ARTIFACT_BUILTIN,
+        host_workflow_map_branch_artifact_builtin,
+    )
+    .signature("__host_workflow_map_branch_artifact(node_id, item, lineage)")
+    .arity(VmBuiltinArity::Exact(3))
+    .doc("Build the synthesized input artifact for one Harn-owned workflow map branch."),
 ];
 
 const WORKFLOW_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
@@ -169,6 +184,27 @@ const WORKFLOW_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     .signature("__host_workflow_execute_stage(state_id, node_id, ready_nodes, options?)")
     .arity(VmBuiltinArity::Range { min: 3, max: 4 })
     .doc("Execute one low-level workflow stage primitive for the Harn stdlib workflow executor."),
+    async_builtin!(
+        HOST_WORKFLOW_MAP_PLAN_BUILTIN,
+        host_workflow_map_plan_builtin
+    )
+    .signature("__host_workflow_map_plan(node, artifacts)")
+    .arity(VmBuiltinArity::Exact(2))
+    .doc("Return the host-normalized execution plan for a workflow map stage."),
+    async_builtin!(
+        HOST_WORKFLOW_MAP_EXECUTE_BRANCH_BUILTIN,
+        host_workflow_map_execute_branch_builtin
+    )
+    .signature("__host_workflow_map_execute_branch(node_id, plan, item, branch_artifact, options?)")
+    .arity(VmBuiltinArity::Range { min: 4, max: 5 })
+    .doc("Execute one workflow map branch while Harn owns branch scheduling."),
+    async_builtin!(
+        HOST_WORKFLOW_MAP_FINALIZE_BUILTIN,
+        host_workflow_map_finalize_builtin
+    )
+    .signature("__host_workflow_map_finalize(strategy, total_items, completed, failures, produced)")
+    .arity(VmBuiltinArity::Exact(5))
+    .doc("Finalize a Harn-owned workflow map stage after branch settlement."),
     async_builtin!("transcript_auto_compact", transcript_auto_compact_builtin)
         .signature("transcript_auto_compact(messages, options?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
@@ -295,6 +331,20 @@ fn parse_string_list_arg(value: Option<&VmValue>, context: &str) -> Result<Vec<S
             })
             .collect(),
         _ => Err(VmError::Runtime(format!("{context}: expected list"))),
+    }
+}
+
+fn parse_json_arg<T: serde::de::DeserializeOwned>(
+    value: Option<&VmValue>,
+    context: &str,
+) -> Result<T, VmError> {
+    serde_json::from_value(crate::llm::vm_value_to_json(value.unwrap_or(&VmValue::Nil)))
+        .map_err(|error| VmError::Runtime(format!("{context}: invalid value: {error}")))
+}
+
+fn map_item_index(item: &MapWorkItem) -> usize {
+    match item {
+        MapWorkItem::Artifact { index, .. } | MapWorkItem::Value { index, .. } => *index,
     }
 }
 
@@ -1031,6 +1081,149 @@ fn host_workflow_finalize_run_builtin(
     state.ready_nodes =
         parse_string_list_arg(args.get(1), "__host_workflow_finalize_run ready_nodes")?;
     finalize_workflow_state(state)
+}
+
+async fn host_workflow_map_plan_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let node: crate::orchestration::WorkflowNode =
+        parse_json_arg(args.first(), HOST_WORKFLOW_MAP_PLAN_BUILTIN)?;
+    let artifacts = parse_artifact_list(args.get(1))?;
+    let plan = map_execution_plan(&node, &artifacts).await?;
+    to_vm(&plan)
+}
+
+fn host_workflow_map_branch_artifact_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let node_id = args
+        .first()
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            VmError::Runtime(format!(
+                "{HOST_WORKFLOW_MAP_BRANCH_ARTIFACT_BUILTIN}: missing node id"
+            ))
+        })?;
+    let item: MapWorkItem = parse_json_arg(args.get(1), HOST_WORKFLOW_MAP_BRANCH_ARTIFACT_BUILTIN)?;
+    let lineage =
+        parse_string_list_arg(args.get(2), "__host_workflow_map_branch_artifact lineage")?;
+    to_vm(&map_branch_artifact(&node_id, &item, &lineage).normalize())
+}
+
+async fn host_workflow_map_execute_branch_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let node_id = args
+        .first()
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            VmError::Runtime(format!(
+                "{HOST_WORKFLOW_MAP_EXECUTE_BRANCH_BUILTIN}: missing node id"
+            ))
+        })?;
+    let plan: MapExecutionPlan =
+        parse_json_arg(args.get(1), HOST_WORKFLOW_MAP_EXECUTE_BRANCH_BUILTIN)?;
+    let item: MapWorkItem = parse_json_arg(args.get(2), HOST_WORKFLOW_MAP_EXECUTE_BRANCH_BUILTIN)?;
+    let branch_artifact: ArtifactRecord =
+        parse_json_arg(args.get(3), HOST_WORKFLOW_MAP_EXECUTE_BRANCH_BUILTIN)?;
+    let options = parse_options_arg(&args, 4);
+    let index = map_item_index(&item);
+    let branch = if let Some(stage_node) = plan.stage_node {
+        let task_label = options
+            .get("task")
+            .map(|value| value.display())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| format!("workflow map {node_id}"));
+        let transcript = options.get("transcript").cloned();
+        let branch_task = format!(
+            "{task_label}\n\nMap item {} of {}",
+            index + 1,
+            plan.total_items.max(1)
+        );
+        let executed = execute_stage_attempts(
+            &branch_task,
+            &format!("{node_id}_map_{}", index + 1),
+            &stage_node,
+            &[branch_artifact.normalize()],
+            transcript,
+        )
+        .await?;
+        MapBranchResult {
+            index,
+            status: executed.status,
+            result: executed.result,
+            artifacts: executed.artifacts,
+            usage: executed.usage,
+            error: executed.error,
+        }
+    } else {
+        let artifact = match &item {
+            MapWorkItem::Artifact { artifact, .. } => {
+                let value = artifact
+                    .data
+                    .clone()
+                    .or_else(|| artifact.text.clone().map(serde_json::Value::String))
+                    .unwrap_or(serde_json::Value::Null);
+                artifact_from_value(
+                    &node_id,
+                    &plan.output_kind,
+                    index,
+                    value,
+                    std::slice::from_ref(&artifact.id),
+                    format!("map {} item {}", node_id, index + 1),
+                )
+            }
+            MapWorkItem::Value { value, .. } => artifact_from_value(
+                &node_id,
+                &plan.output_kind,
+                index,
+                value.clone(),
+                &plan.lineage,
+                format!("map {} item {}", node_id, index + 1),
+            ),
+        };
+        MapBranchResult {
+            index,
+            status: "completed".to_string(),
+            result: serde_json::json!({
+                "status": "completed",
+                "text": artifact.text,
+            }),
+            artifacts: vec![artifact],
+            usage: Default::default(),
+            error: None,
+        }
+    };
+    to_vm(&branch)
+}
+
+async fn host_workflow_map_finalize_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let strategy = args
+        .first()
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "all".to_string());
+    let total_items = match args.get(1) {
+        Some(VmValue::Int(value)) => (*value).max(0) as usize,
+        Some(value) => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_WORKFLOW_MAP_FINALIZE_BUILTIN}: total_items must be an int, got {}",
+                value.type_name()
+            )))
+        }
+        None => 0,
+    };
+    let completed: Vec<serde_json::Value> =
+        parse_json_arg(args.get(2), HOST_WORKFLOW_MAP_FINALIZE_BUILTIN)?;
+    let failures: Vec<serde_json::Value> =
+        parse_json_arg(args.get(3), HOST_WORKFLOW_MAP_FINALIZE_BUILTIN)?;
+    let produced = parse_artifact_list(args.get(4))?;
+    let (result, outcome, branch) =
+        map_finalize(&strategy, total_items, produced.len(), completed, failures).await?;
+    to_vm(&serde_json::json!({
+        "result": result,
+        "outcome": outcome,
+        "branch": branch,
+    }))
 }
 
 pub(crate) fn register_workflow_builtins(vm: &mut Vm) {
