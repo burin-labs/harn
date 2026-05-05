@@ -109,6 +109,31 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         where_clauses: &[],
     },
     BuiltinSignature {
+        name: "agent_daemon_snapshot",
+        params: &[
+            Param::new("session", TY_DICT),
+            Param::new("opts", TY_DICT),
+            Param::optional("daemon_state", TY_STRING),
+            Param::optional("iteration", TY_INT),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "agent_daemon_step",
+        params: &[
+            Param::new("session", TY_DICT),
+            Param::new("opts", TY_DICT),
+            Param::new("iteration", TY_INT),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "agent_inject_feedback",
         params: &[
             Param::new("session_id", TY_STRING),

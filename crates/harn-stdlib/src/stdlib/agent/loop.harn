@@ -1,6 +1,7 @@
 // @harn-entrypoint-category agent.stdlib
 import { agent_autocompact_if_needed } from "std/agent/autocompact"
 import { agent_budget_post_call_blocked, agent_budget_pre_call_blocked } from "std/agent/budget"
+import { agent_daemon_snapshot, agent_daemon_step } from "std/agent/daemon"
 import { agent_verify_or_continue } from "std/agent/judge"
 import { agent_mcp_bootstrap_if_needed } from "std/agent/mcp"
 import { agent_loop_options } from "std/agent/options"
@@ -90,6 +91,9 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
       turn_index,
     )
     if outcome.kind == "continue" {
+      if opts?.daemon && len(tool_calls) == 0 {
+        agent_daemon_step(session, opts, iteration)
+      }
       continue
     }
     let needs_verify = outcome.needs_verify
@@ -110,6 +114,9 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
   }
   if final_status == "" && iteration >= max_iterations && stop_reason == nil {
     final_status = "budget_exhausted"
+  }
+  if opts?.daemon && final_status != "" {
+    agent_daemon_snapshot(session, opts, final_status, iteration)
   }
   let result = agent_session_finalize(
     session.session_id,

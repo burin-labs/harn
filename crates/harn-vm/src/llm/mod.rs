@@ -17,6 +17,7 @@ mod agent_runtime;
 mod agent_session_host;
 mod agent_tools;
 pub(crate) mod api;
+pub(crate) mod autonomy_budget;
 pub mod capabilities;
 mod config_builtins;
 pub(crate) mod content;
@@ -477,6 +478,7 @@ pub fn reset_llm_state() {
     provider::register_default_providers();
     rate_limit::reset_rate_limit_state();
     mock::reset_llm_mock_state();
+    autonomy_budget::reset_autonomy_budget_state();
     trigger_predicate::reset_trigger_predicate_state();
     capabilities::clear_user_overrides();
     // Per-`@step` registry, active stack, and completed-step log are
