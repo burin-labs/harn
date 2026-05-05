@@ -1,5 +1,6 @@
 // @harn-entrypoint-category workflow.stdlib
 import { agent_loop } from "std/agent/loop"
+import { workflow_execute_map_stage } from "std/workflow/map"
 import "std/workflow/prompts"
 import { workflow_join_readiness, workflow_next_edges } from "std/workflow/schedule"
 
@@ -63,10 +64,14 @@ pub fn workflow_execute(task, graph, artifacts = nil, options = nil) {
       plan.result
     } else {
       try {
-        if plan.run_agent_loop {
-          agent_loop(plan.prompt, plan.system, plan.agent_loop_options)
+        if plan?.run_map_stage {
+          workflow_execute_map_stage(current, plan.node, plan.artifacts, plan.map_options)
         } else {
-          llm_call(plan.prompt, plan.system, plan.llm_options)
+          if plan.run_agent_loop {
+            agent_loop(plan.prompt, plan.system, plan.agent_loop_options)
+          } else {
+            llm_call(plan.prompt, plan.system, plan.llm_options)
+          }
         }
       } catch (e) {
         {__workflow_stage_error: true, status: "failed", text: "", visible_text: "", error: to_string(e)}

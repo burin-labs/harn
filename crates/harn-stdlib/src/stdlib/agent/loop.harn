@@ -7,6 +7,7 @@ import { agent_mcp_bootstrap_if_needed } from "std/agent/mcp"
 import { agent_loop_options } from "std/agent/options"
 import { agent_compute_post_turn } from "std/agent/postturn"
 import { agent_build_turn_messages, agent_build_turn_system } from "std/agent/preflight"
+import { native_tool_contract_feedback_prompt } from "std/agent/prompts"
 import { agent_skills_match } from "std/agent/skills"
 import {
   agent_emit_event,
@@ -63,13 +64,7 @@ fn __resolve_tool_calls(llm_result, parsed) {
 }
 
 fn __native_fallback_feedback(policy, fallback_index) {
-  return "This stage is running in native tool mode. Your last response emitted text-mode tool calls instead of provider-native tool calls.\n\n"
-    + "Re-issue the same action using ONLY the native tool channel. Do not write `<tool_call>` tags, bare `name({ ... })` calls, Markdown fences, or JSON tool-call envelopes in assistant text.\n\n"
-    + "Policy: `"
-    + policy
-    + "`. Observed fallback turn: "
-    + to_string(fallback_index)
-    + "."
+  return native_tool_contract_feedback_prompt({policy: policy, fallback_index: fallback_index})
 }
 
 fn __detect_native_fallback(llm_result, parsed, turn_opts, fallback_index, session_id, turn_index) {
@@ -115,6 +110,37 @@ fn __detect_native_fallback(llm_result, parsed, turn_opts, fallback_index, sessi
   return {triggered: true, accepted: accepted, fallback_index: new_index, calls: resolved_calls}
 }
 
+fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
+  if len(tool_calls) == 0 {
+    return {dispatch: nil, turn_opts: turn_opts}
+  }
+  agent_tool_search_emit_queries(session_id, tool_calls, turn_opts)
+  let dispatch = agent_dispatch_tool_batch(
+    tool_calls,
+    turn_opts?.tools,
+    {session_id: session_id, tool_format: turn_opts.tool_format},
+  )
+  agent_session_record_tool_results(session_id, dispatch)
+  return {
+    dispatch: dispatch,
+    turn_opts: agent_tool_search_record_results(session_id, tool_calls, dispatch, turn_opts),
+  }
+}
+
+fn __sync_tool_search_state(opts, turn_opts) {
+  if turn_opts?._tool_search_client == nil {
+    return opts
+  }
+  return opts + {_tool_search_client: turn_opts._tool_search_client}
+}
+
+fn __next_text_only_count(tool_count, consecutive_text_only) {
+  if tool_count == 0 {
+    return consecutive_text_only + 1
+  }
+  return 0
+}
+
 /** agent_loop. */
 pub fn agent_loop(message, system_prompt = nil, options = nil) {
   var opts = agent_loop_options(options)
@@ -124,6 +150,12 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
   let session = agent_session_init(message, system_prompt, opts)
   if session?.done {
     return session.result
+  }
+  defer {
+    try {
+      __host_mcp_disconnect(session.session_id)
+    } catch (e) {
+    }
   }
   opts = agent_mcp_bootstrap_if_needed(session, opts)
   var iteration = 0
@@ -181,20 +213,9 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
     } else {
       __resolve_tool_calls(llm_result, parsed)
     }
-    var dispatch = nil
-    if len(tool_calls) > 0 {
-      agent_tool_search_emit_queries(session.session_id, tool_calls, turn_opts)
-      dispatch = agent_dispatch_tool_batch(
-        tool_calls,
-        turn_opts?.tools,
-        {session_id: session.session_id, tool_format: turn_opts.tool_format},
-      )
-      agent_session_record_tool_results(session.session_id, dispatch)
-      let updated_turn_opts = agent_tool_search_record_results(session.session_id, tool_calls, dispatch, turn_opts)
-      if updated_turn_opts?._tool_search_client != nil {
-        opts = opts + {_tool_search_client: updated_turn_opts._tool_search_client}
-      }
-    }
+    let dispatched = __dispatch_tool_calls(session.session_id, tool_calls, turn_opts)
+    let dispatch = dispatched.dispatch
+    opts = __sync_tool_search_state(opts, dispatched.turn_opts)
     let totals = agent_session_record_usage(session.session_id, llm_result)
     let tool_count = len(tool_calls)
     agent_emit_event(
@@ -206,11 +227,7 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
       final_status = "budget_exhausted"
       break
     }
-    consecutive_text_only = if tool_count == 0 {
-      consecutive_text_only + 1
-    } else {
-      0
-    }
+    consecutive_text_only = __next_text_only_count(tool_count, consecutive_text_only)
     if persistent && tool_count == 0 && consecutive_text_only > max_nudges {
       final_status = "stuck"
       stop_reason = "max_nudges"
@@ -250,10 +267,8 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
   if opts?.daemon && final_status != "" {
     agent_daemon_snapshot(session, opts, final_status, iteration)
   }
-  let result = agent_session_finalize(
+  return agent_session_finalize(
     session.session_id,
     {final_status: final_status, stop_reason: stop_reason ?? "", iterations: iteration},
   )
-  __host_mcp_disconnect(session.session_id)
-  return result
 }

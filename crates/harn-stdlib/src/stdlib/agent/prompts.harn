@@ -33,6 +33,11 @@ pub fn completion_judge_user_prompt(bindings) {
   return render_agent_prompt("completion_judge_user.harn.prompt", bindings)
 }
 
+/** native_tool_contract_feedback_prompt. */
+pub fn native_tool_contract_feedback_prompt(bindings) {
+  return render_agent_prompt("native_tool_contract_feedback.harn.prompt", bindings)
+}
+
 /** agent_turn_preamble_prompt. */
 pub fn agent_turn_preamble_prompt() {
   return render_agent_prompt("agent_turn_preamble.harn.prompt", {})
