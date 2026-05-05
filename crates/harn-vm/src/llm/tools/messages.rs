@@ -26,20 +26,21 @@ pub(crate) fn build_assistant_tool_message(
         }
         serde_json::json!({"role": "assistant", "content": content})
     } else if is_ollama {
-        // Modern Ollama chat validates replayed tool-call history using
-        // the OpenAI-compatible string-encoded `function.arguments`
-        // shape. Keeping the history shape consistent also prevents
-        // local Qwen runs from failing on the second iteration.
+        // Ollama's chat API uses the OpenAI-style `function` envelope but
+        // keeps `arguments` as a JSON object. Replaying OpenAI's
+        // string-encoded arguments trips Ollama's template parser on the
+        // next turn.
         let calls: Vec<serde_json::Value> = tool_calls
             .iter()
             .enumerate()
             .map(|(idx, tc)| {
                 serde_json::json!({
+                    "id": tc["id"],
                     "type": "function",
                     "function": {
                         "index": idx,
                         "name": tc["name"],
-                        "arguments": serde_json::to_string(&tc["arguments"]).unwrap_or_default(),
+                        "arguments": tc["arguments"],
                     }
                 })
             })
