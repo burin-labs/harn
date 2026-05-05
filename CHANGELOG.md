@@ -10,6 +10,9 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **ACP authentication flow.** `harn serve acp` now advertises configured
+  `authMethods`, implements ACP `authenticate`, and returns `auth_required`
+  before protected session methods until the connection authenticates.
 - **A2A canonical HTTP+JSON/REST binding.** The A2A server now exposes the spec-blessed
   REST surface under `/v1` (`POST /v1/message:send`, `POST /v1/message:stream`,
   `GET /v1/tasks/{id}`, `POST /v1/tasks/{id}:cancel`, `POST /v1/tasks/{id}:subscribe`,

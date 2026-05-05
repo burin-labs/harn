@@ -24,6 +24,12 @@ pub(crate) enum ServeCommand {
 
 #[derive(Debug, Args)]
 pub(crate) struct ServeAcpArgs {
+    /// Static API keys accepted by the ACP authenticate method.
+    #[arg(long = "api-key", env = "HARN_SERVE_API_KEY", value_delimiter = ',')]
+    pub api_key: Vec<String>,
+    /// Shared secret for HMAC authentication through the ACP authenticate method.
+    #[arg(long = "hmac-secret", env = "HARN_SERVE_HMAC_SECRET")]
+    pub hmac_secret: Option<String>,
     /// Path to the .harn file to serve.
     pub file: String,
 }

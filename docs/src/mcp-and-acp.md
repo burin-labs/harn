@@ -446,7 +446,11 @@ Bridge-level tool gates and daemon idle/resume notifications are documented in
 harn serve acp pipeline.harn      # execute a specific pipeline per prompt
 ```
 
-The packaged ACP adapter is exposed through `harn serve acp`.
+The packaged ACP adapter is exposed through `harn serve acp`. Pass
+`--api-key <key>` or set `HARN_SERVE_API_KEY` to require clients to complete
+ACP `authenticate` before creating sessions. Harn advertises the configured
+methods in `initialize.authMethods`; unauthenticated protected requests return
+ACP `auth_required` with the same method details.
 
 ### Protocol overview
 
@@ -455,6 +459,7 @@ The ACP server supports these JSON-RPC methods:
 | Method | Description |
 |---|---|
 | `initialize` | Handshake with capabilities |
+| `authenticate` | Authenticate the ACP connection when `authMethods` is non-empty |
 | `session/new` | Create a new session (returns session ID) |
 | `session/fork` | Fork an existing session into an independent branch |
 | `session/list` | List active sessions known to the ACP adapter |

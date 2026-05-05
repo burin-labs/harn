@@ -100,6 +100,25 @@ impl AuthPolicy {
         Self::default()
     }
 
+    pub fn method_by_acp_id(&self, method_id: &str) -> Option<&AuthMethodConfig> {
+        let mut counts = BTreeMap::new();
+        self.methods.iter().find(|method| {
+            let id = next_acp_auth_method_id(method, &mut counts);
+            id == method_id
+        })
+    }
+
+    pub fn acp_auth_methods(&self) -> Vec<serde_json::Value> {
+        let mut counts = BTreeMap::new();
+        self.methods
+            .iter()
+            .map(|method| {
+                let id = next_acp_auth_method_id(method, &mut counts);
+                acp_auth_method(method, id)
+            })
+            .collect()
+    }
+
     pub async fn authorize(&self, request: &AuthRequest) -> AuthorizationDecision {
         if self.methods.is_empty() {
             return AuthorizationDecision::Authorized(AuthenticatedPrincipal {
@@ -117,6 +136,87 @@ impl AuthPolicy {
         }
 
         AuthorizationDecision::Rejected(failures.join("; "))
+    }
+}
+
+fn acp_auth_method_kind(method: &AuthMethodConfig) -> &'static str {
+    match method {
+        AuthMethodConfig::ApiKey(_) => "apiKey",
+        AuthMethodConfig::Hmac(_) => "hmac",
+        AuthMethodConfig::OAuth21(_) => "oauth2",
+    }
+}
+
+fn next_acp_auth_method_id(
+    method: &AuthMethodConfig,
+    counts: &mut BTreeMap<&'static str, usize>,
+) -> String {
+    let base = acp_auth_method_kind(method);
+    let count = counts.entry(base).or_insert(0);
+    let id = if *count == 0 {
+        base.to_string()
+    } else {
+        format!("{base}-{}", *count + 1)
+    };
+    *count += 1;
+    id
+}
+
+fn acp_auth_method(method: &AuthMethodConfig, id: String) -> serde_json::Value {
+    match method {
+        AuthMethodConfig::ApiKey(_) => serde_json::json!({
+            "id": id,
+            "name": "Harn API key",
+            "description": "Authenticate with an API key supplied as `Authorization: Bearer <key>` or `X-API-Key`.",
+            "_meta": {
+                "harn": {
+                    "scheme": "api_key",
+                    "challenge": {
+                        "type": "api_key",
+                        "headers": ["Authorization", "X-API-Key"],
+                        "authorizationScheme": "Bearer"
+                    }
+                }
+            }
+        }),
+        AuthMethodConfig::Hmac(config) => serde_json::json!({
+            "id": id,
+            "name": "Harn HMAC signature",
+            "description": "Authenticate with an HMAC-SHA256 canonical request signature.",
+            "_meta": {
+                "harn": {
+                    "scheme": "hmac",
+                    "challenge": {
+                        "type": "hmac",
+                        "algorithm": "HMAC-SHA256",
+                        "provider": config.provider,
+                        "headers": ["Authorization"],
+                        "canonicalRequest": {
+                            "method": "ACP",
+                            "path": "authenticate"
+                        }
+                    }
+                }
+            }
+        }),
+        AuthMethodConfig::OAuth21(config) => serde_json::json!({
+            "id": id,
+            "name": "OAuth 2.1 bearer token",
+            "description": "Authenticate with a bearer token validated by the transport.",
+            "_meta": {
+                "harn": {
+                    "scheme": "oauth2",
+                    "challenge": {
+                        "type": "oauth2",
+                        "issuer": config.issuer,
+                        "audience": config.audience,
+                        "scopes": config.required_scopes.iter().cloned().collect::<Vec<_>>(),
+                        "headers": ["Authorization"],
+                        "authorizationScheme": "Bearer"
+                    }
+                }
+            }
+        }),
     }
 }
 
@@ -230,6 +330,34 @@ mod tests {
         };
         let decision = policy.authorize(&request).await;
         assert!(matches!(decision, AuthorizationDecision::Authorized(_)));
+    }
+
+    #[test]
+    fn acp_auth_methods_use_stable_kind_ids() {
+        let policy = AuthPolicy {
+            methods: vec![
+                AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+                    keys: BTreeSet::from(["secret".to_string()]),
+                }),
+                AuthMethodConfig::Hmac(HmacAuthConfig {
+                    shared_secret: "shared-secret".to_string(),
+                    provider: "harn-serve".to_string(),
+                    timestamp_window: Duration::seconds(60),
+                }),
+                AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+                    keys: BTreeSet::from(["second".to_string()]),
+                }),
+            ],
+        };
+
+        let methods = policy.acp_auth_methods();
+        assert_eq!(methods[0]["id"], "apiKey");
+        assert_eq!(methods[1]["id"], "hmac");
+        assert_eq!(methods[2]["id"], "apiKey-2");
+        assert!(matches!(
+            policy.method_by_acp_id("hmac"),
+            Some(AuthMethodConfig::Hmac(_))
+        ));
     }
 
     #[tokio::test]

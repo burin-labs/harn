@@ -27,7 +27,11 @@ use uuid::Uuid;
 use crate::cli::{A2aServeArgs, McpServeTransport, ServeAcpArgs, ServeMcpArgs, ServeTlsMode};
 
 pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
-    crate::acp::run_acp_server(Some(&args.file)).await;
+    crate::acp::run_acp_server(
+        Some(&args.file),
+        build_auth_policy(&args.api_key, args.hmac_secret.as_ref()),
+    )
+    .await;
     Ok(())
 }
 
