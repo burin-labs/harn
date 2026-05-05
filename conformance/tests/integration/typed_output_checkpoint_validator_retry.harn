@@ -1,0 +1,60 @@
+import { agent_capture_events } from "std/agent/events"
+import { typed_output_checkpoint } from "std/checkpoint"
+
+pipeline default() {
+  llm_mock_clear()
+  let schema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["decision", "confidence", "evidence"],
+    properties: {
+      decision: {type: "string", enum: ["merge", "wait"]},
+      confidence: {type: "number"},
+      evidence: {type: "array", items: {type: "string"}},
+    },
+  }
+  llm_mock(
+    {
+      text: "Here is the JSON:\n```json\n{\"decision\":\"merge\",\"confidence\":0.2,\"evidence\":[]}\n```",
+    },
+  )
+  llm_mock({text: "{\"decision\":\"wait\",\"confidence\":0.95,\"evidence\":[\"ci still pending\"]}"})
+  let session_id = "typed-checkpoint-session"
+  let captured = agent_capture_events(
+    session_id,
+    fn() { typed_output_checkpoint(
+      "merge_captain.next_action",
+      "Choose the next Merge Captain action.",
+      schema,
+      {provider: "mock", session_id: session_id, validator_retries: 1, repair: {enabled: false}},
+      fn(data) {
+        var errors = []
+        if data.confidence < 0.7 {
+          errors = errors.push("confidence must be at least 0.7")
+        }
+        if len(data.evidence) == 0 {
+          errors = errors.push("evidence must cite a deterministic fact")
+        }
+        return {ok: len(errors) == 0, errors: errors}
+      },
+    ) },
+  )
+  let checkpoint = captured.result
+  println(checkpoint.ok)
+  println(checkpoint.data.decision)
+  println(checkpoint.attempts)
+  println(checkpoint.checkpoint_attempts)
+  println(checkpoint.extracted_json)
+  println(len(checkpoint.validator_failures))
+  println(contains(llm_mock_calls()[1].messages[0].content, "confidence must be at least 0.7"))
+  println(captured.events[0].type)
+  println(captured.events[0].checkpoint.final_accepted)
+  let trace = agent_trace()
+  var found = false
+  for event in trace {
+    if event.type == "typed_checkpoint" && event.name == "merge_captain.next_action" {
+      found = event.final_accepted
+    }
+  }
+  println(found)
+}

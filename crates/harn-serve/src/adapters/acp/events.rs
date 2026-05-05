@@ -706,6 +706,16 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::TypedCheckpoint {
+                session_id,
+                checkpoint,
+            } => {
+                self.emit_agent_event_ext(
+                    "typed_checkpoint",
+                    session_id,
+                    serde_json::json!({"checkpoint": checkpoint}),
+                );
+            }
             AgentEvent::FeedbackInjected {
                 session_id,
                 kind,

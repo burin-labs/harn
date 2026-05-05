@@ -6,6 +6,7 @@
 // run record) on pure Harn.
 import { build } from "../lib/repair_bundle"
 import {
+  default_executor,
   invoke,
   invoke_for_ci_failure,
   invoke_for_merge_conflict,
@@ -123,6 +124,21 @@ pipeline test_completed_run_attaches_output(task) {
   assert_eq(run.output.diagnosis, "fixed")
   assert_eq(run.agent_loop.status, "completed")
   assert_eq(run.agent_loop.iterations, 1)
+}
+
+pipeline test_default_executor_repairs_validator_failures(task) {
+  llm_mock_clear()
+  llm_mock(
+    {
+      text: "{\"diagnosis\":\"maybe\",\"files_changed\":[{\"path\":\"src/foo.rs\",\"action\":\"modified\"}],\"tests_run\":[],\"commits_created\":[{\"sha\":\"abc\",\"subject\":\"fix\"}],\"push_result\":{\"pushed\":true,\"ref\":\"feat\",\"sha\":\"abc\",\"force_with_lease\":true},\"residual_risk\":\"unknown\"}",
+    },
+  )
+  llm_mock({text: json_stringify(_ok_output())})
+  let result = default_executor(_ci_bundle(), {provider: "mock", validator_retries: 1, repair: {enabled: false}})
+  assert(result.ok)
+  assert_eq(result.output.diagnosis, "fixed")
+  assert_eq(result.typed_checkpoint.checkpoint_attempts, 2)
+  assert(result.typed_checkpoint.validator_failures[0].contains("missing tests"))
 }
 
 pipeline test_schema_invalid_when_executor_fails(task) {

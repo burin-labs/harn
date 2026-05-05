@@ -1,7 +1,14 @@
 // @harn-entrypoint-category agent.stdlib
+import { typed_output_checkpoint } from "std/checkpoint"
+
 /** agent_llm_turn. */
 pub fn agent_llm_turn(prompt, system = nil, options = nil) {
   return llm_call(prompt, system, options ?? {})
+}
+
+/** agent_typed_output_checkpoint. */
+pub fn agent_typed_output_checkpoint(name, prompt, schema, options = nil, validator = nil) {
+  return typed_output_checkpoint(name, prompt, schema, options, validator)
 }
 
 /** agent_parse_tool_calls. */

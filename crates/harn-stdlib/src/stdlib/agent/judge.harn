@@ -1,3 +1,4 @@
+import { agent_typed_output_checkpoint } from "std/agent/primitives"
 import { completion_judge_user_prompt } from "std/agent/prompts"
 import { agent_emit_event, agent_session_inject_feedback } from "std/agent/state"
 
@@ -49,8 +50,20 @@ fn __judge_invoke_structured(judge_cfg, opts, payload) {
     system: system,
   }
   let started = monotonic_ms()
-  let result = llm_call_structured(user, schema, llm_opts)
+  let checkpoint = agent_typed_output_checkpoint("agent.completion_judge", user, schema, llm_opts)
   let duration_ms = monotonic_ms() - started
+  if !checkpoint.ok {
+    return {
+      vetoed: true,
+      feedback: checkpoint.error,
+      verdict: "continue",
+      reasoning: checkpoint.error,
+      next_step: checkpoint.error,
+      judge_duration_ms: duration_ms,
+      typed_checkpoint: checkpoint,
+    }
+  }
+  let result = checkpoint.data
   let verdict = result?.verdict ?? "done"
   let reasoning = result?.reasoning ?? ""
   let next_step = result?.next_step ?? ""
@@ -62,7 +75,13 @@ fn __judge_invoke_structured(judge_cfg, opts, payload) {
     {vetoed: true, feedback: feedback}
   }
   return outcome
-    + {verdict: verdict, reasoning: reasoning, next_step: next_step, judge_duration_ms: duration_ms}
+    + {
+    verdict: verdict,
+    reasoning: reasoning,
+    next_step: next_step,
+    judge_duration_ms: duration_ms,
+    typed_checkpoint: checkpoint,
+  }
 }
 
 fn __emit_judge_decision(session_id, iteration, verdict) {

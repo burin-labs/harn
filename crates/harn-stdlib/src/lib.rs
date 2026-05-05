@@ -274,6 +274,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/workflow/options.harn"),
     },
     StdlibSource {
+        module: "workflow/checkpoints",
+        source: include_str!("stdlib/workflow/checkpoints.harn"),
+    },
+    StdlibSource {
         module: "workflow/stage",
         source: include_str!("stdlib/workflow/stage.harn"),
     },

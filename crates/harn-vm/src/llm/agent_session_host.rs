@@ -1006,7 +1006,7 @@ async fn host_agent_emit_event(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let event = build_agent_event(&session_id, &event_type, &payload)?;
     if matches!(
         event_type.as_str(),
-        "tool_search_query" | "tool_search_result"
+        "tool_search_query" | "tool_search_result" | "typed_checkpoint"
     ) {
         let role = if event_type == "tool_search_result" {
             "tool"
@@ -1074,6 +1074,10 @@ fn build_agent_event(
                 .and_then(|m| m.get("judge_duration_ms"))
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0),
+        }),
+        "typed_checkpoint" => Ok(AgentEvent::TypedCheckpoint {
+            session_id: session_id.to_string(),
+            checkpoint: payload.clone(),
         }),
         "tool_search_query" => Ok(AgentEvent::ToolSearchQuery {
             session_id: session_id.to_string(),

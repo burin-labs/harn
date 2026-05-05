@@ -358,6 +358,10 @@ pub enum AgentEvent {
         next_step: Option<String>,
         judge_duration_ms: u64,
     },
+    TypedCheckpoint {
+        session_id: String,
+        checkpoint: serde_json::Value,
+    },
     FeedbackInjected {
         session_id: String,
         kind: String,
@@ -518,6 +522,7 @@ impl AgentEvent {
             | Self::TurnStart { session_id, .. }
             | Self::TurnEnd { session_id, .. }
             | Self::JudgeDecision { session_id, .. }
+            | Self::TypedCheckpoint { session_id, .. }
             | Self::FeedbackInjected { session_id, .. }
             | Self::BudgetExhausted { session_id, .. }
             | Self::LoopStuck { session_id, .. }
