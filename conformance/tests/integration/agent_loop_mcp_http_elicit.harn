@@ -1,4 +1,3 @@
-// @xfail: MCP bootstrap not yet wired through Harn loop — tracked in burin-labs/harn#1238
 import { process_shell } from "std/runtime"
 
 fn wait_for_file(path, attempts) {

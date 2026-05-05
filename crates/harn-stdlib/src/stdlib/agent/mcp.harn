@@ -1,0 +1,19 @@
+/** agent_mcp_bootstrap_if_needed. */
+pub fn agent_mcp_bootstrap_if_needed(session, opts) {
+  let specs = opts?.mcp_servers
+  if specs == nil || len(specs) == 0 {
+    return opts
+  }
+  let result = __host_mcp_bootstrap(session.session_id, specs)
+  if len(result.tools_added) == 0 {
+    return opts
+  }
+  let existing = opts?.tools
+  let existing_tools = if existing?._type == "tool_registry" {
+    existing?.tools ?? []
+  } else {
+    []
+  }
+  let reg = {_type: "tool_registry", tools: existing_tools + result.tools_added}
+  return opts + {tools: reg}
+}

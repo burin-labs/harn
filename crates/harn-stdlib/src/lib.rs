@@ -146,6 +146,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/autocompact.harn"),
     },
     StdlibSource {
+        module: "agent/mcp",
+        source: include_str!("stdlib/agent/mcp.harn"),
+    },
+    StdlibSource {
         module: "agent/budget",
         source: include_str!("stdlib/agent/budget.harn"),
     },

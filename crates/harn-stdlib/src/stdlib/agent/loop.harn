@@ -2,6 +2,7 @@
 import { agent_autocompact_if_needed } from "std/agent/autocompact"
 import { agent_budget_post_call_blocked, agent_budget_pre_call_blocked } from "std/agent/budget"
 import { agent_verify_or_continue } from "std/agent/judge"
+import { agent_mcp_bootstrap_if_needed } from "std/agent/mcp"
 import { agent_loop_options } from "std/agent/options"
 import { agent_compute_post_turn } from "std/agent/postturn"
 import { agent_build_turn_messages, agent_build_turn_system } from "std/agent/preflight"
@@ -18,11 +19,12 @@ import {
 
 /** agent_loop. */
 pub fn agent_loop(message, system_prompt = nil, options = nil) {
-  let opts = agent_loop_options(options)
+  var opts = agent_loop_options(options)
   let session = agent_session_init(message, system_prompt, opts)
   if session?.done {
     return session.result
   }
+  opts = agent_mcp_bootstrap_if_needed(session, opts)
   var iteration = 0
   var stop_reason = nil
   var final_status = ""
@@ -108,8 +110,10 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
   if final_status == "" && iteration >= max_iterations && stop_reason == nil {
     final_status = "budget_exhausted"
   }
-  return agent_session_finalize(
+  let result = agent_session_finalize(
     session.session_id,
     {final_status: final_status, stop_reason: stop_reason ?? "", iterations: iteration},
   )
+  __host_mcp_disconnect(session.session_id)
+  return result
 }
