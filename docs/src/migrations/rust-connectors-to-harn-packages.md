@@ -1,15 +1,13 @@
 # Migrating Rust provider connectors to pure-Harn packages
 
-The Rust-side GitHub, Slack, Linear, and Notion connectors are deprecated
-compatibility shims under the pure-Harn connector pivot. The core sunset
-groundwork has landed; new provider business logic ships in pure-Harn connector
-packages so that Harn Cloud and self-hosted orchestrators can adopt connector
+GitHub, Slack, Linear, and Notion provider business logic now ships in
+pure-Harn connector packages. Harn core keeps only the shared connector
+primitives, so Harn Cloud and self-hosted orchestrators can adopt connector
 fixes, new event families, and provider API changes without waiting for a Harn
 core release.
 
-This guide is the no-downtime migration path for an orchestrator that today
-uses one of the Rust-side providers and wants to cut over to the pure-Harn
-package equivalent.
+This guide is the migration path for an orchestrator that still has an old
+manifest or deployment model from before the pure-Harn package cutover.
 
 The cron, generic webhook, A2A push, and stream connectors stay in Harn core
 and are **not** affected by this migration. HMAC verification, raw-body
@@ -30,9 +28,9 @@ event shape through the connector contract v1 surface:
 
 Manifests opt into the pure-Harn replacement by declaring a
 `[[providers]]` table that points `connector = { harn = "..." }` at the
-package's connector module. The orchestrator already prefers a configured
-Harn module over the Rust default, so the Rust connector keeps running
-unchanged for any provider that does not declare an override.
+package's connector module. Provider-specific Rust fallbacks are no longer
+registered for GitHub, Slack, Linear, or Notion, so the override is the
+canonical path for those providers.
 
 ## Cutover checklist
 
@@ -73,12 +71,12 @@ one provider on the pure-Harn implementation before moving the rest.
    `provider = "github"` automatically resolve through the new connector
    once the override is in place.
 
-4. **Run a parity check against your fixtures.** The recommended pattern
-   is to feed canonical webhook bodies through both the Rust connector and
-   the pure-Harn package and assert the resulting `TriggerEvent`
-   `kind` / `dedupe_key` / `provider_payload` shapes match. The connector
-   testkit (`docs/src/connectors/testkit.md`) has the primitives needed to
-   stage a `RawInbound` and capture the normalized event in tests.
+4. **Run a fixture check.** Feed canonical webhook bodies through the
+   pure-Harn package and assert the resulting `TriggerEvent`
+   `kind` / `dedupe_key` / `provider_payload` shapes match the payloads your
+   handlers expect. The connector testkit
+   (`docs/src/connectors/testkit.md`) has the primitives needed to stage a
+   `RawInbound` and capture the normalized event in tests.
 
    First-party connector packages run a parity matrix against the Rust
    payload shapes in their own CI. If your handlers depend on a vendor
@@ -86,16 +84,9 @@ one provider on the pure-Harn implementation before moving the rest.
    `[connector_contract]` fixture set before cutover.
 
 5. **Roll out and verify.** Deploy the manifest change. The orchestrator
-   logs a one-line confirmation when it loads the Harn module instead of
-   the Rust default. `harn doctor` reports `trigger:<id>` as
-   `via <provider>` regardless of which connector implementation is in
-   use, so existing health checks keep working.
-
-6. **Keep the Rust connector available during the soak.** If the
-   pure-Harn package needs a hotfix, remove the `connector = { harn = ... }`
-   override and the orchestrator falls back to the Rust connector with no
-   downtime. There is no on-disk migration of inbox state, so a fallback is
-   safe to perform mid-flight.
+   logs a one-line confirmation when it loads the Harn module. `harn doctor`
+   reports `trigger:<id>` as `via <provider>`, so existing health checks keep
+   working.
 
 ## Harn Cloud specifics
 
@@ -133,12 +124,9 @@ The Harn core prerequisites are complete:
   primitives, structured concurrency, and the connector testkit are in core.
 - The OAuth / connect CLI and package manager give connector packages a stable
   install + auth path.
-- Harn core has parity fixtures for GitHub, Slack, Linear, and Notion that pin
-  the Rust-compatible `TriggerEvent` payload shapes used by first-party package
-  CI.
+- First-party package CI owns parity fixtures for GitHub, Slack, Linear, and
+  Notion so provider payload behavior can evolve with package releases.
 
-The remaining Rust code is intentionally compatibility-only for the deprecation
-window. Do not add new provider-specific Rust connector business logic in this
-repository; new service connectors should be packages that register with
-`connector = { harn = "..." }`. Removing the compatibility shims is a release
-coordination decision, not a prerequisite for new connector development.
+Do not add provider-specific Rust connector business logic in this repository;
+service connectors should be packages that register with
+`connector = { harn = "..." }`.

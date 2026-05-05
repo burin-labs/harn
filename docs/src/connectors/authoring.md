@@ -518,8 +518,8 @@ checks. The helper enforces these non-negotiable rules:
 - timestamped schemes reject outside a caller-provided window
 - rejection paths write an audit event to the `audit.signature_verify` topic
 
-The helper supports the raw-body HMAC header styles used by the built-in
-compatibility shims and first-party connector packages:
+The helper supports the raw-body HMAC header styles used by first-party
+connector packages and generic webhook intake:
 
 - GitHub: `X-Hub-Signature-256: sha256=<hex>`
 - Notion: `X-Notion-Signature: sha256=<hex>`

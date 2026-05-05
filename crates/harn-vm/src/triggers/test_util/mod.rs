@@ -1,28 +1,24 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
-use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
-use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use tokio::sync::Notify;
 use uuid::Uuid;
 
 use crate::connectors::a2a_push::A2aPushConnector;
 use crate::connectors::cron::{CatchupMode, CronConnector, CronEventSink};
-use crate::connectors::linear::LinearConnector;
 use crate::connectors::webhook::{
     GenericWebhookConnector, WebhookProviderProfile, WebhookSignatureVariant,
 };
 use crate::connectors::{
     Connector, ConnectorCtx, ConnectorError, MetricsRegistry, RateLimitConfig, RateLimiterFactory,
-    RawInbound, SlackConnector, TriggerBinding as ConnectorTriggerBinding,
+    RawInbound, TriggerBinding as ConnectorTriggerBinding,
 };
 use crate::event_log::{
     install_memory_for_current_thread, AnyEventLog, EventLog, FileEventLog, LogEvent,
@@ -64,11 +60,7 @@ pub const TRIGGER_TEST_FIXTURES: &[&str] = &[
     "rate_limit_throttles",
     "replay_binding_gc_fallback",
     "replay_refires_from_dlq",
-    "slack_events_3s_ack",
-    "slack_events_message",
     "webhook_dedupe_blocks_duplicates",
-    "webhook_linear_issue_update",
-    "webhook_linear_timestamp_window",
     "webhook_verifies_hmac",
 ];
 
@@ -247,11 +239,7 @@ impl TriggerTestHarness {
             "rate_limit_throttles" => self.rate_limit_throttles().await,
             "replay_binding_gc_fallback" => self.replay_binding_gc_fallback().await,
             "replay_refires_from_dlq" => self.replay_refires_from_dlq().await,
-            "slack_events_3s_ack" => self.slack_events_3s_ack().await,
-            "slack_events_message" => self.slack_events_message().await,
             "webhook_dedupe_blocks_duplicates" => self.webhook_dedupe_blocks_duplicates().await,
-            "webhook_linear_issue_update" => self.webhook_linear_issue_update().await,
-            "webhook_linear_timestamp_window" => self.webhook_linear_timestamp_window().await,
             "webhook_verifies_hmac" => self.webhook_verifies_hmac().await,
             _ => Err(format!(
                 "unknown trigger harness fixture '{fixture}' (known: {})",
@@ -354,308 +342,6 @@ impl TriggerTestHarness {
             notes: Vec::new(),
             details: json!({
                 "provider": event.provider.as_str(),
-            }),
-        })
-    }
-
-    async fn slack_events_message(self) -> Result<TriggerHarnessResult, String> {
-        let _guard = clock::install_override(self.clock.clone());
-        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
-        let inbox = build_inbox(&log).await;
-        let mut connector = SlackConnector::new();
-        connector
-            .init(connector_ctx(
-                log,
-                Arc::new(StaticSecretProvider::new(
-                    "slack",
-                    BTreeMap::from([(
-                        SecretId::new("slack", "test-signing-secret"),
-                        "8f742231b10e8888abcd99yyyzzz85a5".to_string(),
-                    )]),
-                )),
-                inbox,
-            ))
-            .await
-            .map_err(|error| error.to_string())?;
-        connector
-            .activate(&[slack_binding()])
-            .await
-            .map_err(|error| error.to_string())?;
-
-        let event = connector
-            .normalize_inbound(slack_raw_inbound())
-            .await
-            .map_err(|error| error.to_string())?;
-        self.connector_registry
-            .record_event("slack.fixture", 1, &event, Some("verified"), None);
-        let emitted = self.connector_registry.emitted();
-        Ok(TriggerHarnessResult {
-            fixture: "slack_events_message".to_string(),
-            ok: emitted.len() == 1
-                && emitted[0].provider == "slack"
-                && emitted[0].kind == "message.channels"
-                && emitted[0].signature_state == "verified",
-            stub: false,
-            summary: "slack connector verifies the signature and emits a typed message event"
-                .to_string(),
-            emitted,
-            attempts: Vec::new(),
-            dlq: Vec::new(),
-            alerts: Vec::new(),
-            bindings: Vec::new(),
-            notes: Vec::new(),
-            details: json!({
-                "expected_kind": "message.channels",
-            }),
-        })
-    }
-
-    async fn webhook_linear_issue_update(self) -> Result<TriggerHarnessResult, String> {
-        let _guard = clock::install_override(self.clock.clone());
-        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
-        let metrics = Arc::new(MetricsRegistry::default());
-        let inbox = Arc::new(
-            InboxIndex::new(log.clone(), metrics.clone())
-                .await
-                .map_err(|error| error.to_string())?,
-        );
-        let mut connector = LinearConnector::new();
-        connector
-            .init(ConnectorCtx {
-                event_log: log,
-                secrets: Arc::new(StaticSecretProvider::new(
-                    "linear",
-                    BTreeMap::from([(
-                        SecretId::new("linear", "test-signing-secret"),
-                        "linear-signing-secret".to_string(),
-                    )]),
-                )),
-                inbox,
-                metrics,
-                rate_limiter: Arc::new(RateLimiterFactory::default()),
-            })
-            .await
-            .map_err(|error| error.to_string())?;
-        connector
-            .activate(&[linear_binding()])
-            .await
-            .map_err(|error| error.to_string())?;
-
-        let event = connector
-            .normalize_inbound(linear_issue_update_inbound())
-            .await
-            .map_err(|error| error.to_string())?;
-        self.connector_registry.record_event(
-            "linear.fixture",
-            1,
-            &event,
-            Some("issue_update"),
-            None,
-        );
-        let emitted = self.connector_registry.emitted();
-        let changes = match &event.provider_payload {
-            ProviderPayload::Known(KnownProviderPayload::Linear(
-                crate::triggers::event::LinearEventPayload::Issue(payload),
-            )) => payload
-                .changes
-                .iter()
-                .map(|change| serde_json::to_value(change).unwrap_or_default())
-                .collect::<Vec<_>>(),
-            other => {
-                return Err(format!(
-                    "expected normalized Linear issue payload, got {other:?}"
-                ))
-            }
-        };
-        Ok(TriggerHarnessResult {
-            fixture: "webhook_linear_issue_update".to_string(),
-            ok: emitted.len() == 1 && emitted[0].kind == "issue.update" && changes.len() == 3,
-            stub: false,
-            summary: "linear webhook issue.update normalizes into typed payload + change-set"
-                .to_string(),
-            emitted,
-            attempts: Vec::new(),
-            dlq: Vec::new(),
-            alerts: Vec::new(),
-            bindings: Vec::new(),
-            notes: Vec::new(),
-            details: json!({
-                "changes": changes,
-            }),
-        })
-    }
-
-    async fn slack_events_3s_ack(self) -> Result<TriggerHarnessResult, String> {
-        let _guard = clock::install_override(self.clock.clone());
-        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
-        let inbox = build_inbox(&log).await;
-        let mut connector = SlackConnector::new();
-        connector
-            .init(connector_ctx(
-                log.clone(),
-                Arc::new(StaticSecretProvider::new(
-                    "slack",
-                    BTreeMap::from([(
-                        SecretId::new("slack", "test-signing-secret"),
-                        "8f742231b10e8888abcd99yyyzzz85a5".to_string(),
-                    )]),
-                )),
-                inbox.clone(),
-            ))
-            .await
-            .map_err(|error| error.to_string())?;
-        connector
-            .activate(&[slack_binding()])
-            .await
-            .map_err(|error| error.to_string())?;
-
-        // Slack's 3s contract is really an *ordering* contract: the ingress
-        // path must be able to ack the request without depending on dispatch
-        // work. We model that as a barrier — a mock dispatcher that refuses
-        // to start until the ingress path has finished. If a regression
-        // wires dispatch into the synchronous ingress flow, the harness
-        // deadlocks (and the timeout below catches it as a fast failure).
-        let pending_topic = Topic::new("triggers.harness.pending")
-            .expect("pending topic for slack ack fixture should be valid");
-        let mut pending_stream = log
-            .clone()
-            .subscribe(&pending_topic, None)
-            .await
-            .map_err(|error| error.to_string())?;
-        let dispatch_release = Arc::new(Notify::new());
-        let dispatch_started = Arc::new(AtomicBool::new(false));
-        let dispatch_completed = Arc::new(AtomicBool::new(false));
-        let dispatch_release_for_task = dispatch_release.clone();
-        let dispatch_started_for_task = dispatch_started.clone();
-        let dispatch_completed_for_task = dispatch_completed.clone();
-        let dispatcher_handle = tokio::spawn(async move {
-            dispatch_release_for_task.notified().await;
-            dispatch_started_for_task.store(true, AtomicOrdering::SeqCst);
-            let drained = pending_stream.next().await;
-            if drained.is_some() {
-                dispatch_completed_for_task.store(true, AtomicOrdering::SeqCst);
-            }
-        });
-
-        let event = connector
-            .normalize_inbound(slack_raw_inbound())
-            .await
-            .map_err(|error| error.to_string())?;
-        let processed = crate::connectors::postprocess_normalized_event(
-            inbox.as_ref(),
-            "slack.fixture",
-            false,
-            StdDuration::from_secs(60),
-            event,
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-        let crate::connectors::PostNormalizeOutcome::Ready(event) = processed else {
-            return Err("slack ack fixture unexpectedly dropped the event".to_string());
-        };
-        log.append(
-            &pending_topic,
-            LogEvent::new(
-                "trigger_event",
-                json!({
-                    "trigger_id": "slack.fixture",
-                    "binding_version": 1,
-                    "event": *event,
-                }),
-            ),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-
-        // Ingress is done. The mock dispatcher is still parked on the
-        // release barrier — capture that fact before we lift it. If a
-        // regression made any of the steps above wait on dispatch
-        // (handler, downstream pump, etc.), the dispatcher would already
-        // have started, or the `await`s above would have hung forever.
-        let dispatch_started_during_ingress = dispatch_started.load(AtomicOrdering::SeqCst);
-
-        // Confirm the dispatcher *can* run once we lift the barrier so we
-        // don't accept a code path that simply never dispatches.
-        dispatch_release.notify_one();
-        tokio::time::timeout(TEST_DEFAULT_TIMEOUT, dispatcher_handle)
-            .await
-            .map_err(|_| "mock dispatcher did not run after barrier release".to_string())?
-            .map_err(|error| format!("mock dispatcher task panicked: {error}"))?;
-        let dispatch_ran_after_release = dispatch_completed.load(AtomicOrdering::SeqCst);
-
-        let ok = !dispatch_started_during_ingress && dispatch_ran_after_release;
-
-        Ok(TriggerHarnessResult {
-            fixture: "slack_events_3s_ack".to_string(),
-            ok,
-            stub: false,
-            summary:
-                "slack ack-first ingress completes without waiting on dispatch (ordering contract)"
-                    .to_string(),
-            emitted: Vec::new(),
-            attempts: Vec::new(),
-            dlq: Vec::new(),
-            alerts: Vec::new(),
-            bindings: Vec::new(),
-            notes: Vec::new(),
-            details: json!({
-                "dispatch_started_during_ingress": dispatch_started_during_ingress,
-                "dispatch_ran_after_release": dispatch_ran_after_release,
-            }),
-        })
-    }
-
-    async fn webhook_linear_timestamp_window(self) -> Result<TriggerHarnessResult, String> {
-        let _guard = clock::install_override(self.clock.clone());
-        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
-        let metrics = Arc::new(MetricsRegistry::default());
-        let inbox = Arc::new(
-            InboxIndex::new(log.clone(), metrics.clone())
-                .await
-                .map_err(|error| error.to_string())?,
-        );
-        let mut connector = LinearConnector::new();
-        connector
-            .init(ConnectorCtx {
-                event_log: log,
-                secrets: Arc::new(StaticSecretProvider::new(
-                    "linear",
-                    BTreeMap::from([(
-                        SecretId::new("linear", "test-signing-secret"),
-                        "linear-signing-secret".to_string(),
-                    )]),
-                )),
-                inbox,
-                metrics: metrics.clone(),
-                rate_limiter: Arc::new(RateLimiterFactory::default()),
-            })
-            .await
-            .map_err(|error| error.to_string())?;
-        connector
-            .activate(&[linear_binding()])
-            .await
-            .map_err(|error| error.to_string())?;
-
-        let error = connector
-            .normalize_inbound(linear_issue_update_inbound_stale())
-            .await
-            .expect_err("stale linear webhook should reject");
-        Ok(TriggerHarnessResult {
-            fixture: "webhook_linear_timestamp_window".to_string(),
-            ok: matches!(error, ConnectorError::TimestampOutOfWindow { .. })
-                && metrics.snapshot().linear_timestamp_rejections_total == 1,
-            stub: false,
-            summary: "linear webhook replay window rejects stale timestamps and increments metrics"
-                .to_string(),
-            emitted: Vec::new(),
-            attempts: Vec::new(),
-            dlq: Vec::new(),
-            alerts: Vec::new(),
-            bindings: Vec::new(),
-            notes: Vec::new(),
-            details: json!({
-                "error": error.to_string(),
-                "linear_timestamp_rejections_total": metrics.snapshot().linear_timestamp_rejections_total,
             }),
         })
     }
@@ -1780,94 +1466,6 @@ fn webhook_binding(
     binding
 }
 
-fn slack_binding() -> ConnectorTriggerBinding {
-    let mut binding =
-        ConnectorTriggerBinding::new(ProviderId::from("slack"), "webhook", "slack.fixture");
-    binding.config = json!({
-        "match": { "path": "/hooks/slack" },
-        "secrets": { "signing_secret": "slack/test-signing-secret" },
-    });
-    binding
-}
-
-fn slack_raw_inbound() -> RawInbound {
-    let payload = json!({
-        "team_id": "T123ABC456",
-        "api_app_id": "A123ABC456",
-        "event": {
-            "type": "message",
-            "user": "U123ABC456",
-            "text": "hello from slack",
-            "ts": "1715000000.000100",
-            "channel": "C123ABC456",
-            "channel_type": "channel",
-            "event_ts": "1715000000.000100"
-        },
-        "type": "event_callback",
-        "event_id": "Ev123MESSAGE",
-        "event_time": 1715000000
-    });
-    let body = serde_json::to_vec(&payload).expect("slack fixture body should serialize");
-    let timestamp = 1_715_000_000i64;
-    let mut raw = RawInbound::new(
-        "",
-        BTreeMap::from([
-            ("Content-Type".to_string(), "application/json".to_string()),
-            (
-                "X-Slack-Request-Timestamp".to_string(),
-                timestamp.to_string(),
-            ),
-            (
-                "X-Slack-Signature".to_string(),
-                slack_signature("8f742231b10e8888abcd99yyyzzz85a5", timestamp, &body),
-            ),
-        ]),
-        body,
-    );
-    raw.received_at = OffsetDateTime::from_unix_timestamp(timestamp).unwrap();
-    raw.metadata = json!({ "binding_id": "slack.fixture" });
-    raw
-}
-
-fn slack_signature(secret: &str, timestamp: i64, body: &[u8]) -> String {
-    let mut signed = format!("v0:{timestamp}:").into_bytes();
-    signed.extend_from_slice(body);
-    format!(
-        "v0={}",
-        hex::encode(hmac_sha256(secret.as_bytes(), &signed))
-    )
-}
-
-fn hmac_sha256(secret: &[u8], data: &[u8]) -> Vec<u8> {
-    const BLOCK_SIZE: usize = 64;
-
-    let mut key = if secret.len() > BLOCK_SIZE {
-        Sha256::digest(secret).to_vec()
-    } else {
-        secret.to_vec()
-    };
-    key.resize(BLOCK_SIZE, 0);
-
-    let mut inner_pad = vec![0x36; BLOCK_SIZE];
-    let mut outer_pad = vec![0x5c; BLOCK_SIZE];
-    for (slot, key_byte) in inner_pad.iter_mut().zip(&key) {
-        *slot ^= key_byte;
-    }
-    for (slot, key_byte) in outer_pad.iter_mut().zip(&key) {
-        *slot ^= key_byte;
-    }
-
-    let mut inner = Sha256::new();
-    inner.update(&inner_pad);
-    inner.update(data);
-    let inner_digest = inner.finalize();
-
-    let mut outer = Sha256::new();
-    outer.update(&outer_pad);
-    outer.update(inner_digest);
-    outer.finalize().to_vec()
-}
-
 fn standard_raw_inbound() -> RawInbound {
     let mut raw = RawInbound::new(
         "",
@@ -1905,51 +1503,6 @@ fn github_raw_inbound() -> RawInbound {
         b"Hello, World!".to_vec(),
     );
     raw.received_at = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
-    raw
-}
-
-fn linear_binding() -> ConnectorTriggerBinding {
-    let mut binding =
-        ConnectorTriggerBinding::new(ProviderId::from("linear"), "webhook", "linear.fixture");
-    binding.config = json!({
-        "match": { "path": "/hooks/linear" },
-        "replay_grace_secs": 15,
-        "secrets": { "signing_secret": "linear/test-signing-secret" },
-    });
-    binding
-}
-
-fn linear_issue_update_inbound() -> RawInbound {
-    linear_raw_inbound(1_715_000_000_000i64, 1_715_000_000_000i64)
-}
-
-fn linear_issue_update_inbound_stale() -> RawInbound {
-    linear_raw_inbound(1_715_000_000_000i64, 1_715_000_100_000i64)
-}
-
-fn linear_raw_inbound(webhook_timestamp_ms: i64, received_at_ms: i64) -> RawInbound {
-    let body = json!({
-        "action": "update",
-        "type": "Issue",
-        "organizationId": "org_123",
-        "webhookTimestamp": webhook_timestamp_ms,
-        "actor": { "id": "user_1", "name": "Ada" },
-        "data": { "id": "ISS-1", "title": "Fix connector" },
-        "updatedFrom": { "title": "Old title", "priority": 2, "labelIds": ["lbl_1"] }
-    });
-    let encoded = serde_json::to_vec(&body).unwrap();
-    let signature = hex::encode(hmac_sha256("linear-signing-secret".as_bytes(), &encoded));
-    let mut raw = RawInbound::new(
-        "",
-        BTreeMap::from([
-            ("Linear-Signature".to_string(), signature),
-            ("Linear-Delivery".to_string(), "delivery-123".to_string()),
-            ("Content-Type".to_string(), "application/json".to_string()),
-        ]),
-        encoded,
-    );
-    raw.received_at = OffsetDateTime::from_unix_timestamp(received_at_ms / 1000).unwrap();
-    raw.metadata = json!({ "binding_id": "linear.fixture" });
     raw
 }
 

@@ -1338,10 +1338,7 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                     "hex",
                 ),
                 vec![required_secret("signing_secret", "github")],
-                ProviderRuntimeMetadata::Builtin {
-                    connector: "webhook".to_string(),
-                    default_signature_variant: Some("github".to_string()),
-                },
+                ProviderRuntimeMetadata::Placeholder,
             ),
             normalize: github_payload,
         }),
@@ -1370,10 +1367,7 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                     "hex",
                 ),
                 vec![required_secret("signing_secret", "slack")],
-                ProviderRuntimeMetadata::Builtin {
-                    connector: "slack".to_string(),
-                    default_signature_variant: Some("slack".to_string()),
-                },
+                ProviderRuntimeMetadata::Placeholder,
             ),
             normalize: slack_payload,
         }),
@@ -1398,10 +1392,7 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                         required_secret("signing_secret", "linear"),
                         optional_secret("access_token", "linear"),
                     ],
-                    ProviderRuntimeMetadata::Builtin {
-                        connector: "linear".to_string(),
-                        default_signature_variant: Some("linear".to_string()),
-                    },
+                    ProviderRuntimeMetadata::Placeholder,
                 );
                 metadata.outbound_methods = vec![
                     ProviderOutboundMethod {
@@ -1442,10 +1433,7 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                         "hex",
                     ),
                     vec![required_secret("verification_token", "notion")],
-                    ProviderRuntimeMetadata::Builtin {
-                        connector: "notion".to_string(),
-                        default_signature_variant: Some("notion".to_string()),
-                    },
+                    ProviderRuntimeMetadata::Placeholder,
                 );
                 metadata.outbound_methods = vec![
                     outbound_method("get_page"),
@@ -2453,14 +2441,20 @@ mod tests {
             .filter(|entry| matches!(entry.runtime, ProviderRuntimeMetadata::Builtin { .. }))
             .collect();
 
-        assert_eq!(builtin.len(), 13);
+        assert_eq!(builtin.len(), 9);
         assert!(builtin.iter().any(|entry| entry.provider == "a2a-push"));
         assert!(builtin.iter().any(|entry| entry.provider == "cron"));
-        assert!(builtin.iter().any(|entry| entry.provider == "github"));
-        assert!(builtin.iter().any(|entry| entry.provider == "linear"));
-        assert!(builtin.iter().any(|entry| entry.provider == "notion"));
-        assert!(builtin.iter().any(|entry| entry.provider == "slack"));
         assert!(builtin.iter().any(|entry| entry.provider == "webhook"));
+        for provider in ["github", "linear", "notion", "slack"] {
+            let entry = entries
+                .iter()
+                .find(|entry| entry.provider == provider)
+                .expect("first-party package-backed provider metadata");
+            assert!(matches!(
+                entry.runtime,
+                ProviderRuntimeMetadata::Placeholder
+            ));
+        }
         let kafka = entries
             .iter()
             .find(|entry| entry.provider == "kafka")

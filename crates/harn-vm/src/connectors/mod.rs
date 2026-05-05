@@ -29,13 +29,9 @@ use crate::triggers::{
 pub mod a2a_push;
 pub mod cron;
 pub mod effect_policy;
-pub mod github;
 pub mod harn_module;
 pub mod hmac;
-pub mod linear;
-pub mod notion;
 pub mod shared;
-pub mod slack;
 pub mod stream;
 #[cfg(test)]
 pub(crate) mod test_util;
@@ -48,7 +44,6 @@ pub use effect_policy::{
     connector_export_denied_builtin_reason, connector_export_effect_class,
     default_connector_export_policy, ConnectorExportEffectClass, HarnConnectorEffectPolicies,
 };
-pub use github::GitHubConnector;
 pub use harn_module::{
     load_contract as load_harn_connector_contract, HarnConnector, HarnConnectorContract,
 };
@@ -61,31 +56,15 @@ pub use hmac::{
     DEFAULT_STANDARD_WEBHOOKS_TIMESTAMP_HEADER, DEFAULT_STRIPE_SIGNATURE_HEADER,
     SIGNATURE_VERIFY_AUDIT_TOPIC,
 };
-pub use linear::LinearConnector;
-pub use notion::{
-    load_pending_webhook_handshakes, NotionConnector, PersistedNotionWebhookHandshake,
-};
 pub use shared::{
     paginate_cursor, resolve_jwks, verify_hmac_signature, verify_jwt_claims, verify_jwt_json,
     ConnectorBase, CursorPage, HmacSignatureAlgorithm, JwtKeySource, JwtVerificationOptions,
 };
-pub use slack::SlackConnector;
 pub use stream::StreamConnector;
 use webhook::WebhookProviderProfile;
 pub use webhook::{GenericWebhookConnector, WebhookSignatureVariant};
 
 const OUTBOUND_CONNECTOR_HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(30);
-
-/// Third-party provider ids that still ship Rust-side compatibility
-/// connectors while the pure-Harn connector packages complete their
-/// deprecation soak. New service connectors should be Harn packages that
-/// register through `[[providers]] connector = { harn = "..." }` instead.
-pub const RUST_PROVIDER_CONNECTOR_COMPAT_PROVIDERS: &[&str] =
-    &["github", "linear", "notion", "slack"];
-
-pub fn is_rust_provider_connector_compat_provider(provider: &str) -> bool {
-    RUST_PROVIDER_CONNECTOR_COMPAT_PROVIDERS.contains(&provider)
-}
 
 pub(crate) fn outbound_http_client(user_agent: &'static str) -> reqwest::Client {
     reqwest::Client::builder()
@@ -1700,6 +1679,9 @@ impl ConnectorRegistry {
     pub fn with_defaults() -> Self {
         let mut registry = Self::empty();
         for provider in registered_provider_metadata() {
+            if !matches!(provider.runtime, ProviderRuntimeMetadata::Builtin { .. }) {
+                continue;
+            }
             registry
                 .register(default_connector_for_provider(&provider))
                 .expect("default connector registration should not fail");
@@ -1769,35 +1751,12 @@ impl Default for ConnectorRegistry {
 }
 
 fn default_connector_for_provider(provider: &ProviderMetadata) -> Box<dyn Connector> {
-    // The provider catalog on main registers `github` with
-    // ProviderRuntimeMetadata::Builtin { connector: "webhook", ... } so that
-    // before a native connector existed the catalog auto-wired a
-    // GenericWebhookConnector. Now that #170 lands a first-class
-    // GitHubConnector (inbound HMAC + GitHub App outbound), we short-circuit
-    // provider_id "github" here and return the native connector instead of a
-    // webhook-backed fallback. This keeps manifests that say
-    // `provider = "github"` pointed at the new connector without requiring
-    // users to switch to a distinct provider_id.
-    if provider.provider == "github" {
-        return Box::new(GitHubConnector::new());
-    }
-    if provider.provider == "linear" {
-        return Box::new(LinearConnector::new());
-    }
-    if provider.provider == "slack" {
-        return Box::new(SlackConnector::new());
-    }
-    if provider.provider == "notion" {
-        return Box::new(NotionConnector::new());
-    }
-    if provider.provider == "a2a-push" {
-        return Box::new(A2aPushConnector::new());
-    }
     match &provider.runtime {
         ProviderRuntimeMetadata::Builtin {
             connector,
             default_signature_variant,
         } => match connector.as_str() {
+            "a2a-push" => Box::new(A2aPushConnector::new()),
             "cron" => Box::new(CronConnector::new()),
             "stream" => Box::new(StreamConnector::new(
                 ProviderId::from(provider.provider.clone()),
@@ -2066,16 +2025,18 @@ mod tests {
     }
 
     #[test]
-    fn connector_registry_lists_catalog_providers() {
+    fn connector_registry_lists_core_catalog_providers() {
         let registry = ConnectorRegistry::default();
         let providers = registry.list();
         assert!(providers.contains(&ProviderId::from("cron")));
-        assert!(providers.contains(&ProviderId::from("github")));
         assert!(providers.contains(&ProviderId::from("webhook")));
+        assert!(providers.contains(&ProviderId::from("kafka")));
+        assert!(!providers.contains(&ProviderId::from("github")));
+        assert!(!providers.contains(&ProviderId::from("slack")));
     }
 
     #[test]
-    fn pure_harn_pivot_only_keeps_core_or_compat_builtin_connectors() {
+    fn pure_harn_pivot_only_keeps_core_builtin_connectors() {
         let core_runtime_providers = [
             "a2a-push",
             "cron",
@@ -2094,9 +2055,8 @@ mod tests {
             }
 
             let allowed_core = core_runtime_providers.contains(&provider.provider.as_str());
-            let allowed_compat = is_rust_provider_connector_compat_provider(&provider.provider);
             assert!(
-                allowed_core || allowed_compat,
+                allowed_core,
                 "provider '{}' is registered as a Rust builtin connector; new service connectors \
                  must ship as pure-Harn packages and register with connector = {{ harn = \"...\" }}",
                 provider.provider

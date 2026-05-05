@@ -2,29 +2,23 @@
 
 This catalog is the entry point for choosing a connector, wiring its trigger
 manifest, and finding a ready-to-customize example. It reflects the current
-transition plan:
+runtime split:
 
 - Cron, generic webhook, A2A push, and stream ingress are core runtime
   providers.
-- GitHub, Slack, Linear, and Notion still have deprecated Rust compatibility
-  shims, but new provider business logic belongs in pure-Harn packages.
+- Provider business logic belongs in pure-Harn connector packages.
 - Community connectors are Harn packages that export connector contract v1 and
   pass `harn connector test`.
 
 For the architecture and ownership split that closes the old connector-library
 epic, see [Connector architecture status](./architecture.md).
 
-> **Deprecated: Rust-side GitHub, Slack, Linear, and Notion connectors.**
-> The pure-Harn connector pivot makes the corresponding pure-Harn packages the
-> default path for new
-> deployments: `harn-github-connector`, `harn-slack-connector`,
-> `harn-linear-connector`, and `harn-notion-connector`. Configure one by setting
-> `connector = { harn = "..." }` on the `[[providers]]` table. The Rust shims
-> remain only as compatibility defaults during the deprecation window; leaving
-> the manifest unchanged still resolves to the existing Rust connector and
-> emits an orchestrator-startup warning. See the
-> [Rust-to-Harn-package migration guide](../migrations/rust-connectors-to-harn-packages.md)
-> for a no-downtime cutover.
+GitHub, Slack, Linear, and Notion are first-party pure-Harn packages:
+`harn-github-connector`, `harn-slack-connector`, `harn-linear-connector`, and
+`harn-notion-connector`. Configure one by setting
+`connector = { harn = "..." }` on the `[[providers]]` table. See the
+[Rust-to-Harn-package migration guide](../migrations/rust-connectors-to-harn-packages.md)
+for the cutover pattern.
 
 For an LLM-sized version of this page, use
 [`docs/llm/harn-triggers-quickref.md`](../../llm/harn-triggers-quickref.md).

@@ -152,7 +152,7 @@ fn generate_file() -> String {
     }
 
     out.push_str("\n## First-party Connector Packages\n\n");
-    out.push_str("Prefer pure-Harn packages for provider business logic. The Rust providers remain compatibility defaults while the pure-Harn packages soak.\n\n");
+    out.push_str("Provider business logic ships as pure-Harn packages. The Rust runtime keeps only core connector primitives such as webhook intake, cron, A2A push, and stream ingress.\n\n");
     out.push_str("| Provider | Package | Install | Package gate |\n");
     out.push_str("|---|---|---|---|\n");
     for package in FIRST_PARTY_CONNECTOR_PACKAGES {
@@ -363,7 +363,7 @@ mod tests {
     #[test]
     fn generated_quickref_contains_catalog_and_contract() {
         let out = generate_file();
-        assert!(out.contains("| `github` | `webhook` | `GitHubEventPayload` |"));
+        assert!(out.contains("| `github` | `webhook` | `GitHubEventPayload` | placeholder |"));
         assert!(out.contains("Connector Contract V1"));
         assert!(out.contains("harn connector test ."));
         assert!(out.contains("harn-forgejo-connector"));
