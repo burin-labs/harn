@@ -52,6 +52,18 @@ pub(crate) fn server_config(pipeline: Option<String>) -> AcpServerConfig {
 }
 
 pub(crate) async fn run_acp_server(pipeline: Option<&str>) {
+    if harn_vm::event_log::active_event_log().is_none() {
+        let base_dir = pipeline
+            .map(Path::new)
+            .and_then(Path::parent)
+            .unwrap_or_else(|| Path::new("."));
+        if let Err(error) = harn_vm::event_log::install_default_for_base_dir(base_dir) {
+            eprintln!(
+                "[harn] ACP session replay disabled: failed to initialize EventLog for {}: {error}",
+                base_dir.display()
+            );
+        }
+    }
     harn_serve::run_acp_server(server_config(pipeline.map(str::to_string))).await;
 }
 

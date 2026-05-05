@@ -13,8 +13,10 @@ use super::{
     ContextPackSuggestionOptions, FrictionEvent, HandoffArtifact, PersonaEvalLadderManifest,
     PersonaEvalLadderReport,
 };
+use crate::agent_events::AgentEvent;
 use crate::event_log::{
-    active_event_log, AnyEventLog, EventLog, LogEvent as EventLogRecord, Topic,
+    active_event_log, sanitize_topic_component, AnyEventLog, EventId, EventLog,
+    LogEvent as EventLogRecord, Topic,
 };
 use crate::llm::vm_value_to_json;
 use crate::triggers::{SignatureStatus, TriggerEvent};
@@ -894,6 +896,58 @@ fn read_topic_records(
         records.extend(batch);
     }
     records
+}
+
+#[derive(Clone, Debug)]
+pub struct AgentSessionReplayEvent {
+    pub event_id: EventId,
+    pub event: AgentEvent,
+}
+
+pub async fn load_agent_session_replay_events(
+    session_id: &str,
+) -> Result<Vec<AgentSessionReplayEvent>, VmError> {
+    let Some(log) = active_event_log() else {
+        return Ok(Vec::new());
+    };
+    let topic = Topic::new(format!(
+        "observability.agent_events.{}",
+        sanitize_topic_component(session_id)
+    ))
+    .map_err(|error| VmError::Runtime(format!("failed to build agent event topic: {error}")))?;
+
+    let mut events = Vec::new();
+    let mut from = None;
+    loop {
+        let batch = log.read_range(&topic, from, 1024).await.map_err(|error| {
+            VmError::Runtime(format!(
+                "failed to read agent event replay topic {}: {error}",
+                topic.as_str()
+            ))
+        })?;
+        let batch_len = batch.len();
+        for (event_id, record) in batch {
+            from = Some(event_id);
+            if record.headers.get("session_id").map(String::as_str) != Some(session_id) {
+                continue;
+            }
+            let Some(event_value) = record.payload.get("event").cloned() else {
+                continue;
+            };
+            let event = serde_json::from_value::<AgentEvent>(event_value).map_err(|error| {
+                VmError::Runtime(format!(
+                    "failed to decode agent event replay record {event_id}: {error}"
+                ))
+            })?;
+            if event.session_id() == session_id {
+                events.push(AgentSessionReplayEvent { event_id, event });
+            }
+        }
+        if batch_len < 1024 {
+            break;
+        }
+    }
+    Ok(events)
 }
 
 fn merge_hitl_questions_from_active_log(run: &mut RunRecord) {
