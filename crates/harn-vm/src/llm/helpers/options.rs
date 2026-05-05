@@ -372,9 +372,8 @@ fn resolve_route_policy(
 
 /// Three-way resolution of `tool_search.mode` against the provider's
 /// native capability. Kept as a private enum so the option-parse path
-/// reads linearly; the `Client` variant feeds the harn#70 fallback
-/// injection, the `Native` variant feeds the phase-1 Anthropic path
-/// (and phase-2 OpenAI path via harn#71).
+/// reads linearly; the `Client` variant leaves the fallback to the Harn
+/// agent loop, and the `Native` variant feeds provider-native injection.
 enum ToolSearchResolution {
     Native,
     Client,
@@ -869,7 +868,7 @@ pub(crate) fn extract_llm_options(
     // tool_search option parsing: three shapes accepted.
     //   - shorthand string: "bm25" | "regex" (mode: auto)
     //   - bool: true (defaults to bm25/auto), false (no tool_search)
-    //   - dict: { variant, mode, always_loaded }
+    //   - dict: { variant, mode, strategy, always_loaded, name }
     // Unset / false / nil all leave tool_search absent — tools ship eagerly.
     let mut tool_search = parse_tool_search_option(options.as_ref())?;
 
@@ -878,9 +877,9 @@ pub(crate) fn extract_llm_options(
         // possible outcomes:
         //   - native: prepend the provider's meta-tool (Anthropic path
         //     for Claude 4.0+; OpenAI Responses-API path for GPT 5.4+).
-        //   - client: keep native_tools as-is so the agent loop can
-        //     strip deferred tools per-turn and inject the synthetic
-        //     `__harn_tool_search` dispatchable.
+        //   - client: leave the provider payload alone; the Harn stdlib
+        //     agent loop filters deferred tools, injects the synthetic
+        //     search tool, and emits client-mode events.
         //   - error: explicit native mode on a provider that cannot
         //     satisfy it.
         let native_variants = provider_tool_search_variants(&provider, &model);
@@ -990,9 +989,8 @@ pub(crate) fn extract_llm_options(
                         // they meant "let OpenAI handle the search on
                         // their side" — the hosted mode. Users who want
                         // Harn to execute the search locally should
-                        // write `mode: "client"`, which flows through
-                        // the harn#70 synthetic-tool path below (same
-                        // ergonomics across every provider).
+                        // write `mode: "client"` for the stdlib agent
+                        // loop fallback.
                         crate::llm::tools::apply_tool_search_native_injection_typed(
                             &mut native_tools,
                             shape,
@@ -1002,59 +1000,7 @@ pub(crate) fn extract_llm_options(
                     }
                 }
             }
-            ToolSearchResolution::Client => {
-                // Client mode: capture the deferred tool bodies into
-                // cfg.deferred_bodies (so the agent loop can re-surface
-                // them), inject the synthetic search tool, and hide the
-                // deferred tools from the initial payload. The agent
-                // loop is responsible for promoting hits back onto
-                // `opts.native_tools` across turns; for single-shot
-                // `llm_call` the model still sees the synthetic tool
-                // but without multi-turn continuity it degrades to one
-                // query + one batch of suggestions.
-                if let Some(list) = native_tools.as_ref() {
-                    for tool in list {
-                        let is_deferred = tool
-                            .get("defer_loading")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        if !is_deferred {
-                            continue;
-                        }
-                        let name = tool
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .or_else(|| {
-                                tool.get("function")
-                                    .and_then(|f| f.get("name"))
-                                    .and_then(|v| v.as_str())
-                            })
-                            .unwrap_or("")
-                            .to_string();
-                        if name.is_empty() {
-                            continue;
-                        }
-                        // Strip `defer_loading` from the stored copy —
-                        // providers that don't support the flag will
-                        // reject it when the tool is later promoted.
-                        let mut cloned = tool.clone();
-                        if let Some(obj) = cloned.as_object_mut() {
-                            obj.remove("defer_loading");
-                        }
-                        if let Some(function) =
-                            cloned.get_mut("function").and_then(|v| v.as_object_mut())
-                        {
-                            function.remove("defer_loading");
-                        }
-                        cfg.deferred_bodies.insert(name, cloned);
-                    }
-                }
-                crate::llm::tools::apply_tool_search_client_injection(
-                    &mut native_tools,
-                    &provider,
-                    cfg,
-                );
-            }
+            ToolSearchResolution::Client => {}
         }
     }
 
@@ -1409,13 +1355,11 @@ fn validate_anthropic_beta_feature_name(feature: &str) -> Result<(), VmError> {
 ///   - `nil` / absent / `false` → None (no tool_search engaged)
 ///   - `true` → default (bm25 + auto)
 ///   - `"bm25"` | `"regex"` → that variant + auto
-///   - `{ variant?, mode?, always_loaded? }` → explicit
+///   - `{ variant?, mode?, strategy?, always_loaded?, name? }` → explicit
 fn parse_tool_search_option(
     options: Option<&BTreeMap<String, VmValue>>,
 ) -> Result<Option<crate::llm::api::ToolSearchConfig>, VmError> {
-    use crate::llm::api::{
-        ToolSearchConfig, ToolSearchMode, ToolSearchStrategy, ToolSearchVariant,
-    };
+    use crate::llm::api::{ToolSearchConfig, ToolSearchMode, ToolSearchVariant};
 
     let raw = match options.and_then(|o| o.get("tool_search")) {
         Some(v) => v,
@@ -1443,16 +1387,11 @@ fn parse_tool_search_option(
             )))),
         }
     };
-    let strategy_from_short = |s: &str| -> Result<ToolSearchStrategy, VmError> {
+    let validate_strategy = |s: &str| -> Result<(), VmError> {
         match s {
-            "bm25" => Ok(ToolSearchStrategy::Bm25),
-            "regex" => Ok(ToolSearchStrategy::Regex),
-            "semantic" => Ok(ToolSearchStrategy::Semantic),
-            "host" => Ok(ToolSearchStrategy::Host),
+            "bm25" | "regex" => Ok(()),
             other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
-                format!(
-                "tool_search.strategy: expected \"bm25\" | \"regex\" | \"semantic\" | \"host\", got \"{other}\""
-            ),
+                format!("tool_search.strategy: expected \"bm25\" | \"regex\", got \"{other}\""),
             )))),
         }
     };
@@ -1464,10 +1403,6 @@ fn parse_tool_search_option(
         VmValue::String(s) => Ok(Some(ToolSearchConfig {
             variant: variant_from_short(s.as_ref())?,
             mode: ToolSearchMode::Auto,
-            always_loaded: Vec::new(),
-            strategy: None,
-            name: None,
-            deferred_bodies: std::collections::BTreeMap::new(),
         })),
         VmValue::Dict(d) => {
             let variant = match d.get("variant") {
@@ -1488,25 +1423,24 @@ fn parse_tool_search_option(
                 }
                 None => ToolSearchMode::Auto,
             };
-            let always_loaded = match d.get("always_loaded") {
-                Some(VmValue::List(list)) => list.iter().map(|v| v.display()).collect(),
+            match d.get("always_loaded") {
+                Some(VmValue::List(_)) | None => {}
                 Some(_) => {
                     return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
                         "tool_search.always_loaded: expected a list of tool names",
                     ))));
                 }
-                None => Vec::new(),
             };
-            let strategy = match d.get("strategy") {
-                Some(VmValue::String(s)) => Some(strategy_from_short(s.as_ref())?),
+            match d.get("strategy") {
+                Some(VmValue::String(s)) => validate_strategy(s.as_ref())?,
                 Some(_) => {
                     return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
                         "tool_search.strategy: expected a string",
                     ))));
                 }
-                None => None,
+                None => {}
             };
-            let name = match d.get("name") {
+            match d.get("name") {
                 Some(VmValue::String(s)) => {
                     let s = s.as_ref().trim();
                     if s.is_empty() {
@@ -1522,14 +1456,7 @@ fn parse_tool_search_option(
                     ))));
                 }
             };
-            Ok(Some(ToolSearchConfig {
-                variant,
-                mode,
-                always_loaded,
-                strategy,
-                name,
-                deferred_bodies: std::collections::BTreeMap::new(),
-            }))
+            Ok(Some(ToolSearchConfig { variant, mode }))
         }
         _ => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
             "tool_search: expected bool, string (\"bm25\"/\"regex\"), or dict \

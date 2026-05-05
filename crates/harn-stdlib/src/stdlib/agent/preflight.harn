@@ -2,7 +2,11 @@ import { agent_session_messages } from "std/agent/state"
 
 /** agent_build_turn_system. */
 pub fn agent_build_turn_system(session, opts, iteration) {
-  return __host_agent_build_turn_system(session.session_id, opts, iteration)
+  let base = __host_agent_build_turn_system(session.session_id, opts, iteration)
+  if opts?.tools == nil || opts?.tool_format == "native" {
+    return base
+  }
+  return base + "\n\n" + tool_prompt(opts.tools)
 }
 
 /** agent_build_turn_messages. */

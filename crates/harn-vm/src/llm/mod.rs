@@ -35,6 +35,7 @@ pub(crate) mod schema_recover;
 pub(crate) mod skill_score;
 pub(crate) mod structural_experiments;
 pub(crate) mod structured_envelope;
+mod tool_search_score;
 mod transcript_stats;
 
 use std::sync::OnceLock;
@@ -1830,6 +1831,48 @@ const LLM_MOCK_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .doc("Pop the current isolated LLM mock scope."),
 ];
 
+fn host_tool_search_score_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let query = match args.first() {
+        Some(VmValue::String(s)) => s.to_string(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "__host_tool_search_score(query, registry, opts): query must be a string; got {}",
+                other.type_name()
+            )))
+        }
+        None => String::new(),
+    };
+    let registry = args
+        .get(1)
+        .map(helpers::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let opts = args
+        .get(2)
+        .map(helpers::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let ranked = tool_search_score::score_tools(&query, &registry, &opts);
+    Ok(crate::stdlib::json_to_vm_value(&serde_json::Value::Array(
+        ranked
+            .into_iter()
+            .map(|item| {
+                serde_json::json!({
+                    "tool_name": item.tool_name,
+                    "score": item.score,
+                    "snippet": item.snippet,
+                })
+            })
+            .collect(),
+    )))
+}
+
+const LLM_TOOL_SEARCH_SYNC_PRIMITIVES: &[SyncBuiltin] =
+    &[
+        SyncBuiltin::new("__host_tool_search_score", host_tool_search_score_builtin)
+            .signature("__host_tool_search_score(query, registry, opts)")
+            .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+            .doc("Rank a tool registry for Harn-managed client-mode tool search."),
+    ];
+
 const LLM_RUNTIME_PRIMITIVE_GROUPS: &[BuiltinGroup<'static>] = &[
     BuiltinGroup::new()
         .category("agent.trace")
@@ -1852,6 +1895,9 @@ const LLM_RUNTIME_PRIMITIVE_GROUPS: &[BuiltinGroup<'static>] = &[
     BuiltinGroup::new()
         .category("llm.host")
         .async_(LLM_HOST_COMPLETION_ASYNC_PRIMITIVES),
+    BuiltinGroup::new()
+        .category("agent.host")
+        .sync(LLM_TOOL_SEARCH_SYNC_PRIMITIVES),
 ];
 
 const LLM_MOCK_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()

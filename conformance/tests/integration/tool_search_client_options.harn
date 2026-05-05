@@ -1,8 +1,6 @@
-// @xfail: tool-search client + tool_search_query events not yet emitted by Harn loop — tracked in burin-labs/harn#1236
 /**
- * Tool Vault phase 2 (harn#70): advanced client-mode options —
- * `mode: "client"`, `budget_tokens` cap with oldest-eviction, and the
- * `name` override for the synthetic tool.
+ * Advanced client-mode options: explicit local fallback, budgeted
+ * promotion with oldest-eviction, and a custom synthetic tool name.
  */
 pipeline test(task) {
   // ---------- Explicit mode:"client" + custom tool name ----------
@@ -109,8 +107,8 @@ pipeline test(task) {
       max_iterations: 5,
     },
   )
-  // Explicit `mode: "client"` — mock now spoofs native tool_search
-  // for its default Claude model after harn#71.
+  // Explicit `mode: "client"` keeps this test on the local fallback
+  // even when the mock provider uses a native-capable default model.
   // After three turns: gamma promoted, alpha+beta evicted.
   let calls2 = llm_mock_calls()
   let last_system = calls2[len(calls2) - 1].system

@@ -1,0 +1,286 @@
+import { agent_emit_event } from "std/agent/state"
+
+fn __tool_search_config(value) {
+  if value == nil {
+    return nil
+  }
+  if type_of(value) == "bool" {
+    if !value {
+      return nil
+    }
+    return {variant: "bm25", mode: "auto", strategy: "bm25", name: "__harn_tool_search", always_loaded: []}
+  }
+  if type_of(value) == "string" {
+    return {variant: value, mode: "auto", strategy: value, name: "__harn_tool_search", always_loaded: []}
+  }
+  if type_of(value) != "dict" {
+    return nil
+  }
+  let variant = value?.variant ?? "bm25"
+  return {
+    variant: variant,
+    mode: value?.mode ?? "auto",
+    strategy: value?.strategy ?? variant,
+    name: value?.name ?? "__harn_tool_search",
+    always_loaded: value?.always_loaded ?? [],
+    budget_tokens: value?.budget_tokens,
+  }
+}
+
+fn __tool_search_client_requested(opts) {
+  let cfg = __tool_search_config(opts?.tool_search)
+  return cfg != nil && cfg.mode == "client"
+}
+
+fn __tool_search_tools(registry) {
+  if type_of(registry) == "dict" {
+    return registry?.tools ?? []
+  }
+  if type_of(registry) == "list" {
+    return registry
+  }
+  return []
+}
+
+fn __tool_search_registry_like(registry, tools) {
+  if type_of(registry) == "dict" {
+    return registry + {tools: tools}
+  }
+  return {tools: tools}
+}
+
+fn __tool_search_contains(list, name) {
+  for item in list {
+    if item == name {
+      return true
+    }
+  }
+  return false
+}
+
+fn __tool_search_find_tool(tools, name) {
+  for entry in tools {
+    if entry?.name == name {
+      return entry
+    }
+  }
+  return nil
+}
+
+fn __tool_search_estimate_tokens(entry) {
+  return len(json_stringify(entry)) / 4 + 1
+}
+
+fn __tool_search_strategy(cfg) {
+  let strategy = cfg?.strategy ?? cfg?.variant ?? "bm25"
+  if strategy != "bm25" && strategy != "regex" {
+    throw "tool_search.strategy: Harn client mode currently supports \"bm25\" or \"regex\""
+  }
+  return strategy
+}
+
+fn __tool_search_description(strategy) {
+  if strategy == "regex" {
+    return "Search for deferred tools. Pass `query` as a case-insensitive regex. The result is JSON with `tool_names` in rank order; only those tools will be visible next turn."
+  }
+  return "Search for deferred tools. Pass `query` as natural-language keywords. The result is JSON with `tool_names` in rank order; only those tools will be visible next turn."
+}
+
+fn __tool_search_run(args, state) {
+  let query = args?.query ?? ""
+  let ranked = __host_tool_search_score(
+    query,
+    state.deferred_registry,
+    {strategy: state.strategy, variant: state.variant},
+  )
+  var names = []
+  for hit in ranked {
+    names = names.push(hit.tool_name)
+  }
+  let diagnostic = if len(names) == 0 {
+    "no deferred tools matched the query; try broader terms"
+  } else {
+    nil
+  }
+  return json_stringify({tool_names: names, ranked: ranked, diagnostic: diagnostic})
+}
+
+fn __tool_search_synthetic_tool(registry, state) {
+  return tool_define(
+    registry,
+    state.name,
+    __tool_search_description(state.strategy),
+    {
+      parameters: {query: {type: "string", description: "Search query for deferred tools"}},
+      handler: { args -> __tool_search_run(args, state) },
+    },
+  )
+}
+
+fn __tool_search_initial_state(opts) {
+  let cfg = __tool_search_config(opts?.tool_search)
+  let source_tools = __tool_search_tools(opts?.tools)
+  var eager = []
+  var deferred = []
+  for entry in source_tools {
+    let name = entry?.name ?? ""
+    let pinned = __tool_search_contains(cfg.always_loaded, name)
+    if entry?.defer_loading && !pinned {
+      deferred = deferred.push(entry)
+    } else {
+      eager = eager.push(entry)
+    }
+  }
+  if len(source_tools) > 0 && len(eager) == 0 {
+    throw "tool_search: all tools have defer_loading set. At least one tool must be non-deferred so the model has somewhere to start."
+  }
+  return {
+    enabled: true,
+    name: cfg.name,
+    variant: cfg.variant,
+    strategy: __tool_search_strategy(cfg),
+    budget_tokens: cfg.budget_tokens,
+    original_registry: opts?.tools,
+    eager_tools: eager,
+    deferred_tools: deferred,
+    deferred_registry: __tool_search_registry_like(opts?.tools, deferred),
+    promoted: [],
+  }
+}
+
+fn __tool_search_build_tools(opts, state) {
+  var visible = []
+  for entry in state.eager_tools {
+    visible = visible.push(entry)
+  }
+  for name in state.promoted {
+    let entry = __tool_search_find_tool(state.deferred_tools, name)
+    if entry != nil {
+      visible = visible.push(entry)
+    }
+  }
+  let registry = __tool_search_registry_like(state.original_registry, visible)
+  return __tool_search_synthetic_tool(registry, state)
+}
+
+/** agent_tool_search_inject_if_needed. */
+pub fn agent_tool_search_inject_if_needed(opts) {
+  if !__tool_search_client_requested(opts) {
+    return opts
+  }
+  let state = opts?._tool_search_client ?? __tool_search_initial_state(opts)
+  return opts + {_tool_search_client: state, tools: __tool_search_build_tools(opts, state)}
+}
+
+fn __tool_search_call_id(call) {
+  return call?.id ?? call?.tool_call_id ?? ""
+}
+
+/** agent_tool_search_emit_queries. */
+pub fn agent_tool_search_emit_queries(session_id, tool_calls, opts) {
+  let state = opts?._tool_search_client
+  if state == nil {
+    return
+  }
+  for call in tool_calls {
+    if call?.name == state.name {
+      agent_emit_event(
+        session_id,
+        "tool_search_query",
+        {
+          tool_use_id: __tool_search_call_id(call),
+          name: "tool_search_tool_" + state.variant,
+          query: call?.arguments ?? {},
+          strategy: state.strategy,
+          mode: "client",
+        },
+      )
+    }
+  }
+}
+
+fn __tool_search_parse_result(result) {
+  if type_of(result) == "dict" {
+    return result
+  }
+  if type_of(result) == "string" {
+    let parsed = try {
+      json_parse(result)
+    }
+    if is_ok(parsed) {
+      return unwrap(parsed)
+    }
+  }
+  return {tool_names: []}
+}
+
+fn __tool_search_apply_budget(state, names) {
+  var promoted = state.promoted
+  for name in names {
+    if !__tool_search_contains(promoted, name)
+      && __tool_search_find_tool(state.deferred_tools, name) != nil {
+      promoted = promoted.push(name)
+    }
+  }
+  let budget = state?.budget_tokens
+  if budget == nil {
+    return state + {promoted: promoted}
+  }
+  var total = 0
+  var kept = []
+  for name in promoted {
+    let entry = __tool_search_find_tool(state.deferred_tools, name)
+    if entry != nil {
+      let estimate = __tool_search_estimate_tokens(entry)
+      while total + estimate > budget && len(kept) > 0 {
+        let evicted = kept[0]
+        let evicted_tool = __tool_search_find_tool(state.deferred_tools, evicted)
+        total = total - __tool_search_estimate_tokens(evicted_tool)
+        kept = kept.slice(1)
+      }
+      if estimate <= budget {
+        kept = kept.push(name)
+        total = total + estimate
+      }
+    }
+  }
+  return state + {promoted: kept}
+}
+
+fn __tool_search_promoted_names(state, names) {
+  var out = []
+  for name in names {
+    if __tool_search_contains(state.promoted, name) {
+      out = out.push(name)
+    }
+  }
+  return out
+}
+
+/** agent_tool_search_record_results. */
+pub fn agent_tool_search_record_results(session_id, tool_calls, dispatch, opts) {
+  var state = opts?._tool_search_client
+  if state == nil {
+    return opts
+  }
+  for (index, call) in iter(tool_calls).enumerate() {
+    if call?.name != state.name {
+      continue
+    }
+    let result = __tool_search_parse_result(dispatch[index]?.result)
+    let names = result?.tool_names ?? []
+    state = __tool_search_apply_budget(state, names)
+    let promoted = __tool_search_promoted_names(state, names)
+    agent_emit_event(
+      session_id,
+      "tool_search_result",
+      {
+        tool_use_id: __tool_search_call_id(call),
+        promoted: promoted,
+        strategy: state.strategy,
+        mode: "client",
+      },
+    )
+  }
+  return opts + {_tool_search_client: state}
+}
