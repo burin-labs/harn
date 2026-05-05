@@ -300,6 +300,10 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
         Ok(VmValue::String(Rc::from(handoff_context_text(&handoff))))
     });
 
+    vm.register_builtin("handoff_routes", |_args, _out| {
+        to_vm(&crate::orchestration::snapshot_handoff_routes())
+    });
+
     vm.register_builtin("artifact_derive", |args, _out| {
         let parent = normalize_artifact(
             args.first()

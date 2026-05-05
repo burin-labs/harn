@@ -74,6 +74,33 @@ Optional fields:
 | `package_source` | Package/path/git provenance. |
 | `rollout_policy` | Rollout mode, percentage, and cohorts. |
 
+## Handoff Routes
+
+Personas may emit typed handoff artifacts, but route selection policy stays in
+Harn code. `harn.toml` can carry tenant route data as `[[handoff_routes]]`;
+Rust loads and validates the table, then `std/handoffs` helpers select a route,
+compose the handoff, and persist dispatch records.
+
+```toml
+[[handoff_routes]]
+id = "merge-receipt"
+kind = "merge_receipt"
+from = "merge_captain"
+route = [
+  { target = "review_captain", when = "always" },
+  { target = "human:maintainers", when = "budget_exhausted" },
+  { target = "a2a://reviewer.example.com/tasks", when = "approval_denied" },
+]
+```
+
+`target` accepts a persona name, `persona://name`, `human:group`,
+`worker://queue`, or `a2a://endpoint`. Built-in predicates are `always`,
+`budget_exhausted`, and `approval_denied`; custom predicate names are resolved
+by persona code through the `context.predicates` map passed to
+`handoff_route_select(...)`. `handoff_dispatch(...)` records the selected route
+in the EventLog and accepts optional local dispatcher hooks for tests or
+embedded adapters.
+
 ## Validation
 
 `harn persona check`, `harn persona list`, and `harn persona inspect` validate

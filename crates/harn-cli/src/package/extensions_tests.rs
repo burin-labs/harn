@@ -814,6 +814,82 @@ budget = { daily_usd = 2.0 }
     assert_eq!(bindings[0].daily_cost_usd, Some(2.0));
 }
 
+#[test]
+fn load_runtime_extensions_collects_handoff_routes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let harn_file = write_trigger_project(
+        tmp.path(),
+        r#"
+[[personas]]
+name = "merge_captain"
+description = "Owns PR readiness."
+entry_workflow = "workflows/merge_captain.harn#run"
+tools = ["github"]
+autonomy = "suggest"
+receipts = "required"
+handoffs = ["review_captain"]
+
+[[personas]]
+name = "review_captain"
+description = "Reviews merge receipts."
+entry_workflow = "workflows/review_captain.harn#run"
+tools = ["github"]
+autonomy = "suggest"
+receipts = "required"
+
+[[handoff_routes]]
+id = "merge-receipt"
+kind = "merge_receipt"
+from = "merge_captain"
+route = [
+  { target = "review_captain", when = "always" },
+  { target = "human:maintainers", when = "budget_exhausted" },
+]
+"#,
+        None,
+    );
+
+    let extensions = load_runtime_extensions(&harn_file);
+    assert_eq!(extensions.handoff_routes.len(), 1);
+    assert_eq!(extensions.handoff_routes[0].kind, "merge_receipt");
+    assert_eq!(extensions.handoff_routes[0].route.len(), 2);
+    assert_eq!(
+        extensions.handoff_routes[0].route[1].target,
+        "human:maintainers"
+    );
+}
+
+#[test]
+fn load_runtime_extensions_rejects_unknown_handoff_route_target() {
+    let tmp = tempfile::tempdir().unwrap();
+    let harn_file = write_trigger_project(
+        tmp.path(),
+        r#"
+[[personas]]
+name = "merge_captain"
+description = "Owns PR readiness."
+entry_workflow = "workflows/merge_captain.harn#run"
+tools = ["github"]
+autonomy = "suggest"
+receipts = "required"
+
+[[handoff_routes]]
+kind = "merge_receipt"
+from = "merge_captain"
+route = [{ target = "review_captain", when = "always" }]
+"#,
+        None,
+    );
+
+    let error = try_load_runtime_extensions(&harn_file).expect_err("route target should fail");
+    assert!(
+        error
+            .to_string()
+            .contains("target references unknown persona 'review_captain'"),
+        "{error}"
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn collect_manifest_triggers_accepts_persona_handler_uri() {
     let tmp = tempfile::tempdir().unwrap();

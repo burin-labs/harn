@@ -469,6 +469,7 @@ fn save_run_record_adds_run_receipt_link_to_handoff() {
                 kind: "human".to_string(),
                 id: None,
                 label: Some("maintainer".to_string()),
+                uri: None,
             },
             task: "Approve the rollout".to_string(),
             reason: "Human sign-off gates production changes".to_string(),

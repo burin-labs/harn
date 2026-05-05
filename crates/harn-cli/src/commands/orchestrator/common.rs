@@ -135,6 +135,7 @@ pub(crate) async fn load_local_runtime(
     let mut vm =
         OrchestratorRole::SingleTenant.build_vm(&manifest_dir, &manifest_dir, &state_dir)?;
     let extensions = package::load_runtime_extensions(&config_path);
+    package::install_manifest_handoff_routes(&extensions);
     package::install_orchestrator_budget(&extensions);
     let collected_triggers = package::collect_manifest_triggers(&mut vm, &extensions)
         .await

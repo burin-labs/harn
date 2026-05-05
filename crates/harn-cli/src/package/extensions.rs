@@ -11,6 +11,13 @@ pub(crate) fn is_empty_capabilities(file: &harn_vm::llm::capabilities::Capabilit
     file.provider.is_empty() && file.provider_family.is_empty()
 }
 
+pub fn validate_runtime_manifest_extensions(anchor: &Path) -> Result<(), PackageError> {
+    let Some((manifest, _manifest_dir)) = find_nearest_manifest(anchor) else {
+        return Ok(());
+    };
+    validate_handoff_routes(&manifest.handoff_routes, &manifest)
+}
+
 /// Load the nearest project manifest plus any installed package manifests and
 /// merge the root project's runtime extensions.
 pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, PackageError> {
@@ -33,6 +40,8 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
         &root_manifest,
         &manifest_dir,
     ));
+    let handoff_routes = root_manifest.handoff_routes.clone();
+    validate_handoff_routes(&handoff_routes, &root_manifest)?;
     let provider_connectors =
         resolved_provider_connectors_from_manifest(&root_manifest, &manifest_dir);
 
@@ -44,6 +53,7 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
         capabilities: (!is_empty_capabilities(&capabilities)).then_some(capabilities),
         hooks,
         triggers,
+        handoff_routes,
         provider_connectors,
     })
 }
@@ -62,7 +72,12 @@ pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
 pub fn install_runtime_extensions(extensions: &RuntimeExtensions) {
     harn_vm::llm_config::set_user_overrides(extensions.llm.clone());
     harn_vm::llm::capabilities::set_user_overrides(extensions.capabilities.clone());
+    install_manifest_handoff_routes(extensions);
     install_orchestrator_budget(extensions);
+}
+
+pub fn install_manifest_handoff_routes(extensions: &RuntimeExtensions) {
+    harn_vm::install_handoff_routes(extensions.handoff_routes.clone());
 }
 
 pub fn install_orchestrator_budget(extensions: &RuntimeExtensions) {

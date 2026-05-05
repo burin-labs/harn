@@ -60,6 +60,11 @@ pub struct Manifest {
     /// dispatcher work.
     #[serde(default)]
     pub triggers: Vec<TriggerManifestEntry>,
+    /// `[[handoff_routes]]` array-of-tables — declarative handoff route data.
+    /// Route selection stays in Harn stdlib/persona code; the Rust manifest
+    /// loader makes these tenant routes available to that code.
+    #[serde(default)]
+    pub handoff_routes: Vec<harn_vm::HandoffRouteConfig>,
     /// `[[providers]]` array-of-tables — provider-specific connector
     /// overrides used by the orchestrator to load either builtin Rust
     /// connectors or `.harn` modules as connector implementations.
@@ -781,6 +786,7 @@ pub struct RuntimeExtensions {
     pub capabilities: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
     pub hooks: Vec<ResolvedHookConfig>,
     pub triggers: Vec<ResolvedTriggerConfig>,
+    pub handoff_routes: Vec<harn_vm::HandoffRouteConfig>,
     pub provider_connectors: Vec<ResolvedProviderConnectorConfig>,
 }
 

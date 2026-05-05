@@ -1,0 +1,57 @@
+import "std/agents"
+import "std/handoffs"
+
+fn review_captain_mock(envelope) {
+  return {
+    persona: "review_captain",
+    received_handoff_kind: envelope?.handoff?.kind,
+    received_source: envelope?.handoff?.source_persona,
+    route_target: envelope?.decision?.target,
+  }
+}
+
+pipeline main() {
+  let routes = [
+    {
+      id: "merge-receipt-review",
+      kind: "merge_receipt",
+      from: "merge_captain",
+      route: [
+        {target: "review_captain", when: "always"},
+        {target: "human:maintainers", when: "budget_exhausted"},
+      ],
+    },
+  ]
+  let seed = {
+    kind: "merge_receipt",
+    source_persona: "merge_captain",
+    task: "Review the merge receipt",
+    reason: "The merge queue requires review before landing",
+    requested_capabilities: ["review"],
+    allowed_side_effects: ["comment_on_pr"],
+  }
+  let routed = handoff_routed(seed, routes, {})
+  let dispatch = handoff_dispatch(routed, nil, {dispatchers: {review_captain: review_captain_mock}})
+  let exhausted = handoff_routed(
+    seed + {budget_remaining: {tokens: 0, tool_calls: 0}},
+    routes,
+    {budget_exhausted: true},
+  )
+  let run = workflow_result_run(
+    "Route merge receipt handoff",
+    "merge_captain",
+    {visible_text: "handoff routed"},
+    [handoff_artifact(routed)],
+    {},
+  )
+  println(routed?.target_persona_or_human?.id == "review_captain")
+  println(routed?.route_decision?.matched_when == "always")
+  println(dispatch?.dispatch_status == "enqueued")
+  println(dispatch?.dispatch_receipt?.topic == "handoff.persona.invocations")
+  println(dispatch?.dispatch_receipt?.invocation_result?.persona == "review_captain")
+  println(dispatch?.dispatch_receipt?.invocation_result?.received_handoff_kind == "merge_receipt")
+  println(exhausted?.target_persona_or_human?.kind == "human")
+  println(exhausted?.target_persona_or_human?.id == "maintainers")
+  println(run?.handoffs[0]?.kind == "merge_receipt")
+  println(run?.handoffs[0]?.route_decision?.target == "review_captain")
+}
