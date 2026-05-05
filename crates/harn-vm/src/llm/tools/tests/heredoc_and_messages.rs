@@ -643,7 +643,7 @@ fn assistant_tool_message_includes_empty_content_for_openai_style() {
 }
 
 #[test]
-fn assistant_tool_message_uses_ollama_openai_compatible_arguments() {
+fn assistant_tool_message_uses_ollama_native_arguments() {
     let message = build_assistant_tool_message(
         "",
         &[json!({
@@ -656,11 +656,12 @@ fn assistant_tool_message_uses_ollama_openai_compatible_arguments() {
 
     assert_eq!(message["role"], "assistant");
     assert!(message.get("content").is_none());
+    assert_eq!(message["tool_calls"][0]["id"], "call_001");
     assert_eq!(message["tool_calls"][0]["type"], "function");
     assert_eq!(message["tool_calls"][0]["function"]["name"], "read");
     assert_eq!(
-        message["tool_calls"][0]["function"]["arguments"],
-        "{\"path\":\"main.rs\"}"
+        message["tool_calls"][0]["function"]["arguments"]["path"],
+        "main.rs"
     );
 }
 
