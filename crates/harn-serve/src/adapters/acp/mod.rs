@@ -126,6 +126,73 @@ fn harn_acp_extension_meta() -> serde_json::Value {
     })
 }
 
+fn non_empty_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn configured_llm_route_for_capabilities() -> (String, String) {
+    let provider = non_empty_env("HARN_LLM_PROVIDER")
+        .filter(|provider| !provider.eq_ignore_ascii_case("auto"))
+        .or_else(|| {
+            if std::env::var("LOCAL_LLM_BASE_URL").is_ok()
+                && (non_empty_env("HARN_LLM_MODEL").is_some()
+                    || non_empty_env("LOCAL_LLM_MODEL").is_some())
+            {
+                Some("local".to_string())
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            non_empty_env("HARN_LLM_MODEL").map(|model| {
+                let resolved = harn_vm::llm_config::resolve_model_info(&model);
+                resolved.provider
+            })
+        })
+        .unwrap_or_else(harn_vm::llm_config::default_provider);
+
+    let raw_model = non_empty_env("HARN_LLM_MODEL").or_else(|| {
+        if provider == "local" {
+            non_empty_env("LOCAL_LLM_MODEL")
+        } else {
+            None
+        }
+    });
+    let model = raw_model
+        .map(|model| harn_vm::llm_config::resolve_model(&model).0)
+        .unwrap_or_else(|| harn_vm::llm_config::default_model_for_provider(&provider));
+
+    (provider, model)
+}
+
+fn acp_prompt_capabilities() -> serde_json::Value {
+    let (provider, model) = configured_llm_route_for_capabilities();
+    let capabilities = harn_vm::llm::capabilities::lookup(&provider, &model);
+    serde_json::json!({
+        "image": capabilities.vision || capabilities.vision_supported,
+        "audio": capabilities.audio,
+        "embeddedContext": capabilities.pdf || capabilities.files_api_supported,
+    })
+}
+
+fn acp_agent_capabilities() -> serde_json::Value {
+    serde_json::json!({
+        "_meta": harn_acp_extension_meta(),
+        "loadSession": true,
+        "promptCapabilities": acp_prompt_capabilities(),
+        "mcpCapabilities": {
+            "http": true,
+            "sse": true,
+        },
+        "sessionCapabilities": {
+            "list": {},
+        },
+    })
+}
+
 fn verbose_bridge_logs_enabled() -> bool {
     matches!(
         std::env::var("HARN_ACP_VERBOSE").ok().as_deref(),
@@ -255,6 +322,8 @@ pub struct AcpServerConfig {
     pub pipeline: Option<String>,
     pub auth_policy: AuthPolicy,
     pub runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
+    pub llm_config_overrides: Option<harn_vm::llm_config::ProvidersConfig>,
+    pub llm_capability_overrides: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
 }
 
 impl AcpServerConfig {
@@ -263,6 +332,8 @@ impl AcpServerConfig {
             pipeline,
             auth_policy: AuthPolicy::allow_all(),
             runtime_configurator: Arc::new(NoopAcpRuntimeConfigurator),
+            llm_config_overrides: None,
+            llm_capability_overrides: None,
         }
     }
 
@@ -280,6 +351,16 @@ impl AcpServerConfig {
 
     pub fn with_auth_policy(mut self, auth_policy: AuthPolicy) -> Self {
         self.auth_policy = auth_policy;
+        self
+    }
+
+    pub fn with_llm_overrides(
+        mut self,
+        llm_config: Option<harn_vm::llm_config::ProvidersConfig>,
+        llm_capabilities: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
+    ) -> Self {
+        self.llm_config_overrides = llm_config;
+        self.llm_capability_overrides = llm_capabilities;
         self
     }
 }
@@ -651,6 +732,9 @@ impl AcpServer {
     }
 
     fn new_with_output(config: AcpServerConfig, output: AcpOutput) -> Self {
+        harn_vm::llm_config::set_user_overrides(config.llm_config_overrides.clone());
+        harn_vm::llm::capabilities::set_user_overrides(config.llm_capability_overrides.clone());
+
         Self {
             descriptor: AdapterDescriptor {
                 id: "acp".to_string(),
@@ -754,24 +838,12 @@ impl AcpServer {
             id,
             serde_json::json!({
                 "protocolVersion": 1,
-                "agentCapabilities": {
-                    "_meta": harn_acp_extension_meta(),
-                    "promptCapabilities": {
-                        "audio": true,
-                        "embeddedContext": true,
-                        "image": true,
-                    },
-                    "sessionCapabilities": {
-                        "fork": {},
-                        "load": {},
-                        "setConfigOption": {},
-                        "setMode": {},
-                    },
-                },
+                "agentCapabilities": acp_agent_capabilities(),
                 "agentInfo": {
                     "name": "harn",
                     "version": env!("CARGO_PKG_VERSION"),
                 },
+                "authMethods": [],
             }),
         );
     }
@@ -2031,6 +2103,7 @@ pub async fn run_acp_server(config: AcpServerConfig) {
 mod tests {
     use super::builtins::normalize_host_capability_manifest;
     use super::{
+        acp_agent_capabilities, configured_llm_route_for_capabilities,
         sanitize_visible_assistant_text, AcpBridge, AcpOutput, AcpServer, AcpServerConfig,
         SessionCancellation, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
         HARN_AGENT_EVENT_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
@@ -2042,8 +2115,39 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
     use std::rc::Rc;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::Mutex;
+    use std::sync::{Mutex, OnceLock};
     use tokio::sync::mpsc;
+
+    fn acp_env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvSnapshot {
+        saved: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl EnvSnapshot {
+        fn capture(names: &[&'static str]) -> Self {
+            Self {
+                saved: names
+                    .iter()
+                    .map(|name| (*name, std::env::var(name).ok()))
+                    .collect(),
+            }
+        }
+    }
+
+    impl Drop for EnvSnapshot {
+        fn drop(&mut self) {
+            for (name, value) in self.saved.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
 
     async fn recv_json(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Value {
         let line = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
@@ -2220,6 +2324,88 @@ mod tests {
         assert_eq!(sanitize_visible_assistant_text(raw, false), raw);
     }
 
+    #[test]
+    fn acp_agent_capabilities_use_canonical_initialize_shape() {
+        let _guard = acp_env_lock().lock().unwrap();
+        let _env = EnvSnapshot::capture(&[
+            "HARN_LLM_PROVIDER",
+            "HARN_LLM_MODEL",
+            "LOCAL_LLM_BASE_URL",
+            "LOCAL_LLM_MODEL",
+            "MLX_MODEL_ID",
+        ]);
+        std::env::set_var("HARN_LLM_PROVIDER", "openai");
+        std::env::remove_var("HARN_LLM_MODEL");
+        std::env::remove_var("LOCAL_LLM_BASE_URL");
+        std::env::remove_var("LOCAL_LLM_MODEL");
+        std::env::remove_var("MLX_MODEL_ID");
+
+        let capabilities = acp_agent_capabilities();
+
+        assert_eq!(
+            configured_llm_route_for_capabilities(),
+            ("openai".into(), "gpt-4o".into())
+        );
+        assert_eq!(capabilities["loadSession"], true);
+        assert_eq!(
+            capabilities["promptCapabilities"],
+            serde_json::json!({
+                "image": true,
+                "audio": true,
+                "embeddedContext": false,
+            })
+        );
+        assert_eq!(
+            capabilities["mcpCapabilities"],
+            serde_json::json!({
+                "http": true,
+                "sse": true,
+            })
+        );
+        assert_eq!(
+            capabilities["sessionCapabilities"],
+            serde_json::json!({
+                "list": {},
+            })
+        );
+        assert!(
+            capabilities["sessionCapabilities"].get("fork").is_none(),
+            "Harn-only session/fork must not be advertised as an ACP SessionCapability"
+        );
+    }
+
+    #[test]
+    fn acp_prompt_capabilities_follow_configured_model_aliases() {
+        let _guard = acp_env_lock().lock().unwrap();
+        let _env = EnvSnapshot::capture(&[
+            "HARN_LLM_PROVIDER",
+            "HARN_LLM_MODEL",
+            "LOCAL_LLM_BASE_URL",
+            "LOCAL_LLM_MODEL",
+            "MLX_MODEL_ID",
+        ]);
+        std::env::remove_var("HARN_LLM_PROVIDER");
+        std::env::set_var("HARN_LLM_MODEL", "frontier");
+        std::env::remove_var("LOCAL_LLM_BASE_URL");
+        std::env::remove_var("LOCAL_LLM_MODEL");
+        std::env::remove_var("MLX_MODEL_ID");
+
+        let capabilities = acp_agent_capabilities();
+
+        assert_eq!(
+            configured_llm_route_for_capabilities(),
+            ("anthropic".into(), "claude-sonnet-4-20250514".into())
+        );
+        assert_eq!(
+            capabilities["promptCapabilities"],
+            serde_json::json!({
+                "image": true,
+                "audio": true,
+                "embeddedContext": true,
+            })
+        );
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn acp_server_handles_session_flow_and_prompt_updates() {
         let local = tokio::task::LocalSet::new();
@@ -2243,6 +2429,45 @@ mod tests {
                 let initialize = recv_json(&mut response_rx).await;
                 assert_eq!(initialize["id"], 1);
                 assert_eq!(initialize["result"]["agentInfo"]["name"], "harn");
+                assert_eq!(initialize["result"]["authMethods"], serde_json::json!([]));
+                assert_eq!(
+                    initialize["result"]["agentCapabilities"]["loadSession"],
+                    true
+                );
+                assert_eq!(
+                    initialize["result"]["agentCapabilities"]["sessionCapabilities"],
+                    serde_json::json!({
+                        "list": {},
+                    })
+                );
+                assert!(
+                    initialize["result"]["agentCapabilities"]["sessionCapabilities"]
+                        .get("fork")
+                        .is_none(),
+                    "initialize must not advertise Harn-only session/fork as an ACP SessionCapability"
+                );
+                assert_eq!(
+                    initialize["result"]["agentCapabilities"]["mcpCapabilities"],
+                    serde_json::json!({
+                        "http": true,
+                        "sse": true,
+                    })
+                );
+                assert!(
+                    initialize["result"]["agentCapabilities"]["promptCapabilities"]
+                        ["image"]
+                        .is_boolean()
+                );
+                assert!(
+                    initialize["result"]["agentCapabilities"]["promptCapabilities"]
+                        ["audio"]
+                        .is_boolean()
+                );
+                assert!(
+                    initialize["result"]["agentCapabilities"]["promptCapabilities"]
+                        ["embeddedContext"]
+                        .is_boolean()
+                );
                 assert_eq!(
                     initialize["result"]["agentCapabilities"]["_meta"]["harn"]
                         ["schemaCompatibility"],
@@ -2273,14 +2498,6 @@ mod tests {
                     initialize["result"]["agentCapabilities"]["_meta"]["harn"]
                         ["toolLifecycleExtensionFields"],
                     serde_json::json!(HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS)
-                );
-                assert_eq!(
-                    initialize["result"]["agentCapabilities"]["promptCapabilities"],
-                    serde_json::json!({
-                        "audio": true,
-                        "embeddedContext": true,
-                        "image": true,
-                    })
                 );
 
                 request_tx

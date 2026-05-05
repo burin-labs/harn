@@ -38,7 +38,7 @@ fn write_fixture(temp: &TempDir) {
         r#"
 pub pipeline main() {
   let sid = agent_session_current_id()
-  assert(sid != nil, "ACP prompt installs the current session id")
+  guard sid != nil else { throw "ACP prompt installs the current session id" }
   if prompt != "snapshot" {
     agent_session_inject(sid, {role: "user", content: prompt})
   }
@@ -150,18 +150,24 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
             "params": {}
         }),
     );
+    assert_eq!(init["result"]["agentCapabilities"]["loadSession"], true);
+    assert_eq!(init["result"]["authMethods"], json!([]));
     assert_eq!(
-        init["result"]["agentCapabilities"]["sessionCapabilities"]["fork"],
-        json!({})
+        init["result"]["agentCapabilities"]["mcpCapabilities"],
+        json!({
+            "http": true,
+            "sse": true,
+        })
     );
     assert_eq!(
-        init["result"]["agentCapabilities"]["sessionCapabilities"]["setMode"],
-        json!({})
+        init["result"]["agentCapabilities"]["sessionCapabilities"],
+        json!({
+            "list": {},
+        })
     );
-    assert_eq!(
-        init["result"]["agentCapabilities"]["sessionCapabilities"]["setConfigOption"],
-        json!({})
-    );
+    assert!(init["result"]["agentCapabilities"]["sessionCapabilities"]
+        .get("fork")
+        .is_none());
 
     let (_, created) = send_request(
         &mut stdin,
@@ -190,7 +196,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
             }
         }),
     );
-    assert_eq!(alpha_response["result"]["stopReason"], "completed");
+    assert_eq!(alpha_response["result"]["stopReason"], "end_turn");
     let alpha_summary = latest_prompt_summary(&alpha_notifications, &session_id);
     assert_eq!(alpha_summary["len"], 1);
 
@@ -207,7 +213,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
             }
         }),
     );
-    assert_eq!(beta_response["result"]["stopReason"], "completed");
+    assert_eq!(beta_response["result"]["stopReason"], "end_turn");
     let beta_summary = latest_prompt_summary(&beta_notifications, &session_id);
     assert_eq!(beta_summary["len"], 2);
     assert_eq!(beta_summary["messages"][0]["content"], "alpha");
@@ -292,7 +298,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
             }
         }),
     );
-    assert_eq!(child_response["result"]["stopReason"], "completed");
+    assert_eq!(child_response["result"]["stopReason"], "end_turn");
     assert!(child_notifications.iter().all(|message| {
         message["method"] != "session/update" || message["params"]["sessionId"] == branch_id
     }));
@@ -316,7 +322,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
             }
         }),
     );
-    assert_eq!(parent_response["result"]["stopReason"], "completed");
+    assert_eq!(parent_response["result"]["stopReason"], "end_turn");
     let parent_summary = latest_prompt_summary(&parent_notifications, &session_id);
     assert_eq!(parent_summary["len"], 2);
     assert_eq!(parent_summary["messages"][0]["content"], "alpha");
@@ -333,6 +339,14 @@ fn serve_acp_stdio_runs_packaged_adapter() {
     let _guard = lock_acp_cli_tests();
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
+    write_file(
+        temp.path(),
+        "harn.toml",
+        r#"
+[llm]
+default_provider = "openai"
+"#,
+    );
 
     let mut child = harn_e2e_command()
         .current_dir(temp.path())
@@ -359,6 +373,14 @@ fn serve_acp_stdio_runs_packaged_adapter() {
         }),
     );
     assert_eq!(init["result"]["agentInfo"]["name"], "harn");
+    assert_eq!(
+        init["result"]["agentCapabilities"]["promptCapabilities"],
+        json!({
+            "image": true,
+            "audio": true,
+            "embeddedContext": false,
+        })
+    );
 
     let (_, created) = send_request(
         &mut stdin,
@@ -387,7 +409,7 @@ fn serve_acp_stdio_runs_packaged_adapter() {
             }
         }),
     );
-    assert_eq!(response["result"]["stopReason"], "completed");
+    assert_eq!(response["result"]["stopReason"], "end_turn");
     let summary = latest_prompt_summary(&notifications, &session_id);
     assert_eq!(summary["messages"][0]["content"], "packaged");
 

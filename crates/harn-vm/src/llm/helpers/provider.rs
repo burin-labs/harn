@@ -341,17 +341,7 @@ pub(crate) fn vm_resolve_model(
             return resolved;
         }
     }
-    match provider {
-        "local" => std::env::var("LOCAL_LLM_MODEL")
-            .or_else(|_| std::env::var("HARN_LLM_MODEL"))
-            .unwrap_or_else(|_| "gpt-4o".to_string()),
-        "mlx" => std::env::var("MLX_MODEL_ID")
-            .unwrap_or_else(|_| "unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string()),
-        "openai" => "gpt-4o".to_string(),
-        "ollama" => "llama3.2".to_string(),
-        "openrouter" => "anthropic/claude-sonnet-4.6".to_string(),
-        _ => "claude-sonnet-4-20250514".to_string(),
-    }
+    llm_config::default_model_for_provider(provider)
 }
 
 pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {

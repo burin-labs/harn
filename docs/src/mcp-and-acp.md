@@ -475,9 +475,11 @@ the session's configured working directory, so they operate on the same durable
 `.harn/workflows/<workflowId>/state.json` tree that the in-language builtins
 use.
 
-Harn advertises `agentCapabilities.sessionCapabilities.fork = {}` during
-`initialize`, so ACP clients can gate `session/fork` the same way they do
-other unstable session lifecycle methods.
+During `initialize`, Harn keeps the public `agentCapabilities` object aligned
+with upstream ACP: `loadSession`, `promptCapabilities`, `mcpCapabilities`, and
+the canonical `sessionCapabilities.list` flag are advertised in their upstream
+locations. Harn-only methods such as `session/fork` remain documented
+extensions instead of being inserted into upstream `sessionCapabilities`.
 
 ### Session Forking
 
