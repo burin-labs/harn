@@ -86,5 +86,5 @@ hostlib = ["dep:harn-hostlib"]
 
 [dev-dependencies]
 hmac = "0.13"
-rcgen = "0.13"
+rcgen = "0.14"
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }

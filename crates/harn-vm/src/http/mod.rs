@@ -660,7 +660,7 @@ fn register_http_tls_builtins(vm: &mut Vm) {
         );
         extra.insert(
             "key_pem".to_string(),
-            VmValue::String(Rc::from(cert.key_pair.serialize_pem())),
+            VmValue::String(Rc::from(cert.signing_key.serialize_pem())),
         );
         Ok(http_server_tls_config_value(
             "self_signed_dev",
