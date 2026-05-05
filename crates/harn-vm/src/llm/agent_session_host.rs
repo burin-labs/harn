@@ -50,6 +50,16 @@ struct AgentHostSession {
     rejected_tools: Vec<serde_json::Value>,
     tool_mode: String,
     started_at: String,
+    /// Iteration cap from `agent_loop(options.max_iterations)`. Captured
+    /// here so finalize can disambiguate `final_status == "budget_exhausted"`
+    /// caused by hitting the cap (→ ACP `max_turn_requests`) from other
+    /// budget paths.
+    max_iterations: i64,
+    /// Provider-reported `stop_reason` from the most recent `llm_call`
+    /// in this loop. Used by finalize to detect ACP `max_tokens` (when
+    /// the last call truncated due to its `max_tokens` parameter) and
+    /// `refusal` (Anthropic refusal stop_reason).
+    last_llm_stop_reason: Option<String>,
 }
 
 thread_local! {
@@ -152,6 +162,8 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         rejected_tools: Vec::new(),
         tool_mode: String::new(),
         started_at: now_id(),
+        max_iterations,
+        last_llm_stop_reason: None,
     };
 
     AGENT_HOST_SESSIONS.with(|sessions| {
@@ -219,10 +231,24 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
 
     let iterations = opt_int(&status_dict, "iterations").unwrap_or(0);
     let tool_mode = opt_str(&status_dict, "tool_mode").unwrap_or(session.tool_mode);
+    let acp_stop_reason = canonical_acp_stop_reason(
+        &final_status,
+        iterations,
+        session.max_iterations,
+        session.last_llm_stop_reason.as_deref(),
+    );
+    // Surface the canonical reason to the host bridge so an outer ACP
+    // adapter can populate `session/prompt`'s `stopReason`. The bridge
+    // is opt-in: pipelines that don't run under ACP simply leave the
+    // slot unset.
+    if let Some(bridge) = super::agent_runtime::current_host_bridge() {
+        bridge.set_prompt_stop_reason(acp_stop_reason);
+    }
     let result = serde_json::json!({
         "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
         "final_status": final_status,
         "stop_reason": stop_reason,
+        "acp_stop_reason": acp_stop_reason,
         "text": visible_text,
         "visible_text": visible_text,
         "private_reasoning": serde_json::Value::Null,
@@ -247,6 +273,42 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
         "task": session.task,
     });
     Ok(json_to_vm(&result))
+}
+
+/// Map an agent-loop terminal state to the canonical ACP `stopReason`
+/// enumeration documented at <https://agentclientprotocol.com/protocol/prompt-turn>.
+///
+/// ACP defines five values: `end_turn`, `max_tokens`, `max_turn_requests`,
+/// `refusal`, and `cancelled`. `cancelled` is decided one layer up by the
+/// adapter (it observes the cancel notification directly) so this
+/// function only chooses among the other four.
+///
+/// Precedence: a loop that ran out of turn budget overrides any
+/// per-call signal — the caller stopped the agent before the model
+/// could refuse or truncate again. When the loop exited cleanly we fall
+/// through to the most recent provider stop_reason.
+pub(crate) fn canonical_acp_stop_reason(
+    final_status: &str,
+    iterations: i64,
+    max_iterations: i64,
+    last_llm_stop_reason: Option<&str>,
+) -> &'static str {
+    if final_status == "budget_exhausted" {
+        if max_iterations > 0 && iterations >= max_iterations {
+            return "max_turn_requests";
+        }
+        // Token / cost / autonomy budgets all cap how many requests the
+        // loop will issue, so they collapse to the same canonical
+        // reason. ACP's `max_tokens` is reserved for a single response
+        // truncated by the provider's `max_tokens` parameter.
+        return "max_turn_requests";
+    }
+    match last_llm_stop_reason {
+        Some(reason) if reason.eq_ignore_ascii_case("max_tokens") => "max_tokens",
+        Some(reason) if reason.eq_ignore_ascii_case("length") => "max_tokens",
+        Some(reason) if reason.eq_ignore_ascii_case("refusal") => "refusal",
+        _ => "end_turn",
+    }
 }
 
 fn last_assistant_text(snapshot: &VmValue) -> Option<String> {
@@ -386,6 +448,10 @@ fn host_agent_session_record_usage_builtin(
         .map(|v| v.display())
         .unwrap_or_default();
     let cost = calculate_cost_for_provider(&provider, &model, input_tokens, output_tokens);
+    let stop_reason = match dict_get(&llm_result, "stop_reason") {
+        Some(VmValue::String(s)) if !s.is_empty() => Some(s.to_string()),
+        _ => None,
+    };
 
     let totals = with_session(&session_id, HOST_SESSION_RECORD_USAGE, |session| {
         session.tokens_used = session
@@ -395,6 +461,9 @@ fn host_agent_session_record_usage_builtin(
         session.input_tokens = session.input_tokens.saturating_add(input_tokens);
         session.output_tokens = session.output_tokens.saturating_add(output_tokens);
         session.cost_used += cost;
+        if stop_reason.is_some() {
+            session.last_llm_stop_reason = stop_reason.clone();
+        }
         Ok((session.tokens_used, session.cost_used))
     })?;
     let mut out = BTreeMap::new();
@@ -630,4 +699,88 @@ pub fn register_agent_session_host_primitives(vm: &mut Vm) {
     vm.register_async_builtin_with_metadata(skill_score, |args| {
         Box::pin(async move { host_skill_score(args).await })
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonical_acp_stop_reason;
+
+    #[test]
+    fn iteration_cap_maps_to_max_turn_requests() {
+        assert_eq!(
+            canonical_acp_stop_reason("budget_exhausted", 5, 5, None),
+            "max_turn_requests"
+        );
+        assert_eq!(
+            canonical_acp_stop_reason("budget_exhausted", 6, 5, Some("end_turn")),
+            "max_turn_requests"
+        );
+    }
+
+    #[test]
+    fn other_budget_paths_also_map_to_max_turn_requests() {
+        // Token / cost / autonomy budgets all stop the loop short, so
+        // they share the canonical ACP reason even when iterations are
+        // below the cap.
+        assert_eq!(
+            canonical_acp_stop_reason("budget_exhausted", 2, 50, Some("end_turn")),
+            "max_turn_requests"
+        );
+    }
+
+    #[test]
+    fn provider_max_tokens_promoted_when_loop_clean() {
+        assert_eq!(
+            canonical_acp_stop_reason("done", 1, 50, Some("max_tokens")),
+            "max_tokens"
+        );
+        // OpenAI flavor.
+        assert_eq!(
+            canonical_acp_stop_reason("done", 1, 50, Some("length")),
+            "max_tokens"
+        );
+        // Case-insensitive on the provider value.
+        assert_eq!(
+            canonical_acp_stop_reason("done", 1, 50, Some("MAX_TOKENS")),
+            "max_tokens"
+        );
+    }
+
+    #[test]
+    fn anthropic_refusal_stop_reason_maps_to_refusal() {
+        assert_eq!(
+            canonical_acp_stop_reason("done", 1, 50, Some("refusal")),
+            "refusal"
+        );
+    }
+
+    #[test]
+    fn natural_completion_maps_to_end_turn() {
+        assert_eq!(
+            canonical_acp_stop_reason("done", 1, 50, Some("end_turn")),
+            "end_turn"
+        );
+        assert_eq!(canonical_acp_stop_reason("", 1, 50, None), "end_turn");
+        // Anthropic `tool_use` is normal mid-turn behavior; if it
+        // somehow surfaced as the last call's stop_reason (loop ended
+        // before the next turn ran), it still represents a clean stop.
+        assert_eq!(
+            canonical_acp_stop_reason("done", 1, 50, Some("tool_use")),
+            "end_turn"
+        );
+    }
+
+    #[test]
+    fn budget_exhausted_overrides_provider_signal() {
+        // The loop ran out of budget before the model could refuse or
+        // truncate again, so loop-level cap wins.
+        assert_eq!(
+            canonical_acp_stop_reason("budget_exhausted", 50, 50, Some("max_tokens")),
+            "max_turn_requests"
+        );
+        assert_eq!(
+            canonical_acp_stop_reason("budget_exhausted", 50, 50, Some("refusal")),
+            "max_turn_requests"
+        );
+    }
 }

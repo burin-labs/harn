@@ -927,6 +927,7 @@ impl AcpServer {
         let id_owned = id.clone();
         let send_output = self.output.clone();
         let _mode_guard = modes::ModePolicyGuard::enter(&current_mode_id);
+        let host_bridge_for_response = host_bridge.clone();
         let result = execute::execute_chunk(
             chunk,
             bridge.clone(),
@@ -951,10 +952,17 @@ impl AcpServer {
                 if !output.is_empty() {
                     bridge.send_update(&output);
                 }
+                let stop_reason = if cancellation.cancelled.load(Ordering::SeqCst) {
+                    "cancelled".to_string()
+                } else {
+                    host_bridge_for_response
+                        .take_prompt_stop_reason()
+                        .unwrap_or_else(|| "end_turn".to_string())
+                };
                 send_json_response(
                     &send_output,
                     &id_owned,
-                    serde_json::json!({"stopReason": "completed"}),
+                    serde_json::json!({"stopReason": stop_reason}),
                 );
             }
             Err(e) => {
@@ -2036,7 +2044,7 @@ mod tests {
                         saw_update = true;
                     }
                     if message["id"] == 4 {
-                        assert_eq!(message["result"]["stopReason"], "completed");
+                        assert_eq!(message["result"]["stopReason"], "end_turn");
                         saw_completed = true;
                         break;
                     }
@@ -2909,7 +2917,7 @@ mod tests {
                         continue;
                     }
                     if message["id"] == 3 {
-                        assert_eq!(message["result"]["stopReason"], "completed");
+                        assert_eq!(message["result"]["stopReason"], "end_turn");
                         saw_completed = true;
                         break;
                     }
@@ -3090,7 +3098,7 @@ mod tests {
                         );
                     }
                     if message["id"] == 2 {
-                        assert_eq!(message["result"]["stopReason"], "completed");
+                        assert_eq!(message["result"]["stopReason"], "end_turn");
                         saw_completed = true;
                         break;
                     }
@@ -3182,7 +3190,7 @@ mod tests {
                         }
                     }
                     if message["id"] == 2 {
-                        assert_eq!(message["result"]["stopReason"], "completed");
+                        assert_eq!(message["result"]["stopReason"], "end_turn");
                         break;
                     }
                 }
@@ -3357,7 +3365,7 @@ mod tests {
                         saw_beta_chunk = true;
                     }
                     if message["id"] == 2 {
-                        assert_eq!(message["result"]["stopReason"], "completed");
+                        assert_eq!(message["result"]["stopReason"], "end_turn");
                         break;
                     }
                 }
@@ -3372,6 +3380,124 @@ mod tests {
 
                 drop(request_tx);
                 server.await.expect("ACP channel server task");
+            })
+            .await;
+    }
+
+    /// `session/prompt` returns the canonical ACP `stopReason` rather
+    /// than Harn's internal "completed" / "cancelled" pair. This drives
+    /// each branch of the mapping in `agent_session_host::canonical_acp_stop_reason`
+    /// through a real ACP roundtrip with `provider: "mock"` so the
+    /// adapter and the agent loop's finalize stay aligned with the
+    /// canonical enum at <https://agentclientprotocol.com/protocol/prompt-turn>.
+    async fn run_acp_agent_loop_prompt(prompt_body: &str) -> serde_json::Value {
+        let (request_tx, mut response_rx, server, session_id) = start_acp_channel_session().await;
+
+        // `agent_loop` requires the LLM/network capability ceiling.
+        // The default `ask` mode clamps to read-only; switch to `code`
+        // (`ActAuto` autonomy tier) so the test can exercise the loop.
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/set_mode",
+                "params": {"sessionId": session_id, "modeId": "code"},
+            }))
+            .expect("send session/set_mode");
+        let _ack = recv_json(&mut response_rx).await;
+        let _notification = recv_json(&mut response_rx).await;
+
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id,
+                    "prompt": [{"type": "text", "text": prompt_body}],
+                },
+            }))
+            .expect("send session/prompt");
+
+        let mut stop_reason = serde_json::Value::Null;
+        for _ in 0..64 {
+            let message = recv_json(&mut response_rx).await;
+            if message["method"] == "host/capabilities" {
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": message["id"].clone(),
+                        "result": {},
+                    }))
+                    .expect("send host capabilities response");
+                continue;
+            }
+            if message["id"] == 3 {
+                stop_reason = message["result"]["stopReason"].clone();
+                break;
+            }
+        }
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+        stop_reason
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_session_prompt_reports_end_turn_when_loop_finishes_naturally() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let body = "llm_mock_clear()\n\
+                            llm_mock({text: \"all done\"})\n\
+                            agent_loop(\"hello\", nil, {provider: \"mock\"})";
+                let stop_reason = run_acp_agent_loop_prompt(body).await;
+                assert_eq!(stop_reason, "end_turn");
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_session_prompt_reports_max_tokens_from_provider_signal() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let body = "llm_mock_clear()\n\
+                            llm_mock({text: \"truncated\", stop_reason: \"max_tokens\"})\n\
+                            agent_loop(\"hello\", nil, {provider: \"mock\"})";
+                let stop_reason = run_acp_agent_loop_prompt(body).await;
+                assert_eq!(stop_reason, "max_tokens");
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_session_prompt_reports_refusal_from_provider_signal() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let body = "llm_mock_clear()\n\
+                            llm_mock({text: \"I cannot assist with that.\", stop_reason: \"refusal\"})\n\
+                            agent_loop(\"hello\", nil, {provider: \"mock\"})";
+                let stop_reason = run_acp_agent_loop_prompt(body).await;
+                assert_eq!(stop_reason, "refusal");
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_session_prompt_reports_max_turn_requests_when_iteration_cap_hit() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                // `persistent: true` keeps the loop iterating on a
+                // text-only mock turn, and `max_iterations: 1` forces
+                // the cap to fire on iteration 1 → ACP `max_turn_requests`.
+                let body = "llm_mock_clear()\n\
+                            llm_mock({text: \"still working\"})\n\
+                            llm_mock({text: \"still working\"})\n\
+                            agent_loop(\"hello\", nil, {provider: \"mock\", persistent: true, max_iterations: 1})";
+                let stop_reason = run_acp_agent_loop_prompt(body).await;
+                assert_eq!(stop_reason, "max_turn_requests");
             })
             .await;
     }
