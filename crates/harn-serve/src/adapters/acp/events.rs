@@ -11,11 +11,22 @@ use super::AcpOutput;
 /// to serialize notifications without the full AcpBridge.
 pub(super) struct AcpAgentEventSink {
     output: AcpOutput,
+    replayed: bool,
 }
 
 impl AcpAgentEventSink {
     pub(super) fn new(output: AcpOutput) -> Self {
-        Self { output }
+        Self {
+            output,
+            replayed: false,
+        }
+    }
+
+    pub(super) fn for_replay(output: AcpOutput) -> Self {
+        Self {
+            output,
+            replayed: true,
+        }
     }
 
     fn write_notification(&self, params: serde_json::Value) {
@@ -28,12 +39,18 @@ impl AcpAgentEventSink {
     /// the canonical `session/update` discriminator has no slot for the
     /// event being surfaced — currently the pipeline-loop milestones
     /// emitted via `_harn/agentEvent`.
-    fn write_jsonrpc_notification(&self, method: &str, params: serde_json::Value) {
-        let notification = serde_json::json!({
+    fn write_jsonrpc_notification(&self, method: &str, mut params: serde_json::Value) {
+        if self.replayed {
+            mark_replayed_params(method, &mut params);
+        }
+        let mut notification = serde_json::json!({
             "jsonrpc": "2.0",
             "method": method,
             "params": params,
         });
+        if self.replayed {
+            notification["_harn"] = serde_json::json!({"replayed": true});
+        }
         if let Ok(line) = serde_json::to_string(&notification) {
             self.output.write_line(&line);
         }
@@ -93,6 +110,22 @@ impl AcpAgentEventSink {
         harn_meta: serde_json::Map<String, serde_json::Value>,
     ) {
         merge_harn_meta(update, harn_meta);
+    }
+}
+
+fn mark_replayed_params(method: &str, params: &mut serde_json::Value) {
+    if method == "session/update" {
+        if let Some(update) = params.get_mut("update") {
+            let mut harn_meta = serde_json::Map::new();
+            harn_meta.insert("replayed".to_string(), serde_json::Value::Bool(true));
+            merge_harn_meta(update, harn_meta);
+        }
+        return;
+    }
+    if method.starts_with('_') {
+        if let Some(obj) = params.as_object_mut() {
+            obj.insert("replayed".to_string(), serde_json::Value::Bool(true));
+        }
     }
 }
 

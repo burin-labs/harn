@@ -286,6 +286,10 @@ fn try_register_event_log(session_id: &str) {
     }
 }
 
+pub fn register_event_log_sink(session_id: &str) {
+    try_register_event_log(session_id);
+}
+
 pub fn close(id: &str) {
     SESSIONS.with(|s| {
         s.borrow_mut().remove(id);

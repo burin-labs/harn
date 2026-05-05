@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use harn_vm::agent_events::{clear_session_sinks, register_sink};
+use harn_vm::agent_events::{clear_session_sinks, register_sink, AgentEventSink};
 use harn_vm::visible_text::{sanitize_visible_assistant_text, VisibleTextState};
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{mpsc, oneshot, Mutex, Notify};
@@ -1195,7 +1195,11 @@ impl AcpServer {
         let sid = session_id.clone();
 
         // Translate AgentEvents into ACP session/update notifications so
-        // the client observes tool lifecycle on the wire.
+        // the client observes tool lifecycle on the wire. The event-log
+        // sink is reinstalled here because prompt teardown clears all
+        // per-session transport sinks after each turn.
+        clear_session_sinks(&session_id);
+        harn_vm::agent_sessions::register_event_log_sink(&session_id);
         register_sink(
             session_id.clone(),
             Arc::new(AcpAgentEventSink::new(output.clone())),
@@ -1522,7 +1526,7 @@ impl AcpServer {
         }
     }
 
-    fn handle_session_load(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
+    async fn handle_session_load(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
         let Some(session_id) = params
             .get("sessionId")
             .or_else(|| params.get("session_id"))
@@ -1548,13 +1552,42 @@ impl AcpServer {
             session_value["_meta"] = serde_json::Value::Object(session.info.meta.clone());
         }
 
+        let replay_events =
+            match harn_vm::orchestration::load_agent_session_replay_events(session_id).await {
+                Ok(events) => events,
+                Err(error) => {
+                    self.send_error(
+                        id,
+                        -32000,
+                        &format!("Failed to replay session {session_id}: {error}"),
+                    );
+                    return;
+                }
+            };
+        let replay_sink = AcpAgentEventSink::for_replay(self.output.clone());
+        for replay_event in &replay_events {
+            replay_sink.handle_event(&replay_event.event);
+        }
+        let replayed: Vec<serde_json::Value> = replay_events
+            .iter()
+            .map(|event| {
+                serde_json::json!({
+                    "eventId": event.event_id,
+                    "type": serde_json::to_value(&event.event)
+                        .ok()
+                        .and_then(|value| value.get("type").cloned())
+                        .unwrap_or(serde_json::Value::Null),
+                })
+            })
+            .collect();
+
         self.send_response(
             id,
             serde_json::json!({
                 "session": session_value,
                 "modes": modes::session_mode_state(&session.current_mode_id),
                 "configOptions": modes::config_options_state(&session.current_mode_id),
-                "replayed": [],
+                "replayed": replayed,
             }),
         );
     }
@@ -1701,7 +1734,7 @@ impl AcpServer {
                 self.handle_session_new(&id, &params);
             }
             "session/load" => {
-                self.handle_session_load(&id, &params);
+                self.handle_session_load(&id, &params).await;
             }
             "session/fork" => {
                 self.handle_session_fork(&id, &params);
@@ -3201,6 +3234,88 @@ mod tests {
             .expect("available modes")
             .iter()
             .any(|m| m["id"] == "architect"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_session_load_replays_persisted_agent_events() {
+        harn_vm::event_log::reset_active_event_log();
+        let _log = harn_vm::event_log::install_memory_for_current_thread(64);
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server =
+            AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "session/new",
+                "params": {"cwd": "."},
+            }))
+            .await;
+        let created = recv_json(&mut rx).await;
+        let session_id = created["result"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+
+        harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::AgentMessageChunk {
+            session_id: session_id.clone(),
+            content: "replay me".to_string(),
+        });
+        harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::Plan {
+            session_id: session_id.clone(),
+            plan: serde_json::json!([{"content": "do the thing", "status": "pending"}]),
+        });
+        tokio::task::yield_now().await;
+
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/load",
+                "params": {"sessionId": session_id},
+            }))
+            .await;
+
+        let message_replay = recv_json(&mut rx).await;
+        assert_eq!(message_replay["method"], "session/update");
+        assert_eq!(
+            message_replay["params"]["update"]["sessionUpdate"],
+            "agent_message_chunk"
+        );
+        assert_eq!(
+            message_replay["params"]["update"]["content"]["text"],
+            "replay me"
+        );
+        assert_eq!(message_replay["_harn"]["replayed"], true);
+        assert_eq!(
+            message_replay["params"]["update"]["_meta"]["harn"]["replayed"],
+            true
+        );
+
+        let plan_replay = recv_json(&mut rx).await;
+        assert_eq!(plan_replay["method"], "session/update");
+        assert_eq!(plan_replay["params"]["update"]["sessionUpdate"], "plan");
+        assert_eq!(plan_replay["_harn"]["replayed"], true);
+        assert_eq!(
+            plan_replay["params"]["update"]["_meta"]["harn"]["replayed"],
+            true
+        );
+
+        let loaded = recv_json(&mut rx).await;
+        assert_eq!(loaded["id"], 2);
+        assert_eq!(loaded["result"]["replayed"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            loaded["result"]["replayed"][0]["type"],
+            "agent_message_chunk"
+        );
+        assert_eq!(loaded["result"]["replayed"][1]["type"], "plan");
+
+        harn_vm::agent_events::clear_session_sinks(
+            created["result"]["sessionId"].as_str().unwrap(),
+        );
+        harn_vm::event_log::reset_active_event_log();
     }
 
     /// Setting a valid mode ack's with an empty result and emits a
