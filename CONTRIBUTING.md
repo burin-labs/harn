@@ -119,10 +119,16 @@ This runs:
 - `cargo fmt` -- Rust formatting
 - `harn fmt --check` -- Harn file formatting
 - `cargo clippy -- -D warnings` -- Lint (warnings are errors)
+- `make lint-no-rust-prompt-prose` -- prompt ownership ratchet
+- `make lint-no-xfail-regression` -- conformance xfail count ratchet
 - `markdownlint-cli2` -- Markdown lint
 - `harn lint` -- Harn linter on conformance tests
 - `make test` -- Rust workspace tests (`cargo nextest` when available)
 - `harn test conformance` -- Conformance test suite
+
+Model-facing prompt prose lives in `crates/harn-stdlib/src/stdlib/**/*.harn.prompt`.
+Rust may carry only short diagnostics, tests, parser/protocol constants, and
+provider API strings.
 
 ## Interpreter microbenchmarks
 

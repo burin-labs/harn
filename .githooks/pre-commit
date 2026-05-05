@@ -52,9 +52,17 @@ hook_write_staged_files "$changed"
 if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
   echo "=== Pre-commit: running clippy ==="
   make lint
-  echo "    Clippy OK."
+  echo "    Rust lint OK."
 else
   echo "=== Pre-commit: skipping clippy (no Rust/Cargo changes) ==="
+fi
+
+if hook_paths_match "$changed" "$HOOK_RATCHET_PATTERN"; then
+  echo "=== Pre-commit: checking CI ratchets ==="
+  make lint-no-rust-prompt-prose lint-no-xfail-regression
+  echo "    CI ratchets OK."
+else
+  echo "=== Pre-commit: skipping CI ratchets (no protected paths changed) ==="
 fi
 
 if hook_paths_match "$changed" "$HOOK_HIGHLIGHT_PATTERN"; then

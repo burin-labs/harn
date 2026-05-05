@@ -1,0 +1,2 @@
+# Allowed long Rust string literals in protected orchestration paths.
+# Format: crates/path/file.rs:line # one-line justification
