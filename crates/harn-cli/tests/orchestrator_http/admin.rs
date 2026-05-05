@@ -153,25 +153,30 @@ async fn watch_mode_reloads_manifest_changes() {
     let mut auth_headers = json_headers();
     auth_headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer reload-key"));
 
-    let deadline = tokio::time::Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
-    loop {
-        let response = client
-            .post(format!("{base_url}/a2a/review-watch"))
-            .headers(auth_headers.clone())
-            .body(br#"{"kind":"a2a.task.received","task":{"id":"task-watch"}}"#.to_vec())
-            .send()
-            .await
-            .unwrap();
-        if response.status() == StatusCode::OK {
-            break;
-        }
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "watch reload never applied"
-        );
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+    // The notify-driven manifest watcher emits a `reload_succeeded`
+    // event on `orchestrator.manifest` once the new route is live;
+    // that is exactly the signal HTTP requests would otherwise have
+    // to discover by retrying.
+    await_topic_event(&harness.event_log(), "orchestrator.manifest", |event| {
+        event.kind == "reload_succeeded"
+            && event.payload["summary"]["modified"]
+                .as_array()
+                .is_some_and(|modified| {
+                    modified
+                        .iter()
+                        .any(|item| item.as_str() == Some("incoming-review-task"))
+                })
+    })
+    .await;
+
+    let response = client
+        .post(format!("{base_url}/a2a/review-watch"))
+        .headers(auth_headers.clone())
+        .body(br#"{"kind":"a2a.task.received","task":{"id":"task-watch"}}"#.to_vec())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 
     let retired = client
         .post(format!("{base_url}/a2a/review"))
@@ -395,14 +400,7 @@ async fn graceful_shutdown_waits_for_in_flight_request() {
         async move { client.post(url).headers(headers).body(body).send().await }
     });
 
-    let entry_deadline = tokio::time::Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
-    while !request_entered_path.exists() {
-        assert!(
-            tokio::time::Instant::now() < entry_deadline,
-            "timed out waiting for request to enter handler"
-        );
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+    wait_for_path(&request_entered_path).await;
 
     let _ = shutdown_trigger.send(true);
     fs::write(&request_release_path, b"release").unwrap();

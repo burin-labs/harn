@@ -32,35 +32,29 @@ THREAD_SLEEP_ALLOWLIST=(
   "crates/harn-hostlib/tests/process_tools.rs"
 )
 
-# tokio::time::sleep in test files (outside start_paused = true tests)
-# Legitimate uses: connector integration tests polling real async state.
+# tokio::time::sleep in test files (outside start_paused = true tests).
+# Legitimate uses:
+#   - `orchestration/tests.rs`: paired with `start_paused = true`,
+#     drives advanced timers explicitly.
+#   - `orchestrator_http/support.rs`: `wait_for_path` polls a real
+#     filesystem marker written by handler-side code where no
+#     event signal is available; bounded with `tokio::time::timeout`.
 TOKIO_SLEEP_ALLOWLIST=(
-  "crates/harn-vm/src/connectors/notion/tests.rs"
-  "crates/harn-vm/src/connectors/linear/tests.rs"
-  "crates/harn-vm/src/triggers/dispatcher/tests/retry.rs"
   "crates/harn-vm/src/orchestration/tests.rs"
-  "crates/harn-cli/tests/orchestrator_http/admin.rs"
+  "crates/harn-cli/tests/orchestrator_http/support.rs"
 )
 
-# Instant::now() in a while-loop condition — wall-clock polling.
-# All entries below are subprocess/orchestrator integration tests that poll
-# real process output; they will be refactored by Tier 1A/1B of #1057.
-INSTANT_NOW_WHILE_ALLOWLIST=(
-  "crates/harn-vm/src/triggers/dispatcher/tests/retry.rs"
-  "crates/harn-cli/tests/orchestrator_inbox_dedupe.rs"
-  "crates/harn-cli/tests/orchestrator_http/support.rs"
-  "crates/harn-cli/tests/orchestrator_http/admin.rs"
-  "crates/harn-cli/tests/orchestrator_http/observability.rs"
-  "crates/harn-cli/tests/support/mod.rs"
+# Wall-clock `Instant::now() < deadline` comparisons inside any loop or
+# guard.
+INSTANT_NOW_DEADLINE_ALLOWLIST=(
 )
 
 # SystemTime::now() in test files — use injected clock / MockClock instead.
 # Remaining entries: legitimate fixture-setup uses against real OS time
 # (httpdate Retry-After parsing, real-mtime touch fixtures, tempdir
-# nano-suffix uniqueness, prompt-template `now_ms()` round-trip).
+# nano-suffix uniqueness).
 SYSTEM_TIME_ALLOWLIST=(
   "crates/harn-vm/src/http/tests.rs"
-  "crates/harn-vm/src/stdlib/template/tests.rs"
   "crates/harn-hostlib/tests/scanner_e2e.rs"
   "crates/harn-cli/src/commands/check/tests.rs"
 )
@@ -165,11 +159,14 @@ check_pattern \
   TOKIO_SLEEP_ALLOWLIST \
   "Use tokio::time::pause() + advance() in a #[tokio::test(start_paused = true)] context."
 
-echo "--- Instant::now() in while-loop (wall-clock poll) ---"
+echo "--- Instant::now() deadline comparison (wall-clock poll) ---"
+# Catches `Instant::now() < deadline`, `>= deadline`, etc. — the smell is
+# the comparison itself, regardless of whether it sits inside a `while`,
+# a `loop`, or an `assert!` macro inside a loop body.
 check_pattern \
-  "while.*Instant::now\|while.*std::time::Instant::now" \
-  INSTANT_NOW_WHILE_ALLOWLIST \
-  "Subscribe to an EventLog channel or use a deterministic OrchestratorHarness instead."
+  "Instant::now() *[<>]" \
+  INSTANT_NOW_DEADLINE_ALLOWLIST \
+  "Subscribe to an EventLog channel, use OrchestratorHarness, or wrap a poll in tokio::time::timeout instead."
 
 echo "--- SystemTime::now() in tests ---"
 check_pattern \
