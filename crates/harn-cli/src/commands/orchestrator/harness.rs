@@ -35,9 +35,6 @@ const MANIFEST_TOPIC: &str = "orchestrator.manifest";
 const STATE_SNAPSHOT_FILE: &str = "orchestrator-state.json";
 const PENDING_TOPIC: &str = "orchestrator.triggers.pending";
 const CRON_TICK_TOPIC: &str = "connectors.cron.tick";
-const TEST_PUMP_RELEASE_FILE_ENV: &str = "HARN_TEST_ORCHESTRATOR_PUMP_RELEASE_FILE";
-const TEST_PUMP_WAITING_FILE_ENV: &str = "HARN_TEST_ORCHESTRATOR_PUMP_WAITING_FILE";
-const TEST_PUMP_DRAINING_FILE_ENV: &str = "HARN_TEST_ORCHESTRATOR_PUMP_DRAINING_FILE";
 const TEST_INBOX_TASK_RELEASE_FILE_ENV: &str = "HARN_TEST_ORCHESTRATOR_INBOX_TASK_RELEASE_FILE";
 const TEST_FAIL_PENDING_PUMP_ENV: &str = "HARN_TEST_ORCHESTRATOR_FAIL_PENDING_PUMP";
 const WAITPOINT_SERVICE_INTERVAL: Duration = Duration::from_millis(250);
@@ -164,6 +161,7 @@ pub struct OrchestratorHarness {
     state_dir: PathBuf,
     admin_reload: AdminReloadHandle,
     shutdown_tx: Arc<watch::Sender<bool>>,
+    pump_drain_gate: PumpDrainGate,
     join: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -175,6 +173,30 @@ struct ReadyState {
     admin_reload: AdminReloadHandle,
 }
 
+#[derive(Clone)]
+struct PumpDrainGate {
+    hold_tx: watch::Sender<bool>,
+}
+
+impl PumpDrainGate {
+    fn new() -> Self {
+        let (hold_tx, _) = watch::channel(false);
+        Self { hold_tx }
+    }
+
+    fn pause(&self) {
+        let _ = self.hold_tx.send(true);
+    }
+
+    fn release(&self) {
+        let _ = self.hold_tx.send(false);
+    }
+
+    fn subscribe(&self) -> watch::Receiver<bool> {
+        self.hold_tx.subscribe()
+    }
+}
+
 #[allow(dead_code)]
 impl OrchestratorHarness {
     /// Start the orchestrator in-process.  Resolves once the HTTP listener
@@ -183,6 +205,8 @@ impl OrchestratorHarness {
         let (ready_tx, ready_rx) = oneshot::channel::<Result<ReadyState, OrchestratorError>>();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let shutdown_tx = Arc::new(shutdown_tx);
+        let pump_drain_gate = PumpDrainGate::new();
+        let task_pump_drain_gate = pump_drain_gate.clone();
 
         let join = std::thread::spawn(move || {
             // Use a multi-thread runtime so that blocking I/O (e.g. the OTEL
@@ -197,7 +221,12 @@ impl OrchestratorHarness {
                 .build()
                 .expect("failed to build OrchestratorHarness tokio runtime");
             let local = tokio::task::LocalSet::new();
-            rt.block_on(local.run_until(orchestrator_task(config, ready_tx, shutdown_rx)));
+            rt.block_on(local.run_until(orchestrator_task(
+                config,
+                ready_tx,
+                shutdown_rx,
+                task_pump_drain_gate,
+            )));
         });
 
         match ready_rx.await {
@@ -208,6 +237,7 @@ impl OrchestratorHarness {
                 state_dir: ready.state_dir,
                 admin_reload: ready.admin_reload,
                 shutdown_tx,
+                pump_drain_gate,
                 join: Some(join),
             }),
             Ok(Err(error)) => {
@@ -251,6 +281,17 @@ impl OrchestratorHarness {
         self.shutdown_tx.clone()
     }
 
+    /// Pause topic pumps at the next event admission. Tests can wait for
+    /// `pump_drain_waiting` before triggering shutdown.
+    pub fn pause_pump_drain(&self) {
+        self.pump_drain_gate.pause();
+    }
+
+    /// Release topic pumps paused by `pause_pump_drain`.
+    pub fn release_pump_drain(&self) {
+        self.pump_drain_gate.release();
+    }
+
     /// Cancel-safe, idempotent.  Performs the same drain logic as SIGTERM.
     pub async fn shutdown(mut self, _deadline: Duration) -> Result<ShutdownReport, HarnessError> {
         // Signal the background runtime to start graceful shutdown.
@@ -280,8 +321,10 @@ async fn orchestrator_task(
     config: OrchestratorConfig,
     ready_tx: oneshot::Sender<Result<ReadyState, OrchestratorError>>,
     shutdown_rx: watch::Receiver<bool>,
+    pump_drain_gate: PumpDrainGate,
 ) {
-    if let Err(error) = orchestrator_lifecycle(config, ready_tx, shutdown_rx).await {
+    if let Err(error) = orchestrator_lifecycle(config, ready_tx, shutdown_rx, pump_drain_gate).await
+    {
         eprintln!("[harn] orchestrator harness error: {error}");
     }
 }
@@ -290,6 +333,7 @@ async fn orchestrator_lifecycle(
     config: OrchestratorConfig,
     ready_tx: oneshot::Sender<Result<ReadyState, OrchestratorError>>,
     mut shutdown_rx: watch::Receiver<bool>,
+    pump_drain_gate: PumpDrainGate,
 ) -> Result<(), OrchestratorError> {
     harn_vm::reset_thread_local_state();
 
@@ -495,6 +539,7 @@ async fn orchestrator_lifecycle(
             dispatcher.clone(),
             pump_config,
             metrics_registry.clone(),
+            pump_drain_gate.clone(),
             PENDING_TOPIC,
         )?,
     )];
@@ -527,6 +572,7 @@ async fn orchestrator_lifecycle(
                     dispatcher.clone(),
                     pump_config,
                     metrics_registry.clone(),
+                    pump_drain_gate.clone(),
                     pending_topic.as_str(),
                 )?,
             ));
@@ -553,18 +599,21 @@ async fn orchestrator_lifecycle(
         dispatcher.clone(),
         pump_config,
         metrics_registry.clone(),
+        pump_drain_gate.clone(),
     )?;
     let waitpoint_pump = spawn_waitpoint_resume_pump(
         event_log.clone(),
         dispatcher.clone(),
         pump_config,
         metrics_registry.clone(),
+        pump_drain_gate.clone(),
     )?;
     let waitpoint_cancel_pump = spawn_waitpoint_cancel_pump(
         event_log.clone(),
         dispatcher.clone(),
         pump_config,
         metrics_registry.clone(),
+        pump_drain_gate.clone(),
     )?;
     let waitpoint_sweeper = spawn_waitpoint_sweeper(dispatcher.clone());
 
@@ -868,18 +917,15 @@ impl PumpHandle {
         }));
         append_pump_lifecycle_event(
             log,
-            "pump_drain_requested",
+            "pump_drain_started",
             json!({
                 "topic": topic_name,
                 "up_to": up_to,
                 "max_items": config.max_items,
-                "deadline_secs": config.deadline.as_secs(),
+                "drain_deadline_ms": config.deadline.as_millis(),
             }),
         )
         .await?;
-        if let Some(path) = pump_test_draining_file() {
-            mark_test_file(&path).await?;
-        }
         match self.join.await {
             Ok(result) => result,
             Err(error) => Err(format!("pump task join failed: {error}").into()),
@@ -916,6 +962,7 @@ fn spawn_pending_pump(
     dispatcher: harn_vm::Dispatcher,
     pump_config: PumpConfig,
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
+    pump_drain_gate: PumpDrainGate,
     topic_name: &str,
 ) -> Result<PumpHandle, OrchestratorError> {
     let topic = harn_vm::event_log::Topic::new(topic_name).map_err(|error| error.to_string())?;
@@ -924,6 +971,7 @@ fn spawn_pending_pump(
         topic,
         pump_config,
         metrics_registry,
+        pump_drain_gate,
         move |logged| {
             let dispatcher = dispatcher.clone();
             async move {
@@ -955,6 +1003,7 @@ fn spawn_cron_pump(
     dispatcher: harn_vm::Dispatcher,
     pump_config: PumpConfig,
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
+    pump_drain_gate: PumpDrainGate,
 ) -> Result<PumpHandle, OrchestratorError> {
     let topic =
         harn_vm::event_log::Topic::new(CRON_TICK_TOPIC).map_err(|error| error.to_string())?;
@@ -963,6 +1012,7 @@ fn spawn_cron_pump(
         topic,
         pump_config,
         metrics_registry,
+        pump_drain_gate,
         move |logged| {
             let dispatcher = dispatcher.clone();
             async move {
@@ -1248,6 +1298,7 @@ fn spawn_waitpoint_resume_pump(
     dispatcher: harn_vm::Dispatcher,
     pump_config: PumpConfig,
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
+    pump_drain_gate: PumpDrainGate,
 ) -> Result<PumpHandle, OrchestratorError> {
     let topic = harn_vm::event_log::Topic::new(harn_vm::WAITPOINT_RESUME_TOPIC)
         .map_err(|error| error.to_string())?;
@@ -1256,6 +1307,7 @@ fn spawn_waitpoint_resume_pump(
         topic,
         pump_config,
         metrics_registry,
+        pump_drain_gate,
         move |logged| {
             let dispatcher = dispatcher.clone();
             async move {
@@ -1272,6 +1324,7 @@ fn spawn_waitpoint_cancel_pump(
     dispatcher: harn_vm::Dispatcher,
     pump_config: PumpConfig,
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
+    pump_drain_gate: PumpDrainGate,
 ) -> Result<PumpHandle, OrchestratorError> {
     let topic = harn_vm::event_log::Topic::new(harn_vm::TRIGGER_CANCEL_REQUESTS_TOPIC)
         .map_err(|error| error.to_string())?;
@@ -1280,6 +1333,7 @@ fn spawn_waitpoint_cancel_pump(
         topic,
         pump_config,
         metrics_registry,
+        pump_drain_gate,
         move |logged| {
             let dispatcher = dispatcher.clone();
             async move {
@@ -1328,6 +1382,7 @@ fn spawn_topic_pump<F, Fut>(
     topic: harn_vm::event_log::Topic,
     _pump_config: PumpConfig,
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
+    pump_drain_gate: PumpDrainGate,
     process: F,
 ) -> Result<PumpHandle, OrchestratorError>
 where
@@ -1335,8 +1390,7 @@ where
     Fut: std::future::Future<Output = Result<bool, OrchestratorError>> + 'static,
 {
     let consumer = pump_consumer_id(&topic)?;
-    let test_release_file = pump_test_release_file();
-    let test_waiting_file = pump_test_waiting_file();
+    let mut pump_drain_gate_rx = pump_drain_gate.subscribe();
     let (mode_tx, mut mode_rx) = watch::channel(PumpMode::Running);
     let join = tokio::task::spawn_local(async move {
         let start_from = event_log
@@ -1406,12 +1460,13 @@ where
                         topic.as_str(),
                         admission_delay(logged.occurred_at_ms),
                     );
-                    if let Some(path) = test_release_file.as_ref() {
-                        if let Some(waiting_path) = test_waiting_file.as_ref() {
-                            mark_test_file(waiting_path).await?;
-                        }
-                        wait_for_test_release_file(path).await;
-                    }
+                    wait_for_pump_drain_release(
+                        &event_log,
+                        &topic,
+                        event_id,
+                        &mut pump_drain_gate_rx,
+                    )
+                    .await?;
                     let handled = process(logged).await?;
                     stats.last_seen = event_id;
                     if handled {
@@ -2432,6 +2487,32 @@ async fn append_pump_lifecycle_event(
     append_lifecycle_event(log, kind, payload).await
 }
 
+async fn wait_for_pump_drain_release(
+    log: &Arc<AnyEventLog>,
+    topic: &harn_vm::event_log::Topic,
+    event_id: u64,
+    gate_rx: &mut watch::Receiver<bool>,
+) -> Result<(), OrchestratorError> {
+    if !*gate_rx.borrow() {
+        return Ok(());
+    }
+    append_pump_lifecycle_event(
+        log,
+        "pump_drain_waiting",
+        json!({
+            "topic": topic.as_str(),
+            "event_log_id": event_id,
+        }),
+    )
+    .await?;
+    while *gate_rx.borrow() {
+        if gate_rx.changed().await.is_err() {
+            break;
+        }
+    }
+    Ok(())
+}
+
 #[cfg_attr(not(unix), allow(dead_code))]
 async fn append_manifest_event(
     log: &Arc<AnyEventLog>,
@@ -2681,18 +2762,6 @@ fn pump_consumer_id(topic: &harn_vm::event_log::Topic) -> Result<ConsumerId, Orc
     })
 }
 
-fn pump_test_release_file() -> Option<PathBuf> {
-    test_file_from_env(TEST_PUMP_RELEASE_FILE_ENV)
-}
-
-fn pump_test_waiting_file() -> Option<PathBuf> {
-    test_file_from_env(TEST_PUMP_WAITING_FILE_ENV)
-}
-
-fn pump_test_draining_file() -> Option<PathBuf> {
-    test_file_from_env(TEST_PUMP_DRAINING_FILE_ENV)
-}
-
 fn inbox_task_test_release_file() -> Option<PathBuf> {
     test_file_from_env(TEST_INBOX_TASK_RELEASE_FILE_ENV)
 }
@@ -2707,17 +2776,6 @@ async fn wait_for_test_release_file(path: &Path) {
     while tokio::fs::metadata(path).await.is_err() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-}
-
-async fn mark_test_file(path: &Path) -> Result<(), OrchestratorError> {
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
-    }
-    tokio::fs::write(path, b"1").await.map_err(|error| {
-        OrchestratorError::Serve(format!("failed to write {}: {error}", path.display()))
-    })
 }
 
 fn pending_pump_test_should_fail() -> bool {

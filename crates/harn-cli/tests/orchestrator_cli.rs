@@ -865,8 +865,6 @@ async fn bounded_pump_drain_truncates_and_replays_remaining_backlog_after_restar
     const TOTAL_EVENTS: usize = 60;
 
     let temp = TempDir::new().unwrap();
-    let pump_release_file = temp.path().join("release-pending-pump");
-    let pump_release_value = pump_release_file.to_string_lossy().into_owned();
     write_file(
         temp.path(),
         "harn.toml",
@@ -902,10 +900,6 @@ pub fn on_task(event: TriggerEvent) -> string {
         ("HARN_ORCHESTRATOR_API_KEYS", "test-key"),
         ("HARN_ORCHESTRATOR_HMAC_SECRET", "unused-shared-secret"),
         ("HARN_EVENT_LOG_QUEUE_DEPTH", "8192"),
-        (
-            "HARN_TEST_ORCHESTRATOR_PUMP_RELEASE_FILE",
-            pump_release_value.as_str(),
-        ),
     ])
     .await;
     let harness = start_harness_with(&temp, |mut config| {
@@ -914,8 +908,9 @@ pub fn on_task(event: TriggerEvent) -> string {
         config
     })
     .await;
+    harness.pause_pump_drain();
+    let event_log = harness.event_log();
     let base_url = harness.listener_url().to_string();
-    let first_event_log = harness.event_log();
     let shutdown_trigger = harness.shutdown_trigger();
 
     let client = reqwest::Client::new();
@@ -934,15 +929,21 @@ pub fn on_task(event: TriggerEvent) -> string {
         assert_eq!(response.status(), reqwest::StatusCode::OK);
     }
 
-    await_pump_metrics_recorded(&first_event_log, "orchestrator.triggers.pending", None, 1).await;
-    let _ = shutdown_trigger.send(true);
-    await_topic_event(&first_event_log, "orchestrator.lifecycle", |event| {
-        event.kind == "pump_drain_requested"
+    await_topic_event(&event_log, "orchestrator.lifecycle", |event| {
+        event.kind == "pump_drain_waiting"
             && event.payload.get("topic").and_then(|value| value.as_str())
                 == Some("orchestrator.triggers.pending")
     })
     .await;
-    fs::write(&pump_release_file, b"release").unwrap();
+    await_pump_metrics_recorded(&event_log, "orchestrator.triggers.pending", None, 1).await;
+    let _ = shutdown_trigger.send(true);
+    await_topic_event(&event_log, "orchestrator.lifecycle", |event| {
+        event.kind == "pump_drain_started"
+            && event.payload.get("topic").and_then(|value| value.as_str())
+                == Some("orchestrator.triggers.pending")
+    })
+    .await;
+    harness.release_pump_drain();
     shutdown(harness).await;
 
     drop(_envs);

@@ -1,0 +1,138 @@
+import "../_common"
+
+pipeline default() {
+  let unique = uuid()
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let base = path_join(temp_dir(), "harn-orchestrator-pump-drain-lifecycle-" + unique)
+  let workspace = path_join(base, "workspace")
+  let state_dir = path_join(base, "state")
+  let binary = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  require file_exists(binary), "missing built harn binary at " + binary
+  let script = """
+    set -eu
+
+    base="${base}"
+    workspace="${workspace}"
+    state_dir="${state_dir}"
+    binary="${binary}"
+
+    mkdir -p "$workspace" "$state_dir"
+
+    cat > "$workspace/harn.toml" <<'EOF'
+    [package]
+    name = "orchestrator_pump_drain_lifecycle"
+    EOF
+
+    python3 - "$workspace" "$state_dir" "$binary" <<'PY'
+    import glob
+    import json
+    import os
+    import pathlib
+    import signal
+    import sqlite3
+    import subprocess
+    import sys
+    import time
+
+    workspace, state_dir, binary = sys.argv[1:]
+    base = pathlib.Path(workspace).parent
+    snapshot_path = pathlib.Path(state_dir) / "orchestrator-state.json"
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HARN_ORCHESTRATOR_API_KEYS": "test-key",
+            "HARN_ORCHESTRATOR_HMAC_SECRET": "pump-drain-lifecycle-secret",
+            "HARN_EVENT_LOG_QUEUE_DEPTH": "8192",
+        }
+    )
+    args = [
+        binary,
+        "orchestrator",
+        "serve",
+        "--config",
+        "harn.toml",
+        "--state-dir",
+        str(pathlib.Path(state_dir)),
+        "--bind",
+        "127.0.0.1:0",
+        "--role",
+        "single-tenant",
+        "--shutdown-timeout",
+        "5",
+        "--drain-max-items",
+        "10",
+        "--drain-deadline",
+        "1",
+    ]
+
+    log_path = base / "orchestrator.log"
+    log = open(log_path, "w", encoding="utf-8")
+    proc = subprocess.Popen(
+        args,
+        cwd=workspace,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=log,
+    )
+    try:
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            if snapshot_path.exists():
+                data = json.loads(snapshot_path.read_text())
+                if data.get("bind"):
+                    break
+            time.sleep(0.05)
+        else:
+            tail = log_path.read_text()[-4000:] if log_path.exists() else "(missing log)"
+            raise RuntimeError(f"timed out waiting for orchestrator readiness\\n{tail}")
+
+        proc.send_signal(signal.SIGTERM)
+        proc.wait(timeout=10)
+        if proc.returncode != 0:
+            raise RuntimeError(f"orchestrator exited with {proc.returncode}")
+    finally:
+        log.close()
+
+    sqlite_candidates = glob.glob(str(pathlib.Path(state_dir) / "**" / "*.sqlite"), recursive=True)
+    sqlite_path = pathlib.Path(sqlite_candidates[0]) if sqlite_candidates else pathlib.Path(state_dir) / "events.sqlite"
+    with sqlite3.connect(sqlite_path) as conn:
+        rows = conn.execute(
+            "SELECT kind, payload FROM events WHERE topic = ?",
+            ("orchestrator.lifecycle",),
+        ).fetchall()
+
+    lifecycle = [(kind, json.loads(payload)) for kind, payload in rows]
+    pending_started = any(
+        kind == "pump_drain_started"
+        and payload.get("topic") == "orchestrator.triggers.pending"
+        for kind, payload in lifecycle
+    )
+    waitpoint_started = any(
+        kind == "pump_drain_started"
+        and payload.get("topic") == "waitpoint.resumes"
+        for kind, payload in lifecycle
+    )
+    stopped = any(kind == "stopped" for kind, _ in lifecycle)
+
+    print(
+        json.dumps(
+            {
+                "pending_started": pending_started,
+                "waitpoint_started": waitpoint_started,
+                "stopped": stopped,
+            }
+        )
+    )
+    PY
+    """
+  let result = shell(script)
+  println(result.success)
+  if !result.success {
+    return
+  }
+  let summary = json_parse(result.stdout.trim())
+  println(summary.pending_started)
+  println(summary.waitpoint_started)
+  println(summary.stopped)
+}
