@@ -500,6 +500,16 @@ For background or delegated execution, use the worker lifecycle builtins
 directly from the runtime, or the `worker_*` helpers above when you need the
 normalized request/provenance views.
 
+### std/handoffs
+
+Harn-owned route policy for typed handoff artifacts:
+
+| Function | Description |
+|---|---|
+| `handoff_route_select(handoff, routes?, context?)` | Select the first matching handoff route decision from explicit routes or loaded `[[handoff_routes]]` |
+| `handoff_routed(payload, routes?, context?)` | Compose and normalize a handoff with the selected target and route decision embedded |
+| `handoff_dispatch(handoff, decision?, options?)` | Persist the selected route, enqueue a target-specific dispatch record in the EventLog, and optionally call a local dispatcher hook |
+
 ### std/worktree
 
 Helpers for isolated git worktree execution built on `exec_at(...)` and

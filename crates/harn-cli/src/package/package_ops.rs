@@ -209,6 +209,9 @@ pub(crate) fn check_package_impl(
     }
 
     validate_dependencies_for_publish(&ctx, &mut errors, &mut warnings);
+    if let Err(error) = validate_handoff_routes(&ctx.manifest.handoff_routes, &ctx.manifest) {
+        push_error(&mut errors, "handoff_routes", error.to_string());
+    }
     let exports = validate_exports_for_publish(&ctx, &mut errors, &mut warnings);
 
     Ok(PackageCheckReport {

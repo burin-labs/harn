@@ -1,0 +1,240 @@
+/**
+ * std/handoffs — Harn-owned handoff route selection and dispatch records.
+ *
+ * Rust loads tenant route declarations and persists dispatch records; persona
+ * code owns the route predicates and handoff composition policy.
+ */
+import "std/triggers"
+
+fn __handoff_is_callable(value) -> bool {
+  let kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __handoff_value_string(value) -> string {
+  if value == nil {
+    return ""
+  }
+  return trim(to_string(value))
+}
+
+fn __handoff_kind(payload, context) -> string {
+  let kind = __handoff_value_string(payload?.kind ?? context?.kind)
+  if kind == "" {
+    return "handoff"
+  }
+  return kind
+}
+
+fn __handoff_source(payload, context) -> string {
+  return __handoff_value_string(payload?.source_persona ?? context?.source_persona)
+}
+
+fn __handoff_route_matches(route, kind, source) -> bool {
+  let route_kind = __handoff_value_string(route?.kind)
+  let route_source = __handoff_value_string(route?.from)
+  return (route_kind == "*" || route_kind == kind)
+    && (route_source == "*" || route_source == source)
+}
+
+fn __handoff_target_record(raw_target, route_target) {
+  let target = __handoff_value_string(raw_target)
+  if starts_with(target, "human:") {
+    let label = trim(substring(target, len("human:"), len(target) - len("human:")))
+    return {kind: "human", id: label, label: label}
+  }
+  if starts_with(target, "a2a://") {
+    return {kind: "a2a", uri: target, label: target}
+  }
+  if starts_with(target, "worker://") {
+    let queue = trim(substring(target, len("worker://"), len(target) - len("worker://")))
+    return {kind: "worker", id: queue, label: queue}
+  }
+  let persona = if starts_with(target, "persona://") {
+    trim(substring(target, len("persona://"), len(target) - len("persona://")))
+  } else {
+    target
+  }
+  return {kind: route_target?.transport ?? "persona", id: persona, label: persona}
+}
+
+fn __handoff_budget_exhausted(handoff, context) -> bool {
+  if context?.budget_exhausted {
+    return true
+  }
+  let budget = handoff?.budget_remaining
+  return (budget?.tokens != nil && budget.tokens <= 0)
+    || (budget?.tool_calls != nil && budget.tool_calls <= 0)
+    || (budget?.dollars != nil && budget.dollars <= 0.0)
+}
+
+fn __handoff_approval_denied(handoff, context) -> bool {
+  if context?.approval_denied {
+    return true
+  }
+  let status = lowercase(__handoff_value_string(context?.approval_status ?? handoff?.approval_status))
+  return status == "denied" || status == "rejected"
+}
+
+fn __handoff_predicate_matches(raw_when, handoff, context) -> bool {
+  let when = __handoff_value_string(raw_when)
+  if when == "" || when == "always" {
+    return true
+  }
+  if when == "budget_exhausted" {
+    return __handoff_budget_exhausted(handoff, context)
+  }
+  if when == "approval_denied" {
+    return __handoff_approval_denied(handoff, context)
+  }
+  let predicates = context?.predicates ?? {}
+  let predicate = predicates[when]
+  if __handoff_is_callable(predicate) {
+    return predicate(handoff, context)
+  }
+  return false
+}
+
+fn __handoff_decision(route, route_index, route_target, target_index, handoff, context) {
+  let raw_target = __handoff_value_string(route_target?.target)
+  let target = __handoff_target_record(raw_target, route_target)
+  return {
+    route_id: route?.id,
+    route_index: route_index,
+    target_index: target_index,
+    handoff_id: handoff?.id,
+    handoff_kind: __handoff_kind(handoff, context),
+    source_persona: __handoff_source(handoff, context),
+    target: raw_target,
+    target_persona_or_human: target,
+    matched_when: route_target?.when ?? "always",
+    selected_at: date_iso(),
+    dispatch_kind: target.kind,
+    dispatch_status: "selected",
+    metadata: route?.metadata ?? {} + route_target?.metadata ?? {},
+  }
+}
+
+/** Return the first matching route decision for a handoff payload. */
+pub fn handoff_route_select(handoff_payload, routes = nil, context = nil) {
+  let route_table = routes ?? handoff_routes()
+  let kind = __handoff_kind(handoff_payload, context)
+  let source = __handoff_source(handoff_payload, context)
+  for (route_index, route) in iter(route_table).enumerate() {
+    if !__handoff_route_matches(route, kind, source) {
+      continue
+    }
+    var fallback = nil
+    for (target_index, route_target) in iter(route?.route ?? []).enumerate() {
+      let when = __handoff_value_string(route_target?.when)
+      if when == "" || when == "always" {
+        if fallback == nil {
+          fallback = __handoff_decision(route, route_index, route_target, target_index, handoff_payload, context)
+        }
+        continue
+      }
+      if __handoff_predicate_matches(route_target?.when, handoff_payload, context) {
+        return __handoff_decision(route, route_index, route_target, target_index, handoff_payload, context)
+      }
+    }
+    if fallback != nil {
+      return fallback
+    }
+  }
+  return nil
+}
+
+/** Normalize a handoff after selecting and embedding its route decision. */
+pub fn handoff_routed(payload, routes = nil, context = nil) {
+  let decision = handoff_route_select(payload, routes, context)
+  if decision == nil {
+    throw "handoff_routed: no matching handoff route"
+  }
+  let metadata = payload?.metadata ?? {} + {route_decision: decision}
+  return handoff(
+    payload ?? {}
+      + {
+      target_persona_or_human: decision.target_persona_or_human,
+      route_decision: decision,
+      metadata: metadata,
+    },
+  )
+}
+
+fn __handoff_dispatch_topic(decision) -> string {
+  if decision.dispatch_kind == "human" {
+    return "handoff.human.inbox"
+  }
+  if decision.dispatch_kind == "a2a" {
+    return "handoff.a2a.outbox"
+  }
+  if decision.dispatch_kind == "worker" {
+    return "handoff.worker.outbox"
+  }
+  return "handoff.persona.invocations"
+}
+
+fn __handoff_dispatcher(options, selected) {
+  if __handoff_is_callable(options?.dispatcher) {
+    return options.dispatcher
+  }
+  let dispatchers = options?.dispatchers ?? {}
+  let target_id = selected?.target_persona_or_human?.id
+  let target = selected?.target
+  if __handoff_is_callable(dispatchers[target]) {
+    return dispatchers[target]
+  }
+  if __handoff_is_callable(dispatchers[target_id]) {
+    return dispatchers[target_id]
+  }
+  if __handoff_is_callable(dispatchers[selected?.dispatch_kind]) {
+    return dispatchers[selected.dispatch_kind]
+  }
+  return nil
+}
+
+/** Persist the selected handoff route and enqueue a target-specific dispatch record. */
+pub fn handoff_dispatch(handoff_payload, decision = nil, options = nil) {
+  let handoff_value = handoff(handoff_payload)
+  let selected = decision ?? handoff_value?.route_decision
+  if selected == nil {
+    throw "handoff_dispatch: route decision is required"
+  }
+  let dispatch = selected
+    + {dispatch_status: "enqueued", dispatch_receipt: nil}
+  let payload = {
+    handoff_id: handoff_value.id,
+    handoff: handoff_value,
+    decision: dispatch,
+    tenant_id: options?.tenant_id,
+  }
+  let decision_event_id = event_log
+    .emit(
+    "handoff.dispatch.decisions",
+    "handoff_route_selected",
+    payload,
+    {handoff_id: handoff_value.id, handoff_kind: handoff_value.kind, target: selected.target},
+  )
+  let enqueue_event_id = event_log
+    .emit(
+    __handoff_dispatch_topic(selected),
+    "handoff_dispatch_enqueued",
+    payload + {decision_event_id: decision_event_id},
+    {handoff_id: handoff_value.id, target: selected.target},
+  )
+  let dispatcher = __handoff_dispatcher(options, selected)
+  let invocation_result = if dispatcher == nil {
+    nil
+  } else {
+    dispatcher(payload + {decision_event_id: decision_event_id, enqueue_event_id: enqueue_event_id})
+  }
+  return dispatch
+    + {
+    dispatch_receipt: {
+      decision_event_id: decision_event_id,
+      enqueue_event_id: enqueue_event_id,
+      topic: __handoff_dispatch_topic(selected),
+      invocation_result: invocation_result,
+    },
+  }
+}

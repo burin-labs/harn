@@ -828,12 +828,14 @@ mod tests {
                 kind: "persona".to_string(),
                 id: Some("review_captain".to_string()),
                 label: Some("review_captain".to_string()),
+                uri: None,
             },
             task: "Review the patch".to_string(),
             reason: "Merge queue requires review".to_string(),
             created_at: "2026-04-28T00:00:00Z".to_string(),
             ..Default::default()
         }
+        .normalize()
     }
 
     fn standard_fixture_events() -> Vec<AgentEvent> {
@@ -1237,6 +1239,7 @@ mod tests {
                         kind: "persona".to_string(),
                         id: Some("review_captain".to_string()),
                         label: Some("review_captain".to_string()),
+                        uri: None,
                     },
                     task: "Review the patch".to_string(),
                     reason: "Merge queue requires review".to_string(),
@@ -1271,6 +1274,7 @@ mod tests {
                 kind: "persona".to_string(),
                 id: Some("review_captain".to_string()),
                 label: Some("review_captain".to_string()),
+                uri: None,
             },
             task: "Review the patch".to_string(),
             reason: "Merge queue requires review".to_string(),

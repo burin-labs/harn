@@ -115,6 +115,10 @@ pub use mcp_server::{
     take_mcp_serve_resources, tool_registry_to_mcp_tools, McpServer,
 };
 pub use metadata::{register_metadata_builtins, register_scan_builtins};
+pub use orchestration::{
+    install_handoff_routes, snapshot_handoff_routes, HandoffRouteConfig,
+    HandoffRouteDecisionRecord, HandoffRouteTargetConfig,
+};
 pub use personas::{
     disable_persona, fire_schedule as fire_persona_schedule, fire_trigger as fire_persona_trigger,
     format_ms as format_persona_ms, now_ms as persona_now_ms, parse_rfc3339_ms as parse_persona_ms,

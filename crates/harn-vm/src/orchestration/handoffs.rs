@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
@@ -7,6 +8,11 @@ use super::{current_mutation_session, new_id, now_rfc3339, ArtifactRecord, RunRe
 const HANDOFF_TYPE: &str = "handoff_artifact";
 const HANDOFF_ARTIFACT_KIND: &str = "handoff";
 const RUN_RECEIPT_LINK_KIND: &str = "run_receipt";
+const DEFAULT_HANDOFF_KIND: &str = "handoff";
+
+thread_local! {
+    static HANDOFF_ROUTES: RefCell<Vec<HandoffRouteConfig>> = const { RefCell::new(Vec::new()) };
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -14,6 +20,7 @@ pub struct HandoffTargetRecord {
     pub kind: String,
     pub id: Option<String>,
     pub label: Option<String>,
+    pub uri: Option<String>,
 }
 
 impl HandoffTargetRecord {
@@ -33,6 +40,13 @@ impl HandoffTargetRecord {
         {
             self.label = None;
         }
+        if self
+            .uri
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            self.uri = None;
+        }
         self
     }
 
@@ -41,6 +55,116 @@ impl HandoffTargetRecord {
             .clone()
             .or_else(|| self.id.clone())
             .unwrap_or_else(|| "unknown".to_string())
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct HandoffRouteTargetConfig {
+    pub id: Option<String>,
+    pub target: String,
+    pub when: Option<String>,
+    pub transport: Option<String>,
+    pub allow_cleartext: Option<bool>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+impl HandoffRouteTargetConfig {
+    pub fn normalize(mut self) -> Self {
+        if self
+            .id
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            self.id = None;
+        }
+        self.target = self.target.trim().to_string();
+        self.when = self
+            .when
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        self.transport = self
+            .transport
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        self
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct HandoffRouteConfig {
+    pub id: Option<String>,
+    pub kind: String,
+    pub from: String,
+    #[serde(alias = "routes")]
+    pub route: Vec<HandoffRouteTargetConfig>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+impl HandoffRouteConfig {
+    pub fn normalize(mut self) -> Self {
+        if self
+            .id
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            self.id = None;
+        }
+        self.kind = normalize_handoff_kind(&self.kind);
+        self.from = self.from.trim().to_string();
+        self.route = self
+            .route
+            .into_iter()
+            .map(HandoffRouteTargetConfig::normalize)
+            .collect();
+        self
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct HandoffRouteDecisionRecord {
+    pub route_id: Option<String>,
+    pub route_index: Option<u64>,
+    pub target_index: Option<u64>,
+    pub handoff_id: Option<String>,
+    pub handoff_kind: String,
+    pub source_persona: String,
+    pub target: String,
+    pub target_persona_or_human: HandoffTargetRecord,
+    pub matched_when: String,
+    pub selected_at: String,
+    pub dispatch_kind: String,
+    pub dispatch_status: Option<String>,
+    pub dispatch_receipt: Option<serde_json::Value>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+impl HandoffRouteDecisionRecord {
+    pub fn normalize(mut self) -> Self {
+        self.handoff_id = self
+            .handoff_id
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        self.handoff_kind = normalize_handoff_kind(&self.handoff_kind);
+        self.source_persona = self.source_persona.trim().to_string();
+        self.target = self.target.trim().to_string();
+        self.target_persona_or_human = self.target_persona_or_human.normalize();
+        self.matched_when = self.matched_when.trim().to_string();
+        if self.matched_when.is_empty() {
+            self.matched_when = "always".to_string();
+        }
+        self.selected_at = self.selected_at.trim().to_string();
+        if self.selected_at.is_empty() {
+            self.selected_at = now_rfc3339();
+        }
+        self.dispatch_kind = normalize_target_kind(&self.dispatch_kind);
+        self.dispatch_status = self
+            .dispatch_status
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        self
     }
 }
 
@@ -129,6 +253,7 @@ impl HandoffReceiptLinkRecord {
 pub struct HandoffArtifact {
     #[serde(rename = "_type")]
     pub type_name: String,
+    pub kind: String,
     pub id: String,
     pub parent_run_id: Option<String>,
     pub source_persona: String,
@@ -145,6 +270,7 @@ pub struct HandoffArtifact {
     pub deadline_checkback: Option<HandoffDeadlineCheckbackRecord>,
     pub confidence: Option<f64>,
     pub receipt_links: Vec<HandoffReceiptLinkRecord>,
+    pub route_decision: Option<HandoffRouteDecisionRecord>,
     pub created_at: String,
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
@@ -154,6 +280,7 @@ impl HandoffArtifact {
         if self.type_name.is_empty() {
             self.type_name = HANDOFF_TYPE.to_string();
         }
+        self.kind = normalize_handoff_kind(&self.kind);
         if self.id.is_empty() {
             self.id = new_id("handoff");
         }
@@ -177,9 +304,25 @@ impl HandoffArtifact {
             .into_iter()
             .map(HandoffReceiptLinkRecord::normalize)
             .collect();
+        self.route_decision = self
+            .route_decision
+            .map(HandoffRouteDecisionRecord::normalize);
         self.confidence = self.confidence.map(|value| value.clamp(0.0, 1.0));
         self
     }
+}
+
+pub fn install_handoff_routes(routes: Vec<HandoffRouteConfig>) {
+    HANDOFF_ROUTES.with(|installed| {
+        *installed.borrow_mut() = routes
+            .into_iter()
+            .map(HandoffRouteConfig::normalize)
+            .collect();
+    });
+}
+
+pub fn snapshot_handoff_routes() -> Vec<HandoffRouteConfig> {
+    HANDOFF_ROUTES.with(|installed| installed.borrow().clone())
 }
 
 fn normalize_string_list(values: Vec<String>) -> Vec<String> {
@@ -195,7 +338,18 @@ fn normalize_target_kind(kind: &str) -> String {
     match kind.trim() {
         "human" => "human".to_string(),
         "persona" => "persona".to_string(),
+        "a2a" | "external_a2a" => "a2a".to_string(),
+        "worker" | "queue" => "worker".to_string(),
         _ => "persona".to_string(),
+    }
+}
+
+fn normalize_handoff_kind(kind: &str) -> String {
+    let kind = kind.trim();
+    if kind.is_empty() {
+        DEFAULT_HANDOFF_KIND.to_string()
+    } else {
+        kind.to_string()
     }
 }
 
@@ -216,6 +370,11 @@ pub fn normalize_handoff_artifact_json(
     }
     if handoff.reason.is_empty() {
         return Err("handoff reason is required".to_string());
+    }
+    if let Some(decision) = handoff.route_decision.as_ref() {
+        if decision.target_persona_or_human.display_name() == "unknown" {
+            return Err("handoff route_decision target is required".to_string());
+        }
     }
     Ok(handoff)
 }
@@ -356,6 +515,9 @@ fn merge_handoffs(mut left: HandoffArtifact, right: HandoffArtifact) -> HandoffA
     if left.confidence.is_none() {
         left.confidence = right.confidence;
     }
+    if left.route_decision.is_none() {
+        left.route_decision = right.route_decision;
+    }
     left.receipt_links = merge_receipt_links(left.receipt_links, right.receipt_links);
     for (key, value) in right.metadata {
         left.metadata.entry(key).or_insert(value);
@@ -365,6 +527,7 @@ fn merge_handoffs(mut left: HandoffArtifact, right: HandoffArtifact) -> HandoffA
 
 pub fn handoff_context_text(handoff: &HandoffArtifact) -> String {
     let mut lines = vec![
+        format!("<kind>{}</kind>", handoff.kind),
         format!(
             "<source_persona>{}</source_persona>",
             handoff.source_persona
@@ -444,6 +607,12 @@ pub fn handoff_context_text(handoff: &HandoffArtifact) -> String {
     if let Some(confidence) = handoff.confidence {
         lines.push(format!("<confidence>{confidence:.2}</confidence>"));
     }
+    if let Some(decision) = handoff.route_decision.as_ref() {
+        lines.push(format!(
+            "<route_decision target=\"{}\" when=\"{}\" dispatch=\"{}\" selected_at=\"{}\" />",
+            decision.target, decision.matched_when, decision.dispatch_kind, decision.selected_at
+        ));
+    }
     format!("<handoff>\n{}\n</handoff>", lines.join("\n"))
 }
 
@@ -465,6 +634,7 @@ fn handoff_target_label(handoff: &HandoffArtifact) -> String {
 fn handoff_metadata(handoff: &HandoffArtifact) -> BTreeMap<String, serde_json::Value> {
     BTreeMap::from([
         ("handoff_id".to_string(), serde_json::json!(handoff.id)),
+        ("handoff_kind".to_string(), serde_json::json!(handoff.kind)),
         (
             "target_kind".to_string(),
             serde_json::json!(handoff.target_persona_or_human.kind),

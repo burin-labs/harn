@@ -213,6 +213,12 @@ async fn async_main() {
                     "`harn check` requires at least one target path, or `--workspace` with `[workspace].pipelines`",
                 );
             }
+            for target in &target_strings {
+                if let Err(error) = package::validate_runtime_manifest_extensions(Path::new(target))
+                {
+                    command_error(&format!("manifest extension validation failed: {error}"));
+                }
+            }
             let targets: Vec<&str> = target_strings.iter().map(String::as_str).collect();
             let files = commands::check::collect_harn_targets(&targets);
             if files.is_empty() {

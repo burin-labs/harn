@@ -924,6 +924,110 @@ pub(crate) fn validate_static_trigger_configs(
     Ok(())
 }
 
+pub(crate) fn validate_handoff_routes(
+    routes: &[harn_vm::HandoffRouteConfig],
+    manifest: &Manifest,
+) -> Result<(), PackageError> {
+    let known_personas = manifest
+        .personas
+        .iter()
+        .filter_map(|persona| persona.name.as_deref())
+        .collect::<HashSet<_>>();
+    let mut seen_ids = HashSet::new();
+    for (route_index, route) in routes.iter().enumerate() {
+        let field = format!("handoff_routes[{route_index}]");
+        if route.kind.trim().is_empty() {
+            return Err(PackageError::Validation(format!(
+                "{field}.kind is required"
+            )));
+        }
+        if route.from.trim().is_empty() {
+            return Err(PackageError::Validation(format!(
+                "{field}.from is required"
+            )));
+        }
+        let route = route.clone().normalize();
+        if route.from != "*"
+            && !known_personas.is_empty()
+            && !known_personas.contains(route.from.as_str())
+        {
+            return Err(PackageError::Validation(format!(
+                "{field}.from references unknown persona '{}'",
+                route.from
+            )));
+        }
+        if let Some(id) = route.id.as_deref() {
+            if !seen_ids.insert(id.to_string()) {
+                return Err(PackageError::Validation(format!(
+                    "duplicate handoff route id '{id}'"
+                )));
+            }
+        }
+        if route.route.is_empty() {
+            return Err(PackageError::Validation(format!(
+                "{field}.route requires at least one target"
+            )));
+        }
+        for (target_index, target) in route.route.iter().enumerate() {
+            let target_field = format!("{field}.route[{target_index}]");
+            let target = target.clone().normalize();
+            if target.target.trim().is_empty() {
+                return Err(PackageError::Validation(format!(
+                    "{target_field}.target is required"
+                )));
+            }
+            if target.when.as_deref().is_some_and(|value| value.is_empty()) {
+                return Err(PackageError::Validation(format!(
+                    "{target_field}.when must not be empty"
+                )));
+            }
+            validate_handoff_route_target(&target_field, &target.target, &known_personas)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_handoff_route_target(
+    field: &str,
+    target: &str,
+    known_personas: &HashSet<&str>,
+) -> Result<(), PackageError> {
+    if target.starts_with("human:") {
+        let group = target.trim_start_matches("human:").trim();
+        if group.is_empty() {
+            return Err(PackageError::Validation(format!(
+                "{field}.target human route requires a group after `human:`"
+            )));
+        }
+        return Ok(());
+    }
+    if target.starts_with("a2a://") {
+        let endpoint = target.trim_start_matches("a2a://").trim();
+        if endpoint.is_empty() {
+            return Err(PackageError::Validation(format!(
+                "{field}.target a2a route requires an endpoint"
+            )));
+        }
+        return Ok(());
+    }
+    if target.starts_with("worker://") {
+        let queue = target.trim_start_matches("worker://").trim();
+        if queue.is_empty() {
+            return Err(PackageError::Validation(format!(
+                "{field}.target worker route requires a queue"
+            )));
+        }
+        return Ok(());
+    }
+    let persona = target.strip_prefix("persona://").unwrap_or(target);
+    if !known_personas.is_empty() && !known_personas.contains(persona) {
+        return Err(PackageError::Validation(format!(
+            "{field}.target references unknown persona '{persona}'"
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn parse_trigger_allow_cleartext(value: &toml::Value) -> Result<bool, PackageError> {
     value
         .as_bool()

@@ -453,6 +453,15 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         has_rest: false,
         where_clauses: &[],
     },
+    // handoff_routes() -> runtime handoff route table from harn.toml.
+    BuiltinSignature {
+        name: "handoff_routes",
+        params: &[],
+        returns: TY_LIST,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
     // load_run_tree(path) — load a run record tree from disk.
     BuiltinSignature {
         name: "load_run_tree",
