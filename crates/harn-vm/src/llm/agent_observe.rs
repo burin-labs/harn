@@ -53,9 +53,34 @@ thread_local! {
     /// write them once per stage instead of once per request.
     static LAST_SYSTEM_PROMPT_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
     static LAST_TOOL_SCHEMAS_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
+    static TRANSCRIPT_DIR_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+fn reset_transcript_dedup() {
+    LAST_SYSTEM_PROMPT_HASH.with(|hash| *hash.borrow_mut() = None);
+    LAST_TOOL_SCHEMAS_HASH.with(|hash| *hash.borrow_mut() = None);
+}
+
+pub(super) fn push_llm_transcript_dir(dir: &str) {
+    if dir.trim().is_empty() {
+        return;
+    }
+    TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow_mut().push(dir.to_string()));
+    reset_transcript_dedup();
+}
+
+pub(super) fn pop_llm_transcript_dir() {
+    TRANSCRIPT_DIR_STACK.with(|stack| {
+        stack.borrow_mut().pop();
+    });
+    reset_transcript_dedup();
 }
 
 fn current_transcript_dir() -> Option<String> {
+    let stacked = TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow().last().cloned());
+    if stacked.is_some() {
+        return stacked;
+    }
     std::env::var("HARN_LLM_TRANSCRIPT_DIR")
         .ok()
         .filter(|d| !d.is_empty())
@@ -935,6 +960,26 @@ mod retry_tests {
             message: msg.to_string(),
             category,
         }
+    }
+
+    #[test]
+    fn transcript_dir_option_overrides_env_until_popped() {
+        push_llm_transcript_dir("/tmp/harn-transcript-a");
+        assert_eq!(
+            current_transcript_dir().as_deref(),
+            Some("/tmp/harn-transcript-a")
+        );
+        push_llm_transcript_dir("/tmp/harn-transcript-b");
+        assert_eq!(
+            current_transcript_dir().as_deref(),
+            Some("/tmp/harn-transcript-b")
+        );
+        pop_llm_transcript_dir();
+        assert_eq!(
+            current_transcript_dir().as_deref(),
+            Some("/tmp/harn-transcript-a")
+        );
+        pop_llm_transcript_dir();
     }
 
     #[test]
