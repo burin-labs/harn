@@ -315,6 +315,14 @@ enum StageExecution {
         attempt_started_at: String,
         input_transcript: Option<VmValue>,
     },
+    HarnMapCall {
+        artifacts: Vec<ArtifactRecord>,
+        map_options: BTreeMap<String, VmValue>,
+        usage_before: UsageSnapshot,
+        attempt_started_at: String,
+        input_transcript: Option<VmValue>,
+        consumed_artifact_ids: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -873,6 +881,19 @@ fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmE
                 );
             }
         }
+        StageExecution::HarnMapCall {
+            artifacts,
+            map_options,
+            ..
+        } => {
+            dict.insert("run_map_stage".to_string(), VmValue::Bool(true));
+            dict.insert("node".to_string(), to_vm(&scope.node)?);
+            dict.insert("artifacts".to_string(), to_vm(artifacts)?);
+            dict.insert(
+                "map_options".to_string(),
+                VmValue::Dict(Rc::new(map_options.clone())),
+            );
+        }
     }
     Ok(VmValue::Dict(Rc::new(dict)))
 }
@@ -1021,6 +1042,88 @@ async fn complete_harn_stage_call(
     })
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct WorkflowMapStageExecution {
+    result: serde_json::Value,
+    artifacts: Vec<ArtifactRecord>,
+    outcome: String,
+    branch: Option<String>,
+}
+
+fn complete_harn_map_stage_call(
+    usage_before: UsageSnapshot,
+    attempt_started_at: String,
+    input_transcript: Option<VmValue>,
+    consumed_artifact_ids: Vec<String>,
+    map_result: serde_json::Value,
+) -> ExecutedStage {
+    if let Some(error) = harn_stage_call_error(&map_result) {
+        return failed_executed_stage_from_error(
+            error,
+            &usage_before,
+            attempt_started_at,
+            input_transcript,
+            consumed_artifact_ids,
+        );
+    }
+    let executed: Result<WorkflowMapStageExecution, _> = serde_json::from_value(map_result);
+    let executed = match executed {
+        Ok(value) => value,
+        Err(error) => {
+            return failed_executed_stage_from_error(
+                VmError::Runtime(format!(
+                    "workflow_execute_map_stage returned invalid shape: {error}"
+                )),
+                &usage_before,
+                attempt_started_at,
+                input_transcript,
+                consumed_artifact_ids,
+            )
+        }
+    };
+    let usage = llm_usage_delta(&usage_before, &llm_usage_snapshot());
+    let success = !matches!(executed.branch.as_deref(), Some("failed"));
+    let artifacts = executed
+        .artifacts
+        .into_iter()
+        .map(ArtifactRecord::normalize)
+        .collect::<Vec<_>>();
+    ExecutedStage {
+        status: if success {
+            "completed".to_string()
+        } else {
+            "failed".to_string()
+        },
+        outcome: executed.outcome.clone(),
+        branch: executed.branch.clone(),
+        result: executed.result,
+        artifacts,
+        transcript: input_transcript,
+        verification: None,
+        usage,
+        error: if success {
+            None
+        } else {
+            Some("verification failed".to_string())
+        },
+        attempts: vec![crate::orchestration::RunStageAttemptRecord {
+            attempt: 1,
+            status: if success {
+                "completed".to_string()
+            } else {
+                "failed".to_string()
+            },
+            outcome: executed.outcome,
+            branch: executed.branch,
+            error: None,
+            verification: None,
+            started_at: attempt_started_at,
+            finished_at: Some(uuid::Uuid::now_v7().to_string()),
+        }],
+        consumed_artifact_ids,
+    }
+}
+
 async fn prepare_workflow_stage_state(
     mut state: WorkflowRunState,
     node_id: String,
@@ -1111,9 +1214,37 @@ async fn prepare_workflow_stage_state(
                 ))
             }
         }
+    } else if node.kind == "map" {
+        let selected_stage_artifacts = crate::orchestration::select_workflow_stage_artifacts(
+            &state.artifacts,
+            &node.context_policy,
+            &node.input_contract,
+        )
+        .await?
+        .artifacts;
+        let consumed_artifact_ids = selected_stage_artifacts
+            .iter()
+            .map(|artifact| artifact.id.clone())
+            .collect::<Vec<_>>();
+        let mut map_options = BTreeMap::new();
+        map_options.insert(
+            "task".to_string(),
+            VmValue::String(Rc::from(state.run.task.clone())),
+        );
+        if let Some(transcript) = transcript.clone() {
+            map_options.insert("transcript".to_string(), transcript);
+        }
+        StageExecution::HarnMapCall {
+            artifacts: state.artifacts.clone(),
+            map_options,
+            usage_before: llm_usage_snapshot(),
+            attempt_started_at: uuid::Uuid::now_v7().to_string(),
+            input_transcript: transcript,
+            consumed_artifact_ids,
+        }
     } else if matches!(
         node.kind.as_str(),
-        "map" | "subagent" | "fork" | "join" | "condition" | "reduce" | "escalation"
+        "subagent" | "fork" | "join" | "condition" | "reduce" | "escalation"
     ) {
         StageExecution::Precomputed(
             execute_stage_attempts(
@@ -1218,6 +1349,19 @@ async fn complete_workflow_stage_state(
             )
             .await?
         }
+        StageExecution::HarnMapCall {
+            usage_before,
+            attempt_started_at,
+            input_transcript,
+            consumed_artifact_ids,
+            ..
+        } => complete_harn_map_stage_call(
+            usage_before,
+            attempt_started_at,
+            input_transcript,
+            consumed_artifact_ids,
+            llm_result,
+        ),
     };
     state.transcript = executed
         .transcript

@@ -176,14 +176,6 @@ type StageAttemptResult = (
     Option<serde_json::Value>,
 );
 
-#[derive(Debug, Deserialize)]
-struct WorkflowMapStageExecution {
-    result: serde_json::Value,
-    artifacts: Vec<ArtifactRecord>,
-    outcome: String,
-    branch: Option<String>,
-}
-
 pub(super) async fn execute_stage_attempts(
     task: &str,
     node_id: &str,
@@ -223,52 +215,6 @@ pub(super) async fn execute_stage_attempts(
             ));
         }
         let r: Result<StageAttemptResult, VmError> = match node.kind.as_str() {
-            "map" => {
-                let mut options = std::collections::BTreeMap::new();
-                options.insert(
-                    "task".to_string(),
-                    crate::value::VmValue::String(std::rc::Rc::from(task.to_string())),
-                );
-                if let Some(transcript) = transcript.clone() {
-                    options.insert("transcript".to_string(), transcript);
-                }
-                let executed = crate::stdlib::harn_entry::call_harn_export_by_name(
-                    "std/workflow/map",
-                    "workflow_execute_map_stage",
-                    "workflow_execute_map_stage",
-                    &[
-                        crate::value::VmValue::String(std::rc::Rc::from(node_id.to_string())),
-                        crate::stdlib::json_to_vm_value(
-                            &serde_json::to_value(node).unwrap_or_default(),
-                        ),
-                        crate::stdlib::json_to_vm_value(
-                            &serde_json::to_value(artifacts).unwrap_or_default(),
-                        ),
-                        crate::value::VmValue::Dict(std::rc::Rc::new(options)),
-                    ],
-                )
-                .await?;
-                let executed: WorkflowMapStageExecution = serde_json::from_value(
-                    crate::llm::vm_value_to_json(&executed),
-                )
-                .map_err(|error| {
-                    VmError::Runtime(format!(
-                        "workflow_execute_map_stage returned invalid shape: {error}"
-                    ))
-                })?;
-                Ok((
-                    executed.result,
-                    executed
-                        .artifacts
-                        .into_iter()
-                        .map(ArtifactRecord::normalize)
-                        .collect(),
-                    transcript.clone(),
-                    executed.outcome,
-                    executed.branch,
-                    None,
-                ))
-            }
             "subagent" => {
                 let (result, produced, next_transcript) =
                     super::super::agents_workers::execute_delegated_stage(
