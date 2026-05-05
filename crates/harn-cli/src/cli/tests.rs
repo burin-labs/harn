@@ -332,7 +332,16 @@ fn test_parses_serve_mcp_flags() {
 
 #[test]
 fn test_parses_serve_acp() {
-    let cli = Cli::parse_from(["harn", "serve", "acp", "agent.harn"]);
+    let cli = Cli::parse_from([
+        "harn",
+        "serve",
+        "acp",
+        "--api-key",
+        "alpha,beta",
+        "--hmac-secret",
+        "shared",
+        "agent.harn",
+    ]);
 
     let Command::Serve(args) = cli.command.unwrap() else {
         panic!("expected serve command");
@@ -340,6 +349,8 @@ fn test_parses_serve_acp() {
     let crate::cli::ServeCommand::Acp(serve) = args.command else {
         panic!("expected serve acp");
     };
+    assert_eq!(serve.api_key, vec!["alpha".to_string(), "beta".to_string()]);
+    assert_eq!(serve.hmac_secret.as_deref(), Some("shared"));
     assert_eq!(serve.file, "agent.harn");
 }
 

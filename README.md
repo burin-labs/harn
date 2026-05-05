@@ -453,6 +453,7 @@ Run Harn as an ACP backend:
 
 ```bash
 harn serve acp agent.harn
+harn serve acp --api-key "$HARN_ACP_KEY" agent.harn
 ```
 
 Inspect persisted run records:

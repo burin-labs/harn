@@ -12,7 +12,7 @@ mod execute;
 mod io;
 mod modes;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -26,7 +26,10 @@ use harn_vm::visible_text::{sanitize_visible_assistant_text, VisibleTextState};
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
-use crate::{AdapterDescriptor, AuthPolicy, AuthRequest, AuthorizationDecision};
+use crate::{
+    AdapterDescriptor, AuthMethodConfig, AuthPolicy, AuthRequest, AuthenticatedPrincipal,
+    AuthorizationDecision,
+};
 use commands::{
     discover_commands, parse_slash_invocation, render_available_commands, DiscoveredCommand,
 };
@@ -88,6 +91,7 @@ pub(super) const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
 ];
 
 pub(super) const HARN_CONTENT_EXTENSION_FIELDS: &[&str] = &["visible_delta", "visible_text"];
+const ACP_AUTH_REQUIRED_CODE: i64 = -32000;
 
 fn harn_acp_extension_meta() -> serde_json::Value {
     serde_json::json!({
@@ -703,6 +707,101 @@ fn prompt_messages_for_content(content: &[serde_json::Value]) -> Vec<serde_json:
     })]
 }
 
+fn harn_auth_meta(
+    params: &serde_json::Value,
+) -> Option<&serde_json::Map<String, serde_json::Value>> {
+    params
+        .get("_meta")
+        .and_then(|value| value.get("harn"))
+        .and_then(|value| value.as_object())
+}
+
+fn harn_auth_string<'a>(
+    meta: &'a serde_json::Map<String, serde_json::Value>,
+    fields: &[&str],
+) -> Option<&'a str> {
+    fields
+        .iter()
+        .find_map(|field| meta.get(*field).and_then(|value| value.as_str()))
+        .or_else(|| {
+            let credentials = meta.get("credentials")?.as_object()?;
+            fields
+                .iter()
+                .find_map(|field| credentials.get(*field).and_then(|value| value.as_str()))
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn harn_auth_headers(
+    meta: &serde_json::Map<String, serde_json::Value>,
+) -> BTreeMap<String, String> {
+    let Some(headers) = meta.get("headers").and_then(|value| value.as_object()) else {
+        return BTreeMap::new();
+    };
+    headers
+        .iter()
+        .filter_map(|(key, value)| {
+            value
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| (key.clone(), value.to_string()))
+        })
+        .collect()
+}
+
+fn acp_auth_request_for_method(
+    method: &AuthMethodConfig,
+    params: &serde_json::Value,
+) -> Result<AuthRequest, String> {
+    let meta = harn_auth_meta(params).ok_or_else(|| {
+        "authenticate requires `_meta.harn` credentials for Harn auth policies".to_string()
+    })?;
+    let mut request = AuthRequest {
+        method: harn_auth_string(meta, &["method"])
+            .unwrap_or("ACP")
+            .to_string(),
+        path: harn_auth_string(meta, &["path"])
+            .unwrap_or("authenticate")
+            .to_string(),
+        body: harn_auth_string(meta, &["body"])
+            .map(|value| value.as_bytes().to_vec())
+            .unwrap_or_default(),
+        headers: harn_auth_headers(meta),
+        validated_oauth: None,
+    };
+
+    match method {
+        AuthMethodConfig::ApiKey(_) => {
+            if request.headers.is_empty() {
+                let api_key =
+                    harn_auth_string(meta, &["apiKey", "api_key", "token", "bearerToken"])
+                        .ok_or_else(|| {
+                            "authenticate requires an API key in `_meta.harn.apiKey`".to_string()
+                        })?;
+                request
+                    .headers
+                    .insert("x-api-key".to_string(), api_key.to_string());
+            }
+        }
+        AuthMethodConfig::Hmac(_) => {
+            if request.headers.is_empty() {
+                return Err(
+                    "authenticate requires HMAC headers in `_meta.harn.headers`".to_string()
+                );
+            }
+        }
+        AuthMethodConfig::OAuth21(_) => {
+            return Err(
+                "OAuth ACP authentication requires transport-validated bearer claims".to_string(),
+            );
+        }
+    }
+
+    Ok(request)
+}
+
 /// ACP server that reads JSON-RPC requests from a transport and writes
 /// responses / notifications back to that same transport.
 pub struct AcpServer {
@@ -711,6 +810,8 @@ pub struct AcpServer {
     pipeline: Option<String>,
     /// Shared harn-serve auth policy for adapter entrypoints.
     auth_policy: AuthPolicy,
+    /// Principal authenticated through ACP's connection-level `authenticate` method.
+    authenticated_principal: Option<AuthenticatedPrincipal>,
     /// CLI/project hook used to install package-provided runtime extensions.
     runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
     /// Active sessions keyed by session ID.
@@ -744,6 +845,7 @@ impl AcpServer {
             },
             pipeline: config.pipeline,
             auth_policy: config.auth_policy,
+            authenticated_principal: None,
             runtime_configurator: config.runtime_configurator,
             sessions: HashMap::new(),
             next_id: AtomicU64::new(1),
@@ -769,6 +871,19 @@ impl AcpServer {
     /// Send a JSON-RPC error response.
     fn send_error(&self, id: &serde_json::Value, code: i64, message: &str) {
         let response = harn_vm::jsonrpc::error_response(id.clone(), code, message);
+        if let Ok(line) = serde_json::to_string(&response) {
+            self.write_line(&line);
+        }
+    }
+
+    fn send_error_with_data(
+        &self,
+        id: &serde_json::Value,
+        code: i64,
+        message: &str,
+        data: serde_json::Value,
+    ) {
+        let response = harn_vm::jsonrpc::error_response_with_data(id.clone(), code, message, data);
         if let Ok(line) = serde_json::to_string(&response) {
             self.write_line(&line);
         }
@@ -843,9 +958,96 @@ impl AcpServer {
                     "name": "harn",
                     "version": env!("CARGO_PKG_VERSION"),
                 },
-                "authMethods": [],
+                "authMethods": self.auth_policy.acp_auth_methods(),
             }),
         );
+    }
+
+    fn auth_required_data(&self) -> serde_json::Value {
+        serde_json::json!({
+            "authMethods": self.auth_policy.acp_auth_methods(),
+        })
+    }
+
+    fn send_auth_required(&self, id: &serde_json::Value) {
+        self.send_error_with_data(
+            id,
+            ACP_AUTH_REQUIRED_CODE,
+            "auth_required",
+            self.auth_required_data(),
+        );
+    }
+
+    fn requires_authentication(&self) -> bool {
+        !self.auth_policy.methods.is_empty() && self.authenticated_principal.is_none()
+    }
+
+    fn reject_unauthenticated(&self, id: &serde_json::Value) -> bool {
+        if !self.requires_authentication() {
+            return false;
+        }
+        if !id.is_null() {
+            self.send_auth_required(id);
+        }
+        true
+    }
+
+    async fn handle_authenticate(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
+        let method_id = match params.get("methodId").and_then(|value| value.as_str()) {
+            Some(method_id) => method_id,
+            None => {
+                self.send_error(id, -32602, "authenticate requires methodId");
+                return;
+            }
+        };
+        let Some(method) = self.auth_policy.method_by_acp_id(method_id) else {
+            self.send_error_with_data(
+                id,
+                -32602,
+                "authenticate methodId was not advertised",
+                self.auth_required_data(),
+            );
+            return;
+        };
+        let auth = match acp_auth_request_for_method(method, params) {
+            Ok(auth) => auth,
+            Err(message) => {
+                self.send_error_with_data(
+                    id,
+                    ACP_AUTH_REQUIRED_CODE,
+                    &message,
+                    self.auth_required_data(),
+                );
+                return;
+            }
+        };
+        match self.auth_policy.authorize(&auth).await {
+            AuthorizationDecision::Authorized(principal) => {
+                self.authenticated_principal = Some(principal.clone());
+                self.send_response(
+                    id,
+                    serde_json::json!({
+                        "_meta": {
+                            "harn": {
+                                "authenticated": true,
+                                "principal": {
+                                    "subject": principal.subject,
+                                    "scheme": principal.scheme,
+                                }
+                            }
+                        }
+                    }),
+                );
+            }
+            AuthorizationDecision::Rejected(message) => {
+                self.send_error_with_data(
+                    id,
+                    ACP_AUTH_REQUIRED_CODE,
+                    &message,
+                    self.auth_required_data(),
+                );
+            }
+        }
     }
 
     pub fn descriptor(&self) -> AdapterDescriptor {
@@ -1104,19 +1306,6 @@ impl AcpServer {
         };
         harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
         let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
-
-        let auth = AuthRequest {
-            method: "ACP".to_string(),
-            path: "session/prompt".to_string(),
-            ..Default::default()
-        };
-        match self.auth_policy.authorize(&auth).await {
-            AuthorizationDecision::Authorized(_) => {}
-            AuthorizationDecision::Rejected(message) => {
-                self.send_prompt_error(&session_id, id, &message);
-                return;
-            }
-        }
 
         let (source, source_path) = if let Some(ref pipeline_path) = self.pipeline {
             let full_path = if std::path::Path::new(pipeline_path).is_absolute() {
@@ -1730,52 +1919,100 @@ impl AcpServer {
             "initialize" => {
                 self.handle_initialize(&id);
             }
+            "authenticate" => {
+                self.handle_authenticate(&id, &params).await;
+            }
             "session/new" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_session_new(&id, &params);
             }
             "session/load" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_session_load(&id, &params).await;
             }
             "session/fork" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_session_fork(&id, &params);
             }
             "session/set_mode" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_session_set_mode(&id, &params);
             }
             "session/set_config_option" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_session_set_config_option(&id, &params);
             }
             "session/prompt" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_session_prompt(&id, &params).await;
             }
             "session/cancel" => {
                 self.handle_session_cancel(&params);
             }
             "session/input" | "user_message" | "agent/user_message" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_session_input(&params).await;
             }
             "agent/resume" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_agent_resume(&params);
             }
             "harn.hitl.respond" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_hitl_respond(&id, &params).await;
             }
             "workflow/signal" | "harn.workflow.signal" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_workflow_signal(&id, &params).await;
             }
             "workflow/query" | "harn.workflow.query" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_workflow_query(&id, &params);
             }
             "workflow/update" | "harn.workflow.update" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_workflow_update(&id, &params).await;
             }
             "workflow/pause" | "harn.workflow.pause" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_workflow_pause(&id, &params);
             }
             "workflow/resume" | "harn.workflow.resume" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_workflow_resume(&id, &params);
             }
             "session/list" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_session_list(&id);
             }
             _ => {
@@ -2138,8 +2375,8 @@ mod tests {
     use super::{
         acp_agent_capabilities, configured_llm_route_for_capabilities,
         sanitize_visible_assistant_text, AcpBridge, AcpOutput, AcpServer, AcpServerConfig,
-        SessionCancellation, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
-        HARN_AGENT_EVENT_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
+        SessionCancellation, ACP_AUTH_REQUIRED_CODE, ACP_SCHEMA_COMPATIBILITY,
+        HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
         HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
     };
     use crate::{ApiKeyAuthConfig, AuthMethodConfig, AuthPolicy};
@@ -3076,53 +3313,127 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn acp_prompt_uses_shared_auth_policy() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let config = AcpServerConfig::new(None).with_auth_policy(AuthPolicy {
-            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
-                keys: BTreeSet::from(["secret".to_string()]),
-            })],
-        });
-        let mut server = AcpServer::new_with_output(config, AcpOutput::Channel(tx));
+    async fn acp_authenticate_uses_shared_auth_policy() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let config = AcpServerConfig::new(None).with_auth_policy(AuthPolicy {
+                    methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+                        keys: BTreeSet::from(["secret".to_string()]),
+                    })],
+                });
+                let (request_tx, request_rx) = mpsc::unbounded_channel();
+                let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+                let server = tokio::task::spawn_local(super::run_acp_channel_server(
+                    config,
+                    request_rx,
+                    response_tx,
+                ));
 
-        server
-            .handle_incoming_message(serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "session/new",
-                "params": {"cwd": "."},
-            }))
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 0,
+                        "method": "initialize",
+                    }))
+                    .expect("send initialize");
+                let initialize = recv_json(&mut response_rx).await;
+                assert_eq!(
+                    initialize["result"]["authMethods"][0]["_meta"]["harn"]["scheme"],
+                    "api_key"
+                );
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "session/new",
+                        "params": {"cwd": "."},
+                    }))
+                    .expect("send unauthenticated session/new");
+                let blocked = recv_json(&mut response_rx).await;
+                assert_eq!(blocked["id"], 1);
+                assert_eq!(blocked["error"]["code"], ACP_AUTH_REQUIRED_CODE);
+                assert_eq!(blocked["error"]["message"], "auth_required");
+                assert_eq!(blocked["error"]["data"]["authMethods"][0]["id"], "apiKey");
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "authenticate",
+                        "params": {
+                            "methodId": "apiKey",
+                            "_meta": {"harn": {"apiKey": "secret"}}
+                        },
+                    }))
+                    .expect("send authenticate");
+                let authenticated = recv_json(&mut response_rx).await;
+                assert_eq!(authenticated["id"], 2);
+                assert_eq!(
+                    authenticated["result"]["_meta"]["harn"]["principal"]["scheme"],
+                    "api_key"
+                );
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "method": "session/new",
+                        "params": {"cwd": "."},
+                    }))
+                    .expect("send authenticated session/new");
+                let created = recv_json(&mut response_rx).await;
+                let session_id = created["result"]["sessionId"]
+                    .as_str()
+                    .expect("session id")
+                    .to_string();
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 4,
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": session_id,
+                            "prompt": [{"type": "text", "text": "println(\"allowed\")"}],
+                        },
+                    }))
+                    .expect("send authenticated prompt");
+                let mut saw_allowed = false;
+                let mut saw_response = false;
+                for _ in 0..16 {
+                    let message = recv_json(&mut response_rx).await;
+                    match message.get("method").and_then(|value| value.as_str()) {
+                        Some("host/capabilities") => {
+                            request_tx
+                                .send(serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "id": message["id"].clone(),
+                                    "result": {},
+                                }))
+                                .expect("send host/capabilities response");
+                        }
+                        Some("session/update") => {
+                            saw_allowed |= message["params"]["update"]["content"]["text"]
+                                .as_str()
+                                .is_some_and(|text| text == "allowed\n");
+                        }
+                        _ if message["id"] == 4 => {
+                            saw_response = true;
+                            assert_eq!(message["result"]["stopReason"], "end_turn");
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                assert!(saw_allowed, "authenticated prompt should execute");
+                assert!(saw_response, "authenticated prompt should complete");
+
+                drop(request_tx);
+                server.await.expect("ACP channel server task");
+            })
             .await;
-        let created = recv_json(&mut rx).await;
-        let session_id = created["result"]["sessionId"]
-            .as_str()
-            .expect("session id")
-            .to_string();
-
-        server
-            .handle_incoming_message(serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "session/prompt",
-                "params": {
-                    "sessionId": session_id,
-                    "prompt": [{"type": "text", "text": "println(\"blocked\")"}],
-                },
-            }))
-            .await;
-
-        let update = recv_json(&mut rx).await;
-        assert_eq!(update["method"], "session/update");
-        assert_eq!(
-            update["params"]["update"]["content"]["_meta"]["harn"]["visible_delta"],
-            "Error: missing API key"
-        );
-        assert!(update["params"]["update"]["content"]
-            .get("visible_delta")
-            .is_none());
-        let error = recv_json(&mut rx).await;
-        assert_eq!(error["id"], 2);
-        assert_eq!(error["error"]["message"], "missing API key");
     }
 
     /// `session/new` returns the legacy `SessionModeState` and the

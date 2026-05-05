@@ -1051,7 +1051,9 @@ is preserved and rewrites internally to `harn serve a2a <file>`.
 hosts. It creates ACP sessions, executes the target pipeline for each
 `session/prompt`, streams `AgentEvent` values as `session/update`
 notifications, and forwards permission prompts through
-`session/request_permission`.
+`session/request_permission`. Use `--api-key <key>` / `HARN_SERVE_API_KEY` or
+`--hmac-secret <secret>` / `HARN_SERVE_HMAC_SECRET` to advertise ACP
+`authMethods` and require `authenticate` before protected session methods.
 
 See [MCP and ACP Integration](./mcp-and-acp.md) and
 [Outbound workflow server](./harn-serve.md) for protocol details.
