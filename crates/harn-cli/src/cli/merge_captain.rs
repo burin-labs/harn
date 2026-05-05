@@ -12,6 +12,8 @@ pub(crate) enum MergeCaptainCommand {
     Run(MergeCaptainRunArgs),
     /// Run a route/timeout ladder and write per-tier eval artifacts.
     Ladder(MergeCaptainLadderArgs),
+    /// Run scenario × variant sweeps and diff iteration reports.
+    Iterate(MergeCaptainIterateArgs),
     /// Audit a JSONL transcript against the Merge Captain oracle.
     Audit(MergeCaptainAuditArgs),
     /// Manage a mock-repos playground (real temp git repos + fake GitHub HTTP).
@@ -34,6 +36,38 @@ pub(crate) struct MergeCaptainLadderArgs {
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub(crate) enum MergeCaptainLadderFormat {
     /// Human-readable summary suitable for terminals.
+    Text,
+    /// Pretty-printed JSON suitable for hosts and CI gates.
+    Json,
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("merge_captain_iterate_mode")
+        .args(["manifest", "diff"])
+        .multiple(false)
+        .required(true)
+))]
+pub(crate) struct MergeCaptainIterateArgs {
+    /// Iteration manifest (TOML or JSON).
+    pub manifest: Option<String>,
+    /// Diff two iteration directories or summary JSON files.
+    #[arg(long, value_names = ["BASELINE", "CANDIDATE"], num_args = 2)]
+    pub diff: Vec<String>,
+    /// Write the iteration or diff JSON report to this path.
+    #[arg(long = "report-out", value_name = "PATH")]
+    pub report_out: Option<String>,
+    /// Write the Markdown summary/diff to this path.
+    #[arg(long = "markdown-out", value_name = "PATH")]
+    pub markdown_out: Option<String>,
+    /// Output format. Defaults to `text`.
+    #[arg(long, value_enum, default_value_t = MergeCaptainIterateFormat::Text)]
+    pub format: MergeCaptainIterateFormat,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum MergeCaptainIterateFormat {
+    /// Human-readable Markdown summary suitable for terminals and artifacts.
     Text,
     /// Pretty-printed JSON suitable for hosts and CI gates.
     Json,

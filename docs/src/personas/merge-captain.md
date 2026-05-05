@@ -99,6 +99,21 @@ tier that completed correctly and every tier that degraded or looped. The
 same manifest can be run with `harn eval`, `harn test package --evals`, or
 `harn merge-captain ladder`, so host surfaces consume one JSON contract.
 
+## Agent iteration
+
+`harn merge-captain iterate` is the brute-force loop agents use after a prompt
+or Harn package change. The manifest declares scenarios and variants. Scenarios
+can be replay transcripts or mock-playground manifests; variants carry model
+route, timeout tier, package revision, and prompt-asset revision metadata. The
+runner writes one shareable directory with copied replay fixtures or materialized
+playgrounds, per-run transcripts/receipts/summaries, `summary.json`, and a
+Markdown table ranking variants by transcript-drift score and cost.
+
+```bash
+harn merge-captain iterate examples/personas/merge_captain/iterations/smoke.toml
+harn merge-captain iterate --diff previous-iteration candidate-iteration
+```
+
 ## Authoring per-repo policy
 
 Policies are JSON files under

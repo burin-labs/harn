@@ -7,15 +7,18 @@
 use std::path::{Path, PathBuf};
 
 use harn_vm::orchestration::{
-    audit_transcript, load_eval_pack_manifest, load_merge_captain_golden, load_transcript_jsonl,
-    AuditReport, MergeCaptainDriverBackend, MergeCaptainDriverMode, MergeCaptainDriverOptions,
+    audit_transcript, diff_merge_captain_iterations, load_eval_pack_manifest,
+    load_merge_captain_golden, load_merge_captain_iteration_manifest, load_transcript_jsonl,
+    render_iteration_diff_markdown, render_iteration_markdown, AuditReport,
+    MergeCaptainDriverBackend, MergeCaptainDriverMode, MergeCaptainDriverOptions,
     MergeCaptainGolden, PersonaEvalLadderManifest, PersonaEvalLadderReport,
 };
 use harn_vm::value::VmError;
 
 use crate::cli::{
     MergeCaptainAuditArgs, MergeCaptainAuditFormat, MergeCaptainBackendKind,
-    MergeCaptainLadderArgs, MergeCaptainLadderFormat, MergeCaptainRunArgs,
+    MergeCaptainIterateArgs, MergeCaptainIterateFormat, MergeCaptainLadderArgs,
+    MergeCaptainLadderFormat, MergeCaptainRunArgs,
 };
 
 pub(crate) fn run_driver(args: &MergeCaptainRunArgs) -> i32 {
@@ -132,6 +135,114 @@ pub(crate) fn run_ladder(args: &MergeCaptainLadderArgs) -> i32 {
     }
 }
 
+pub(crate) fn run_iterate(args: &MergeCaptainIterateArgs) -> i32 {
+    if !args.diff.is_empty() {
+        return run_iteration_diff(args);
+    }
+
+    let Some(manifest) = args.manifest.as_deref() else {
+        eprintln!("error: merge-captain iterate requires a manifest or --diff A B");
+        return 2;
+    };
+    let manifest_path = Path::new(manifest);
+    let manifest = match load_merge_captain_iteration_manifest(manifest_path) {
+        Ok(manifest) => manifest,
+        Err(VmError::Runtime(message)) => {
+            eprintln!("error: {message}");
+            return 1;
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            return 1;
+        }
+    };
+    let report = match harn_vm::orchestration::run_merge_captain_iteration(&manifest) {
+        Ok(report) => report,
+        Err(VmError::Runtime(message)) => {
+            eprintln!("error: {message}");
+            return 1;
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            return 1;
+        }
+    };
+
+    if let Some(path) = &args.report_out {
+        if let Err(error) = write_json(Path::new(path), &report, "merge-captain iteration report") {
+            eprintln!("error: {error}");
+            return 1;
+        }
+    }
+    let markdown = render_iteration_markdown(&report);
+    if let Some(path) = &args.markdown_out {
+        if let Err(error) = write_text(
+            Path::new(path),
+            &markdown,
+            "merge-captain iteration Markdown summary",
+        ) {
+            eprintln!("error: {error}");
+            return 1;
+        }
+    }
+
+    match args.format {
+        MergeCaptainIterateFormat::Json => print_json_value(&report),
+        MergeCaptainIterateFormat::Text => print!("{markdown}"),
+    }
+
+    if report.budget_exhausted || report.completed == 0 {
+        1
+    } else {
+        0
+    }
+}
+
+fn run_iteration_diff(args: &MergeCaptainIterateArgs) -> i32 {
+    if args.diff.len() != 2 {
+        eprintln!("error: --diff requires exactly two paths");
+        return 2;
+    }
+    let diff =
+        match diff_merge_captain_iterations(Path::new(&args.diff[0]), Path::new(&args.diff[1])) {
+            Ok(diff) => diff,
+            Err(VmError::Runtime(message)) => {
+                eprintln!("error: {message}");
+                return 1;
+            }
+            Err(error) => {
+                eprintln!("error: {error}");
+                return 1;
+            }
+        };
+    if let Some(path) = &args.report_out {
+        if let Err(error) = write_json(
+            Path::new(path),
+            &diff,
+            "merge-captain iteration diff report",
+        ) {
+            eprintln!("error: {error}");
+            return 1;
+        }
+    }
+    let markdown = render_iteration_diff_markdown(&diff);
+    if let Some(path) = &args.markdown_out {
+        if let Err(error) = write_text(
+            Path::new(path),
+            &markdown,
+            "merge-captain iteration Markdown diff",
+        ) {
+            eprintln!("error: {error}");
+            return 1;
+        }
+    }
+    match args.format {
+        MergeCaptainIterateFormat::Json => print_json_value(&diff),
+        MergeCaptainIterateFormat::Text => print!("{markdown}"),
+    }
+    0
+}
+
 fn load_ladder_manifest_for_cli(path: &Path) -> Result<PersonaEvalLadderManifest, VmError> {
     if let Some(ladder) = load_single_ladder_from_eval_pack(path)? {
         return Ok(ladder);
@@ -214,6 +325,19 @@ fn write_json<T: serde::Serialize>(path: &Path, value: &T, label: &str) -> Resul
         .map_err(|error| format!("failed to serialize {label}: {error}"))?;
     bytes.push(b'\n');
     std::fs::write(path, bytes)
+        .map_err(|error| format!("failed to write {label} {}: {error}", path.display()))
+}
+
+fn write_text(path: &Path, value: &str, label: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "failed to create {label} directory {}: {error}",
+                parent.display()
+            )
+        })?;
+    }
+    std::fs::write(path, value)
         .map_err(|error| format!("failed to write {label} {}: {error}", path.display()))
 }
 

@@ -703,12 +703,24 @@ Run, audit, or exercise Merge Captain fixtures.
 harn merge-captain run --backend replay examples/personas/merge_captain/transcripts/green_pr.jsonl --once
 harn merge-captain audit examples/personas/merge_captain/transcripts/green_pr.jsonl --golden examples/personas/merge_captain/goldens/green_pr.json
 harn merge-captain ladder personas/merge_captain/harn.eval.toml --format json --report-out .harn-runs/merge-captain-ladder/report.json
+harn merge-captain iterate examples/personas/merge_captain/iterations/smoke.toml --format json
+harn merge-captain iterate --diff .harn-runs/merge-captain-iterations/baseline .harn-runs/merge-captain-iterations/candidate
 ```
 
 `harn merge-captain ladder` runs every configured model route and timeout
 tier against the same backend fixture. It writes per-tier JSONL transcripts,
 receipts, and summaries, and emits an aggregate report with the first correct
 tier plus degraded or looping tiers.
+
+`harn merge-captain iterate` runs the next layer up: scenario × variant sweeps
+for agent-led prompt/package iteration. Each variant can carry model route,
+timeout tier, Harn package revision, and prompt-asset revision metadata. The
+iteration directory is self-contained: it stores copied replay fixtures or
+materialized mock playgrounds, per-run JSONL transcripts, receipts, summaries,
+`summary.json`, and `summary.md`. The aggregate table ranks variants by
+transcript-drift score, then cost. `--diff A B` compares two iteration
+directories or summary JSON files and marks scenario/variant cells as improved,
+regressed, unchanged, or missing.
 
 ## harn orchestrator
 

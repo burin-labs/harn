@@ -1,0 +1,61 @@
+{
+  "_type": "merge_captain_iteration_report",
+  "version": 1,
+  "id": "prompt-v2-candidate",
+  "name": "Prompt v2 candidate",
+  "artifact_root": "examples/personas/merge_captain/iterations/diff/candidate",
+  "summary_json_path": "examples/personas/merge_captain/iterations/diff/candidate-summary.json",
+  "summary_markdown_path": "examples/personas/merge_captain/iterations/diff/candidate-summary.md",
+  "pass": true,
+  "total": 1,
+  "completed": 1,
+  "skipped": 0,
+  "budget_exhausted": false,
+  "budget_exhausted_reason": null,
+  "total_cost_usd": 0.0,
+  "total_latency_ms": 120,
+  "runs": [
+    {
+      "id": "green-pr::value-route",
+      "scenario_id": "green-pr",
+      "variant_id": "value-route",
+      "backend": "replay",
+      "backend_source": "examples/personas/merge_captain/transcripts/green_pr.jsonl",
+      "model_route": "local/qwen-value",
+      "timeout_tier": "balanced",
+      "package_revision": "harn-package@workspace",
+      "prompt_asset_revision": "merge-captain/prompts@v2",
+      "pass": true,
+      "skipped": false,
+      "skip_reason": null,
+      "drift_score": 0,
+      "degradation_reasons": [],
+      "transcript_path": "runs/green-pr/value-route/event_log.jsonl",
+      "receipt_path": "runs/green-pr/value-route/receipt.json",
+      "summary_path": "runs/green-pr/value-route/summary.json",
+      "oracle_error_findings": 0,
+      "oracle_warn_findings": 0,
+      "cost_usd": 0.0,
+      "latency_ms": 120,
+      "tool_calls": 4,
+      "model_calls": 1,
+      "event_count": 9
+    }
+  ],
+  "rankings": [
+    {
+      "variant_id": "value-route",
+      "package_revision": "harn-package@workspace",
+      "prompt_asset_revision": "merge-captain/prompts@v2",
+      "scenarios_completed": 1,
+      "scenarios_passed": 1,
+      "skipped": 0,
+      "drift_score": 0,
+      "cost_usd": 0.0,
+      "latency_ms": 120
+    }
+  ],
+  "metadata": {
+    "worked_example": "The v2 prompt profile keeps the same deterministic transcript under budget."
+  }
+}

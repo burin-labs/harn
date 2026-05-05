@@ -1,0 +1,45 @@
+version = 1
+id = "issue-1021-mock-playground-smoke"
+name = "Merge Captain mock-playground iteration smoke"
+description = "Offline scenario x prompt-asset revision matrix for the agent iteration harness."
+base_dir = "."
+artifact-root = ".harn-runs/merge-captain-iterations/issue-1021-smoke"
+
+[budget]
+max-runs = 8
+max-wallclock-ms = 30000
+max-cost-usd = 0.01
+
+[[scenarios]]
+id = "single-green"
+description = "One low-risk PR in a materialized fake GitHub/fake git playground."
+
+[scenarios.backend]
+kind = "mock"
+path = "examples/merge_captain/scenarios/single_green.json"
+
+[[scenarios]]
+id = "three-repo-basic"
+description = "Green, stale, conflicting, and failing-CI PRs across three fake repos."
+
+[scenarios.backend]
+kind = "mock"
+path = "examples/merge_captain/scenarios/three_repo_basic.json"
+
+[[variants]]
+id = "value-route-tight-v1"
+model-route = "local/qwen-value"
+timeout-tier = "tight"
+package-revision = "harn-package@workspace"
+prompt-asset-revision = "merge-captain/prompts@v1"
+max-tool-calls = 1
+max-model-calls = 1
+
+[[variants]]
+id = "value-route-balanced-v2"
+model-route = "local/qwen-value"
+timeout-tier = "balanced"
+package-revision = "harn-package@workspace"
+prompt-asset-revision = "merge-captain/prompts@v2"
+max-tool-calls = 8
+max-model-calls = 1

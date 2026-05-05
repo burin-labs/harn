@@ -50,6 +50,27 @@ state-out-of-order) into non-zero exits. Without `--golden` the
 auditor falls back to default heuristics (write-tool detection,
 canonical Merge Captain state-step list).
 
+## Agent iteration harness
+
+`harn merge-captain iterate` is the outer loop for prompt/package tuning. It
+runs a scenario × variant matrix, where variants record the model route,
+timeout tier, Harn package revision, and prompt-asset revision under test. Each
+iteration directory is shareable: replay fixtures are copied under `fixtures/`,
+mock scenarios are materialized under `playgrounds/`, and every matrix cell
+writes the same JSONL transcript, receipt, and summary as `merge-captain run`.
+
+```bash
+harn merge-captain iterate examples/personas/merge_captain/iterations/smoke.toml
+
+harn merge-captain iterate --diff \
+  examples/personas/merge_captain/iterations/diff/baseline-summary.json \
+  examples/personas/merge_captain/iterations/diff/candidate-summary.json
+```
+
+The aggregate `summary.json` and `summary.md` rank variants by transcript-drift
+score, then cost. The checked-in `iterations/diff/` example shows a small prompt
+asset revision moving one green-PR cell from drift `25` to drift `0`.
+
 ## Wire format
 
 The transcript loader accepts either:
