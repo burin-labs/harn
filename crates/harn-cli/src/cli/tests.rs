@@ -507,6 +507,60 @@ fn test_parses_merge_captain_ladder_args() {
 }
 
 #[test]
+fn test_parses_merge_captain_iterate_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "merge-captain",
+        "iterate",
+        "examples/personas/merge_captain/iterations/smoke.toml",
+        "--report-out",
+        "iteration-report.json",
+        "--markdown-out",
+        "iteration.md",
+        "--format",
+        "json",
+    ]);
+
+    let Command::MergeCaptain(args) = cli.command.unwrap() else {
+        panic!("expected merge-captain command");
+    };
+    let super::MergeCaptainCommand::Iterate(iterate) = args.command else {
+        panic!("expected merge-captain iterate command");
+    };
+    assert_eq!(
+        iterate.manifest.as_deref(),
+        Some("examples/personas/merge_captain/iterations/smoke.toml")
+    );
+    assert_eq!(iterate.report_out.as_deref(), Some("iteration-report.json"));
+    assert_eq!(iterate.markdown_out.as_deref(), Some("iteration.md"));
+    assert!(matches!(
+        iterate.format,
+        crate::cli::MergeCaptainIterateFormat::Json
+    ));
+}
+
+#[test]
+fn test_parses_merge_captain_iterate_diff_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "merge-captain",
+        "iterate",
+        "--diff",
+        "baseline",
+        "candidate",
+    ]);
+
+    let Command::MergeCaptain(args) = cli.command.unwrap() else {
+        panic!("expected merge-captain command");
+    };
+    let super::MergeCaptainCommand::Iterate(iterate) = args.command else {
+        panic!("expected merge-captain iterate command");
+    };
+    assert_eq!(iterate.diff, vec!["baseline", "candidate"]);
+    assert!(iterate.manifest.is_none());
+}
+
+#[test]
 fn test_parses_trigger_replay_flags() {
     let cli = Cli::parse_from([
         "harn",

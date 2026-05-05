@@ -102,6 +102,53 @@ The same ladder manifests can live inside eval packs, so `harn eval
 personas/merge_captain/harn.eval.toml` and `harn test package --evals` use the
 same runner and JSON artifact contract as host TUI/CLI surfaces.
 
+Use `harn merge-captain iterate <manifest>` when an agent needs the brute-force
+outer loop: scenarios × variants, where variants include model route, timeout
+tier, Harn package revision, and prompt-asset revision metadata. The command
+copies replay fixtures or materializes mock playgrounds into one iteration
+directory, writes every run's JSONL transcript, receipt, and summary, then emits
+`summary.json` plus a Markdown ranking table sorted by transcript-drift score
+and cost.
+
+```bash
+harn merge-captain iterate examples/personas/merge_captain/iterations/smoke.toml \
+  --report-out .harn-runs/merge-captain-iterations/latest.json \
+  --markdown-out .harn-runs/merge-captain-iterations/latest.md
+
+harn merge-captain iterate --diff \
+  examples/personas/merge_captain/iterations/diff/baseline-summary.json \
+  examples/personas/merge_captain/iterations/diff/candidate-summary.json
+```
+
+Iteration manifests are intentionally small:
+
+```toml
+version = 1
+id = "merge-captain-local-loop"
+base_dir = "."
+artifact-root = ".harn-runs/merge-captain-iterations/local-loop"
+
+[budget]
+max-runs = 12
+max-wallclock-ms = 30000
+max-cost-usd = 0.01
+
+[[scenarios]]
+id = "single-green"
+[scenarios.backend]
+kind = "mock"
+path = "examples/merge_captain/scenarios/single_green.json"
+
+[[variants]]
+id = "value-route-balanced"
+model-route = "local/qwen-value"
+timeout-tier = "balanced"
+package-revision = "harn-package@workspace"
+prompt-asset-revision = "merge-captain/prompts@v2"
+max-tool-calls = 8
+max-model-calls = 1
+```
+
 ### Mock-repos playground (#1020)
 
 `harn merge-captain mock` materializes a real on-disk sandbox — temp

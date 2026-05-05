@@ -731,6 +731,12 @@ async fn async_main() {
                     process::exit(code);
                 }
             }
+            MergeCaptainCommand::Iterate(iterate) => {
+                let code = commands::merge_captain::run_iterate(&iterate);
+                if code != 0 {
+                    process::exit(code);
+                }
+            }
             MergeCaptainCommand::Audit(audit) => {
                 let code = commands::merge_captain::run_audit(&audit);
                 if code != 0 {
