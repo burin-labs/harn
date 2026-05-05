@@ -367,6 +367,261 @@ fn prepare_session_prompt(
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct NormalizedAcpPrompt {
+    text: String,
+    content: Vec<serde_json::Value>,
+    messages: Vec<serde_json::Value>,
+}
+
+fn normalize_acp_prompt(params: &serde_json::Value) -> Result<NormalizedAcpPrompt, String> {
+    let Some(prompt) = params.get("prompt") else {
+        return Ok(NormalizedAcpPrompt {
+            text: String::new(),
+            content: Vec::new(),
+            messages: prompt_messages_for_content(&[]),
+        });
+    };
+    let blocks = prompt.as_array().ok_or_else(|| {
+        "session/prompt: prompt must be an array of ACP content blocks".to_string()
+    })?;
+
+    let mut content = Vec::new();
+    for block in blocks {
+        content.push(normalize_acp_prompt_block(block)?);
+    }
+
+    let text = prompt_text_from_content(&content);
+    let messages = prompt_messages_for_content(&content);
+    Ok(NormalizedAcpPrompt {
+        text,
+        content,
+        messages,
+    })
+}
+
+fn normalize_acp_prompt_block(block: &serde_json::Value) -> Result<serde_json::Value, String> {
+    match block.get("type").and_then(|value| value.as_str()) {
+        Some("text") => Ok(serde_json::json!({
+            "type": "text",
+            "text": required_string(block, "text", "text prompt block")?,
+        })),
+        Some("image") => normalize_binary_prompt_block(block, "image"),
+        Some("audio") => normalize_binary_prompt_block(block, "audio"),
+        Some("resource") => normalize_embedded_resource_block(block),
+        Some("resource_link") => normalize_resource_link_block(block),
+        Some(other) => Err(format!(
+            "session/prompt: unsupported content block type `{other}`"
+        )),
+        None => Err("session/prompt: content block is missing required `type`".to_string()),
+    }
+}
+
+fn normalize_binary_prompt_block(
+    block: &serde_json::Value,
+    block_type: &str,
+) -> Result<serde_json::Value, String> {
+    let media_type = required_media_type(block, block_type)?;
+    let data = block
+        .get("data")
+        .or_else(|| block.get("base64"))
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty());
+    let uri = block
+        .get("uri")
+        .or_else(|| block.get("url"))
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty());
+
+    let mut normalized = serde_json::json!({
+        "type": block_type,
+        "media_type": media_type,
+    });
+    if let Some(data) = data {
+        normalized["base64"] = serde_json::json!(data);
+        if let Some(uri) = uri {
+            normalized["source_uri"] = serde_json::json!(uri);
+        }
+    } else if let Some(uri) = uri {
+        normalized["url"] = serde_json::json!(uri);
+    } else {
+        return Err(format!(
+            "session/prompt: {block_type} block requires `data` or `uri`"
+        ));
+    }
+    if block_type == "image" {
+        if let Some(detail) = block.get("detail").and_then(|value| value.as_str()) {
+            normalized["detail"] = serde_json::json!(detail);
+        }
+    }
+    Ok(normalized)
+}
+
+fn normalize_embedded_resource_block(
+    block: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let resource = block
+        .get("resource")
+        .and_then(|value| value.as_object())
+        .ok_or_else(|| "session/prompt: resource block requires `resource` object".to_string())?;
+    let uri = resource
+        .get("uri")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "session/prompt: embedded resource requires `uri`".to_string())?;
+    let media_type = resource
+        .get("mimeType")
+        .or_else(|| resource.get("media_type"))
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty());
+
+    if let Some(text) = resource.get("text").and_then(|value| value.as_str()) {
+        return Ok(serde_json::json!({
+            "type": "text",
+            "text": render_embedded_text_resource(uri, media_type, text),
+            "uri": uri,
+            "media_type": media_type,
+        }));
+    }
+
+    let blob = resource
+        .get("blob")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "session/prompt: embedded resource requires `text` or `blob`".to_string())?;
+    let Some(media_type) = media_type else {
+        return Ok(serde_json::json!({
+            "type": "text",
+            "text": format!("Embedded binary resource: {uri}\nMIME type: unknown"),
+            "uri": uri,
+        }));
+    };
+    if media_type.starts_with("image/") {
+        Ok(serde_json::json!({
+            "type": "image",
+            "base64": blob,
+            "media_type": media_type,
+            "source_uri": uri,
+        }))
+    } else if media_type.starts_with("audio/") {
+        Ok(serde_json::json!({
+            "type": "audio",
+            "base64": blob,
+            "media_type": media_type,
+            "source_uri": uri,
+        }))
+    } else if media_type == "application/pdf" {
+        Ok(serde_json::json!({
+            "type": "pdf",
+            "base64": blob,
+            "media_type": media_type,
+            "source_uri": uri,
+        }))
+    } else {
+        Ok(serde_json::json!({
+            "type": "text",
+            "text": format!("Embedded binary resource: {uri}\nMIME type: {media_type}"),
+            "uri": uri,
+            "media_type": media_type,
+        }))
+    }
+}
+
+fn normalize_resource_link_block(block: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let uri = required_string(block, "uri", "resource_link prompt block")?;
+    let mut lines = vec![format!("Resource link: {uri}")];
+    for key in ["name", "title", "description", "mimeType", "media_type"] {
+        if let Some(value) = block.get(key).and_then(|value| value.as_str()) {
+            if !value.is_empty() {
+                lines.push(format!("{key}: {value}"));
+            }
+        }
+    }
+    if let Some(size) = block.get("size").and_then(|value| value.as_u64()) {
+        lines.push(format!("size: {size}"));
+    }
+    Ok(serde_json::json!({
+        "type": "text",
+        "text": lines.join("\n"),
+        "uri": uri,
+    }))
+}
+
+fn render_embedded_text_resource(uri: &str, media_type: Option<&str>, text: &str) -> String {
+    let mut rendered = format!("Embedded resource: {uri}");
+    if let Some(media_type) = media_type {
+        rendered.push_str(&format!("\nMIME type: {media_type}"));
+    }
+    rendered.push_str("\n\n");
+    rendered.push_str(text);
+    rendered
+}
+
+fn required_media_type(block: &serde_json::Value, block_type: &str) -> Result<String, String> {
+    block
+        .get("mimeType")
+        .or_else(|| block.get("media_type"))
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| format!("session/prompt: {block_type} block requires `mimeType`"))
+}
+
+fn required_string(value: &serde_json::Value, key: &str, context: &str) -> Result<String, String> {
+    value
+        .get(key)
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| format!("session/prompt: {context} requires `{key}`"))
+}
+
+fn retarget_prompt_text(prompt: &mut NormalizedAcpPrompt, text: String) {
+    if let Some(block) = prompt
+        .content
+        .iter_mut()
+        .find(|block| block.get("type").and_then(|value| value.as_str()) == Some("text"))
+    {
+        block["text"] = serde_json::json!(text);
+    } else {
+        prompt.content.insert(
+            0,
+            serde_json::json!({
+                "type": "text",
+                "text": text,
+            }),
+        );
+    }
+    prompt.text = prompt_text_from_content(&prompt.content);
+    prompt.messages = prompt_messages_for_content(&prompt.content);
+}
+
+fn prompt_text_from_content(content: &[serde_json::Value]) -> String {
+    content
+        .iter()
+        .filter_map(|block| {
+            if block.get("type").and_then(|value| value.as_str()) == Some("text") {
+                block.get("text").and_then(|value| value.as_str())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn prompt_messages_for_content(content: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let message_content = if content.is_empty() {
+        serde_json::Value::String(String::new())
+    } else {
+        serde_json::Value::Array(content.to_vec())
+    };
+    vec![serde_json::json!({
+        "role": "user",
+        "content": message_content,
+    })]
+}
+
 /// ACP server that reads JSON-RPC requests from a transport and writes
 /// responses / notifications back to that same transport.
 pub struct AcpServer {
@@ -501,7 +756,11 @@ impl AcpServer {
                 "protocolVersion": 1,
                 "agentCapabilities": {
                     "_meta": harn_acp_extension_meta(),
-                    "promptCapabilities": {},
+                    "promptCapabilities": {
+                        "audio": true,
+                        "embeddedContext": true,
+                        "image": true,
+                    },
                     "sessionCapabilities": {
                         "fork": {},
                         "load": {},
@@ -747,23 +1006,14 @@ impl AcpServer {
             }
         };
 
-        let prompt_text = params
-            .get("prompt")
-            .and_then(|v| v.as_array())
-            .map(|blocks| {
-                blocks
-                    .iter()
-                    .filter_map(|b| {
-                        if b.get("type").and_then(|t| t.as_str()) == Some("text") {
-                            b.get("text").and_then(|t| t.as_str())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            })
-            .unwrap_or_default();
+        let prompt = match normalize_acp_prompt(params) {
+            Ok(prompt) => prompt,
+            Err(message) => {
+                self.send_prompt_error(&session_id, id, &message);
+                return;
+            }
+        };
+        let prompt_text = prompt.text.clone();
 
         let (cwd, cancellation, current_mode_id) = match self.sessions.get_mut(&session_id) {
             Some(s) => {
@@ -862,6 +1112,10 @@ impl AcpServer {
             None => (prompt_text.clone(), None),
         };
         let prompt_text = effective_prompt;
+        let mut prompt = prompt;
+        if prompt_text != prompt.text {
+            retarget_prompt_text(&mut prompt, prompt_text.clone());
+        }
 
         let output = self.output.clone();
         let pending = self.pending.clone();
@@ -932,7 +1186,11 @@ impl AcpServer {
             chunk,
             bridge.clone(),
             host_bridge,
-            &prompt_text,
+            execute::PromptGlobals {
+                text: &prompt_text,
+                content: &prompt.content,
+                messages: &prompt.messages,
+            },
             source_path.as_deref(),
             &cwd,
             self.runtime_configurator.clone(),
@@ -1801,10 +2059,23 @@ mod tests {
         tokio::task::JoinHandle<()>,
         String,
     ) {
+        start_acp_channel_session_with_config(AcpServerConfig::new(None), serde_json::json!("."))
+            .await
+    }
+
+    async fn start_acp_channel_session_with_config(
+        config: AcpServerConfig,
+        cwd: serde_json::Value,
+    ) -> (
+        mpsc::UnboundedSender<serde_json::Value>,
+        mpsc::UnboundedReceiver<String>,
+        tokio::task::JoinHandle<()>,
+        String,
+    ) {
         let (request_tx, request_rx) = mpsc::unbounded_channel();
         let (response_tx, mut response_rx) = mpsc::unbounded_channel();
         let server = tokio::task::spawn_local(super::run_acp_channel_server(
-            AcpServerConfig::new(None),
+            config,
             request_rx,
             response_tx,
         ));
@@ -1814,7 +2085,7 @@ mod tests {
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "session/new",
-                "params": {"cwd": "."},
+                "params": {"cwd": cwd},
             }))
             .expect("send session/new");
         let created = recv_json(&mut response_rx).await;
@@ -1823,6 +2094,30 @@ mod tests {
             .expect("session id")
             .to_string();
 
+        (request_tx, response_rx, server, session_id)
+    }
+
+    async fn start_acp_code_session_with_config(
+        config: AcpServerConfig,
+        cwd: serde_json::Value,
+    ) -> (
+        mpsc::UnboundedSender<serde_json::Value>,
+        mpsc::UnboundedReceiver<String>,
+        tokio::task::JoinHandle<()>,
+        String,
+    ) {
+        let (request_tx, mut response_rx, server, session_id) =
+            start_acp_channel_session_with_config(config, cwd).await;
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/set_mode",
+                "params": {"sessionId": session_id.clone(), "modeId": "code"},
+            }))
+            .expect("send session/set_mode");
+        let _ack = recv_json(&mut response_rx).await;
+        let _notification = recv_json(&mut response_rx).await;
         (request_tx, response_rx, server, session_id)
     }
 
@@ -1979,6 +2274,14 @@ mod tests {
                         ["toolLifecycleExtensionFields"],
                     serde_json::json!(HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS)
                 );
+                assert_eq!(
+                    initialize["result"]["agentCapabilities"]["promptCapabilities"],
+                    serde_json::json!({
+                        "audio": true,
+                        "embeddedContext": true,
+                        "image": true,
+                    })
+                );
 
                 request_tx
                     .send(serde_json::json!({
@@ -2051,6 +2354,187 @@ mod tests {
                 }
                 assert!(saw_update, "prompt should emit session/update text");
                 assert!(saw_completed, "prompt should finish successfully");
+
+                drop(request_tx);
+                server.await.expect("ACP channel server task");
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_session_prompt_exposes_multimodal_prompt_messages() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let dir = tempfile::tempdir().expect("tempdir");
+                let pipeline_path = dir.path().join("multimodal.harn");
+                std::fs::write(
+                    &pipeline_path,
+                    r#"pipeline default(task) {
+  llm_mock_clear()
+  llm_mock({text: "ok"})
+  llm_call("", nil, {provider: "mock", messages: prompt_messages})
+  let blocks = llm_mock_calls()[0].messages[0].content
+  println(blocks[0].text == "Please inspect this context.")
+  println(blocks[1].type == "image")
+  println(blocks[1].base64 == "iVBORw0KGgo=")
+  println(blocks[1].media_type == "image/png")
+  println(blocks[2].type == "audio")
+  println(blocks[2].base64 == "UklGRiQ=")
+  println(blocks[2].media_type == "audio/wav")
+  println(contains(blocks[3].text, "file:///tmp/example.txt"))
+  println(contains(blocks[3].text, "hello from embedded context"))
+}"#,
+                )
+                .expect("write pipeline");
+
+                let (request_tx, mut response_rx, server, session_id) =
+                    start_acp_code_session_with_config(
+                        AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string()),
+                        serde_json::json!(dir.path()),
+                    )
+                    .await;
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": session_id,
+                            "prompt": [
+                                {"type": "text", "text": "Please inspect this context."},
+                                {
+                                    "type": "image",
+                                    "mimeType": "image/png",
+                                    "data": "iVBORw0KGgo=",
+                                    "uri": "file:///tmp/pixel.png"
+                                },
+                                {
+                                    "type": "audio",
+                                    "mimeType": "audio/wav",
+                                    "data": "UklGRiQ="
+                                },
+                                {
+                                    "type": "resource",
+                                    "resource": {
+                                        "uri": "file:///tmp/example.txt",
+                                        "mimeType": "text/plain",
+                                        "text": "hello from embedded context"
+                                    }
+                                }
+                            ],
+                        },
+                    }))
+                    .expect("send session/prompt");
+
+                let mut output = String::new();
+                let mut saw_completed = false;
+                for _ in 0..32 {
+                    let message = recv_json(&mut response_rx).await;
+                    if message["method"] == "host/capabilities" {
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {},
+                            }))
+                            .expect("send host capabilities response");
+                        continue;
+                    }
+                    if message["method"] == "session/update"
+                        && message["params"]["update"]["sessionUpdate"] == "agent_message_chunk"
+                    {
+                        if let Some(text) = message["params"]["update"]["content"]["text"].as_str()
+                        {
+                            output.push_str(text);
+                        }
+                    }
+                    if message["id"] == 3 {
+                        assert_eq!(message["result"]["stopReason"], "end_turn");
+                        saw_completed = true;
+                        break;
+                    }
+                }
+                assert!(saw_completed, "prompt should complete successfully");
+                assert!(
+                    !output.contains("false"),
+                    "multimodal prompt assertions failed; output was:\n{output}"
+                );
+
+                drop(request_tx);
+                server.await.expect("ACP channel server task");
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_session_prompt_surfaces_multimodal_capability_errors() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let dir = tempfile::tempdir().expect("tempdir");
+                let pipeline_path = dir.path().join("unsupported_vision.harn");
+                std::fs::write(
+                    &pipeline_path,
+                    r#"pipeline default(task) {
+  llm_call("", nil, {provider: "mock", model: "gpt-3.5-turbo", messages: prompt_messages})
+}"#,
+                )
+                .expect("write pipeline");
+
+                let (request_tx, mut response_rx, server, session_id) =
+                    start_acp_code_session_with_config(
+                        AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string()),
+                        serde_json::json!(dir.path()),
+                    )
+                    .await;
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": session_id,
+                            "prompt": [
+                                {"type": "text", "text": "caption"},
+                                {
+                                    "type": "image",
+                                    "mimeType": "image/png",
+                                    "data": "iVBORw0KGgo="
+                                }
+                            ],
+                        },
+                    }))
+                    .expect("send session/prompt");
+
+                let mut saw_error = false;
+                for _ in 0..24 {
+                    let message = recv_json(&mut response_rx).await;
+                    if message["method"] == "host/capabilities" {
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {},
+                            }))
+                            .expect("send host capabilities response");
+                        continue;
+                    }
+                    if message["id"] == 3 {
+                        let error = message["error"]["message"]
+                            .as_str()
+                            .expect("prompt error message");
+                        assert!(
+                            error.contains("option `vision` is not supported"),
+                            "unexpected error: {error}"
+                        );
+                        saw_error = true;
+                        break;
+                    }
+                }
+                assert!(saw_error, "prompt should return a capability error");
 
                 drop(request_tx);
                 server.await.expect("ACP channel server task");

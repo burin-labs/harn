@@ -8,12 +8,18 @@ use std::time::Instant;
 
 use super::{builtins, AcpBridge, AcpRuntimeConfigurator};
 
+pub(super) struct PromptGlobals<'a> {
+    pub text: &'a str,
+    pub content: &'a [serde_json::Value],
+    pub messages: &'a [serde_json::Value],
+}
+
 /// Execute a compiled chunk with ACP bridge builtins.
 pub(super) async fn execute_chunk(
     chunk: harn_vm::Chunk,
     bridge: Rc<AcpBridge>,
     host_bridge: Rc<harn_vm::bridge::HostBridge>,
-    prompt_text: &str,
+    prompt: PromptGlobals<'_>,
     source_path: Option<&std::path::Path>,
     cwd: &std::path::Path,
     runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
@@ -55,7 +61,15 @@ pub(super) async fn execute_chunk(
 
     runtime_configurator.configure(&mut vm, source_path).await?;
 
-    vm.set_global("prompt", harn_vm::VmValue::String(Rc::from(prompt_text)));
+    vm.set_global("prompt", harn_vm::VmValue::String(Rc::from(prompt.text)));
+    vm.set_global(
+        "prompt_content",
+        harn_vm::json_to_vm_value(&serde_json::Value::Array(prompt.content.to_vec())),
+    );
+    vm.set_global(
+        "prompt_messages",
+        harn_vm::json_to_vm_value(&serde_json::Value::Array(prompt.messages.to_vec())),
+    );
     vm.set_global(
         "cwd",
         harn_vm::VmValue::String(Rc::from(cwd.to_string_lossy().as_ref())),
