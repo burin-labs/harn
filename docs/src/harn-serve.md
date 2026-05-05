@@ -184,6 +184,9 @@ Mapping:
 - `harn serve acp <file.harn>` starts the packaged stdio ACP adapter
 - the adapter owns session state, prompt execution, permission prompts, cancel
   tokens, and bidirectional `session/update` traffic
+- each `session/prompt` exposes `prompt` as the text-only prompt string,
+  `prompt_content` as normalized Harn content blocks, and `prompt_messages` as a
+  user-role message list suitable for `llm_call(..., {messages: prompt_messages})`
 
 ## Design rule
 
