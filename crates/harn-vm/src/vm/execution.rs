@@ -146,6 +146,7 @@ impl Vm {
 
             if frame.ip >= frame.chunk.code.len() {
                 let val = self.stack.pop().unwrap_or(VmValue::Nil);
+                let val = self.run_step_post_hooks_for_current_frame(val).await?;
                 self.release_sync_guards_for_frame(self.frames.len());
                 let popped_frame = self.frames.pop().unwrap();
                 if let Some(ref dir) = popped_frame.saved_source_dir {
@@ -171,6 +172,7 @@ impl Vm {
                 Ok(Some(val)) => return Ok(val),
                 Ok(None) => continue,
                 Err(VmError::Return(val)) => {
+                    let val = self.run_step_post_hooks_for_current_frame(val).await?;
                     if let Some(popped_frame) = self.frames.pop() {
                         self.release_sync_guards_for_frame(self.frames.len() + 1);
                         if let Some(ref dir) = popped_frame.saved_source_dir {

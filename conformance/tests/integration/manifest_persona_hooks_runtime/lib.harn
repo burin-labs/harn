@@ -1,0 +1,15 @@
+/** Verify and rewrite the manifest PreStep payload. */
+pub fn manifest_pre_step(event) {
+  if event?.persona != "merge_captain" {
+    return {deny: "bad persona payload"}
+  }
+  if event?.step?.name != "admin_merge" {
+    return {deny: "bad step payload"}
+  }
+  return {args: [event.step.args[0] + ":pre"]}
+}
+
+/** Rewrite the manifest PostStep output with payload fields. */
+pub fn manifest_post_step(event) {
+  return {output: event.output + ":" + event.persona + ":" + event.step.name}
+}

@@ -1,12 +1,285 @@
 use std::rc::Rc;
 
 use crate::chunk::{InlineCacheEntry, MethodCacheTarget};
+use crate::orchestration::HookEvent;
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::BuiltinId;
 
 use super::super::CallFrame;
 
+enum StepPreHookAction {
+    Allow(Vec<VmValue>),
+    Deny(String),
+}
+
 impl super::super::Vm {
+    fn step_hook_payload(
+        event: HookEvent,
+        persona: Option<&str>,
+        step_name: &str,
+        function_name: &str,
+        args: &[VmValue],
+        output: Option<VmValue>,
+    ) -> VmValue {
+        let mut step = std::collections::BTreeMap::new();
+        step.insert("name".to_string(), VmValue::String(Rc::from(step_name)));
+        step.insert(
+            "function".to_string(),
+            VmValue::String(Rc::from(function_name)),
+        );
+        step.insert("args".to_string(), VmValue::List(Rc::new(args.to_vec())));
+        let mut payload = std::collections::BTreeMap::new();
+        payload.insert(
+            "event".to_string(),
+            VmValue::String(Rc::from(event.as_str())),
+        );
+        payload.insert(
+            "target".to_string(),
+            VmValue::String(Rc::from(match persona {
+                Some(persona) if !persona.is_empty() => format!("{persona}.{step_name}"),
+                _ => step_name.to_string(),
+            })),
+        );
+        payload.insert(
+            "persona".to_string(),
+            VmValue::String(Rc::from(persona.unwrap_or(""))),
+        );
+        payload.insert("step".to_string(), VmValue::Dict(Rc::new(step)));
+        if let Some(output) = output {
+            payload.insert("output".to_string(), output);
+        }
+        VmValue::Dict(Rc::new(payload))
+    }
+
+    fn parse_step_pre_hook_result(
+        value: VmValue,
+        current_args: Vec<VmValue>,
+    ) -> Result<StepPreHookAction, VmError> {
+        match value {
+            VmValue::Nil => Ok(StepPreHookAction::Allow(current_args)),
+            VmValue::String(text) if text.as_ref() == "Allow" => {
+                Ok(StepPreHookAction::Allow(current_args))
+            }
+            VmValue::Dict(map) => {
+                if let Some(reason) = map.get("deny").or_else(|| map.get("reason")) {
+                    return Ok(StepPreHookAction::Deny(reason.display()));
+                }
+                if matches!(
+                    map.get("action").map(|value| value.display()).as_deref(),
+                    Some("deny" | "Deny")
+                ) {
+                    return Ok(StepPreHookAction::Deny(
+                        map.get("reason")
+                            .map(|value| value.display())
+                            .unwrap_or_else(|| "step hook denied execution".to_string()),
+                    ));
+                }
+                if let Some(VmValue::List(args)) = map.get("args").or_else(|| map.get("modify")) {
+                    return Ok(StepPreHookAction::Allow((**args).clone()));
+                }
+                Ok(StepPreHookAction::Allow(current_args))
+            }
+            other => Err(VmError::Runtime(format!(
+                "PreStep hook must return nil, Allow, or {{deny|args}}, got {}",
+                other.type_name()
+            ))),
+        }
+    }
+
+    fn parse_step_post_hook_result(
+        value: VmValue,
+        current_output: VmValue,
+    ) -> Result<VmValue, VmError> {
+        match value {
+            VmValue::Nil => Ok(current_output),
+            VmValue::String(text) if text.as_ref() == "Pass" => Ok(current_output),
+            VmValue::Dict(map) => Ok(map
+                .get("output")
+                .or_else(|| map.get("result"))
+                .or_else(|| map.get("modify"))
+                .cloned()
+                .unwrap_or(current_output)),
+            other => Err(VmError::Runtime(format!(
+                "PostStep hook must return nil, Pass, or {{output}}, got {}",
+                other.type_name()
+            ))),
+        }
+    }
+
+    async fn run_step_pre_hooks(
+        &mut self,
+        closure: &VmClosure,
+        mut args: Vec<VmValue>,
+    ) -> Result<Vec<VmValue>, VmError> {
+        let Some(definition) =
+            crate::step_runtime::step_definition_for_function(&closure.func.name)
+        else {
+            return Ok(args);
+        };
+        let persona = crate::step_runtime::current_persona_name();
+        let match_payload = Self::step_hook_payload(
+            HookEvent::PreStep,
+            persona.as_deref(),
+            &definition.name,
+            &definition.function,
+            &args,
+            None,
+        );
+        let manifest_hooks = crate::orchestration::matching_vm_lifecycle_hooks(
+            HookEvent::PreStep,
+            &crate::llm::vm_value_to_json(&match_payload),
+        );
+        for hook in manifest_hooks {
+            let payload = Self::step_hook_payload(
+                HookEvent::PreStep,
+                persona.as_deref(),
+                &definition.name,
+                &definition.function,
+                &args,
+                None,
+            );
+            let raw = self.call_lifecycle_hook(&hook.closure, payload).await?;
+            match Self::parse_step_pre_hook_result(raw, args)? {
+                StepPreHookAction::Allow(next_args) => args = next_args,
+                StepPreHookAction::Deny(reason) => {
+                    return Err(Self::step_hook_denied(&definition.name, reason));
+                }
+            }
+        }
+        let hooks = crate::step_runtime::matching_hooks(
+            HookEvent::PreStep,
+            persona.as_deref(),
+            Some(&definition.name),
+            None,
+        );
+        for hook in hooks {
+            let payload = Self::step_hook_payload(
+                hook.event,
+                persona.as_deref(),
+                &definition.name,
+                &definition.function,
+                &args,
+                None,
+            );
+            let raw = self.call_lifecycle_hook(&hook.handler, payload).await?;
+            match Self::parse_step_pre_hook_result(raw, args)? {
+                StepPreHookAction::Allow(next_args) => args = next_args,
+                StepPreHookAction::Deny(reason) => {
+                    return Err(Self::step_hook_denied(&definition.name, reason));
+                }
+            }
+        }
+        Ok(args)
+    }
+
+    fn step_hook_denied(step_name: &str, reason: String) -> VmError {
+        VmError::Thrown(VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
+            (
+                "category".to_string(),
+                VmValue::String(Rc::from("hook_denied")),
+            ),
+            ("event".to_string(), VmValue::String(Rc::from("PreStep"))),
+            ("reason".to_string(), VmValue::String(Rc::from(reason))),
+            (
+                "step".to_string(),
+                VmValue::String(Rc::from(step_name.to_string())),
+            ),
+        ]))))
+    }
+
+    pub(crate) async fn run_step_post_hooks_for_current_frame(
+        &mut self,
+        output: VmValue,
+    ) -> Result<VmValue, VmError> {
+        let depth = self.frames.len();
+        let Some(step) = crate::step_runtime::take_active_step(depth) else {
+            return Ok(output);
+        };
+        let persona = step.persona.clone();
+        let mut current = output;
+        let hooks = crate::step_runtime::matching_hooks(
+            HookEvent::PostStep,
+            persona.as_deref(),
+            Some(&step.definition.name),
+            None,
+        );
+        let result = async {
+            let manifest_hooks = crate::orchestration::matching_vm_lifecycle_hooks(
+                HookEvent::PostStep,
+                &crate::llm::vm_value_to_json(&Self::step_hook_payload(
+                    HookEvent::PostStep,
+                    persona.as_deref(),
+                    &step.definition.name,
+                    &step.definition.function,
+                    &step.args,
+                    Some(current.clone()),
+                )),
+            );
+            for hook in manifest_hooks {
+                let payload = Self::step_hook_payload(
+                    HookEvent::PostStep,
+                    persona.as_deref(),
+                    &step.definition.name,
+                    &step.definition.function,
+                    &step.args,
+                    Some(current.clone()),
+                );
+                let raw = self.call_lifecycle_hook(&hook.closure, payload).await?;
+                current = Self::parse_step_post_hook_result(raw, current)?;
+            }
+            for hook in hooks {
+                let payload = Self::step_hook_payload(
+                    hook.event,
+                    persona.as_deref(),
+                    &step.definition.name,
+                    &step.definition.function,
+                    &step.args,
+                    Some(current.clone()),
+                );
+                let raw = self.call_lifecycle_hook(&hook.handler, payload).await?;
+                current = Self::parse_step_post_hook_result(raw, current)?;
+            }
+            Ok::<VmValue, VmError>(current)
+        }
+        .await;
+        match result {
+            Ok(value) => {
+                crate::step_runtime::finish_active_step(step, "completed", None);
+                Ok(value)
+            }
+            Err(error) => {
+                crate::step_runtime::finish_active_step(step, "failed", Some(error.to_string()));
+                Err(error)
+            }
+        }
+    }
+
+    async fn call_user_closure(
+        &mut self,
+        closure: Rc<VmClosure>,
+        args: Vec<VmValue>,
+    ) -> Result<(), VmError> {
+        if closure.func.is_generator {
+            let gen = self.create_generator(&closure, &args);
+            self.stack.push(gen);
+        } else {
+            let args = self.run_step_pre_hooks(&closure, args).await?;
+            self.push_closure_frame(&closure, &args)?;
+        }
+        Ok(())
+    }
+
+    async fn call_lifecycle_hook(
+        &mut self,
+        handler: &Rc<VmClosure>,
+        payload: VmValue,
+    ) -> Result<VmValue, VmError> {
+        let snapshot = crate::step_runtime::take_active_context();
+        let result = self.call_closure(handler, &[payload]).await;
+        crate::step_runtime::restore_active_context(snapshot);
+        result
+    }
+
     fn try_cached_method(
         cache: &InlineCacheEntry,
         name_idx: u16,
@@ -228,12 +501,7 @@ impl super::super::Vm {
             return Ok(());
         }
         if let Some(closure) = self.resolve_named_closure(name) {
-            if closure.func.is_generator {
-                let gen = self.create_generator(&closure, &args);
-                self.stack.push(gen);
-            } else {
-                self.push_closure_frame(&closure, &args)?;
-            }
+            self.call_user_closure(closure, args).await?;
         } else {
             let result = if let Some(id) = direct_id {
                 self.call_builtin_id_or_name(id, name, args).await?
@@ -258,12 +526,7 @@ impl super::super::Vm {
                 self.call_named_value(&name, args, None).await?;
             }
             VmValue::Closure(closure) => {
-                if closure.func.is_generator {
-                    let gen = self.create_generator(&closure, &args);
-                    self.stack.push(gen);
-                } else {
-                    self.push_closure_frame(&closure, &args)?;
-                }
+                self.call_user_closure(closure, args).await?;
             }
             VmValue::BuiltinRef(name) => {
                 self.call_named_value(&name, args, None).await?;
@@ -297,12 +560,7 @@ impl super::super::Vm {
                 self.call_named_value(&name, args, None).await?;
             }
             VmValue::Closure(closure) => {
-                if closure.func.is_generator {
-                    let gen = self.create_generator(&closure, &args);
-                    self.stack.push(gen);
-                } else {
-                    self.push_closure_frame(&closure, &args)?;
-                }
+                self.call_user_closure(closure, args).await?;
             }
             VmValue::BuiltinRef(name) => {
                 self.call_named_value(&name, args, None).await?;
@@ -367,6 +625,21 @@ impl super::super::Vm {
         };
 
         if let Some(closure) = resolved_closure {
+            let current_fn_name = self
+                .frames
+                .last()
+                .map(|frame| frame.fn_name.clone())
+                .unwrap_or_default();
+            if crate::step_runtime::is_tracked_function(&current_fn_name)
+                || crate::step_runtime::is_tracked_function(&closure.func.name)
+            {
+                // Persona/step lifecycle state is frame-owned. Keep those
+                // frames explicit so PreStep/PostStep hooks see the same
+                // boundaries as a non-tail call.
+                self.call_user_closure(closure, args).await?;
+                return Ok(());
+            }
+
             crate::typecheck::validate_user_call(&closure.func, &args, None)?;
             if closure.func.is_generator {
                 // Generators cannot be tail-call optimized.
@@ -559,7 +832,7 @@ impl super::super::Vm {
         let value = self.pop()?;
         match callable {
             VmValue::Closure(closure) => {
-                self.push_closure_frame(&closure, &[value])?;
+                self.call_user_closure(closure, vec![value]).await?;
             }
             VmValue::String(name) => {
                 self.call_named_value(&name, vec![value], None).await?;

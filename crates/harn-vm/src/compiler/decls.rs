@@ -234,8 +234,42 @@ impl Compiler {
                 if let Node::FnDecl { name, .. } = &inner.node {
                     self.emit_step_registration(attr, name)?;
                 }
+            } else if attr.name == "persona" {
+                if let Node::FnDecl { name, .. } = &inner.node {
+                    self.emit_persona_registration(attr, name)?;
+                }
             }
         }
+        Ok(())
+    }
+
+    /// Emit bytecode equivalent to:
+    ///   __register_persona("merge_captain", { name: "merge_captain" })
+    /// so `@step` calls can inherit the active persona while the
+    /// persona function is on the VM call stack.
+    pub(super) fn emit_persona_registration(
+        &mut self,
+        attr: &harn_parser::Attribute,
+        fn_name: &str,
+    ) -> Result<(), CompileError> {
+        let define_idx = self
+            .chunk
+            .add_constant(Constant::String("__register_persona".into()));
+        self.chunk.emit_u16(Op::Constant, define_idx, self.line);
+
+        let fn_const = self.chunk.add_constant(Constant::String(fn_name.into()));
+        self.chunk.emit_u16(Op::Constant, fn_const, self.line);
+
+        let mut entries: u16 = 0;
+        if let Some(name) = attr.named_arg("name") {
+            let key_idx = self.chunk.add_constant(Constant::String("name".into()));
+            self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+            self.compile_attribute_value(name)?;
+            entries += 1;
+        }
+        self.chunk.emit_u16(Op::BuildDict, entries, self.line);
+        self.chunk.emit_u8(Op::Call, 2, self.line);
+        self.chunk.emit(Op::Pop, self.line);
         Ok(())
     }
 

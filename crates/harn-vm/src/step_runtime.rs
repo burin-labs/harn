@@ -21,7 +21,8 @@ use std::rc::Rc;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 
-use crate::value::{VmError, VmValue};
+use crate::orchestration::HookEvent;
+use crate::value::{VmClosure, VmError, VmValue};
 
 fn vm_str(value: &VmValue) -> Option<&str> {
     match value {
@@ -48,6 +49,11 @@ pub struct StepDefinition {
     pub error_boundary: Option<String>,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct PersonaDefinition {
+    pub name: String,
+}
+
 impl StepDefinition {
     pub fn boundary(&self) -> StepErrorBoundary {
         match self.error_boundary.as_deref() {
@@ -72,6 +78,8 @@ pub enum StepErrorBoundary {
 pub struct ActiveStep {
     pub frame_depth: usize,
     pub definition: Rc<StepDefinition>,
+    pub persona: Option<String>,
+    pub args: Vec<VmValue>,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cost_usd: f64,
@@ -80,10 +88,17 @@ pub struct ActiveStep {
 }
 
 impl ActiveStep {
-    fn new(frame_depth: usize, definition: Rc<StepDefinition>) -> Self {
+    fn new(
+        frame_depth: usize,
+        definition: Rc<StepDefinition>,
+        persona: Option<String>,
+        args: Vec<VmValue>,
+    ) -> Self {
         Self {
             frame_depth,
             definition,
+            persona,
+            args,
             input_tokens: 0,
             output_tokens: 0,
             cost_usd: 0.0,
@@ -95,6 +110,12 @@ impl ActiveStep {
     fn total_tokens(&self) -> u64 {
         self.input_tokens.saturating_add(self.output_tokens)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ActivePersona {
+    pub frame_depth: usize,
+    pub definition: Rc<PersonaDefinition>,
 }
 
 /// Snapshot persisted into [`COMPLETED_STEPS`] when the step's frame
@@ -116,8 +137,12 @@ pub struct CompletedStep {
 thread_local! {
     static STEP_REGISTRY: RefCell<BTreeMap<String, Rc<StepDefinition>>> =
         const { RefCell::new(BTreeMap::new()) };
+    static PERSONA_REGISTRY: RefCell<BTreeMap<String, Rc<PersonaDefinition>>> =
+        const { RefCell::new(BTreeMap::new()) };
+    static PERSONA_STACK: RefCell<Vec<ActivePersona>> = const { RefCell::new(Vec::new()) };
     static STEP_STACK: RefCell<Vec<ActiveStep>> = const { RefCell::new(Vec::new()) };
     static COMPLETED_STEPS: RefCell<Vec<CompletedStep>> = const { RefCell::new(Vec::new()) };
+    static PERSONA_HOOKS: RefCell<Vec<PersonaHookRegistration>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Reset every thread-local owned by this module. Called between test
@@ -125,8 +150,11 @@ thread_local! {
 /// registrations don't leak across runs.
 pub fn reset_thread_local_state() {
     STEP_REGISTRY.with(|r| r.borrow_mut().clear());
+    PERSONA_REGISTRY.with(|r| r.borrow_mut().clear());
+    PERSONA_STACK.with(|s| s.borrow_mut().clear());
     STEP_STACK.with(|s| s.borrow_mut().clear());
     COMPLETED_STEPS.with(|c| c.borrow_mut().clear());
+    PERSONA_HOOKS.with(|h| h.borrow_mut().clear());
 }
 
 /// Bind a `@step` function name to its declared metadata. Idempotent: a
@@ -138,6 +166,44 @@ pub fn register_step(function: &str, definition: StepDefinition) {
             .borrow_mut()
             .insert(function.to_string(), Rc::new(definition));
     });
+}
+
+pub fn register_persona(function: &str, definition: PersonaDefinition) {
+    PERSONA_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .insert(function.to_string(), Rc::new(definition));
+    });
+}
+
+pub fn register_persona_from_dict(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let function = args
+        .first()
+        .and_then(vm_str)
+        .map(|s| s.to_string())
+        .ok_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "__register_persona: expected (function_name, metadata_dict)",
+            )))
+        })?;
+    let meta = args
+        .get(1)
+        .and_then(VmValue::as_dict)
+        .cloned()
+        .ok_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "__register_persona: metadata argument must be a dict",
+            )))
+        })?;
+    let definition = PersonaDefinition {
+        name: meta
+            .get("name")
+            .and_then(vm_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| function.clone()),
+    };
+    register_persona(&function, definition);
+    Ok(VmValue::Nil)
 }
 
 /// Builtin entry point invoked by compiler-emitted bytecode after every
@@ -203,19 +269,169 @@ pub fn register_step_from_dict(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(VmValue::Nil)
 }
 
+#[derive(Clone)]
+pub struct PersonaHookRegistration {
+    pub persona_pattern: String,
+    pub step_name: Option<String>,
+    pub event: HookEvent,
+    pub threshold_pct: Option<f64>,
+    pub handler: Rc<VmClosure>,
+}
+
+impl std::fmt::Debug for PersonaHookRegistration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PersonaHookRegistration")
+            .field("persona_pattern", &self.persona_pattern)
+            .field("step_name", &self.step_name)
+            .field("event", &self.event)
+            .field("threshold_pct", &self.threshold_pct)
+            .field("handler", &"..")
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PersonaHookInvocation {
+    pub handler: Rc<VmClosure>,
+    pub event: HookEvent,
+}
+
+pub fn register_persona_hook(
+    persona_pattern: impl Into<String>,
+    event: HookEvent,
+    threshold_pct: Option<f64>,
+    handler: Rc<VmClosure>,
+) {
+    PERSONA_HOOKS.with(|hooks| {
+        hooks.borrow_mut().push(PersonaHookRegistration {
+            persona_pattern: persona_pattern.into(),
+            step_name: None,
+            event,
+            threshold_pct,
+            handler,
+        });
+    });
+}
+
+pub fn register_step_hook(
+    persona_pattern: impl Into<String>,
+    step_name: impl Into<String>,
+    event: HookEvent,
+    threshold_pct: Option<f64>,
+    handler: Rc<VmClosure>,
+) {
+    PERSONA_HOOKS.with(|hooks| {
+        hooks.borrow_mut().push(PersonaHookRegistration {
+            persona_pattern: persona_pattern.into(),
+            step_name: Some(step_name.into()),
+            event,
+            threshold_pct,
+            handler,
+        });
+    });
+}
+
+pub fn clear_persona_hooks() {
+    PERSONA_HOOKS.with(|hooks| hooks.borrow_mut().clear());
+}
+
+pub struct ActiveContextSnapshot {
+    steps: Vec<ActiveStep>,
+    personas: Vec<ActivePersona>,
+}
+
+pub fn take_active_context() -> ActiveContextSnapshot {
+    ActiveContextSnapshot {
+        steps: STEP_STACK.with(|stack| std::mem::take(&mut *stack.borrow_mut())),
+        personas: PERSONA_STACK.with(|stack| std::mem::take(&mut *stack.borrow_mut())),
+    }
+}
+
+pub fn restore_active_context(snapshot: ActiveContextSnapshot) {
+    STEP_STACK.with(|stack| *stack.borrow_mut() = snapshot.steps);
+    PERSONA_STACK.with(|stack| *stack.borrow_mut() = snapshot.personas);
+}
+
+pub fn is_tracked_function(function_name: &str) -> bool {
+    STEP_REGISTRY.with(|registry| registry.borrow().contains_key(function_name))
+        || PERSONA_REGISTRY.with(|registry| registry.borrow().contains_key(function_name))
+}
+
+pub fn step_definition_for_function(function_name: &str) -> Option<Rc<StepDefinition>> {
+    STEP_REGISTRY.with(|registry| registry.borrow().get(function_name).cloned())
+}
+
+pub fn current_persona_name() -> Option<String> {
+    PERSONA_STACK.with(|stack| stack.borrow().last().map(|p| p.definition.name.clone()))
+}
+
+fn persona_matches(pattern: &str, persona: &str) -> bool {
+    crate::orchestration::glob_match(pattern, persona)
+}
+
+pub fn matching_hooks(
+    event: HookEvent,
+    persona: Option<&str>,
+    step_name: Option<&str>,
+    budget_pct: Option<f64>,
+) -> Vec<PersonaHookInvocation> {
+    let persona = persona.unwrap_or("");
+    PERSONA_HOOKS.with(|hooks| {
+        hooks
+            .borrow()
+            .iter()
+            .filter(|hook| hook.event == event)
+            .filter(|hook| persona_matches(&hook.persona_pattern, persona))
+            .filter(|hook| match (&hook.step_name, step_name) {
+                (Some(expected), Some(actual)) => expected == actual,
+                (Some(_), None) => false,
+                (None, _) => true,
+            })
+            .filter(|hook| match (hook.threshold_pct, budget_pct) {
+                (Some(threshold), Some(pct)) => pct >= threshold,
+                (Some(_), None) => false,
+                (None, _) => true,
+            })
+            .map(|hook| PersonaHookInvocation {
+                handler: hook.handler.clone(),
+                event: hook.event,
+            })
+            .collect()
+    })
+}
+
+pub fn maybe_push_active_persona(function_name: &str, frame_depth: usize) -> bool {
+    let definition =
+        PERSONA_REGISTRY.with(|registry| registry.borrow().get(function_name).cloned());
+    let Some(definition) = definition else {
+        return false;
+    };
+    PERSONA_STACK.with(|stack| {
+        stack.borrow_mut().push(ActivePersona {
+            frame_depth,
+            definition,
+        });
+    });
+    true
+}
+
 /// Push an active step onto the stack iff `function_name` has metadata
 /// registered. Returns `true` when a frame was pushed so the call site
 /// can record that fact. Called from `Vm::push_closure_frame` after the
 /// new frame has been added.
-pub fn maybe_push_active_step(function_name: &str, frame_depth: usize) -> bool {
+pub fn maybe_push_active_step(function_name: &str, frame_depth: usize, args: &[VmValue]) -> bool {
     let definition = STEP_REGISTRY.with(|registry| registry.borrow().get(function_name).cloned());
     let Some(definition) = definition else {
         return false;
     };
+    let persona = current_persona_name();
     STEP_STACK.with(|stack| {
-        stack
-            .borrow_mut()
-            .push(ActiveStep::new(frame_depth, definition));
+        stack.borrow_mut().push(ActiveStep::new(
+            frame_depth,
+            definition,
+            persona,
+            args.to_vec(),
+        ));
     });
     true
 }
@@ -239,6 +455,33 @@ pub fn prune_below_frame(current_frame_depth: usize) {
     for step in popped {
         finish_step(step, "completed", None);
     }
+    PERSONA_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        while stack
+            .last()
+            .is_some_and(|persona| persona.frame_depth > current_frame_depth)
+        {
+            stack.pop();
+        }
+    });
+}
+
+pub fn take_active_step(current_frame_depth: usize) -> Option<ActiveStep> {
+    STEP_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        if stack
+            .last()
+            .is_some_and(|step| step.frame_depth == current_frame_depth)
+        {
+            stack.pop()
+        } else {
+            None
+        }
+    })
+}
+
+pub fn finish_active_step(step: ActiveStep, status: &str, error: Option<String>) {
+    finish_step(step, status, error);
 }
 
 /// Pop the topmost active step (if its frame is the current one) and
@@ -502,6 +745,9 @@ pub fn register_step_builtins(vm: &mut crate::vm::Vm) {
     vm.register_builtin("__register_step", |args, _out| {
         register_step_from_dict(args.to_vec())
     });
+    vm.register_builtin("__register_persona", |args, _out| {
+        register_persona_from_dict(args.to_vec())
+    });
 }
 
 #[cfg(test)]
@@ -536,7 +782,7 @@ mod tests {
         ])
         .expect("registration succeeds");
 
-        assert!(maybe_push_active_step("plan_step", 3));
+        assert!(maybe_push_active_step("plan_step", 3, &[]));
         assert_eq!(active_step_frame_depth(), Some(3));
         assert_eq!(
             active_step_model_default().as_deref(),
@@ -563,7 +809,7 @@ mod tests {
     #[test]
     fn unregistered_function_does_not_push() {
         fresh_state();
-        assert!(!maybe_push_active_step("not_a_step", 1));
+        assert!(!maybe_push_active_step("not_a_step", 1, &[]));
         assert!(active_step_frame_depth().is_none());
     }
 }

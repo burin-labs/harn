@@ -1,0 +1,29 @@
+import { post_message } from "std/connectors/slack"
+
+@persona(name: "merge_captain")
+fn merge_captain(ctx) -> string {
+  return admin_merge(ctx)
+}
+
+@step(name: "admin_merge", approval: required, receipt: audit)
+fn admin_merge(ctx) -> string {
+  return "merged " + ctx.pr
+}
+
+pipeline default() {
+  register_step_hook(
+    "merge_captain",
+    "admin_merge",
+    "PostStep",
+    { ctx ->
+      post_message(
+        "#release-ops",
+        "merge_captain.admin_merge completed: " + to_string(ctx.output),
+        nil,
+        {metadata: {persona_hook_target: ctx.target}},
+      )
+      return nil
+    },
+  )
+  println(merge_captain({pr: "burin-labs/harn#1075"}))
+}
