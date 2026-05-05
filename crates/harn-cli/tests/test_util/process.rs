@@ -49,7 +49,9 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::LazyLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tokio::process::Command as TokioCommand;
 
 /// Maximum time the one-shot `harn --version` pre-warm is allowed to
 /// take before we give up and fall through to per-test timing. The
@@ -84,7 +86,26 @@ pub fn harn_e2e_command() -> Command {
 }
 
 fn prewarm(path: &Path) {
-    let started = Instant::now();
+    let path = path.to_path_buf();
+    // Some E2E tests first touch the warmed binary from inside a Tokio
+    // runtime, so the helper runtime lives on a short-lived thread.
+    match std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .expect("harn-cli test prewarm runtime");
+
+        runtime.block_on(prewarm_async(&path));
+    })
+    .join()
+    {
+        Ok(()) => {}
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+async fn prewarm_async(path: &Path) {
     // Run the warm-up from a directory that has no `harn.toml` so the
     // CLI's manifest-discovery walk doesn't inflate the cold-start
     // budget. From inside the harn repo, even `harn --version` can take
@@ -92,7 +113,7 @@ fn prewarm(path: &Path) {
     // for a workspace manifest. `/` is universally safe: it has no
     // `harn.toml`, every test process can `chdir` to it, and the path
     // resolution for the spawn target itself is already absolute.
-    let mut child = match Command::new(path)
+    let mut child = match TokioCommand::new(path)
         .current_dir("/")
         .arg("--version")
         .stdin(Stdio::null())
@@ -107,37 +128,26 @@ fn prewarm(path: &Path) {
         ),
     };
 
-    let deadline = started + PREWARM_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                if !status.success() {
-                    panic!(
-                        "harn-cli test prewarm: `{} --version` exited unsuccessfully: {status}",
-                        path.display()
-                    );
-                }
-                return;
-            }
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    panic!(
-                        "harn-cli test prewarm: `{} --version` exceeded {:?}; \
-                         the dyld/AMFI cold-cache warm-up is the architectural \
-                         predicate for relaxing max-threads — investigate before \
-                         reverting the cap.",
-                        path.display(),
-                        PREWARM_TIMEOUT
-                    );
-                }
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            Err(error) => panic!(
-                "harn-cli test prewarm: failed to poll `{} --version`: {error}",
-                path.display()
-            ),
+    match tokio::time::timeout(PREWARM_TIMEOUT, child.wait()).await {
+        Ok(Ok(status)) if status.success() => {}
+        Ok(Ok(status)) => panic!(
+            "harn-cli test prewarm: `{} --version` exited unsuccessfully: {status}",
+            path.display()
+        ),
+        Ok(Err(error)) => panic!(
+            "harn-cli test prewarm: failed to wait for `{} --version`: {error}",
+            path.display()
+        ),
+        Err(_) => {
+            let _ = child.kill().await;
+            panic!(
+                "harn-cli test prewarm: `{} --version` exceeded {:?}; \
+                 the dyld/AMFI cold-cache warm-up is the architectural \
+                 predicate for relaxing max-threads — investigate before \
+                 reverting the cap.",
+                path.display(),
+                PREWARM_TIMEOUT
+            );
         }
     }
 }

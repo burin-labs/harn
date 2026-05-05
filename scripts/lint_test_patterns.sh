@@ -30,7 +30,6 @@ cd "$ROOT_DIR"
 # Legitimate uses: waiting on real subprocess I/O that cannot be time-paused.
 THREAD_SLEEP_ALLOWLIST=(
   "crates/harn-hostlib/tests/process_tools.rs"
-  "crates/harn-cli/tests/test_util/process.rs"
 )
 
 # tokio::time::sleep in test files (outside start_paused = true tests)
@@ -54,7 +53,6 @@ INSTANT_NOW_WHILE_ALLOWLIST=(
   "crates/harn-cli/tests/orchestrator_http/admin.rs"
   "crates/harn-cli/tests/orchestrator_http/observability.rs"
   "crates/harn-cli/tests/support/mod.rs"
-  "crates/harn-cli/tests/test_util/process.rs"
 )
 
 # SystemTime::now() in test files — use injected clock / MockClock instead.
