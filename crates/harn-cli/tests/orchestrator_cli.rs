@@ -244,29 +244,41 @@ fn bearer_headers() -> HeaderMap {
     headers
 }
 
-async fn wait_for_metrics_contains(
-    client: &reqwest::Client,
-    base_url: &str,
-    needles: &[&str],
-) -> String {
-    let url = format!("{base_url}/metrics");
-    let last = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-    let last_capture = last.clone();
-    let result = tokio::time::timeout(EVENT_FAIL_FAST_TIMEOUT, async move {
-        loop {
-            let body = client.get(&url).send().await.unwrap().text().await.unwrap();
-            if needles.iter().all(|needle| body.contains(needle)) {
-                return body;
-            }
-            *last_capture.lock().unwrap() = body;
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
+async fn await_pump_metrics_recorded(
+    event_log: &Arc<AnyEventLog>,
+    topic: &str,
+    backlog: Option<u64>,
+    outstanding: u64,
+) -> LogEvent {
+    let topic = topic.to_string();
+    await_topic_event(event_log, "orchestrator.lifecycle", move |event| {
+        event.kind == "pump_metrics_recorded"
+            && event.payload.get("topic").and_then(|value| value.as_str()) == Some(topic.as_str())
+            && backlog.is_none_or(|expected| {
+                event
+                    .payload
+                    .get("backlog")
+                    .and_then(|value| value.as_u64())
+                    == Some(expected)
+            })
+            && event
+                .payload
+                .get("outstanding")
+                .and_then(|value| value.as_u64())
+                == Some(outstanding)
     })
-    .await;
-    result.unwrap_or_else(|_| {
-        let snapshot = last.lock().unwrap().clone();
-        panic!("timed out waiting for metrics samples {needles:?}; last={snapshot}")
-    })
+    .await
+}
+
+async fn scrape_metrics_once(client: &reqwest::Client, base_url: &str) -> String {
+    client
+        .get(format!("{base_url}/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap()
 }
 
 fn run_harn_with_env(temp: &TempDir, args: &[&str], envs: &[(&str, &str)]) -> Output {
@@ -714,15 +726,22 @@ pub fn on_task(event: TriggerEvent) -> string {
         "second inbox event was acked before admission"
     );
 
-    let _metrics = wait_for_metrics_contains(
-        &client,
-        &base_url,
-        &[
-            "harn_orchestrator_pump_outstanding{topic=\"trigger.inbox.envelopes\"} 1",
-            "harn_orchestrator_pump_backlog{topic=\"trigger.inbox.envelopes\"} 1",
-        ],
+    await_pump_metrics_recorded(
+        &event_log,
+        harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC,
+        Some(1),
+        1,
     )
     .await;
+    let metrics = scrape_metrics_once(&client, &base_url).await;
+    assert!(
+        metrics.contains("harn_orchestrator_pump_outstanding"),
+        "metrics={metrics}"
+    );
+    assert!(
+        metrics.contains("harn_orchestrator_pump_backlog"),
+        "metrics={metrics}"
+    );
 
     let _ = shutdown_trigger.send(true);
     fs::write(&inbox_release_file, b"release").unwrap();
@@ -847,11 +866,7 @@ async fn bounded_pump_drain_truncates_and_replays_remaining_backlog_after_restar
 
     let temp = TempDir::new().unwrap();
     let pump_release_file = temp.path().join("release-pending-pump");
-    let pump_waiting_file = temp.path().join("pending-pump-waiting");
-    let pump_draining_file = temp.path().join("pending-pump-draining");
     let pump_release_value = pump_release_file.to_string_lossy().into_owned();
-    let pump_waiting_value = pump_waiting_file.to_string_lossy().into_owned();
-    let pump_draining_value = pump_draining_file.to_string_lossy().into_owned();
     write_file(
         temp.path(),
         "harn.toml",
@@ -891,14 +906,6 @@ pub fn on_task(event: TriggerEvent) -> string {
             "HARN_TEST_ORCHESTRATOR_PUMP_RELEASE_FILE",
             pump_release_value.as_str(),
         ),
-        (
-            "HARN_TEST_ORCHESTRATOR_PUMP_WAITING_FILE",
-            pump_waiting_value.as_str(),
-        ),
-        (
-            "HARN_TEST_ORCHESTRATOR_PUMP_DRAINING_FILE",
-            pump_draining_value.as_str(),
-        ),
     ])
     .await;
     let harness = start_harness_with(&temp, |mut config| {
@@ -908,6 +915,7 @@ pub fn on_task(event: TriggerEvent) -> string {
     })
     .await;
     let base_url = harness.listener_url().to_string();
+    let first_event_log = harness.event_log();
     let shutdown_trigger = harness.shutdown_trigger();
 
     let client = reqwest::Client::new();
@@ -926,9 +934,14 @@ pub fn on_task(event: TriggerEvent) -> string {
         assert_eq!(response.status(), reqwest::StatusCode::OK);
     }
 
-    wait_for_path_async(&pump_waiting_file).await;
+    await_pump_metrics_recorded(&first_event_log, "orchestrator.triggers.pending", None, 1).await;
     let _ = shutdown_trigger.send(true);
-    wait_for_path_async(&pump_draining_file).await;
+    await_topic_event(&first_event_log, "orchestrator.lifecycle", |event| {
+        event.kind == "pump_drain_requested"
+            && event.payload.get("topic").and_then(|value| value.as_str())
+                == Some("orchestrator.triggers.pending")
+    })
+    .await;
     fs::write(&pump_release_file, b"release").unwrap();
     shutdown(harness).await;
 
@@ -1119,14 +1132,4 @@ pub fn on_task(event: TriggerEvent) -> dict {
     );
     assert_eq!(drain_json["summary"]["ready"], serde_json::json!(0));
     assert_eq!(drain_json["summary"]["responses"], serde_json::json!(1));
-}
-
-async fn wait_for_path_async(path: &Path) {
-    tokio::time::timeout(EVENT_FAIL_FAST_TIMEOUT, async {
-        while !path.exists() {
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("timed out waiting for path {}", path.display()));
 }
