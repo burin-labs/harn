@@ -228,6 +228,7 @@ struct ApprovalOptions {
 
 #[derive(Clone, Debug)]
 struct ApprovalProgress {
+    request_id: String,
     reviewers: BTreeSet<String>,
     signatures: Vec<ApprovalSignature>,
     reason: Option<String>,
@@ -549,6 +550,48 @@ async fn request_approval_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
             Err(approval_wait_error(&log, HitlRequestKind::Approval, &request_id).await)
         }
     }
+}
+
+pub(crate) async fn request_approval_for_side_effect(
+    action: &str,
+    detail: JsonValue,
+    principal: String,
+    reviewers: Vec<String>,
+    capabilities_requested: Vec<String>,
+) -> Result<VmValue, VmError> {
+    let mut options = BTreeMap::new();
+    options.insert("args".to_string(), crate::stdlib::json_to_vm_value(&detail));
+    options.insert(
+        "detail".to_string(),
+        crate::stdlib::json_to_vm_value(&detail),
+    );
+    options.insert(
+        "principal".to_string(),
+        VmValue::String(Rc::from(principal)),
+    );
+    options.insert(
+        "reviewers".to_string(),
+        VmValue::List(Rc::new(
+            reviewers
+                .into_iter()
+                .map(|reviewer| VmValue::String(Rc::from(reviewer)))
+                .collect(),
+        )),
+    );
+    options.insert(
+        "capabilities_requested".to_string(),
+        VmValue::List(Rc::new(
+            capabilities_requested
+                .into_iter()
+                .map(|capability| VmValue::String(Rc::from(capability)))
+                .collect(),
+        )),
+    );
+    let args = vec![
+        VmValue::String(Rc::from(action.to_string())),
+        VmValue::Dict(Rc::new(options)),
+    ];
+    request_approval_impl(&args).await
 }
 
 async fn dual_control_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -988,6 +1031,7 @@ async fn resolve_approval_state(
         .into_iter()
         .collect::<BTreeSet<_>>();
     let mut progress = ApprovalProgress {
+        request_id: request.request_id.clone(),
         reviewers: BTreeSet::new(),
         signatures: Vec::new(),
         reason: None,
@@ -1102,6 +1146,7 @@ fn approval_reviewers_from_request(
 
 fn approval_record_json(progress: &ApprovalProgress) -> JsonValue {
     json!({
+        "request_id": progress.request_id.clone(),
         "approved": true,
         "reviewers": progress.reviewers.iter().cloned().collect::<Vec<_>>(),
         "approved_at": progress.approved_at.clone().unwrap_or_else(now_rfc3339),

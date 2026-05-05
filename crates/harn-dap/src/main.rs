@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod debugger;
 mod host_bridge;
 mod protocol;

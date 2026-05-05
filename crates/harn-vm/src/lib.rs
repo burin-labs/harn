@@ -1,9 +1,11 @@
+#![recursion_limit = "256"]
 #![allow(clippy::result_large_err, clippy::cloned_ref_to_slice_refs)]
 
 pub mod a2a;
 pub mod agent_events;
 pub mod agent_sessions;
 pub mod atomic_io;
+pub mod autonomy;
 pub mod bridge;
 mod builtin_id;
 pub mod checkpoint;

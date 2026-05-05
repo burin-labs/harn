@@ -1360,6 +1360,7 @@ the ergonomic Harn call surface for nested operations.
 | `command_policy(config)` | config: dict | dict | Normalize a command-runner policy with workspace roots, deterministic deny/approval rules, and optional pre/post closures |
 | `command_policy_push(policy)` | policy: dict | nil | Install a command policy for the current VM scope |
 | `command_policy_pop()` | — | nil | Remove the most recently installed command policy |
+| `with_autonomy_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped autonomy tier policy; side-effecting builtins are enforced by the VM |
 | `with_execution_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped capability policy; the policy is popped on success or throw |
 | `with_approval_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped tool approval policy; the policy is popped on success or throw |
 | `with_command_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped command policy; the policy is popped on success or throw |

@@ -34,7 +34,7 @@ pipeline test(task) {
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-shadow-" + unique}},
   )
-  let denied: list<TrustRecord> = trust_query({agent: agent_id, action: "github.issue.opened", outcome: "denied"})
+  let denied: list<TrustRecord> = trust_query({agent: agent_id, action: "fs.write", outcome: "denied"})
   let file_after_first = file_exists(file_path)
   let promoted: TrustRecord = trust_record(agent_id, "trust.promote", "tester", "success", "act_auto")
   let promote_records: list<TrustRecord> = trust_query({agent: agent_id, action: "trust.promote"})
@@ -42,8 +42,8 @@ pipeline test(task) {
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-auto-" + unique}},
   )
-  let successes: list<TrustRecord> = trust_query({agent: agent_id, action: "github.issue.opened", outcome: "success"})
-  println(first.status == "failed")
+  let successes: list<TrustRecord> = trust_query({agent: agent_id, action: "github.issue.opened", outcome: "success", tier: "act_auto"})
+  println(first.status == "dispatched" && first.result?.autonomy_tier == "shadow")
   println(!file_after_first)
   println(len(denied) == 1 && denied[0].autonomy_tier == "shadow")
   println(promoted.action == "trust.promote" && promoted.autonomy_tier == "act_auto")

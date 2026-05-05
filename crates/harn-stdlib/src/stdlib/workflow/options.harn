@@ -33,6 +33,27 @@ fn __workflow_native_tool_fallback(value) {
   return "reject"
 }
 
+fn __workflow_autonomy_tier(value) {
+  let tier = value ?? "act_auto"
+  if tier == "shadow" || tier == "suggest" || tier == "act_with_approval" || tier == "act_auto" {
+    return tier
+  }
+  throw "workflow_autonomy_policy: tier must be one of shadow, suggest, act_with_approval, act_auto"
+}
+
+/** workflow_autonomy_policy normalizes tier policy for with_autonomy_policy. */
+pub fn workflow_autonomy_policy(config = nil) {
+  let cfg = config ?? {}
+  return {
+    agent_id: cfg?.agent_id ?? cfg?.agent,
+    autonomy_tier: __workflow_autonomy_tier(cfg?.autonomy_tier ?? cfg?.tier),
+    action_tiers: cfg?.action_tiers ?? {},
+    agent_tiers: cfg?.agent_tiers ?? {},
+    agent_action_tiers: cfg?.agent_action_tiers ?? {},
+    reviewers: cfg?.reviewers ?? [],
+  }
+}
+
 fn __workflow_add_model_option(options, model_policy, key) {
   let value = model_policy[key]
   if value == nil {

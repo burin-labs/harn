@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 //! Integration tests for first-class sessions.
 
 use harn_vm::value::VmError;

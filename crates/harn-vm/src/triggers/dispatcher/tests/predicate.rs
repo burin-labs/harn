@@ -671,12 +671,9 @@ pub fn local_fn(event: TriggerEvent) {
     let outcomes = dispatcher
         .dispatch_event(trigger_event("issues.opened", "delivery-suggest-1"))
         .await
-        .expect("dispatch completes with handler failure");
-    assert_eq!(outcomes[0].status, DispatchStatus::Failed);
-    assert!(outcomes[0]
-        .error
-        .as_deref()
-        .is_some_and(|error| error.contains("workspace write ceiling")));
+        .expect("dispatch completes with side effect proposal");
+    assert_eq!(outcomes[0].status, DispatchStatus::Succeeded);
+    assert!(outcomes[0].error.is_none());
 
     let outbox = read_topic(log.clone(), crate::TRIGGER_OUTBOX_TOPIC).await;
     assert!(outbox

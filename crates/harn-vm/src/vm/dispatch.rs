@@ -198,11 +198,12 @@ impl Vm {
             match callable {
                 VmValue::Closure(closure) => self.call_closure(closure, args).await,
                 VmValue::BuiltinRef(name) => {
-                    if let Some(result) = self.call_sync_builtin_by_ref(name, args) {
-                        result
-                    } else {
-                        self.call_named_builtin(name, args.to_vec()).await
+                    if !crate::autonomy::needs_async_side_effect_enforcement(name) {
+                        if let Some(result) = self.call_sync_builtin_by_ref(name, args) {
+                            return result;
+                        }
                     }
+                    self.call_named_builtin(name, args.to_vec()).await
                 }
                 VmValue::BuiltinRefId { id, name } => {
                     self.call_builtin_id_or_name(*id, name, args.to_vec()).await
@@ -308,7 +309,20 @@ impl Vm {
                 category: ErrorCategory::ToolRejected,
             });
         }
-        crate::orchestration::enforce_current_policy_for_builtin(name, &args)?;
+        let autonomy = if crate::autonomy::needs_async_side_effect_enforcement(name) {
+            crate::autonomy::enforce_builtin_side_effect_boxed(name, &args).await?
+        } else {
+            None
+        };
+        if let Some(crate::autonomy::AutonomyDecision::Skip(value)) = autonomy {
+            return Ok(value);
+        }
+        if !matches!(
+            autonomy,
+            Some(crate::autonomy::AutonomyDecision::AllowApproved)
+        ) {
+            crate::orchestration::enforce_current_policy_for_builtin(name, &args)?;
+        }
         crate::typecheck::validate_builtin_call(name, &args, None)?;
 
         if let Some(result) =

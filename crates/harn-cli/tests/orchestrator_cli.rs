@@ -30,6 +30,7 @@ use harn_vm::event_log::{
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use tempfile::TempDir;
 use test_util::connectors::github_connector_module;
+use test_util::connectors::{provider_declarations, write_first_party_connector_modules};
 use test_util::process::harn_e2e_command;
 use tokio::sync::MutexGuard;
 
@@ -80,6 +81,7 @@ async fn lock_env_with(envs: &[(&'static str, &str)]) -> EnvGuards {
 }
 
 fn test_config(temp: &TempDir) -> OrchestratorConfig {
+    write_first_party_connector_modules(temp.path());
     OrchestratorConfig::for_test(temp.path().join("harn.toml"), temp.path().join("state"))
 }
 
@@ -776,20 +778,18 @@ pub fn on_task(event: TriggerEvent) -> string {
 #[tokio::test(flavor = "multi_thread")]
 async fn orchestrator_queue_soft_migrates_legacy_inbox_topics() {
     let temp = TempDir::new().unwrap();
-    write_file(
-        temp.path(),
-        "harn.toml",
-        r#"
+    let mut manifest = r#"
 [package]
 name = "fixture"
 
 [exports]
 handlers = "lib.harn"
 
-[[providers]]
-id = "github"
-connector = { harn = "github_connector.harn" }
-
+"#
+    .to_string();
+    manifest.push_str(provider_declarations());
+    manifest.push_str(
+        r#"
 [[triggers]]
 id = "github-new-issue"
 kind = "webhook"
@@ -799,6 +799,7 @@ handler = "handlers::on_event"
 secrets = { signing_secret = "github/webhook-secret" }
 "#,
     );
+    write_file(temp.path(), "harn.toml", &manifest);
     write_file(
         temp.path(),
         "lib.harn",
