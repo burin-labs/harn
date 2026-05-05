@@ -16,6 +16,8 @@ pub(crate) mod merge_captain;
 pub(crate) mod merge_captain_mock;
 pub mod orchestrator;
 pub mod persona;
+pub mod persona_doctor;
+pub mod persona_scaffold;
 pub mod playground;
 pub(crate) mod portal;
 pub(crate) mod protocol_conformance;

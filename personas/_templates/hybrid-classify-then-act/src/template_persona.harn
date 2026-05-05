@@ -1,0 +1,50 @@
+import { cheap_classify_then_escalate, with_audit_receipt } from "std/personas/prelude"
+
+@persona(name: "template_persona", description: "Hybrid classify-then-act template persona.", tools: [github, mcp], capabilities: ["project.scan", "runtime.record_run"], autonomy: "act_with_approval", receipts: "required")
+/** Run the hybrid classify-then-act template DAG. */
+pub fn template_persona(task) {
+  let classified = classify_request(task)
+  return act_on_classification(classified)
+}
+
+@step(name: "classify_request", model: "mock", receipt: audit, error_boundary: escalate, budget: {max_tokens: 2000})
+fn classify_request(task) {
+  let fixture = task?.fixture ?? {}
+  let prompt = render_prompt(
+    "../prompts/system.harn.prompt",
+    {
+      persona_name: "template_persona",
+      template_kind: "hybrid-classify-then-act",
+      request: fixture?.request ?? "classify requested work",
+    },
+  )
+  return cheap_classify_then_escalate(
+    fixture,
+    fn(input) { return {label: "needs_plan", confidence: 0.62, item_count: len(input?.items ?? [])} },
+    fn(input) { return {label: "draft_plan", confidence: 0.91, item_count: len(input?.items ?? [])} },
+    fn(result) { return result.confidence < 0.7 || result.label == "needs_plan" },
+    {
+      persona: "template_persona",
+      step: "classify_request",
+      min_confidence: 0.7,
+      metadata: {prompt_digest: sha256(prompt)},
+    },
+  )
+}
+
+@step(name: "act_on_classification", receipt: audit, error_boundary: fail, budget: {max_tokens: 1000})
+fn act_on_classification(classified) {
+  let wrapped = with_audit_receipt(
+    fn() { return {
+      action: classified.result.label,
+      escalated: classified.escalated,
+      confidence: classified.result.confidence,
+    } },
+    {persona: "template_persona", step: "act_on_classification"},
+  )
+  return wrapped()
+}
+
+pipeline run(task) {
+  return template_persona(task)
+}

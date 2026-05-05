@@ -1,0 +1,15 @@
+import { template_persona } from "../src/template_persona"
+
+pipeline test_template_persona_smoke(task) {
+  llm_mock_clear()
+  llm_mock(
+    {text: "{\"decision\": \"ship\", \"confidence\": 0.92, \"rationale\": \"fixture is low risk\"}"},
+  )
+  let fixture = json_parse(read_file("../fixtures/happy_path.json"))
+  let result = template_persona({fixture: fixture})
+  assert_eq(result.status, "completed")
+  assert_eq(result.state.decision, "ship")
+  assert_eq(result.receipt.schema, "harn.receipt.v1")
+  println(true)
+  println(result.receipt.schema)
+}

@@ -1,0 +1,11 @@
+import { template_persona } from "../src/template_persona"
+
+pipeline test_template_persona_smoke(task) {
+  let fixture = json_parse(read_file("../fixtures/happy_path.json"))
+  let result = template_persona({fixture: fixture})
+  assert_eq(result.status, "success")
+  assert_eq(result.result.action, "draft_plan")
+  assert_eq(result.receipt.schema, "harn.receipt.v1")
+  println(true)
+  println(result.receipt.schema)
+}
