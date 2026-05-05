@@ -45,6 +45,7 @@ const HOST_DAEMON_SNAPSHOT: &str = "__host_agent_daemon_snapshot";
 const HOST_DAEMON_WAIT: &str = "__host_agent_daemon_wait";
 const HOST_AGENT_EMIT_EVENT: &str = "__host_agent_emit_event";
 const HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK: &str = "__host_agent_record_native_tool_fallback";
+const HOST_AGENT_RECORD_COMPACTION: &str = "__host_agent_record_compaction";
 
 /// Session-keyed record for Harn-driven agent loops. The Harn loop owns
 /// iteration and decision logic; this struct holds only session-scoped
@@ -1049,6 +1050,48 @@ fn host_agent_record_native_tool_fallback_builtin(
     Ok(VmValue::Nil)
 }
 
+fn host_agent_record_compaction_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_AGENT_RECORD_COMPACTION}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let payload = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let payload_json = vm_to_json(&payload);
+    let archived_messages = payload_json
+        .get("archived_messages")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let new_summary_len = payload_json
+        .get("new_summary_len")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let iteration = payload_json
+        .get("iteration")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    super::trace::emit_agent_event(super::trace::AgentTraceEvent::ContextCompaction {
+        archived_messages,
+        new_summary_len,
+        iteration,
+    });
+    let event = super::helpers::transcript_event(
+        "compaction",
+        "system",
+        "internal",
+        "",
+        Some(payload_json),
+    );
+    let _ = crate::agent_sessions::append_event(&session_id, event);
+    Ok(VmValue::Nil)
+}
+
 fn host_agent_session_claim_tool_format_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1577,6 +1620,13 @@ const HOST_SESSION_PRIMITIVES_SYNC: &[SyncBuiltin] = &[
     .signature("__host_agent_record_native_tool_fallback(session_id, payload)")
     .arity(VmBuiltinArity::Exact(2))
     .doc("Record a native→text tool-call fallback as a transcript event and trace counter."),
+    SyncBuiltin::new(
+        HOST_AGENT_RECORD_COMPACTION,
+        host_agent_record_compaction_builtin,
+    )
+    .signature("__host_agent_record_compaction(session_id, payload)")
+    .arity(VmBuiltinArity::Exact(2))
+    .doc("Record a transcript compaction as a transcript event and trace counter."),
 ];
 
 const HOST_SESSION_PRIMITIVES_GROUP: BuiltinGroup<'static> = BuiltinGroup::new()

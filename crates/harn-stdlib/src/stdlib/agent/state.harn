@@ -75,3 +75,8 @@ pub fn agent_emit_event(session_id, event_type, payload) {
 pub fn agent_record_native_tool_fallback(session_id, payload) {
   return __host_agent_record_native_tool_fallback(session_id, payload)
 }
+
+/** agent_record_compaction. */
+pub fn agent_record_compaction(session_id, payload) {
+  return __host_agent_record_compaction(session_id, payload)
+}

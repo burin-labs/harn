@@ -100,6 +100,8 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__host_agent_dispatch_tool_call",
     "__host_agent_emit_event",
     "__host_agent_parse_tool_calls",
+    "__host_agent_record_compaction",
+    "__host_agent_record_native_tool_fallback",
     "__host_agent_session_active_skills",
     "__host_agent_session_claim_tool_format",
     "__host_agent_session_compact_if_needed",
