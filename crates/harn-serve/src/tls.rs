@@ -210,7 +210,7 @@ async fn self_signed_rustls_config(hosts: &[String]) -> Result<RustlsConfig, Str
         .map_err(|error| format!("failed to generate self-signed dev certificate: {error}"))?;
     RustlsConfig::from_pem(
         cert.cert.pem().into_bytes(),
-        cert.key_pair.serialize_pem().into_bytes(),
+        cert.signing_key.serialize_pem().into_bytes(),
     )
     .await
     .map_err(|error| format!("failed to load self-signed dev certificate: {error}"))

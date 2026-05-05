@@ -255,7 +255,7 @@ async fn tls_listener_serves_https_with_supplied_cert_and_key() {
     let cert = generate_simple_self_signed(vec!["localhost".to_string(), "127.0.0.1".to_string()])
         .unwrap();
     let cert_pem = cert.cert.pem();
-    let key_pem = cert.key_pair.serialize_pem();
+    let key_pem = cert.signing_key.serialize_pem();
     write_bytes(temp.path(), "tls/cert.pem", cert_pem.as_bytes());
     write_bytes(temp.path(), "tls/key.pem", key_pem.as_bytes());
 

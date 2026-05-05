@@ -355,7 +355,7 @@ async fn custom_tls_ca_bundle_and_pin_allow_request() {
             .with_no_client_auth()
             .with_single_cert(
                 vec![cert.cert.der().clone()],
-                PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der()).into(),
+                PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der()).into(),
             )
             .expect("build tls config"),
     );
@@ -414,7 +414,7 @@ async fn custom_tls_pin_mismatch_is_rejected() {
             .with_no_client_auth()
             .with_single_cert(
                 vec![cert.cert.der().clone()],
-                PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der()).into(),
+                PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der()).into(),
             )
             .expect("build tls config"),
     );

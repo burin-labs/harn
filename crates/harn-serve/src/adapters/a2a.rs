@@ -3887,7 +3887,7 @@ mod tests {
         let client_key_path = temp.path().join("client-key.pem");
         std::fs::write(&server_cert_path, server_cert.cert.pem()).expect("server cert file");
         std::fs::write(&client_cert_path, client_cert.cert.pem()).expect("client cert file");
-        std::fs::write(&client_key_path, client_cert.key_pair.serialize_pem())
+        std::fs::write(&client_key_path, client_cert.signing_key.serialize_pem())
             .expect("client key file");
 
         let mut client_roots = rustls::RootCertStore::empty();
@@ -3903,7 +3903,7 @@ mod tests {
                 .with_single_cert(
                     vec![server_cert.cert.der().clone()],
                     rustls::pki_types::PrivatePkcs8KeyDer::from(
-                        server_cert.key_pair.serialize_der(),
+                        server_cert.signing_key.serialize_der(),
                     )
                     .into(),
                 )
