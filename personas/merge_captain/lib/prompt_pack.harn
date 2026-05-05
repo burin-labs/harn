@@ -3,6 +3,8 @@
 // Deterministic Harn code owns context assembly, side-effect gating,
 // schema validation, and transcript/eval revision gates. Model outputs
 // are recommendations until these validators accept them.
+import { typed_output_checkpoint } from "std/checkpoint"
+
 /** Narrow decisions owned by the value-model prompt pack. */
 pub fn prompt_ids() {
   return [
@@ -338,6 +340,245 @@ pub fn validate_output(id, output) {
     }
   }
   return {ok: len(errors) == 0, errors: errors}
+}
+
+fn _ids(items) {
+  var ids = []
+  for item in items ?? [] {
+    if item?.id != nil {
+      ids = ids + [to_string(item.id)]
+    }
+    if item?.sha != nil && !ids.contains(to_string(item.sha)) {
+      ids = ids + [to_string(item.sha)]
+    }
+  }
+  return ids
+}
+
+fn _classify_pr_errors(output) {
+  var errors = []
+  if output.confidence < 0.7 && len(output.missing_context ?? []) == 0 {
+    errors = errors + ["low-confidence PR classifications must name missing_context"]
+  }
+  if len(output.evidence_keys ?? []) == 0 {
+    errors = errors + ["classification must cite at least one evidence key"]
+  }
+  return errors
+}
+
+fn _next_action_errors(output) {
+  var errors = []
+  if output.action != "wait" && len(output.deterministic_inputs ?? []) == 0 {
+    errors = errors + ["non-wait actions must cite deterministic_inputs"]
+  }
+  if output.approval_required
+    && !["run_repair_worker", "escalate_human", "comment"].contains(output.action) {
+    errors = errors + ["approval_required is only valid for mutating or human-escalation actions"]
+  }
+  return errors
+}
+
+fn _ci_category_errors(context, output) {
+  var errors = []
+  let allowed_spans = _ids(context.selected_log_spans)
+  if ["deterministic_failure", "flaky_test", "infra_failure"].contains(output.category)
+    && len(output.selected_log_span_ids ?? []) == 0 {
+    errors = errors + ["CI diagnoses must cite selected_log_span_ids unless context is missing"]
+  }
+  for span_id in output.selected_log_span_ids ?? [] {
+    if !allowed_spans.contains(to_string(span_id)) {
+      errors = errors + ["selected_log_span_id '${to_string(span_id)}' was not in prompt context"]
+    }
+  }
+  if output.confidence < 0.7 && output.category != "missing_context" {
+    errors = errors + ["low-confidence CI diagnoses must use missing_context"]
+  }
+  return errors
+}
+
+fn _release_audit_errors(context, output) {
+  var errors = []
+  if len(output.evidence_checked ?? []) == 0 {
+    errors = errors + ["release/changelog audits must list evidence_checked"]
+  }
+  let commit_shas = _ids(context.commits)
+  for section in output.rewrite_sections ?? [] {
+    for sha in section.evidence_commit_shas ?? [] {
+      if !commit_shas.contains(to_string(sha)) {
+        errors = errors + ["rewrite_sections cited unknown commit sha '${to_string(sha)}'"]
+      }
+    }
+  }
+  if output.confidence < 0.7 && len(output.blockers ?? []) == 0 {
+    errors = errors + ["low-confidence release audits must list blockers"]
+  }
+  return errors
+}
+
+fn _approval_errors(output) {
+  var errors = []
+  if output.ask_approval && len(output.action_kinds ?? []) == 0 {
+    errors = errors + ["approval requests must list action_kinds"]
+  }
+  if output.ask_approval && trim(output.question ?? "") == "" {
+    errors = errors + ["approval requests must include a question"]
+  }
+  return errors
+}
+
+fn _repair_summary_errors(output) {
+  if output.status == "completed" && len(output.tests ?? []) == 0 {
+    return ["completed repair summaries must list tests"]
+  }
+  return []
+}
+
+fn _field_errors(id, context, output) {
+  if id == "classify_pr" {
+    return _classify_pr_errors(output)
+  }
+  if id == "choose_next_action" {
+    return _next_action_errors(output)
+  }
+  if id == "diagnose_ci_category" {
+    return _ci_category_errors(context, output)
+  }
+  if id == "audit_release_changelog" {
+    return _release_audit_errors(context, output)
+  }
+  if id == "decide_approval" {
+    return _approval_errors(output)
+  }
+  if id == "summarize_repair_result" {
+    return _repair_summary_errors(output)
+  }
+  return []
+}
+
+fn _checkpoint_validator(id, context, extra_validator) {
+  return fn(output) {
+    var errors = []
+    let schema_validation = validate_output(id, output)
+    if !schema_validation.ok {
+      errors = errors + schema_validation.errors
+    }
+    errors = errors + _field_errors(id, context, output)
+    if extra_validator != nil {
+      let extra = extra_validator(output, context)
+      if extra == nil {
+        return {ok: len(errors) == 0, errors: errors}
+      }
+      if type_of(extra) == "bool" {
+        if !extra {
+          errors = errors + ["custom validator returned false"]
+        }
+      } else {
+        if type_of(extra) == "dict" {
+          if !(extra?.ok ?? false) {
+            let extra_errors = extra?.errors ?? extra?.validation_errors
+              ?? [extra?.message ?? "custom validator rejected output"]
+            errors = errors + extra_errors
+          }
+        } else {
+          if type_of(extra) == "list" {
+            errors = errors + extra.map({ item -> to_string(item) })
+          } else {
+            if type_of(extra) == "string" && trim(extra) != "" {
+              errors = errors + [extra]
+            }
+          }
+        }
+      }
+    }
+    return {ok: len(errors) == 0, errors: errors}
+  }
+}
+
+/** Run one prompt-pack decision through a strict typed-output checkpoint. */
+pub fn typed_prompt_checkpoint(id, evidence, options = nil, validator = nil) {
+  let schema = schema_for(id)
+  if schema == nil {
+    return {
+      _type: "typed_output_checkpoint",
+      version: 1,
+      name: "merge_captain." + id,
+      ok: false,
+      status: "schema_rejected",
+      data: nil,
+      error: "unknown prompt id '${id}'",
+      error_category: "unknown_prompt",
+      validation_errors: ["unknown prompt id '${id}'"],
+      final_accepted: false,
+    }
+  }
+  let context = assemble_context(id, evidence)
+  let context_validation = validate_context(context)
+  if !context_validation.ok {
+    return {
+      _type: "typed_output_checkpoint",
+      version: 1,
+      name: "merge_captain." + id,
+      ok: false,
+      status: "validator_rejected",
+      data: nil,
+      error: context_validation.errors.join("; "),
+      error_category: "context_validation",
+      validation_errors: context_validation.errors,
+      final_accepted: false,
+      context: context,
+    }
+  }
+  let opts = options ?? {}
+  let prompt = prompt_text(id) + "\n\nContext JSON:\n" + json_stringify(context)
+  let checkpoint = typed_output_checkpoint(
+    "merge_captain." + id,
+    prompt,
+    schema,
+    opts
+      + {
+      output_format: {kind: "json_schema", schema: schema, strict: true},
+      validator_retries: opts?.validator_retries ?? 1,
+    },
+    _checkpoint_validator(id, context, validator),
+  )
+  return checkpoint + {prompt_id: id, context: context}
+}
+
+/** Checkpoint the next deterministic action for one classified PR. */
+pub fn choose_next_action_checkpoint(classification, policy, dry_run, approval_state, options = nil) {
+  return typed_prompt_checkpoint(
+    "choose_next_action",
+    {classification: classification, policy: policy, dry_run: dry_run, approval_gate: approval_state},
+    options,
+  )
+}
+
+/** Checkpoint CI failure categorization from selected deterministic log spans. */
+pub fn diagnose_ci_failure_checkpoint(evidence, options = nil) {
+  return typed_prompt_checkpoint("diagnose_ci_category", evidence, options)
+}
+
+/** Checkpoint flaky-test categorization from selected deterministic log spans. */
+pub fn classify_flake_checkpoint(evidence, options = nil) {
+  return typed_prompt_checkpoint(
+    "diagnose_ci_category",
+    evidence,
+    options,
+    fn(output, _context) {
+      if output.category != "flaky_test" && output.category != "missing_context" {
+        return {
+          ok: false,
+          errors: ["flake classification must return category flaky_test or request missing_context"],
+        }
+      }
+      return {ok: true, errors: []}
+    },
+  )
+}
+
+/** Checkpoint release/changelog audit synthesis against deterministic facts. */
+pub fn audit_release_changelog_checkpoint(evidence, options = nil) {
+  return typed_prompt_checkpoint("audit_release_changelog", evidence, options)
 }
 
 /** Known prompt/eval failure modes that should stay visible during revisions. */

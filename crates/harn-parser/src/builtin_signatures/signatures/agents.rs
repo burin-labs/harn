@@ -384,6 +384,20 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         where_clauses: &[],
     },
     BuiltinSignature {
+        name: "agent_typed_output_checkpoint",
+        params: &[
+            Param::new("name", TY_STRING),
+            Param::new("prompt", TY_STRING),
+            Param::new("schema", TY_SCHEMA_VALUE),
+            Param::optional("options", TY_DICT_OR_NIL),
+            Param::optional("validator", Ty::Union(&[TY_CLOSURE, TY_NIL])),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "close_agent",
         // Worker handle: string id, dict (with `id` field), or task handle
         // — accepted polymorphically by `worker_id_from_value`.

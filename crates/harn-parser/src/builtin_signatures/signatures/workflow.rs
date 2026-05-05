@@ -11,14 +11,18 @@
 //! - `run_record_*` and `eval_*` for replay fixtures and eval suites.
 
 use super::{
-    BuiltinSignature, Param, Ty, TY_ANY, TY_DICT, TY_DICT_OR_NIL, TY_INT, TY_LIST, TY_NIL,
-    TY_STRING, TY_STRING_OR_NIL,
+    BuiltinSignature, Param, Ty, TY_ANY, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_INT, TY_LIST,
+    TY_NIL, TY_STRING, TY_STRING_OR_NIL,
 };
 
 /// `string | dict` — accepted shapes for workflow targets in the
 /// `workflow.*` mailbox primitives. Either a workflow id string or a
 /// `{workflow_id, base_dir?}` dict.
 const TY_WORKFLOW_TARGET: Ty = Ty::Union(&[TY_STRING, TY_DICT]);
+
+/// `dict | Schema<any>` — schema aliases type-check as `Schema<T>` but
+/// compile down to JSON-Schema dictionaries at runtime.
+const TY_SCHEMA_VALUE: Ty = Ty::Union(&[TY_DICT, Ty::Apply("Schema", &[TY_ANY])]);
 
 pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     // artifact(payload) — normalize a free-form dict into a canonical
@@ -839,6 +843,20 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::new("workflow", TY_DICT),
             Param::new("node_id", TY_STRING),
             Param::new("visibility", TY_STRING_OR_NIL),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "workflow_typed_output_checkpoint",
+        params: &[
+            Param::new("name", TY_STRING),
+            Param::new("prompt", TY_STRING),
+            Param::new("schema", TY_SCHEMA_VALUE),
+            Param::optional("options", TY_DICT_OR_NIL),
+            Param::optional("validator", Ty::Union(&[TY_CLOSURE, TY_NIL])),
         ],
         returns: TY_DICT,
         type_params: &[],

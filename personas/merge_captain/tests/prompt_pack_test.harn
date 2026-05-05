@@ -1,7 +1,11 @@
 // Run: harn test personas/merge_captain/tests/prompt_pack_test.harn
 import {
   assemble_context,
+  audit_release_changelog_checkpoint,
+  choose_next_action_checkpoint,
+  classify_flake_checkpoint,
   context_budget_for,
+  diagnose_ci_failure_checkpoint,
   golden_examples_for,
   known_failure_modes,
   pack_manifest,
@@ -133,6 +137,102 @@ pipeline test_validate_output_rejects_missing_and_extra_keys(task) {
   )
   assert(!extra.ok)
   assert(json_stringify(extra.errors).contains("unexpected key"))
+}
+
+pipeline test_next_action_checkpoint_repairs_missing_evidence(task) {
+  llm_mock_clear()
+  llm_mock(
+    {
+      text: "```json\n{\"action\":\"update_branch\",\"deterministic_inputs\":[],\"approval_required\":false,\"reason\":\"behind\"}\n```",
+    },
+  )
+  llm_mock(
+    {
+      text: "{\"action\":\"update_branch\",\"deterministic_inputs\":[\"behind_by\",\"base_ref\",\"head_ref\"],\"approval_required\":false,\"reason\":\"branch is behind base\"}",
+    },
+  )
+  let checkpoint = choose_next_action_checkpoint(
+    {state: "behind", action: "update_branch", evidence: {behind_by: 2}},
+    {merge_queue_enabled: true},
+    true,
+    {required: false},
+    {provider: "mock", validator_retries: 1, repair: {enabled: false}},
+  )
+  assert(checkpoint.ok)
+  assert_eq(checkpoint.data.action, "update_branch")
+  assert_eq(checkpoint.checkpoint_attempts, 2)
+  assert(checkpoint.extracted_json)
+  assert(checkpoint.validator_failures[0].contains("deterministic_inputs"))
+}
+
+pipeline test_ci_failure_checkpoint_rejects_unknown_log_span(task) {
+  llm_mock_clear()
+  llm_mock(
+    {
+      text: "{\"category\":\"deterministic_failure\",\"selected_log_span_ids\":[\"not-present\"],\"likely_owner\":\"repair_worker\",\"next_inspection_commands\":[\"cargo test\"],\"confidence\":0.91,\"reason\":\"failure\"}",
+    },
+  )
+  llm_mock(
+    {
+      text: "{\"category\":\"flaky_test\",\"selected_log_span_ids\":[\"span-1\"],\"likely_owner\":\"merge_captain\",\"next_inspection_commands\":[\"cargo test -- --exact test_flake\"],\"confidence\":0.82,\"reason\":\"same test is nondeterministic\"}",
+    },
+  )
+  let checkpoint = diagnose_ci_failure_checkpoint(
+    {
+      failing_checks: ["ci / rust"],
+      selected_log_spans: [{id: "span-1", text: "test_flake failed then passed"}],
+      tool_errors: [],
+    },
+    {provider: "mock", validator_retries: 1, repair: {enabled: false}},
+  )
+  assert(checkpoint.ok)
+  assert_eq(checkpoint.data.category, "flaky_test")
+  assert(checkpoint.validator_failures[0].contains("not in prompt context"))
+}
+
+pipeline test_flake_checkpoint_requires_flake_or_missing_context(task) {
+  llm_mock_clear()
+  llm_mock(
+    {
+      text: "{\"category\":\"deterministic_failure\",\"selected_log_span_ids\":[\"span-1\"],\"likely_owner\":\"repair_worker\",\"next_inspection_commands\":[\"cargo test\"],\"confidence\":0.91,\"reason\":\"single failure\"}",
+    },
+  )
+  llm_mock(
+    {
+      text: "{\"category\":\"flaky_test\",\"selected_log_span_ids\":[\"span-1\"],\"likely_owner\":\"merge_captain\",\"next_inspection_commands\":[\"cargo test -- --exact test_flake\"],\"confidence\":0.82,\"reason\":\"rerun passed\"}",
+    },
+  )
+  let checkpoint = classify_flake_checkpoint(
+    {
+      failing_checks: ["ci / rust"],
+      selected_log_spans: [{id: "span-1", text: "test_flake failed once and passed on rerun"}],
+      tool_errors: [],
+    },
+    {provider: "mock", validator_retries: 1, repair: {enabled: false}},
+  )
+  assert(checkpoint.ok)
+  assert_eq(checkpoint.data.category, "flaky_test")
+  assert(checkpoint.validator_failures[0].contains("flake classification"))
+}
+
+pipeline test_release_changelog_checkpoint_separates_commit_evidence(task) {
+  llm_mock_clear()
+  llm_mock(
+    {
+      text: "{\"gaps\":[\"missing note\"],\"rewrite_sections\":[{\"section\":\"Unreleased / Added\",\"after\":\"Add release audit.\",\"evidence_commit_shas\":[\"abc123\"],\"uncertainty\":\"none\"}],\"blockers\":[],\"evidence_checked\":[\"commit abc123\"],\"confidence\":0.88}",
+    },
+  )
+  let checkpoint = audit_release_changelog_checkpoint(
+    {
+      commits: [{sha: "abc123", subject: "feat: add release audit"}],
+      changelog_excerpt: "## Unreleased",
+      shell_observations: [{command: "git log", status: "ok"}],
+    },
+    {provider: "mock", validator_retries: 1, repair: {enabled: false}},
+  )
+  assert(checkpoint.ok)
+  assert_eq(checkpoint.data.rewrite_sections[0].evidence_commit_shas[0], "abc123")
+  assert_eq(checkpoint.context.commits[0].subject, "feat: add release audit")
 }
 
 pipeline test_value_model_eval_fixture_records_failure_modes(task) {

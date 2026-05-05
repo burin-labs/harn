@@ -1,3 +1,4 @@
+import { typed_output_checkpoint_from_text } from "std/checkpoint"
 // Repair-worker checkpoint dispatcher.
 //
 // This module is the only place in Merge Captain that calls
@@ -30,38 +31,58 @@ pub fn default_agent_options() {
 }
 
 /**
- * Default executor: invoke `agent_loop` with the bundle prompt + a
- * strict json_schema output format, then parse the JSON. Returns a
- * record with `{ok, output, raw, agent_loop}` where `output` is the
- * parsed JSON dict.
+ * Default executor: run the side-effectful repair worker once, then
+ * validate its summary through a typed checkpoint. Any validator retry
+ * repairs only the summary text, never the worker actions.
  */
 pub fn default_executor(bundle, options) {
-  let merged = default_agent_options() + options ?? {}
+  let supplied = options ?? {}
+  let merged = default_agent_options() + supplied
   let schema = output_schema()
   let agent_options = merged
     + {output_schema: schema, output_format: {kind: "json_schema", schema: schema, strict: true}}
-  let result = agent_loop(bundle.prompt, options?.system, agent_options)
+  let result = agent_loop(bundle.prompt, supplied?.system, agent_options)
   let raw = result?.text ?? ""
-  let parsed = try {
-    json_parse(raw)
-  }
+  let checkpoint = typed_output_checkpoint_from_text(
+    "merge_captain.repair_worker.summary",
+    raw,
+    schema,
+    merged
+      + {
+      llm_repair: false,
+      output_format: {kind: "json_schema", schema: schema, strict: true},
+      validator_retries: merged?.validator_retries ?? 1,
+    },
+    fn(output) { return validate_all(bundle, output) },
+  )
   let agent_meta = {
     status: result?.status,
     iterations: result?.llm?.iterations,
     input_tokens: result?.llm?.input_tokens,
     output_tokens: result?.llm?.output_tokens,
-    transcript_session_id: options?.session_id,
+    transcript_session_id: supplied?.session_id,
+    typed_checkpoint: checkpoint,
   }
-  if !is_ok(parsed) {
+  if !checkpoint.ok && checkpoint.error_category != "validator_failure" {
     return {
       ok: false,
       output: nil,
       raw: raw,
       agent_loop: agent_meta,
-      error: "json parse failed: ${to_string(unwrap_err(parsed))}",
+      typed_checkpoint: checkpoint,
+      error_category: checkpoint.error_category,
+      error: checkpoint.error,
     }
   }
-  return {ok: true, output: unwrap(parsed), raw: raw, agent_loop: agent_meta}
+  return {
+    ok: checkpoint.data != nil,
+    output: checkpoint.data,
+    raw: raw,
+    agent_loop: agent_meta,
+    typed_checkpoint: checkpoint,
+    error_category: checkpoint.error_category,
+    error: checkpoint.error,
+  }
 }
 
 fn _started() {
@@ -81,6 +102,7 @@ fn _empty_output_run(args) {
     output: nil,
     validation_errors: args.errors ?? [],
     raw_text: args.raw_text ?? "",
+    typed_checkpoint: args.typed_checkpoint ?? nil,
     started_at: args.started_at,
     finished_at: args.finished_at ?? now_ms(),
   }
@@ -167,6 +189,7 @@ pub fn invoke(args) {
         agent_loop: exec_result?.agent_loop,
         errors: [exec_result?.error ?? "executor returned ok=false"],
         raw_text: exec_result?.raw ?? "",
+        typed_checkpoint: exec_result?.typed_checkpoint,
         started_at: started_at,
       },
     )
@@ -186,6 +209,7 @@ pub fn invoke(args) {
       output: output,
       validation_errors: v.errors,
       raw_text: exec_result.raw,
+      typed_checkpoint: exec_result?.typed_checkpoint,
       started_at: started_at,
       finished_at: now_ms(),
     }
@@ -205,6 +229,7 @@ pub fn invoke(args) {
       output: output,
       validation_errors: h.errors,
       raw_text: exec_result.raw,
+      typed_checkpoint: exec_result?.typed_checkpoint,
       started_at: started_at,
       finished_at: now_ms(),
     }
@@ -221,6 +246,7 @@ pub fn invoke(args) {
     output: output,
     validation_errors: [],
     raw_text: exec_result.raw,
+    typed_checkpoint: exec_result?.typed_checkpoint,
     started_at: started_at,
     finished_at: now_ms(),
   }

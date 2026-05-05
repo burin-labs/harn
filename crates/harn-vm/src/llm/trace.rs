@@ -128,6 +128,17 @@ pub enum AgentTraceEvent {
         nudge_used: bool,
         correction_prompt: String,
     },
+    TypedCheckpoint {
+        name: String,
+        status: String,
+        checkpoint_attempts: usize,
+        llm_attempts: usize,
+        error_category: Option<String>,
+        errors: Vec<String>,
+        repaired: bool,
+        final_accepted: bool,
+        raw_text: String,
+    },
     NativeToolFallback {
         iteration: usize,
         accepted: bool,
@@ -173,6 +184,8 @@ pub fn agent_trace_summary() -> serde_json::Value {
         let mut native_text_tool_fallbacks = 0usize;
         let mut native_text_tool_fallback_rejections = 0usize;
         let mut empty_completion_retries = 0usize;
+        let mut typed_checkpoints = 0usize;
+        let mut typed_checkpoint_failures = 0usize;
         let mut total_input_tokens = 0i64;
         let mut total_output_tokens = 0i64;
         let mut total_llm_duration_ms = 0u64;
@@ -227,6 +240,12 @@ pub fn agent_trace_summary() -> serde_json::Value {
                     total_duration_ms = *d;
                 }
                 AgentTraceEvent::SchemaRetry { .. } => {}
+                AgentTraceEvent::TypedCheckpoint { final_accepted, .. } => {
+                    typed_checkpoints += 1;
+                    if !final_accepted {
+                        typed_checkpoint_failures += 1;
+                    }
+                }
                 AgentTraceEvent::NativeToolFallback { accepted, .. } => {
                     native_text_tool_fallbacks += 1;
                     if !accepted {
@@ -251,6 +270,8 @@ pub fn agent_trace_summary() -> serde_json::Value {
             "native_text_tool_fallbacks": native_text_tool_fallbacks,
             "native_text_tool_fallback_rejections": native_text_tool_fallback_rejections,
             "empty_completion_retries": empty_completion_retries,
+            "typed_checkpoints": typed_checkpoints,
+            "typed_checkpoint_failures": typed_checkpoint_failures,
             "total_input_tokens": total_input_tokens,
             "total_output_tokens": total_output_tokens,
             "total_llm_duration_ms": total_llm_duration_ms,
