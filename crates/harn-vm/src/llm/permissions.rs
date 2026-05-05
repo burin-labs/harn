@@ -33,12 +33,62 @@ enum PermissionMatcher {
 }
 
 pub(crate) enum PermissionCheck {
-    Granted,
+    Granted { reason: String, escalated: bool },
     Denied { reason: String, escalated: bool },
+}
+
+/// Build the transcript event that callers append to a session when a
+/// dynamic permission rule grants, denies, or escalates a tool call.
+pub(crate) fn permission_transcript_event(
+    kind: &str,
+    tool_name: &str,
+    args: &serde_json::Value,
+    reason: &str,
+    escalated: bool,
+) -> VmValue {
+    crate::llm::helpers::transcript_event(
+        kind,
+        "tool",
+        "internal",
+        reason,
+        Some(serde_json::json!({
+            "tool_name": tool_name,
+            "arguments": args,
+            "reason": reason,
+            "escalated": escalated,
+        })),
+    )
 }
 
 thread_local! {
     static DYNAMIC_PERMISSION_STACK: RefCell<Vec<DynamicPermissionPolicy>> = const { RefCell::new(Vec::new()) };
+    static SESSION_PERMISSION_GRANTS: RefCell<BTreeMap<String, BTreeSet<String>>> = const {
+        RefCell::new(BTreeMap::new())
+    };
+}
+
+/// Pull the per-session "session"-scoped grant cache out of the store
+/// for the duration of a single dispatch. Pair with [`store_session_grants`].
+/// Caching across dispatch calls within a session ensures an
+/// `on_escalation` callback returning `{grant: "session"}` only fires
+/// once per session.
+pub(crate) fn take_session_grants(session_id: &str) -> BTreeSet<String> {
+    SESSION_PERMISSION_GRANTS
+        .with(|store| store.borrow_mut().remove(session_id).unwrap_or_default())
+}
+
+pub(crate) fn store_session_grants(session_id: &str, grants: BTreeSet<String>) {
+    SESSION_PERMISSION_GRANTS.with(|store| {
+        store.borrow_mut().insert(session_id.to_string(), grants);
+    });
+}
+
+/// Drop the session-scoped permission grant cache for a session, e.g. on
+/// agent loop finalize.
+pub(crate) fn clear_session_grants(session_id: &str) {
+    SESSION_PERMISSION_GRANTS.with(|store| {
+        store.borrow_mut().remove(session_id);
+    });
 }
 
 pub(crate) fn push_dynamic_permission_policy(policy: DynamicPermissionPolicy) {
@@ -212,7 +262,7 @@ pub(crate) async fn check_dynamic_permission(
             PermissionCheck::Denied { reason, escalated } => {
                 return Ok(Some(PermissionCheck::Denied { reason, escalated }));
             }
-            grant @ PermissionCheck::Granted => {
+            grant @ PermissionCheck::Granted { .. } => {
                 grant_result = Some(grant);
             }
         }
@@ -230,7 +280,15 @@ async fn check_one_dynamic_permission(
 ) -> Result<PermissionCheck, VmError> {
     let grant_key = session_grant_key(scope_index, tool_name, args);
     if session_grants.contains(&grant_key) {
-        return Ok(PermissionCheck::Granted);
+        // Cached session grant: the escalation callback already fired
+        // (and was logged) the first time; subsequent calls only emit a
+        // PermissionGrant.
+        return Ok(PermissionCheck::Granted {
+            reason: format!(
+                "permission granted by prior session-scoped escalation for tool '{tool_name}'"
+            ),
+            escalated: false,
+        });
     }
 
     let denied = first_matching_rule(&policy.deny, tool_name, args).await?;
@@ -252,7 +310,14 @@ async fn check_one_dynamic_permission(
     };
 
     let Some(reason) = denial_reason else {
-        return Ok(PermissionCheck::Granted);
+        let allow_reason = match allowed {
+            Some(Some(pattern)) => format!("permission granted by allow rule: {pattern}"),
+            Some(None) | None => format!("permission granted for tool '{tool_name}'"),
+        };
+        return Ok(PermissionCheck::Granted {
+            reason: allow_reason,
+            escalated: false,
+        });
     };
 
     let Some(on_escalation) = policy.on_escalation.as_ref() else {
@@ -269,7 +334,11 @@ async fn check_one_dynamic_permission(
         if matches!(response.scope, GrantScope::Session) {
             session_grants.insert(grant_key);
         }
-        Ok(PermissionCheck::Granted)
+        let grant_reason = response.reason.unwrap_or(reason);
+        Ok(PermissionCheck::Granted {
+            reason: grant_reason,
+            escalated: true,
+        })
     } else {
         Ok(PermissionCheck::Denied {
             reason: response

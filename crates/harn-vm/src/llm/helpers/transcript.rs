@@ -103,7 +103,7 @@ pub(crate) fn new_transcript_with_events(
     VmValue::Dict(Rc::new(transcript))
 }
 
-fn transcript_event_from_message(message: &VmValue) -> VmValue {
+pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
     let dict = message.as_dict().cloned().unwrap_or_default();
     let role = dict
         .get("role")

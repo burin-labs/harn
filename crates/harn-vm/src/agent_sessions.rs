@@ -449,14 +449,17 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
             Some(VmValue::List(list)) => list.iter().cloned().collect(),
             _ => Vec::new(),
         };
-        messages.push(VmValue::Dict(Rc::new(msg_dict)));
+        let mut events: Vec<VmValue> = match dict.get("events") {
+            Some(VmValue::List(list)) => list.iter().cloned().collect(),
+            _ => crate::llm::helpers::transcript_events_from_messages(&messages),
+        };
+        let new_message = VmValue::Dict(Rc::new(msg_dict));
+        events.push(crate::llm::helpers::transcript_event_from_message(
+            &new_message,
+        ));
+        messages.push(new_message);
         let mut next = dict;
-        next.insert(
-            "events".to_string(),
-            VmValue::List(Rc::new(
-                crate::llm::helpers::transcript_events_from_messages(&messages),
-            )),
-        );
+        next.insert("events".to_string(), VmValue::List(Rc::new(events)));
         next.insert("messages".to_string(), VmValue::List(Rc::new(messages)));
         state.transcript = VmValue::Dict(Rc::new(next));
         state.last_accessed = Instant::now();

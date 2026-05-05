@@ -10,11 +10,16 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use crate::orchestration::{
+    pop_approval_policy, pop_execution_policy, push_approval_policy, push_command_policy,
+    push_execution_policy, CapabilityPolicy, ToolApprovalPolicy,
+};
 use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuiltin};
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
 use super::cost::calculate_cost_for_provider;
+use super::permissions;
 
 const HOST_SESSION_INIT: &str = "__host_agent_session_init";
 const HOST_SESSION_FINALIZE: &str = "__host_agent_session_finalize";
@@ -46,8 +51,8 @@ struct AgentHostSession {
     output_tokens: i64,
     active_skills: Vec<String>,
     tool_calls: Vec<serde_json::Value>,
-    successful_tools: Vec<serde_json::Value>,
-    rejected_tools: Vec<serde_json::Value>,
+    successful_tools: Vec<String>,
+    rejected_tools: Vec<String>,
     tool_mode: String,
     started_at: String,
     /// Iteration cap from `agent_loop(options.max_iterations)`. Captured
@@ -60,6 +65,20 @@ struct AgentHostSession {
     /// the last call truncated due to its `max_tokens` parameter) and
     /// `refusal` (Anthropic refusal stop_reason).
     last_llm_stop_reason: Option<String>,
+    installed_policies: InstalledPolicies,
+}
+
+/// Tracks which scoped policy stacks were pushed during session init so
+/// finalize can pop them in reverse order. The agent loop honours
+/// per-agent ceilings by intersecting outer policies with the requested
+/// per-agent ones before pushing — so child sub-agents never widen
+/// permissions beyond their parents.
+#[derive(Default)]
+struct InstalledPolicies {
+    pushed_execution: bool,
+    pushed_approval: bool,
+    pushed_command: bool,
+    pushed_permissions: bool,
 }
 
 thread_local! {
@@ -149,6 +168,8 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         .unwrap_or(20)
         .max(0);
 
+    let installed_policies = install_session_policies(&opts_map)?;
+
     let session = AgentHostSession {
         session_id: resolved.clone(),
         task: message.clone(),
@@ -164,6 +185,7 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         started_at: now_id(),
         max_iterations,
         last_llm_stop_reason: None,
+        installed_policies,
     };
 
     AGENT_HOST_SESSIONS.with(|sessions| {
@@ -212,6 +234,10 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
                 "{HOST_SESSION_FINALIZE}: unknown session `{session_id}`"
             ))
         })?;
+    // Unwind the per-agent policy stacks pushed in init, in reverse
+    // order — outer scopes (workflow stage, parent agent) survive intact.
+    release_session_policies(&session.installed_policies);
+    permissions::clear_session_grants(&session_id);
     // Pair with the push in init so subsequent loops see the right stack.
     crate::agent_sessions::pop_current_session();
     // Fire registered session-end hooks (e.g. cancelling orphaned
@@ -384,22 +410,24 @@ fn host_agent_session_record_tool_results_builtin(
     let mut successful = Vec::new();
     let mut rejected = Vec::new();
     for result in list_items(&results_value).iter() {
-        let name = dict_get(result, "name")
+        let name = dict_get(result, "tool_name")
+            .or_else(|| dict_get(result, "name"))
             .map(|v| v.display())
             .unwrap_or_default();
         let observation = dict_get(result, "observation")
+            .or_else(|| dict_get(result, "rendered_result"))
             .or_else(|| dict_get(result, "output"))
             .or_else(|| dict_get(result, "content"))
             .map(|v| v.display())
             .unwrap_or_default();
-        let success = dict_get(result, "success")
+        let ok = dict_get(result, "ok")
+            .or_else(|| dict_get(result, "success"))
             .map(|v| matches!(v, VmValue::Bool(true)))
             .unwrap_or(true);
-        let summary = serde_json::json!({"name": name, "observation": observation});
-        if success {
-            successful.push(summary);
+        if ok {
+            successful.push(name.clone());
         } else {
-            rejected.push(summary);
+            rejected.push(name.clone());
         }
         let mut msg = BTreeMap::new();
         msg.insert("role".to_string(), VmValue::String(Rc::from("tool")));
@@ -592,6 +620,109 @@ fn host_agent_build_turn_system_builtin(
         }
     }
     Ok(VmValue::String(Rc::from(parts.join("\n\n"))))
+}
+
+/// Install per-agent execution / approval / command / dynamic permission
+/// policies onto the thread-local stacks for the lifetime of this agent
+/// session. Each scope intersects with the currently-active outer policy
+/// (when any) so a sub-agent cannot widen its parent's ceiling — only
+/// narrow it. Dynamic permissions are stack-checked, so push as-is and
+/// rely on the dispatch path to honour every active scope.
+///
+/// On any failure the partially-pushed stacks are unwound before
+/// returning, so the caller never has to worry about leaked policy
+/// state.
+fn install_session_policies(
+    opts_map: &BTreeMap<String, VmValue>,
+) -> Result<InstalledPolicies, VmError> {
+    let mut installed = InstalledPolicies::default();
+    match install_session_policies_inner(opts_map, &mut installed) {
+        Ok(()) => Ok(installed),
+        Err(error) => {
+            release_session_policies(&installed);
+            Err(error)
+        }
+    }
+}
+
+fn install_session_policies_inner(
+    opts_map: &BTreeMap<String, VmValue>,
+    installed: &mut InstalledPolicies,
+) -> Result<(), VmError> {
+    if let Some(requested) = parse_capability_policy(opts_map.get("policy"))? {
+        let effective = match crate::orchestration::current_execution_policy() {
+            Some(outer) => outer.intersect(&requested).map_err(VmError::Runtime)?,
+            None => requested,
+        };
+        push_execution_policy(effective);
+        installed.pushed_execution = true;
+    }
+
+    if let Some(requested) = parse_approval_policy(opts_map.get("approval_policy"))? {
+        let effective = match crate::orchestration::current_approval_policy() {
+            Some(outer) => outer.intersect(&requested),
+            None => requested,
+        };
+        push_approval_policy(effective);
+        installed.pushed_approval = true;
+    }
+
+    if let Some(policy) = crate::orchestration::parse_command_policy_value(
+        opts_map.get("command_policy"),
+        "agent_loop.command_policy",
+    )? {
+        push_command_policy(policy);
+        installed.pushed_command = true;
+    }
+
+    if let Some(permissions) = permissions::parse_dynamic_permission_policy(
+        opts_map.get("permissions"),
+        "agent_loop.permissions",
+    )? {
+        permissions::push_dynamic_permission_policy(permissions);
+        installed.pushed_permissions = true;
+    }
+
+    Ok(())
+}
+
+fn release_session_policies(installed: &InstalledPolicies) {
+    if installed.pushed_permissions {
+        permissions::pop_dynamic_permission_policy();
+    }
+    if installed.pushed_command {
+        crate::orchestration::pop_command_policy();
+    }
+    if installed.pushed_approval {
+        pop_approval_policy();
+    }
+    if installed.pushed_execution {
+        pop_execution_policy();
+    }
+}
+
+fn parse_capability_policy(value: Option<&VmValue>) -> Result<Option<CapabilityPolicy>, VmError> {
+    let Some(value) = value else { return Ok(None) };
+    if matches!(value, VmValue::Nil) {
+        return Ok(None);
+    }
+    serde_json::from_value::<CapabilityPolicy>(crate::llm::vm_value_to_json(value))
+        .map(Some)
+        .map_err(|error| VmError::Runtime(format!("agent_loop.policy: invalid policy: {error}")))
+}
+
+fn parse_approval_policy(value: Option<&VmValue>) -> Result<Option<ToolApprovalPolicy>, VmError> {
+    let Some(value) = value else { return Ok(None) };
+    if matches!(value, VmValue::Nil) {
+        return Ok(None);
+    }
+    serde_json::from_value::<ToolApprovalPolicy>(crate::llm::vm_value_to_json(value))
+        .map(Some)
+        .map_err(|error| {
+            VmError::Runtime(format!(
+                "agent_loop.approval_policy: invalid policy: {error}"
+            ))
+        })
 }
 
 const HOST_SESSION_PRIMITIVES_SYNC: &[SyncBuiltin] = &[
