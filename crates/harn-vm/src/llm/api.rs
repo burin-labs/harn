@@ -47,8 +47,7 @@ pub(crate) use openai_normalize::normalize_openai_style_messages;
 pub(crate) use options::{
     push_unique_anthropic_beta_feature, DeltaSender, LlmCallOptions, LlmRequestPayload,
     LlmRouteAlternative, LlmRouteFallback, LlmRoutePolicy, LlmRoutingDecision, OutputFormat,
-    ReasoningEffort, ThinkingConfig, ToolSearchConfig, ToolSearchMode, ToolSearchStrategy,
-    ToolSearchVariant,
+    ReasoningEffort, ThinkingConfig, ToolSearchConfig, ToolSearchMode, ToolSearchVariant,
 };
 pub use readiness::{
     probe_openai_compatible_model, selected_model_for_provider, supports_model_readiness_probe,

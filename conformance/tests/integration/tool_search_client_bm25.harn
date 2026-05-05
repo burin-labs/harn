@@ -1,7 +1,6 @@
-// @xfail: tool-search client + tool_search_query events not yet emitted by Harn loop — tracked in burin-labs/harn#1236
 /**
- * Tool Vault phase 2 (harn#70): client-executed `tool_search` fallback
- * with the BM25 strategy, exercised in text-mode (mock provider).
+ * Client-executed `tool_search` fallback with the BM25 strategy,
+ * exercised in text-mode (mock provider).
  *
  * Validates the full lifecycle:
  *   1. Options parsing injects the synthetic `__harn_tool_search` tool

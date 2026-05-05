@@ -913,7 +913,7 @@ fn host_agent_budget_pre_call_builtin(
     Ok(VmValue::Bool(false))
 }
 
-fn host_agent_emit_event_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+async fn host_agent_emit_event(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
         Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
         _ => {
@@ -933,7 +933,20 @@ fn host_agent_emit_event_builtin(args: &[VmValue], _out: &mut String) -> Result<
     let payload_value = args.get(2).cloned().unwrap_or(VmValue::Nil);
     let payload = vm_to_json(&payload_value);
     let event = build_agent_event(&session_id, &event_type, &payload)?;
-    crate::llm::agent_runtime::emit_agent_event_sync(&event);
+    if matches!(
+        event_type.as_str(),
+        "tool_search_query" | "tool_search_result"
+    ) {
+        let role = if event_type == "tool_search_result" {
+            "tool"
+        } else {
+            "assistant"
+        };
+        let transcript_event =
+            super::helpers::transcript_event(&event_type, role, "internal", "", Some(payload));
+        let _ = crate::agent_sessions::append_event(&session_id, transcript_event);
+    }
+    crate::llm::agent_runtime::emit_agent_event(&event).await;
     Ok(VmValue::Nil)
 }
 
@@ -991,6 +1004,36 @@ fn build_agent_event(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0),
         }),
+        "tool_search_query" => Ok(AgentEvent::ToolSearchQuery {
+            session_id: session_id.to_string(),
+            tool_use_id: get_string("tool_use_id"),
+            name: get_string("name"),
+            query: payload_obj
+                .and_then(|m| m.get("query"))
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+            strategy: get_string("strategy"),
+            mode: get_string("mode"),
+        }),
+        "tool_search_result" => {
+            let promoted = payload_obj
+                .and_then(|m| m.get("promoted"))
+                .and_then(|v| v.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(AgentEvent::ToolSearchResult {
+                session_id: session_id.to_string(),
+                tool_use_id: get_string("tool_use_id"),
+                promoted,
+                strategy: get_string("strategy"),
+                mode: get_string("mode"),
+            })
+        }
         other => Err(VmError::Runtime(format!(
             "{HOST_AGENT_EMIT_EVENT}: unsupported event type `{other}`"
         ))),
@@ -1609,10 +1652,6 @@ const HOST_SESSION_PRIMITIVES_SYNC: &[SyncBuiltin] = &[
     .signature("__host_agent_session_claim_tool_format(session_id, tool_format)")
     .arity(VmBuiltinArity::Exact(2))
     .doc("Claim the session's tool_format contract; rejects mid-session changes."),
-    SyncBuiltin::new(HOST_AGENT_EMIT_EVENT, host_agent_emit_event_builtin)
-        .signature("__host_agent_emit_event(session_id, event_type, payload)")
-        .arity(VmBuiltinArity::Exact(3))
-        .doc("Emit a `turn_start`, `turn_end`, or `judge_decision` agent event."),
     SyncBuiltin::new(
         HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK,
         host_agent_record_native_tool_fallback_builtin,
@@ -1652,6 +1691,15 @@ pub fn register_agent_session_host_primitives(vm: &mut Vm) {
         .doc_static("Tear down a Harn-driven agent session and emit the final result dict.");
     vm.register_async_builtin_with_metadata(finalize, |args| {
         Box::pin(async move { host_agent_session_finalize(args).await })
+    });
+
+    let emit_event = VmBuiltinMetadata::async_static(HOST_AGENT_EMIT_EVENT)
+        .signature_static("__host_agent_emit_event(session_id, event_type, payload)")
+        .arity(VmBuiltinArity::Exact(3))
+        .category_static("agent.host")
+        .doc_static("Emit an agent event and record transcript-backed event types.");
+    vm.register_async_builtin_with_metadata(emit_event, |args| {
+        Box::pin(async move { host_agent_emit_event(args).await })
     });
 
     let skill_score = VmBuiltinMetadata::async_static(HOST_SKILL_SCORE)

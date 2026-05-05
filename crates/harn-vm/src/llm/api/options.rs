@@ -77,9 +77,9 @@ impl OutputFormat {
     }
 }
 
-/// Which tool-search variant to use. Two shapes today, matching the two
-/// Anthropic variants (also reused as the mental model for the OpenAI path
-/// landing in harn#71). Scripts write the lower-case short name.
+/// Which tool-search variant to use. Two shapes today, matching the
+/// Anthropic variants and reused as the local fallback's scoring modes.
+/// Scripts write the lower-case short name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ToolSearchVariant {
     /// BM25 / natural-language queries. Default when the user wrote just
@@ -98,51 +98,16 @@ impl ToolSearchVariant {
     }
 }
 
-/// Implementation of the client-executed tool-search fallback (harn#70).
-/// Only consulted when `ToolSearchMode::Client` resolves (either
-/// explicit or via auto-fallback when the provider lacks native
-/// support). Orthogonal to `ToolSearchVariant`: a user can ask for
-/// `variant: bm25` (the model sees the BM25-style tool) and
-/// `strategy: semantic` (the host runs embedding search under the
-/// hood).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ToolSearchStrategy {
-    /// In-tree BM25 over the deferred tool corpus. **Default.**
-    Bm25,
-    /// In-tree regex over the deferred tool corpus (case-insensitive).
-    Regex,
-    /// Delegated to the host via the `tool_search/query` bridge RPC so
-    /// integrators can wire embeddings without Harn depending on ML
-    /// crates.
-    Semantic,
-    /// Pure host-side implementation; the VM just round-trips the query
-    /// and promotes whatever names the host returns.
-    Host,
-}
-
-impl ToolSearchStrategy {
-    /// Default strategy for a given variant when the user did not
-    /// specify one explicitly. Native-facing variant leaks into the
-    /// client path as a sensible default: `variant: regex` users
-    /// probably want regex semantics in the fallback too.
-    pub(crate) fn default_for_variant(variant: ToolSearchVariant) -> Self {
-        match variant {
-            ToolSearchVariant::Bm25 => ToolSearchStrategy::Bm25,
-            ToolSearchVariant::Regex => ToolSearchStrategy::Regex,
-        }
-    }
-}
-
 /// How to resolve `tool_search` against the active provider.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ToolSearchMode {
     /// Auto-select: native if the provider supports it, client-executed
-    /// fallback otherwise (harn#70). Default.
+    /// fallback otherwise. Default.
     Auto,
     /// Force the provider's native mechanism; error if unsupported.
     Native,
-    /// Force client-executed fallback even when native is available.
-    /// Currently errors with a pointer to harn#70 until the fallback lands.
+    /// Force the Harn stdlib client-executed fallback even when native is
+    /// available.
     Client,
 }
 
@@ -153,28 +118,6 @@ pub(crate) enum ToolSearchMode {
 pub(crate) struct ToolSearchConfig {
     pub variant: ToolSearchVariant,
     pub mode: ToolSearchMode,
-    /// Tool names that must remain eager even when `defer_loading: true`
-    /// is otherwise set on them. Useful for a "safety net" a skill wants
-    /// always available regardless of the tool-search index's decisions.
-    /// Only consumed by the client-executed path — for the native
-    /// Anthropic path, eagerness is already controlled per-tool via
-    /// `defer_loading`.
-    pub always_loaded: Vec<String>,
-    /// Client-mode implementation strategy. When unset, defaults to
-    /// `ToolSearchStrategy::default_for_variant(variant)`.
-    pub strategy: Option<ToolSearchStrategy>,
-    /// Override for the synthetic tool's name. Default
-    /// `__harn_tool_search`. Lets skills with a brand-specific vocabulary
-    /// name the tool something the model will understand out of the
-    /// box (`find_tool`, `discover_tool`, etc.).
-    pub name: Option<String>,
-    /// Canonical native-shape JSON for every tool that had
-    /// `defer_loading: true` at option-parse time, keyed by tool name.
-    /// Populated by `apply_tool_search_client_injection` and later
-    /// drained by `AgentLoopState::new` when it builds the per-loop
-    /// client state. Never populated for native mode — the provider
-    /// handles deferral server-side.
-    pub deferred_bodies: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 impl ToolSearchConfig {
@@ -183,24 +126,7 @@ impl ToolSearchConfig {
         Self {
             variant: ToolSearchVariant::Bm25,
             mode: ToolSearchMode::Auto,
-            always_loaded: Vec::new(),
-            strategy: None,
-            name: None,
-            deferred_bodies: std::collections::BTreeMap::new(),
         }
-    }
-
-    /// Resolve the effective strategy, falling back to the variant
-    /// default when the user left `strategy` unset.
-    pub(crate) fn effective_strategy(&self) -> ToolSearchStrategy {
-        self.strategy
-            .unwrap_or_else(|| ToolSearchStrategy::default_for_variant(self.variant))
-    }
-
-    /// Resolve the synthetic tool's name. Default matches the spec's
-    /// proposed `__harn_tool_search` sentinel.
-    pub(crate) fn effective_name(&self) -> &str {
-        self.name.as_deref().unwrap_or("__harn_tool_search")
     }
 }
 
@@ -334,10 +260,10 @@ pub(crate) struct LlmCallOptions {
     /// extractor resolves this against the active provider's capability
     /// matrix and, for native-supporting providers, prepends a
     /// `tool_search_tool_*_20251119` meta-tool to `native_tools`. For
-    /// client-executed mode (harn#70) this carries the config forward
-    /// into the agent-loop fallback. See [`ToolSearchConfig`].
+    /// client-executed mode this carries the config forward into the
+    /// agent-loop fallback. See [`ToolSearchConfig`].
     #[allow(dead_code)] // consumed by the options extractor; persisted for transcript /
-    // replay fidelity and harn#70's client-executed loop
+    // replay fidelity and the client-executed agent loop
     pub tool_search: Option<ToolSearchConfig>,
 
     // --- Caching ---

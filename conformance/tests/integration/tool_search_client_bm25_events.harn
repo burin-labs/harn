@@ -1,4 +1,3 @@
-// @xfail: tool-search client + tool_search_query events not yet emitted by Harn loop — tracked in burin-labs/harn#1236
 /**
  * harn v0.7.20 Gap 1: promote `tool_search_query` / `tool_search_result`
  * to canonical `AgentEvent` variants so ACP / agent_subscribe consumers

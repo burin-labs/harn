@@ -1,9 +1,8 @@
-// @xfail: tool-search client + tool_search_query events not yet emitted by Harn loop — tracked in burin-labs/harn#1236
 /**
- * Tool Vault phase 2 (harn#70): client-executed `tool_search` fallback
- * with the regex strategy. Variant = regex → the model is shown a
- * regex-flavoured prompt and the dispatch path runs Rust's `regex`
- * crate (case-insensitive, no backreferences/lookaround).
+ * Client-executed `tool_search` fallback with the regex strategy.
+ * Variant = regex means the model is shown a regex-flavoured prompt
+ * and the dispatch path runs Rust's `regex` crate (case-insensitive,
+ * no backreferences/lookaround).
  */
 pipeline test(task) {
   llm_mock_clear()
@@ -64,9 +63,8 @@ pipeline test(task) {
       max_iterations: 5,
     },
   )
-  // Explicit `mode: "client"` — mock spoofs native tool_search for
-  // Claude 4.0+ / GPT 5.4+ default models after harn#71, so
-  // client-mode tests must opt into the client path explicitly.
+  // Explicit `mode: "client"` keeps this test on the local fallback
+  // even when the mock provider uses a native-capable default model.
   let events = transcript_events(result?.transcript)
   var found_regex_strategy = false
   var promoted_edit = false
