@@ -50,7 +50,7 @@ jobs:
           shared-key: workspace-windows
           cache-on-failure: true
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@5f57d6cb7cd20b14a8a27f522884c4bc8a187458 # v2.75.19
+        uses: taiki-e/install-action@711e1c3275189d76dcc4d34ddea63bf96ac49090 # v2.76.0
         with:
           tool: nextest@0.9.133
       - name: Run workspace nextest
