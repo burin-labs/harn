@@ -851,6 +851,8 @@ struct PumpHandle {
 impl PumpHandle {
     async fn drain(
         self,
+        log: &Arc<AnyEventLog>,
+        topic_name: &str,
         up_to: u64,
         config: DrainConfig,
         overall_deadline: tokio::time::Instant,
@@ -864,6 +866,17 @@ impl PumpHandle {
             config,
             deadline: drain_deadline,
         }));
+        append_pump_lifecycle_event(
+            log,
+            "pump_drain_requested",
+            json!({
+                "topic": topic_name,
+                "up_to": up_to,
+                "max_items": config.max_items,
+                "deadline_secs": config.deadline.as_secs(),
+            }),
+        )
+        .await?;
         if let Some(path) = pump_test_draining_file() {
             mark_test_file(&path).await?;
         }
@@ -986,7 +999,6 @@ fn spawn_inbox_pump(
     let inbox_task_release_file = inbox_task_test_release_file();
     let (mode_tx, mut mode_rx) = watch::channel(PumpMode::Running);
     let join = tokio::task::spawn_local(async move {
-        metrics_registry.set_orchestrator_pump_outstanding(topic.as_str(), 0);
         let start_from = event_log
             .consumer_cursor(&topic, &consumer)
             .await
@@ -1004,7 +1016,7 @@ fn spawn_inbox_pump(
             last_seen: start_from.unwrap_or(0),
             processed: 0,
         };
-        record_pump_backlog(&metrics_registry, &event_log, &topic, stats.last_seen).await;
+        record_pump_metrics(&metrics_registry, &event_log, &topic, stats.last_seen, 0).await?;
         let mut drain_progress = None;
         let mut tasks = JoinSet::new();
 
@@ -1050,8 +1062,14 @@ fn spawn_inbox_pump(
                 joined = tasks.join_next(), if !tasks.is_empty() => {
                     match joined {
                         Some(Ok(())) => {
-                            metrics_registry
-                                .set_orchestrator_pump_outstanding(topic.as_str(), tasks.len());
+                            record_pump_metrics(
+                                &metrics_registry,
+                                &event_log,
+                                &topic,
+                                stats.last_seen,
+                                tasks.len(),
+                            )
+                            .await?;
                         }
                         Some(Err(error)) => {
                             return Err(format!("inbox dispatch task join failed: {error}").into());
@@ -1060,7 +1078,7 @@ fn spawn_inbox_pump(
                     }
                 }
                 _ = tokio::time::sleep(Duration::from_millis(25)), if tasks.len() >= pump_config.max_outstanding => {
-                    record_pump_backlog(&metrics_registry, &event_log, &topic, stats.last_seen).await;
+                    record_pump_metrics(&metrics_registry, &event_log, &topic, stats.last_seen, tasks.len()).await?;
                 }
                 received = stream.next(), if tasks.len() < pump_config.max_outstanding => {
                     let Some(received) = received else {
@@ -1074,7 +1092,7 @@ fn spawn_inbox_pump(
                             .ack(&topic, &consumer, event_id)
                             .await
                             .map_err(|error| format!("failed to ack topic pump cursor for {topic}: {error}"))?;
-                        record_pump_backlog(&metrics_registry, &event_log, &topic, stats.last_seen).await;
+                        record_pump_metrics(&metrics_registry, &event_log, &topic, stats.last_seen, tasks.len()).await?;
                         continue;
                     }
                     append_pump_lifecycle_event(
@@ -1187,15 +1205,21 @@ fn spawn_inbox_pump(
                         }),
                     )
                     .await?;
-                    metrics_registry.set_orchestrator_pump_outstanding(topic.as_str(), tasks.len());
-                    record_pump_backlog(&metrics_registry, &event_log, &topic, stats.last_seen).await;
+                    record_pump_metrics(&metrics_registry, &event_log, &topic, stats.last_seen, tasks.len()).await?;
                 }
             }
         }
 
         while let Some(joined) = tasks.join_next().await {
             joined.map_err(|error| format!("inbox dispatch task join failed: {error}"))?;
-            metrics_registry.set_orchestrator_pump_outstanding(topic.as_str(), tasks.len());
+            record_pump_metrics(
+                &metrics_registry,
+                &event_log,
+                &topic,
+                stats.last_seen,
+                tasks.len(),
+            )
+            .await?;
         }
 
         Ok(drain_progress
@@ -1315,7 +1339,6 @@ where
     let test_waiting_file = pump_test_waiting_file();
     let (mode_tx, mut mode_rx) = watch::channel(PumpMode::Running);
     let join = tokio::task::spawn_local(async move {
-        metrics_registry.set_orchestrator_pump_outstanding(topic.as_str(), 0);
         let start_from = event_log
             .consumer_cursor(&topic, &consumer)
             .await
@@ -1333,7 +1356,7 @@ where
             last_seen: start_from.unwrap_or(0),
             processed: 0,
         };
-        record_pump_backlog(&metrics_registry, &event_log, &topic, stats.last_seen).await;
+        record_pump_metrics(&metrics_registry, &event_log, &topic, stats.last_seen, 0).await?;
         let mut drain_progress = None;
         loop {
             if let Some(progress) = drain_progress {
@@ -1378,7 +1401,7 @@ where
                     };
                     let (event_id, logged) = received
                         .map_err(|error| format!("topic pump read failed for {topic}: {error}"))?;
-                    metrics_registry.set_orchestrator_pump_outstanding(topic.as_str(), 1);
+                    record_pump_metrics(&metrics_registry, &event_log, &topic, stats.last_seen, 1).await?;
                     metrics_registry.record_orchestrator_pump_admission_delay(
                         topic.as_str(),
                         admission_delay(logged.occurred_at_ms),
@@ -1398,8 +1421,7 @@ where
                         .ack(&topic, &consumer, event_id)
                         .await
                         .map_err(|error| format!("failed to ack topic pump cursor for {topic}: {error}"))?;
-                    metrics_registry.set_orchestrator_pump_outstanding(topic.as_str(), 0);
-                    record_pump_backlog(&metrics_registry, &event_log, &topic, stats.last_seen).await;
+                    record_pump_metrics(&metrics_registry, &event_log, &topic, stats.last_seen, 0).await?;
                 }
             }
         }
@@ -1508,6 +1530,8 @@ async fn graceful_shutdown(
     }
     let waitpoint_stats = waitpoint_pump
         .drain(
+            ctx.event_log,
+            harn_vm::WAITPOINT_RESUME_TOPIC,
             topic_latest_id(ctx.event_log, harn_vm::WAITPOINT_RESUME_TOPIC).await?,
             ctx.drain_config,
             deadline,
@@ -1522,6 +1546,8 @@ async fn graceful_shutdown(
     .await?;
     let waitpoint_cancel_stats = waitpoint_cancel_pump
         .drain(
+            ctx.event_log,
+            harn_vm::TRIGGER_CANCEL_REQUESTS_TOPIC,
             topic_latest_id(ctx.event_log, harn_vm::TRIGGER_CANCEL_REQUESTS_TOPIC).await?,
             ctx.drain_config,
             deadline,
@@ -2424,14 +2450,29 @@ async fn append_manifest_event(
         })
 }
 
-async fn record_pump_backlog(
+async fn record_pump_metrics(
     metrics: &harn_vm::MetricsRegistry,
     log: &Arc<AnyEventLog>,
     topic: &harn_vm::event_log::Topic,
     last_seen: u64,
-) {
+    outstanding: usize,
+) -> Result<(), OrchestratorError> {
     let latest = log.latest(topic).await.ok().flatten().unwrap_or(last_seen);
-    metrics.set_orchestrator_pump_backlog(topic.as_str(), latest.saturating_sub(last_seen));
+    let backlog = latest.saturating_sub(last_seen);
+    metrics.set_orchestrator_pump_outstanding(topic.as_str(), outstanding);
+    metrics.set_orchestrator_pump_backlog(topic.as_str(), backlog);
+    append_pump_lifecycle_event(
+        log,
+        "pump_metrics_recorded",
+        json!({
+            "topic": topic.as_str(),
+            "latest": latest,
+            "last_seen": last_seen,
+            "backlog": backlog,
+            "outstanding": outstanding,
+        }),
+    )
+    .await
 }
 
 fn admission_delay(occurred_at_ms: i64) -> Duration {
@@ -2509,7 +2550,12 @@ async fn drain_pump_best_effort(
         .unwrap_or(0);
     let budget = remaining_budget(overall_deadline);
 
-    match tokio::time::timeout(budget, pump.drain(up_to, config, overall_deadline)).await {
+    match tokio::time::timeout(
+        budget,
+        pump.drain(log, topic_name, up_to, config, overall_deadline),
+    )
+    .await
+    {
         Ok(Ok(report)) => Ok(report),
         Ok(Err(error)) => {
             eprintln!("[harn] warning: pump drain error for {topic_name}: {error}");
