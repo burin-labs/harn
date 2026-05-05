@@ -1,0 +1,51 @@
+// @harn-entrypoint-category agent.stdlib
+import { agent_session_inject_feedback } from "std/agent/state"
+
+fn __daemon_compaction_summary(opts) {
+  if !(opts?.consolidate_on_idle ?? false) {
+    return nil
+  }
+  if !(opts?.auto_compact ?? false) {
+    return nil
+  }
+  let callback = opts?.compact_callback
+  if callback == nil {
+    return nil
+  }
+  let compacted = callback([])
+  if type_of(compacted) == "dict" {
+    return compacted?.summary
+  }
+  if type_of(compacted) == "string" {
+    return compacted
+  }
+  return nil
+}
+
+/** agent_daemon_snapshot. */
+pub fn agent_daemon_snapshot(session, opts, daemon_state = "idle", iteration = 0) {
+  let summary = __daemon_compaction_summary(opts)
+  var snapshot_opts = opts + {daemon_state: daemon_state, total_iterations: iteration}
+  if summary != nil {
+    snapshot_opts = snapshot_opts + {transcript_summary: summary}
+  }
+  return __host_agent_daemon_snapshot(session.session_id, snapshot_opts)
+}
+
+/** agent_daemon_step. */
+pub fn agent_daemon_step(session, opts, iteration) {
+  let snapshot = agent_daemon_snapshot(session, opts, "idle", iteration)
+  let timeout = opts?.wake_interval_ms ?? 0
+  var wake = __host_agent_daemon_wait(session.session_id, timeout)
+  while wake?.reason == nil && timeout > 0 {
+    wake = __host_agent_daemon_wait(session.session_id, timeout)
+  }
+  if wake?.feedback != nil {
+    agent_session_inject_feedback(
+      session.session_id,
+      wake?.feedback_kind ?? wake?.reason ?? "daemon",
+      wake.feedback,
+    )
+  }
+  return {snapshot: snapshot, wake: wake}
+}

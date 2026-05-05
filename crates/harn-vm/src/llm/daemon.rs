@@ -4,7 +4,24 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::event_log::EventLog;
-use crate::value::VmError;
+use crate::value::{VmError, VmValue};
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub(crate) struct DaemonLoopConfig {
+    pub persist_path: Option<String>,
+    pub resume_path: Option<String>,
+    pub wake_interval_ms: Option<u64>,
+    pub watch_paths: Vec<String>,
+    pub consolidate_on_idle: bool,
+    pub idle_watchdog_attempts: Option<usize>,
+}
+
+impl DaemonLoopConfig {
+    pub(crate) fn effective_persist_path(&self) -> Option<&str> {
+        self.persist_path.as_deref().or(self.resume_path.as_deref())
+    }
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -51,6 +68,95 @@ pub(crate) fn load_snapshot(path: &str) -> Result<DaemonSnapshot, VmError> {
     let snapshot = snapshot.normalize();
     append_daemon_state_event(path, "snapshot_loaded", &snapshot);
     Ok(snapshot)
+}
+
+pub(crate) fn persist_snapshot(path: &str, snapshot: &DaemonSnapshot) -> Result<String, VmError> {
+    let path_buf = Path::new(path);
+    if let Some(parent) = path_buf.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| VmError::Runtime(format!("daemon snapshot mkdir error: {error}")))?;
+    }
+    let json = serde_json::to_string_pretty(&snapshot.clone().normalize())
+        .map_err(|error| VmError::Runtime(format!("daemon snapshot encode error: {error}")))?;
+    let tmp = path_buf.with_extension("json.tmp");
+    std::fs::write(&tmp, json)
+        .map_err(|error| VmError::Runtime(format!("daemon snapshot write error: {error}")))?;
+    std::fs::rename(&tmp, path_buf)
+        .map_err(|error| VmError::Runtime(format!("daemon snapshot finalize error: {error}")))?;
+    append_daemon_state_event(path, "snapshot_persisted", &snapshot.clone().normalize());
+    Ok(path.to_string())
+}
+
+pub(crate) fn parse_daemon_loop_config(
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> DaemonLoopConfig {
+    let Some(options) = options else {
+        return DaemonLoopConfig::default();
+    };
+    let watch_paths = match options.get("watch_paths") {
+        Some(VmValue::List(items)) => items
+            .iter()
+            .map(VmValue::display)
+            .filter(|path| !path.is_empty())
+            .collect(),
+        Some(VmValue::String(path)) if !path.is_empty() => vec![path.to_string()],
+        Some(value) => {
+            let path = value.display();
+            if path.is_empty() {
+                Vec::new()
+            } else {
+                vec![path]
+            }
+        }
+        None => Vec::new(),
+    };
+    DaemonLoopConfig {
+        persist_path: options
+            .get("persist_path")
+            .map(VmValue::display)
+            .filter(|value| !value.is_empty()),
+        resume_path: options
+            .get("resume_path")
+            .map(VmValue::display)
+            .filter(|value| !value.is_empty()),
+        wake_interval_ms: options
+            .get("wake_interval_ms")
+            .and_then(VmValue::as_int)
+            .map(|value| value as u64)
+            .filter(|value| *value > 0),
+        watch_paths,
+        consolidate_on_idle: options
+            .get("consolidate_on_idle")
+            .is_some_and(|value| matches!(value, VmValue::Bool(true))),
+        idle_watchdog_attempts: options
+            .get("idle_watchdog_attempts")
+            .and_then(VmValue::as_int)
+            .and_then(|value| usize::try_from(value).ok()),
+    }
+}
+
+pub(crate) trait MtimeProvider {
+    fn mtime_ns(&self, path: &str) -> u64;
+}
+
+pub(crate) struct RealMtimeProvider;
+
+impl MtimeProvider for RealMtimeProvider {
+    fn mtime_ns(&self, path: &str) -> u64 {
+        std::fs::metadata(path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .and_then(|duration| u64::try_from(duration.as_nanos()).ok())
+            .unwrap_or(0)
+    }
+}
+
+pub(crate) fn watch_state(provider: &dyn MtimeProvider, paths: &[String]) -> BTreeMap<String, u64> {
+    paths
+        .iter()
+        .map(|path| (path.clone(), provider.mtime_ns(path)))
+        .collect()
 }
 
 fn append_daemon_state_event(path: &str, kind: &str, snapshot: &DaemonSnapshot) {

@@ -38,6 +38,9 @@ const HOST_SESSION_COMPACT: &str = "__host_agent_session_compact_if_needed";
 const HOST_SKILL_SCORE: &str = "__host_skill_score";
 const HOST_BUDGET_PRE_CALL: &str = "__host_agent_budget_pre_call_blocked";
 const HOST_BUILD_TURN_SYSTEM: &str = "__host_agent_build_turn_system";
+const HOST_AUTONOMY_BUDGET_CHECK: &str = "__host_autonomy_budget_check";
+const HOST_DAEMON_SNAPSHOT: &str = "__host_agent_daemon_snapshot";
+const HOST_DAEMON_WAIT: &str = "__host_agent_daemon_wait";
 
 /// Session-keyed record for Harn-driven agent loops. The Harn loop owns
 /// iteration and decision logic; this struct holds only session-scoped
@@ -62,6 +65,12 @@ struct AgentHostSession {
     /// caused by hitting the cap (→ ACP `max_turn_requests`) from other
     /// budget paths.
     max_iterations: i64,
+    daemon_state: Option<String>,
+    daemon_snapshot_path: Option<String>,
+    resumed_iterations: usize,
+    daemon_watch_state: BTreeMap<String, u64>,
+    daemon_idle_backoff_ms: u64,
+    host_bridge: Option<Rc<crate::bridge::HostBridge>>,
     /// Provider-reported `stop_reason` from the most recent `llm_call`
     /// in this loop. Used by finalize to detect ACP `max_tokens` (when
     /// the last call truncated due to its `max_tokens` parameter) and
@@ -157,9 +166,24 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         _ => None,
     };
     let opts_map = opts_dict(args.get(2));
+    let host_bridge = super::agent_runtime::current_host_bridge();
     let session_id = opt_str(&opts_map, "session_id")
         .or_else(crate::agent_sessions::current_session_id)
         .unwrap_or_else(|| format!("agent_session_{}", now_id()));
+
+    let autonomy_budget = match check_autonomy_budget(&opts_map, &session_id).await? {
+        AutonomyCheck::NoBudget => None,
+        AutonomyCheck::Approved(config) => Some(config),
+        AutonomyCheck::Denied(result) => {
+            return Ok(agent_init_control_done(
+                &session_id,
+                &message,
+                system.as_deref(),
+                result,
+            ));
+        }
+    };
+
     let resolved = crate::agent_sessions::open_or_create(Some(session_id));
 
     let user_msg = serde_json::json!({"role": "user", "content": message});
@@ -169,8 +193,16 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
     let max_verify_attempts = opt_int(&opts_map, "max_verify_attempts")
         .unwrap_or(20)
         .max(0);
+    let daemon_config = super::daemon::parse_daemon_loop_config(Some(&opts_map));
+    let resumed_iterations = match daemon_config.resume_path.as_deref() {
+        Some(path) => super::daemon::load_snapshot(path)?.total_iterations,
+        None => 0,
+    };
 
     let installed_policies = install_session_policies(&opts_map)?;
+    if let Some(config) = autonomy_budget.as_ref() {
+        super::autonomy_budget::note_decision(config);
+    }
 
     let persisted_active_skills = crate::agent_sessions::active_skills(&resolved);
 
@@ -188,6 +220,12 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         tool_mode: String::new(),
         started_at: now_id(),
         max_iterations,
+        daemon_state: None,
+        daemon_snapshot_path: None,
+        resumed_iterations,
+        daemon_watch_state: BTreeMap::new(),
+        daemon_idle_backoff_ms: 100,
+        host_bridge,
         last_llm_stop_reason: None,
         installed_policies,
     };
@@ -219,6 +257,62 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
     );
     control.insert("done".to_string(), VmValue::Bool(false));
     Ok(VmValue::Dict(Rc::new(control)))
+}
+
+enum AutonomyCheck {
+    NoBudget,
+    Approved(super::autonomy_budget::AgentAutonomyBudget),
+    Denied(VmValue),
+}
+
+async fn check_autonomy_budget(
+    opts_map: &BTreeMap<String, VmValue>,
+    session_id: &str,
+) -> Result<AutonomyCheck, VmError> {
+    let Some(config) =
+        super::autonomy_budget::parse_autonomy_budget(Some(opts_map), session_id, "agent_loop")?
+    else {
+        return Ok(AutonomyCheck::NoBudget);
+    };
+    let trace_id = crate::triggers::dispatcher::current_dispatch_context()
+        .map(|context| context.trigger_event.trace_id.0)
+        .unwrap_or_else(|| format!("trace_{}", uuid::Uuid::now_v7()));
+    match super::autonomy_budget::enforce_budget(config, session_id, &trace_id).await? {
+        super::autonomy_budget::BudgetCheckOutcome::Approved(config) => {
+            Ok(AutonomyCheck::Approved(config))
+        }
+        super::autonomy_budget::BudgetCheckOutcome::Denied { result } => {
+            Ok(AutonomyCheck::Denied(json_to_vm(&result)))
+        }
+    }
+}
+
+fn agent_init_control_done(
+    session_id: &str,
+    task: &str,
+    system: Option<&str>,
+    result: VmValue,
+) -> VmValue {
+    let mut control = BTreeMap::new();
+    control.insert(
+        "session_id".to_string(),
+        VmValue::String(Rc::from(session_id.to_string())),
+    );
+    control.insert(
+        "task".to_string(),
+        VmValue::String(Rc::from(task.to_string())),
+    );
+    control.insert(
+        "system".to_string(),
+        system
+            .map(|s| VmValue::String(Rc::from(s.to_string())))
+            .unwrap_or(VmValue::Nil),
+    );
+    control.insert("max_iterations".to_string(), VmValue::Int(0));
+    control.insert("max_verify_attempts".to_string(), VmValue::Int(0));
+    control.insert("done".to_string(), VmValue::Bool(true));
+    control.insert("result".to_string(), result);
+    VmValue::Dict(Rc::new(control))
 }
 
 async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmError> {
@@ -301,6 +395,8 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
         "session_id": session.session_id,
         "started_at": session.started_at,
         "task": session.task,
+        "daemon_state": session.daemon_state,
+        "daemon_snapshot_path": session.daemon_snapshot_path,
     });
     Ok(json_to_vm(&result))
 }
@@ -460,6 +556,7 @@ fn host_agent_session_record_usage_builtin(
         .cloned()
         .unwrap_or(VmValue::Nil);
     let input_tokens = dict_get(&llm_block, "input_tokens")
+        .or_else(|| dict_get(&llm_result, "input_tokens"))
         .and_then(|v| match v {
             VmValue::Int(i) => Some(*i),
             VmValue::Float(f) => Some(*f as i64),
@@ -467,6 +564,7 @@ fn host_agent_session_record_usage_builtin(
         })
         .unwrap_or(0);
     let output_tokens = dict_get(&llm_block, "output_tokens")
+        .or_else(|| dict_get(&llm_result, "output_tokens"))
         .and_then(|v| match v {
             VmValue::Int(i) => Some(*i),
             VmValue::Float(f) => Some(*f as i64),
@@ -498,6 +596,22 @@ fn host_agent_session_record_usage_builtin(
         }
         Ok((session.tokens_used, session.cost_used))
     })?;
+    let _ = crate::agent_sessions::append_event(
+        &session_id,
+        crate::llm::helpers::transcript_event(
+            "llm_call",
+            "assistant",
+            "internal",
+            "LLM call completed",
+            Some(serde_json::json!({
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "provider": provider,
+                "model": model,
+                "cost_usd": cost,
+            })),
+        ),
+    );
     let mut out = BTreeMap::new();
     out.insert("tokens_used".to_string(), VmValue::Int(totals.0));
     out.insert("cost_usd".to_string(), VmValue::Float(totals.1));
@@ -778,6 +892,203 @@ fn render_active_skill_prompt(value: Option<&VmValue>) -> Option<String> {
     Some(out)
 }
 
+fn host_agent_daemon_snapshot_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = args.first().map(|v| v.display()).unwrap_or_default();
+    let opts_map = opts_dict(args.get(1));
+    let config = super::daemon::parse_daemon_loop_config(Some(&opts_map));
+    let daemon_state = opt_str(&opts_map, "daemon_state").unwrap_or_else(|| "idle".to_string());
+    let total_iterations = opt_int(&opts_map, "total_iterations").unwrap_or(0).max(0) as usize;
+    let transcript_summary_override = opt_str(&opts_map, "transcript_summary");
+    let transcript = crate::agent_sessions::snapshot(&session_id).unwrap_or(VmValue::Nil);
+    let transcript_json = vm_to_json(&transcript);
+    let visible_messages = transcript_json
+        .get("messages")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let recorded_messages = visible_messages.clone();
+    let transcript_events = transcript_json
+        .get("events")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let transcript_summary = transcript_summary_override.or_else(|| {
+        transcript_json
+            .get("summary")
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string)
+    });
+    let total_text = visible_messages
+        .iter()
+        .filter_map(|message| message.get("content").and_then(|value| value.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let last_iteration_text = visible_messages
+        .iter()
+        .rev()
+        .find(|message| message.get("role").and_then(|value| value.as_str()) == Some("assistant"))
+        .and_then(|message| message.get("content").and_then(|value| value.as_str()))
+        .unwrap_or_default()
+        .to_string();
+
+    let mut snapshot = super::daemon::DaemonSnapshot {
+        daemon_state: daemon_state.clone(),
+        visible_messages,
+        recorded_messages,
+        transcript_summary,
+        transcript_events,
+        total_text,
+        last_iteration_text,
+        total_iterations,
+        ..Default::default()
+    }
+    .normalize();
+
+    let (snapshot_path, idle_backoff_ms) =
+        with_session(&session_id, HOST_DAEMON_SNAPSHOT, |session| {
+            if session.daemon_watch_state.is_empty() && !config.watch_paths.is_empty() {
+                session.daemon_watch_state = super::daemon::watch_state(
+                    &super::daemon::RealMtimeProvider,
+                    &config.watch_paths,
+                );
+            }
+            snapshot.all_tools_used = session.successful_tools.clone();
+            snapshot.rejected_tools = session.rejected_tools.clone();
+            snapshot.total_iterations = snapshot
+                .total_iterations
+                .saturating_add(session.resumed_iterations);
+            snapshot.idle_backoff_ms = session.daemon_idle_backoff_ms;
+            snapshot.watch_state = session.daemon_watch_state.clone();
+            let snapshot_path = if let Some(path) = config.effective_persist_path() {
+                Some(super::daemon::persist_snapshot(path, &snapshot)?)
+            } else {
+                None
+            };
+            session.daemon_state = Some(daemon_state.clone());
+            if let Some(path) = snapshot_path.as_ref() {
+                session.daemon_snapshot_path = Some(path.clone());
+            }
+            Ok((snapshot_path, session.daemon_idle_backoff_ms))
+        })?;
+
+    let mut value = serde_json::to_value(&snapshot).unwrap_or_default();
+    value["daemon_snapshot_path"] = snapshot_path
+        .as_ref()
+        .map(|path| serde_json::json!(path))
+        .unwrap_or(serde_json::Value::Null);
+    value["idle_backoff_ms"] = serde_json::json!(idle_backoff_ms);
+    Ok(json_to_vm(&value))
+}
+
+async fn host_agent_daemon_wait(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let session_id = args.first().map(|v| v.display()).unwrap_or_default();
+    let timeout_ms = args
+        .get(1)
+        .and_then(VmValue::as_int)
+        .map(|value| value.max(0) as u64)
+        .unwrap_or(0);
+    let bridge = with_session(&session_id, HOST_DAEMON_WAIT, |session| {
+        Ok(session.host_bridge.clone())
+    })
+    .ok()
+    .flatten()
+    .or_else(super::agent_runtime::current_host_bridge);
+    let has_bridge = bridge.is_some();
+    if let Some(bridge) = bridge.as_ref() {
+        bridge.set_daemon_idle(true);
+        bridge.notify(
+            "agent/idle",
+            serde_json::json!({"session_id": session_id, "timeout_ms": timeout_ms}),
+        );
+        if bridge.take_resume_signal() {
+            bridge.set_daemon_idle(false);
+            return Ok(json_to_vm(&serde_json::json!({"reason": "resume"})));
+        }
+        let queued = bridge
+            .take_queued_user_messages_for(crate::bridge::DeliveryCheckpoint::InterruptImmediate)
+            .await;
+        if !queued.is_empty() {
+            for message in queued {
+                let _ = crate::agent_sessions::inject_message(
+                    &session_id,
+                    json_to_vm(&serde_json::json!({
+                        "role": "user",
+                        "content": message.content,
+                    })),
+                );
+            }
+            bridge.set_daemon_idle(false);
+            return Ok(json_to_vm(&serde_json::json!({"reason": "message"})));
+        }
+    }
+
+    if timeout_ms > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(timeout_ms)).await;
+    }
+
+    if let Some(bridge) = bridge.as_ref() {
+        let queued = bridge
+            .take_queued_user_messages_for(crate::bridge::DeliveryCheckpoint::InterruptImmediate)
+            .await;
+        if !queued.is_empty() {
+            for message in queued {
+                let _ = crate::agent_sessions::inject_message(
+                    &session_id,
+                    json_to_vm(&serde_json::json!({
+                        "role": "user",
+                        "content": message.content,
+                    })),
+                );
+            }
+            bridge.set_daemon_idle(false);
+            return Ok(json_to_vm(&serde_json::json!({"reason": "message"})));
+        }
+        bridge.set_daemon_idle(false);
+    }
+
+    if timeout_ms > 0 && !has_bridge {
+        Ok(json_to_vm(&serde_json::json!({
+            "reason": "timer",
+            "feedback_kind": "timer",
+            "feedback": "Daemon wake interval elapsed.",
+        })))
+    } else {
+        Ok(json_to_vm(&serde_json::json!({"reason": nil_json()})))
+    }
+}
+
+fn nil_json() -> serde_json::Value {
+    serde_json::Value::Null
+}
+
+async fn host_autonomy_budget_check(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let session_id = args
+        .first()
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| format!("agent_session_{}", now_id()));
+    let mut opts = BTreeMap::new();
+    if let Some(config) = args.get(1) {
+        opts.insert("autonomy_budget".to_string(), config.clone());
+    }
+    match check_autonomy_budget(&opts, &session_id).await? {
+        AutonomyCheck::Denied(result) => {
+            let mut out = BTreeMap::new();
+            out.insert("approved".to_string(), VmValue::Bool(false));
+            out.insert("denial_result".to_string(), result);
+            Ok(VmValue::Dict(Rc::new(out)))
+        }
+        AutonomyCheck::Approved(_) | AutonomyCheck::NoBudget => {
+            let mut out = BTreeMap::new();
+            out.insert("approved".to_string(), VmValue::Bool(true));
+            Ok(VmValue::Dict(Rc::new(out)))
+        }
+    }
+}
+
 /// Install per-agent execution / approval / command / dynamic permission
 /// policies onto the thread-local stacks for the lifetime of this agent
 /// session. Each scope intersects with the currently-active outer policy
@@ -958,6 +1269,10 @@ const HOST_SESSION_PRIMITIVES_SYNC: &[SyncBuiltin] = &[
         .signature("__host_agent_build_turn_system(session_id, options, iteration)")
         .arity(VmBuiltinArity::Exact(3))
         .doc("Compose the per-turn system prompt from system + tool contract."),
+    SyncBuiltin::new(HOST_DAEMON_SNAPSHOT, host_agent_daemon_snapshot_builtin)
+        .signature("__host_agent_daemon_snapshot(session_id, options)")
+        .arity(VmBuiltinArity::Exact(2))
+        .doc("Persist a daemon snapshot for a Harn-driven agent session."),
 ];
 
 const HOST_SESSION_PRIMITIVES_GROUP: BuiltinGroup<'static> = BuiltinGroup::new()
@@ -992,6 +1307,24 @@ pub fn register_agent_session_host_primitives(vm: &mut Vm) {
         .doc_static("Score skills against the current task context.");
     vm.register_async_builtin_with_metadata(skill_score, |args| {
         Box::pin(async move { host_skill_score(args).await })
+    });
+
+    let budget_check = VmBuiltinMetadata::async_static(HOST_AUTONOMY_BUDGET_CHECK)
+        .signature_static("__host_autonomy_budget_check(session_id, budget_config)")
+        .arity(VmBuiltinArity::Exact(2))
+        .category_static("agent.host")
+        .doc_static("Check per-agent autonomy budget and return an approval-shaped denial.");
+    vm.register_async_builtin_with_metadata(budget_check, |args| {
+        Box::pin(async move { host_autonomy_budget_check(args).await })
+    });
+
+    let daemon_wait = VmBuiltinMetadata::async_static(HOST_DAEMON_WAIT)
+        .signature_static("__host_agent_daemon_wait(session_id, timeout_ms)")
+        .arity(VmBuiltinArity::Exact(2))
+        .category_static("agent.host")
+        .doc_static("Wait for daemon wake input or a timeout.");
+    vm.register_async_builtin_with_metadata(daemon_wait, |args| {
+        Box::pin(async move { host_agent_daemon_wait(args).await })
     });
 }
 

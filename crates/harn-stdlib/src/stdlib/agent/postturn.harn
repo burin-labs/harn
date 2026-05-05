@@ -144,7 +144,8 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
     return {kind: "break", stop_reason: "post_turn_stop", needs_verify: opts?.verify_completion != nil}
   }
   let persistent = opts?.persistent ?? false
-  if !has_tool_calls && !persistent {
+  let daemon = opts?.daemon ?? false
+  if !has_tool_calls && !persistent && !daemon {
     return {
       kind: "break",
       stop_reason: "natural",
