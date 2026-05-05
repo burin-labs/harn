@@ -1,4 +1,3 @@
-/** @xfail: agent hooks not yet wired through Harn loop — tracked in burin-labs/harn#1236 */
 pipeline default() {
   llm_mock_clear()
   var registry = tool_registry()
