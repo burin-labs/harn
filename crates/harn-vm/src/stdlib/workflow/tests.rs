@@ -1,5 +1,4 @@
 use super::artifact::{load_run_tree, snapshot_trace_spans};
-use super::map::{execute_join_tasks, LocalTask};
 use super::stage::{execute_stage_attempts, replay_stage};
 use crate::orchestration::{
     save_run_record, stage_verification_contracts, verification_contract_from_verify,
@@ -7,9 +6,7 @@ use crate::orchestration::{
     VerificationContract, WorkflowGraph, WorkflowNode,
 };
 use crate::tracing::{set_tracing_enabled, span_end, span_start, SpanKind};
-use std::cell::Cell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 #[test]
 fn load_run_tree_recurses_into_child_runs() {
@@ -145,61 +142,6 @@ fn snapshot_trace_spans_returns_completed_trace_tree() {
     assert_eq!(spans[1].kind, "pipeline");
 
     set_tracing_enabled(false);
-}
-
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn execute_join_tasks_stops_after_first_completion() {
-    tokio::task::LocalSet::new()
-        .run_until(async {
-            let tasks: Vec<LocalTask<i32>> = vec![
-                Box::pin(async {
-                    // Never resolves on its own; the target count must
-                    // abort this branch once the immediate winner completes.
-                    std::future::pending::<()>().await;
-                    1
-                }),
-                Box::pin(async { 2 }),
-            ];
-            let results = execute_join_tasks(tasks, 1, None).await;
-            assert_eq!(results.len(), 1);
-            assert_eq!(results[0].as_ref().ok().copied(), Some(2));
-        })
-        .await;
-}
-
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn execute_join_tasks_honors_target_and_concurrency_limit() {
-    tokio::task::LocalSet::new()
-        .run_until(async {
-            let active = Rc::new(Cell::new(0usize));
-            let max_seen = Rc::new(Cell::new(0usize));
-            let tasks = (0..5)
-                .map(|value| {
-                    let active = active.clone();
-                    let max_seen = max_seen.clone();
-                    Box::pin(async move {
-                        active.set(active.get() + 1);
-                        max_seen.set(max_seen.get().max(active.get()));
-                        // Yield twice so the executor schedules the
-                        // sibling task and `max_seen` observes both
-                        // branches in flight before either decrements
-                        // `active`.
-                        tokio::task::yield_now().await;
-                        tokio::task::yield_now().await;
-                        active.set(active.get().saturating_sub(1));
-                        value
-                    }) as LocalTask<i32>
-                })
-                .collect::<Vec<_>>();
-            let results = execute_join_tasks(tasks, 2, Some(2)).await;
-            assert_eq!(results.len(), 2);
-            assert!(
-                max_seen.get() <= 2,
-                "observed concurrency {}",
-                max_seen.get()
-            );
-        })
-        .await;
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]

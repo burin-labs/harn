@@ -5,17 +5,12 @@ use std::collections::VecDeque;
 use serde::Deserialize;
 
 use crate::orchestration::{
-    pop_execution_policy, push_execution_policy, select_workflow_stage_artifacts, ArtifactRecord,
-    LlmUsageRecord, RunStageAttemptRecord, RunStageRecord,
+    select_workflow_stage_artifacts, ArtifactRecord, LlmUsageRecord, RunStageAttemptRecord,
+    RunStageRecord,
 };
 use crate::value::{VmError, VmValue};
 
-use super::artifact::artifact_from_value;
-use super::map::{
-    execute_join_tasks, map_branch_artifact, map_execution_plan, map_finalize, LocalTask,
-    MapBranchResult, MapWorkItem,
-};
-use super::usage::{llm_usage_delta, llm_usage_snapshot, merge_usage};
+use super::usage::{llm_usage_delta, llm_usage_snapshot};
 
 #[derive(Debug)]
 pub(super) struct ExecutedStage {
@@ -181,6 +176,14 @@ type StageAttemptResult = (
     Option<serde_json::Value>,
 );
 
+#[derive(Debug, Deserialize)]
+struct WorkflowMapStageExecution {
+    result: serde_json::Value,
+    artifacts: Vec<ArtifactRecord>,
+    outcome: String,
+    branch: Option<String>,
+}
+
 pub(super) async fn execute_stage_attempts(
     task: &str,
     node_id: &str,
@@ -221,169 +224,50 @@ pub(super) async fn execute_stage_attempts(
         }
         let r: Result<StageAttemptResult, VmError> = match node.kind.as_str() {
             "map" => {
-                let plan = map_execution_plan(node, artifacts).await?;
-                let total_items = plan.total_items;
-                let join_target = plan.join_target;
-                let max_concurrent = plan.max_concurrent;
-                let stage_template = plan.stage_node;
-                let output_kind = plan.output_kind;
-                let lineage = plan.lineage;
-                let strategy = plan.strategy;
-                let branch_policy = crate::orchestration::current_execution_policy();
-                let tasks = plan
-                    .items
-                    .into_iter()
-                    .map(|item| {
-                        let branch_policy = branch_policy.clone();
-                        let branch_transcript = transcript.clone();
-                        let task_label = task.to_string();
-                        let stage_template = stage_template.clone();
-                        let node_id = node_id.to_string();
-                        let output_kind = output_kind.clone();
-                        let lineage = lineage.clone();
-                        Box::pin(async move {
-                            if let Some(policy) = branch_policy.clone() {
-                                push_execution_policy(policy);
-                            }
-                            let result = match stage_template {
-                                Some(stage_node) => {
-                                    let index = match &item {
-                                        MapWorkItem::Artifact { index, .. }
-                                        | MapWorkItem::Value { index, .. } => *index,
-                                    };
-                                    let branch_input =
-                                        vec![map_branch_artifact(&node_id, &item, &lineage)];
-                                    let branch_task = format!(
-                                        "{task_label}\n\nMap item {} of {}",
-                                        index + 1,
-                                        total_items.max(1)
-                                    );
-                                    let executed = execute_stage_attempts(
-                                        &branch_task,
-                                        &format!("{node_id}_map_{}", index + 1),
-                                        &stage_node,
-                                        &branch_input,
-                                        branch_transcript,
-                                    )
-                                    .await?;
-                                    Ok(MapBranchResult {
-                                        index,
-                                        status: executed.status.clone(),
-                                        result: executed.result,
-                                        artifacts: executed.artifacts,
-                                        usage: executed.usage,
-                                        error: executed.error,
-                                    })
-                                }
-                                None => {
-                                    let index = match &item {
-                                        MapWorkItem::Artifact { index, .. }
-                                        | MapWorkItem::Value { index, .. } => *index,
-                                    };
-                                    let artifact = match &item {
-                                        MapWorkItem::Artifact { artifact, .. } => {
-                                            let value = artifact
-                                                .data
-                                                .clone()
-                                                .or_else(|| {
-                                                    artifact
-                                                        .text
-                                                        .clone()
-                                                        .map(serde_json::Value::String)
-                                                })
-                                                .unwrap_or(serde_json::Value::Null);
-                                            artifact_from_value(
-                                                &node_id,
-                                                &output_kind,
-                                                index,
-                                                value,
-                                                std::slice::from_ref(&artifact.id),
-                                                format!("map {} item {}", node_id, index + 1),
-                                            )
-                                        }
-                                        MapWorkItem::Value { value, .. } => artifact_from_value(
-                                            &node_id,
-                                            &output_kind,
-                                            index,
-                                            value.clone(),
-                                            &lineage,
-                                            format!("map {} item {}", node_id, index + 1),
-                                        ),
-                                    };
-                                    Ok(MapBranchResult {
-                                        index,
-                                        status: "completed".to_string(),
-                                        result: serde_json::json!({
-                                            "status": "completed",
-                                            "text": artifact.text,
-                                        }),
-                                        artifacts: vec![artifact],
-                                        usage: LlmUsageRecord::default(),
-                                        error: None,
-                                    })
-                                }
-                            };
-                            if branch_policy.is_some() {
-                                pop_execution_policy();
-                            }
-                            result
-                        }) as LocalTask<Result<MapBranchResult, VmError>>
-                    })
-                    .collect::<Vec<_>>();
-
-                let branch_results = execute_join_tasks(tasks, join_target, max_concurrent).await;
-
-                let mut completed = Vec::new();
-                let mut failures = Vec::new();
-                let mut produced = Vec::new();
-                let mut usage = LlmUsageRecord::default();
-                for branch_result in branch_results {
-                    match branch_result {
-                        Ok(Ok(branch)) => {
-                            merge_usage(&mut usage, &branch.usage);
-                            if branch.status == "completed" && branch.error.is_none() {
-                                produced.extend(branch.artifacts.clone());
-                                completed.push(serde_json::json!({
-                                    "index": branch.index,
-                                    "status": branch.status,
-                                    "result": branch.result,
-                                    "artifact_count": branch.artifacts.len(),
-                                }));
-                            } else {
-                                failures.push(serde_json::json!({
-                                    "index": branch.index,
-                                    "status": branch.status,
-                                    "error": branch.error,
-                                }));
-                            }
-                        }
-                        Ok(Err(error)) => failures.push(serde_json::json!({
-                            "status": "failed",
-                            "error": error.to_string(),
-                        })),
-                        Err(error) => failures.push(serde_json::json!({
-                            "status": "failed",
-                            "error": error,
-                        })),
-                    }
+                let mut options = std::collections::BTreeMap::new();
+                options.insert(
+                    "task".to_string(),
+                    crate::value::VmValue::String(std::rc::Rc::from(task.to_string())),
+                );
+                if let Some(transcript) = transcript.clone() {
+                    options.insert("transcript".to_string(), transcript);
                 }
-                produced.sort_by(|left, right| {
-                    let left_index = left
-                        .metadata
-                        .get("index")
-                        .and_then(|value| value.as_u64())
-                        .unwrap_or(u64::MAX);
-                    let right_index = right
-                        .metadata
-                        .get("index")
-                        .and_then(|value| value.as_u64())
-                        .unwrap_or(u64::MAX);
-                    left_index.cmp(&right_index)
-                });
-                let (result, outcome, branch) =
-                    map_finalize(&strategy, total_items, produced.len(), completed, failures)
-                        .await?;
-                Ok((result, produced, transcript.clone(), outcome, branch, None))
+                let executed = crate::stdlib::harn_entry::call_harn_export_by_name(
+                    "std/workflow/map",
+                    "workflow_execute_map_stage",
+                    "workflow_execute_map_stage",
+                    &[
+                        crate::value::VmValue::String(std::rc::Rc::from(node_id.to_string())),
+                        crate::stdlib::json_to_vm_value(
+                            &serde_json::to_value(node).unwrap_or_default(),
+                        ),
+                        crate::stdlib::json_to_vm_value(
+                            &serde_json::to_value(artifacts).unwrap_or_default(),
+                        ),
+                        crate::value::VmValue::Dict(std::rc::Rc::new(options)),
+                    ],
+                )
+                .await?;
+                let executed: WorkflowMapStageExecution = serde_json::from_value(
+                    crate::llm::vm_value_to_json(&executed),
+                )
+                .map_err(|error| {
+                    VmError::Runtime(format!(
+                        "workflow_execute_map_stage returned invalid shape: {error}"
+                    ))
+                })?;
+                Ok((
+                    executed.result,
+                    executed
+                        .artifacts
+                        .into_iter()
+                        .map(ArtifactRecord::normalize)
+                        .collect(),
+                    transcript.clone(),
+                    executed.outcome,
+                    executed.branch,
+                    None,
+                ))
             }
             "subagent" => {
                 let (result, produced, next_transcript) =
