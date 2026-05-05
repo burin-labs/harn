@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject new model-facing prompt prose in Rust orchestration paths."""
+"""Reject new long Rust-owned prompt prose in protected orchestration paths."""
 
 from __future__ import annotations
 
@@ -12,46 +12,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+DEFAULT_THRESHOLD = 200
+DEFAULT_ALLOWLIST = Path("scripts/allowed_long_strings.txt")
+MAX_ALLOWLIST_ENTRIES = 10
 PROTECTED_PATHS = [
-    Path("crates/harn-vm/src/llm/tools"),
-    Path("crates/harn-vm/src/llm/conversation.rs"),
-    Path("crates/harn-vm/src/llm/structural_experiments.rs"),
-    Path("crates/harn-vm/src/llm/schema_recover.rs"),
-    Path("crates/harn-vm/src/llm/structured_envelope.rs"),
+    Path("crates/harn-vm/src/llm"),
     Path("crates/harn-vm/src/orchestration/workflow.rs"),
     Path("crates/harn-vm/src/orchestration/artifacts.rs"),
     Path("crates/harn-vm/src/orchestration/compaction.rs"),
-    Path("crates/harn-vm/src/llm/api/completion.rs"),
 ]
-
-MODEL_FACING_MARKERS = (
-    "you are",
-    "you must",
-    "you may",
-    "do not",
-    "respond",
-    "assistant",
-    "user-visible",
-    "tool call",
-    "tool-call",
-    "tool result",
-    "runtime_feedback",
-    "prompt",
-    "instruction",
-    "schema",
-    "completion judge",
-)
-
-ALLOWLIST: dict[str, str] = {
-    # Keep this list small and review every addition. Hashes are over the
-    # normalized literal body, not over file paths, so moving allowed primitive
-    # constants does not churn the ratchet.
-    "aa6e205895b6a1f6": "deterministic assistant-history truncation marker",
-    "e6f73be5c2d864fb": "deterministic assistant-history hard-cap marker",
-    "f34849951800b1c3": "runtime feedback XML envelope syntax",
-    "799398738e7a23dc": "final visible-text join between assistant text and tool result",
-    "f039a4fe173d20ba": "parser canonical assistant_prose tag reconstruction",
-    "368fa520828a9440": "completion fallback joins user system text with rendered stdlib prompt",
+EXCLUDED_PROTECTED_FILES = {
+    Path("crates/harn-vm/src/llm/api/transport.rs"),
+    Path("crates/harn-vm/src/llm/api/options.rs"),
 }
 
 
@@ -66,15 +38,20 @@ class Literal:
         normalized = re.sub(r"\s+", " ", self.text).strip()
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
+    @property
+    def location(self) -> str:
+        return f"{self.path.as_posix()}:{self.line}"
+
 
 @dataclass(frozen=True)
 class Finding:
     literal: Literal
-    reason: str
+    length: int
 
 
 RAW_STRING_RE = re.compile(r'(?<![A-Za-z0-9_])r(?P<hashes>#*)"(?:.|\n)*?"(?P=hashes)', re.MULTILINE)
 NORMAL_STRING_RE = re.compile(r'"(?:\\.|[^"\\\n])*"')
+ALLOWLIST_RE = re.compile(r"^(?P<location>[^#\s].*?:\d+)\s+#\s+(?P<justification>\S.*)$")
 
 
 def decode_normal_literal(raw: str) -> str:
@@ -120,36 +97,65 @@ def protected_files(root: Path, paths: list[Path]) -> list[Path]:
     for path in paths:
         full = root / path
         if full.is_dir():
-            files.extend(path for path in sorted(full.rglob("*.rs")) if "tests" not in path.parts)
+            files.extend(
+                path
+                for path in sorted(full.rglob("*.rs"))
+                if "tests" not in path.relative_to(root).parts
+                and path.relative_to(root) not in EXCLUDED_PROTECTED_FILES
+            )
         elif full.exists():
-            files.append(full)
+            if full.relative_to(root) not in EXCLUDED_PROTECTED_FILES:
+                files.append(full)
     return files
 
 
-def suspicious_reason(text: str) -> str | None:
-    normalized = re.sub(r"\s+", " ", text).strip()
-    lower = normalized.lower()
-    marker_hit = any(marker in lower for marker in MODEL_FACING_MARKERS)
-    if len(normalized) >= 180 and marker_hit:
-        return "long model-facing literal"
-    if text.count("\n") >= 2 and marker_hit:
-        return "multi-line model-facing literal"
-    if len(normalized) >= 100 and ("you " in lower or "respond" in lower or "assistant" in lower):
-        return "instruction-like literal"
-    return None
+def normalized_length(text: str) -> int:
+    return len(re.sub(r"\s+", " ", text).strip())
 
 
-def scan(root: Path, paths: list[Path]) -> list[Finding]:
+def read_allowlist(root: Path, path: Path) -> set[str]:
+    allowlist_path = root / path
+    if not allowlist_path.exists():
+        print(f"allowlist not found: {path}", file=sys.stderr)
+        raise SystemExit(1)
+
+    allowed: set[str] = set()
+    for line_number, raw_line in enumerate(allowlist_path.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = ALLOWLIST_RE.match(line)
+        if match is None:
+            print(
+                f"{path}:{line_number}: expected '<path>:<line> # one-line justification'",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        allowed.add(match.group("location"))
+
+    if len(allowed) > MAX_ALLOWLIST_ENTRIES:
+        print(
+            f"{path}: allowlist has {len(allowed)} entries; keep it at <= {MAX_ALLOWLIST_ENTRIES}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    return allowed
+
+
+def scan(root: Path, paths: list[Path], allowed: set[str], threshold: int) -> tuple[list[Finding], set[str]]:
     findings: list[Finding] = []
+    observed_long_locations: set[str] = set()
     for path in protected_files(root, paths):
         for literal in iter_literals(path):
-            reason = suspicious_reason(literal.text)
-            if reason is None:
+            literal = Literal(path.relative_to(root), literal.line, literal.text)
+            length = normalized_length(literal.text)
+            if length < threshold:
                 continue
-            if literal.digest in ALLOWLIST:
+            observed_long_locations.add(literal.location)
+            if literal.location in allowed:
                 continue
-            findings.append(Finding(literal, reason))
-    return findings
+            findings.append(Finding(literal, length))
+    return findings, observed_long_locations
 
 
 def print_findings(findings: list[Finding]) -> None:
@@ -159,8 +165,8 @@ def print_findings(findings: list[Finding]) -> None:
         if len(preview) > 140:
             preview = preview[:137] + "..."
         print(
-            f"{literal.path}:{literal.line}: {finding.reason} "
-            f"(hash {literal.digest})\n  {preview}",
+            f"{literal.location}: long Rust string literal "
+            f"({finding.length} chars, hash {literal.digest})\n  {preview}",
             file=sys.stderr,
         )
 
@@ -172,7 +178,9 @@ def run_self_test() -> int:
         bad.write_text(
             'fn bad() { let _ = "You are an assistant. You must respond with a '
             'careful tool call, then explain the result to the user in detail '
-            'without skipping any required schema fields."; }\n',
+            'without skipping any required schema fields. Include enough '
+            'model-facing procedural prose here to cross the protected-path '
+            'threshold and prove the ratchet catches new Rust-owned prompts."; }\n',
             encoding="utf-8",
         )
         ok = root / "ok.rs"
@@ -181,8 +189,8 @@ def run_self_test() -> int:
             'fn err() { let _ = "tool_dispatch: missing tool name"; }\n',
             encoding="utf-8",
         )
-        bad_findings = scan(root, [Path("bad.rs")])
-        ok_findings = scan(root, [Path("ok.rs")])
+        bad_findings, _ = scan(root, [Path("bad.rs")], set(), DEFAULT_THRESHOLD)
+        ok_findings, _ = scan(root, [Path("ok.rs")], set(), DEFAULT_THRESHOLD)
         if len(bad_findings) != 1 or ok_findings:
             print("self-test failed", file=sys.stderr)
             print_findings(bad_findings + ok_findings)
@@ -194,6 +202,8 @@ def run_self_test() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".", help="repository root")
+    parser.add_argument("--allowlist", default=str(DEFAULT_ALLOWLIST), help="path:line allowlist file")
+    parser.add_argument("--threshold", type=int, default=DEFAULT_THRESHOLD, help="normalized character threshold")
     parser.add_argument("--self-test", action="store_true", help="run fixture checks")
     parser.add_argument("paths", nargs="*", help="override protected paths")
     args = parser.parse_args()
@@ -203,12 +213,19 @@ def main() -> int:
 
     root = Path(args.root).resolve()
     paths = [Path(path) for path in args.paths] if args.paths else PROTECTED_PATHS
-    findings = scan(root, paths)
+    allowed = read_allowlist(root, Path(args.allowlist))
+    findings, observed_long_locations = scan(root, paths, allowed, args.threshold)
+    stale_allowed = sorted(allowed - observed_long_locations)
+    if stale_allowed:
+        for location in stale_allowed:
+            print(f"{args.allowlist}: stale allowlist entry: {location}", file=sys.stderr)
+        return 1
     if findings:
         print_findings(findings)
         print(
-            "\nMove model-facing wording to stdlib .harn.prompt assets, "
-            "or add a reviewed hash allowlist entry for a primitive constant.",
+            f"\nMove model-facing wording to stdlib .harn.prompt assets, or add "
+            f"a reviewed '{findings[0].literal.location} # justification' entry "
+            f"to {args.allowlist} for a primitive constant.",
             file=sys.stderr,
         )
         return 1

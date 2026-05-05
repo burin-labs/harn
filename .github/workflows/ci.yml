@@ -89,7 +89,7 @@ jobs:
       - run: make check-trigger-examples
       - run: make check-docs-snippets
       - run: make lint-test-patterns
-      - run: make check-rust-prompt-prose
+      - run: make lint-no-rust-prompt-prose lint-no-xfail-regression
       - run: python3 scripts/verify_release_metadata.py
       - name: Check no retroactive CHANGELOG edits
         run: |
