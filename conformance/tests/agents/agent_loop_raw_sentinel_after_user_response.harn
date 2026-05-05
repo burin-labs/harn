@@ -1,0 +1,12 @@
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "<user_response>Visible answer.</user_response>##DONE##"})
+  let result = agent_loop(
+    "finish cleanly",
+    nil,
+    {provider: "mock", persistent: true, max_iterations: 3, done_sentinel: "##DONE##"},
+  )
+  println(result.status)
+  println(result.text)
+  println(result.llm.iterations)
+}

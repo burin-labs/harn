@@ -472,7 +472,12 @@ fn last_assistant_text(snapshot: &VmValue) -> Option<String> {
             .map(|v| v.display())
             .unwrap_or_default();
         if role == "assistant" {
-            return dict_get(msg, "content").map(|v| v.display());
+            let visible = dict_get(msg, "content")
+                .map(|v| crate::visible_text::sanitize_visible_assistant_text(&v.display(), false))
+                .unwrap_or_default();
+            if !visible.trim().is_empty() {
+                return Some(visible);
+            }
         }
     }
     None
@@ -1810,7 +1815,7 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        assistant_message_from_llm_result, canonical_acp_stop_reason,
+        assistant_message_from_llm_result, canonical_acp_stop_reason, last_assistant_text,
         tool_result_message_for_provider, vm_to_json,
     };
 
@@ -1857,6 +1862,21 @@ mod tests {
         ));
         assert_eq!(anthropic["role"], "tool_result");
         assert_eq!(anthropic["tool_use_id"], "call_002");
+    }
+
+    #[test]
+    fn final_visible_text_skips_control_only_assistant_turns() {
+        let snapshot = crate::stdlib::json_to_vm_value(&json!({
+            "messages": [
+                {"role": "assistant", "content": "Final answer before sentinel."},
+                {"role": "assistant", "content": "\n\n##DONE##"}
+            ]
+        }));
+
+        assert_eq!(
+            last_assistant_text(&snapshot).as_deref(),
+            Some("Final answer before sentinel.")
+        );
     }
 
     #[test]

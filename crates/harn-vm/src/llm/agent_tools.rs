@@ -33,10 +33,28 @@ pub(super) fn render_tool_result(value: &serde_json::Value) -> String {
 }
 
 pub(super) fn is_denied_tool_result(value: &serde_json::Value) -> bool {
+    if is_denied_tool_result_object(value) {
+        return true;
+    }
+    value
+        .as_str()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+        .is_some_and(|parsed| is_denied_tool_result_object(&parsed))
+}
+
+fn is_denied_tool_result_object(value: &serde_json::Value) -> bool {
     value
         .get("error")
         .and_then(|error| error.as_str())
         .is_some_and(|error| error == "permission_denied")
+        || value
+            .get("blocked")
+            .and_then(|blocked| blocked.as_bool())
+            .unwrap_or(false)
+        || value
+            .get("status")
+            .and_then(|status| status.as_str())
+            .is_some_and(|status| status == "blocked")
 }
 
 pub(super) fn next_call_id() -> String {
@@ -187,7 +205,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                         message,
                         category: ErrorCategory::ToolRejected,
                     }) => Ok(denied_tool_result(tool_name, message)),
-                    Err(e) => Ok(serde_json::Value::String(format!("Error: {e}"))),
+                    Err(e) => Err(e),
                 }
             } else if let Some(bridge) = bridge {
                 match bridge
@@ -255,7 +273,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                     message,
                     category: ErrorCategory::ToolRejected,
                 }) => Ok(denied_tool_result(tool_name, message)),
-                Err(e) => Ok(serde_json::Value::String(format!("Error: {e}"))),
+                Err(e) => Err(e),
             }
         } else if let Some(local_result) = handle_tool_locally(tool_name, tool_args) {
             // VM-stdlib short-circuit (read_file / list_directory) used
@@ -501,6 +519,23 @@ mod tests {
         let mut dict = BTreeMap::new();
         dict.insert("tools".to_string(), VmValue::List(Rc::new(list)));
         VmValue::Dict(Rc::new(dict))
+    }
+
+    #[test]
+    fn denied_tool_result_detects_rendered_blocked_json() {
+        let blocked = serde_json::json!({
+            "blocked": true,
+            "status": "blocked",
+            "reason": "policy rejected command"
+        });
+        assert!(is_denied_tool_result(&blocked));
+        assert!(is_denied_tool_result(&serde_json::Value::String(
+            blocked.to_string()
+        )));
+        assert!(!is_denied_tool_result(&serde_json::json!({
+            "status": "completed",
+            "stdout": "ok"
+        })));
     }
 
     #[test]

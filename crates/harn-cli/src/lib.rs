@@ -28,6 +28,14 @@ use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 
 pub const CLI_RUNTIME_STACK_SIZE: usize = 16 * 1024 * 1024;
 
+#[cfg(feature = "hostlib")]
+pub(crate) fn install_default_hostlib(vm: &mut harn_vm::Vm) {
+    let _ = harn_hostlib::install_default(vm);
+}
+
+#[cfg(not(feature = "hostlib"))]
+pub(crate) fn install_default_hostlib(_vm: &mut harn_vm::Vm) {}
+
 /// Entry point used by `src/main.rs`. Hosts the CLI runtime thread and
 /// drives the async dispatcher in `async_main`.
 pub fn run() {
@@ -2178,6 +2186,7 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
         .run_until(async {
             let mut vm = harn_vm::Vm::new();
             harn_vm::register_vm_stdlib(&mut vm);
+            install_default_hostlib(&mut vm);
             let source_parent = source_path
                 .and_then(|p| p.parent())
                 .unwrap_or(std::path::Path::new("."));

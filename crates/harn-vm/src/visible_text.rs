@@ -46,6 +46,7 @@ fn internal_block_patterns() -> &'static [Regex] {
             r"(?s)<tool_result[^>]*>.*?</tool_result>",
             r"(?s)\[result of [^\]]+\].*?\[end of [^\]]+\]",
             r"(?m)^\s*(##DONE##|DONE|PLAN_READY)\s*$",
+            r"(?s)\s*(##DONE##|PLAN_READY)\s*$",
         ]
         .into_iter()
         .map(|pattern| Regex::new(pattern).expect("valid assistant sanitization regex"))
@@ -392,6 +393,18 @@ mod tests {
         assert_eq!(
             sanitize_visible_assistant_text(raw, false),
             "Visible answer."
+        );
+    }
+
+    #[test]
+    fn sanitize_strips_trailing_runtime_sentinel_after_answer_text() {
+        assert_eq!(
+            sanitize_visible_assistant_text("HARN_LOCAL_TOOL_OK##DONE##", false),
+            "HARN_LOCAL_TOOL_OK"
+        );
+        assert_eq!(
+            sanitize_visible_assistant_text("Done.\nPLAN_READY", false),
+            "Done."
         );
     }
 

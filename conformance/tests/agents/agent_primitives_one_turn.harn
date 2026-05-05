@@ -14,6 +14,19 @@ fn calculator_tools() {
       annotations: {kind: "read"},
     },
   )
+  tools = tool_define(
+    tools,
+    "explode",
+    "Throw from a Harn-side handler",
+    {
+      handler: { _args ->
+        throw "boom"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
   return tools
 }
 
@@ -26,6 +39,7 @@ pipeline main() {
   let batch = agent_dispatch_tool_batch(parsed.tool_calls, tools)
   let malformed_text = agent_parse_tool_calls("<tool_call>\nadd({ left: })\n</tool_call>", tools)
   let schema_error = agent_dispatch_tool_call({name: "add", arguments: {left: 2}}, tools)
+  let handler_error = agent_dispatch_tool_call({name: "explode", arguments: {}}, tools)
   llm_mock({text: "", tool_calls: [{id: "native_add", name: "add", arguments: {left: 4, right: 6}}]})
   let native_turn = agent_llm_turn("Calculate 4 + 6", nil, {provider: "mock", tools: tools})
   let native_batch = agent_dispatch_tool_batch(native_turn.tool_calls, tools)
@@ -37,6 +51,8 @@ pipeline main() {
   println(len(malformed_text.tool_parse_errors) > 0)
   println(schema_error.ok)
   println(schema_error.error_category)
+  println(handler_error.ok)
+  println(contains(handler_error.error, "boom"))
   println(native_turn.tool_calls[0].name)
   println(native_batch[0].rendered_result)
 }

@@ -399,6 +399,7 @@ async fn append_replay_audit(
 pub fn build_replay_vm(workspace_root: &Path) -> harn_vm::Vm {
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
+    crate::install_default_hostlib(&mut vm);
     harn_vm::register_store_builtins(&mut vm, workspace_root);
     harn_vm::register_metadata_builtins(&mut vm, workspace_root);
     harn_vm::register_checkpoint_builtins(&mut vm, workspace_root, "trigger-replay");

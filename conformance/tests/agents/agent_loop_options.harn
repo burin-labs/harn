@@ -13,6 +13,20 @@ pipeline default() {
   let explicit_native = agent_loop_options({provider: "mock", tools: tool_registry(), tool_format: "native"})
   println(explicit_native.tool_format)
   println(contains(explicit_native.keys(), "done_sentinel"))
+  let persistent_native = agent_loop_options(
+    {provider: "mock", tools: tool_registry(), tool_format: "native", persistent: true},
+  )
+  println(persistent_native.done_sentinel == nil)
+  let judged_native = agent_loop_options(
+    {
+      provider: "mock",
+      tools: tool_registry(),
+      tool_format: "native",
+      persistent: true,
+      done_judge: true,
+    },
+  )
+  println(judged_native.done_sentinel == nil)
   println(contains(no_tools.keys(), "task_ledger"))
   let shorthand = agent_loop_options(
     {provider: "mock", root_task: " Build feature ", deliverables: ["Write code", "", "Run tests"]},

@@ -1,12 +1,81 @@
+import { persistent_loop_system_prompt, render_agent_prompt } from "std/agent/prompts"
 import { agent_session_messages } from "std/agent/state"
+
+fn __agent_done_sentinel(opts) {
+  let sentinel = opts?.done_sentinel
+  if sentinel == nil {
+    return nil
+  }
+  return sentinel
+}
+
+fn __agent_tool_format(opts) {
+  if opts?.tool_format != nil {
+    return opts.tool_format
+  }
+  if opts?.model != nil {
+    let resolved = try {
+      llm_resolve_model(opts.model)
+    }
+    if !is_err(resolved) {
+      let info = unwrap(resolved)
+      if info?.tool_format != nil {
+        return info.tool_format
+      }
+    }
+  }
+  return "text"
+}
+
+fn __agent_loop_contract_prompt(opts) {
+  let sentinel = __agent_done_sentinel(opts)
+  let persistent = opts?.persistent ?? false
+  if !persistent && sentinel == nil {
+    return ""
+  }
+  let mode = __agent_tool_format(opts)
+  return persistent_loop_system_prompt(
+    {
+      persistent: persistent,
+      exit_when_verified: opts?.exit_when_verified ?? false,
+      has_tools: opts?.tools != nil,
+      native_mode: mode == "native",
+      native_done: mode == "native",
+      sentinel_active: sentinel != nil,
+      done_sentinel: sentinel,
+    },
+  )
+}
+
+fn __agent_native_tool_contract_prompt(opts) {
+  if opts?.tools == nil || __agent_tool_format(opts) != "native" {
+    return ""
+  }
+  return render_agent_prompt(
+    "tool_contract_native.harn.prompt",
+    {done_sentinel: __agent_done_sentinel(opts)},
+  )
+}
 
 /** agent_build_turn_system. */
 pub fn agent_build_turn_system(session, opts, iteration) {
   let base = __host_agent_build_turn_system(session.session_id, opts, iteration)
-  if opts?.tools == nil || opts?.tool_format == "native" {
-    return base
+  var parts = []
+  if base != "" {
+    parts = parts.push(base)
   }
-  return base + "\n\n" + tool_prompt(opts.tools)
+  let loop_contract = __agent_loop_contract_prompt(opts)
+  if loop_contract != "" {
+    parts = parts.push(loop_contract)
+  }
+  let native_contract = __agent_native_tool_contract_prompt(opts)
+  if native_contract != "" {
+    parts = parts.push(native_contract)
+  }
+  if opts?.tools != nil && __agent_tool_format(opts) != "native" {
+    parts = parts.push(tool_prompt(opts.tools))
+  }
+  return join(parts, "\n\n")
 }
 
 /** agent_build_turn_messages. */

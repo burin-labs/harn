@@ -136,6 +136,98 @@ println(result.text)
 - When the result should be inspectable by later steps, return a dict or list,
   not a formatted string.
 
+## Host-backed tool helpers
+
+Harnesses that need filesystem, git, search, or command execution tools can use
+the packaged hostlib wrappers instead of hand-rolling tool registries. Import
+`std/agent/host_tools` and choose the narrowest helper:
+
+```harn
+import { agent_command_tools, agent_host_tools } from "std/agent/host_tools"
+
+let tools = agent_command_tools(nil, {
+  cwd: repo_root,
+  max_inline_bytes: 12000,
+  allow_argv_prefixes: [
+    ["git", "status"],
+    ["git", "log"],
+    ["git", "diff"],
+    ["sed", "-n"],
+  ],
+})
+
+agent_loop(task, system, {
+  tools: tools,
+  tool_format: "native",
+  require_successful_tools: ["run_command", ["read_command_output", "read_command_output_tail"]],
+})
+```
+
+`agent_command_tools(...)` installs:
+
+- `run_command` — argv-first process execution through
+  `hostlib_tools_run_command`
+- `read_command_output` — range-read stdout, stderr, or combined artifacts by
+  `command_id`, `handle_id`, or artifact path
+- `read_command_output_tail` — read the last bytes of command output without
+  requiring the model to calculate offsets
+
+`agent_read_tools(...)` installs root-scoped `read_file`, `read_file_tail`,
+`search_files`, and read-only `git_inspect`. `agent_host_tools(...)` composes
+both groups.
+
+The helpers are deliberately configurable so harness authors can keep their
+script surface product-specific without duplicating implementation details:
+
+```harn,ignore
+let tools = agent_host_tools(nil, {
+  root: repo_root,
+  cwd: repo_root,
+  max_inline_bytes: 12000,
+  search_max_matches: 50,
+  exclude_globs: [".harn-runs/**", "logs/**"],
+  names: {
+    run_command: "release_run",
+    read_command_output_tail: "release_log_tail",
+  },
+  descriptions: {
+    run_command: "Run one bounded release inspection command.",
+  },
+  enabled_tools: ["read", "command"],
+  disabled_tools: ["git_inspect"],
+  annotations: {
+    run_command: {workflow_phase: "release_audit"},
+  },
+  namespace: "release",
+  defer_loading: true,
+  output_format: "json",
+  command_policy: { request, _args ->
+    if request.mode == "argv" && request.argv[0] == "git" {
+      return true
+    }
+    return "only git inspection commands are allowed in this harness"
+  },
+})
+```
+
+Useful options:
+
+| Option | Meaning |
+|---|---|
+| `root`, `cwd` | Scope read/search/git paths plus command working directories. Out-of-root absolute command `cwd` or git `repo` paths become rejected tool results instead of being executed. |
+| `names` | Rename logical tools while preserving correct result-reader links. |
+| `descriptions` | Override model-facing descriptions per logical tool. |
+| `enabled_tools`, `disabled_tools` | Include logical keys (`run_command`) or groups (`read`, `command`). |
+| `max_inline_bytes` | Cap inline command output. If the model asks for a larger inline capture, the helper clamps it to this ceiling so full output still flows through command-output artifact readers. |
+| `search_max_matches` / `max_search_matches` | Default `search_files.max_matches` when the model omits one; callers can still request a different cap per call. |
+| `exclude_globs` / `search_exclude_globs` | Baseline exclusions for `search_files` using root-relative globs. Tool-call `exclude_globs` are merged with these defaults, not substituted for them. |
+| `allow_argv_prefixes` | Deny `run_command` calls unless `argv` starts with a listed string or list prefix. |
+| `command_policy` / `allow_command` | Closure hook for custom command approval, denial, or rewrite. |
+| `annotations` | Merge extra annotations into generated tool definitions. |
+| `tool_config` | Advanced raw `tool_define(...)` config overrides per logical tool or `"*"`. |
+| `namespace`, `defer_loading` | Apply Tool Vault metadata to generated tools. |
+| `output_format`, `result_formatter` | Return JSON strings by default, or customize rendering. |
+
 ## Tool Vault
 
 Harn's Tool Vault is the progressive-tool-disclosure primitive: tool

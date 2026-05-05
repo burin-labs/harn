@@ -48,6 +48,23 @@ fn __client_tool_search_requested(value) {
   return type_of(value) == "dict" && value?.mode == "client"
 }
 
+fn __model_tool_format(opts) {
+  if opts?.model == nil {
+    return nil
+  }
+  let resolved = try {
+    llm_resolve_model(opts.model)
+  }
+  if is_err(resolved) {
+    return nil
+  }
+  return unwrap(resolved)?.tool_format
+}
+
+fn __native_tools_complete_naturally(opts) {
+  return opts?.tools != nil && opts?.tool_format == "native"
+}
+
 fn __task_ledger_deliverable_text(value) {
   let text = if type_of(value) == "string" {
     value
@@ -94,8 +111,11 @@ fn __validate_done_sentinel(value) {
     return
   }
   let kind = type_of(value)
-  if kind != "string" && kind != "bool" {
-    throw "agent_loop: `done_sentinel` must be a string, bool, or nil; got " + kind
+  if kind != "string" {
+    throw "agent_loop: `done_sentinel` must be a non-empty string or nil; got " + kind
+  }
+  if trim(value) == "" {
+    throw "agent_loop: `done_sentinel` must be a non-empty string or nil; got empty string"
   }
 }
 
@@ -157,13 +177,30 @@ pub fn agent_loop_options(options = nil) {
   let profile = opts?.profile ?? "tool_using"
   let defaults = __profile_defaults(profile)
   opts = defaults + opts
+  if !__has_key(opts, "tool_format") && opts?.tools != nil {
+    let model_tool_format = __model_tool_format(opts)
+    if model_tool_format != nil {
+      opts = opts + {tool_format: model_tool_format}
+    }
+  }
   if !__has_key(opts, "tool_format")
     && (opts?.tools == nil || __client_tool_search_requested(opts?.tool_search)) {
     opts = opts + {tool_format: "text"}
   }
+  if opts?.persistent ?? false && !__has_key(opts, "done_sentinel") {
+    opts = opts
+      + {
+      done_sentinel: if __native_tools_complete_naturally(opts) {
+        nil
+      } else {
+        "##DONE##"
+      },
+    }
+  }
   if __has_key(opts, "done_judge") && __judge_enabled(opts?.done_judge)
-    && !__has_key(opts, "done_sentinel") {
-    opts = opts + {done_sentinel: true}
+    && !__has_key(opts, "done_sentinel")
+    && !__native_tools_complete_naturally(opts) {
+    opts = opts + {done_sentinel: "##DONE##"}
   }
   if __has_key(opts, "verify_completion_judge") {
     if __judge_enabled(opts?.verify_completion_judge) {

@@ -94,6 +94,39 @@ fn search_respects_glob_filter() {
 }
 
 #[test]
+fn search_respects_exclude_globs() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("logs")).unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(
+        dir.path().join("logs/llm_transcript.jsonl"),
+        "target from transcript\n",
+    )
+    .unwrap();
+    fs::write(dir.path().join("src/release.txt"), "target from source\n").unwrap();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let result = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("target")),
+        ("path", vm_string(&dir.path().to_string_lossy())),
+        ("fixed_strings", VmValue::Bool(true)),
+        (
+            "exclude_globs",
+            VmValue::List(Rc::new(vec![vm_string("logs/**")])),
+        ),
+    ]))
+    .unwrap();
+    let rows = matches_in(&result);
+    assert_eq!(rows.len(), 1);
+    if let VmValue::Dict(d) = &rows[0] {
+        if let Some(VmValue::String(s)) = d.get("path") {
+            assert!(s.ends_with("src/release.txt"), "got {s}");
+        }
+    }
+}
+
+#[test]
 fn search_respects_max_matches_and_marks_truncated() {
     let dir = TempDir::new().unwrap();
     let mut buf = String::new();

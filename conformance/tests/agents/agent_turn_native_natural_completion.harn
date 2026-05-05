@@ -1,0 +1,34 @@
+fn tools() {
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "lookup",
+    "Lookup evidence",
+    {
+      handler: { args -> "evidence for " + args.query },
+      parameters: {query: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return registry
+}
+
+pipeline main() {
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "native turn"}}]})
+  llm_mock({text: "<user_response>Native turn complete.</user_response>"})
+  llm_mock({text: "{\"verdict\":\"done\",\"reasoning\":\"answer is complete\"}"})
+  let result = agent_turn(
+    "Use the lookup tool and finish.",
+    {provider: "mock", tools: tools(), tool_format: "native", max_iterations: 3},
+  )
+  let calls = llm_mock_calls()
+  println(result.status)
+  println(result.visible_text)
+  println(result.llm.iterations)
+  println(len(calls))
+  println(!contains(calls[0].system, "##DONE##"))
+  println(!contains(calls[1].system, "##DONE##"))
+  println(result.judge_decisions[0].verdict)
+}

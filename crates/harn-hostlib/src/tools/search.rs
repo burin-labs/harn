@@ -9,6 +9,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use grep_matcher::Matcher;
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::{Searcher, SearcherBuilder, Sink, SinkContext, SinkContextKind, SinkMatch};
@@ -17,7 +18,8 @@ use ignore::WalkBuilder;
 
 use crate::error::HostlibError;
 use crate::tools::args::{
-    build_dict, dict_arg, optional_bool, optional_int, optional_string, require_string, str_value,
+    build_dict, dict_arg, optional_bool, optional_int, optional_string, optional_string_list,
+    require_string, str_value,
 };
 
 const BUILTIN: &str = "hostlib_tools_search";
@@ -40,6 +42,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     let glob = optional_string(BUILTIN, dict, "glob")?;
+    let exclude_globs = optional_string_list(BUILTIN, dict, "exclude_globs")?;
     let case_insensitive = optional_bool(BUILTIN, dict, "case_insensitive", false)?;
     let fixed_strings = optional_bool(BUILTIN, dict, "fixed_strings", false)?;
     let include_hidden = optional_bool(BUILTIN, dict, "include_hidden", false)?;
@@ -74,6 +77,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let context_after = context_after as usize;
 
     let matcher = build_matcher(&pattern, case_insensitive, fixed_strings)?;
+    let exclude_set = build_exclude_globs(exclude_globs)?;
 
     let mut walker = WalkBuilder::new(&path);
     walker
@@ -120,6 +124,9 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             continue;
         }
         let file_path = entry.path().to_path_buf();
+        if excluded_by_globs(&path, &file_path, exclude_set.as_ref()) {
+            continue;
+        }
         let mut sink = CollectorSink {
             matcher: matcher.clone(),
             rows: Vec::new(),
@@ -186,6 +193,42 @@ fn normalize_glob(glob: &str) -> String {
     } else {
         glob.to_string()
     }
+}
+
+fn build_exclude_globs(patterns: Vec<String>) -> Result<Option<GlobSet>, HostlibError> {
+    if patterns.is_empty() {
+        return Ok(None);
+    }
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        let normalized = normalize_glob(&pattern);
+        let glob = Glob::new(&normalized).map_err(|err| HostlibError::InvalidParameter {
+            builtin: BUILTIN,
+            param: "exclude_globs",
+            message: format!("invalid glob `{pattern}`: {err}"),
+        })?;
+        builder.add(glob);
+    }
+    builder
+        .build()
+        .map(Some)
+        .map_err(|err| HostlibError::InvalidParameter {
+            builtin: BUILTIN,
+            param: "exclude_globs",
+            message: format!("invalid exclude glob set: {err}"),
+        })
+}
+
+fn excluded_by_globs(
+    root: &std::path::Path,
+    file_path: &std::path::Path,
+    set: Option<&GlobSet>,
+) -> bool {
+    let Some(set) = set else {
+        return false;
+    };
+    let candidate = file_path.strip_prefix(root).unwrap_or(file_path);
+    set.is_match(candidate)
 }
 
 #[derive(Debug, Clone)]

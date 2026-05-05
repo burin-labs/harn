@@ -1,0 +1,706 @@
+fn __agent_host_options(options) {
+  return options ?? {}
+}
+
+fn __agent_host_root(options) {
+  let opts = __agent_host_options(options)
+  return opts?.root ?? opts?.cwd
+}
+
+fn __agent_host_list_contains(values, needle) {
+  if type_of(values) == "string" {
+    return values == needle
+  }
+  if type_of(values) != "list" {
+    return false
+  }
+  for value in values {
+    if value == needle {
+      return true
+    }
+  }
+  return false
+}
+
+fn __agent_host_string_list(value, label) {
+  if value == nil {
+    return []
+  }
+  if type_of(value) == "string" {
+    return [value]
+  }
+  if type_of(value) == "list" {
+    return value
+  }
+  throw "agent_host_tools: " + label + " must be a string, list of strings, or nil"
+}
+
+fn __agent_host_tool_enabled(options, key, group) {
+  let opts = __agent_host_options(options)
+  let enabled = opts?.enabled_tools ?? opts?.tools
+  if enabled != nil && !__agent_host_list_contains(enabled, "all")
+    && !__agent_host_list_contains(enabled, group)
+    && !__agent_host_list_contains(enabled, key) {
+    return false
+  }
+  let disabled = opts?.disabled_tools ?? []
+  if __agent_host_list_contains(disabled, group) || __agent_host_list_contains(disabled, key) {
+    return false
+  }
+  return true
+}
+
+fn __agent_host_name(options, key, default_name) {
+  let opts = __agent_host_options(options)
+  return opts?.names?[key] ?? opts?[key + "_name"] ?? default_name
+}
+
+fn __agent_host_description(options, key, default_description) {
+  let opts = __agent_host_options(options)
+  return opts?.descriptions?[key] ?? default_description
+}
+
+fn __agent_host_annotations(options, key, defaults) {
+  let opts = __agent_host_options(options)
+  let shared = opts?.annotations?["*"] ?? {}
+  let local = opts?.annotations?[key] ?? {}
+  return defaults + shared + local
+}
+
+fn __agent_host_config(options, key, config) {
+  let opts = __agent_host_options(options)
+  var out = config
+  if opts?.defer_loading != nil {
+    out = out + {defer_loading: opts.defer_loading}
+  }
+  if opts?.namespace != nil {
+    out = out + {namespace: opts.namespace}
+  }
+  let shared = opts?.tool_config?["*"] ?? {}
+  let local = opts?.tool_config?[key] ?? {}
+  out = out + shared + local
+  return out
+}
+
+fn __agent_host_path_has_parent_segment(path) {
+  for segment in split(path, "/") {
+    if segment == ".." {
+      return true
+    }
+  }
+  return false
+}
+
+fn __agent_host_resolve_path(path, options) {
+  let opts = __agent_host_options(options)
+  let raw = trim(path ?? "")
+  if raw == "" {
+    throw "agent_host_tools: path must be a non-empty string"
+  }
+  let normalized = raw.replace("\\", "/")
+  if __agent_host_path_has_parent_segment(normalized) {
+    throw "agent_host_tools: path must not contain '..' segments"
+  }
+  let root = __agent_host_root(opts)
+  if starts_with(normalized, "/") {
+    if root != nil && (normalized == root || starts_with(normalized, root + "/")) {
+      return normalized
+    }
+    if opts?.allow_absolute_paths ?? false {
+      return normalized
+    }
+    throw "agent_host_tools: absolute paths are disabled; pass a path relative to the configured root"
+  }
+  if root != nil && root != "" {
+    return path_join(root, normalized)
+  }
+  return normalized
+}
+
+fn __agent_host_render(value, options, key) {
+  let opts = __agent_host_options(options)
+  let formatter = opts?.formatters?[key] ?? opts?.result_formatter
+  if formatter != nil {
+    return formatter(value, key)
+  }
+  let format = opts?.output_format ?? "json"
+  if format == "value" {
+    return value
+  }
+  if format == "display" {
+    return to_string(value)
+  }
+  return json_stringify(value)
+}
+
+fn __agent_host_read_file_request(args, options) {
+  var req = {path: __agent_host_resolve_path(args.path, options)}
+  if args?.offset != nil {
+    req = req + {offset: args.offset}
+  }
+  if args?.limit_bytes != nil {
+    req = req + {limit_bytes: args.limit_bytes}
+  }
+  if args?.encoding != nil {
+    req = req + {encoding: args.encoding}
+  }
+  return req
+}
+
+fn __agent_host_search_request(args, options) {
+  var req = {pattern: args.pattern}
+  let search_path = args?.path ?? "."
+  req = req + {path: __agent_host_resolve_path(search_path, options)}
+  let default_max_matches = __agent_host_options(options)?.search_max_matches
+    ?? __agent_host_options(options)?.max_search_matches
+    ?? 50
+  if args?.max_matches == nil && default_max_matches != nil {
+    req = req + {max_matches: default_max_matches}
+  }
+  let configured_exclude_globs = __agent_host_options(options)?.search_exclude_globs
+    ?? __agent_host_options(options)?.exclude_globs
+  let exclude_globs = __agent_host_string_list(configured_exclude_globs, "exclude_globs")
+    + __agent_host_string_list(args?.exclude_globs, "exclude_globs")
+  if len(exclude_globs) > 0 {
+    req = req + {exclude_globs: exclude_globs}
+  }
+  for key in [
+    "glob",
+    "case_insensitive",
+    "fixed_strings",
+    "max_matches",
+    "context_before",
+    "context_after",
+    "include_hidden",
+  ] {
+    if args?[key] != nil {
+      req = req + {[key]: args[key]}
+    }
+  }
+  return req
+}
+
+fn __agent_host_safe_relative_path(path) {
+  let raw = path ?? ""
+  if raw == "" {
+    return raw
+  }
+  let normalized = raw.replace("\\", "/")
+  if starts_with(normalized, "/") || __agent_host_path_has_parent_segment(normalized) {
+    throw "agent_host_tools: git path must be relative and must not contain '..' segments"
+  }
+  return normalized
+}
+
+fn __agent_host_git_request(args, options) {
+  var req = {operation: args.operation}
+  let repo = args?.repo ?? __agent_host_root(options)
+  if repo != nil && repo != "" {
+    req = req + {repo: __agent_host_resolve_path(repo, options)}
+  }
+  if args?.path != nil {
+    req = req + {path: __agent_host_safe_relative_path(args.path)}
+  }
+  for key in ["rev", "rev_range", "max_count"] {
+    if args?[key] != nil {
+      req = req + {[key]: args[key]}
+    }
+  }
+  return req
+}
+
+fn __agent_host_prefix_matches(argv, prefix) {
+  if type_of(prefix) == "string" {
+    return len(argv) > 0 && argv[0] == prefix
+  }
+  if type_of(prefix) != "list" {
+    return false
+  }
+  if len(prefix) > len(argv) {
+    return false
+  }
+  var index = 0
+  while index < len(prefix) {
+    if argv[index] != prefix[index] {
+      return false
+    }
+    index = index + 1
+  }
+  return true
+}
+
+fn __agent_host_argv_allowed(argv, options) {
+  let prefixes = __agent_host_options(options)?.allow_argv_prefixes
+  if prefixes == nil || len(prefixes) == 0 {
+    return true
+  }
+  for prefix in prefixes {
+    if __agent_host_prefix_matches(argv, prefix) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __agent_host_blocked_command(argv, options) {
+  return {
+    blocked: true,
+    status: "blocked",
+    reason: "argv does not match any configured allow_argv_prefixes entry",
+    argv: argv,
+    allowed_argv_prefixes: __agent_host_options(options)?.allow_argv_prefixes ?? [],
+  }
+}
+
+fn __agent_host_policy_blocked(reason, request, args, options) {
+  return {
+    blocked: true,
+    status: "blocked",
+    reason: reason,
+    request: request,
+    args: args,
+    allowed_argv_prefixes: __agent_host_options(options)?.allow_argv_prefixes ?? [],
+  }
+}
+
+fn __agent_host_apply_command_policy(request, args, options) {
+  let opts = __agent_host_options(options)
+  let policy = opts?.command_policy ?? opts?.allow_command
+  if policy == nil {
+    return request
+  }
+  let verdict = policy(request, args)
+  if verdict == nil {
+    return request
+  }
+  if type_of(verdict) == "bool" {
+    if verdict {
+      return request
+    }
+    return __agent_host_policy_blocked("command_policy rejected command", request, args, opts)
+  }
+  let kind = type_of(verdict)
+  if kind == "string" {
+    return __agent_host_policy_blocked(verdict, request, args, opts)
+  }
+  if kind == "dict" {
+    if verdict?.request != nil {
+      return verdict.request
+    }
+    if verdict?.rewrite != nil {
+      return verdict.rewrite
+    }
+    let allow_value = verdict?.allow
+    let blocked_value = verdict?.blocked
+    if (type_of(allow_value) == "bool" && !allow_value)
+      || (type_of(blocked_value) == "bool" && blocked_value) {
+      return __agent_host_policy_blocked(
+        verdict?.reason ?? "command_policy rejected command",
+        request,
+        args,
+        opts,
+      )
+        + verdict
+    }
+    return request + verdict
+  }
+  throw "agent_host_tools: command_policy must return bool, string, dict, or nil"
+}
+
+fn __agent_host_command_cwd(args, options) {
+  let opts = __agent_host_options(options)
+  let cwd = args?.cwd ?? opts?.cwd ?? opts?.root
+  if cwd == nil || cwd == "" {
+    return nil
+  }
+  return __agent_host_resolve_path(cwd, opts)
+}
+
+fn __agent_host_command_request(args, options) {
+  let opts = __agent_host_options(options)
+  let argv = args?.argv
+  if type_of(argv) == "list" && len(argv) > 0 {
+    if !__agent_host_argv_allowed(argv, opts) {
+      return __agent_host_blocked_command(argv, opts)
+    }
+    var req = {mode: "argv", argv: argv}
+    let command_cwd = __agent_host_command_cwd(args, opts)
+    if command_cwd != nil && command_cwd != "" {
+      req = req + {cwd: command_cwd}
+    }
+    return __agent_host_apply_command_policy(__agent_host_command_request_common(req, args, opts), args, opts)
+  }
+  if opts?.allow_shell ?? false && type_of(args?.command) == "string" && trim(args.command) != "" {
+    var req = {mode: "shell", command: args.command}
+    let shell_cwd = __agent_host_command_cwd(args, opts)
+    if shell_cwd != nil && shell_cwd != "" {
+      req = req + {cwd: shell_cwd}
+    }
+    let shell_id = args?.shell_id ?? opts?.shell_id
+    if shell_id != nil {
+      req = req + {shell_id: shell_id}
+    }
+    if args?.login != nil {
+      req = req + {login: args.login}
+    }
+    if args?.interactive != nil {
+      req = req + {interactive: args.interactive}
+    }
+    return __agent_host_apply_command_policy(__agent_host_command_request_common(req, args, opts), args, opts)
+  }
+  throw "run_command: argv must be a non-empty list of strings"
+}
+
+fn __agent_host_command_request_common(base_request, args, options) {
+  let opts = __agent_host_options(options)
+  var req = base_request
+  let timeout = args?.timeout_ms ?? opts?.timeout_ms
+  if timeout != nil {
+    req = req + {timeout_ms: timeout}
+  }
+  if args?.stdin != nil {
+    req = req + {stdin: args.stdin}
+  }
+  if args?.env != nil {
+    req = req + {env: args.env}
+  }
+  if args?.env_mode != nil {
+    req = req + {env_mode: args.env_mode}
+  }
+  var capture = args?.capture ?? {}
+  let requested_max_inline = capture?.max_inline_bytes ?? args?.max_inline_bytes
+  let configured_max_inline = opts?.max_inline_bytes
+  let max_inline = if requested_max_inline != nil && configured_max_inline != nil {
+    if requested_max_inline < configured_max_inline {
+      requested_max_inline
+    } else {
+      configured_max_inline
+    }
+  } else {
+    requested_max_inline ?? configured_max_inline
+  }
+  if max_inline != nil {
+    capture = capture + {max_inline_bytes: max_inline}
+  }
+  if len(capture.keys()) > 0 {
+    req = req + {capture: capture}
+  }
+  return req
+}
+
+fn __agent_host_reader_locator(args) {
+  var req = {}
+  if args?.command_id != nil {
+    req = req + {command_id: args.command_id}
+  }
+  if args?.handle_id != nil {
+    req = req + {handle_id: args.handle_id}
+  }
+  if args?.path != nil {
+    req = req + {path: args.path}
+  }
+  if len(req.keys()) == 0 {
+    throw "read_command_output: pass command_id, handle_id, or path"
+  }
+  return req
+}
+
+fn __agent_host_read_command_request(args, options) {
+  var req = __agent_host_reader_locator(args)
+  req = req
+    + {
+    offset: args?.offset ?? 0,
+    length: args?.length ?? __agent_host_options(options)?.read_bytes ?? 65536,
+  }
+  return req
+}
+
+fn __agent_host_tail_command_request(args, options) {
+  let locator = __agent_host_reader_locator(args)
+  let length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
+  let meta = hostlib_tools_read_command_output(locator + {offset: 0, length: 0})
+  let offset = if meta.total_bytes > length {
+    meta.total_bytes - length
+  } else {
+    0
+  }
+  return locator + {offset: offset, length: length}
+}
+
+fn __agent_host_tail_file_request(args, options) {
+  let path = __agent_host_resolve_path(args.path, options)
+  let length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
+  let info = stat(path)
+  let offset = if info.size > length {
+    info.size - length
+  } else {
+    0
+  }
+  return {path: path, offset: offset, limit_bytes: length}
+}
+
+fn __agent_host_command_result_readers(options, read_name, tail_name) {
+  var readers = []
+  if __agent_host_tool_enabled(options, "read_command_output", "command") {
+    readers = readers + [read_name]
+  }
+  if __agent_host_tool_enabled(options, "read_command_output_tail", "command") {
+    readers = readers + [tail_name]
+  }
+  return readers
+}
+
+/**
+ * agent_read_tools adds root-scoped read_file, read_file_tail, search_files, and git_inspect tools.
+ */
+pub fn agent_read_tools(registry = nil, options = nil) {
+  let opts = __agent_host_options(options)
+  let _enabled = hostlib_enable("tools:deterministic")
+  var tools = registry ?? tool_registry()
+  if __agent_host_tool_enabled(opts, "read_file", "read") {
+    let key = "read_file"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "read_file"),
+      __agent_host_description(
+        opts,
+        key,
+        "Read a UTF-8 file under the configured root by path. Use this for known files such as VERSION; use search_files only when you have a content pattern to search for.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            path: {type: "string"},
+            offset: {type: "integer", required: false},
+            limit_bytes: {type: "integer", required: false},
+            encoding: {type: "string", enum: ["utf-8", "binary"], required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
+          handler: { args -> __agent_host_render(hostlib_tools_read_file(__agent_host_read_file_request(args, opts)), opts, key) },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "read_file_tail", "read") {
+    let key = "read_file_tail"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "read_file_tail"),
+      __agent_host_description(
+        opts,
+        key,
+        "Read the last bytes of a UTF-8 file under the configured root.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {path: {type: "string"}, length: {type: "integer", required: false}},
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
+          handler: { args -> __agent_host_render(hostlib_tools_read_file(__agent_host_tail_file_request(args, opts)), opts, key) },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "search_files", "read") {
+    let key = "search_files"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "search_files"),
+      __agent_host_description(
+        opts,
+        key,
+        "Search file contents under the configured root. Required: pattern. Optional path only scopes where to search; do not call this with path alone. Use read_file to read a known file path.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            pattern: {type: "string"},
+            path: {type: "string", required: false},
+            glob: {type: "string", required: false},
+            case_insensitive: {type: "boolean", required: false},
+            fixed_strings: {type: "boolean", required: false},
+            max_matches: {type: "integer", required: false},
+            context_before: {type: "integer", required: false},
+            context_after: {type: "integer", required: false},
+            include_hidden: {type: "boolean", required: false},
+            exclude_globs: {type: "array", items: {type: "string"}, required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "search", side_effect_level: "read_only"}),
+          handler: { args -> __agent_host_render(hostlib_tools_search(__agent_host_search_request(args, opts)), opts, key) },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "git_inspect", "read") {
+    let key = "git_inspect"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "git_inspect"),
+      __agent_host_description(
+        opts,
+        key,
+        "Inspect git status, diff, log, show, blame, branches, and remotes without mutating the repo.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            operation: {
+              type: "string",
+              enum: ["status", "diff", "log", "blame", "show", "branch_list", "current_branch", "remote_list"],
+            },
+            repo: {type: "string", required: false},
+            path: {type: "string", required: false},
+            rev: {type: "string", required: false},
+            rev_range: {type: "string", required: false},
+            max_count: {type: "integer", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
+          handler: { args -> __agent_host_render(hostlib_tools_git(__agent_host_git_request(args, opts)), opts, key) },
+        },
+      ),
+    )
+  }
+  return tools
+}
+
+/** agent_command_tools adds argv-based run_command plus command-output artifact readers. */
+pub fn agent_command_tools(registry = nil, options = nil) {
+  let opts = __agent_host_options(options)
+  let _enabled = hostlib_enable("tools:deterministic")
+  var tools = registry ?? tool_registry()
+  let read_name = __agent_host_name(opts, "read_command_output", "read_command_output")
+  let tail_name = __agent_host_name(opts, "read_command_output_tail", "read_command_output_tail")
+  let result_readers = __agent_host_command_result_readers(opts, read_name, tail_name)
+  if __agent_host_tool_enabled(opts, "run_command", "command") {
+    let key = "run_command"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "run_command"),
+      __agent_host_description(
+        opts,
+        key,
+        "Run one argv-based command from the configured cwd. Pass argv as an array of strings. Output is capped inline; use the returned command_id with the command-output reader tools for full stdout/stderr.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            argv: {type: "array", items: {type: "string"}},
+            command: {type: "string", required: false},
+            cwd: {type: "string", required: false},
+            timeout_ms: {type: "integer", required: false},
+            stdin: {type: "string", required: false},
+            env: {type: "object", required: false},
+            env_mode: {type: "string", enum: ["inherit_clean", "replace", "patch"], required: false},
+            shell_id: {type: "string", required: false},
+            login: {type: "boolean", required: false},
+            interactive: {type: "boolean", required: false},
+            capture: {type: "object", required: false},
+            max_inline_bytes: {type: "integer", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {
+              kind: "execute",
+              side_effect_level: "process_exec",
+              emits_artifacts: true,
+              result_readers: result_readers,
+            },
+          ),
+          handler: { args ->
+            let req = __agent_host_command_request(args, opts)
+            if req?.blocked ?? false {
+              return __agent_host_render(req, opts, key)
+            }
+            return __agent_host_render(hostlib_tools_run_command(req), opts, key)
+          },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "read_command_output", "command") {
+    let key = "read_command_output"
+    tools = tool_define(
+      tools,
+      read_name,
+      __agent_host_description(
+        opts,
+        key,
+        "Read stdout, stderr, or combined output from a prior run_command call by command_id, handle_id, or artifact path. Use command_id from run_command results when available.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            command_id: {type: "string", required: false},
+            handle_id: {type: "string", required: false},
+            path: {type: "string", required: false},
+            offset: {type: "integer", required: false},
+            length: {type: "integer", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
+          handler: { args -> __agent_host_render(
+            hostlib_tools_read_command_output(__agent_host_read_command_request(args, opts)),
+            opts,
+            key,
+          ) },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "read_command_output_tail", "command") {
+    let key = "read_command_output_tail"
+    tools = tool_define(
+      tools,
+      tail_name,
+      __agent_host_description(
+        opts,
+        key,
+        "Read the last bytes of stdout, stderr, or combined output from a prior run_command call. Use this with command_id when inline command output was truncated.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            command_id: {type: "string", required: false},
+            handle_id: {type: "string", required: false},
+            path: {type: "string", required: false},
+            length: {type: "integer", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
+          handler: { args -> __agent_host_render(
+            hostlib_tools_read_command_output(__agent_host_tail_command_request(args, opts)),
+            opts,
+            key,
+          ) },
+        },
+      ),
+    )
+  }
+  return tools
+}
+
+/** agent_host_tools adds read/search/git inspection tools and argv-based command tools. */
+pub fn agent_host_tools(registry = nil, options = nil) {
+  var tools = agent_read_tools(registry, options)
+  tools = agent_command_tools(tools, options)
+  return tools
+}
