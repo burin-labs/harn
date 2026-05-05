@@ -89,9 +89,50 @@ fn __with_task_ledger_shorthand(opts) {
   return opts + {task_ledger: ledger}
 }
 
+fn __validate_done_sentinel(value) {
+  if value == nil {
+    return
+  }
+  let kind = type_of(value)
+  if kind != "string" && kind != "bool" {
+    throw "agent_loop: `done_sentinel` must be a string, bool, or nil; got " + kind
+  }
+}
+
+fn __validate_verify_completion(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "closure" {
+    throw "agent_loop: `verify_completion` must be a closure or nil; got " + type_of(value)
+  }
+}
+
+fn __validate_judge_dict_or_bool(label, value) {
+  if value == nil {
+    return
+  }
+  let kind = type_of(value)
+  if kind != "dict" && kind != "bool" {
+    throw "agent_loop: `" + label + "` must be a dict, bool, or nil; got " + kind
+  }
+}
+
 /** agent_loop_options. */
 pub fn agent_loop_options(options = nil) {
   var opts = options ?? {}
+  if __has_key(opts, "done_sentinel") {
+    __validate_done_sentinel(opts.done_sentinel)
+  }
+  if __has_key(opts, "verify_completion") {
+    __validate_verify_completion(opts.verify_completion)
+  }
+  if __has_key(opts, "verify_completion_judge") {
+    __validate_judge_dict_or_bool("verify_completion_judge", opts.verify_completion_judge)
+  }
+  if __has_key(opts, "done_judge") {
+    __validate_judge_dict_or_bool("done_judge", opts.done_judge)
+  }
   let profile = opts?.profile ?? "tool_using"
   let defaults = __profile_defaults(profile)
   opts = defaults + opts
@@ -104,10 +145,19 @@ pub fn agent_loop_options(options = nil) {
     opts = opts + {done_sentinel: true}
   }
   if __has_key(opts, "verify_completion_judge") {
-    opts = opts + {verify_completion_judge: __completion_judge_defaults(opts?.verify_completion_judge)}
+    if __judge_enabled(opts?.verify_completion_judge) {
+      opts = opts
+        + {verify_completion_judge: __completion_judge_defaults(opts?.verify_completion_judge)}
+    } else {
+      opts = opts + {verify_completion_judge: nil}
+    }
   }
   if __has_key(opts, "done_judge") {
-    opts = opts + {done_judge: __completion_judge_defaults(opts?.done_judge)}
+    if __judge_enabled(opts?.done_judge) {
+      opts = opts + {done_judge: __completion_judge_defaults(opts?.done_judge)}
+    } else {
+      opts = opts + {done_judge: nil}
+    }
   }
   opts = __with_task_ledger_shorthand(opts)
   return opts

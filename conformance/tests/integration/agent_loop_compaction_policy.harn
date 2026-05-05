@@ -1,6 +1,3 @@
-/**
- * @xfail: loop option validation / verifier-profile / compaction events / verify-completion shape regression — tracked in burin-labs/harn#1236
- */
 fn noisy_tools() {
   var tools = tool_registry()
   tools = tool_define(

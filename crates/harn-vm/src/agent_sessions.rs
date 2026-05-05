@@ -608,6 +608,18 @@ pub fn append_event(id: &str, event: VmValue) -> Result<(), String> {
 /// Replace the transcript's message list wholesale. Used by the
 /// in-loop compaction path, which operates on JSON messages.
 pub fn replace_messages(id: &str, messages: &[serde_json::Value]) {
+    replace_messages_with_summary(id, messages, None);
+}
+
+/// Replace the transcript's message list and optionally update the
+/// `summary` field on the persisted transcript. The compaction path
+/// uses this to publish the human-readable rollup line that
+/// `transcript_summary(transcript)` exposes to host code.
+pub fn replace_messages_with_summary(
+    id: &str,
+    messages: &[serde_json::Value],
+    summary: Option<&str>,
+) {
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {
@@ -630,6 +642,12 @@ pub fn replace_messages(id: &str, messages: &[serde_json::Value]) {
             )),
         );
         next.insert("messages".to_string(), VmValue::List(Rc::new(vm_messages)));
+        if let Some(summary) = summary {
+            next.insert(
+                "summary".to_string(),
+                VmValue::String(Rc::from(summary.to_string())),
+            );
+        }
         state.transcript = VmValue::Dict(Rc::new(next));
         state.last_accessed = Instant::now();
     });

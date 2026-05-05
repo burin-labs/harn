@@ -1,16 +1,162 @@
+import { agent_record_compaction } from "std/agent/state"
+
+fn __compaction_strategy_label(value) {
+  if type_of(value) == "string" {
+    return value
+  }
+  if type_of(value) == "dict" {
+    let label = value?.strategy ?? value?.kind ?? value?.type
+    if type_of(label) == "string" && label != "" {
+      return label
+    }
+    return "hybrid"
+  }
+  return ""
+}
+
+fn __compaction_engine_strategy(label) {
+  if label == "truncate" {
+    return "truncate"
+  }
+  if label == "summarize_all" || label == "summarize_middle" || label == "summarize"
+    || label == "hybrid"
+    || label == "llm" {
+    return "llm"
+  }
+  if label == "observation_mask" {
+    return "observation_mask"
+  }
+  return "observation_mask"
+}
+
+fn __compaction_keep_last(opts) {
+  let cfg = opts?.compaction
+  if type_of(cfg) == "dict" {
+    let keep = cfg?.keep_last_n ?? cfg?.keep_last
+    if type_of(keep) == "int" {
+      return keep
+    }
+  }
+  if type_of(opts?.compact_keep_last) == "int" {
+    return opts.compact_keep_last
+  }
+  return nil
+}
+
+fn __compact_options(opts, engine_strategy, keep_last) {
+  let auto_cfg = opts?.auto_compact
+  var compact_opts = if type_of(auto_cfg) == "dict" {
+    auto_cfg
+  } else {
+    {}
+  }
+  if !contains(compact_opts.keys(), "compact_threshold") && opts?.compact_threshold != nil {
+    compact_opts = compact_opts + {compact_threshold: opts.compact_threshold}
+  }
+  if !contains(compact_opts.keys(), "keep_last") && keep_last != nil {
+    compact_opts = compact_opts + {keep_last: keep_last}
+  }
+  if !contains(compact_opts.keys(), "compact_strategy") {
+    if opts?.compact_strategy != nil {
+      compact_opts = compact_opts + {compact_strategy: opts.compact_strategy}
+    } else if engine_strategy != "" {
+      compact_opts = compact_opts + {compact_strategy: engine_strategy}
+    }
+  }
+  if !contains(compact_opts.keys(), "compact_callback") && opts?.compact_callback != nil {
+    compact_opts = compact_opts + {compact_callback: opts.compact_callback}
+  }
+  if !contains(compact_opts.keys(), "provider") && opts?.provider != nil {
+    compact_opts = compact_opts + {provider: opts.provider}
+  }
+  if !contains(compact_opts.keys(), "model") && opts?.model != nil {
+    compact_opts = compact_opts + {model: opts.model}
+  }
+  return compact_opts
+}
+
+fn __auto_compact_summary(before, after) {
+  if len(after) == 0 || len(before) == len(after) {
+    return ""
+  }
+  let head = after[0]
+  if type_of(head) != "dict" {
+    return ""
+  }
+  let role = head?.role ?? ""
+  let content = head?.content ?? ""
+  if role != "user" || type_of(content) != "string" {
+    return ""
+  }
+  return content
+}
+
+fn __compaction_enabled(opts) {
+  let auto_cfg = opts?.auto_compact
+  let policy_cfg = opts?.compaction
+  if auto_cfg == nil && policy_cfg == nil && opts?.compact_threshold == nil {
+    return false
+  }
+  if type_of(auto_cfg) == "bool" && !auto_cfg {
+    return false
+  }
+  if type_of(auto_cfg) == "dict" && type_of(auto_cfg?.enabled) == "bool" && !auto_cfg.enabled {
+    return false
+  }
+  if type_of(policy_cfg) == "bool" && !policy_cfg {
+    return false
+  }
+  if type_of(policy_cfg) == "string" && policy_cfg == "none" {
+    return false
+  }
+  if type_of(policy_cfg) == "dict" {
+    let label = policy_cfg?.strategy ?? policy_cfg?.kind ?? policy_cfg?.type
+    if type_of(label) == "string" && label == "none" {
+      return false
+    }
+  }
+  return true
+}
+
 /** agent_autocompact_if_needed. */
 pub fn agent_autocompact_if_needed(session, opts) {
-  let cfg = opts?.auto_compact
-  if cfg == nil || !cfg {
+  if !__compaction_enabled(opts) {
     return nil
   }
-  let enabled = if type_of(cfg) == "bool" {
-    cfg
+  let policy_label = if opts?.compaction != nil {
+    __compaction_strategy_label(opts.compaction)
   } else {
-    cfg?.enabled ?? true
+    ""
   }
-  if !enabled {
-    return nil
+  let engine_strategy = if policy_label != "" {
+    __compaction_engine_strategy(policy_label)
+  } else {
+    if type_of(opts?.compact_strategy) == "string" {
+      opts.compact_strategy
+    } else {
+      "observation_mask"
+    }
   }
-  return __host_agent_session_compact_if_needed(session.session_id, cfg)
+  let keep_last = __compaction_keep_last(opts)
+  let compact_opts = __compact_options(opts, engine_strategy, keep_last)
+  let messages = __host_agent_session_messages(session.session_id)
+  let compacted = transcript_auto_compact(messages, compact_opts)
+  let summary = __auto_compact_summary(messages, compacted)
+  let archived = len(messages) - len(compacted)
+  if archived > 0 {
+    __host_agent_session_replace_messages(session.session_id, compacted, summary)
+    let metadata = {
+      strategy: if policy_label != "" {
+        policy_label
+      } else {
+        engine_strategy
+      },
+      engine_strategy: engine_strategy,
+      archived_messages: archived,
+      new_summary_len: len(summary),
+      keep_last: keep_last ?? 0,
+    }
+    agent_record_compaction(session.session_id, metadata)
+  }
+  return nil
 }

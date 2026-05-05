@@ -157,6 +157,15 @@ pub(crate) fn vm_build_llm_result(
         let calls: Vec<VmValue> = merged_tool_calls.iter().map(json_to_vm_value).collect();
         dict.insert("tool_calls".to_string(), VmValue::List(Rc::new(calls)));
     }
+    // Expose native_tool_calls separately so the agent loop can distinguish
+    // provider-native tool calls from text-parsed ones for native_tool_fallback
+    // detection. `tool_calls` (above) merges both sources for callers that
+    // just want the unified view.
+    let native_calls: Vec<VmValue> = result.tool_calls.iter().map(json_to_vm_value).collect();
+    dict.insert(
+        "native_tool_calls".to_string(),
+        VmValue::List(Rc::new(native_calls)),
+    );
 
     if let Some(parse) = tagged.as_ref() {
         if !parse.violations.is_empty() {

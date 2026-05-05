@@ -35,12 +35,17 @@ const HOST_SESSION_SET_ACTIVE_SKILLS: &str = "__host_agent_session_set_active_sk
 const HOST_SESSION_ACTIVE_SKILLS: &str = "__host_agent_session_active_skills";
 const HOST_SESSION_RECORD_SKILL_EVENT: &str = "__host_agent_session_record_skill_event";
 const HOST_SESSION_COMPACT: &str = "__host_agent_session_compact_if_needed";
+const HOST_SESSION_REPLACE_MESSAGES: &str = "__host_agent_session_replace_messages";
+const HOST_SESSION_CLAIM_TOOL_FORMAT: &str = "__host_agent_session_claim_tool_format";
 const HOST_SKILL_SCORE: &str = "__host_skill_score";
 const HOST_BUDGET_PRE_CALL: &str = "__host_agent_budget_pre_call_blocked";
 const HOST_BUILD_TURN_SYSTEM: &str = "__host_agent_build_turn_system";
 const HOST_AUTONOMY_BUDGET_CHECK: &str = "__host_autonomy_budget_check";
 const HOST_DAEMON_SNAPSHOT: &str = "__host_agent_daemon_snapshot";
 const HOST_DAEMON_WAIT: &str = "__host_agent_daemon_wait";
+const HOST_AGENT_EMIT_EVENT: &str = "__host_agent_emit_event";
+const HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK: &str = "__host_agent_record_native_tool_fallback";
+const HOST_AGENT_RECORD_COMPACTION: &str = "__host_agent_record_compaction";
 
 /// Session-keyed record for Harn-driven agent loops. The Harn loop owns
 /// iteration and decision logic; this struct holds only session-scoped
@@ -206,6 +211,12 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
 
     let persisted_active_skills = crate::agent_sessions::active_skills(&resolved);
 
+    let tool_format = opt_str(&opts_map, "tool_format").unwrap_or_default();
+    if !tool_format.is_empty() {
+        crate::agent_sessions::claim_tool_format(&resolved, &tool_format)
+            .map_err(VmError::Runtime)?;
+    }
+
     let session = AgentHostSession {
         session_id: resolved.clone(),
         task: message.clone(),
@@ -217,7 +228,7 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         tool_calls: Vec::new(),
         successful_tools: Vec::new(),
         rejected_tools: Vec::new(),
-        tool_mode: String::new(),
+        tool_mode: tool_format,
         started_at: now_id(),
         max_iterations,
         daemon_state: None,
@@ -368,6 +379,7 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
     if let Some(bridge) = super::agent_runtime::current_host_bridge() {
         bridge.set_prompt_stop_reason(acp_stop_reason);
     }
+    let trace_summary = super::trace::agent_trace_summary();
     let result = serde_json::json!({
         "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
         "final_status": final_status,
@@ -390,6 +402,7 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
             "mode": tool_mode,
         },
         "transcript": transcript_json,
+        "trace": trace_summary,
         "tokens_used": session.tokens_used,
         "cost_usd": session.cost_used,
         "session_id": session.session_id,
@@ -485,11 +498,57 @@ fn host_agent_session_record_assistant_builtin(
         session.tool_calls.extend(calls_json);
         Ok(())
     });
+    // Only attach `tool_calls` to the assistant transcript message when the
+    // provider produced them via the native channel. Text-mode tool calls are
+    // inline `<tool_call>` blocks in the assistant text and must not be
+    // duplicated on the message envelope.
+    let native_calls_value = dict_get(&llm_result, "native_tool_calls")
+        .cloned()
+        .unwrap_or(VmValue::Nil);
+    let native_calls_items = list_items(&native_calls_value);
     let mut msg = BTreeMap::new();
     msg.insert("role".to_string(), VmValue::String(Rc::from("assistant")));
     msg.insert("content".to_string(), VmValue::String(Rc::from(text)));
+    if !native_calls_items.is_empty() {
+        msg.insert(
+            "tool_calls".to_string(),
+            VmValue::List(Rc::new(native_calls_items)),
+        );
+    }
     let _ = crate::agent_sessions::inject_message(&session_id, VmValue::Dict(Rc::new(msg)));
     Ok(VmValue::Nil)
+}
+
+/// Recover the plan artifact from a dispatched emit_plan/update_plan result.
+///
+/// The local short-circuit handler (`handle_tool_locally`) returns the
+/// pretty-printed plan JSON as a string, so the dispatch result's
+/// `result` field is typically a string. We try parsing it; if that
+/// fails, fall back to renormalizing from the tool arguments. Either
+/// way we get a structured plan value the transcript "plan" event can
+/// carry under `metadata.plan`.
+fn plan_artifact_from_result(result: &VmValue) -> Option<serde_json::Value> {
+    if let Some(VmValue::String(rendered)) = dict_get(result, "result") {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(rendered) {
+            if parsed.is_object() {
+                return Some(parsed);
+            }
+        }
+    }
+    if let Some(value) = dict_get(result, "result") {
+        let json = vm_to_json(value);
+        if json.is_object() {
+            return Some(json);
+        }
+    }
+    let tool_name = dict_get(result, "tool_name")
+        .or_else(|| dict_get(result, "name"))
+        .map(|v| v.display())
+        .unwrap_or_default();
+    let arguments = dict_get(result, "arguments").map(vm_to_json)?;
+    Some(super::plan::normalize_plan_tool_call(
+        &tool_name, &arguments,
+    ))
 }
 
 fn host_agent_session_record_tool_results_builtin(
@@ -520,14 +579,37 @@ fn host_agent_session_record_tool_results_builtin(
             .or_else(|| dict_get(result, "content"))
             .map(|v| v.display())
             .unwrap_or_default();
-        let ok = dict_get(result, "ok")
-            .or_else(|| dict_get(result, "success"))
-            .map(|v| matches!(v, VmValue::Bool(true)))
-            .unwrap_or(true);
+        let ok = match dict_get(result, "ok") {
+            Some(VmValue::Bool(value)) => *value,
+            _ => match dict_get(result, "success") {
+                Some(VmValue::Bool(value)) => *value,
+                _ => match dict_get(result, "status") {
+                    Some(VmValue::String(s)) => s.as_ref() == "ok",
+                    _ => true,
+                },
+            },
+        };
         if ok {
             successful.push(name.clone());
         } else {
             rejected.push(name.clone());
+        }
+        if ok && super::plan::is_plan_tool(&name) {
+            if let Some(plan_value) = plan_artifact_from_result(result) {
+                let plan_metadata = serde_json::json!({"plan": plan_value});
+                let event = super::helpers::transcript_event(
+                    "plan",
+                    "tool",
+                    "public",
+                    "",
+                    Some(plan_metadata.clone()),
+                );
+                let _ = crate::agent_sessions::append_event(&session_id, event);
+                super::agent_runtime::emit_agent_event_sync(&AgentEvent::Plan {
+                    session_id: session_id.clone(),
+                    plan: plan_value,
+                });
+            }
         }
         let mut msg = BTreeMap::new();
         msg.insert("role".to_string(), VmValue::String(Rc::from("tool")));
@@ -779,6 +861,38 @@ fn host_agent_session_compact_builtin(
     Ok(VmValue::Nil)
 }
 
+fn host_agent_session_replace_messages_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_REPLACE_MESSAGES}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let messages_json: Vec<serde_json::Value> = match args.get(1) {
+        Some(VmValue::List(list)) => list.iter().map(vm_to_json).collect(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_REPLACE_MESSAGES}: messages must be a list"
+            )))
+        }
+    };
+    let summary = match args.get(2) {
+        Some(VmValue::String(s)) if !s.is_empty() => Some(s.to_string()),
+        _ => None,
+    };
+    crate::agent_sessions::replace_messages_with_summary(
+        &session_id,
+        &messages_json,
+        summary.as_deref(),
+    );
+    Ok(VmValue::Nil)
+}
+
 async fn host_skill_score(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let context = args.first().cloned().unwrap_or(VmValue::Nil);
     let registry = args.get(1).cloned().unwrap_or(VmValue::Nil);
@@ -797,6 +911,214 @@ fn host_agent_budget_pre_call_builtin(
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
     Ok(VmValue::Bool(false))
+}
+
+fn host_agent_emit_event_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_AGENT_EMIT_EVENT}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let event_type = match args.get(1) {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_AGENT_EMIT_EVENT}: event_type must be a non-empty string"
+            )))
+        }
+    };
+    let payload_value = args.get(2).cloned().unwrap_or(VmValue::Nil);
+    let payload = vm_to_json(&payload_value);
+    let event = build_agent_event(&session_id, &event_type, &payload)?;
+    crate::llm::agent_runtime::emit_agent_event_sync(&event);
+    Ok(VmValue::Nil)
+}
+
+fn build_agent_event(
+    session_id: &str,
+    event_type: &str,
+    payload: &serde_json::Value,
+) -> Result<crate::agent_events::AgentEvent, VmError> {
+    use crate::agent_events::AgentEvent;
+    let payload_obj = payload.as_object();
+    let get_usize = |key: &str| -> usize {
+        payload_obj
+            .and_then(|m| m.get(key))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize
+    };
+    let get_string = |key: &str| -> String {
+        payload_obj
+            .and_then(|m| m.get(key))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let get_opt_string = |key: &str| -> Option<String> {
+        payload_obj
+            .and_then(|m| m.get(key))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty())
+    };
+    match event_type {
+        "turn_start" => Ok(AgentEvent::TurnStart {
+            session_id: session_id.to_string(),
+            iteration: get_usize("iteration"),
+        }),
+        "turn_end" => {
+            let turn_info = payload_obj
+                .and_then(|m| m.get("turn_info"))
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            Ok(AgentEvent::TurnEnd {
+                session_id: session_id.to_string(),
+                iteration: get_usize("iteration"),
+                turn_info,
+            })
+        }
+        "judge_decision" => Ok(AgentEvent::JudgeDecision {
+            session_id: session_id.to_string(),
+            iteration: get_usize("iteration"),
+            verdict: get_string("verdict"),
+            reasoning: get_string("reasoning"),
+            next_step: get_opt_string("next_step"),
+            judge_duration_ms: payload_obj
+                .and_then(|m| m.get("judge_duration_ms"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+        }),
+        other => Err(VmError::Runtime(format!(
+            "{HOST_AGENT_EMIT_EVENT}: unsupported event type `{other}`"
+        ))),
+    }
+}
+
+fn host_agent_record_native_tool_fallback_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let payload = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let payload_json = vm_to_json(&payload);
+    let accepted = payload_json
+        .get("accepted")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let policy = payload_json
+        .get("policy")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let fallback_index = payload_json
+        .get("fallback_index")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let tool_call_count = payload_json
+        .get("tool_call_count")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let iteration = payload_json
+        .get("iteration")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    super::trace::emit_agent_event(super::trace::AgentTraceEvent::NativeToolFallback {
+        iteration,
+        accepted,
+        policy: policy.clone(),
+        fallback_index,
+        tool_call_count,
+    });
+    let event = super::helpers::transcript_event(
+        "native_tool_fallback",
+        "assistant",
+        "internal",
+        "",
+        Some(payload_json),
+    );
+    let _ = crate::agent_sessions::append_event(&session_id, event);
+    Ok(VmValue::Nil)
+}
+
+fn host_agent_record_compaction_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_AGENT_RECORD_COMPACTION}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let payload = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let payload_json = vm_to_json(&payload);
+    let archived_messages = payload_json
+        .get("archived_messages")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let new_summary_len = payload_json
+        .get("new_summary_len")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let iteration = payload_json
+        .get("iteration")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    super::trace::emit_agent_event(super::trace::AgentTraceEvent::ContextCompaction {
+        archived_messages,
+        new_summary_len,
+        iteration,
+    });
+    let event = super::helpers::transcript_event(
+        "compaction",
+        "system",
+        "internal",
+        "",
+        Some(payload_json),
+    );
+    let _ = crate::agent_sessions::append_event(&session_id, event);
+    Ok(VmValue::Nil)
+}
+
+fn host_agent_session_claim_tool_format_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_CLAIM_TOOL_FORMAT}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let tool_format = match args.get(1) {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_CLAIM_TOOL_FORMAT}: tool_format must be a non-empty string"
+            )))
+        }
+    };
+    crate::agent_sessions::claim_tool_format(&session_id, &tool_format)
+        .map_err(VmError::Runtime)?;
+    with_session(&session_id, HOST_SESSION_CLAIM_TOOL_FORMAT, |session| {
+        session.tool_mode = tool_format.clone();
+        Ok(())
+    })?;
+    Ok(VmValue::Nil)
 }
 
 fn host_agent_build_turn_system_builtin(
@@ -1261,6 +1583,13 @@ const HOST_SESSION_PRIMITIVES_SYNC: &[SyncBuiltin] = &[
         .signature("__host_agent_session_compact_if_needed(session_id, options)")
         .arity(VmBuiltinArity::Exact(2))
         .doc("No-op compaction hook; Harn implements compaction via llm_call."),
+    SyncBuiltin::new(
+        HOST_SESSION_REPLACE_MESSAGES,
+        host_agent_session_replace_messages_builtin,
+    )
+    .signature("__host_agent_session_replace_messages(session_id, messages, summary?)")
+    .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+    .doc("Replace the session's transcript message list (used by Harn-driven auto-compact)."),
     SyncBuiltin::new(HOST_BUDGET_PRE_CALL, host_agent_budget_pre_call_builtin)
         .signature("__host_agent_budget_pre_call_blocked(session_id, envelope)")
         .arity(VmBuiltinArity::Exact(2))
@@ -1273,6 +1602,31 @@ const HOST_SESSION_PRIMITIVES_SYNC: &[SyncBuiltin] = &[
         .signature("__host_agent_daemon_snapshot(session_id, options)")
         .arity(VmBuiltinArity::Exact(2))
         .doc("Persist a daemon snapshot for a Harn-driven agent session."),
+    SyncBuiltin::new(
+        HOST_SESSION_CLAIM_TOOL_FORMAT,
+        host_agent_session_claim_tool_format_builtin,
+    )
+    .signature("__host_agent_session_claim_tool_format(session_id, tool_format)")
+    .arity(VmBuiltinArity::Exact(2))
+    .doc("Claim the session's tool_format contract; rejects mid-session changes."),
+    SyncBuiltin::new(HOST_AGENT_EMIT_EVENT, host_agent_emit_event_builtin)
+        .signature("__host_agent_emit_event(session_id, event_type, payload)")
+        .arity(VmBuiltinArity::Exact(3))
+        .doc("Emit a `turn_start`, `turn_end`, or `judge_decision` agent event."),
+    SyncBuiltin::new(
+        HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK,
+        host_agent_record_native_tool_fallback_builtin,
+    )
+    .signature("__host_agent_record_native_tool_fallback(session_id, payload)")
+    .arity(VmBuiltinArity::Exact(2))
+    .doc("Record a native→text tool-call fallback as a transcript event and trace counter."),
+    SyncBuiltin::new(
+        HOST_AGENT_RECORD_COMPACTION,
+        host_agent_record_compaction_builtin,
+    )
+    .signature("__host_agent_record_compaction(session_id, payload)")
+    .arity(VmBuiltinArity::Exact(2))
+    .doc("Record a transcript compaction as a transcript event and trace counter."),
 ];
 
 const HOST_SESSION_PRIMITIVES_GROUP: BuiltinGroup<'static> = BuiltinGroup::new()
