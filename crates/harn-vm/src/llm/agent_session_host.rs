@@ -497,9 +497,23 @@ fn host_agent_session_record_assistant_builtin(
         session.tool_calls.extend(calls_json);
         Ok(())
     });
+    // Only attach `tool_calls` to the assistant transcript message when the
+    // provider produced them via the native channel. Text-mode tool calls are
+    // inline `<tool_call>` blocks in the assistant text and must not be
+    // duplicated on the message envelope.
+    let native_calls_value = dict_get(&llm_result, "native_tool_calls")
+        .cloned()
+        .unwrap_or(VmValue::Nil);
+    let native_calls_items = list_items(&native_calls_value);
     let mut msg = BTreeMap::new();
     msg.insert("role".to_string(), VmValue::String(Rc::from("assistant")));
     msg.insert("content".to_string(), VmValue::String(Rc::from(text)));
+    if !native_calls_items.is_empty() {
+        msg.insert(
+            "tool_calls".to_string(),
+            VmValue::List(Rc::new(native_calls_items)),
+        );
+    }
     let _ = crate::agent_sessions::inject_message(&session_id, VmValue::Dict(Rc::new(msg)));
     Ok(VmValue::Nil)
 }

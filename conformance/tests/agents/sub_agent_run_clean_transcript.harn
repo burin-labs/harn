@@ -1,6 +1,3 @@
-/**
- * @xfail: parent/child transcript isolation in sub_agent_run not wired through Harn loop — tracked in burin-labs/harn#1236
- */
 fn child_tools() {
   var tools = tool_registry()
   tools = tool_define(
