@@ -10,10 +10,7 @@ use std::thread_local;
 use serde::{Deserialize, Serialize};
 
 use super::glob_match;
-use crate::event_log::{active_event_log, EventLog, LogEvent, Topic};
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
-use crate::triggers::dispatcher::current_dispatch_context;
-use crate::trust_graph::AutonomyTier;
 use crate::value::{VmError, VmValue};
 use crate::workspace_path::{classify_workspace_path, WorkspacePathInfo};
 
@@ -182,111 +179,7 @@ pub fn current_tool_declared_path_entries(
     entries
 }
 
-fn builtin_mutates_state(name: &str) -> bool {
-    matches!(
-        name,
-        "write_file"
-            | "append_file"
-            | "mkdir"
-            | "copy_file"
-            | "delete_file"
-            | "apply_edit"
-            | "exec"
-            | "exec_at"
-            | "shell"
-            | "shell_at"
-            | "host_call"
-            | "store_set"
-            | "store_delete"
-            | "store_save"
-            | "store_clear"
-            | "metadata_set"
-            | "metadata_save"
-            | "metadata_refresh_hashes"
-            | "invalidate_facts"
-            | "checkpoint"
-            | "checkpoint_delete"
-            | "checkpoint_clear"
-            | "sse_server_response"
-            | "sse_server_send"
-            | "sse_server_heartbeat"
-            | "sse_server_flush"
-            | "sse_server_close"
-            | "sse_server_cancel"
-            | "sse_server_mock_receive"
-            | "sse_server_mock_disconnect"
-            | "__agent_state_write"
-            | "__agent_state_delete"
-            | "__agent_state_handoff"
-            | "mcp_release"
-            | "git.worktree.create"
-            | "git.worktree.remove"
-            | "git.fetch"
-            | "git.rebase"
-            | "git.push"
-    )
-}
-
-fn emit_autonomy_proposal_event(
-    tier: AutonomyTier,
-    builtin_name: &str,
-    args: &[VmValue],
-) -> Result<(), VmError> {
-    let Some(context) = current_dispatch_context() else {
-        return Ok(());
-    };
-    let Some(log) = active_event_log() else {
-        return Ok(());
-    };
-    let topic = Topic::new(crate::TRIGGER_OUTBOX_TOPIC)
-        .map_err(|error| VmError::Runtime(format!("autonomy proposal topic error: {error}")))?;
-    let mut headers = BTreeMap::new();
-    headers.insert(
-        "trace_id".to_string(),
-        context.trigger_event.trace_id.0.clone(),
-    );
-    headers.insert("agent".to_string(), context.agent_id.clone());
-    headers.insert("autonomy_tier".to_string(), tier.as_str().to_string());
-    let payload = serde_json::json!({
-        "agent": context.agent_id,
-        "action": context.action,
-        "builtin": builtin_name,
-        "args": args.iter().map(crate::llm::vm_value_to_json).collect::<Vec<_>>(),
-        "trace_id": context.trigger_event.trace_id.0,
-        "replay_of_event_id": context.replay_of_event_id,
-        "autonomy_tier": tier,
-        "proposal": true,
-    });
-    futures::executor::block_on(log.append(
-        &topic,
-        LogEvent::new("dispatch_proposed", payload).with_headers(headers),
-    ))
-    .map(|_| ())
-    .map_err(|error| VmError::Runtime(format!("failed to append autonomy proposal: {error}")))
-}
-
-fn enforce_dispatch_autonomy_for_builtin(name: &str, args: &[VmValue]) -> Result<(), VmError> {
-    let Some(context) = current_dispatch_context() else {
-        return Ok(());
-    };
-    if !builtin_mutates_state(name) {
-        return Ok(());
-    }
-    match context.autonomy_tier {
-        AutonomyTier::Shadow => {
-            emit_autonomy_proposal_event(AutonomyTier::Shadow, name, args)?;
-            Ok(())
-        }
-        AutonomyTier::Suggest => {
-            emit_autonomy_proposal_event(AutonomyTier::Suggest, name, args)?;
-            Ok(())
-        }
-        AutonomyTier::ActWithApproval | AutonomyTier::ActAuto => Ok(()),
-    }
-}
-
 pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Result<(), VmError> {
-    enforce_dispatch_autonomy_for_builtin(name, args)?;
     let Some(policy) = current_execution_policy() else {
         return Ok(());
     };

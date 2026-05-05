@@ -3916,6 +3916,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         where_clauses: &[],
     },
     BuiltinSignature {
+        name: "with_autonomy_policy",
+        params: &[Param::new("policy", TY_DICT), Param::new("fn", TY_CLOSURE)],
+        returns: TY_ANY,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "with_command_policy",
         params: &[Param::new("policy", TY_DICT), Param::new("fn", TY_CLOSURE)],
         returns: TY_ANY,

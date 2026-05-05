@@ -41,6 +41,7 @@
 - [Prompt library stdlib](./stdlib/prompt-library.md)
 - [Human in the loop](./hitl.md)
 - [Trust graph](./trust-graph.md)
+  - [Autonomy tiers](./autonomy.md)
   - [OpenTrustGraph v0 spec](./spec/open-trust-graph/v0.md)
 - [Audit receipts](./audit-receipts.md)
 - [Skills](./skills.md)

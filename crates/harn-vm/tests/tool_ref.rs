@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 //! Integration tests for `tool_ref` / `tool_def` / `tool_bind`.
 
 use harn_vm::value::VmError;

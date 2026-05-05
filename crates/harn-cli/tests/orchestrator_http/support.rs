@@ -31,6 +31,7 @@ pub(super) use time::OffsetDateTime;
 pub(super) use tokio::sync::MutexGuard;
 
 pub(super) use crate::test_util::connectors::github_connector_module;
+use crate::test_util::connectors::{provider_declarations, write_first_party_connector_modules};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -66,10 +67,11 @@ name = "fixture"
 [exports]
 handlers = "lib.harn"
 
-[[providers]]
-id = "github"
-connector = { harn = "github_connector.harn" }
-
+"#
+    .to_string();
+    manifest.push_str(provider_declarations());
+    manifest.push_str(
+        r#"
 [[triggers]]
 id = "github-new-issue"
 kind = "webhook"
@@ -77,8 +79,8 @@ provider = "github"
 match = { events = ["issues.opened"] }
 handler = "handlers::on_issue"
 secrets = { signing_secret = "github/webhook-secret" }
-"#
-    .to_string();
+"#,
+    );
     if let Some(block) = orchestrator_block {
         manifest.push('\n');
         manifest.push_str(block);
@@ -147,10 +149,11 @@ name = "fixture"
 [exports]
 handlers = "lib.harn"
 
-[[providers]]
-id = "slack"
-connector = { harn = "slack_connector.harn" }
-
+"#
+    .to_string();
+    manifest.push_str(provider_declarations());
+    manifest.push_str(
+        r#"
 [[triggers]]
 id = "slack-mentions"
 kind = "webhook"
@@ -158,8 +161,8 @@ provider = "slack"
 match = { events = ["app_mention"] }
 handler = "handlers::on_slack"
 secrets = { signing_secret = "slack/signing-secret" }
-"#
-    .to_string();
+"#,
+    );
     if let Some(block) = orchestrator_block {
         manifest.push('\n');
         manifest.push_str(block);
@@ -176,10 +179,11 @@ name = "fixture"
 [exports]
 handlers = "lib.harn"
 
-[[providers]]
-id = "notion"
-connector = { harn = "notion_connector.harn" }
-
+"#
+    .to_string();
+    manifest.push_str(provider_declarations());
+    manifest.push_str(
+        r#"
 [[triggers]]
 id = "notion-pages"
 kind = "webhook"
@@ -188,8 +192,8 @@ path = "/hooks/notion"
 match = { path = "/hooks/notion", events = ["page.content_updated"] }
 handler = "handlers::on_notion"
 secrets = { verification_token = "notion/verification-token" }
-"#
-    .to_string();
+"#,
+    );
     if let Some(block) = orchestrator_block {
         manifest.push('\n');
         manifest.push_str(block);
@@ -633,6 +637,7 @@ pub(super) async fn lock_env_with(envs: &[(&'static str, &str)]) -> EnvGuards {
 /// Build a default [`OrchestratorConfig`] rooted at `temp/harn.toml`
 /// with state in `temp/state`.
 pub(super) fn test_config(temp: &TempDir) -> OrchestratorConfig {
+    write_first_party_connector_modules(temp.path());
     OrchestratorConfig::for_test(temp.path().join("harn.toml"), temp.path().join("state"))
 }
 

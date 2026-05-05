@@ -118,6 +118,27 @@ fn __validate_judge_dict_or_bool(label, value) {
   }
 }
 
+fn __autonomy_tier(value) {
+  let tier = value ?? "act_auto"
+  if tier == "shadow" || tier == "suggest" || tier == "act_with_approval" || tier == "act_auto" {
+    return tier
+  }
+  throw "autonomy_policy: tier must be one of shadow, suggest, act_with_approval, act_auto"
+}
+
+/** autonomy_policy returns the VM-enforced autonomy assignment for an agent. */
+pub fn autonomy_policy(tier = "act_auto", options = nil) {
+  let opts = options ?? {}
+  return {
+    agent_id: opts?.agent_id ?? opts?.agent,
+    autonomy_tier: __autonomy_tier(tier),
+    action_tiers: opts?.action_tiers ?? {},
+    agent_tiers: opts?.agent_tiers ?? {},
+    agent_action_tiers: opts?.agent_action_tiers ?? {},
+    reviewers: opts?.reviewers ?? [],
+  }
+}
+
 /** agent_loop_options. */
 pub fn agent_loop_options(options = nil) {
   var opts = options ?? {}

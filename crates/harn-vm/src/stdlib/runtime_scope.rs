@@ -38,6 +38,21 @@ async fn call_scoped_closure(closure: Rc<VmClosure>, label: &str) -> Result<VmVa
 }
 
 pub(crate) fn register_runtime_scope_builtins(vm: &mut Vm) {
+    vm.register_async_builtin("with_autonomy_policy", |args| async move {
+        let policy_value = args
+            .first()
+            .ok_or_else(|| VmError::Runtime("with_autonomy_policy: policy is required".into()))?;
+        let policy = serde_json::from_value::<crate::autonomy::AutonomyPolicy>(
+            crate::llm::helpers::vm_value_to_json(policy_value),
+        )
+        .map_err(|error| {
+            VmError::Runtime(format!("with_autonomy_policy: invalid policy: {error}"))
+        })?;
+        let closure = closure_arg(&args, 1, "with_autonomy_policy")?;
+        let _guard = crate::autonomy::push_autonomy_policy(policy);
+        call_scoped_closure(closure, "with_autonomy_policy").await
+    });
+
     vm.register_async_builtin("with_execution_policy", |args| async move {
         let policy_value = args
             .first()

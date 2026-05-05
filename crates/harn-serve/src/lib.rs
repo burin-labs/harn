@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod adapter;
 pub mod adapters;
 mod auth;
