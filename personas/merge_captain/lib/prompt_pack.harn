@@ -1,0 +1,550 @@
+// Cheap-model Merge Captain prompt pack.
+//
+// Deterministic Harn code owns context assembly, side-effect gating,
+// schema validation, and transcript/eval revision gates. Model outputs
+// are recommendations until these validators accept them.
+/** Narrow decisions owned by the value-model prompt pack. */
+pub fn prompt_ids() {
+  return [
+    "classify_pr",
+    "choose_next_action",
+    "diagnose_ci_category",
+    "summarize_repair_result",
+    "decide_approval",
+    "audit_release_changelog",
+  ]
+}
+
+/** True when `id` names a prompt in this pack. */
+pub fn is_prompt_id(id) {
+  return prompt_ids().contains(id)
+}
+
+fn _string_schema() {
+  return {type: "string"}
+}
+
+fn _string_array_schema() {
+  return {type: "array", items: {type: "string"}}
+}
+
+fn _strict(required, properties) {
+  return {type: "object", additionalProperties: false, required: required, properties: properties}
+}
+
+/** Strict JSON schema for one prompt's model recommendation. */
+pub fn schema_for(id) {
+  if id == "classify_pr" {
+    return _strict(
+      ["state", "confidence", "reason", "evidence_keys", "missing_context"],
+      {
+        state: {
+          type: "string",
+          enum: [
+            "discovered",
+            "draft",
+            "waiting_checks",
+            "behind",
+            "dirty",
+            "queued",
+            "merge_group_running",
+            "failing_ci",
+            "local_repair",
+            "blocked",
+            "merged",
+            "closed",
+          ],
+        },
+        confidence: {type: "number"},
+        reason: _string_schema(),
+        evidence_keys: _string_array_schema(),
+        missing_context: _string_array_schema(),
+      },
+    )
+  }
+  if id == "choose_next_action" {
+    return _strict(
+      ["action", "deterministic_inputs", "approval_required", "reason"],
+      {
+        action: {
+          type: "string",
+          enum: [
+            "wait",
+            "update_branch",
+            "enqueue_merge_queue",
+            "request_review",
+            "comment",
+            "run_local_verification",
+            "run_repair_worker",
+            "escalate_human",
+          ],
+        },
+        deterministic_inputs: _string_array_schema(),
+        approval_required: {type: "boolean"},
+        reason: _string_schema(),
+      },
+    )
+  }
+  if id == "diagnose_ci_category" {
+    return _strict(
+      [
+        "category",
+        "selected_log_span_ids",
+        "likely_owner",
+        "next_inspection_commands",
+        "confidence",
+        "reason",
+      ],
+      {
+        category: {
+          type: "string",
+          enum: ["deterministic_failure", "flaky_test", "infra_failure", "missing_context", "unknown"],
+        },
+        selected_log_span_ids: _string_array_schema(),
+        likely_owner: {type: "string", enum: ["merge_captain", "repair_worker", "human", "ci_provider", "unknown"]},
+        next_inspection_commands: _string_array_schema(),
+        confidence: {type: "number"},
+        reason: _string_schema(),
+      },
+    )
+  }
+  if id == "summarize_repair_result" {
+    return _strict(
+      ["status", "user_summary", "tests", "changed_files", "residual_risk", "follow_up"],
+      {
+        status: {type: "string", enum: ["completed", "validators_failed", "blocked", "needs_more_context"]},
+        user_summary: _string_schema(),
+        tests: _string_array_schema(),
+        changed_files: _string_array_schema(),
+        residual_risk: _string_schema(),
+        follow_up: _string_array_schema(),
+      },
+    )
+  }
+  if id == "decide_approval" {
+    return _strict(
+      ["ask_approval", "action_kinds", "question", "blocking_reason", "confidence"],
+      {
+        ask_approval: {type: "boolean"},
+        action_kinds: _string_array_schema(),
+        question: _string_schema(),
+        blocking_reason: _string_schema(),
+        confidence: {type: "number"},
+      },
+    )
+  }
+  if id == "audit_release_changelog" {
+    return _strict(
+      ["gaps", "rewrite_sections", "blockers", "evidence_checked", "confidence"],
+      {
+        gaps: _string_array_schema(),
+        rewrite_sections: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["section", "after", "evidence_commit_shas", "uncertainty"],
+            properties: {
+              section: _string_schema(),
+              after: _string_schema(),
+              evidence_commit_shas: _string_array_schema(),
+              uncertainty: _string_schema(),
+            },
+          },
+        },
+        blockers: _string_array_schema(),
+        evidence_checked: _string_array_schema(),
+        confidence: {type: "number"},
+      },
+    )
+  }
+  return nil
+}
+
+/** Model-facing constraints common to every prompt. */
+pub fn side_effect_policy() {
+  return "Deterministic Harn code owns all side effects. You recommend one JSON object only; do not claim to merge, push, label, comment, tag, or edit files. Validators decide whether the recommendation can be used."
+}
+
+/** Prompt text for one narrow decision. */
+pub fn prompt_text(id) {
+  let shared = side_effect_policy()
+  if id == "classify_pr" {
+    return "${shared}\nClassify exactly one pull request from the compact observation. Use only the provided evidence keys. Return JSON matching merge_captain.prompt_pack.classify_pr.v1."
+  }
+  if id == "choose_next_action" {
+    return "${shared}\nChoose the next deterministic action for one already-classified PR. Prefer wait/escalate_human when evidence is incomplete. Return JSON matching merge_captain.prompt_pack.choose_next_action.v1."
+  }
+  if id == "diagnose_ci_category" {
+    return "${shared}\nDiagnose the CI failure category from summaries and selected log spans. Raw logs are unavailable unless a deterministic log summarizer selected spans first. Return JSON matching merge_captain.prompt_pack.diagnose_ci_category.v1."
+  }
+  if id == "summarize_repair_result" {
+    return "${shared}\nSummarize the repair result for a human reviewer from validator output, tests, and receipts. Keep residual risk visible. Return JSON matching merge_captain.prompt_pack.summarize_repair_result.v1."
+  }
+  if id == "decide_approval" {
+    return "${shared}\nDecide whether the deterministic approval gate must ask a human before proceeding. Explain the blocking action kinds. Return JSON matching merge_captain.prompt_pack.decide_approval.v1."
+  }
+  if id == "audit_release_changelog" {
+    return "${shared}\nAudit release notes against deterministic git-log and changelog evidence. Identify gaps, draft user-friendly changelog text, and keep uncertainty visible. Shell/tool errors are evidence, not hidden retries. Return JSON matching merge_captain.prompt_pack.audit_release_changelog.v1."
+  }
+  return shared
+}
+
+/** Context budgets are intentionally small for Gemma-class/value models. */
+pub fn context_budget_for(id) {
+  if id == "classify_pr" {
+    return {
+      max_input_tokens: 900,
+      reserved_output_tokens: 160,
+      max_prs: 1,
+      include: ["pr_summary", "check_summary", "labels", "review_decision", "prior_state"],
+      exclude: ["raw_logs", "full_diff", "full_thread"],
+      raw_logs_allowed: false,
+    }
+  }
+  if id == "choose_next_action" {
+    return {
+      max_input_tokens: 800,
+      reserved_output_tokens: 160,
+      max_prs: 1,
+      include: ["classification", "policy_gates", "dry_run", "approval_state"],
+      exclude: ["raw_logs", "full_diff", "full_thread"],
+      raw_logs_allowed: false,
+    }
+  }
+  if id == "diagnose_ci_category" {
+    return {
+      max_input_tokens: 1200,
+      reserved_output_tokens: 220,
+      max_log_spans: 4,
+      max_log_span_tokens: 600,
+      include: ["failing_checks", "check_summaries", "selected_log_spans", "tool_errors"],
+      exclude: ["raw_logs", "full_diff", "full_thread"],
+      raw_logs_allowed: false,
+      selected_log_spans_required: true,
+    }
+  }
+  if id == "summarize_repair_result" {
+    return {
+      max_input_tokens: 700,
+      reserved_output_tokens: 180,
+      include: ["repair_status", "validation_errors", "tests_run", "files_changed", "receipt_link"],
+      exclude: ["raw_logs", "full_diff", "full_thread"],
+      raw_logs_allowed: false,
+    }
+  }
+  if id == "decide_approval" {
+    return {
+      max_input_tokens: 600,
+      reserved_output_tokens: 140,
+      include: ["action_kinds", "policy_gate", "dry_run", "pre_approved"],
+      exclude: ["raw_logs", "full_diff", "full_thread"],
+      raw_logs_allowed: false,
+    }
+  }
+  if id == "audit_release_changelog" {
+    return {
+      max_input_tokens: 1600,
+      reserved_output_tokens: 500,
+      max_commits: 30,
+      include: ["git_log_summary", "changelog_excerpt", "release_metadata", "shell_observations", "tool_errors"],
+      exclude: ["raw_logs", "full_diff", "full_thread"],
+      raw_logs_allowed: false,
+    }
+  }
+  return {
+    max_input_tokens: 512,
+    reserved_output_tokens: 128,
+    include: [],
+    exclude: ["raw_logs"],
+    raw_logs_allowed: false,
+  }
+}
+
+fn _take(items, count) {
+  if items == nil {
+    return []
+  }
+  if len(items) > count {
+    return items[0:count]
+  }
+  return items
+}
+
+/** Assemble the compact context the prompt is allowed to see. */
+pub fn assemble_context(id, evidence) {
+  let budget = context_budget_for(id)
+  let selected_log_spans = _take(evidence?.selected_log_spans ?? [], budget.max_log_spans ?? 0)
+  let commits = _take(evidence?.commits ?? [], budget.max_commits ?? 0)
+  return {
+    _type: "merge_captain.prompt_context",
+    version: 1,
+    prompt_id: id,
+    budget: budget,
+    pr: evidence?.pr,
+    classification: evidence?.classification,
+    policy: evidence?.policy,
+    failing_checks: evidence?.failing_checks ?? [],
+    selected_log_spans: selected_log_spans,
+    raw_logs_included: false,
+    commits: commits,
+    changelog_excerpt: evidence?.changelog_excerpt,
+    shell_observations: evidence?.shell_observations ?? [],
+    tool_errors: evidence?.tool_errors ?? [],
+    repair_result: evidence?.repair_result,
+    approval_gate: evidence?.approval_gate,
+  }
+}
+
+/** Verify context assembly did not leak raw logs or exceed simple count budgets. */
+pub fn validate_context(context) {
+  var errors = []
+  if context.raw_logs_included {
+    errors = errors + ["raw logs must not enter prompt context"]
+  }
+  let max_log_spans = context.budget?.max_log_spans
+  if max_log_spans != nil && len(context.selected_log_spans ?? []) > max_log_spans {
+    errors = errors + ["selected_log_spans exceeds budget"]
+  }
+  let max_commits = context.budget?.max_commits
+  if max_commits != nil && len(context.commits ?? []) > max_commits {
+    errors = errors + ["commits exceeds budget"]
+  }
+  return {ok: len(errors) == 0, errors: errors}
+}
+
+fn _allowed_keys(schema) {
+  return schema.properties.keys()
+}
+
+/** Lightweight schema validator for golden fixtures and mock value-model outputs. */
+pub fn validate_output(id, output) {
+  let schema = schema_for(id)
+  if schema == nil {
+    return {ok: false, errors: ["unknown prompt id '${id}'"]}
+  }
+  if output == nil || type_of(output) != "dict" {
+    return {ok: false, errors: ["output must be a dict"]}
+  }
+  var errors = []
+  for key in schema.required {
+    if !contains(output.keys(), key) {
+      errors = errors + ["missing required key '${key}'"]
+    }
+  }
+  for key in output.keys() {
+    if !_allowed_keys(schema).contains(key) {
+      errors = errors + ["unexpected key '${key}'"]
+    }
+  }
+  return {ok: len(errors) == 0, errors: errors}
+}
+
+/** Known prompt/eval failure modes that should stay visible during revisions. */
+pub fn known_failure_modes() {
+  return [
+    {
+      artifact: "examples/personas/merge_captain/transcripts/release_harness_crystallization.jsonl",
+      gate: "transcript_oracle",
+      status: "failing_fixture",
+      findings: ["github_pull_request_create before approval_gate", "intake state observed after later steps"],
+      recovery_expectation: "shell/tool observations and approval errors must stay in the active transcript so the model can recover from evidence, not hidden retries",
+    },
+  ]
+}
+
+/** Golden examples double as cheap-model calibration fixtures. */
+pub fn golden_examples_for(id) {
+  if id == "classify_pr" {
+    return [
+      {
+        input: {pr: {number: 7, draft: false, checks: ["ci:success"], approvals: 1}},
+        output: {
+          state: "queued",
+          confidence: 0.92,
+          reason: "required checks and review gates passed",
+          evidence_keys: ["checks", "approvals"],
+          missing_context: [],
+        },
+      },
+    ]
+  }
+  if id == "choose_next_action" {
+    return [
+      {
+        input: {classification: {state: "behind"}, policy: {merge_queue_enabled: true}},
+        output: {
+          action: "update_branch",
+          deterministic_inputs: ["base_ref", "head_ref", "behind_by"],
+          approval_required: false,
+          reason: "branch must be current before merge-queue entry",
+        },
+      },
+    ]
+  }
+  if id == "diagnose_ci_category" {
+    return [
+      {
+        input: {failing_checks: ["ci / rust"], selected_log_spans: [{id: "span-1", text: "cargo test failed"}]},
+        output: {
+          category: "deterministic_failure",
+          selected_log_span_ids: ["span-1"],
+          likely_owner: "repair_worker",
+          next_inspection_commands: ["cargo test -p harn-vm"],
+          confidence: 0.81,
+          reason: "selected span contains a reproducible test failure",
+        },
+      },
+    ]
+  }
+  if id == "summarize_repair_result" {
+    return [
+      {
+        input: {status: "completed", tests_run: ["make test"], validation_errors: []},
+        output: {
+          status: "completed",
+          user_summary: "Repair completed and required verification passed.",
+          tests: ["make test"],
+          changed_files: ["src/lib.rs"],
+          residual_risk: "None known.",
+          follow_up: [],
+        },
+      },
+    ]
+  }
+  if id == "decide_approval" {
+    return [
+      {
+        input: {action_kinds: ["semantic_repair"], require_human_for: ["semantic_repair"]},
+        output: {
+          ask_approval: true,
+          action_kinds: ["semantic_repair"],
+          question: "Approve the semantic repair before the worker runs?",
+          blocking_reason: "policy requires human approval for semantic_repair",
+          confidence: 0.99,
+        },
+      },
+    ]
+  }
+  if id == "audit_release_changelog" {
+    return [
+      {
+        input: {
+          commits: [{sha: "abc", subject: "feat: add release metadata verifier"}],
+          changelog_excerpt: "## Unreleased",
+          shell_observations: [{status: "failed", command: "git log --bad"}],
+        },
+        output: {
+          gaps: ["missing user-facing note for release metadata verifier"],
+          rewrite_sections: [
+            {
+              section: "Unreleased / Added",
+              after: "Added release metadata verification so release candidates surface missing tag and changelog evidence before publish.",
+              evidence_commit_shas: ["abc"],
+              uncertainty: "git log command failed once; retry evidence should be inspected before finalizing",
+            },
+          ],
+          blockers: ["rerun git log with a valid range"],
+          evidence_checked: ["commit abc", "CHANGELOG.md excerpt", "failed shell observation"],
+          confidence: 0.74,
+        },
+      },
+    ]
+  }
+  return []
+}
+
+/** Deterministic eval fixture for the configured value-model route. */
+pub fn value_model_eval_fixture() {
+  var cases = []
+  for id in prompt_ids() {
+    let example = golden_examples_for(id)[0]
+    let validation = validate_output(id, example.output)
+    cases = cases
+      + [
+      {
+        prompt_id: id,
+        route: "local/gemma-value",
+        provider: "llama.cpp",
+        model: "gemma",
+        prompt_version: "merge-captain-value-pack-v1",
+        pass: validation.ok,
+        failure_modes: validation.errors,
+      },
+    ]
+  }
+  return {
+    _type: "merge_captain.prompt_pack_eval",
+    version: 1,
+    route: "local/gemma-value",
+    prompt_version: "merge-captain-value-pack-v1",
+    cases: cases,
+  }
+}
+
+/** Prompt revisions must ship with both semantic and deterministic gates. */
+pub fn revision_gate() {
+  return {
+    prompt_version: "merge-captain-value-pack-v1",
+    required_artifacts: [
+      "golden_examples",
+      "strict_json_schemas",
+      "transcript_oracle_diff",
+      "timeout_ladder_results",
+      "value_model_failure_modes",
+    ],
+    transcript_oracle: {command: "harn merge-captain audit <transcript>", must_review_diff: true},
+    timeout_ladder: {
+      command: "harn merge-captain ladder personas/merge_captain/harn.eval.toml --format json",
+      route: "local/gemma-value",
+    },
+  }
+}
+
+/** Full pack manifest for docs, evals, and inspection. */
+pub fn pack_manifest() {
+  var prompts = []
+  for id in prompt_ids() {
+    prompts = prompts
+      + [
+      {
+        id: id,
+        prompt: prompt_text(id),
+        schema: schema_for(id),
+        context_budget: context_budget_for(id),
+        golden_examples: golden_examples_for(id),
+      },
+    ]
+  }
+  return {
+    _type: "merge_captain.prompt_pack",
+    version: 1,
+    id: "merge-captain-value-pack-v1",
+    optimized_for: ["local/gemma-value", "llama.cpp/gemma"],
+    side_effect_policy: side_effect_policy(),
+    prompts: prompts,
+    eval_fixture: value_model_eval_fixture(),
+    known_failure_modes: known_failure_modes(),
+    revision_gate: revision_gate(),
+  }
+}
+
+/** Prompt used by the repair checkpoint while preserving repair_output validation. */
+pub fn repair_checkpoint_prompt(kind) {
+  if kind == "release_audit" {
+    let prompt = prompt_text("audit_release_changelog")
+    return "${prompt}\nAfter the audit recommendation, fill the universal merge_captain.repair_output v1 JSON object, including release_outputs. Keep blockers and uncertainty visible."
+  }
+  if kind == "ci_failure" {
+    let prompt = prompt_text("diagnose_ci_category")
+    return "${prompt}\nAfter diagnosing the CI category, perform only allowed repair work through deterministic tools and fill the universal merge_captain.repair_output v1 JSON object."
+  }
+  if kind == "flaky_test" {
+    let prompt = prompt_text("diagnose_ci_category")
+    return "${prompt}\nFocus on nondeterminism evidence. Then fill the universal merge_captain.repair_output v1 JSON object."
+  }
+  if kind == "merge_conflict" {
+    return "${side_effect_policy()}\nResolve only the listed merge-conflict paths, preserve the intent of both branches, modify only allowed_write_scope, run required_verification, and return one universal merge_captain.repair_output v1 JSON object."
+  }
+  return "${side_effect_policy()}\nResolve only the checkpoint described by the bundle, modify only allowed_write_scope, run required_verification, and return one universal merge_captain.repair_output v1 JSON object."
+}

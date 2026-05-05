@@ -44,6 +44,7 @@ GitHub adapter that rides the connector contract — no raw
 | [`lib/github_adapter.harn`](lib/github_adapter.harn) | Live (connector) and fixture-mode GitHub I/O. |
 | [`lib/local_verify.harn`](lib/local_verify.harn) | Runs per-repo local verification commands. |
 | [`lib/repair_bundle.harn`](lib/repair_bundle.harn) | Pure builders + JSON schema for the repair-worker checkpoint contract. |
+| [`lib/prompt_pack.harn`](lib/prompt_pack.harn) | Cheap/value-model prompt pack: narrow decision prompts, strict JSON schemas, golden examples, compact context budgets, and revision gates. |
 | [`lib/repair_validator.harn`](lib/repair_validator.harn) | Deterministic validators for repair-worker output (missing tests, dirty worktrees, unexpected write scope, malformed output, unpushed commits). |
 | [`lib/approval.harn`](lib/approval.harn) | Approval gate for repair-worker action kinds (semantic_repair / force_push / admin_merge / release_tag / branch_delete). |
 | [`lib/repair_worker.harn`](lib/repair_worker.harn) | The only `agent_loop` caller. Builds the bundle, runs the gate, dispatches the worker, runs the validators, and returns a `merge_captain.repair_run` record. |
@@ -53,6 +54,7 @@ GitHub adapter that rides the connector contract — no raw
 | [`fixtures/github_snapshot.json`](fixtures/github_snapshot.json) | Deterministic GitHub state for evals. |
 | [`tests/`](tests) | Pure-Harn unit + scheduler tests. |
 | [`evals/merge_captain_smoke.json`](evals/merge_captain_smoke.json) | Smoke eval suite. |
+| [`evals/prompt_pack_value_model.json`](evals/prompt_pack_value_model.json) | Deterministic golden fixture for the Gemma-class prompt pack. |
 | [`runs/merge_captain_smoke.run.json`](runs/merge_captain_smoke.run.json) | Recorded run for the smoke eval. |
 
 ## States
@@ -85,6 +87,7 @@ harn test personas/merge_captain/tests/policy_test.harn
 harn test personas/merge_captain/tests/classifier_test.harn
 harn test personas/merge_captain/tests/receipt_test.harn
 harn test personas/merge_captain/tests/scheduler_test.harn
+harn test personas/merge_captain/tests/prompt_pack_test.harn
 ```
 
 ## Running against live GitHub
@@ -124,6 +127,31 @@ receipts, and summaries, and marks the first tier that completed correctly.
 Run it through `harn eval`, `harn test package --evals`, or
 `harn merge-captain ladder` depending on whether you want eval-pack output
 or a standalone machine-readable ladder report.
+
+## Cheap-model prompt pack
+
+`lib/prompt_pack.harn` keeps value-model calls narrow enough for
+Gemma-class/local routes. It exposes separate prompts for:
+
+- PR classification
+- next deterministic action selection
+- CI failure category diagnosis
+- repair-result summarization
+- approval-request decisions
+- release changelog audit/rewrite
+
+Every prompt has a strict JSON schema, one golden example, and an explicit
+context budget. Context assembly is deterministic and excludes raw logs,
+full diffs, and full threads; CI diagnosis can only see log spans already
+selected by a log summarizer. The release changelog audit prompt consumes
+deterministic git-log/changelog evidence plus shell/tool observations, so
+failed commands stay visible to the model instead of becoming hidden harness
+retries.
+
+Prompt revisions are gated by the golden fixture, transcript-oracle diffs,
+and timeout-ladder results. The core boundary is intentionally simple:
+deterministic Harn code owns side effects, model outputs are recommendations,
+and validators decide whether any recommendation can be used.
 
 ## Repair-worker checkpoint contract
 

@@ -7,6 +7,8 @@
 //
 // No I/O, no time, no network. The scheduler (or a release driver)
 // gathers the raw inputs and asks this module to assemble them.
+import { repair_checkpoint_prompt } from "prompt_pack"
+
 /** Canonical kinds of repair checkpoint. */
 pub fn all_kinds() {
   return ["ci_failure", "merge_conflict", "release_audit", "flaky_test"]
@@ -129,19 +131,7 @@ pub fn validate_bundle(bundle) {
 
 /** Default prompt for each kind. Kept short so it's easy to override. */
 pub fn default_prompt(kind) {
-  if kind == "ci_failure" {
-    return "Diagnose and repair the failing CI checks listed in this bundle. Modify only the files inside allowed_write_scope. After your edits, run every command in required_verification, commit the result, and push to push_target. Respond once with a single JSON document that conforms to the merge_captain.repair_output v1 schema. Do not emit any text outside the JSON."
-  }
-  if kind == "merge_conflict" {
-    return "Resolve the merge conflict on the listed paths. Preserve the intent of both branches. Modify only files in allowed_write_scope. After your edits, run every command in required_verification, commit the resolution, and push to push_target. Respond with a single repair_output JSON document. No prose outside the JSON."
-  }
-  if kind == "release_audit" {
-    return "Audit the changelog and release notes against the commits in release_facts. Identify gaps, propose user-facing release-note rewrites, and surface remaining blockers. Modify only files in allowed_write_scope. Respond with a single repair_output JSON document populated with release_outputs."
-  }
-  if kind == "flaky_test" {
-    return "Stabilize the listed flaky test. Diagnose the source of nondeterminism, modify only files in allowed_write_scope, run required_verification, commit the fix, and push to push_target. Respond with a single repair_output JSON document."
-  }
-  return "Address the issue described in this bundle. Modify only files in allowed_write_scope. Run required_verification before pushing. Respond with a single repair_output JSON document."
+  return repair_checkpoint_prompt(kind)
 }
 
 /**

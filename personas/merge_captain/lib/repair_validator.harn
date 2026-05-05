@@ -246,6 +246,17 @@ pub fn validate_all(bundle, output) {
  * pivot from a path string into arbitrary shell. Callers always set
  * cwd from trusted state, but this is a cheap defence-in-depth.
  */
+pub fn cwd_has_shell_metacharacters(cwd) {
+  let text = to_string(cwd ?? "")
+  let blocked = [";", "|", "&", "$", "`", "<", ">", "\n", "\\r"]
+  for ch in blocked {
+    if text.contains(ch) {
+      return true
+    }
+  }
+  return false
+}
+
 /**
  * Optional post-run harness check. After `agent_loop` returns we ask
  * git for the working-tree state. If `git status --porcelain` produces
@@ -257,6 +268,9 @@ pub fn harness_validate(bundle, output, options) {
     return _err([])
   }
   let cwd = to_string(options.cwd ?? ".")
+  if cwd_has_shell_metacharacters(cwd) {
+    return _err(["harness cwd contains shell metacharacters"])
+  }
   let result = try {
     process_run(["git", "-C", cwd, "status", "--porcelain"], {timeout_ms: options.timeout_ms ?? 30000})
   }

@@ -74,6 +74,7 @@ pipeline test_build_assembles_full_shape(task) {
   assert_eq(bundle.push_target.force_with_lease, true)
   assert(len(bundle.prompt) > 0)
   assert(bundle.prompt.contains("repair_output"))
+  assert(bundle.prompt.contains("Deterministic Harn code owns all side effects"))
 }
 
 pipeline test_validate_accepts_well_formed(task) {
