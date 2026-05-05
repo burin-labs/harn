@@ -96,6 +96,52 @@ fn vm_skill_catalog_entries(skills: &[VmValue]) -> Vec<VmValue> {
     catalog.into_iter().map(|(_, value)| value).collect()
 }
 
+fn vm_skill_who_signed(skills: &[VmValue], target: &str) -> Result<VmValue, VmError> {
+    let mut bare_matches: Vec<&BTreeMap<String, VmValue>> = Vec::new();
+    for skill in skills {
+        let Some(entry) = skill.as_dict() else {
+            continue;
+        };
+        if vm_skill_entry_id(entry) == target {
+            return Ok(who_signed_entry(entry));
+        }
+        if entry
+            .get("name")
+            .map(|value| value.display())
+            .is_some_and(|name| name == target)
+        {
+            bare_matches.push(entry);
+        }
+    }
+    match bare_matches.as_slice() {
+        [entry] => Ok(who_signed_entry(entry)),
+        [] => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "skill_who_signed: skill '{target}' not found"
+        ))))),
+        _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "skill_who_signed: skill '{target}' is ambiguous; use the fully qualified id from the catalog"
+        ))))),
+    }
+}
+
+fn who_signed_entry(entry: &BTreeMap<String, VmValue>) -> VmValue {
+    let mut out = match entry.get("provenance").and_then(VmValue::as_dict) {
+        Some(provenance) => provenance.clone(),
+        None => BTreeMap::new(),
+    };
+    out.insert(
+        "skill_id".to_string(),
+        VmValue::String(Rc::from(vm_skill_entry_id(entry).as_str())),
+    );
+    out.entry("signed".to_string())
+        .or_insert(VmValue::Bool(false));
+    out.entry("trusted".to_string())
+        .or_insert(VmValue::Bool(false));
+    out.entry("endorsements".to_string())
+        .or_insert_with(|| VmValue::List(Rc::new(Vec::new())));
+    VmValue::Dict(Rc::new(out))
+}
+
 fn render_catalog_entry(entry: &BTreeMap<String, VmValue>) -> Option<String> {
     let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
     if name.is_empty() {
@@ -383,6 +429,24 @@ pub(crate) fn register_skill_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(vm_skill_catalog_entries(
             vm_get_skills(registry),
         ))))
+    });
+
+    vm.register_builtin("skill_who_signed", |args, _out| {
+        if args.len() < 2 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "skill_who_signed: requires registry and skill name",
+            ))));
+        }
+        let registry = match args.first() {
+            Some(VmValue::Dict(map)) => map,
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "skill_who_signed: first argument must be a skill registry",
+                ))));
+            }
+        };
+        vm_validate_registry("skill_who_signed", registry)?;
+        vm_skill_who_signed(vm_get_skills(registry), &args[1].display())
     });
 
     vm.register_builtin("render_always_on_catalog", |args, _out| {

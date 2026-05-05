@@ -17,7 +17,7 @@ use url::Url;
 use crate::package::load_skills_config;
 
 pub(crate) const SIGNER_REGISTRY_URL_ENV: &str = "HARN_SKILL_SIGNER_REGISTRY_URL";
-const SIG_SCHEMA: &str = "harn-skill-sig/v1";
+const SIG_SCHEMA: &str = "harn-skill-sig/v2";
 
 #[derive(Debug, Clone)]
 pub(crate) struct GeneratedKeypair {
@@ -33,10 +33,18 @@ pub(crate) struct SignedSkill {
     pub skill_sha256: String,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct EndorsedSkill {
+    pub signature_path: PathBuf,
+    pub endorser_fingerprint: String,
+    pub skill_sha256: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct VerifyOptions {
     pub registry_url: Option<String>,
     pub allowed_signers: Vec<String>,
+    pub allowed_endorsers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +54,29 @@ pub(crate) enum VerificationStatus {
     InvalidSignature,
     MissingSigner,
     UntrustedSigner,
+    MissingEndorsement,
+}
+
+impl VerificationStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            VerificationStatus::Verified => "verified",
+            VerificationStatus::MissingSignature => "missing_signature",
+            VerificationStatus::InvalidSignature => "invalid_signature",
+            VerificationStatus::MissingSigner => "missing_signer",
+            VerificationStatus::UntrustedSigner => "untrusted_signer",
+            VerificationStatus::MissingEndorsement => "missing_endorsement",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct EndorsementReport {
+    pub endorser_fingerprint: String,
+    pub signed_at: String,
+    pub trusted: bool,
+    pub status: VerificationStatus,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +85,8 @@ pub(crate) struct VerificationReport {
     pub signature_path: PathBuf,
     pub skill_sha256: String,
     pub signer_fingerprint: Option<String>,
+    pub signed_at: Option<String>,
+    pub endorsements: Vec<EndorsementReport>,
     pub signed: bool,
     pub trusted: bool,
     pub status: VerificationStatus,
@@ -92,6 +125,10 @@ impl VerificationReport {
                     self.skill_path.display(),
                     self.signer_fingerprint.clone().unwrap_or_default()
                 ),
+                VerificationStatus::MissingEndorsement => format!(
+                    "{} is missing at least one trusted endorsement signature",
+                    self.skill_path.display()
+                ),
             },
         }
     }
@@ -110,6 +147,15 @@ pub(crate) struct SkillSignatureEnvelope {
     pub signer_fingerprint: String,
     pub ed25519_sig_base64: String,
     pub skill_sha256: String,
+    #[serde(default)]
+    pub endorsements: Vec<SkillSignatureEndorsement>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct SkillSignatureEndorsement {
+    pub signed_at: String,
+    pub endorser_fingerprint: String,
+    pub ed25519_sig_base64: String,
 }
 
 pub(crate) fn generate_keypair(out: impl AsRef<Path>) -> Result<GeneratedKeypair, String> {
@@ -178,6 +224,7 @@ pub(crate) fn sign_skill(
         signer_fingerprint: signer_fingerprint.clone(),
         ed25519_sig_base64: base64::engine::general_purpose::STANDARD.encode(signature.to_bytes()),
         skill_sha256: skill_sha256.clone(),
+        endorsements: Vec::new(),
     };
     let signature_path = signature_path_for(skill_path);
     let serialized = serde_json::to_string_pretty(&envelope)
@@ -192,6 +239,75 @@ pub(crate) fn sign_skill(
     Ok(SignedSkill {
         signature_path,
         signer_fingerprint,
+        skill_sha256,
+    })
+}
+
+pub(crate) fn endorse_skill(
+    skill_path: impl AsRef<Path>,
+    private_key_path: impl AsRef<Path>,
+) -> Result<EndorsedSkill, String> {
+    let skill_path = skill_path.as_ref();
+    let private_key_path = private_key_path.as_ref();
+    let skill_bytes = fs::read(skill_path)
+        .map_err(|error| format!("failed to read {}: {error}", skill_path.display()))?;
+    let skill_sha256 = sha256_hex(&skill_bytes);
+    let signature_path = signature_path_for(skill_path);
+    let mut envelope = read_signature_envelope(&signature_path)?;
+    if envelope.schema != SIG_SCHEMA {
+        return Err(format!(
+            "{} declares unsupported schema {}",
+            signature_path.display(),
+            envelope.schema
+        ));
+    }
+    if envelope.skill_sha256 != skill_sha256 {
+        return Err(format!(
+            "{} does not match the current contents of {}",
+            signature_path.display(),
+            skill_path.display()
+        ));
+    }
+
+    let private_pem = fs::read_to_string(private_key_path)
+        .map_err(|error| format!("failed to read {}: {error}", private_key_path.display()))?;
+    let signing_key = SigningKey::from_pkcs8_pem(&private_pem)
+        .map_err(|error| format!("failed to parse {}: {error}", private_key_path.display()))?;
+    let endorser_fingerprint = fingerprint_for_key(&signing_key.verifying_key());
+    if endorser_fingerprint == envelope.signer_fingerprint {
+        return Err(
+            "skill endorsements must be signed by a different key than the author signature"
+                .to_string(),
+        );
+    }
+    let signed_at = time::OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .map_err(|error| format!("failed to format signed_at timestamp: {error}"))?;
+    let endorsement = SkillSignatureEndorsement {
+        signed_at,
+        endorser_fingerprint: endorser_fingerprint.clone(),
+        ed25519_sig_base64: base64::engine::general_purpose::STANDARD
+            .encode(signing_key.sign(&skill_bytes).to_bytes()),
+    };
+    envelope
+        .endorsements
+        .retain(|existing| existing.endorser_fingerprint != endorser_fingerprint);
+    envelope.endorsements.push(endorsement);
+    envelope
+        .endorsements
+        .sort_by(|left, right| left.endorser_fingerprint.cmp(&right.endorser_fingerprint));
+    let serialized = serde_json::to_string_pretty(&envelope)
+        .map_err(|error| format!("failed to serialize signature: {error}"))?;
+    fs::write(&signature_path, serialized.as_bytes()).map_err(|error| {
+        format!(
+            "failed to write signature {}: {error}",
+            signature_path.display()
+        )
+    })?;
+
+    Ok(EndorsedSkill {
+        signature_path,
+        endorser_fingerprint,
         skill_sha256,
     })
 }
@@ -211,6 +327,8 @@ pub(crate) fn verify_skill(
         signature_path: signature_path.clone(),
         skill_sha256: skill_sha256.clone(),
         signer_fingerprint: None,
+        signed_at: None,
+        endorsements: Vec::new(),
         signed: false,
         trusted: false,
         status: VerificationStatus::MissingSignature,
@@ -269,6 +387,7 @@ pub(crate) fn verify_skill(
     let signer_fingerprint = envelope.signer_fingerprint.clone();
     let base_report = VerificationReport {
         signer_fingerprint: Some(signer_fingerprint.clone()),
+        signed_at: Some(envelope.signed_at.clone()),
         signed: true,
         ..base_report
     };
@@ -335,11 +454,114 @@ pub(crate) fn verify_skill(
         });
     }
 
+    let endorsement_reports = verify_endorsements(&skill_bytes, &envelope.endorsements, options)?;
+    if endorsement_reports.is_empty() {
+        return Ok(VerificationReport {
+            endorsements: endorsement_reports,
+            status: VerificationStatus::MissingEndorsement,
+            error: Some(format!(
+                "{} has no endorsement signatures; add at least one with `harn skill endorse`",
+                skill_path.display()
+            )),
+            ..base_report
+        });
+    }
+    if let Some(failed) = endorsement_reports
+        .iter()
+        .find(|endorsement| endorsement.status != VerificationStatus::Verified)
+    {
+        return Ok(VerificationReport {
+            endorsements: endorsement_reports.clone(),
+            status: failed.status,
+            error: failed.error.clone(),
+            ..base_report
+        });
+    }
+
     Ok(VerificationReport {
+        endorsements: endorsement_reports,
         trusted: true,
         status: VerificationStatus::Verified,
         ..base_report
     })
+}
+
+fn verify_endorsements(
+    skill_bytes: &[u8],
+    endorsements: &[SkillSignatureEndorsement],
+    options: &VerifyOptions,
+) -> Result<Vec<EndorsementReport>, String> {
+    let allowed_endorsers: BTreeSet<String> = options.allowed_endorsers.iter().cloned().collect();
+    endorsements
+        .iter()
+        .map(|endorsement| {
+            let fingerprint = endorsement.endorser_fingerprint.clone();
+            let base_report = EndorsementReport {
+                endorser_fingerprint: fingerprint.clone(),
+                signed_at: endorsement.signed_at.clone(),
+                trusted: false,
+                status: VerificationStatus::InvalidSignature,
+                error: None,
+            };
+            let Some(verifying_key) =
+                resolve_verifying_key(&fingerprint, options.registry_url.as_deref())?
+            else {
+                return Ok(EndorsementReport {
+                    status: VerificationStatus::MissingSigner,
+                    error: Some(format!(
+                        "endorsement signer {fingerprint} is not installed locally and no registry resolved it"
+                    )),
+                    ..base_report
+                });
+            };
+            if !allowed_endorsers.is_empty() && !allowed_endorsers.contains(&fingerprint) {
+                return Ok(EndorsementReport {
+                    status: VerificationStatus::UntrustedSigner,
+                    error: Some(format!(
+                        "endorsement signer {fingerprint} is not in the skill's trusted_endorsers allowlist"
+                    )),
+                    ..base_report
+                });
+            }
+            let signature_bytes = match base64::engine::general_purpose::STANDARD
+                .decode(endorsement.ed25519_sig_base64.as_bytes())
+            {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    return Ok(EndorsementReport {
+                        error: Some(format!(
+                            "endorsement signature for {fingerprint} is not valid base64: {error}"
+                        )),
+                        ..base_report
+                    })
+                }
+            };
+            let signature = match Signature::from_slice(&signature_bytes) {
+                Ok(signature) => signature,
+                Err(error) => {
+                    return Ok(EndorsementReport {
+                        error: Some(format!(
+                            "endorsement signature for {fingerprint} is not valid Ed25519 bytes: {error}"
+                        )),
+                        ..base_report
+                    })
+                }
+            };
+            if verifying_key.verify(skill_bytes, &signature).is_err() {
+                return Ok(EndorsementReport {
+                    error: Some(format!(
+                        "endorsement signature for {fingerprint} failed Ed25519 verification"
+                    )),
+                    ..base_report
+                });
+            }
+            Ok(EndorsementReport {
+                trusted: true,
+                status: VerificationStatus::Verified,
+                ..base_report
+            })
+        })
+        .collect()
 }
 
 pub(crate) fn trust_add(from: &str) -> Result<TrustedSignerRecord, String> {
@@ -395,6 +617,18 @@ pub(crate) fn configured_registry_url(anchor: Option<&Path>) -> Option<String> {
 
 pub(crate) fn signature_path_for(skill_path: &Path) -> PathBuf {
     append_suffix(skill_path, ".sig")
+}
+
+fn read_signature_envelope(signature_path: &Path) -> Result<SkillSignatureEnvelope, String> {
+    let signature_raw = fs::read_to_string(signature_path)
+        .map_err(|error| format!("failed to read {}: {error}", signature_path.display()))?;
+    serde_json::from_str(&signature_raw).map_err(|error| {
+        format!(
+            "{} is not valid {} JSON: {error}",
+            signature_path.display(),
+            SIG_SCHEMA
+        )
+    })
 }
 
 pub(crate) fn trusted_signers_dir() -> Result<PathBuf, String> {
@@ -549,6 +783,12 @@ mod tests {
         let signed = sign_skill(&skill, &keys.private_key_path).unwrap();
         let signer = trust_add(keys.public_key_path.to_str().unwrap()).unwrap();
         let report = verify_skill(&skill, &VerifyOptions::default()).unwrap();
+        assert_eq!(report.status, VerificationStatus::MissingEndorsement);
+
+        let endorser_keys = generate_keypair(tmp.path().join("endorser.pem")).unwrap();
+        trust_add(endorser_keys.public_key_path.to_str().unwrap()).unwrap();
+        endorse_skill(&skill, &endorser_keys.private_key_path).unwrap();
+        let report = verify_skill(&skill, &VerifyOptions::default()).unwrap();
 
         assert_eq!(signed.signer_fingerprint, keys.fingerprint);
         assert_eq!(signer.fingerprint, keys.fingerprint);
@@ -571,6 +811,9 @@ mod tests {
         let keys = generate_keypair(tmp.path().join("signer.pem")).unwrap();
         sign_skill(&skill, &keys.private_key_path).unwrap();
         trust_add(keys.public_key_path.to_str().unwrap()).unwrap();
+        let endorser_keys = generate_keypair(tmp.path().join("endorser.pem")).unwrap();
+        trust_add(endorser_keys.public_key_path.to_str().unwrap()).unwrap();
+        endorse_skill(&skill, &endorser_keys.private_key_path).unwrap();
         fs::write(&skill, "---\nname: deploy\n---\nship it now\n").unwrap();
 
         let report = verify_skill(&skill, &VerifyOptions::default()).unwrap();
@@ -589,6 +832,8 @@ mod tests {
         let signing_keys = generate_keypair(tmp.path().join("signer.pem")).unwrap();
         let trusted_keys = generate_keypair(tmp.path().join("trusted.pem")).unwrap();
         sign_skill(&skill, &signing_keys.private_key_path).unwrap();
+        let endorser_keys = generate_keypair(tmp.path().join("endorser.pem")).unwrap();
+        endorse_skill(&skill, &endorser_keys.private_key_path).unwrap();
         trust_add(trusted_keys.public_key_path.to_str().unwrap()).unwrap();
 
         let sig_path = signature_path_for(&skill);
@@ -612,6 +857,8 @@ mod tests {
         write_skill(&skill, "---\nname: deploy\n---\nship it\n");
         let keys = generate_keypair(tmp.path().join("signer.pem")).unwrap();
         sign_skill(&skill, &keys.private_key_path).unwrap();
+        let endorser_keys = generate_keypair(tmp.path().join("endorser.pem")).unwrap();
+        endorse_skill(&skill, &endorser_keys.private_key_path).unwrap();
 
         let report = verify_skill(&skill, &VerifyOptions::default()).unwrap();
         assert_eq!(report.status, VerificationStatus::MissingSigner);
@@ -631,6 +878,9 @@ mod tests {
         let keys = generate_keypair(tmp.path().join("signer.pem")).unwrap();
         sign_skill(&skill, &keys.private_key_path).unwrap();
         trust_add(keys.public_key_path.to_str().unwrap()).unwrap();
+        let endorser_keys = generate_keypair(tmp.path().join("endorser.pem")).unwrap();
+        trust_add(endorser_keys.public_key_path.to_str().unwrap()).unwrap();
+        endorse_skill(&skill, &endorser_keys.private_key_path).unwrap();
 
         let report = verify_skill(
             &skill,
@@ -641,5 +891,35 @@ mod tests {
         )
         .unwrap();
         assert_eq!(report.status, VerificationStatus::UntrustedSigner);
+
+        let report = verify_skill(
+            &skill,
+            &VerifyOptions {
+                allowed_signers: vec![keys.fingerprint.clone()],
+                allowed_endorsers: vec!["not-the-endorser".to_string()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(report.status, VerificationStatus::UntrustedSigner);
+    }
+
+    #[test]
+    fn verify_rejects_missing_endorsement() {
+        let _cwd = lock_cwd();
+        let _env = lock_env().blocking_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", tmp.path());
+
+        let skill = tmp.path().join("skill").join("SKILL.md");
+        write_skill(&skill, "---\nname: deploy\n---\nship it\n");
+        let keys = generate_keypair(tmp.path().join("signer.pem")).unwrap();
+        sign_skill(&skill, &keys.private_key_path).unwrap();
+        trust_add(keys.public_key_path.to_str().unwrap()).unwrap();
+
+        let report = verify_skill(&skill, &VerifyOptions::default()).unwrap();
+        assert_eq!(report.status, VerificationStatus::MissingEndorsement);
+        assert!(report.signed);
+        assert!(!report.trusted);
     }
 }

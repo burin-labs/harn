@@ -158,6 +158,7 @@ fn build_provenance_report_for_ref(
     let options = VerifyOptions {
         registry_url,
         allowed_signers: winner.manifest.trusted_signers.clone(),
+        allowed_endorsers: winner.manifest.trusted_endorsers.clone(),
     };
     match skill_provenance::verify_skill(&skill_path, &options) {
         Ok(report) => Some(report),
@@ -166,6 +167,8 @@ fn build_provenance_report_for_ref(
             signature_path: skill_provenance::signature_path_for(&skill_path),
             skill_sha256: String::new(),
             signer_fingerprint: None,
+            signed_at: None,
+            endorsements: Vec::new(),
             signed: false,
             trusted: false,
             status: VerificationStatus::InvalidSignature,
@@ -184,13 +187,7 @@ fn provenance_to_vm(report: &VerificationReport) -> VmValue {
     dict.insert("trusted".to_string(), VmValue::Bool(report.trusted));
     dict.insert(
         "status".to_string(),
-        VmValue::String(Rc::from(match report.status {
-            VerificationStatus::Verified => "verified",
-            VerificationStatus::MissingSignature => "missing_signature",
-            VerificationStatus::InvalidSignature => "invalid_signature",
-            VerificationStatus::MissingSigner => "missing_signer",
-            VerificationStatus::UntrustedSigner => "untrusted_signer",
-        })),
+        VmValue::String(Rc::from(status_label(report.status))),
     );
     dict.insert(
         "signature_path".to_string(),
@@ -201,11 +198,95 @@ fn provenance_to_vm(report: &VerificationReport) -> VmValue {
             "signer_fingerprint".to_string(),
             VmValue::String(Rc::from(fingerprint)),
         );
+        dict.insert(
+            "author".to_string(),
+            signer_policy_input(fingerprint, report.signed_at.as_deref()),
+        );
     }
+    let endorsements = report
+        .endorsements
+        .iter()
+        .map(|endorsement| {
+            let mut item = match signer_policy_input(
+                &endorsement.endorser_fingerprint,
+                Some(&endorsement.signed_at),
+            ) {
+                VmValue::Dict(map) => (*map).clone(),
+                _ => BTreeMap::new(),
+            };
+            item.insert("trusted".to_string(), VmValue::Bool(endorsement.trusted));
+            item.insert(
+                "status".to_string(),
+                VmValue::String(Rc::from(status_label(endorsement.status))),
+            );
+            if let Some(error) = endorsement.error.as_deref() {
+                item.insert("error".to_string(), VmValue::String(Rc::from(error)));
+            }
+            VmValue::Dict(Rc::new(item))
+        })
+        .collect();
+    dict.insert(
+        "endorsements".to_string(),
+        VmValue::List(Rc::new(endorsements)),
+    );
+    let mut policy_input = BTreeMap::new();
+    policy_input.insert(
+        "action".to_string(),
+        VmValue::String(Rc::from("skill.provenance")),
+    );
+    if let Some(fingerprint) = report.signer_fingerprint.as_deref() {
+        policy_input.insert(
+            "author_actor_id".to_string(),
+            VmValue::String(Rc::from(fingerprint)),
+        );
+    }
+    policy_input.insert(
+        "endorser_actor_ids".to_string(),
+        VmValue::List(Rc::new(
+            report
+                .endorsements
+                .iter()
+                .map(|endorsement| {
+                    VmValue::String(Rc::from(endorsement.endorser_fingerprint.as_str()))
+                })
+                .collect(),
+        )),
+    );
+    dict.insert(
+        "trust_policy_input".to_string(),
+        VmValue::Dict(Rc::new(policy_input)),
+    );
     if let Some(error) = report.error.as_deref() {
         dict.insert("error".to_string(), VmValue::String(Rc::from(error)));
     }
     VmValue::Dict(Rc::new(dict))
+}
+
+fn signer_policy_input(fingerprint: &str, signed_at: Option<&str>) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert(
+        "fingerprint".to_string(),
+        VmValue::String(Rc::from(fingerprint)),
+    );
+    dict.insert(
+        "trust_actor_id".to_string(),
+        VmValue::String(Rc::from(fingerprint)),
+    );
+    dict.insert(
+        "trust_action".to_string(),
+        VmValue::String(Rc::from("skill.provenance")),
+    );
+    if let Some(signed_at) = signed_at {
+        dict.insert(
+            "signed_at".to_string(),
+            VmValue::String(Rc::from(signed_at)),
+        );
+    }
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn status_label(status: VerificationStatus) -> &'static str {
+    status.as_str()
 }
 
 fn manifest_source_to_vm(entry: &SkillSourceEntry) -> Option<ManifestSource> {
@@ -384,6 +465,14 @@ mod tests {
         let keys = skill_provenance::generate_keypair(tmp.path().join("signer.pem")).unwrap();
         skill_provenance::sign_skill(skill_dir.join("SKILL.md"), &keys.private_key_path).unwrap();
         skill_provenance::trust_add(keys.public_key_path.to_str().unwrap()).unwrap();
+        let endorser_keys =
+            skill_provenance::generate_keypair(tmp.path().join("endorser.pem")).unwrap();
+        skill_provenance::endorse_skill(
+            skill_dir.join("SKILL.md"),
+            &endorser_keys.private_key_path,
+        )
+        .unwrap();
+        skill_provenance::trust_add(endorser_keys.public_key_path.to_str().unwrap()).unwrap();
 
         let loaded = load_skills(&SkillLoaderInputs {
             cli_dirs: vec![tmp.path().to_path_buf()],

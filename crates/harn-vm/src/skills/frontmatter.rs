@@ -74,6 +74,11 @@ pub struct SkillManifest {
     /// the signer must both be trusted locally and appear in this set.
     #[serde(default)]
     pub trusted_signers: Vec<String>,
+    /// Optional endorsement signer allowlist. Required signed skills
+    /// need at least one trusted endorsement, and when this list is
+    /// non-empty every endorsement must come from one of these keys.
+    #[serde(default)]
+    pub trusted_endorsers: Vec<String>,
     /// Shell program to run the body under when `context == "shell"`.
     #[serde(default)]
     pub shell: Option<String>,
@@ -108,6 +113,7 @@ const KNOWN_CANONICAL_KEYS: &[&str] = &[
     "effort",
     "require_signature",
     "trusted_signers",
+    "trusted_endorsers",
     "shell",
     "argument_hint",
 ];

@@ -303,7 +303,14 @@ fn record_skill_loaded_event(
     metadata.insert("signed".to_string(), serde_json::json!(signed));
     metadata.insert("trusted".to_string(), serde_json::json!(trusted));
     if let Some(provenance) = provenance {
-        for key in ["status", "signer_fingerprint", "skill_sha256"] {
+        for key in [
+            "status",
+            "signer_fingerprint",
+            "skill_sha256",
+            "author",
+            "endorsements",
+            "trust_policy_input",
+        ] {
             if let Some(value) = provenance.get(key) {
                 metadata.insert(key.to_string(), crate::llm::vm_value_to_json(value));
             }

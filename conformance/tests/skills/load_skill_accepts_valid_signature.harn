@@ -22,6 +22,20 @@ pipeline test(task) {
     },
   )
   assert(result?.status == "done", "agent loop finishes")
+  let chain = skill_who_signed(skills, "signed-review")
+  assert(chain?.trusted, "who-signed query marks chain trusted")
+  assert(
+    chain?.author?.fingerprint == "6eaf8d0aae351c481ddbba5b06012b514f75065ab1e97a325ec65920086b8ccc",
+    "author fingerprint surfaces",
+  )
+  assert(
+    contains(json_stringify(chain), "84878ad03a6518f7bb8f5f4eff29591bb94cafa2ddf37ded6b5bba82cd8ddc60"),
+    "endorsement chain surfaces",
+  )
+  assert(
+    chain?.trust_policy_input?.action == "skill.provenance",
+    "trust-ranking policy input surfaces",
+  )
   let calls = llm_mock_calls()
   let second_messages = json_stringify(calls[1].messages)
   assert(
@@ -34,6 +48,17 @@ pipeline test(task) {
     if ev?.kind == "skill.loaded" && ev?.metadata?.skill_id == "signed-review" {
       assert(ev?.metadata?.signed, "trust record marks skill as signed")
       assert(ev?.metadata?.trusted, "trust record marks skill as trusted")
+      assert(
+        contains(
+          json_stringify(ev?.metadata),
+          "84878ad03a6518f7bb8f5f4eff29591bb94cafa2ddf37ded6b5bba82cd8ddc60",
+        ),
+        "trust record carries endorsements",
+      )
+      assert(
+        ev?.metadata?.trust_policy_input?.action == "skill.provenance",
+        "trust record carries trust policy input",
+      )
       saw_record = true
     }
   }
