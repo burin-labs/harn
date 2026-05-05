@@ -441,11 +441,26 @@ async fn acp_websocket_requires_configured_bearer_auth() {
             .expect("authorized connect");
     let response = acp_request(&mut socket, 1, "initialize", json!({})).await;
     assert_eq!(response["result"]["agentInfo"]["name"], "harn");
+    assert_eq!(response["result"]["agentCapabilities"]["loadSession"], true);
+    assert_eq!(
+        response["result"]["agentCapabilities"]["mcpCapabilities"],
+        json!({
+            "http": true,
+            "sse": true,
+        })
+    );
+    assert_eq!(
+        response["result"]["agentCapabilities"]["sessionCapabilities"],
+        json!({
+            "list": {},
+        })
+    );
     assert!(
         response["result"]["agentCapabilities"]["sessionCapabilities"]
-            .get("load")
-            .is_some()
+            .get("fork")
+            .is_none()
     );
+    assert_eq!(response["result"]["authMethods"], json!([]));
 
     listener
         .shutdown(Duration::from_secs(5))

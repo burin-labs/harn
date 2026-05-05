@@ -41,7 +41,14 @@ impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
 }
 
 pub(crate) fn server_config(pipeline: Option<String>) -> AcpServerConfig {
-    AcpServerConfig::new(pipeline).with_runtime_configurator(Arc::new(CliAcpRuntimeConfigurator))
+    let extensions = pipeline
+        .as_deref()
+        .map(Path::new)
+        .map(crate::package::load_runtime_extensions)
+        .unwrap_or_default();
+    AcpServerConfig::new(pipeline)
+        .with_runtime_configurator(Arc::new(CliAcpRuntimeConfigurator))
+        .with_llm_overrides(extensions.llm, extensions.capabilities)
 }
 
 pub(crate) async fn run_acp_server(pipeline: Option<&str>) {
