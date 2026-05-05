@@ -31,6 +31,7 @@ pub(crate) mod permissions;
 pub mod plan;
 pub mod readiness;
 pub(crate) mod schema_recover;
+pub(crate) mod skill_score;
 pub(crate) mod structural_experiments;
 pub(crate) mod structured_envelope;
 mod transcript_stats;

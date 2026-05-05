@@ -627,26 +627,22 @@ pub(crate) fn register_skill_builtins(vm: &mut Vm) {
     });
 
     vm.register_async_builtin("load_skill", |args| async move {
-        let requested = match args.first() {
-            Some(VmValue::String(name)) if !name.is_empty() => name.to_string(),
-            Some(value) => {
-                let rendered = value.display();
-                if rendered.is_empty() {
-                    return Err(crate::skills::skill_vm_error(
-                        "load_skill: requires a non-empty skill name",
-                    ));
-                }
-                rendered
-            }
-            None => {
-                return Err(crate::skills::skill_vm_error(
-                    "load_skill: requires a non-empty skill name",
-                ));
-            }
-        };
-        let session_id = std::env::var("HARN_SESSION_ID").ok();
-        let loaded = crate::skills::load_bound_skill_by_name(&requested, session_id.as_deref())
-            .map_err(crate::skills::skill_vm_error)?;
+        let (requested, inline_options) = parse_load_skill_request(args.first())?;
+        let call_options = parse_load_skill_options(args.get(1))?;
+        let session_id = call_options
+            .session_id
+            .or(inline_options.session_id)
+            .or_else(|| std::env::var("HARN_SESSION_ID").ok());
+        let loaded = crate::skills::load_bound_skill_by_name_with_options(
+            &requested,
+            crate::skills::LoadSkillOptions {
+                session_id,
+                require_signature: call_options.require_signature
+                    || inline_options.require_signature,
+                model_invocation: true,
+            },
+        )
+        .map_err(crate::skills::tool_rejected_error)?;
         Ok(VmValue::String(Rc::from(loaded.rendered_body.as_str())))
     });
 
@@ -663,6 +659,69 @@ pub(crate) fn register_skill_builtins(vm: &mut Vm) {
         let count = vm_get_skills(registry).len();
         Ok(VmValue::Int(count as i64))
     });
+}
+
+fn parse_load_skill_request(
+    value: Option<&VmValue>,
+) -> Result<(String, crate::skills::LoadSkillOptions), VmError> {
+    let Some(value) = value else {
+        return Err(crate::skills::skill_vm_error(
+            "load_skill: requires a non-empty skill name",
+        ));
+    };
+    let options = parse_load_skill_options(Some(value))?;
+    let requested = match value {
+        VmValue::Dict(map) => map
+            .get("name")
+            .or_else(|| map.get("id"))
+            .map(|value| value.display())
+            .unwrap_or_default(),
+        VmValue::String(name) => name.to_string(),
+        other => other.display(),
+    };
+    if requested.is_empty() {
+        return Err(crate::skills::skill_vm_error(
+            "load_skill: requires a non-empty skill name",
+        ));
+    }
+    Ok((requested, options))
+}
+
+fn parse_load_skill_options(
+    value: Option<&VmValue>,
+) -> Result<crate::skills::LoadSkillOptions, VmError> {
+    let mut options = crate::skills::LoadSkillOptions::default();
+    let Some(value) = value else {
+        return Ok(options);
+    };
+    let VmValue::Dict(map) = value else {
+        return Ok(options);
+    };
+    if let Some(value) = map.get("require_signature") {
+        match value {
+            VmValue::Bool(flag) => options.require_signature = *flag,
+            VmValue::Nil => {}
+            _ => {
+                return Err(crate::skills::skill_vm_error(
+                    "load_skill: require_signature must be a bool",
+                ));
+            }
+        }
+    }
+    if let Some(value) = map.get("session_id") {
+        match value {
+            VmValue::String(session_id) if !session_id.is_empty() => {
+                options.session_id = Some(session_id.to_string());
+            }
+            VmValue::String(_) | VmValue::Nil => {}
+            _ => {
+                return Err(crate::skills::skill_vm_error(
+                    "load_skill: session_id must be a string",
+                ));
+            }
+        }
+    }
+    Ok(options)
 }
 
 #[cfg(test)]

@@ -1,4 +1,3 @@
-/** @xfail: skill matching/scoring not yet a primitive — tracked in burin-labs/harn#1240 */
 fn child_tools() {
   var tools = tool_registry()
   tools = tool_define(

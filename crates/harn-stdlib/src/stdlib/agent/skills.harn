@@ -1,44 +1,328 @@
-import { agent_session_active_skills, agent_session_set_active_skills } from "std/agent/state"
+import {
+  agent_session_active_skills,
+  agent_session_messages,
+  agent_session_record_skill_event,
+  agent_session_set_active_skills,
+} from "std/agent/state"
 
-fn __skills_should_match(opts, iteration) {
-  let cfg = opts?.skill_match ?? {}
-  let sticky = cfg?.sticky ?? true
-  if iteration == 0 {
-    return true
+fn __skills_registry(opts) {
+  let registry = opts?.skill_registry ?? opts?.skills
+  if type_of(registry) == "list" {
+    return {_type: "skill_registry", skills: registry}
   }
-  return !sticky
+  return registry
 }
 
-fn __skills_active_changed(prev, next) {
-  if len(prev) != len(next) {
-    return true
+fn __skills_entries(registry) {
+  if registry == nil {
+    return []
   }
-  for (index, item) in iter(next).enumerate() {
-    if prev[index]?.id != item?.id {
+  return registry?.skills ?? []
+}
+
+fn __skill_id(entry) {
+  return entry?.id ?? entry?.name ?? ""
+}
+
+fn __skill_find(registry, id) {
+  for entry in __skills_entries(registry) {
+    if __skill_id(entry) == id {
+      return entry
+    }
+  }
+  return nil
+}
+
+fn __skill_ids(entries) {
+  var ids = []
+  for entry in entries {
+    let id = __skill_id(entry)
+    if id != "" {
+      ids = ids.push(id)
+    }
+  }
+  return ids
+}
+
+fn __tool_registry_has(registry, name) {
+  if type_of(registry) != "dict" {
+    return false
+  }
+  for tool_entry in registry?.tools ?? [] {
+    if __tool_name(tool_entry) == name {
       return true
     }
   }
   return false
 }
 
-/** agent_skills_match. */
-pub fn agent_skills_match(session, opts, iteration) {
-  let registry = opts?.skill_registry
-  if registry == nil || len(registry) == 0 {
-    return nil
+fn __with_load_skill_tool(session, opts) {
+  let existing = opts?.tools
+  let registry = if type_of(existing) == "dict" {
+    existing
+  } else {
+    tool_registry()
   }
-  if !__skills_should_match(opts, iteration) {
-    return nil
+  if __tool_registry_has(registry, "load_skill") {
+    return opts + {tools: registry}
   }
-  let scored = __host_skill_score(
-    {task: session?.task ?? "", working_files: opts?.working_files ?? [], iteration: iteration},
+  let next_registry = tool_define(
     registry,
-    opts?.skill_match ?? {},
+    "load_skill",
+    "Load the full instructions for a skill from the active skill catalog",
+    {
+      parameters: {
+        name: {type: "string", description: "Skill id from the catalog"},
+        require_signature: {
+          type: "boolean",
+          description: "Reject the skill unless provenance shows a trusted signature",
+          required: false,
+        },
+      },
+      handler: { args -> load_skill(args + {session_id: session.session_id}) },
+    },
   )
-  let active = scored?.active ?? []
-  let prev = agent_session_active_skills(session.session_id) ?? []
-  if __skills_active_changed(prev, active) {
-    agent_session_set_active_skills(session.session_id, active)
+  return opts + {tools: next_registry}
+}
+
+fn __skills_same_ids(prev, next) {
+  let prev_ids = __skill_ids(prev)
+  let next_ids = __skill_ids(next)
+  if len(prev_ids) != len(next_ids) {
+    return false
+  }
+  for (index, id) in iter(next_ids).enumerate() {
+    if prev_ids[index] != id {
+      return false
+    }
+  }
+  return true
+}
+
+fn __active_from_ids(registry, ids) {
+  var active = []
+  for item in ids {
+    let id = item?.id ?? item?.name ?? item
+    let entry = __skill_find(registry, id)
+    if entry != nil {
+      active = active.push(entry + {id: id})
+    }
   }
   return active
+}
+
+fn __latest_user_text(session) {
+  var latest = session?.task ?? ""
+  for message in agent_session_messages(session.session_id) {
+    if message?.role == "user" {
+      latest = message?.content ?? latest
+    }
+  }
+  return latest
+}
+
+fn __match_config(opts) {
+  return opts?.skill_match ?? {}
+}
+
+fn __match_strategy(opts) {
+  return __match_config(opts)?.strategy ?? "metadata"
+}
+
+fn __match_top_n(opts) {
+  let value = __match_config(opts)?.top_n
+  if type_of(value) == "int" && value > 0 {
+    return value
+  }
+  return 1
+}
+
+fn __match_sticky(opts) {
+  let value = __match_config(opts)?.sticky
+  if type_of(value) == "bool" {
+    return value
+  }
+  return true
+}
+
+fn __score_candidates(session, registry, opts, iteration) {
+  return __host_skill_score(
+    {task: __latest_user_text(session), working_files: opts?.working_files ?? [], iteration: iteration},
+    registry,
+    __match_config(opts),
+  )?.scored
+    ?? []
+}
+
+fn __top_active_from_scores(registry, scored, opts) {
+  var active = []
+  let top_n = __match_top_n(opts)
+  let strategy = __match_strategy(opts)
+  for candidate in scored {
+    if len(active) >= top_n {
+      break
+    }
+    let score = candidate?.score ?? 0.0
+    if score <= 0.0 && strategy == "metadata" {
+      continue
+    }
+    let id = candidate?.id ?? candidate?.name ?? ""
+    let entry = __skill_find(registry, id)
+    if entry != nil {
+      active = active.push(entry + {id: id, score: score, trigger: candidate?.trigger ?? candidate?.reason ?? ""})
+    }
+  }
+  return active
+}
+
+fn __record_matched(session, opts, iteration, scored) {
+  agent_session_record_skill_event(
+    session.session_id,
+    "skill_matched",
+    {
+      strategy: __match_strategy(opts),
+      iteration: iteration,
+      reassess: iteration > 0,
+      candidates: scored,
+      working_files: opts?.working_files ?? [],
+    },
+  )
+}
+
+fn __record_deactivations(session, prev, next, iteration) {
+  let next_ids = __skill_ids(next)
+  for entry in prev {
+    let id = __skill_id(entry)
+    if id != "" && !contains(next_ids, id) {
+      agent_session_record_skill_event(
+        session.session_id,
+        "skill_deactivated",
+        {name: id, id: id, iteration: iteration},
+      )
+    }
+  }
+}
+
+fn __record_activations(session, prev, next, iteration) {
+  let prev_ids = __skill_ids(prev)
+  for entry in next {
+    let id = __skill_id(entry)
+    if id == "" || contains(prev_ids, id) {
+      continue
+    }
+    agent_session_record_skill_event(
+      session.session_id,
+      "skill_activated",
+      {
+        name: id,
+        id: id,
+        description: entry?.description ?? "",
+        iteration: iteration,
+        score: entry?.score ?? 0.0,
+        trigger: entry?.trigger ?? "",
+        allowed_tools: entry?.allowed_tools ?? [],
+      },
+    )
+    if len(entry?.allowed_tools ?? []) > 0 {
+      agent_session_record_skill_event(
+        session.session_id,
+        "skill_scope_tools",
+        {name: id, id: id, allowed_tools: entry.allowed_tools},
+      )
+    }
+  }
+}
+
+fn __allowed_union(active) {
+  var allowed = []
+  for active_entry in active {
+    for allowed_entry in active_entry?.allowed_tools ?? [] {
+      if !contains(allowed, allowed_entry) {
+        allowed = allowed.push(allowed_entry)
+      }
+    }
+  }
+  return allowed
+}
+
+fn __tool_name(tool_entry) {
+  return tool_entry?.name ?? tool_entry?.function?.name ?? ""
+}
+
+fn __tool_namespace(tool_entry) {
+  return tool_entry?.namespace ?? tool_entry?.function?.namespace ?? ""
+}
+
+fn __allowed_matches_tool(entry, tool_entry) {
+  if entry == "*" {
+    return true
+  }
+  let name = __tool_name(tool_entry)
+  if entry == name {
+    return true
+  }
+  if starts_with(entry, "namespace:") {
+    return substring(entry, len("namespace:")) == __tool_namespace(tool_entry)
+  }
+  return false
+}
+
+fn __skill_scoped_tools(opts, active) {
+  let allowed = __allowed_union(active)
+  if len(allowed) == 0 || contains(allowed, "*") {
+    return opts?.tools
+  }
+  let registry = opts?.tools
+  if type_of(registry) != "dict" {
+    return registry
+  }
+  var kept = []
+  for tool_entry in registry?.tools ?? [] {
+    if __tool_name(tool_entry) == "load_skill" {
+      kept = kept.push(tool_entry)
+      continue
+    }
+    var keep = false
+    for entry in allowed {
+      if __allowed_matches_tool(entry, tool_entry) {
+        keep = true
+        break
+      }
+    }
+    if keep {
+      kept = kept.push(tool_entry)
+    }
+  }
+  return registry + {tools: kept}
+}
+
+fn __opts_with_active_skills(opts, active) {
+  let scoped_tools = __skill_scoped_tools(opts, active)
+  var next = opts + {active_skills: active}
+  if scoped_tools != nil {
+    next = next + {tools: scoped_tools}
+  }
+  return next
+}
+
+/** agent_skills_match. */
+pub fn agent_skills_match(session, opts, iteration) {
+  let registry = __skills_registry(opts)
+  if registry == nil || len(__skills_entries(registry)) == 0 {
+    return opts
+  }
+  let tool_opts = __with_load_skill_tool(session, opts)
+  let prev = __active_from_ids(registry, agent_session_active_skills(session.session_id) ?? [])
+  if __match_sticky(opts) && len(prev) > 0 {
+    return __opts_with_active_skills(tool_opts, prev)
+  }
+  let scored = __score_candidates(session, registry, tool_opts, iteration)
+  __record_matched(session, tool_opts, iteration, scored)
+  let active = __top_active_from_scores(registry, scored, tool_opts)
+  if !__skills_same_ids(prev, active) {
+    __record_deactivations(session, prev, active, iteration)
+    __record_activations(session, prev, active, iteration)
+    agent_session_set_active_skills(session.session_id, active)
+  }
+  return __opts_with_active_skills(tool_opts, active)
 }

@@ -27,8 +27,9 @@ pub use discovery::{DiscoveryOptions, DiscoveryReport, LayeredDiscovery, Shadowe
 pub use frontmatter::{parse_frontmatter, split_frontmatter, ParsedFrontmatter, SkillManifest};
 pub use runtime::{
     clear_current_skill_registry, current_skill_registry, install_current_skill_registry,
-    load_bound_skill_by_name, load_skill_from_registry, resolve_skill_entry, skill_entry_id,
-    vm_error as skill_vm_error, BoundSkillRegistry, LoadedSkill, SkillFetcher,
+    load_bound_skill_by_name, load_bound_skill_by_name_with_options, load_skill_from_registry,
+    resolve_skill_entry, skill_entry_id, tool_rejected_error, vm_error as skill_vm_error,
+    BoundSkillRegistry, LoadSkillOptions, LoadedSkill, SkillFetcher,
 };
 pub use source::{
     skill_entry_to_vm, skill_manifest_ref_to_vm, FsSkillSource, HostSkillSource, Layer, Skill,
