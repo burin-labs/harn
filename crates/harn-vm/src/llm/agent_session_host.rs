@@ -44,6 +44,7 @@ const HOST_AUTONOMY_BUDGET_CHECK: &str = "__host_autonomy_budget_check";
 const HOST_DAEMON_SNAPSHOT: &str = "__host_agent_daemon_snapshot";
 const HOST_DAEMON_WAIT: &str = "__host_agent_daemon_wait";
 const HOST_AGENT_EMIT_EVENT: &str = "__host_agent_emit_event";
+const HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK: &str = "__host_agent_record_native_tool_fallback";
 
 /// Session-keyed record for Harn-driven agent loops. The Harn loop owns
 /// iteration and decision logic; this struct holds only session-scoped
@@ -981,6 +982,59 @@ fn build_agent_event(
     }
 }
 
+fn host_agent_record_native_tool_fallback_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let payload = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let payload_json = vm_to_json(&payload);
+    let accepted = payload_json
+        .get("accepted")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let policy = payload_json
+        .get("policy")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let fallback_index = payload_json
+        .get("fallback_index")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let tool_call_count = payload_json
+        .get("tool_call_count")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let iteration = payload_json
+        .get("iteration")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    super::trace::emit_agent_event(super::trace::AgentTraceEvent::NativeToolFallback {
+        iteration,
+        accepted,
+        policy: policy.clone(),
+        fallback_index,
+        tool_call_count,
+    });
+    let event = super::helpers::transcript_event(
+        "native_tool_fallback",
+        "assistant",
+        "internal",
+        "",
+        Some(payload_json),
+    );
+    let _ = crate::agent_sessions::append_event(&session_id, event);
+    Ok(VmValue::Nil)
+}
+
 fn host_agent_session_claim_tool_format_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1502,6 +1556,13 @@ const HOST_SESSION_PRIMITIVES_SYNC: &[SyncBuiltin] = &[
         .signature("__host_agent_emit_event(session_id, event_type, payload)")
         .arity(VmBuiltinArity::Exact(3))
         .doc("Emit a `turn_start`, `turn_end`, or `judge_decision` agent event."),
+    SyncBuiltin::new(
+        HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK,
+        host_agent_record_native_tool_fallback_builtin,
+    )
+    .signature("__host_agent_record_native_tool_fallback(session_id, payload)")
+    .arity(VmBuiltinArity::Exact(2))
+    .doc("Record a native→text tool-call fallback as a transcript event and trace counter."),
 ];
 
 const HOST_SESSION_PRIMITIVES_GROUP: BuiltinGroup<'static> = BuiltinGroup::new()

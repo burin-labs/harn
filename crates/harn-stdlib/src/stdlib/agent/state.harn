@@ -70,3 +70,8 @@ pub fn agent_session_claim_tool_format_internal(session_id, tool_format) {
 pub fn agent_emit_event(session_id, event_type, payload) {
   return __host_agent_emit_event(session_id, event_type, payload)
 }
+
+/** agent_record_native_tool_fallback. */
+pub fn agent_record_native_tool_fallback(session_id, payload) {
+  return __host_agent_record_native_tool_fallback(session_id, payload)
+}

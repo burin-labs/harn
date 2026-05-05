@@ -10,6 +10,7 @@ import { agent_build_turn_messages, agent_build_turn_system } from "std/agent/pr
 import { agent_skills_match } from "std/agent/skills"
 import {
   agent_emit_event,
+  agent_record_native_tool_fallback,
   agent_session_drain_feedback,
   agent_session_finalize,
   agent_session_init,
@@ -49,11 +50,64 @@ fn __visible_text(parsed, raw_text) {
 }
 
 fn __resolve_tool_calls(llm_result, parsed) {
-  let native_calls = llm_result?.tool_calls ?? []
+  let native_calls = llm_result?.native_tool_calls ?? llm_result?.tool_calls ?? []
   if len(native_calls) > 0 {
     return native_calls
   }
   return parsed?.calls ?? []
+}
+
+fn __native_fallback_feedback(policy, fallback_index) {
+  return "This stage is running in native tool mode. Your last response emitted text-mode tool calls instead of provider-native tool calls.\n\n"
+    + "Re-issue the same action using ONLY the native tool channel. Do not write `<tool_call>` tags, bare `name({ ... })` calls, Markdown fences, or JSON tool-call envelopes in assistant text.\n\n"
+    + "Policy: `"
+    + policy
+    + "`. Observed fallback turn: "
+    + to_string(fallback_index)
+    + "."
+}
+
+fn __detect_native_fallback(llm_result, parsed, turn_opts, fallback_index, session_id, turn_index) {
+  let native_calls = llm_result?.native_tool_calls ?? []
+  let parsed_calls = parsed?.calls ?? []
+  let format = turn_opts?.tool_format ?? ""
+  if format != "native" || len(native_calls) > 0 || len(parsed_calls) == 0 {
+    return {triggered: false, accepted: false, fallback_index: fallback_index, calls: nil}
+  }
+  let new_index = fallback_index + 1
+  let policy = turn_opts?.native_tool_fallback ?? "reject"
+  let accepted = if policy == "allow" {
+    true
+  } else {
+    if policy == "allow_once" {
+      new_index == 1
+    } else {
+      false
+    }
+  }
+  agent_record_native_tool_fallback(
+    session_id,
+    {
+      iteration: turn_index + 1,
+      accepted: accepted,
+      policy: policy,
+      fallback_index: new_index,
+      tool_call_count: len(parsed_calls),
+    },
+  )
+  if !accepted {
+    agent_session_inject_feedback(
+      session_id,
+      "native_tool_contract",
+      __native_fallback_feedback(policy, new_index),
+    )
+  }
+  let resolved_calls = if accepted {
+    parsed_calls
+  } else {
+    []
+  }
+  return {triggered: true, accepted: accepted, fallback_index: new_index, calls: resolved_calls}
 }
 
 /** agent_loop. */
@@ -72,6 +126,7 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
   var final_status = ""
   var verify_attempts = 0
   var consecutive_text_only = 0
+  var fallback_index = 0
   let max_verify_attempts = opts?.max_verify_attempts ?? 20
   let max_iterations = opts?.max_iterations ?? 50
   let max_nudges = opts?.max_nudges ?? 8
@@ -106,7 +161,20 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
     let visible_text = __visible_text(parsed, raw_text)
     let normalized = llm_result + {text: visible_text, visible_text: visible_text}
     agent_session_record_assistant(session.session_id, normalized)
-    let tool_calls = __resolve_tool_calls(llm_result, parsed)
+    let fallback_outcome = __detect_native_fallback(
+      llm_result,
+      parsed,
+      turn_opts,
+      fallback_index,
+      session.session_id,
+      turn_index,
+    )
+    fallback_index = fallback_outcome.fallback_index
+    let tool_calls = if fallback_outcome.triggered {
+      fallback_outcome.calls
+    } else {
+      __resolve_tool_calls(llm_result, parsed)
+    }
     var dispatch = nil
     if len(tool_calls) > 0 {
       dispatch = agent_dispatch_tool_batch(
