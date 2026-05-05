@@ -1062,12 +1062,28 @@ fn workflow_stage_agent_loop_options(
     Ok(options)
 }
 
-pub async fn execute_stage_node(
+#[derive(Clone, Debug)]
+pub struct PreparedWorkflowStageNode {
+    pub prompt: String,
+    pub system: Option<String>,
+    pub run_agent_loop: bool,
+    pub llm_options: BTreeMap<String, VmValue>,
+    pub agent_loop_options: BTreeMap<String, VmValue>,
+    pub result: Option<serde_json::Value>,
+    pub selected: Vec<ArtifactRecord>,
+    pub rendered_context: String,
+    pub rendered_verification: String,
+    pub verification_contracts: Vec<VerificationContract>,
+    pub tool_format: String,
+    pub stage_session_id: String,
+}
+
+pub async fn prepare_stage_node(
     node_id: &str,
     node: &WorkflowNode,
     task: &str,
     artifacts: &[ArtifactRecord],
-) -> Result<(serde_json::Value, Vec<ArtifactRecord>, Option<VmValue>), VmError> {
+) -> Result<PreparedWorkflowStageNode, VmError> {
     let selected_stage = super::select_workflow_stage_artifacts(
         artifacts,
         &node.context_policy,
@@ -1127,7 +1143,7 @@ pub async fn execute_stage_node(
     )
     .await?;
     let tool_format = stage_agent_options.tool_format.clone();
-    let mut llm_result = if node.kind == "verify" {
+    let result = if node.kind == "verify" {
         if let Some(command) = node
             .verify
             .as_ref()
@@ -1184,80 +1200,97 @@ pub async fn execute_stage_node(
         }
     } else {
         let tools_value = stage_tools_value(node);
-        if stage_agent_options.run_agent_loop {
-            let options = workflow_stage_agent_loop_options(
+        let llm_options = workflow_stage_llm_options(
+            node,
+            &stage_session_id,
+            &tools_value,
+            &tool_names,
+            &stage_agent_options,
+        );
+        let agent_loop_options = if stage_agent_options.run_agent_loop {
+            workflow_stage_agent_loop_options(
                 node,
                 &stage_session_id,
                 &tools_value,
                 &tool_names,
                 &stage_agent_options,
-            )?;
-            let result = crate::stdlib::harn_entry::call_harn_export_by_name(
-                "std/agent/loop",
-                "agent_loop",
-                "workflow_stage_agent_loop",
-                &[
-                    VmValue::String(Rc::from(prompt.clone())),
-                    node.system
-                        .clone()
-                        .map(|s| VmValue::String(Rc::from(s)))
-                        .unwrap_or(VmValue::Nil),
-                    VmValue::Dict(Rc::new(options)),
-                ],
-            )
-            .await?;
-            crate::llm::vm_value_to_json(&result)
+            )?
         } else {
-            let options = workflow_stage_llm_options(
-                node,
-                &stage_session_id,
-                &tools_value,
-                &tool_names,
-                &stage_agent_options,
-            );
-            let args = vec![
-                VmValue::String(Rc::from(prompt.clone())),
-                node.system
-                    .clone()
-                    .map(|s| VmValue::String(Rc::from(s)))
-                    .unwrap_or(VmValue::Nil),
-                VmValue::Dict(Rc::new(options)),
-            ];
-            let opts = extract_llm_options(&args)?;
-            let result = vm_call_llm_full(&opts).await?;
-            crate::llm::agent_loop_result_from_llm(&result, opts)
-        }
+            BTreeMap::new()
+        };
+        return Ok(PreparedWorkflowStageNode {
+            prompt,
+            system: node.system.clone(),
+            run_agent_loop: stage_agent_options.run_agent_loop,
+            llm_options,
+            agent_loop_options,
+            result: None,
+            selected,
+            rendered_context,
+            rendered_verification,
+            verification_contracts,
+            tool_format,
+            stage_session_id,
+        });
     };
+
+    Ok(PreparedWorkflowStageNode {
+        prompt,
+        system: node.system.clone(),
+        run_agent_loop: false,
+        llm_options: BTreeMap::new(),
+        agent_loop_options: BTreeMap::new(),
+        result: Some(result),
+        selected,
+        rendered_context,
+        rendered_verification,
+        verification_contracts,
+        tool_format,
+        stage_session_id,
+    })
+}
+
+pub fn complete_prepared_stage_node(
+    node_id: &str,
+    node: &WorkflowNode,
+    prepared: &PreparedWorkflowStageNode,
+    mut llm_result: serde_json::Value,
+) -> Result<(serde_json::Value, Vec<ArtifactRecord>, Option<VmValue>), VmError> {
     if let Some(payload) = llm_result.as_object_mut() {
-        payload.insert("prompt".to_string(), serde_json::json!(prompt));
+        payload.insert(
+            "prompt".to_string(),
+            serde_json::json!(prepared.prompt.clone()),
+        );
         payload.insert(
             "system_prompt".to_string(),
             serde_json::json!(node.system.clone().unwrap_or_default()),
         );
         payload.insert(
             "rendered_context".to_string(),
-            serde_json::json!(rendered_context),
+            serde_json::json!(prepared.rendered_context.clone()),
         );
-        if !verification_contracts.is_empty() {
+        if !prepared.verification_contracts.is_empty() {
             payload.insert(
                 "verification_contracts".to_string(),
-                serde_json::to_value(&verification_contracts).unwrap_or_default(),
+                serde_json::to_value(&prepared.verification_contracts).unwrap_or_default(),
             );
             payload.insert(
                 "rendered_verification_context".to_string(),
-                serde_json::json!(rendered_verification),
+                serde_json::json!(prepared.rendered_verification.clone()),
             );
         }
         payload.insert(
             "selected_artifact_ids".to_string(),
-            serde_json::json!(selected
+            serde_json::json!(prepared
+                .selected
                 .iter()
                 .map(|artifact| artifact.id.clone())
                 .collect::<Vec<_>>()),
         );
         payload.insert(
             "selected_artifact_titles".to_string(),
-            serde_json::json!(selected
+            serde_json::json!(prepared
+                .selected
                 .iter()
                 .map(|artifact| artifact.title.clone())
                 .collect::<Vec<_>>()),
@@ -1267,10 +1300,13 @@ pub async fn execute_stage_node(
             .or_insert_with(|| serde_json::json!({}))
         {
             serde_json::Value::Object(tools) => {
-                tools.insert("mode".to_string(), serde_json::json!(tool_format.clone()));
+                tools.insert(
+                    "mode".to_string(),
+                    serde_json::json!(prepared.tool_format.clone()),
+                );
             }
             slot => {
-                *slot = serde_json::json!({ "mode": tool_format.clone() });
+                *slot = serde_json::json!({ "mode": prepared.tool_format.clone() });
             }
         }
     }
@@ -1283,7 +1319,7 @@ pub async fn execute_stage_node(
         .get("transcript")
         .cloned()
         .map(|value| crate::stdlib::json_to_vm_value(&value));
-    let session_transcript = crate::agent_sessions::snapshot(&stage_session_id);
+    let session_transcript = crate::agent_sessions::snapshot(&prepared.stage_session_id);
     let transcript = result_transcript
         .or(session_transcript)
         .and_then(|value| redact_transcript_visibility(&value, node.output_visibility.as_deref()));
@@ -1302,7 +1338,8 @@ pub async fn execute_stage_node(
     let mut metadata = BTreeMap::new();
     metadata.insert(
         "input_artifact_ids".to_string(),
-        serde_json::json!(selected
+        serde_json::json!(prepared
+            .selected
             .iter()
             .map(|artifact| artifact.id.clone())
             .collect::<Vec<_>>()),
@@ -1325,7 +1362,8 @@ pub async fn execute_stage_node(
         created_at: now_rfc3339(),
         freshness: Some("fresh".to_string()),
         priority: None,
-        lineage: selected
+        lineage: prepared
+            .selected
             .iter()
             .map(|artifact| artifact.id.clone())
             .collect(),
@@ -1337,6 +1375,40 @@ pub async fn execute_stage_node(
     .normalize();
 
     Ok((llm_result, vec![artifact], transcript))
+}
+
+pub async fn execute_stage_node(
+    node_id: &str,
+    node: &WorkflowNode,
+    task: &str,
+    artifacts: &[ArtifactRecord],
+) -> Result<(serde_json::Value, Vec<ArtifactRecord>, Option<VmValue>), VmError> {
+    let prepared = prepare_stage_node(node_id, node, task, artifacts).await?;
+    let llm_result = if let Some(result) = prepared.result.clone() {
+        result
+    } else if prepared.run_agent_loop {
+        let result = crate::stdlib::harn_entry::call_agent_loop(
+            prepared.prompt.clone(),
+            prepared.system.clone(),
+            prepared.agent_loop_options.clone(),
+        )
+        .await?;
+        crate::llm::vm_value_to_json(&result)
+    } else {
+        let args = vec![
+            VmValue::String(Rc::from(prepared.prompt.clone())),
+            prepared
+                .system
+                .clone()
+                .map(|s| VmValue::String(Rc::from(s)))
+                .unwrap_or(VmValue::Nil),
+            VmValue::Dict(Rc::new(prepared.llm_options.clone())),
+        ];
+        let opts = extract_llm_options(&args)?;
+        let result = vm_call_llm_full(&opts).await?;
+        crate::llm::agent_loop_result_from_llm(&result, opts)
+    };
+    complete_prepared_stage_node(node_id, node, &prepared, llm_result)
 }
 
 pub fn append_audit_entry(
