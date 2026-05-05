@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 
@@ -442,12 +443,14 @@ fn apply_builtin_experiment(
         BuiltInStructuralExperiment::ChainOfDraft => {
             if let Some(index) = latest_string_user_message_index(&messages) {
                 if let Some(content) = message_text(&messages[index]).map(str::to_string) {
-                    set_message_text(
-                        &mut messages[index],
-                        format!(
-                            "{content}\n\nBefore the final answer, emit a terse scratch draft inside <draft>...</draft>. After the draft block, provide the final answer outside those tags."
-                        ),
-                    );
+                    let mut bindings = BTreeMap::new();
+                    bindings.insert("content".to_string(), VmValue::String(Rc::from(content)));
+                    let rendered = crate::stdlib::template::render_stdlib_prompt_asset(
+                        "llm/prompts/structural_chain_of_draft.harn.prompt",
+                        Some(&bindings),
+                    )
+                    .expect("structural_chain_of_draft.harn.prompt is embedded and must render");
+                    set_message_text(&mut messages[index], rendered);
                 }
             }
         }
@@ -539,6 +542,22 @@ mod tests {
         assert!(content.contains("alpha"));
         assert!(content.contains("beta"));
         assert!(content.contains("gamma"));
+    }
+
+    #[test]
+    fn chain_of_draft_appends_scaffold_from_asset() {
+        let (messages, _system) = apply_builtin_experiment(
+            &BuiltInStructuralExperiment::ChainOfDraft,
+            vec![serde_json::json!({
+                "role": "user",
+                "content": "what is 17 * 23?"
+            })],
+            None,
+        );
+        let content = messages[0]["content"].as_str().expect("content");
+        assert!(content.starts_with("what is 17 * 23?"));
+        assert!(content.contains("<draft>"));
+        assert!(content.contains("scratch draft"));
     }
 
     #[test]

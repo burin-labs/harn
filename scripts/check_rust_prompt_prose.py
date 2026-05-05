@@ -13,8 +13,11 @@ from pathlib import Path
 
 
 PROTECTED_PATHS = [
-    Path("crates/harn-vm/src/llm/agent"),
     Path("crates/harn-vm/src/llm/tools"),
+    Path("crates/harn-vm/src/llm/conversation.rs"),
+    Path("crates/harn-vm/src/llm/structural_experiments.rs"),
+    Path("crates/harn-vm/src/llm/schema_recover.rs"),
+    Path("crates/harn-vm/src/llm/structured_envelope.rs"),
     Path("crates/harn-vm/src/orchestration/workflow.rs"),
     Path("crates/harn-vm/src/orchestration/artifacts.rs"),
     Path("crates/harn-vm/src/orchestration/compaction.rs"),

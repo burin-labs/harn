@@ -583,16 +583,20 @@ async fn run_llm_repair(
 
 fn build_repair_prompt(raw_text: &str, schema: &VmValue) -> String {
     let schema_text = schema_to_compact_json(schema);
-    let mut s = String::from(
-        "The following text was supposed to be JSON conforming to the schema below, but it failed validation. \
-Repair it and respond with ONLY the corrected JSON — no prose, no markdown fences, no commentary.\n\n",
+    let mut bindings = BTreeMap::new();
+    bindings.insert(
+        "schema_text".to_string(),
+        VmValue::String(Rc::from(schema_text)),
     );
-    s.push_str("Target schema:\n");
-    s.push_str(&schema_text);
-    s.push_str("\n\nOriginal text:\n");
-    s.push_str(raw_text);
-    s.push_str("\n\nReply with valid JSON only.");
-    s
+    bindings.insert(
+        "raw_text".to_string(),
+        VmValue::String(Rc::from(raw_text.to_string())),
+    );
+    crate::stdlib::template::render_stdlib_prompt_asset(
+        "llm/prompts/schema_recover_repair.harn.prompt",
+        Some(&bindings),
+    )
+    .expect("schema_recover_repair.harn.prompt is embedded and must render")
 }
 
 fn schema_to_compact_json(schema: &VmValue) -> String {

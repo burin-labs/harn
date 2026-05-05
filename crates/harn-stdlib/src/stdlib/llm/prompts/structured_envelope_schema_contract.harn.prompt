@@ -1,0 +1,6 @@
+{{ prompt }}
+
+Structured output transport is unavailable for this model. Return ONLY JSON that conforms to this JSON Schema. Do not include prose, markdown fences, or commentary.
+
+JSON Schema:
+{{ schema_json }}

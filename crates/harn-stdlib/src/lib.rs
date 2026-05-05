@@ -379,6 +379,26 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
         source: include_str!("stdlib/llm/prompts/completion_fallback_user.harn.prompt"),
     },
     StdlibPromptAsset {
+        path: "llm/prompts/transcript_summarize_user.harn.prompt",
+        source: include_str!("stdlib/llm/prompts/transcript_summarize_user.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "llm/prompts/structural_chain_of_draft.harn.prompt",
+        source: include_str!("stdlib/llm/prompts/structural_chain_of_draft.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "llm/prompts/schema_recover_repair.harn.prompt",
+        source: include_str!("stdlib/llm/prompts/schema_recover_repair.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "llm/prompts/structured_envelope_schema_contract.harn.prompt",
+        source: include_str!("stdlib/llm/prompts/structured_envelope_schema_contract.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "llm/prompts/structured_envelope_repair.harn.prompt",
+        source: include_str!("stdlib/llm/prompts/structured_envelope_repair.harn.prompt"),
+    },
+    StdlibPromptAsset {
         path: "workflow/prompts/stage.harn.prompt",
         source: include_str!("stdlib/workflow/prompts/stage.harn.prompt"),
     },
