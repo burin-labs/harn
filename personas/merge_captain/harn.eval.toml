@@ -1,7 +1,14 @@
 version = 1
 id = "merge-captain-timeout-ladders"
-name = "Merge Captain timeout ladders"
-description = "Replay the same Merge Captain fixture across value-model timeout and budget tiers."
+name = "Merge Captain value-model gates"
+description = "Gate Merge Captain prompt-pack revisions with deterministic golden fixtures, transcript oracle diffs, and value-model timeout ladders."
+
+[metadata.prompt_pack]
+id = "merge-captain-value-pack-v1"
+golden_fixture = "evals/prompt_pack_value_model.json"
+requires_transcript_oracle_diff = true
+requires_timeout_ladder_results = true
+side_effect_policy = "deterministic Harn code owns all side effects; model outputs are recommendations until validators accept them"
 
 [[ladders]]
 id = "green-pr-value-model"

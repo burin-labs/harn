@@ -1,0 +1,40 @@
+{
+  "_type": "merge_captain.prompt_pack_eval",
+  "version": 1,
+  "route": "local/gemma-value",
+  "provider": "llama.cpp",
+  "model": "gemma",
+  "prompt_version": "merge-captain-value-pack-v1",
+  "purpose": "Deterministic golden-output fixture for the cheap-model prompt pack. Live model sweeps are gated separately by the timeout ladder and transcript oracle diff.",
+  "cases": [
+    {"prompt_id": "classify_pr", "pass": true, "failure_modes": []},
+    {"prompt_id": "choose_next_action", "pass": true, "failure_modes": []},
+    {"prompt_id": "diagnose_ci_category", "pass": true, "failure_modes": []},
+    {"prompt_id": "summarize_repair_result", "pass": true, "failure_modes": []},
+    {"prompt_id": "decide_approval", "pass": true, "failure_modes": []},
+    {"prompt_id": "audit_release_changelog", "pass": true, "failure_modes": []}
+  ],
+  "known_failure_modes": [
+    {
+      "artifact": "examples/personas/merge_captain/transcripts/release_harness_crystallization.jsonl",
+      "gate": "transcript_oracle",
+      "status": "failing_fixture",
+      "findings": [
+        "github_pull_request_create before approval_gate",
+        "intake state observed after later steps"
+      ],
+      "recovery_expectation": "shell/tool observations and approval errors must stay in the active transcript so the model can recover from evidence, not hidden retries"
+    }
+  ],
+  "revision_gate": {
+    "required_artifacts": [
+      "golden_examples",
+      "strict_json_schemas",
+      "transcript_oracle_diff",
+      "timeout_ladder_results",
+      "value_model_failure_modes"
+    ],
+    "transcript_oracle_command": "harn merge-captain audit <transcript>",
+    "timeout_ladder_command": "harn merge-captain ladder personas/merge_captain/harn.eval.toml --format json"
+  }
+}

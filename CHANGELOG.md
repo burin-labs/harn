@@ -10,6 +10,13 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Merge Captain cheap-model prompt pack (#1016).** Added a Harn-native
+  value-model prompt pack with narrow prompts for PR classification,
+  deterministic action choice, CI diagnosis, repair summaries, approval
+  decisions, and release changelog audit/rewrite. The pack ships strict JSON
+  schemas, golden examples, compact context budgets that exclude raw logs
+  unless selected spans are provided, and revision gates for transcript-oracle
+  diffs plus timeout-ladder results.
 - **ACP authentication flow.** `harn serve acp` now advertises configured
   `authMethods`, implements ACP `authenticate`, and returns `auth_required`
   before protected session methods until the connection authenticates.

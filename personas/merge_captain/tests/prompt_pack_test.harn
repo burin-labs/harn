@@ -1,0 +1,172 @@
+// Run: harn test personas/merge_captain/tests/prompt_pack_test.harn
+import {
+  assemble_context,
+  context_budget_for,
+  golden_examples_for,
+  known_failure_modes,
+  pack_manifest,
+  prompt_ids,
+  prompt_text,
+  revision_gate,
+  schema_for,
+  side_effect_policy,
+  validate_context,
+  validate_output,
+  value_model_eval_fixture,
+} from "../lib/prompt_pack"
+
+pipeline test_prompt_pack_has_required_narrow_decisions(task) {
+  let ids = prompt_ids()
+  assert_eq(len(ids), 6)
+  assert(ids.contains("classify_pr"))
+  assert(ids.contains("choose_next_action"))
+  assert(ids.contains("diagnose_ci_category"))
+  assert(ids.contains("summarize_repair_result"))
+  assert(ids.contains("decide_approval"))
+  assert(ids.contains("audit_release_changelog"))
+}
+
+pipeline test_every_prompt_has_strict_schema_prompt_budget_and_goldens(task) {
+  for id in prompt_ids() {
+    let schema = schema_for(id)
+    assert_eq(schema.type, "object")
+    assert_eq(schema.additionalProperties, false)
+    assert(len(schema.required) > 0)
+    assert(len(schema.properties.keys()) >= len(schema.required))
+    let budget = context_budget_for(id)
+    assert(budget.max_input_tokens <= 1600)
+    assert(budget.reserved_output_tokens > 0)
+    assert(budget.exclude.contains("raw_logs"))
+    assert_eq(budget.raw_logs_allowed, false)
+    let prompt = prompt_text(id)
+    assert(prompt.contains("JSON"))
+    assert(prompt.contains("Deterministic Harn code owns all side effects"))
+    let examples = golden_examples_for(id)
+    assert_eq(len(examples), 1)
+    let validation = validate_output(id, examples[0].output)
+    assert(validation.ok, json_stringify(validation.errors))
+  }
+}
+
+pipeline test_context_assembly_filters_raw_logs_and_caps_selected_spans(task) {
+  let context = assemble_context(
+    "diagnose_ci_category",
+    {
+      raw_logs: "raw log blob must stay out",
+      selected_log_spans: [
+        {id: "1", text: "a"},
+        {id: "2", text: "b"},
+        {id: "3", text: "c"},
+        {id: "4", text: "d"},
+        {id: "5", text: "e"},
+      ],
+      failing_checks: ["ci / rust"],
+      tool_errors: [{command: "cargo test", error: "timeout"}],
+    },
+  )
+  assert_eq(context.raw_logs_included, false)
+  assert_eq(len(context.selected_log_spans), 4)
+  assert_eq(context.tool_errors[0].error, "timeout")
+  let validation = validate_context(context)
+  assert(validation.ok, json_stringify(validation.errors))
+}
+
+pipeline test_release_audit_context_caps_git_log_summary(task) {
+  let context = assemble_context(
+    "audit_release_changelog",
+    {
+      commits: [
+        {sha: "1"},
+        {sha: "2"},
+        {sha: "3"},
+        {sha: "4"},
+        {sha: "5"},
+        {sha: "6"},
+        {sha: "7"},
+        {sha: "8"},
+        {sha: "9"},
+        {sha: "10"},
+        {sha: "11"},
+        {sha: "12"},
+        {sha: "13"},
+        {sha: "14"},
+        {sha: "15"},
+        {sha: "16"},
+        {sha: "17"},
+        {sha: "18"},
+        {sha: "19"},
+        {sha: "20"},
+        {sha: "21"},
+        {sha: "22"},
+        {sha: "23"},
+        {sha: "24"},
+        {sha: "25"},
+        {sha: "26"},
+        {sha: "27"},
+        {sha: "28"},
+        {sha: "29"},
+        {sha: "30"},
+        {sha: "31"},
+      ],
+      changelog_excerpt: "## Unreleased",
+      shell_observations: [{command: "git log", status: "failed"}],
+    },
+  )
+  assert_eq(len(context.commits), 30)
+  assert_eq(context.shell_observations[0].status, "failed")
+  assert(validate_context(context).ok)
+}
+
+pipeline test_validate_output_rejects_missing_and_extra_keys(task) {
+  let missing = validate_output("decide_approval", {ask_approval: true})
+  assert(!missing.ok)
+  assert(missing.errors[0].contains("missing required key"))
+  let extra = validate_output(
+    "choose_next_action",
+    {
+      action: "wait",
+      deterministic_inputs: [],
+      approval_required: false,
+      reason: "pending checks",
+      shell_command: "gh pr merge",
+    },
+  )
+  assert(!extra.ok)
+  assert(json_stringify(extra.errors).contains("unexpected key"))
+}
+
+pipeline test_value_model_eval_fixture_records_failure_modes(task) {
+  let fixture = value_model_eval_fixture()
+  assert_eq(fixture._type, "merge_captain.prompt_pack_eval")
+  assert_eq(fixture.route, "local/gemma-value")
+  assert_eq(len(fixture.cases), len(prompt_ids()))
+  for case in fixture.cases {
+    assert(case.pass, json_stringify(case.failure_modes))
+    assert_eq(len(case.failure_modes), 0)
+  }
+}
+
+pipeline test_known_failure_modes_include_release_harness_oracle_gap(task) {
+  let modes = known_failure_modes()
+  assert_eq(len(modes), 1)
+  assert(modes[0].artifact.contains("release_harness_crystallization"))
+  assert(modes[0].findings[0].contains("approval_gate"))
+}
+
+pipeline test_revision_gate_requires_oracle_diff_and_timeout_ladder(task) {
+  let gate = revision_gate()
+  assert(gate.required_artifacts.contains("transcript_oracle_diff"))
+  assert(gate.required_artifacts.contains("timeout_ladder_results"))
+  assert(gate.required_artifacts.contains("value_model_failure_modes"))
+  assert(gate.transcript_oracle.command.contains("merge-captain audit"))
+  assert(gate.timeout_ladder.command.contains("merge-captain ladder"))
+}
+
+pipeline test_pack_manifest_is_inspectable(task) {
+  let pack = pack_manifest()
+  assert_eq(pack._type, "merge_captain.prompt_pack")
+  assert_eq(pack.id, "merge-captain-value-pack-v1")
+  assert(pack.side_effect_policy.contains(side_effect_policy()))
+  assert_eq(len(pack.prompts), len(prompt_ids()))
+  assert_eq(len(pack.known_failure_modes), 1)
+}
