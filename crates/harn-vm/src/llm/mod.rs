@@ -1047,6 +1047,26 @@ fn agent_primitive_call_json(args: &[VmValue]) -> Result<serde_json::Value, VmEr
     }
 }
 
+/// Append a `PermissionGrant` / `PermissionDeny` / `PermissionEscalation`
+/// event to the live transcript for the named session, when one exists.
+/// Silent no-op for sessions that haven't been opened (e.g. raw
+/// dispatcher calls outside an agent loop).
+fn emit_permission_event(
+    session_id: &str,
+    kind: &str,
+    tool_name: &str,
+    tool_args: &serde_json::Value,
+    reason: &str,
+    escalated: bool,
+) {
+    if !crate::agent_sessions::exists(session_id) {
+        return;
+    }
+    let event =
+        permissions::permission_transcript_event(kind, tool_name, tool_args, reason, escalated);
+    let _ = crate::agent_sessions::append_event(session_id, event);
+}
+
 fn agent_primitive_denied_tool(
     tool_name: &str,
     tool_args: &serde_json::Value,
@@ -1211,26 +1231,73 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
             )
         })
     {
+        let reason = error.to_string();
+        emit_permission_event(
+            &session_id,
+            "PermissionDeny",
+            &tool_name,
+            &tool_args,
+            &reason,
+            false,
+        );
         return Ok(json_to_vm_value(&agent_primitive_denied_tool(
             &tool_name,
             &tool_args,
-            error.to_string(),
+            reason,
             crate::agent_events::ToolCallErrorCategory::PermissionDenied,
         )));
     }
 
-    let mut permission_grants = std::collections::BTreeSet::new();
-    if let Some(permission) = permissions::check_dynamic_permission(
+    let mut permission_grants = permissions::take_session_grants(&session_id);
+    let permission_outcome = permissions::check_dynamic_permission(
         &mut permission_grants,
         &tool_name,
         &tool_args,
         &session_id,
     )
-    .await?
-    {
+    .await?;
+    permissions::store_session_grants(&session_id, permission_grants);
+    if let Some(permission) = permission_outcome {
         match permission {
-            permissions::PermissionCheck::Granted => {}
-            permissions::PermissionCheck::Denied { reason, .. } => {
+            permissions::PermissionCheck::Granted { reason, escalated } => {
+                if escalated {
+                    emit_permission_event(
+                        &session_id,
+                        "PermissionEscalation",
+                        &tool_name,
+                        &tool_args,
+                        &reason,
+                        true,
+                    );
+                }
+                emit_permission_event(
+                    &session_id,
+                    "PermissionGrant",
+                    &tool_name,
+                    &tool_args,
+                    &reason,
+                    escalated,
+                );
+            }
+            permissions::PermissionCheck::Denied { reason, escalated } => {
+                if escalated {
+                    emit_permission_event(
+                        &session_id,
+                        "PermissionEscalation",
+                        &tool_name,
+                        &tool_args,
+                        &reason,
+                        true,
+                    );
+                }
+                emit_permission_event(
+                    &session_id,
+                    "PermissionDeny",
+                    &tool_name,
+                    &tool_args,
+                    &reason,
+                    escalated,
+                );
                 return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                     &tool_name,
                     &tool_args,
@@ -1247,6 +1314,14 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
     match approval {
         None | Some(crate::orchestration::ToolApprovalDecision::AutoApproved) => {}
         Some(crate::orchestration::ToolApprovalDecision::AutoDenied { reason }) => {
+            emit_permission_event(
+                &session_id,
+                "PermissionDeny",
+                &tool_name,
+                &tool_args,
+                &reason,
+                false,
+            );
             return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                 &tool_name,
                 &tool_args,
@@ -1256,10 +1331,19 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
         }
         Some(crate::orchestration::ToolApprovalDecision::RequiresHostApproval) => {
             let Some(bridge) = bridge.as_ref() else {
+                let reason = "approval required but no host bridge is available";
+                emit_permission_event(
+                    &session_id,
+                    "PermissionDeny",
+                    &tool_name,
+                    &tool_args,
+                    reason,
+                    false,
+                );
                 return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                     &tool_name,
                     &tool_args,
-                    "approval required but no host bridge is available",
+                    reason,
                     crate::agent_events::ToolCallErrorCategory::PermissionDenied,
                 )));
             };
@@ -1309,11 +1393,27 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
                             tool_args = new_args.clone();
                         }
                         approval_status = Some("host_granted");
+                        emit_permission_event(
+                            &session_id,
+                            "PermissionGrant",
+                            &tool_name,
+                            &tool_args,
+                            "host approved tool call",
+                            true,
+                        );
                     } else {
                         let reason = response
                             .get("reason")
                             .and_then(|value| value.as_str())
                             .unwrap_or("host did not grant approval");
+                        emit_permission_event(
+                            &session_id,
+                            "PermissionDeny",
+                            &tool_name,
+                            &tool_args,
+                            reason,
+                            true,
+                        );
                         return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                             &tool_name,
                             &tool_args,
@@ -1323,10 +1423,20 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
                     }
                 }
                 Err(_) => {
+                    let reason =
+                        "approval request failed or host does not implement session/request_permission";
+                    emit_permission_event(
+                        &session_id,
+                        "PermissionDeny",
+                        &tool_name,
+                        &tool_args,
+                        reason,
+                        true,
+                    );
                     return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                         &tool_name,
                         &tool_args,
-                        "approval request failed or host does not implement session/request_permission",
+                        reason,
                         crate::agent_events::ToolCallErrorCategory::PermissionDenied,
                     )));
                 }

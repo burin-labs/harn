@@ -344,32 +344,20 @@ fn permission_denied_from_transcript(transcript: &VmValue) -> Option<(String, St
             _ => None,
         })?;
     for event in events.iter().rev() {
-        let dict = event.as_dict()?;
-        let rejected = dict
-            .get("metadata")
-            .and_then(|value| value.as_dict())
-            .and_then(|metadata| metadata.get("rejected"))
-            .is_some_and(|value| value.is_truthy());
-        if !rejected {
+        let Some(dict) = event.as_dict() else {
             continue;
-        }
-        let text = dict
-            .get("text")
-            .map(|value| value.display())
-            .unwrap_or_default();
-        let json = crate::stdlib::json::extract_json_from_text(&text);
-        let payload = serde_json::from_str::<serde_json::Value>(&json).ok()?;
-        if payload.get("error").and_then(|value| value.as_str()) == Some("permission_denied") {
-            let tool = payload
-                .get("tool")
-                .and_then(|value| value.as_str())
-                .unwrap_or_default()
-                .to_string();
-            let reason = payload
-                .get("reason")
-                .and_then(|value| value.as_str())
-                .unwrap_or("permission denied")
-                .to_string();
+        };
+        let kind = dict.get("kind").map(VmValue::display).unwrap_or_default();
+        if kind == "PermissionDeny" {
+            let metadata = dict.get("metadata").and_then(|v| v.as_dict());
+            let tool = metadata
+                .and_then(|m| m.get("tool_name"))
+                .map(VmValue::display)
+                .unwrap_or_default();
+            let reason = metadata
+                .and_then(|m| m.get("reason"))
+                .map(VmValue::display)
+                .unwrap_or_else(|| "permission denied".to_string());
             return Some((tool, reason));
         }
     }
