@@ -1,5 +1,5 @@
 /**
- * @xfail: loop option validation / verifier-profile / compaction events / verify-completion shape regression — tracked in burin-labs/harn#1236
+ * @xfail: compaction transcript events + trace.compactions counter not yet emitted from Harn loop — tracked in burin-labs/harn#1236
  */
 fn noisy_tools() {
   var tools = tool_registry()

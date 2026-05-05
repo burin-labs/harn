@@ -1,13 +1,14 @@
 import { completion_judge_user_prompt } from "std/agent/prompts"
-import { agent_session_inject_feedback } from "std/agent/state"
+import { agent_emit_event, agent_session_inject_feedback } from "std/agent/state"
 
-fn __judge_payload(session, opts, stop_reason, text) {
+fn __judge_payload(session, opts, stop_reason, text, iteration) {
   return {
     session_id: session.session_id,
     task: session?.task ?? "",
     stop_reason: stop_reason,
     text: text,
     visible_text: text,
+    iteration: iteration,
   }
 }
 
@@ -47,29 +48,57 @@ fn __judge_invoke_structured(judge_cfg, opts, payload) {
     session_id: payload.session_id,
     system: system,
   }
+  let started = monotonic_ms()
   let result = llm_call_structured(user, schema, llm_opts)
+  let duration_ms = monotonic_ms() - started
   let verdict = result?.verdict ?? "done"
-  if verdict == "done" {
-    return {vetoed: false}
+  let reasoning = result?.reasoning ?? ""
+  let next_step = result?.next_step ?? ""
+  let outcome = if verdict == "done" {
+    {vetoed: false}
+  } else {
+    let feedback = result?.next_step ?? result?.reasoning
+      ?? (judge_cfg?.feedback_fallback ?? "")
+    {vetoed: true, feedback: feedback}
   }
-  let feedback = result?.next_step ?? result?.reasoning
-    ?? (judge_cfg?.feedback_fallback ?? "")
-  return {vetoed: true, feedback: feedback}
+  return outcome
+    + {verdict: verdict, reasoning: reasoning, next_step: next_step, judge_duration_ms: duration_ms}
+}
+
+fn __emit_judge_decision(session_id, iteration, verdict) {
+  agent_emit_event(
+    session_id,
+    "judge_decision",
+    {
+      iteration: iteration,
+      verdict: verdict?.verdict
+        ?? if verdict.vetoed {
+        "continue"
+      } else {
+        "done"
+      },
+      reasoning: verdict?.reasoning ?? "",
+      next_step: verdict?.next_step ?? "",
+      judge_duration_ms: verdict?.judge_duration_ms ?? 0,
+    },
+  )
 }
 
 /** agent_verify_or_continue. */
-pub fn agent_verify_or_continue(session, opts, stop_reason, text) {
-  let payload = __judge_payload(session, opts, stop_reason, text)
+pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0) {
+  let payload = __judge_payload(session, opts, stop_reason, text, iteration)
   var verdict = {vetoed: false}
   if opts?.verify_completion != nil {
     verdict = __judge_invoke_closure(opts.verify_completion, payload)
   }
   if !verdict.vetoed && opts?.verify_completion_judge != nil {
     verdict = __judge_invoke_structured(opts.verify_completion_judge, opts, payload)
+    __emit_judge_decision(session.session_id, iteration, verdict)
   }
   let done_judge_applies = opts?.done_judge != nil && (stop_reason == "sentinel" || stop_reason == "natural")
   if !verdict.vetoed && done_judge_applies {
     verdict = __judge_invoke_structured(opts.done_judge, opts, payload)
+    __emit_judge_decision(session.session_id, iteration, verdict)
   }
   if verdict.vetoed && verdict?.feedback != nil && verdict.feedback != "" {
     agent_session_inject_feedback(session.session_id, "verify_completion", verdict.feedback)

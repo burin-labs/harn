@@ -1,4 +1,3 @@
-// @xfail: loop option validation / verifier-profile / compaction events / verify-completion shape regression — tracked in burin-labs/harn#1236
 // `done_sentinel` must be a string, bool, or nil. Passing an int is a
 // runtime type error, which guards against silent foot-guns where users
 // expect a number to coerce or be ignored.

@@ -1,5 +1,5 @@
 /**
- * @xfail: agent loop events / tool_format claim / plan persistence not yet emitted — tracked in burin-labs/harn#1236
+ * @xfail: native_tool_fallback transcript events + trace counters not yet emitted by Harn loop — tracked in burin-labs/harn#1236
  */
 fn tools() {
   var registry = tool_registry()

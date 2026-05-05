@@ -9,6 +9,7 @@ import { agent_compute_post_turn } from "std/agent/postturn"
 import { agent_build_turn_messages, agent_build_turn_system } from "std/agent/preflight"
 import { agent_skills_match } from "std/agent/skills"
 import {
+  agent_emit_event,
   agent_session_drain_feedback,
   agent_session_finalize,
   agent_session_init,
@@ -18,9 +19,49 @@ import {
   agent_session_record_usage,
 } from "std/agent/state"
 
+fn __invoke_llm(message, turn_system, llm_opts) {
+  let result = try {
+    llm_call(message, turn_system, llm_opts)
+  }
+  if !is_err(result) {
+    return {ok: true, value: unwrap(result)}
+  }
+  let err = unwrap_err(result)
+  let reason = if type_of(err) == "dict" {
+    err?.reason ?? ""
+  } else {
+    ""
+  }
+  if reason == "budget_exceeded" {
+    return {ok: false, status: "budget_exhausted"}
+  }
+  throw err
+}
+
+fn __visible_text(parsed, raw_text) {
+  if parsed?.user_response != nil && parsed.user_response != "" {
+    return parsed.user_response
+  }
+  if parsed?.prose != nil && parsed.prose != "" {
+    return parsed.prose
+  }
+  return raw_text
+}
+
+fn __resolve_tool_calls(llm_result, parsed) {
+  let native_calls = llm_result?.tool_calls ?? []
+  if len(native_calls) > 0 {
+    return native_calls
+  }
+  return parsed?.calls ?? []
+}
+
 /** agent_loop. */
 pub fn agent_loop(message, system_prompt = nil, options = nil) {
   var opts = agent_loop_options(options)
+  if system_prompt != nil && system_prompt != "" {
+    opts = opts + {system: system_prompt}
+  }
   let session = agent_session_init(message, system_prompt, opts)
   if session?.done {
     return session.result
@@ -30,45 +71,42 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
   var stop_reason = nil
   var final_status = ""
   var verify_attempts = 0
+  var consecutive_text_only = 0
   let max_verify_attempts = opts?.max_verify_attempts ?? 20
   let max_iterations = opts?.max_iterations ?? 50
+  let max_nudges = opts?.max_nudges ?? 8
+  let persistent = opts?.persistent ?? false
   while iteration < max_iterations {
     if agent_budget_pre_call_blocked(session, opts) {
       final_status = "budget_exhausted"
       break
     }
     let turn_index = iteration
-    let turn_opts = agent_skills_match(session, opts, iteration)
+    agent_emit_event(session.session_id, "turn_start", {iteration: turn_index + 1})
+    let turn_opts = agent_skills_match(session, opts, turn_index)
     agent_autocompact_if_needed(session, turn_opts)
     let pending = agent_session_drain_feedback(session.session_id)
     for note in pending {
       agent_session_inject_feedback(session.session_id, note.kind, note.content)
     }
-    let turn_system = agent_build_turn_system(session, turn_opts, iteration)
-    let turn_messages = agent_build_turn_messages(session, turn_opts, iteration)
+    let turn_system = agent_build_turn_system(session, turn_opts, turn_index)
+    let turn_messages = agent_build_turn_messages(session, turn_opts, turn_index)
     let base_opts = turn_opts?.llm_options ?? turn_opts ?? {}
-    let llm_opts = base_opts + {messages: turn_messages, session_id: session.session_id}
-    let llm_result = llm_call(message, turn_system, llm_opts)
+    let llm_opts = base_opts
+      + {messages: turn_messages, session_id: session.session_id, tool_format: turn_opts.tool_format}
+    let call = __invoke_llm(message, turn_system, llm_opts)
+    if !call.ok {
+      final_status = call.status
+      break
+    }
+    let llm_result = call.value
     iteration = iteration + 1
     let raw_text = llm_result?.text ?? ""
     let parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools)
-    let visible_text = if parsed?.user_response != nil && parsed.user_response != "" {
-      parsed.user_response
-    } else {
-      if parsed?.prose != nil && parsed.prose != "" {
-        parsed.prose
-      } else {
-        raw_text
-      }
-    }
+    let visible_text = __visible_text(parsed, raw_text)
     let normalized = llm_result + {text: visible_text, visible_text: visible_text}
     agent_session_record_assistant(session.session_id, normalized)
-    let native_calls = llm_result?.tool_calls ?? []
-    let tool_calls = if len(native_calls) > 0 {
-      native_calls
-    } else {
-      parsed?.calls ?? []
-    }
+    let tool_calls = __resolve_tool_calls(llm_result, parsed)
     var dispatch = nil
     if len(tool_calls) > 0 {
       dispatch = agent_dispatch_tool_batch(
@@ -79,8 +117,24 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
       agent_session_record_tool_results(session.session_id, dispatch)
     }
     let totals = agent_session_record_usage(session.session_id, llm_result)
-    if agent_budget_post_call_blocked(totals, opts) {
+    let tool_count = len(tool_calls)
+    agent_emit_event(
+      session.session_id,
+      "turn_end",
+      {iteration: turn_index + 1, turn_info: {tool_count: tool_count, text: visible_text}},
+    )
+    if agent_budget_post_call_blocked(totals, turn_opts) {
       final_status = "budget_exhausted"
+      break
+    }
+    consecutive_text_only = if tool_count == 0 {
+      consecutive_text_only + 1
+    } else {
+      0
+    }
+    if persistent && tool_count == 0 && consecutive_text_only > max_nudges {
+      final_status = "stuck"
+      stop_reason = "max_nudges"
       break
     }
     let outcome = agent_compute_post_turn(
@@ -96,14 +150,13 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
       }
       continue
     }
-    let needs_verify = outcome.needs_verify
-    if needs_verify {
+    if outcome.needs_verify {
       if verify_attempts >= max_verify_attempts {
         final_status = "verify_exhausted"
         stop_reason = outcome.stop_reason
         break
       }
-      let verdict = agent_verify_or_continue(session, turn_opts, outcome.stop_reason, llm_result.text)
+      let verdict = agent_verify_or_continue(session, turn_opts, outcome.stop_reason, llm_result.text, turn_index)
       if verdict.vetoed {
         verify_attempts = verify_attempts + 1
         continue

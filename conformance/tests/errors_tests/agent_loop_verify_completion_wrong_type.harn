@@ -1,4 +1,3 @@
-// @xfail: loop option validation / verifier-profile / compaction events / verify-completion shape regression — tracked in burin-labs/harn#1236
 // `verify_completion` must be a closure or nil. Passing a non-callable
 // value used to silently no-op (.filter(Closure)) which made typos in
 // agent_loop options invisible. The strict parse turns the typo into a

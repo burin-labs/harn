@@ -123,9 +123,12 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
     return {kind: "break", stop_reason: "natural", needs_verify: false}
   }
   let payload = {
+    session_id: session.session_id,
     iteration: iteration,
     has_tool_calls: has_tool_calls,
     dispatch: dispatch,
+    tool_results: dispatch_results,
+    tool_count: len(dispatch_results),
     text: text,
     visible_text: text,
   }

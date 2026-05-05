@@ -60,3 +60,13 @@ pub fn agent_session_active_skills(session_id) {
 pub fn agent_session_record_skill_event(session_id, kind, metadata) {
   return __host_agent_session_record_skill_event(session_id, kind, metadata)
 }
+
+/** agent_session_claim_tool_format_internal. */
+pub fn agent_session_claim_tool_format_internal(session_id, tool_format) {
+  return __host_agent_session_claim_tool_format(session_id, tool_format)
+}
+
+/** agent_emit_event. */
+pub fn agent_emit_event(session_id, event_type, payload) {
+  return __host_agent_emit_event(session_id, event_type, payload)
+}
