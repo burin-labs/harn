@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::value::{VmError, VmValue};
+use crate::value::{ErrorCategory, VmError, VmValue};
 
 use super::{skill_entry_to_vm, substitute_skill_body, Skill, SubstitutionContext};
 
@@ -19,6 +19,13 @@ pub struct LoadedSkill {
     pub id: String,
     pub entry: BTreeMap<String, VmValue>,
     pub rendered_body: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LoadSkillOptions {
+    pub session_id: Option<String>,
+    pub require_signature: bool,
+    pub model_invocation: bool,
 }
 
 thread_local! {
@@ -87,7 +94,7 @@ pub fn resolve_skill_entry(
 
     match bare_matches.len() {
         1 => Ok(bare_matches.remove(0)),
-        0 => Err(format!("skill '{target}' not found")),
+        0 => Err(format!("skill_not_found: skill '{target}' not found")),
         _ => Err(format!(
             "skill '{target}' is ambiguous; use the fully qualified id from the catalog"
         )),
@@ -139,7 +146,13 @@ fn hydrate_skill_entry(
 
     let loaded = fetcher(&skill_id)?;
     match skill_entry_to_vm(&loaded) {
-        VmValue::Dict(dict) => Ok((*dict).clone()),
+        VmValue::Dict(dict) => {
+            let mut hydrated = (*dict).clone();
+            for (key, value) in entry {
+                hydrated.entry(key).or_insert(value);
+            }
+            Ok(hydrated)
+        }
         _ => Err(format!(
             "{builtin_name}: failed to hydrate skill '{skill_id}'"
         )),
@@ -166,17 +179,31 @@ pub fn load_bound_skill_by_name(
     requested: &str,
     session_id: Option<&str>,
 ) -> Result<LoadedSkill, String> {
+    load_bound_skill_by_name_with_options(
+        requested,
+        LoadSkillOptions {
+            session_id: session_id.map(str::to_string),
+            require_signature: false,
+            model_invocation: false,
+        },
+    )
+}
+
+pub fn load_bound_skill_by_name_with_options(
+    requested: &str,
+    options: LoadSkillOptions,
+) -> Result<LoadedSkill, String> {
     let Some(binding) = current_skill_registry() else {
         return Err(
             "load_skill: no skill registry is bound to this scope. Start the VM with discovered skills first."
                 .to_string(),
         );
     };
-    load_skill_from_registry(
+    load_skill_from_registry_with_options(
         &binding.registry,
         Some(&binding.fetcher),
         requested,
-        session_id,
+        options,
         "load_skill",
     )
 }
@@ -188,10 +215,52 @@ pub fn load_skill_from_registry(
     session_id: Option<&str>,
     builtin_name: &str,
 ) -> Result<LoadedSkill, String> {
+    load_skill_from_registry_with_options(
+        registry,
+        fetcher,
+        requested,
+        LoadSkillOptions {
+            session_id: session_id.map(str::to_string),
+            require_signature: false,
+            model_invocation: false,
+        },
+        builtin_name,
+    )
+}
+
+pub fn load_skill_from_registry_with_options(
+    registry: &VmValue,
+    fetcher: Option<&SkillFetcher>,
+    requested: &str,
+    options: LoadSkillOptions,
+    builtin_name: &str,
+) -> Result<LoadedSkill, String> {
     let entry = resolve_skill_entry(registry, requested, builtin_name)?;
-    let entry = hydrate_skill_entry(entry, fetcher, builtin_name)?;
     let id = skill_entry_id(&entry);
-    let rendered_body = render_skill_entry(&entry, session_id);
+    if options.model_invocation && vm_bool_field(&entry, "disable_model_invocation") {
+        return Err(format!(
+            "skill_model_invocation_disabled: skill '{id}' cannot be loaded by a model"
+        ));
+    }
+    let require_signature = options.require_signature || vm_bool_field(&entry, "require_signature");
+    if require_signature {
+        let signed = vm_provenance_bool(&entry, "signed");
+        let trusted = vm_provenance_bool(&entry, "trusted");
+        if !signed || !trusted {
+            record_skill_loaded_event(
+                options.session_id.as_deref(),
+                &id,
+                &entry,
+                Some("UnsignedSkillError"),
+            );
+            return Err(format!(
+                "UnsignedSkillError: skill '{id}' requires a trusted signature"
+            ));
+        }
+    }
+    let entry = hydrate_skill_entry(entry, fetcher, builtin_name)?;
+    record_skill_loaded_event(options.session_id.as_deref(), &id, &entry, None);
+    let rendered_body = render_skill_entry(&entry, options.session_id.as_deref());
     Ok(LoadedSkill {
         id,
         entry,
@@ -199,6 +268,70 @@ pub fn load_skill_from_registry(
     })
 }
 
+fn vm_bool_field(entry: &BTreeMap<String, VmValue>, key: &str) -> bool {
+    matches!(entry.get(key), Some(VmValue::Bool(true)))
+}
+
+fn vm_provenance(entry: &BTreeMap<String, VmValue>) -> Option<&BTreeMap<String, VmValue>> {
+    entry.get("provenance").and_then(VmValue::as_dict)
+}
+
+fn vm_provenance_bool(entry: &BTreeMap<String, VmValue>, key: &str) -> bool {
+    vm_provenance(entry)
+        .and_then(|provenance| provenance.get(key))
+        .is_some_and(|value| matches!(value, VmValue::Bool(true)))
+}
+
+fn record_skill_loaded_event(
+    session_id: Option<&str>,
+    skill_id: &str,
+    entry: &BTreeMap<String, VmValue>,
+    error: Option<&str>,
+) {
+    let Some(session_id) = session_id.filter(|value| !value.is_empty()) else {
+        return;
+    };
+    let provenance = vm_provenance(entry);
+    let signed = provenance
+        .and_then(|metadata| metadata.get("signed"))
+        .is_some_and(|value| matches!(value, VmValue::Bool(true)));
+    let trusted = provenance
+        .and_then(|metadata| metadata.get("trusted"))
+        .is_some_and(|value| matches!(value, VmValue::Bool(true)));
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("skill_id".to_string(), serde_json::json!(skill_id));
+    metadata.insert("signed".to_string(), serde_json::json!(signed));
+    metadata.insert("trusted".to_string(), serde_json::json!(trusted));
+    if let Some(provenance) = provenance {
+        for key in ["status", "signer_fingerprint", "skill_sha256"] {
+            if let Some(value) = provenance.get(key) {
+                metadata.insert(key.to_string(), crate::llm::vm_value_to_json(value));
+            }
+        }
+    }
+    if let Some(error) = error {
+        metadata.insert("error".to_string(), serde_json::json!(error));
+    }
+    let event = crate::llm::helpers::transcript_event(
+        "skill.loaded",
+        "system",
+        "internal",
+        &match error {
+            Some(error) => format!("Skill load blocked for {skill_id}: {error}"),
+            None => format!("Loaded skill {skill_id}"),
+        },
+        Some(serde_json::Value::Object(metadata)),
+    );
+    let _ = crate::agent_sessions::append_event(session_id, event);
+}
+
 pub fn vm_error(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::String(Rc::from(message.into())))
+}
+
+pub fn tool_rejected_error(message: impl Into<String>) -> VmError {
+    VmError::CategorizedError {
+        message: message.into(),
+        category: ErrorCategory::ToolRejected,
+    }
 }

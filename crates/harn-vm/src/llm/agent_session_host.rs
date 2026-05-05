@@ -10,6 +10,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use crate::agent_events::AgentEvent;
 use crate::orchestration::{
     pop_approval_policy, pop_execution_policy, push_approval_policy, push_command_policy,
     push_execution_policy, CapabilityPolicy, ToolApprovalPolicy,
@@ -32,6 +33,7 @@ const HOST_SESSION_TOTALS: &str = "__host_agent_session_totals";
 const HOST_SESSION_INJECT_FEEDBACK: &str = "__host_agent_session_inject_feedback";
 const HOST_SESSION_SET_ACTIVE_SKILLS: &str = "__host_agent_session_set_active_skills";
 const HOST_SESSION_ACTIVE_SKILLS: &str = "__host_agent_session_active_skills";
+const HOST_SESSION_RECORD_SKILL_EVENT: &str = "__host_agent_session_record_skill_event";
 const HOST_SESSION_COMPACT: &str = "__host_agent_session_compact_if_needed";
 const HOST_SKILL_SCORE: &str = "__host_skill_score";
 const HOST_BUDGET_PRE_CALL: &str = "__host_agent_budget_pre_call_blocked";
@@ -170,6 +172,8 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
 
     let installed_policies = install_session_policies(&opts_map)?;
 
+    let persisted_active_skills = crate::agent_sessions::active_skills(&resolved);
+
     let session = AgentHostSession {
         session_id: resolved.clone(),
         task: message.clone(),
@@ -177,7 +181,7 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         cost_used: 0.0,
         input_tokens: 0,
         output_tokens: 0,
-        active_skills: Vec::new(),
+        active_skills: persisted_active_skills,
         tool_calls: Vec::new(),
         successful_tools: Vec::new(),
         rejected_tools: Vec::new(),
@@ -550,9 +554,10 @@ fn host_agent_session_set_active_skills_builtin(
         .filter_map(|v| dict_get(v, "id").map(|v| v.display()))
         .collect();
     with_session(&session_id, HOST_SESSION_SET_ACTIVE_SKILLS, |session| {
-        session.active_skills = ids;
+        session.active_skills = ids.clone();
         Ok(())
     })?;
+    crate::agent_sessions::set_active_skills(&session_id, ids);
     Ok(VmValue::Nil)
 }
 
@@ -575,6 +580,84 @@ fn host_agent_session_active_skills_builtin(
     Ok(VmValue::List(Rc::new(list)))
 }
 
+fn host_agent_session_record_skill_event_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = args.first().map(|v| v.display()).unwrap_or_default();
+    let kind = args.get(1).map(|v| v.display()).unwrap_or_default();
+    let metadata = args.get(2).cloned().unwrap_or(VmValue::Nil);
+    if session_id.is_empty() || kind.is_empty() {
+        return Ok(VmValue::Nil);
+    }
+    let metadata_json = vm_to_json(&metadata);
+    let text = metadata_json
+        .get("name")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let event = super::helpers::transcript_event(
+        &kind,
+        "system",
+        "internal",
+        &text,
+        Some(metadata_json.clone()),
+    );
+    let _ = crate::agent_sessions::append_event(&session_id, event);
+
+    let name = metadata_json
+        .get("name")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let iteration = metadata_json
+        .get("iteration")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0) as usize;
+    match kind.as_str() {
+        "skill_activated" if !name.is_empty() => {
+            let reason = metadata_json
+                .get("trigger")
+                .or_else(|| metadata_json.get("reason"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_string();
+            super::agent_runtime::emit_agent_event_sync(&AgentEvent::SkillActivated {
+                session_id,
+                skill_name: name,
+                iteration,
+                reason,
+            });
+        }
+        "skill_deactivated" if !name.is_empty() => {
+            super::agent_runtime::emit_agent_event_sync(&AgentEvent::SkillDeactivated {
+                session_id,
+                skill_name: name,
+                iteration,
+            });
+        }
+        "skill_scope_tools" if !name.is_empty() => {
+            let allowed_tools = metadata_json
+                .get("allowed_tools")
+                .and_then(|value| value.as_array())
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(|value| value.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            super::agent_runtime::emit_agent_event_sync(&AgentEvent::SkillScopeTools {
+                session_id,
+                skill_name: name,
+                allowed_tools,
+            });
+        }
+        _ => {}
+    }
+    Ok(VmValue::Nil)
+}
+
 fn host_agent_session_compact_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -582,11 +665,17 @@ fn host_agent_session_compact_builtin(
     Ok(VmValue::Nil)
 }
 
-async fn host_skill_score(_args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let mut out = BTreeMap::new();
-    out.insert("scored".to_string(), VmValue::List(Rc::new(Vec::new())));
-    out.insert("active".to_string(), VmValue::List(Rc::new(Vec::new())));
-    Ok(VmValue::Dict(Rc::new(out)))
+async fn host_skill_score(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let context = args.first().cloned().unwrap_or(VmValue::Nil);
+    let registry = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let options = args.get(2).cloned().unwrap_or(VmValue::Nil);
+    super::skill_score::score_skill_registry(
+        &context,
+        &registry,
+        &options,
+        super::current_host_bridge(),
+    )
+    .await
 }
 
 fn host_agent_budget_pre_call_builtin(
@@ -608,6 +697,9 @@ fn host_agent_build_turn_system_builtin(
             parts.push(system);
         }
     }
+    if let Some(skill_prompt) = render_active_skill_prompt(opts_map.get("active_skills")) {
+        parts.push(skill_prompt);
+    }
     if opts_map.contains_key("tools") {
         let tool_format = opt_str(&opts_map, "tool_format").unwrap_or_else(|| "text".to_string());
         if tool_format != "native" {
@@ -620,6 +712,70 @@ fn host_agent_build_turn_system_builtin(
         }
     }
     Ok(VmValue::String(Rc::from(parts.join("\n\n"))))
+}
+
+fn render_active_skill_prompt(value: Option<&VmValue>) -> Option<String> {
+    let active = match value {
+        Some(VmValue::List(list)) => list,
+        _ => return None,
+    };
+    if active.is_empty() {
+        return None;
+    }
+    let mut out = String::from("## Active skills\n");
+    for skill in active.iter() {
+        let Some(dict) = skill.as_dict() else {
+            continue;
+        };
+        let name = dict
+            .get("id")
+            .or_else(|| dict.get("name"))
+            .map(VmValue::display);
+        let Some(name) = name.filter(|name| !name.is_empty()) else {
+            continue;
+        };
+        out.push_str(&format!("\n### {name}\n"));
+        if let Some(description) = dict
+            .get("description")
+            .map(VmValue::display)
+            .filter(|text| !text.trim().is_empty())
+        {
+            out.push_str(description.trim());
+            out.push('\n');
+        }
+        if let Some(when_to_use) = dict
+            .get("when_to_use")
+            .map(VmValue::display)
+            .filter(|text| !text.trim().is_empty())
+        {
+            out.push_str("When to use: ");
+            out.push_str(when_to_use.trim());
+            out.push('\n');
+        }
+        let allowed_tools = match dict.get("allowed_tools") {
+            Some(VmValue::List(list)) => list
+                .iter()
+                .map(VmValue::display)
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        if !allowed_tools.is_empty() {
+            out.push_str("Scoped tools: ");
+            out.push_str(&allowed_tools.join(", "));
+            out.push('\n');
+        }
+        if let Some(prompt) = dict
+            .get("prompt")
+            .map(VmValue::display)
+            .filter(|text| !text.trim().is_empty())
+        {
+            out.push('\n');
+            out.push_str(prompt.trim());
+            out.push('\n');
+        }
+    }
+    Some(out)
 }
 
 /// Install per-agent execution / approval / command / dynamic permission
@@ -783,6 +939,13 @@ const HOST_SESSION_PRIMITIVES_SYNC: &[SyncBuiltin] = &[
     .signature("__host_agent_session_active_skills(session_id)")
     .arity(VmBuiltinArity::Exact(1))
     .doc("Return the session's active skill list."),
+    SyncBuiltin::new(
+        HOST_SESSION_RECORD_SKILL_EVENT,
+        host_agent_session_record_skill_event_builtin,
+    )
+    .signature("__host_agent_session_record_skill_event(session_id, kind, metadata)")
+    .arity(VmBuiltinArity::Exact(3))
+    .doc("Append a skill lifecycle event and notify live agent-event sinks."),
     SyncBuiltin::new(HOST_SESSION_COMPACT, host_agent_session_compact_builtin)
         .signature("__host_agent_session_compact_if_needed(session_id, options)")
         .arity(VmBuiltinArity::Exact(2))
@@ -826,7 +989,7 @@ pub fn register_agent_session_host_primitives(vm: &mut Vm) {
         .signature_static("__host_skill_score(context, registry, options)")
         .arity(VmBuiltinArity::Exact(3))
         .category_static("agent.host")
-        .doc_static("Score skills against the current task context (stub returning empty).");
+        .doc_static("Score skills against the current task context.");
     vm.register_async_builtin_with_metadata(skill_score, |args| {
         Box::pin(async move { host_skill_score(args).await })
     });

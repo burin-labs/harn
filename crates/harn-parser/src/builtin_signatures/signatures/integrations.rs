@@ -667,7 +667,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     },
     BuiltinSignature {
         name: "load_skill",
-        params: &[Param::new("name", TY_STRING)],
+        params: &[Param::new("request", TY_STRING_OR_DICT)],
         returns: TY_STRING,
         type_params: &[],
         has_rest: false,

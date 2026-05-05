@@ -1,4 +1,3 @@
-// @xfail: skill matching/scoring not yet a primitive — tracked in burin-labs/harn#1240
 /**
  * harn v0.7.20 Gap 3: `namespace:<tag>` entries in a skill's
  * `allowed_tools` list match any tool declared with that namespace,

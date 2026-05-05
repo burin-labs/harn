@@ -34,20 +34,21 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
       final_status = "budget_exhausted"
       break
     }
-    agent_skills_match(session, opts, iteration)
-    agent_autocompact_if_needed(session, opts)
+    let turn_index = iteration
+    let turn_opts = agent_skills_match(session, opts, iteration)
+    agent_autocompact_if_needed(session, turn_opts)
     let pending = agent_session_drain_feedback(session.session_id)
     for note in pending {
       agent_session_inject_feedback(session.session_id, note.kind, note.content)
     }
-    let turn_system = agent_build_turn_system(session, opts, iteration)
-    let turn_messages = agent_build_turn_messages(session, opts, iteration)
-    let base_opts = opts?.llm_options ?? opts ?? {}
+    let turn_system = agent_build_turn_system(session, turn_opts, iteration)
+    let turn_messages = agent_build_turn_messages(session, turn_opts, iteration)
+    let base_opts = turn_opts?.llm_options ?? turn_opts ?? {}
     let llm_opts = base_opts + {messages: turn_messages, session_id: session.session_id}
     let llm_result = llm_call(message, turn_system, llm_opts)
     iteration = iteration + 1
     let raw_text = llm_result?.text ?? ""
-    let parsed = agent_parse_tool_calls(raw_text, opts?.tools)
+    let parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools)
     let visible_text = if parsed?.user_response != nil && parsed.user_response != "" {
       parsed.user_response
     } else {
@@ -69,8 +70,8 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
     if len(tool_calls) > 0 {
       dispatch = agent_dispatch_tool_batch(
         tool_calls,
-        opts?.tools,
-        {session_id: session.session_id, tool_format: opts.tool_format},
+        turn_opts?.tools,
+        {session_id: session.session_id, tool_format: turn_opts.tool_format},
       )
       agent_session_record_tool_results(session.session_id, dispatch)
     }
@@ -83,8 +84,8 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
       session,
       normalized + {parsed_done_marker: parsed?.done_marker ?? ""},
       dispatch,
-      opts,
-      iteration,
+      turn_opts,
+      turn_index,
     )
     if outcome.kind == "continue" {
       continue
@@ -96,7 +97,7 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
         stop_reason = outcome.stop_reason
         break
       }
-      let verdict = agent_verify_or_continue(session, opts, outcome.stop_reason, llm_result.text)
+      let verdict = agent_verify_or_continue(session, turn_opts, outcome.stop_reason, llm_result.text)
       if verdict.vetoed {
         verify_attempts = verify_attempts + 1
         continue

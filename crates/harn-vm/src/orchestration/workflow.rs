@@ -1030,6 +1030,18 @@ fn workflow_stage_agent_loop_options(
 ) -> Result<BTreeMap<String, VmValue>, VmError> {
     let mut options = stage_agent_options.agent_loop_options_vm_dict();
     merge_raw_model_policy_options(&mut options, node);
+    if let Some(context) = crate::orchestration::current_workflow_skill_context() {
+        if !options.contains_key("skills") {
+            if let Some(registry) = context.registry {
+                options.insert("skills".to_string(), registry);
+            }
+        }
+        if !options.contains_key("skill_match") {
+            if let Some(match_config) = context.match_config {
+                options.insert("skill_match".to_string(), match_config);
+            }
+        }
+    }
     preserve_nested_command_policy(&mut options, node);
     add_workflow_agent_compaction_options(&mut options, node);
     add_stage_tools_option(&mut options, tools_value, tool_names);

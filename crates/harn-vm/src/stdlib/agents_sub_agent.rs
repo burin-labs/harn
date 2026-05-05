@@ -157,6 +157,18 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
         .unwrap_or_else(|| format!("sub_agent_session_{}", uuid::Uuid::now_v7()));
 
     let mut options = raw_options.clone();
+    if let Some(context) = crate::orchestration::current_workflow_skill_context() {
+        if !options.contains_key("skills") {
+            if let Some(registry) = context.registry {
+                options.insert("skills".to_string(), registry);
+            }
+        }
+        if !options.contains_key("skill_match") {
+            if let Some(match_config) = context.match_config {
+                options.insert("skill_match".to_string(), match_config);
+            }
+        }
+    }
     for key in [
         "background",
         "carry",

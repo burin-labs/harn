@@ -1,4 +1,3 @@
-/** @xfail: skill matching/scoring not yet a primitive — tracked in burin-labs/harn#1240 */
 pipeline test(task) {
   llm_mock_clear()
   let catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
