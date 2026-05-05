@@ -131,17 +131,20 @@
               "evidence_refs": [],
               "files_or_entities_touched": [],
               "id": "handoff-1",
+              "kind": "handoff",
               "metadata": {},
               "open_questions": [],
               "parent_run_id": null,
               "reason": "Merge queue requires review",
               "receipt_links": [],
               "requested_capabilities": [],
+              "route_decision": null,
               "source_persona": "merge_captain",
               "target_persona_or_human": {
                 "id": "review_captain",
                 "kind": "persona",
-                "label": "review_captain"
+                "label": "review_captain",
+                "uri": null
               },
               "task": "Review the patch"
             },

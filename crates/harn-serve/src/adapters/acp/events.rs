@@ -835,6 +835,7 @@ mod tests {
             created_at: "2026-04-28T00:00:00Z".to_string(),
             ..Default::default()
         }
+        .normalize()
     }
 
     fn standard_fixture_events() -> Vec<AgentEvent> {
