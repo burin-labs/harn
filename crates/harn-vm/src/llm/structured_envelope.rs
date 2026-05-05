@@ -141,11 +141,20 @@ fn apply_prompt_mode_structured_transport(args: &mut [VmValue]) {
 fn prompt_with_schema_contract(prompt: &str, schema: &VmValue) -> String {
     let schema_json = serde_json::to_string_pretty(&vm_value_to_json(schema))
         .unwrap_or_else(|_| schema.display());
-    format!(
-        "{prompt}\n\n\
-Structured output transport is unavailable for this model. Return ONLY JSON that conforms to this JSON Schema. \
-Do not include prose, markdown fences, or commentary.\n\nJSON Schema:\n{schema_json}"
+    let mut bindings = BTreeMap::new();
+    bindings.insert(
+        "prompt".to_string(),
+        VmValue::String(Rc::from(prompt.to_string())),
+    );
+    bindings.insert(
+        "schema_json".to_string(),
+        VmValue::String(Rc::from(schema_json)),
+    );
+    crate::stdlib::template::render_stdlib_prompt_asset(
+        "llm/prompts/structured_envelope_schema_contract.harn.prompt",
+        Some(&bindings),
     )
+    .expect("structured_envelope_schema_contract.harn.prompt is embedded and must render")
 }
 
 fn classify_main_failure(outcome: &SchemaLoopOutcome) -> EnvelopeFailureKind {
@@ -238,16 +247,20 @@ fn build_repair_prompt(raw_text: &str, errors: &[String]) -> String {
     } else {
         errors.join("; ")
     };
-    let mut s = String::from(
-        "The following text was supposed to be JSON conforming to the configured schema, but it failed validation. \
-Repair it and respond with ONLY the corrected JSON — no prose, no markdown fences, no commentary.\n\n",
+    let mut bindings = BTreeMap::new();
+    bindings.insert(
+        "errors_line".to_string(),
+        VmValue::String(Rc::from(errors_line)),
     );
-    s.push_str("Validation errors: ");
-    s.push_str(&errors_line);
-    s.push_str("\n\nOriginal text:\n");
-    s.push_str(raw_text);
-    s.push_str("\n\nReply with valid JSON only.");
-    s
+    bindings.insert(
+        "raw_text".to_string(),
+        VmValue::String(Rc::from(raw_text.to_string())),
+    );
+    crate::stdlib::template::render_stdlib_prompt_asset(
+        "llm/prompts/structured_envelope_repair.harn.prompt",
+        Some(&bindings),
+    )
+    .expect("structured_envelope_repair.harn.prompt is embedded and must render")
 }
 
 fn merge_repair_options(

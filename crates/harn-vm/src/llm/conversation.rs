@@ -325,14 +325,12 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             .and_then(|v| v.as_int())
             .unwrap_or(6)
             .max(0) as usize;
-        let prompt = args
+        let prompt_override = args
             .get(1)
             .and_then(|v| v.as_dict())
             .and_then(|d| d.get("prompt"))
             .map(|v| v.display())
-            .unwrap_or_else(|| {
-                "Summarize this conversation for a follow-on agent. Preserve goals, constraints, decisions, unresolved questions, and concrete next actions. Be concise but complete.".to_string()
-            });
+            .unwrap_or_default();
 
         let messages = transcript_message_list(transcript)?;
         let formatted = messages
@@ -352,9 +350,22 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             .collect::<Vec<_>>()
             .join("\n");
 
+        let mut bindings = BTreeMap::new();
+        bindings.insert(
+            "prompt".to_string(),
+            VmValue::String(Rc::from(prompt_override)),
+        );
+        bindings.insert(
+            "formatted".to_string(),
+            VmValue::String(Rc::from(formatted)),
+        );
+        let user_message = crate::stdlib::template::render_stdlib_prompt_asset(
+            "llm/prompts/transcript_summarize_user.harn.prompt",
+            Some(&bindings),
+        )?;
         opts.messages = vec![serde_json::json!({
             "role": "user",
-            "content": format!("{prompt}\n\nConversation:\n{formatted}"),
+            "content": user_message,
         })];
 
         let result = super::api::vm_call_llm_full(&opts).await?;
@@ -366,7 +377,9 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             .into_iter()
             .rev()
             .collect::<Vec<_>>();
-        let archived_count = transcript_message_list(transcript)?.len().saturating_sub(retained.len());
+        let archived_count = transcript_message_list(transcript)?
+            .len()
+            .saturating_sub(retained.len());
         let mut compacted = match rebuild_transcript(
             transcript,
             retained,
@@ -378,7 +391,10 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             VmValue::Dict(d) => (*d).clone(),
             _ => BTreeMap::new(),
         };
-        compacted.insert("archived_messages".to_string(), VmValue::Int(archived_count as i64));
+        compacted.insert(
+            "archived_messages".to_string(),
+            VmValue::Int(archived_count as i64),
+        );
         Ok(VmValue::Dict(Rc::new(compacted)))
     });
 

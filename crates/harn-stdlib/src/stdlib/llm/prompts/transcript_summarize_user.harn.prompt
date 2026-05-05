@@ -1,0 +1,4 @@
+{{ if prompt }}{{ prompt }}{{ else }}Summarize this conversation for a follow-on agent. Preserve goals, constraints, decisions, unresolved questions, and concrete next actions. Be concise but complete.{{ end }}
+
+Conversation:
+{{ formatted }}
