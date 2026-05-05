@@ -110,6 +110,8 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__host_agent_session_record_usage",
     "__host_agent_session_set_active_skills",
     "__host_agent_session_totals",
+    "__host_mcp_bootstrap",
+    "__host_mcp_disconnect",
     "__host_skill_score",
     "__host_sub_agent_run",
     "__host_worker_close",

@@ -8,11 +8,13 @@
 //! channel for the active session id and bridge.
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::{Arc, Condvar, LazyLock, Mutex};
 use std::time::Duration;
 
 use crate::agent_events::{self, AgentEvent, AgentEventSink};
+use crate::mcp::VmMcpClientHandle;
 use crate::value::VmValue;
 
 /// Boxed session-end hook: receives a `session_id` string.
@@ -51,6 +53,9 @@ static GLOBAL_PENDING_FEEDBACK_CV: LazyLock<Condvar> = LazyLock::new(Condvar::ne
 /// session (e.g. cancelling orphaned long-running handles).
 static SESSION_END_HOOKS: LazyLock<Mutex<Vec<SessionEndHook>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
+
+static SESSION_MCP_CLIENTS: LazyLock<Mutex<BTreeMap<String, BTreeMap<String, VmMcpClientHandle>>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
 /// RAII guard that pushes a per-loop event sink onto the
 /// `CURRENT_LOOP_SINKS` stack and pops it on drop.
@@ -258,4 +263,30 @@ pub(crate) fn current_host_bridge() -> Option<Rc<crate::bridge::HostBridge>> {
 /// `host_agent_session_init` / popped by `host_agent_session_finalize`.
 pub fn current_agent_session_id() -> Option<String> {
     crate::agent_sessions::current_session_id()
+}
+
+pub(crate) fn install_session_mcp_clients(
+    session_id: &str,
+    clients: BTreeMap<String, VmMcpClientHandle>,
+) {
+    if let Ok(mut map) = SESSION_MCP_CLIENTS.lock() {
+        map.insert(session_id.to_string(), clients);
+    }
+}
+
+pub(crate) fn take_session_mcp_clients(
+    session_id: &str,
+) -> Option<BTreeMap<String, VmMcpClientHandle>> {
+    SESSION_MCP_CLIENTS
+        .lock()
+        .ok()
+        .and_then(|mut map| map.remove(session_id))
+}
+
+pub(crate) fn session_mcp_client(session_id: &str, server_name: &str) -> Option<VmMcpClientHandle> {
+    SESSION_MCP_CLIENTS.lock().ok().and_then(|map| {
+        map.get(session_id)
+            .and_then(|clients| clients.get(server_name))
+            .cloned()
+    })
 }

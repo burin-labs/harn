@@ -1471,11 +1471,27 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
     }
 
     let started = std::time::Instant::now();
+    // Session-scoped MCP clients (from opts.mcp_servers) bypass the bridge.
+    let session_mcp = {
+        use std::collections::BTreeMap;
+        let mut clients: BTreeMap<String, crate::mcp::VmMcpClientHandle> = BTreeMap::new();
+        if let Some(server_name) = agent_tools::mcp_server_for_tool(tools.as_ref(), &tool_name) {
+            if let Some(handle) = agent_runtime::session_mcp_client(&session_id, &server_name) {
+                clients.insert(server_name, handle);
+            }
+        }
+        clients
+    };
+    let mcp_clients_ref = if session_mcp.is_empty() {
+        None
+    } else {
+        Some(&session_mcp)
+    };
     let outcome = agent_tools::dispatch_tool_execution_with_mcp(
         &tool_name,
         &tool_args,
         tools.as_ref(),
-        None,
+        mcp_clients_ref,
         bridge.as_ref(),
         tool_retries,
         tool_backoff_ms,
@@ -1547,6 +1563,140 @@ const LLM_TRACE_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .doc("Return a summarized view of captured agent trace events."),
 ];
 
+async fn host_mcp_bootstrap_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    use std::collections::BTreeMap;
+
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) => s.to_string(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "__host_mcp_bootstrap(session_id, specs): session_id must be a string; got {}",
+                other.type_name()
+            )))
+        }
+        None => {
+            return Err(VmError::Runtime(
+                "__host_mcp_bootstrap(session_id, specs): missing session_id".to_string(),
+            ))
+        }
+    };
+
+    let specs_val = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let specs_list: Vec<serde_json::Value> = match &specs_val {
+        VmValue::List(list) => list.iter().map(crate::mcp::vm_value_to_serde).collect(),
+        VmValue::Nil => Vec::new(),
+        other => {
+            return Err(VmError::Runtime(format!(
+                "__host_mcp_bootstrap(session_id, specs): specs must be a list; got {}",
+                other.type_name()
+            )))
+        }
+    };
+
+    let mut clients: BTreeMap<String, crate::mcp::VmMcpClientHandle> = BTreeMap::new();
+    let mut tools_added: Vec<serde_json::Value> = Vec::new();
+    let mut errors: Vec<serde_json::Value> = Vec::new();
+
+    for spec in &specs_list {
+        let server_name = spec
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if server_name.is_empty() {
+            errors.push(serde_json::json!({"error": "mcp_servers entry missing 'name'"}));
+            continue;
+        }
+
+        match crate::mcp::connect_mcp_server_from_json(spec).await {
+            Err(e) => {
+                errors.push(serde_json::json!({
+                    "server": server_name,
+                    "error": e.to_string(),
+                }));
+            }
+            Ok(handle) => {
+                let list_result = handle.call("tools/list", serde_json::json!({})).await;
+                match list_result {
+                    Err(e) => {
+                        errors.push(serde_json::json!({
+                            "server": server_name,
+                            "error": format!("tools/list failed: {e}"),
+                        }));
+                    }
+                    Ok(result) => {
+                        let raw_tools = result
+                            .get("tools")
+                            .and_then(|t| t.as_array())
+                            .cloned()
+                            .unwrap_or_default();
+                        for mut tool in raw_tools {
+                            if let Some(obj) = tool.as_object_mut() {
+                                let original_name = obj
+                                    .get("name")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let prefixed_name = format!("{server_name}__{original_name}");
+                                // Namespace to avoid conflicts between servers.
+                                obj.insert("name".into(), serde_json::Value::String(prefixed_name));
+                                obj.insert(
+                                    "executor".into(),
+                                    serde_json::Value::String("mcp_server".into()),
+                                );
+                                obj.insert(
+                                    "mcp_server".into(),
+                                    serde_json::Value::String(server_name.clone()),
+                                );
+                                obj.insert(
+                                    "_mcp_server".into(),
+                                    serde_json::Value::String(server_name.clone()),
+                                );
+                                obj.insert(
+                                    "_mcp_tool_name".into(),
+                                    serde_json::Value::String(original_name),
+                                );
+                            }
+                            tools_added.push(tool);
+                        }
+                        clients.insert(server_name, handle);
+                    }
+                }
+            }
+        }
+    }
+
+    agent_runtime::install_session_mcp_clients(&session_id, clients);
+
+    Ok(json_to_vm_value(&serde_json::json!({
+        "tools_added": tools_added,
+        "errors": errors,
+    })))
+}
+
+async fn host_mcp_disconnect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) => s.to_string(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "__host_mcp_disconnect(session_id): session_id must be a string; got {}",
+                other.type_name()
+            )))
+        }
+        None => String::new(),
+    };
+
+    if !session_id.is_empty() {
+        if let Some(clients) = agent_runtime::take_session_mcp_clients(&session_id) {
+            for handle in clients.values() {
+                let _ = handle.disconnect().await;
+            }
+        }
+    }
+
+    Ok(VmValue::Bool(true))
+}
+
 const AGENT_HOST_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     async_builtin!(
         "__host_agent_capture_events",
@@ -1576,6 +1726,21 @@ const AGENT_HOST_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     .signature("__host_agent_dispatch_tool_batch(calls, tools?, options?)")
     .arity(VmBuiltinArity::Range { min: 1, max: 3 })
     .doc("Dispatch a batch of normalized agent tool calls through the host tool runtime."),
+    async_builtin!("__host_mcp_bootstrap", host_mcp_bootstrap_impl)
+        .signature("__host_mcp_bootstrap(session_id, specs)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .doc(
+            "Connect to each MCP server in specs, list their tools (prefixed with \
+             server_name__), store handles keyed by session_id, and return \
+             {tools_added, errors}.",
+        ),
+    async_builtin!("__host_mcp_disconnect", host_mcp_disconnect_impl)
+        .signature("__host_mcp_disconnect(session_id)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc(
+            "Disconnect all MCP clients installed for session_id and remove them \
+             from the session registry.",
+        ),
 ];
 
 const LLM_HOST_CORE_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
