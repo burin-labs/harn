@@ -7,10 +7,11 @@ use std::rc::Rc;
 use crate::orchestration::{
     append_audit_entry, builtin_ceiling, install_current_mutation_session,
     install_workflow_skill_context, load_run_record, normalize_run_record,
-    normalize_workflow_value, pop_execution_policy, push_execution_policy, validate_workflow,
-    workflow_verification_contracts, ArtifactRecord, MutationSessionRecord, RunRecord,
-    RunStageRecord, RunTransitionRecord, VerificationContract, WorkflowEdge, WorkflowGraph,
-    WorkflowSkillContext, WorkflowSkillContextGuard,
+    normalize_workflow_value, push_execution_policy, validate_workflow,
+    workflow_verification_contracts, ArtifactRecord, MutationSessionRecord,
+    PreparedWorkflowStageNode, RunRecord, RunStageRecord, RunTransitionRecord,
+    VerificationContract, WorkflowEdge, WorkflowGraph, WorkflowSkillContext,
+    WorkflowSkillContextGuard,
 };
 use crate::stdlib::harn_entry::register_harn_entrypoint_category;
 use crate::stdlib::registration::{
@@ -26,7 +27,9 @@ use super::artifact::{
     parse_execution_record, snapshot_trace_spans,
 };
 use super::convert::{to_vm, workflow_graph_to_vm};
-use super::guards::{MutationSessionResetGuard, WorkflowApprovalPolicyGuard};
+use super::guards::{
+    MutationSessionResetGuard, WorkflowApprovalPolicyGuard, WorkflowExecutionPolicyGuard,
+};
 use super::map::{
     map_branch_artifact, map_execution_plan, map_finalize, MapBranchResult, MapExecutionPlan,
     MapWorkItem,
@@ -35,12 +38,13 @@ use super::policy::{
     apply_runtime_node_overrides, effective_node_approval_policy, effective_node_policy,
     normalize_policy, set_node_policy,
 };
-use super::stage::{execute_stage_attempts, replay_stage, ExecutedStage};
+use super::stage::{execute_stage_attempts, replay_stage, stage_attempt_outcome, ExecutedStage};
 use super::usage::{llm_usage_delta, llm_usage_snapshot, UsageSnapshot};
 
 const WORKFLOW_STDLIB_ENTRYPOINT_CATEGORY: &str = "workflow.stdlib";
 const HOST_WORKFLOW_PREPARE_RUN_BUILTIN: &str = "__host_workflow_prepare_run";
-const HOST_WORKFLOW_EXECUTE_STAGE_BUILTIN: &str = "__host_workflow_execute_stage";
+const HOST_WORKFLOW_STAGE_PREPARE_BUILTIN: &str = "__host_workflow_stage_prepare";
+const HOST_WORKFLOW_STAGE_COMPLETE_BUILTIN: &str = "__host_workflow_stage_complete";
 const HOST_WORKFLOW_RECORD_TRANSITIONS_BUILTIN: &str = "__host_workflow_record_transitions";
 const HOST_WORKFLOW_FINALIZE_RUN_BUILTIN: &str = "__host_workflow_finalize_run";
 const HOST_WORKFLOW_MAP_PLAN_BUILTIN: &str = "__host_workflow_map_plan";
@@ -178,12 +182,19 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
 
 const WORKFLOW_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     async_builtin!(
-        HOST_WORKFLOW_EXECUTE_STAGE_BUILTIN,
-        host_workflow_execute_stage_builtin
+        HOST_WORKFLOW_STAGE_PREPARE_BUILTIN,
+        host_workflow_stage_prepare_builtin
     )
-    .signature("__host_workflow_execute_stage(state_id, node_id, ready_nodes, options?)")
+    .signature("__host_workflow_stage_prepare(state_id, node_id, ready_nodes, options?)")
     .arity(VmBuiltinArity::Range { min: 3, max: 4 })
-    .doc("Execute one low-level workflow stage primitive for the Harn stdlib workflow executor."),
+    .doc("Prepare one low-level workflow stage and install its execution scope."),
+    async_builtin!(
+        HOST_WORKFLOW_STAGE_COMPLETE_BUILTIN,
+        host_workflow_stage_complete_builtin
+    )
+    .signature("__host_workflow_stage_complete(state_id, node_id, llm_result)")
+    .arity(VmBuiltinArity::Exact(3))
+    .doc("Complete one prepared low-level workflow stage and tear down its execution scope."),
     async_builtin!(
         HOST_WORKFLOW_MAP_PLAN_BUILTIN,
         host_workflow_map_plan_builtin
@@ -262,7 +273,6 @@ fn validate_workflow_skill_registry(value: VmValue) -> Option<VmValue> {
     }
 }
 
-#[derive(Clone, Debug)]
 struct WorkflowRunState {
     state_id: String,
     graph: WorkflowGraph,
@@ -279,6 +289,32 @@ struct WorkflowRunState {
     run_usage_before: UsageSnapshot,
     workflow_span_id: u64,
     max_steps: usize,
+    stage_scope: Option<StageExecutionScope>,
+}
+
+struct StageExecutionScope {
+    node_id: String,
+    node: crate::orchestration::WorkflowNode,
+    stage_policy: crate::orchestration::CapabilityPolicy,
+    stage_id: String,
+    started_at: String,
+    execution: StageExecution,
+    _mutation_session_guard: MutationSessionResetGuard,
+    _workflow_skill_guard: WorkflowSkillContextGuard,
+    _workflow_approval_guard: WorkflowApprovalPolicyGuard,
+    _stage_execution_policy_guard: WorkflowExecutionPolicyGuard,
+    _stage_approval_guard: WorkflowApprovalPolicyGuard,
+    _runtime_context_guard: crate::runtime_context::RuntimeContextOverlayGuard,
+}
+
+enum StageExecution {
+    Precomputed(ExecutedStage),
+    HarnCall {
+        prepared: PreparedWorkflowStageNode,
+        usage_before: UsageSnapshot,
+        attempt_started_at: String,
+        input_transcript: Option<VmValue>,
+    },
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -709,6 +745,7 @@ fn prepare_workflow_state(
         run_usage_before,
         workflow_span_id,
         max_steps,
+        stage_scope: None,
     };
     checkpoint_workflow_state(&mut state, None, "start")?;
     Ok(state)
@@ -790,11 +827,215 @@ fn stage_metadata(
     metadata
 }
 
-async fn execute_workflow_stage_state(
+fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmError> {
+    let mut dict = BTreeMap::new();
+    dict.insert(
+        "kind".to_string(),
+        VmValue::String(Rc::from(scope.node.kind.as_str())),
+    );
+    match &scope.execution {
+        StageExecution::Precomputed(executed) => {
+            dict.insert(
+                "result".to_string(),
+                crate::stdlib::json_to_vm_value(&executed.result),
+            );
+        }
+        StageExecution::HarnCall { prepared, .. } => {
+            if let Some(result) = &prepared.result {
+                dict.insert(
+                    "result".to_string(),
+                    crate::stdlib::json_to_vm_value(result),
+                );
+            } else {
+                dict.insert(
+                    "prompt".to_string(),
+                    VmValue::String(Rc::from(prepared.prompt.as_str())),
+                );
+                dict.insert(
+                    "system".to_string(),
+                    prepared
+                        .system
+                        .as_ref()
+                        .map(|system| VmValue::String(Rc::from(system.as_str())))
+                        .unwrap_or(VmValue::Nil),
+                );
+                dict.insert(
+                    "run_agent_loop".to_string(),
+                    VmValue::Bool(prepared.run_agent_loop),
+                );
+                dict.insert(
+                    "llm_options".to_string(),
+                    VmValue::Dict(Rc::new(prepared.llm_options.clone())),
+                );
+                dict.insert(
+                    "agent_loop_options".to_string(),
+                    VmValue::Dict(Rc::new(prepared.agent_loop_options.clone())),
+                );
+            }
+        }
+    }
+    Ok(VmValue::Dict(Rc::new(dict)))
+}
+
+fn workflow_stage_error_result(error: &VmError) -> serde_json::Value {
+    serde_json::json!({
+        "status": "failed",
+        "text": "",
+        "visible_text": "",
+        "error": error.to_string(),
+    })
+}
+
+fn harn_stage_call_error(value: &serde_json::Value) -> Option<VmError> {
+    if !value
+        .get("__workflow_stage_error")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let error = value
+        .get("error")
+        .and_then(|value| value.as_str())
+        .unwrap_or("workflow stage call failed");
+    Some(VmError::Runtime(error.to_string()))
+}
+
+fn failed_executed_stage_from_error(
+    error: VmError,
+    usage_before: &UsageSnapshot,
+    started_at: String,
+    transcript: Option<VmValue>,
+    consumed_artifact_ids: Vec<String>,
+) -> ExecutedStage {
+    let usage = llm_usage_delta(usage_before, &llm_usage_snapshot());
+    let error_message = error.to_string();
+    ExecutedStage {
+        status: "failed".to_string(),
+        outcome: "error".to_string(),
+        branch: Some("error".to_string()),
+        result: workflow_stage_error_result(&error),
+        artifacts: Vec::new(),
+        transcript,
+        verification: None,
+        usage,
+        error: Some(error_message.clone()),
+        attempts: vec![crate::orchestration::RunStageAttemptRecord {
+            attempt: 1,
+            status: "failed".to_string(),
+            outcome: "error".to_string(),
+            branch: Some("error".to_string()),
+            error: Some(error_message),
+            verification: None,
+            started_at,
+            finished_at: Some(uuid::Uuid::now_v7().to_string()),
+        }],
+        consumed_artifact_ids,
+    }
+}
+
+async fn complete_harn_stage_call(
+    node_id: &str,
+    node: &crate::orchestration::WorkflowNode,
+    prepared: PreparedWorkflowStageNode,
+    usage_before: UsageSnapshot,
+    attempt_started_at: String,
+    input_transcript: Option<VmValue>,
+    llm_result: serde_json::Value,
+) -> Result<ExecutedStage, VmError> {
+    let consumed_artifact_ids = prepared
+        .selected
+        .iter()
+        .map(|artifact| artifact.id.clone())
+        .collect::<Vec<_>>();
+    if let Some(error) = harn_stage_call_error(&llm_result) {
+        return Ok(failed_executed_stage_from_error(
+            error,
+            &usage_before,
+            attempt_started_at,
+            input_transcript,
+            consumed_artifact_ids,
+        ));
+    }
+    let execution =
+        crate::orchestration::complete_prepared_stage_node(node_id, node, &prepared, llm_result);
+    let (result, produced, next_transcript) = match execution {
+        Ok(value) => value,
+        Err(error) => {
+            return Ok(failed_executed_stage_from_error(
+                error,
+                &usage_before,
+                attempt_started_at,
+                input_transcript,
+                consumed_artifact_ids,
+            ));
+        }
+    };
+    let (outcome, branch, verification) = match stage_attempt_outcome(node, &result, None).await {
+        Ok(value) => value,
+        Err(error) => {
+            return Ok(failed_executed_stage_from_error(
+                error,
+                &usage_before,
+                attempt_started_at,
+                input_transcript,
+                consumed_artifact_ids,
+            ));
+        }
+    };
+    let usage = llm_usage_delta(&usage_before, &llm_usage_snapshot());
+    let success = !matches!(branch.as_deref(), Some("failed"));
+    Ok(ExecutedStage {
+        status: if success {
+            "completed".to_string()
+        } else {
+            "failed".to_string()
+        },
+        outcome: outcome.clone(),
+        branch: branch.clone(),
+        result,
+        artifacts: produced,
+        transcript: next_transcript,
+        verification: Some(verification.clone()),
+        usage,
+        error: if success {
+            None
+        } else {
+            Some("verification failed".to_string())
+        },
+        attempts: vec![crate::orchestration::RunStageAttemptRecord {
+            attempt: 1,
+            status: if success {
+                "completed".to_string()
+            } else {
+                "failed".to_string()
+            },
+            outcome,
+            branch,
+            error: None,
+            verification: Some(verification),
+            started_at: attempt_started_at,
+            finished_at: Some(uuid::Uuid::now_v7().to_string()),
+        }],
+        consumed_artifact_ids,
+    })
+}
+
+async fn prepare_workflow_stage_state(
     mut state: WorkflowRunState,
     node_id: String,
     options: &BTreeMap<String, VmValue>,
-) -> Result<(WorkflowRunState, WorkflowExecutedStageRecord), VmError> {
+) -> Result<(WorkflowRunState, VmValue), VmError> {
+    if state.stage_scope.is_some() {
+        return Err(VmError::Runtime(format!(
+            "workflow_execute: stage {} is already prepared",
+            state
+                .stage_scope
+                .as_ref()
+                .map(|scope| scope.node_id.as_str())
+                .unwrap_or("unknown")
+        )));
+    }
     let raw_node = state
         .graph
         .nodes
@@ -817,7 +1058,7 @@ async fn execute_workflow_stage_state(
     let started_at = uuid::Uuid::now_v7().to_string();
 
     install_current_mutation_session(Some(state.mutation_session.clone()));
-    let _mutation_session_guard = MutationSessionResetGuard;
+    let mutation_session_guard = MutationSessionResetGuard;
 
     let workflow_skill_registry = options
         .get("skills")
@@ -830,7 +1071,7 @@ async fn execute_workflow_stage_state(
             match_config: workflow_skill_match,
         }));
     }
-    let _workflow_skill_guard = WorkflowSkillContextGuard;
+    let workflow_skill_guard = WorkflowSkillContextGuard;
 
     let workflow_approval_guard = match state.mutation_session.approval_policy.clone() {
         Some(policy) => {
@@ -839,11 +1080,12 @@ async fn execute_workflow_stage_state(
         }
         None => WorkflowApprovalPolicyGuard(false),
     };
-    let _workflow_approval_guard = workflow_approval_guard;
 
     push_execution_policy(stage_policy.clone());
     crate::orchestration::push_approval_policy(stage_approval.clone());
-    let _runtime_context_guard = crate::runtime_context::install_runtime_context_overlay(
+    let stage_execution_policy_guard = WorkflowExecutionPolicyGuard(true);
+    let stage_approval_guard = WorkflowApprovalPolicyGuard(true);
+    let runtime_context_guard = crate::runtime_context::install_runtime_context_overlay(
         crate::runtime_context::RuntimeContextOverlay {
             workflow_id: Some(state.run.workflow_id.clone()),
             run_id: Some(state.run.id.clone()),
@@ -855,32 +1097,128 @@ async fn execute_workflow_stage_state(
         .transcript
         .as_ref()
         .map(crate::stdlib::json_to_vm_value);
-    let executed_result = if state.replay_mode.as_deref() == Some("deterministic") {
+    let execution = if state.replay_mode.as_deref() == Some("deterministic") {
         match state.replay_stages.take() {
             Some(stages) => {
                 let mut stages = VecDeque::from(stages);
                 let result = replay_stage(&node_id, &mut stages);
                 state.replay_stages = Some(stages.into_iter().collect());
-                result
+                StageExecution::Precomputed(result?)
             }
-            None => Err(VmError::Runtime(
-                "replay_mode requires replay_run or replay_path".to_string(),
-            )),
+            None => {
+                return Err(VmError::Runtime(
+                    "replay_mode requires replay_run or replay_path".to_string(),
+                ))
+            }
         }
+    } else if matches!(
+        node.kind.as_str(),
+        "map" | "subagent" | "fork" | "join" | "condition" | "reduce" | "escalation"
+    ) {
+        StageExecution::Precomputed(
+            execute_stage_attempts(
+                &state.run.task,
+                &node_id,
+                &node,
+                &state.artifacts,
+                transcript.clone(),
+            )
+            .await?,
+        )
     } else {
-        execute_stage_attempts(
-            &state.run.task,
+        let usage_before = llm_usage_snapshot();
+        let attempt_started_at = uuid::Uuid::now_v7().to_string();
+        let prepared = crate::orchestration::prepare_stage_node(
             &node_id,
             &node,
+            &state.run.task,
             &state.artifacts,
-            transcript,
         )
-        .await
+        .await;
+        match prepared {
+            Ok(prepared) => StageExecution::HarnCall {
+                prepared,
+                usage_before,
+                attempt_started_at,
+                input_transcript: transcript,
+            },
+            Err(error) => StageExecution::Precomputed(failed_executed_stage_from_error(
+                error,
+                &usage_before,
+                attempt_started_at,
+                transcript,
+                Vec::new(),
+            )),
+        }
     };
-    crate::orchestration::pop_approval_policy();
-    pop_execution_policy();
-    let executed = executed_result?;
 
+    let scope = StageExecutionScope {
+        node_id,
+        node,
+        stage_policy,
+        stage_id,
+        started_at,
+        execution,
+        _mutation_session_guard: mutation_session_guard,
+        _workflow_skill_guard: workflow_skill_guard,
+        _workflow_approval_guard: workflow_approval_guard,
+        _stage_execution_policy_guard: stage_execution_policy_guard,
+        _stage_approval_guard: stage_approval_guard,
+        _runtime_context_guard: runtime_context_guard,
+    };
+    let plan = workflow_stage_plan_to_vm(&scope)?;
+    state.stage_scope = Some(scope);
+    Ok((state, plan))
+}
+
+async fn complete_workflow_stage_state(
+    mut state: WorkflowRunState,
+    node_id: String,
+    llm_result: serde_json::Value,
+) -> Result<(WorkflowRunState, WorkflowExecutedStageRecord), VmError> {
+    let scope = state.stage_scope.take().ok_or_else(|| {
+        VmError::Runtime("__host_workflow_stage_complete: no prepared stage".to_string())
+    })?;
+    if scope.node_id != node_id {
+        return Err(VmError::Runtime(format!(
+            "__host_workflow_stage_complete: prepared node {} but completed {node_id}",
+            scope.node_id
+        )));
+    }
+    let StageExecutionScope {
+        node_id,
+        node,
+        stage_policy,
+        stage_id,
+        started_at,
+        execution,
+        _mutation_session_guard,
+        _workflow_skill_guard,
+        _workflow_approval_guard,
+        _stage_execution_policy_guard,
+        _stage_approval_guard,
+        _runtime_context_guard,
+    } = scope;
+    let executed = match execution {
+        StageExecution::Precomputed(executed) => executed,
+        StageExecution::HarnCall {
+            prepared,
+            usage_before,
+            attempt_started_at,
+            input_transcript,
+        } => {
+            complete_harn_stage_call(
+                &node_id,
+                &node,
+                prepared,
+                usage_before,
+                attempt_started_at,
+                input_transcript,
+                llm_result,
+            )
+            .await?
+        }
+    };
     state.transcript = executed
         .transcript
         .as_ref()
@@ -1013,20 +1351,36 @@ fn host_workflow_prepare_run_builtin(
     Ok(control)
 }
 
-async fn host_workflow_execute_stage_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let state_id = parse_state_id_arg(args.first(), "__host_workflow_execute_stage")?;
-    let mut state = remove_workflow_state(&state_id, "__host_workflow_execute_stage")?;
+async fn host_workflow_stage_prepare_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let state_id = parse_state_id_arg(args.first(), "__host_workflow_stage_prepare")?;
+    let mut state = remove_workflow_state(&state_id, "__host_workflow_stage_prepare")?;
     let node_id = args
         .get(1)
         .map(|value| value.display())
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
-            VmError::Runtime("__host_workflow_execute_stage: missing node id".to_string())
+            VmError::Runtime("__host_workflow_stage_prepare: missing node id".to_string())
         })?;
     state.ready_nodes =
-        parse_string_list_arg(args.get(2), "__host_workflow_execute_stage ready_nodes")?;
+        parse_string_list_arg(args.get(2), "__host_workflow_stage_prepare ready_nodes")?;
     let options = parse_options_arg(&args, 3);
-    let (state, stage) = execute_workflow_stage_state(state, node_id, &options).await?;
+    let (state, plan) = prepare_workflow_stage_state(state, node_id, &options).await?;
+    insert_workflow_state(state);
+    Ok(plan)
+}
+
+async fn host_workflow_stage_complete_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let state_id = parse_state_id_arg(args.first(), "__host_workflow_stage_complete")?;
+    let state = remove_workflow_state(&state_id, "__host_workflow_stage_complete")?;
+    let node_id = args
+        .get(1)
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            VmError::Runtime("__host_workflow_stage_complete: missing node id".to_string())
+        })?;
+    let llm_result = crate::llm::vm_value_to_json(args.get(2).unwrap_or(&VmValue::Nil));
+    let (state, stage) = complete_workflow_stage_state(state, node_id, llm_result).await?;
     let branch = stage.branch.clone();
     let control = workflow_control_to_vm(&state, false)?;
     insert_workflow_state(state);

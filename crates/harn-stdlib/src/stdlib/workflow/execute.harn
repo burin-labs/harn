@@ -1,4 +1,5 @@
 // @harn-entrypoint-category workflow.stdlib
+import { agent_loop } from "std/agent/loop"
 import "std/workflow/prompts"
 import { workflow_join_readiness, workflow_next_edges } from "std/workflow/schedule"
 
@@ -57,7 +58,21 @@ pub fn workflow_execute(task, graph, artifacts = nil, options = nil) {
         continue
       }
     }
-    let executed = __host_workflow_execute_stage(state_id, current, ready, opts)
+    let plan = __host_workflow_stage_prepare(state_id, current, ready, opts)
+    let llm_result = if contains(plan.keys(), "result") {
+      plan.result
+    } else {
+      try {
+        if plan.run_agent_loop {
+          agent_loop(plan.prompt, plan.system, plan.agent_loop_options)
+        } else {
+          llm_call(plan.prompt, plan.system, plan.llm_options)
+        }
+      } catch (e) {
+        {__workflow_stage_error: true, status: "failed", text: "", visible_text: "", error: to_string(e)}
+      }
+    }
+    let executed = __host_workflow_stage_complete(state_id, current, llm_result)
     state = executed.state
     let edges = workflow_next_edges({graph: workflow_graph, current: current, branch: executed.branch})
     ready = __workflow_execute_enqueue_edges(__workflow_execute_list(state?.ready_nodes), edges)

@@ -1,5 +1,7 @@
 //! Registration helpers for public builtins implemented by Harn stdlib modules.
 
+use std::rc::Rc;
+
 use serde::de::DeserializeOwned;
 
 use crate::value::{VmError, VmValue};
@@ -114,6 +116,26 @@ pub(crate) async fn call_harn_export_by_name(
     let output = vm.take_output();
     crate::vm::forward_child_output_to_parent(&output);
     result
+}
+
+pub(crate) async fn call_agent_loop(
+    prompt: String,
+    system: Option<String>,
+    options: std::collections::BTreeMap<String, VmValue>,
+) -> Result<VmValue, VmError> {
+    call_harn_export_by_name(
+        "std/agent/loop",
+        "agent_loop",
+        "workflow_stage_agent_loop",
+        &[
+            VmValue::String(Rc::from(prompt)),
+            system
+                .map(|value| VmValue::String(Rc::from(value)))
+                .unwrap_or(VmValue::Nil),
+            VmValue::Dict(Rc::new(options)),
+        ],
+    )
+    .await
 }
 
 pub(crate) async fn call_harn_export_json(
