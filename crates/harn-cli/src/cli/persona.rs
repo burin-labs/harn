@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 
 #[derive(Debug, Args)]
 pub(crate) struct PersonaArgs {
@@ -21,6 +21,10 @@ pub(crate) struct PersonaArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum PersonaCommand {
+    /// Scaffold a new Harn-first persona package from a template.
+    New(PersonaNewArgs),
+    /// Validate a persona package end-to-end.
+    Doctor(PersonaDoctorArgs),
     /// Validate a persona manifest with the canonical harn-modules schema.
     Check(PersonaCheckArgs),
     /// List personas declared in the resolved harn.toml.
@@ -41,6 +45,53 @@ pub(crate) enum PersonaCommand {
     Trigger(PersonaTriggerArgs),
     /// Record an expensive-work budget receipt for a persona.
     Spend(PersonaSpendArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PersonaNewArgs {
+    /// Persona package name, for example `my_release_captain`.
+    pub name: String,
+    /// Persona control-flow template.
+    #[arg(long, value_enum)]
+    pub template: PersonaTemplateKind,
+    /// Directory under which the persona package is created.
+    #[arg(long, value_name = "DIR", default_value = "personas")]
+    pub output_root: PathBuf,
+    /// Replace an existing generated package.
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PersonaDoctorArgs {
+    /// Persona name or package directory to validate.
+    pub name: String,
+    /// Emit a stable JSON report instead of a human-readable table.
+    #[arg(long)]
+    pub json: bool,
+    /// Test timeout for the smoke suite.
+    #[arg(long, default_value_t = 10_000)]
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum PersonaTemplateKind {
+    #[value(name = "deterministic-sweeper")]
+    DeterministicSweeper,
+    #[value(name = "hybrid-classify-then-act")]
+    HybridClassifyThenAct,
+    #[value(name = "frontier-judgment-loop")]
+    FrontierJudgmentLoop,
+}
+
+impl PersonaTemplateKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::DeterministicSweeper => "deterministic-sweeper",
+            Self::HybridClassifyThenAct => "hybrid-classify-then-act",
+            Self::FrontierJudgmentLoop => "frontier-judgment-loop",
+        }
+    }
 }
 
 #[derive(Debug, Args)]

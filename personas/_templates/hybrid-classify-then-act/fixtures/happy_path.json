@@ -1,0 +1,7 @@
+{
+  "items": [
+    {"id": "demo-1", "title": "First scaffolded work item", "risk": "low"},
+    {"id": "demo-2", "title": "Second scaffolded work item", "risk": "medium"}
+  ],
+  "request": "Decide the next safe action for this persona package."
+}

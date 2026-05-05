@@ -1,0 +1,17 @@
+[package]
+name = "harn-persona-template-deterministic-sweeper"
+version = "0.1.0"
+description = "Template package for deterministic sweeper personas."
+
+[[personas]]
+name = "template_persona"
+version = "0.1.0"
+description = "Deterministic sweeper template persona."
+entry_workflow = "src/template_persona.harn#run"
+tools = ["github"]
+capabilities = ["project.test_commands", "runtime.record_run"]
+autonomy_tier = "act_with_approval"
+receipt_policy = "required"
+triggers = ["github.pr_opened"]
+budget = { daily_usd = 2.0, run_usd = 0.05, max_tokens = 10000, max_runtime_seconds = 120 }
+model_policy = { default_model = "mock", escalation_model = "mock", fallback_models = ["mock"], reasoning_effort = "low" }

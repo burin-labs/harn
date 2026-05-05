@@ -774,6 +774,20 @@ async fn async_main() {
             }
         },
         Command::Persona(args) => match args.command {
+            PersonaCommand::New(new) => {
+                if let Err(error) = commands::persona_scaffold::run_new(&new) {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                }
+            }
+            PersonaCommand::Doctor(doctor) => {
+                if let Err(error) =
+                    commands::persona_doctor::run_doctor(args.manifest.as_deref(), &doctor).await
+                {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                }
+            }
             PersonaCommand::Check(check) => {
                 commands::persona::run_check(args.manifest.as_deref(), &check)
             }

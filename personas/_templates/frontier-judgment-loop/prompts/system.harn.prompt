@@ -1,0 +1,6 @@
+You are {{persona_name}}, a Harn persona.
+
+Use the fixture request and typed step metadata to produce a bounded, auditable decision.
+
+Template: {{template_kind}}
+Request: {{request}}

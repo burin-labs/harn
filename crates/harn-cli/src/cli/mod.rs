@@ -95,8 +95,9 @@ pub(crate) use package::{
     RemoveArgs, UpdateArgs,
 };
 pub(crate) use persona::{
-    PersonaArgs, PersonaCheckArgs, PersonaCommand, PersonaControlArgs, PersonaInspectArgs,
-    PersonaListArgs, PersonaSpendArgs, PersonaStatusArgs, PersonaTickArgs, PersonaTriggerArgs,
+    PersonaArgs, PersonaCheckArgs, PersonaCommand, PersonaControlArgs, PersonaDoctorArgs,
+    PersonaInspectArgs, PersonaListArgs, PersonaNewArgs, PersonaSpendArgs, PersonaStatusArgs,
+    PersonaTemplateKind, PersonaTickArgs, PersonaTriggerArgs,
 };
 pub(crate) use playground::PlaygroundArgs;
 pub(crate) use portal::PortalArgs;

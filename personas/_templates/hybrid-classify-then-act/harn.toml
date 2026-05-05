@@ -1,0 +1,17 @@
+[package]
+name = "harn-persona-template-hybrid-classify-then-act"
+version = "0.1.0"
+description = "Template package for cheap classify, escalation, then action personas."
+
+[[personas]]
+name = "template_persona"
+version = "0.1.0"
+description = "Hybrid classify-then-act template persona."
+entry_workflow = "src/template_persona.harn#run"
+tools = ["github", "mcp"]
+capabilities = ["project.scan", "runtime.record_run"]
+autonomy_tier = "act_with_approval"
+receipt_policy = "required"
+triggers = ["github.issue_opened"]
+budget = { daily_usd = 3.0, run_usd = 0.10, frontier_escalations = 1, max_tokens = 16000, max_runtime_seconds = 180 }
+model_policy = { default_model = "mock", escalation_model = "mock", fallback_models = ["mock"], reasoning_effort = "medium" }

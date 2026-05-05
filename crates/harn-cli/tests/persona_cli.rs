@@ -10,7 +10,7 @@
 use std::fs;
 use std::path::Path;
 
-use harn_cli::commands::persona;
+use harn_cli::commands::{persona, persona_doctor, persona_scaffold};
 use tempfile::TempDir;
 
 fn write_manifest(body: &str) -> TempDir {
@@ -258,6 +258,58 @@ fn persona_manifest_flag_loads_fixer_persona() {
     assert_eq!(persona["triggers"][0], "invariant.blocked_with_remediation");
     assert_eq!(persona["entry_workflow"], "manifest.harn#run");
     assert_eq!(persona["receipt_policy"], "required");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn persona_scaffolder_creates_doctor_clean_package() {
+    for template in [
+        "deterministic-sweeper",
+        "hybrid-classify-then-act",
+        "frontier-judgment-loop",
+    ] {
+        let temp = TempDir::new().unwrap();
+        let result = persona_scaffold::scaffold_persona_package(
+            "my_release_captain",
+            template,
+            &temp.path().join("personas"),
+            false,
+        )
+        .expect("scaffold persona");
+        assert!(result.root.join("harn.toml").exists());
+        assert!(result.root.join("src/my_release_captain.harn").exists());
+        assert!(result
+            .root
+            .join("tests/my_release_captain_smoke.harn")
+            .exists());
+        assert!(result
+            .root
+            .join("tests/my_release_captain_smoke.expected")
+            .exists());
+        assert!(result.root.join("fixtures/happy_path.json").exists());
+        assert!(result.root.join("prompts/system.harn.prompt").exists());
+        assert!(result.root.join("evals/smoke.eval.json").exists());
+
+        let manifest = result.root.join("harn.toml");
+        let persona =
+            persona::inspect_payload(Some(&manifest), "my_release_captain").expect("inspect");
+        assert_eq!(persona["name"], "my_release_captain");
+        assert!(!persona["steps"].as_array().unwrap().is_empty());
+
+        let report = persona_doctor::doctor_report_for_persona(
+            Some(&manifest),
+            "my_release_captain",
+            10_000,
+        )
+        .await
+        .expect("doctor report");
+        assert!(
+            report
+                .checks
+                .iter()
+                .all(|check| check.status != persona_doctor::DoctorStatus::Red),
+            "unexpected red check in {template:?}: {report:#?}"
+        );
+    }
 }
 
 #[test]

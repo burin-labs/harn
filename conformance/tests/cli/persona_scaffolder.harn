@@ -1,0 +1,32 @@
+import "../_common"
+
+pipeline default() {
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  let root = path_join(temp_dir(), "harn_persona_scaffolder_" + uuid_v7())
+  mkdir(root)
+  let created = exec_at(
+    root,
+    harn_bin,
+    "persona",
+    "new",
+    "my_release_captain",
+    "--template",
+    "deterministic-sweeper",
+  )
+  println(created.success)
+  let persona_dir = path_join(root, "personas/my_release_captain")
+  println(file_exists(path_join(persona_dir, "harn.toml")))
+  println(file_exists(path_join(persona_dir, "src/my_release_captain.harn")))
+  println(file_exists(path_join(persona_dir, "tests/my_release_captain_smoke.harn")))
+  println(file_exists(path_join(persona_dir, "tests/my_release_captain_smoke.expected")))
+  println(file_exists(path_join(persona_dir, "fixtures/happy_path.json")))
+  println(file_exists(path_join(persona_dir, "evals/smoke.eval.json")))
+  let doctor = exec_at(root, harn_bin, "persona", "doctor", "my_release_captain", "--json")
+  println(doctor.success)
+  let report = json_parse(doctor.stdout)
+  println(report.persona)
+  println(len(report.checks) >= 6)
+  let smoke = exec_at(persona_dir, harn_bin, "test", "tests/my_release_captain_smoke.harn")
+  println(smoke.success)
+}
