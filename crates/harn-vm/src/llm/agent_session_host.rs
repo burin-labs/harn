@@ -503,6 +503,38 @@ fn host_agent_session_record_assistant_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Recover the plan artifact from a dispatched emit_plan/update_plan result.
+///
+/// The local short-circuit handler (`handle_tool_locally`) returns the
+/// pretty-printed plan JSON as a string, so the dispatch result's
+/// `result` field is typically a string. We try parsing it; if that
+/// fails, fall back to renormalizing from the tool arguments. Either
+/// way we get a structured plan value the transcript "plan" event can
+/// carry under `metadata.plan`.
+fn plan_artifact_from_result(result: &VmValue) -> Option<serde_json::Value> {
+    if let Some(VmValue::String(rendered)) = dict_get(result, "result") {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(rendered) {
+            if parsed.is_object() {
+                return Some(parsed);
+            }
+        }
+    }
+    if let Some(value) = dict_get(result, "result") {
+        let json = vm_to_json(value);
+        if json.is_object() {
+            return Some(json);
+        }
+    }
+    let tool_name = dict_get(result, "tool_name")
+        .or_else(|| dict_get(result, "name"))
+        .map(|v| v.display())
+        .unwrap_or_default();
+    let arguments = dict_get(result, "arguments").map(vm_to_json)?;
+    Some(super::plan::normalize_plan_tool_call(
+        &tool_name, &arguments,
+    ))
+}
+
 fn host_agent_session_record_tool_results_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -545,6 +577,23 @@ fn host_agent_session_record_tool_results_builtin(
             successful.push(name.clone());
         } else {
             rejected.push(name.clone());
+        }
+        if ok && super::plan::is_plan_tool(&name) {
+            if let Some(plan_value) = plan_artifact_from_result(result) {
+                let plan_metadata = serde_json::json!({"plan": plan_value});
+                let event = super::helpers::transcript_event(
+                    "plan",
+                    "tool",
+                    "public",
+                    "",
+                    Some(plan_metadata.clone()),
+                );
+                let _ = crate::agent_sessions::append_event(&session_id, event);
+                super::agent_runtime::emit_agent_event_sync(&AgentEvent::Plan {
+                    session_id: session_id.clone(),
+                    plan: plan_value,
+                });
+            }
         }
         let mut msg = BTreeMap::new();
         msg.insert("role".to_string(), VmValue::String(Rc::from("tool")));
