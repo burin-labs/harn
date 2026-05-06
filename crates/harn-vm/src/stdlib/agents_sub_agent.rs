@@ -38,48 +38,11 @@ fn parse_string_list(value: Option<&VmValue>, label: &str) -> Result<Vec<String>
     Ok(values)
 }
 
-fn select_tool_registry(registry: &VmValue, names: &[String]) -> Result<VmValue, VmError> {
-    let registry_dict = registry.as_dict().ok_or_else(|| {
-        VmError::Runtime("sub_agent_run: tools must be a tool registry".to_string())
-    })?;
-    let is_registry = matches!(
-        registry_dict.get("_type"),
-        Some(VmValue::String(kind)) if kind.as_ref() == "tool_registry"
-    );
-    if !is_registry {
-        return Err(VmError::Runtime(
-            "sub_agent_run: tools must be a tool registry".to_string(),
-        ));
-    }
-    let selected: Vec<VmValue> = registry_dict
-        .get("tools")
-        .and_then(|value| match value {
-            VmValue::List(list) => Some(list),
-            _ => None,
-        })
-        .map(|list| {
-            list.iter()
-                .filter(|tool| {
-                    tool.as_dict()
-                        .and_then(|entry| entry.get("name"))
-                        .map(|value| names.iter().any(|name| name == &value.display()))
-                        .unwrap_or(false)
-                })
-                .cloned()
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let mut next = registry_dict.clone();
-    next.insert("tools".to_string(), VmValue::List(Rc::new(selected)));
-    Ok(VmValue::Dict(Rc::new(next)))
-}
-
 fn sub_agent_requested_policy(
-    options: &BTreeMap<String, VmValue>,
+    policy_value: Option<&VmValue>,
     allowed_tools: &[String],
 ) -> Result<Option<CapabilityPolicy>, VmError> {
-    let explicit: Option<CapabilityPolicy> = options
-        .get("policy")
+    let explicit: Option<CapabilityPolicy> = policy_value
         .filter(|value| !matches!(value, VmValue::Nil))
         .map(|value| serde_json::from_value(crate::llm::vm_value_to_json(value)))
         .transpose()
@@ -103,60 +66,71 @@ fn sub_agent_requested_policy(
     }
 }
 
+fn request_string_field(
+    request: &BTreeMap<String, VmValue>,
+    key: &str,
+    fallback: Option<&str>,
+) -> Option<String> {
+    request.get(key).and_then(|value| match value {
+        VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
+        _ => fallback.map(str::to_string),
+    })
+}
+
+fn request_options(
+    request: &BTreeMap<String, VmValue>,
+) -> Result<BTreeMap<String, VmValue>, VmError> {
+    match request.get("options") {
+        Some(VmValue::Dict(options)) => Ok(options.as_ref().clone()),
+        Some(VmValue::Nil) | None => Ok(BTreeMap::new()),
+        Some(_) => Err(VmError::Runtime(
+            "sub_agent_run: request.options must be a dict".to_string(),
+        )),
+    }
+}
+
 pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgentRequest, VmError> {
-    let task = args
-        .first()
-        .map(|value| value.display())
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| VmError::Runtime("sub_agent_run: task is required".to_string()))?;
-    let raw_options = match args.get(1) {
+    let request = match args.first() {
         Some(VmValue::Dict(map)) => map.as_ref().clone(),
-        Some(VmValue::Nil) | None => BTreeMap::new(),
-        Some(_) => {
+        _ => {
             return Err(VmError::Runtime(
-                "sub_agent_run: options must be a dict".to_string(),
+                "sub_agent_run: expected a normalized sub_agent_request dict".to_string(),
             ))
         }
     };
-    let background = matches!(raw_options.get("background"), Some(VmValue::Bool(true)));
-    let allowed_tools = parse_string_list(
-        raw_options.get("allowed_tools"),
-        "sub_agent_run.allowed_tools",
-    )?;
-    let base_tools = raw_options
-        .get("tools")
-        .cloned()
-        .or_else(crate::stdlib::tools::current_tool_registry);
-    let selected_tools = if allowed_tools.is_empty() {
-        base_tools
-    } else {
-        base_tools
-            .as_ref()
-            .map(|registry| select_tool_registry(registry, &allowed_tools))
-            .transpose()?
-    };
-    let requested_policy = sub_agent_requested_policy(&raw_options, &allowed_tools)?;
+    if !matches!(
+        request.get("_type"),
+        Some(VmValue::String(kind)) if kind.as_ref() == "sub_agent_request"
+    ) {
+        return Err(VmError::Runtime(
+            "sub_agent_run: expected a normalized sub_agent_request dict".to_string(),
+        ));
+    }
+    let task = request_string_field(&request, "task", None)
+        .ok_or_else(|| VmError::Runtime("sub_agent_run: task is required".to_string()))?;
+    let background = matches!(request.get("background"), Some(VmValue::Bool(true)));
+    let allowed_tools =
+        parse_string_list(request.get("allowed_tools"), "sub_agent_run.allowed_tools")?;
+    let requested_policy = sub_agent_requested_policy(request.get("policy"), &allowed_tools)?;
     let worker_policy = agents_workers::resolve_inherited_worker_policy(requested_policy.clone())?;
-    let carry_policy = agents_workers::parse_worker_carry_policy(&raw_options)?;
-    let execution = agents_workers::parse_worker_execution_profile(raw_options.get("execution"))?;
-    let returns_schema = raw_options
-        .get("returns")
-        .and_then(|value| value.as_dict())
-        .and_then(|dict| dict.get("schema"))
-        .cloned();
-    let system = raw_options.get("system").and_then(|value| match value {
-        VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
-        _ => None,
-    });
-    let session_id = raw_options
-        .get("session_id")
-        .and_then(|value| match value {
-            VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
-            _ => None,
-        })
+    let carry_policy = agents_workers::parse_worker_carry_policy(&request)?;
+    let execution = agents_workers::parse_worker_execution_profile(request.get("execution"))?;
+    let returns_schema = request
+        .get("returns_schema")
+        .filter(|value| !matches!(value, VmValue::Nil))
+        .cloned()
+        .or_else(|| {
+            request
+                .get("returns")
+                .and_then(|value| value.as_dict())
+                .and_then(|dict| dict.get("schema"))
+                .cloned()
+        });
+    let system = request_string_field(&request, "system", None);
+    let session_id = request_string_field(&request, "session_id", None)
         .unwrap_or_else(|| format!("sub_agent_session_{}", uuid::Uuid::now_v7()));
 
-    let mut options = raw_options.clone();
+    let mut options = request_options(&request)?;
     if let Some(context) = crate::orchestration::current_workflow_skill_context() {
         if !options.contains_key("skills") {
             if let Some(registry) = context.registry {
@@ -169,30 +143,10 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
             }
         }
     }
-    for key in [
-        "background",
-        "carry",
-        "returns",
-        "allowed_tools",
-        "name",
-        "execution",
-        "system",
-        "session_id",
-    ] {
-        options.remove(key);
-    }
     options.insert(
         "session_id".to_string(),
         VmValue::String(Rc::from(session_id.clone())),
     );
-    match selected_tools {
-        Some(registry) => {
-            options.insert("tools".to_string(), registry);
-        }
-        None => {
-            options.remove("tools");
-        }
-    }
     match requested_policy {
         Some(policy) => {
             options.insert("policy".to_string(), super::to_vm(&policy)?);
@@ -204,10 +158,7 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
 
     Ok(ParsedSubAgentRequest {
         spec: SubAgentRunSpec {
-            name: raw_options
-                .get("name")
-                .map(|value| value.display())
-                .filter(|value| !value.trim().is_empty())
+            name: request_string_field(&request, "name", Some("sub-agent"))
                 .unwrap_or_else(|| "sub-agent".to_string()),
             task,
             system,

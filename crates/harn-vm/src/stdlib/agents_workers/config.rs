@@ -378,6 +378,7 @@ pub(in super::super) fn parse_worker_execution_profile(
     value: Option<&VmValue>,
 ) -> Result<WorkerExecutionProfile, VmError> {
     match value {
+        Some(VmValue::Nil) => Ok(WorkerExecutionProfile::default()),
         Some(value) => serde_json::from_value(crate::llm::vm_value_to_json(value))
             .map_err(|e| VmError::Runtime(format!("worker execution parse error: {e}"))),
         None => Ok(WorkerExecutionProfile::default()),

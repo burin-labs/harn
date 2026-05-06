@@ -1,8 +1,7 @@
 //! Agent orchestration primitives.
 //!
-//! Provides `agent()` for creating named, configured agents, and `agent_call()`
-//! for invoking them. These are ergonomic wrappers around `agent_loop` that
-//! make multi-agent pipelines natural to express.
+//! Provides the host execution primitives used by the Harn-authored agent
+//! stdlib.
 
 #[path = "agents_workers/mod.rs"]
 pub(super) mod agents_workers;
@@ -35,18 +34,6 @@ use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
 
 const AGENT_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("agent", agent_builtin)
-        .signature("agent(name, config?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Build a low-level agent spec dict."),
-    SyncBuiltin::new("agent_config", agent_config_builtin)
-        .signature("agent_config(agent, prompt)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Build low-level agent prompt/system/options config."),
-    SyncBuiltin::new("agent_name", agent_name_builtin)
-        .signature("agent_name(agent)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Read an agent spec name."),
     SyncBuiltin::new("__host_worker_resume", resume_agent_builtin)
         .signature("__host_worker_resume(worker_or_snapshot)")
         .arity(VmBuiltinArity::Exact(1))
@@ -59,9 +46,9 @@ const AGENT_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
 
 const AGENT_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     async_builtin!("__host_sub_agent_run", sub_agent_run_builtin)
-        .signature("__host_sub_agent_run(task, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Run or spawn a sub-agent through the low-level host worker runtime."),
+        .signature("__host_sub_agent_run(request)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Run or spawn a normalized Harn-authored sub-agent request."),
     async_builtin!("__host_worker_spawn", spawn_agent_builtin)
         .signature("__host_worker_spawn(config)")
         .arity(VmBuiltinArity::Exact(1))
@@ -215,92 +202,6 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
     register_builtin_group(vm, AGENT_PRIMITIVES);
     records::register_record_builtins(vm);
     workflow::register_workflow_builtins(vm);
-}
-
-fn agent_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let name = args.first().map(|a| a.display()).unwrap_or_default();
-    let config = match args.get(1) {
-        Some(VmValue::Dict(map)) => (**map).clone(),
-        Some(_) => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "agent: second argument must be a config dict",
-            ))));
-        }
-        None => BTreeMap::new(),
-    };
-
-    let mut agent = config;
-    agent.insert("_type".to_string(), VmValue::String(Rc::from("agent")));
-    agent.insert("name".to_string(), VmValue::String(Rc::from(name)));
-
-    Ok(VmValue::Dict(Rc::new(agent)))
-}
-
-fn agent_config_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
-            "agent_config: requires agent and prompt",
-        ))));
-    }
-
-    let agent = match &args[0] {
-        VmValue::Dict(map) => map,
-        _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "agent_config: first argument must be an agent",
-            ))));
-        }
-    };
-
-    match agent.get("_type") {
-        Some(VmValue::String(t)) if &**t == "agent" => {}
-        _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "agent_config: first argument must be an agent (created with agent())",
-            ))));
-        }
-    }
-
-    let mut options = BTreeMap::new();
-    for key in [
-        "provider",
-        "model",
-        "thinking",
-        "tools",
-        "max_iterations",
-        "tool_format",
-        "structural_experiment",
-        "context_callback",
-        "context_filter",
-        "tool_retries",
-        "tool_backoff_ms",
-    ] {
-        if let Some(val) = agent.get(key) {
-            options.insert(key.to_string(), val.clone());
-        }
-    }
-
-    let prompt = args[1].clone();
-    let system = agent.get("system").cloned().unwrap_or(VmValue::Nil);
-
-    let mut result = BTreeMap::new();
-    result.insert("prompt".to_string(), prompt);
-    result.insert("system".to_string(), system);
-    result.insert("options".to_string(), VmValue::Dict(Rc::new(options)));
-
-    Ok(VmValue::Dict(Rc::new(result)))
-}
-
-fn agent_name_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let agent = match args.first() {
-        Some(VmValue::Dict(map)) => map,
-        _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "agent_name: argument must be an agent",
-            ))));
-        }
-    };
-    Ok(agent.get("name").cloned().unwrap_or(VmValue::Nil))
 }
 
 async fn sub_agent_run_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {

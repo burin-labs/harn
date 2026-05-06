@@ -152,6 +152,10 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
+    vm.register_builtin("__host_current_tool_registry", |_args, _out| {
+        Ok(current_tool_registry().unwrap_or(VmValue::Nil))
+    });
+
     vm.register_builtin("plan_artifact", |args, _out| {
         let input = args.first().cloned().unwrap_or(VmValue::Nil);
         let json = crate::llm::vm_value_to_json(&input);

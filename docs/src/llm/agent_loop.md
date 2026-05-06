@@ -556,6 +556,7 @@ Worker lifecycle builtins:
 | Function | Description |
 |---|---|
 | `spawn_agent(config)` | Start a worker from a workflow graph or delegated stage |
+| `sub_agent_request(task, options?)` | Build the normalized child-agent request used by `sub_agent_run` |
 | `sub_agent_run(task, options?)` | Run an isolated child agent loop and return a single clean result envelope to the parent |
 | `send_input(handle, task)` | Re-run a completed worker with a new task, carrying transcript/artifacts forward when applicable |
 | `resume_agent(id_or_snapshot_path)` | Restore a persisted worker snapshot and continue it in the current runtime |
@@ -567,7 +568,9 @@ Worker lifecycle builtins:
 
 Use `sub_agent_run(...)` when you want a full child `agent_loop` with its own
 session and narrowed capability scope, but you do not want the child transcript
-to spill into the parent conversation history.
+to spill into the parent conversation history. `sub_agent_request(...)` exposes
+the Harn-authored request normalization when callers need to inspect the tool
+selection and child options before execution.
 
 ```harn,ignore
 let result = sub_agent_run("Find the config entrypoints.", {
