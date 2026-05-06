@@ -292,8 +292,6 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
   var rejected_tools_seen = []
   let max_verify_attempts = opts?.max_verify_attempts ?? 20
   let max_iterations = opts?.max_iterations ?? 50
-  let max_nudges = opts?.max_nudges ?? 8
-  let persistent = opts?.persistent ?? false
   while iteration < max_iterations {
     if agent_budget_pre_call_blocked(session, opts) {
       final_status = "budget_exhausted"
@@ -357,7 +355,9 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
       break
     }
     consecutive_text_only = __next_text_only_count(tool_count, consecutive_text_only)
-    if persistent && tool_count == 0 && consecutive_text_only > max_nudges {
+    let turn_persistent = turn_opts?.persistent ?? false
+    let turn_max_nudges = turn_opts?.max_nudges ?? 8
+    if turn_persistent && tool_count == 0 && consecutive_text_only > turn_max_nudges {
       final_status = "stuck"
       stop_reason = "max_nudges"
       break
