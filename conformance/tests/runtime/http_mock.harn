@@ -19,7 +19,7 @@ pipeline test(task) {
   let post_resp = http_post(
     "https://api.example.com/items",
     "{\"name\": \"test\"}",
-    {headers: {Authorization: "Bearer test-token", ["Content-Type"]: "application/json"}},
+    {headers: {Authorization: "Bearer test-token", "Content-Type": "application/json"}},
   )
   assert_eq(post_resp.status, 201)
   log("post status: " + to_string(post_resp.status))

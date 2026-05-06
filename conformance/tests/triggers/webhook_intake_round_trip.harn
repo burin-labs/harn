@@ -17,7 +17,7 @@ pipeline test(task) {
   let accepted = webhook_intake_feed(
     "round-trip",
     {
-      headers: {["x-hub-signature-256"]: signature, ["x-github-delivery"]: "delivery-1"},
+      headers: {"x-hub-signature-256": signature, "x-github-delivery": "delivery-1"},
       body: body,
       path: "/hooks/foo",
     },
@@ -28,7 +28,7 @@ pipeline test(task) {
   let dup = webhook_intake_feed(
     "round-trip",
     {
-      headers: {["x-hub-signature-256"]: signature, ["x-github-delivery"]: "delivery-1"},
+      headers: {"x-hub-signature-256": signature, "x-github-delivery": "delivery-1"},
       body: body,
       path: "/hooks/foo",
     },
@@ -38,7 +38,7 @@ pipeline test(task) {
   let bad = webhook_intake_feed(
     "round-trip",
     {
-      headers: {["x-hub-signature-256"]: "sha256=deadbeef", ["x-github-delivery"]: "delivery-2"},
+      headers: {"x-hub-signature-256": "sha256=deadbeef", "x-github-delivery": "delivery-2"},
       body: body,
       path: "/hooks/foo",
     },

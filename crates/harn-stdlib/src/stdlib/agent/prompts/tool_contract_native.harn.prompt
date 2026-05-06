@@ -4,5 +4,5 @@ The provider exposes tool definitions outside this prompt.
 
 - Invoke tools only through the provider's native tool-calling channel.
 - The current workflow/system prompt may mention only the tool names available for this stage; do not assume tools from earlier stages remain available.
-- Do not write text-mode tool tags, bare `name({ ... })` calls, Markdown code fences, or JSON tool-call envelopes in assistant text.
-- Keep assistant prose short and operational. If you emit a final user-facing answer, wrap it in `<user_response>...</user_response>`. {{ if done_sentinel }}When the task is complete and no more tool calls are needed, include `{{ done_sentinel }}` exactly once in assistant text.{{ else }}When the task is complete and no more tool calls are needed, emit your final user-facing answer in `<user_response>...</user_response>` or plain assistant text and stop calling tools; that signals completion.{{ end }}
+- Do not write tool-call syntax by hand in assistant text, including text-mode tags, function-call snippets, Markdown code fences, or JSON tool-call envelopes.
+- Keep assistant prose short and operational. {{ if done_sentinel }}When the task is complete and no more tool calls are needed, include `{{ done_sentinel }}` exactly once in assistant text.{{ else }}When the task is complete and no more tool calls are needed, give the final user-facing answer as plain assistant text and stop calling tools; that signals completion.{{ end }}

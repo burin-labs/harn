@@ -58,7 +58,7 @@ pipeline test(task) {
   let url = wait_for_listener_url(path_join(root, "orchestrator.log"))
   assert(url != nil, "listener URL did not appear in log")
   let body = "{\"kind\":\"a2a.task.received\",\"task\":{\"id\":\"task-123\"}}"
-  let json_headers = {["Content-Type"]: "application/json"}
+  let json_headers = {"Content-Type": "application/json"}
   let unauth = http_request("POST", url + "/a2a/review", {body: body, headers: json_headers})
   println(unauth.status == 401)
   let ts = to_string(to_int(timestamp()))
@@ -68,7 +68,7 @@ pipeline test(task) {
     {
       body: body,
       headers: {
-        ["Content-Type"]: "application/json",
+        "Content-Type": "application/json",
         Authorization: "HMAC-SHA256 timestamp=" + ts + ",signature=AAAAAAAAAAAAAAAAAAAAAA==",
       },
     },
@@ -77,7 +77,7 @@ pipeline test(task) {
   let bearer = http_request(
     "POST",
     url + "/a2a/review",
-    {body: body, headers: {["Content-Type"]: "application/json", Authorization: "Bearer test-key-2"}},
+    {body: body, headers: {"Content-Type": "application/json", Authorization: "Bearer test-key-2"}},
   )
   println(bearer.status == 200)
   let _ = shell("kill -TERM " + pid)

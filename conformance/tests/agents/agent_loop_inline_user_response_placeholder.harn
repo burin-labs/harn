@@ -1,0 +1,16 @@
+pipeline default() {
+  llm_mock_clear()
+  llm_mock(
+    {
+      text: "Remember `<user_response>...</user_response>` is only an example wrapper.\nAudit: actual final answer.",
+    },
+  )
+  let result = agent_loop(
+    "Finish with a visible answer.",
+    nil,
+    {provider: "mock", loop_until_done: false, max_iterations: 1},
+  )
+  println(result.status)
+  println(result.visible_text)
+  println(result.text)
+}

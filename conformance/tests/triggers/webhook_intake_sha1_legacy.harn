@@ -16,17 +16,14 @@ pipeline test(task) {
   let signature = "sha1=" + hmac_sha1("legacy-secret", body)
   let outcome = webhook_intake_feed(
     "legacy-sha1",
-    {headers: {["x-hub-signature"]: signature, ["x-legacy-delivery"]: "legacy-1"}, body: body},
+    {headers: {"x-hub-signature": signature, "x-legacy-delivery": "legacy-1"}, body: body},
   )
   println(outcome.status == "accepted")
   // SHA-256 signature against a SHA-1 intake is rejected (mismatch).
   let wrong = webhook_intake_feed(
     "legacy-sha1",
     {
-      headers: {
-        ["x-hub-signature"]: "sha1=" + hmac_sha256("legacy-secret", body),
-        ["x-legacy-delivery"]: "legacy-2",
-      },
+      headers: {"x-hub-signature": "sha1=" + hmac_sha256("legacy-secret", body), "x-legacy-delivery": "legacy-2"},
       body: body,
     },
   )

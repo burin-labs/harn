@@ -24,7 +24,7 @@ pipeline test(task) {
       when_to_use: "User requests a credential rotation",
       prompt: "Never execute without manual approval.",
       allowed_tools: ["rotate"],
-      ["disable-model-invocation"]: true,
+      "disable-model-invocation": true,
     },
   )
   llm_mock({text: "Nothing to do."})

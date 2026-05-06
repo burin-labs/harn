@@ -8,7 +8,7 @@ pipeline test(task) {
   let get_resp = http_get(
     "https://api.example.com/items",
     {
-      headers: {Authorization: "Bearer secret-token", ["X-Api-Key"]: "header-secret", Accept: "application/json"},
+      headers: {Authorization: "Bearer secret-token", "X-Api-Key": "header-secret", Accept: "application/json"},
       query: {api_key: "secret", limit: 2},
     },
   )
@@ -28,7 +28,7 @@ pipeline test(task) {
   let post_resp = http_post(
     "https://api.example.com/items",
     "{\"name\":\"Ada\"}",
-    {headers: {Cookie: "sid=session-secret", ["Content-Type"]: "application/json"}},
+    {headers: {Cookie: "sid=session-secret", "Content-Type": "application/json"}},
   )
   assert_eq(post_resp.status, 201)
   let with_sensitive = http_mock_calls({include_sensitive: true})

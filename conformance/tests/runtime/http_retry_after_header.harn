@@ -2,7 +2,7 @@ pipeline test(task) {
   http_mock(
     "GET",
     "https://api.example.com/retry-after",
-    {responses: [{status: 429, headers: {["retry-after"]: "0"}}, {status: 200, body: "ok"}]},
+    {responses: [{status: 429, headers: {"retry-after": "0"}}, {status: 200, body: "ok"}]},
   )
   let resp = http_get("https://api.example.com/retry-after", {retry: {max: 1, backoff_ms: 0}})
   let calls = http_mock_calls()

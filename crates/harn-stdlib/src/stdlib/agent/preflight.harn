@@ -27,6 +27,23 @@ fn __agent_tool_format(opts) {
   return "text"
 }
 
+fn __agent_has_tools(opts) {
+  let registry = opts?.tools
+  if registry == nil {
+    return false
+  }
+  if type_of(registry) == "list" {
+    return len(registry) > 0
+  }
+  if type_of(registry) == "dict" {
+    let tools = registry?.tools
+    if type_of(tools) == "list" {
+      return len(tools) > 0
+    }
+  }
+  return true
+}
+
 fn __agent_loop_contract_prompt(opts) {
   let sentinel = __agent_done_sentinel(opts)
   let loop_until_done = opts?.loop_until_done ?? false
@@ -38,7 +55,7 @@ fn __agent_loop_contract_prompt(opts) {
     {
       loop_until_done: loop_until_done,
       exit_when_verified: opts?.exit_when_verified ?? false,
-      has_tools: opts?.tools != nil,
+      has_tools: __agent_has_tools(opts),
       native_mode: mode == "native",
       native_done: mode == "native",
       sentinel_active: sentinel != nil,
@@ -49,7 +66,7 @@ fn __agent_loop_contract_prompt(opts) {
 }
 
 fn __agent_native_tool_contract_prompt(opts) {
-  if opts?.tools == nil || __agent_tool_format(opts) != "native" {
+  if !__agent_has_tools(opts) || __agent_tool_format(opts) != "native" {
     return ""
   }
   return render_agent_prompt_id(
