@@ -42,4 +42,5 @@ pipeline main() {
   println(contains(calls[0].system, "##DONE##"))
   println(contains(calls[1].system, "##DONE##"))
   println(contains(calls[2].system, "##DONE##"))
+  println(!contains(calls[0].system, "<user_response>"))
 }

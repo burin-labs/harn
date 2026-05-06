@@ -106,7 +106,7 @@ pipeline test(task) {
     crash_url + "/a2a/review",
     {
       body: "{\"kind\":\"a2a.task.received\",\"task\":{\"id\":\"task-242\"}}",
-      headers: {["Content-Type"]: "application/json", Authorization: "Bearer test-key"},
+      headers: {"Content-Type": "application/json", Authorization: "Bearer test-key"},
     },
   )
   println(response.status == 200 && wait_for_exit(crash_pid))

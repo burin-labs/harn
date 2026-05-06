@@ -262,6 +262,33 @@ fn tagged_parser_accepts_user_response_tag() {
 }
 
 #[test]
+fn tagged_parser_ignores_inline_user_response_placeholder() {
+    let tools = sample_tool_registry();
+    let text =
+        "Use `<user_response>...</user_response>` as the wrapper.\nActual answer in plain prose.";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.user_response, None);
+    assert_eq!(result.prose, "");
+    assert!(
+        result
+            .violations
+            .iter()
+            .any(|violation| violation.contains("Stray text outside response tags")),
+        "inline placeholder should be stray prose, not a user response: {:?}",
+        result.violations
+    );
+}
+
+#[test]
+fn tagged_parser_ignores_user_response_inside_markdown_fence() {
+    let tools = sample_tool_registry();
+    let text = "```xml\n<user_response>example only</user_response>\n```\n<user_response>Visible answer.</user_response>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.user_response.as_deref(), Some("Visible answer."));
+    assert_eq!(result.prose, "Visible answer.");
+}
+
+#[test]
 fn tagged_parser_flags_empty_done_block() {
     let tools = sample_tool_registry();
     let text = "<tool_call>\nedit({ action: \"create\", path: \"a.rs\", content: \"x\" })\n</tool_call>\n<done></done>";

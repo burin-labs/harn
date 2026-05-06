@@ -8,7 +8,7 @@ pipeline default() {
   println(mixed.unquoted)
   println(mixed.quoted)
   // Quoted keys with special characters
-  let special = {["content-type"]: "json", ["x-api-key"]: "abc"}
+  let special = {"content-type": "json", "x-api-key": "abc"}
   println(special["content-type"])
   println(special["x-api-key"])
 }

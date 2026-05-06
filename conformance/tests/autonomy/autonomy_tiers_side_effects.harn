@@ -68,7 +68,7 @@ pipeline test(task) {
   let scoped_agent = "autonomy-scoped-" + unique
   let scoped_path = path_join(".harn", "autonomy_tier_scoped_" + unique + ".txt")
   with_autonomy_policy(
-    {agent_id: scoped_agent, autonomy_tier: "act_auto", action_tiers: {["fs.write"]: "shadow"}},
+    {agent_id: scoped_agent, autonomy_tier: "act_auto", action_tiers: {"fs.write": "shadow"}},
     fn() { write_file(scoped_path, "scoped") },
   )
   let scoped_records: list<TrustRecord> = trust_query({agent: scoped_agent, action: "fs.write", tier: "shadow"})

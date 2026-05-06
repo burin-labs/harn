@@ -27,6 +27,23 @@ fn __agent_tool_format(opts) {
   return "text"
 }
 
+fn __agent_has_tools(opts) {
+  let registry = opts?.tools
+  if registry == nil {
+    return false
+  }
+  if type_of(registry) == "list" {
+    return len(registry) > 0
+  }
+  if type_of(registry) == "dict" {
+    let tools = registry?.tools
+    if type_of(tools) == "list" {
+      return len(tools) > 0
+    }
+  }
+  return true
+}
+
 fn __agent_loop_contract_prompt(opts) {
   let sentinel = __agent_done_sentinel(opts)
   let loop_until_done = opts?.loop_until_done ?? false
@@ -38,7 +55,7 @@ fn __agent_loop_contract_prompt(opts) {
     {
       loop_until_done: loop_until_done,
       exit_when_verified: opts?.exit_when_verified ?? false,
-      has_tools: opts?.tools != nil,
+      has_tools: __agent_has_tools(opts),
       native_mode: mode == "native",
       native_done: mode == "native",
       sentinel_active: sentinel != nil,
@@ -49,7 +66,7 @@ fn __agent_loop_contract_prompt(opts) {
 }
 
 fn __agent_native_tool_contract_prompt(opts) {
-  if opts?.tools == nil || __agent_tool_format(opts) != "native" {
+  if !__agent_has_tools(opts) || __agent_tool_format(opts) != "native" {
     return ""
   }
   return render_agent_prompt_id(
@@ -106,18 +123,28 @@ fn __agent_text_tool_contract_prompt(opts) {
     return ""
   }
   let turn_policy = opts?.turn_policy ?? {}
+  let done_sentinel = __agent_done_sentinel(opts)
   return render_agent_prompt_id(
     "agent.tool_contract_text",
     {
       mode: "text",
       native_mode: false,
       require_action: turn_policy?.require_action_or_yield ?? opts?.require_action_or_yield ?? false,
-      done_sentinel: __agent_done_sentinel(opts),
+      done_sentinel: done_sentinel,
       include_task_ledger_help: opts?.task_ledger != nil,
       tool_examples: turn_policy?.tool_examples ?? opts?.tool_examples ?? "",
       shared_types: opts?.shared_types ?? "",
       expanded_schemas: __agent_tool_listing_prompt(opts.tools),
       compact_schemas: "",
+      native_contract: render_agent_prompt_id("agent.tool_contract_native", {done_sentinel: done_sentinel}, opts),
+      action_native_contract: render_agent_prompt_id("agent.tool_contract_action_native", {done_sentinel: done_sentinel}, opts),
+      task_ledger_contract: render_agent_prompt_id("agent.tool_contract_task_ledger", {done_sentinel: done_sentinel}, opts),
+      text_response_protocol: render_agent_prompt_id(
+        "agent.tool_contract_text_response_protocol",
+        {done_sentinel: done_sentinel},
+        opts,
+      ),
+      action_text_contract: render_agent_prompt_id("agent.tool_contract_action_text", {done_sentinel: done_sentinel}, opts),
     },
     opts,
   )

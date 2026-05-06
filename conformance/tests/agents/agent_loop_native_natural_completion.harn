@@ -38,5 +38,17 @@ pipeline main() {
   println(len(calls))
   println(!contains(calls[0].system, "##DONE##"))
   println(!contains(calls[1].system, "##DONE##"))
+  println(!contains(calls[0].system, "<user_response>"))
+  println(contains(calls[0].system, "provider's native tool-calling channel"))
   println(contains(json_stringify(calls[1].messages), "evidence for release"))
+  llm_mock_clear()
+  llm_mock({text: "Plain final answer."})
+  agent_loop(
+    "Finish without tools.",
+    nil,
+    {provider: "mock", tools: tool_registry(), tool_format: "native", max_iterations: 1},
+  )
+  let empty_calls = llm_mock_calls()
+  println(!contains(empty_calls[0].system, "Native tool protocol"))
+  println(!contains(empty_calls[0].system, "<user_response>"))
 }

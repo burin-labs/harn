@@ -27,19 +27,11 @@ pipeline test(task) {
   let sig_b = "sha256=" + hmac_sha256("secret-b", body)
   let outcome_a = webhook_intake_feed(
     "intake-a",
-    {
-      headers: {["x-a-signature"]: sig_a, ["x-a-delivery"]: "shared-delivery"},
-      body: body,
-      path: "/hooks/a",
-    },
+    {headers: {"x-a-signature": sig_a, "x-a-delivery": "shared-delivery"}, body: body, path: "/hooks/a"},
   )
   let outcome_b = webhook_intake_feed(
     "intake-b",
-    {
-      headers: {["x-b-signature"]: sig_b, ["x-b-delivery"]: "shared-delivery"},
-      body: body,
-      path: "/hooks/b",
-    },
+    {headers: {"x-b-signature": sig_b, "x-b-delivery": "shared-delivery"}, body: body, path: "/hooks/b"},
   )
   println(outcome_a.status == "accepted")
   println(outcome_b.status == "accepted")
@@ -47,7 +39,7 @@ pipeline test(task) {
   let mismatched = webhook_intake_feed(
     "intake-a",
     {
-      headers: {["x-a-signature"]: sig_a, ["x-a-delivery"]: "delivery-other"},
+      headers: {"x-a-signature": sig_a, "x-a-delivery": "delivery-other"},
       body: body,
       path: "/hooks/wrong",
     },
@@ -56,11 +48,7 @@ pipeline test(task) {
   // Wrong-secret signature is rejected (cross-intake leakage).
   let cross = webhook_intake_feed(
     "intake-a",
-    {
-      headers: {["x-a-signature"]: sig_b, ["x-a-delivery"]: "delivery-cross"},
-      body: body,
-      path: "/hooks/a",
-    },
+    {headers: {"x-a-signature": sig_b, "x-a-delivery": "delivery-cross"}, body: body, path: "/hooks/a"},
   )
   println(cross.status == "rejected")
 }

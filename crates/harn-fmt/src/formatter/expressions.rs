@@ -686,6 +686,7 @@ impl Formatter<'_> {
     fn format_dict_key(&self, node: &SNode, indent: usize) -> String {
         match &node.node {
             Node::StringLiteral(s) if is_identifier(s) => s.clone(),
+            Node::StringLiteral(s) => format!("\"{}\"", escape_string(s)),
             _ => format!("[{}]", self.format_expr(node, indent)),
         }
     }

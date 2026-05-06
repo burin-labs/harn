@@ -84,6 +84,21 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             continue;
         }
 
+        if !is_top_level_tag_position(src, cursor) || inside_markdown_fence(src, cursor) {
+            let start = cursor;
+            while cursor < bytes.len() && bytes[cursor] != b'\n' {
+                cursor += 1;
+            }
+            report_stray(
+                &src[start..cursor],
+                &mut violations,
+                tools_val,
+                &mut calls,
+                &mut canonical_parts,
+            );
+            continue;
+        }
+
         if let Some((body, after)) = match_block(src, cursor, TEXT_TOOL_CALL_TAG)
             .or_else(|| match_block(src, cursor, TEXT_TOOL_CALL_TAG_COMPACT))
         {
@@ -271,6 +286,26 @@ fn try_parse_angle_wrapped_call(
         "arguments": arguments,
     });
     Some((call, end))
+}
+
+fn is_top_level_tag_position(src: &str, cursor: usize) -> bool {
+    let line_start = src[..cursor].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
+    src[line_start..cursor]
+        .chars()
+        .all(|ch| matches!(ch, ' ' | '\t' | '\r'))
+}
+
+fn inside_markdown_fence(src: &str, cursor: usize) -> bool {
+    let mut count = 0;
+    let mut scan = 0;
+    while scan < cursor {
+        let Some(pos) = src[scan..cursor].find("```") else {
+            break;
+        };
+        count += 1;
+        scan += pos + 3;
+    }
+    count % 2 == 1
 }
 
 /// Report stray text that sits outside any recognized top-level tag.

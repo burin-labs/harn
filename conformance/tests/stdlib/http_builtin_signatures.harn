@@ -4,12 +4,12 @@ pipeline test(task) {
   http_mock(
     "GET",
     "https://api.example.com/stream",
-    {status: 206, body: "abcdef", headers: {["content-type"]: "application/octet-stream"}},
+    {status: 206, body: "abcdef", headers: {"content-type": "application/octet-stream"}},
   )
   http_mock(
     "GET",
     "https://api.example.com/download",
-    {status: 200, body: "payload", headers: {["content-type"]: "text/plain"}},
+    {status: 200, body: "payload", headers: {"content-type": "text/plain"}},
   )
   let get_resp: dict = http_get("https://api.example.com/users")
   let post_resp: dict = http_post("https://api.example.com/users", "{}")

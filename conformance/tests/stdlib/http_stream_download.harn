@@ -2,7 +2,7 @@ pipeline default() {
   http_mock(
     "GET",
     "https://api.example.com/stream",
-    {status: 200, body: "stream-body", headers: {["x-test"]: "yes"}},
+    {status: 200, body: "stream-body", headers: {"x-test": "yes"}},
   )
   let stream = http_stream_open("https://api.example.com/stream")
   let info = http_stream_info(stream)

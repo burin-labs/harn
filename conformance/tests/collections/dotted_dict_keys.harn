@@ -1,0 +1,8 @@
+pipeline test(task) {
+  var d = {}
+  d["a.b.c"] = "x"
+  d.k = "y"
+  log(d["a.b.c"])
+  log(d.k)
+  log(json_stringify(d))
+}

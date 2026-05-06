@@ -99,10 +99,7 @@ pub fn graphql_introspection_query() {
 
 /** graphql_auth_headers. */
 pub fn graphql_auth_headers(auth = nil, extra_headers = nil) {
-  var headers = {
-    ["Content-Type"]: "application/json",
-    Accept: "application/graphql-response+json, application/json",
-  }
+  var headers = {"Content-Type": "application/json", Accept: "application/graphql-response+json, application/json"}
   if auth != nil {
     if type_of(auth) == "string" {
       headers = merge(headers, {Authorization: "Bearer " + auth})

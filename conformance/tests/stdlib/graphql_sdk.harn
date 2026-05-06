@@ -39,7 +39,7 @@ pipeline test(task) {
     {
       status: 200,
       body: json_stringify({data: {viewer: {id: "user-1", name: "Ada"}}, extensions: {cost: 1}}),
-      headers: {["X-Complexity"]: "7", ["X-RateLimit-Requests-Remaining"]: "49", ["X-Request-Id"]: "req-1"},
+      headers: {"X-Complexity": "7", "X-RateLimit-Requests-Remaining": "49", "X-Request-Id": "req-1"},
     },
   )
   let envelope = graphql_execute_operation(

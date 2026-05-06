@@ -57,7 +57,7 @@ fn internal_block_patterns() -> &'static [Regex] {
 fn assistant_prose_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(?s)<assistant_?prose>\s*(.*?)\s*</assistant_?prose>")
+        Regex::new(r"(?ms)^[ \t]*<assistant_?prose>\s*(.*?)\s*</assistant_?prose>")
             .expect("valid assistant_prose regex")
     })
 }
@@ -65,14 +65,42 @@ fn assistant_prose_regex() -> &'static Regex {
 fn user_response_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(?s)<user_?response>\s*(.*?)\s*</user_?response>")
+        Regex::new(r"(?ms)^[ \t]*<user_?response>\s*(.*?)\s*</user_?response>")
             .expect("valid user_response regex")
     })
+}
+
+fn inside_markdown_fence(text: &str, idx: usize) -> bool {
+    let mut count = 0;
+    let mut cursor = 0;
+    while cursor < idx {
+        let Some(pos) = text[cursor..idx].find("```") else {
+            break;
+        };
+        count += 1;
+        cursor += pos + 3;
+    }
+    count % 2 == 1
+}
+
+fn is_top_level_tag_position(text: &str, idx: usize) -> bool {
+    let line_start = text[..idx].rfind('\n').map(|pos| pos + 1).unwrap_or(0);
+    text[line_start..idx]
+        .chars()
+        .all(|ch| matches!(ch, ' ' | '\t' | '\r'))
+}
+
+fn is_protocol_tag_position(text: &str, idx: usize) -> bool {
+    is_top_level_tag_position(text, idx) && !inside_markdown_fence(text, idx)
 }
 
 fn extract_user_response(text: &str) -> Option<String> {
     let sections: Vec<String> = user_response_regex()
         .captures_iter(text)
+        .filter(|caps| {
+            caps.get(0)
+                .is_some_and(|m| is_protocol_tag_position(text, m.start()))
+        })
         .filter_map(|caps| caps.get(1).map(|m| m.as_str().trim().to_string()))
         .filter(|section| !section.is_empty())
         .collect();
@@ -83,6 +111,26 @@ fn extract_user_response(text: &str) -> Option<String> {
     }
 }
 
+fn unwrap_assistant_prose(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0;
+    for caps in assistant_prose_regex().captures_iter(text) {
+        let Some(block) = caps.get(0) else {
+            continue;
+        };
+        if !is_protocol_tag_position(text, block.start()) {
+            continue;
+        }
+        out.push_str(&text[last..block.start()]);
+        if let Some(body) = caps.get(1) {
+            out.push_str(body.as_str().trim());
+        }
+        last = block.end();
+    }
+    out.push_str(&text[last..]);
+    out
+}
+
 /// Strip the wrapper tags around `<assistant_prose>` blocks so the
 /// surfaced visible text reads as plain narration. When a
 /// `<user_response>` block is present, it becomes the authoritative
@@ -91,7 +139,7 @@ fn extract_visible_prose(text: &str) -> String {
     if let Some(user_response) = extract_user_response(text) {
         return user_response;
     }
-    assistant_prose_regex().replace_all(text, "$1").to_string()
+    unwrap_assistant_prose(text)
 }
 
 fn json_fence_regex() -> &'static Regex {
@@ -203,35 +251,35 @@ fn strip_unclosed_internal_blocks(text: &str) -> String {
 
     if let Some(open_idx) = text.rfind(TEXT_TOOL_CALL_OPEN) {
         let close_idx = text.rfind(TEXT_TOOL_CALL_CLOSE);
-        if close_idx.is_none_or(|idx| idx < open_idx) {
+        if is_protocol_tag_position(text, open_idx) && close_idx.is_none_or(|idx| idx < open_idx) {
             return text[..open_idx].to_string();
         }
     }
 
     if let Some(open_idx) = text.rfind(TEXT_TOOL_CALL_OPEN_COMPACT) {
         let close_idx = text.rfind(TEXT_TOOL_CALL_CLOSE_COMPACT);
-        if close_idx.is_none_or(|idx| idx < open_idx) {
+        if is_protocol_tag_position(text, open_idx) && close_idx.is_none_or(|idx| idx < open_idx) {
             return text[..open_idx].to_string();
         }
     }
 
     if let Some(open_idx) = text.rfind("<done>") {
         let close_idx = text.rfind("</done>");
-        if close_idx.is_none_or(|idx| idx < open_idx) {
+        if is_protocol_tag_position(text, open_idx) && close_idx.is_none_or(|idx| idx < open_idx) {
             return text[..open_idx].to_string();
         }
     }
 
     if let Some(open_idx) = text.rfind("<user_response>") {
         let close_idx = text.rfind("</user_response>");
-        if close_idx.is_none_or(|idx| idx < open_idx) {
+        if is_protocol_tag_position(text, open_idx) && close_idx.is_none_or(|idx| idx < open_idx) {
             return text[..open_idx].to_string();
         }
     }
 
     if let Some(open_idx) = text.rfind("<userresponse>") {
         let close_idx = text.rfind("</userresponse>");
-        if close_idx.is_none_or(|idx| idx < open_idx) {
+        if is_protocol_tag_position(text, open_idx) && close_idx.is_none_or(|idx| idx < open_idx) {
             return text[..open_idx].to_string();
         }
     }
@@ -245,7 +293,7 @@ fn strip_unclosed_internal_blocks(text: &str) -> String {
 
     if let Some(open_idx) = text.rfind("<tool_result") {
         let close_idx = text.rfind("</tool_result>");
-        if close_idx.is_none_or(|idx| idx < open_idx) {
+        if is_protocol_tag_position(text, open_idx) && close_idx.is_none_or(|idx| idx < open_idx) {
             return text[..open_idx].to_string();
         }
     }
@@ -285,7 +333,9 @@ fn strip_partial_marker_suffix(text: &str) -> String {
         for len in (1..marker.len()).rev() {
             let prefix = &marker[..len];
             if let Some(stripped) = text.strip_suffix(prefix) {
-                return stripped.to_string();
+                if is_protocol_tag_position(text, stripped.len()) {
+                    return stripped.to_string();
+                }
             }
         }
     }
@@ -420,5 +470,38 @@ mod tests {
             sanitize_visible_assistant_text("A tool call summary is fine.", false),
             "A tool call summary is fine."
         );
+    }
+
+    #[test]
+    fn sanitize_ignores_inline_user_response_placeholder() {
+        let raw = "Wrap final answers in `<user_response>...</user_response>`.\nAudit: real answer";
+        assert_eq!(sanitize_visible_assistant_text(raw, false), raw);
+    }
+
+    #[test]
+    fn sanitize_prefers_top_level_user_response_over_inline_placeholder() {
+        let raw =
+            "Remember `<user_response>...</user_response>` is the wrapper.\n<user_response>Visible answer.</user_response>";
+        assert_eq!(
+            sanitize_visible_assistant_text(raw, false),
+            "Visible answer."
+        );
+    }
+
+    #[test]
+    fn sanitize_ignores_user_response_inside_markdown_fence() {
+        let raw = "```xml\n<user_response>example only</user_response>\n```\nFinal plain answer.";
+        assert_eq!(sanitize_visible_assistant_text(raw, false), raw);
+    }
+
+    #[test]
+    fn sanitize_partial_keeps_inline_protocol_prefixes() {
+        let raw = "Mention `<user_resp";
+        assert_eq!(sanitize_visible_assistant_text(raw, true), raw);
+    }
+
+    #[test]
+    fn sanitize_partial_hides_top_level_protocol_prefixes() {
+        assert_eq!(sanitize_visible_assistant_text("<user_resp", true), "");
     }
 }

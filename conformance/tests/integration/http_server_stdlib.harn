@@ -6,7 +6,7 @@ pipeline default() {
     server,
     { response, _req ->
       let prior = response.headers["x-order"] ?? ""
-      response + {headers: response.headers + {["x-order"]: prior + ",after-a"}}
+      response + {headers: response.headers + {"x-order": prior + ",after-a"}}
     },
   )
   http_server_after(
@@ -14,7 +14,7 @@ pipeline default() {
     { response, _req ->
       let prior = response.headers["x-order"] ?? ""
       response
-        + {headers: response.headers + {["x-order"]: prior + ",after-b", ["x-after"]: "after-b"}}
+        + {headers: response.headers + {"x-order": prior + ",after-b", "x-after": "after-b"}}
     },
   )
   http_server_route(
@@ -30,7 +30,7 @@ pipeline default() {
       assert(req.client_ip == "203.0.113.7", "client IP metadata")
       http_response_json(
         {accepted: req.path_params.trigger, tenant: req.path_params.tenant},
-        {status: 202, headers: {["x-handler"]: "ok", ["x-order"]: req.order + ",handler"}},
+        {status: 202, headers: {"x-handler": "ok", "x-order": req.order + ",handler"}},
       )
     },
     {max_body_bytes: 64},
@@ -40,7 +40,7 @@ pipeline default() {
     {
       method: "post",
       path: "/hooks/acme/push?mode=fast",
-      headers: {["X-Signature"]: "sig"},
+      headers: {"X-Signature": "sig"},
       body: "{\"ok\":true}",
       client_ip: "203.0.113.7",
     },
