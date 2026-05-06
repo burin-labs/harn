@@ -395,7 +395,7 @@ async fn daemon_resume_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
                 .insert("daemon".to_string(), VmValue::Bool(true));
             daemon
                 .options
-                .insert("persistent".to_string(), VmValue::Bool(false));
+                .insert("loop_until_done".to_string(), VmValue::Bool(false));
             daemon.options.insert(
                 "session_id".to_string(),
                 VmValue::String(Rc::from(spec.session_id.clone())),
@@ -443,7 +443,7 @@ async fn daemon_resume_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
 
     let mut resume_options = options;
     resume_options.insert("daemon".to_string(), VmValue::Bool(true));
-    resume_options.insert("persistent".to_string(), VmValue::Bool(false));
+    resume_options.insert("loop_until_done".to_string(), VmValue::Bool(false));
     resume_options.insert(
         "session_id".to_string(),
         VmValue::String(Rc::from(spec.session_id.clone())),
@@ -604,7 +604,7 @@ fn parse_spawn_spec(
         .unwrap_or(DEFAULT_EVENT_QUEUE_CAPACITY);
 
     options.insert("daemon".to_string(), VmValue::Bool(true));
-    options.insert("persistent".to_string(), VmValue::Bool(false));
+    options.insert("loop_until_done".to_string(), VmValue::Bool(false));
     options.insert(
         "session_id".to_string(),
         VmValue::String(Rc::from(session_id.clone())),

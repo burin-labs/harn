@@ -92,7 +92,6 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__cost_route",
     "__dict_rest",
     "__host_agent_budget_pre_call_blocked",
-    "__host_agent_build_turn_system",
     "__host_agent_capture_events",
     "__host_agent_daemon_snapshot",
     "__host_agent_daemon_wait",

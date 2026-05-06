@@ -1,0 +1,45 @@
+pipeline test(task) {
+  llm_mock_clear()
+  var registry = tool_registry()
+  registry = tool_define(registry, "anchor", "Always visible", {parameters: {}, handler: { _ -> "anchor" }})
+  registry = tool_define(
+    registry,
+    "deploy_tool",
+    "Deploy service",
+    {parameters: {}, defer_loading: true, handler: { _ -> "deployed" }},
+  )
+  llm_mock({text: "search", tool_calls: [{id: "s1", name: "find_tool", arguments: {query: "ship"}}]})
+  llm_mock({text: "<done>##DONE##</done>"})
+  let result = agent_loop(
+    "ship",
+    nil,
+    {
+      provider: "mock",
+      tools: registry,
+      tool_search: {
+        mode: "client",
+        name: "find_tool",
+        strategy: {
+          handler: { query, _candidates, _state -> {tool_names: ["deploy_tool"], ranked: [{tool_name: "deploy_tool", score: 1.0, snippet: query}]} },
+          name: "fixture",
+        },
+      },
+      loop_until_done: true,
+      max_iterations: 3,
+    },
+  )
+  let events = transcript_events(result.transcript)
+  var promoted = false
+  var saw_fixture = false
+  for ev in events {
+    if ev.kind == "tool_search_query" {
+      saw_fixture = ev.metadata.strategy == "fixture"
+    }
+    if ev.kind == "tool_search_result" {
+      promoted = len(ev.metadata.promoted ?? []) == 1 && ev.metadata.promoted[0] == "deploy_tool"
+    }
+  }
+  assert(saw_fixture, "custom strategy label recorded")
+  assert(promoted, "custom strategy promoted deploy_tool")
+  log("tool_search_custom_strategy tests passed")
+}

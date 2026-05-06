@@ -86,7 +86,7 @@ let result = llm_call(
 println(result.visible_text)
 ```
 
-Persistent agent loop with tools:
+Loop-until-done agent with tools:
 
 ```harn
 tool read(path: string) -> string {
@@ -113,7 +113,7 @@ let result = agent_loop(
   "Fix the failing test and verify the change.",
   "You are a senior engineer.",
   {
-    persistent: true,
+    loop_until_done: true,
     tools: read,
     max_iterations: 24
   }

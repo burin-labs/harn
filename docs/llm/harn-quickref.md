@@ -839,7 +839,7 @@ println(response.output_tokens)
 | `thinking` | bool \| dict | nil | Typed provider reasoning. `true` / `{mode: "enabled"}` automatically sends Anthropic's `interleaved-thinking-2025-05-14` beta header on supported Claude Opus models. `thinking: false` on Qwen3 routes auto-prepends `/no_think` to the system message (capability-driven; no per-template knowledge needed in scripts). |
 | `interleaved_thinking` | bool | false | Force the Anthropic interleaved-thinking beta header for the call/loop. |
 | `anthropic_beta_features` | string \| list | nil | Extra Anthropic beta feature names for the comma-separated `anthropic-beta` header. |
-| `tool_search` | bool \| string \| dict | nil | Engage progressive tool disclosure. Shorthand `"bm25"` / `"regex"` (variant, mode auto). Dict: `{variant: "bm25" \| "regex", mode: "auto" \| "native" \| "client", strategy: "bm25" \| "regex" \| "semantic" \| "host", always_loaded: [string], budget_tokens: int, name: string, include_stub_listing: bool}`. See "Tool loading & search" below. |
+| `tool_search` | bool \| string \| dict | nil | Engage progressive tool disclosure. Shorthand `"bm25"` / `"regex"` / `"hybrid"` (variant, mode auto). Dict: `{variant: "bm25" \| "regex" \| "hybrid", mode: "auto" \| "native" \| "client", strategy: "bm25" \| "regex" \| "hybrid" \| closure \| {handler}, always_loaded: [string], budget_tokens: int, name: string, include_stub_listing: bool}`. See "Tool loading & search" below. |
 | `output_format` | dict \| string | `{kind: "text"}` | Provider-agnostic output shape. Dicts: `{kind: "json_schema", schema: {...}, strict: true}`, `{kind: "json_object"}`, `{kind: "text"}`. Strings: `"json_schema"`, `"json_object"`/`"json"`, `"text"`. |
 | `response_format` | string | nil | Legacy alias. `"json"` maps to `output_format: {kind: "json_object"}` unless `json_schema`/`schema` is also supplied, in which case it maps to `kind: "json_schema"`. |
 | `json_schema` | dict | nil | Legacy alias for `output_format.schema` and `output_schema`. Prefer `output_format`. |
@@ -941,7 +941,7 @@ let r = llm_call(prompt, sys, {
   provider: "anthropic",
   model: "claude-opus-4-7",
   tools: registry,
-  tool_search: "bm25",                 // or "regex"
+  tool_search: "bm25",                 // or "regex" / "hybrid"
 })
 ```
 
@@ -969,9 +969,9 @@ Semantics:
   models, or `{"type": "tool_search", "mode": "hosted"}` on GPT 5.4+
   via the Responses API. On any other provider, Harn falls back to a
   client-executed equivalent: a synthetic `__harn_tool_search` tool
-  whose handler runs BM25/regex/semantic/host in-VM or through the
-  bridge, then promotes the matching deferred tools into subsequent
-  turns' schema list.
+  whose handler runs BM25/regex/hybrid or a custom Harn scorer, then
+  promotes the matching deferred tools into subsequent turns' schema
+  list.
 - `tool_search: "regex"` uses the Python-regex variant
   (`tool_search_tool_regex_20251119`) on Anthropic, or an
   in-VM case-insensitive Rust-regex search on everything else.
@@ -981,11 +981,10 @@ Semantics:
   even on providers with native support (useful for debuggability on
   GPT 5.4+, where the hosted path hides search deltas in the usage
   accounting).
-- `tool_search: {strategy: "bm25" | "regex" | "semantic" | "host"}`
-  (client mode only) picks the implementation. `"semantic"` and
-  `"host"` delegate to the host via the `tool_search/query` bridge
-  RPC so integrators can wire embeddings without Harn pulling in ML
-  crates.
+- `tool_search: {strategy: "bm25" | "regex" | "hybrid" | scorer}`
+  (client mode only) picks the implementation. A scorer can be a Harn
+  closure or `{handler: closure, name?: string}` and may call embeddings,
+  host-backed tools, MCP tools, or project-specific indexes.
 - `tool_search: {budget_tokens: N}` caps the total token footprint
   of client-mode promoted tool schemas; oldest-first eviction when
   exceeded.
@@ -1332,7 +1331,7 @@ artifacts through this builtin before the prompt is rendered.
 `agent_turn(prompt, options?)` is the high-level wrapper for the common
 "complete this request" shape. It builds on `agent_loop`, moves
 `options.system` into the system prompt, adds generic progress guidance,
-defaults to persistent completion, and requires the completion judge.
+defaults to loop-until-done completion, and requires the completion judge.
 Native-tool turns complete naturally when the model returns final text
 with no tool calls; text/no-tool turns use the normal sentinel path.
 Pass `judge: {...}` or `done_judge: {...}` to customize the judge; omit
@@ -1362,8 +1361,8 @@ tool dispatch. Native-tool loops complete naturally when the model
 returns final assistant text with no tool calls. Tagged text-tool stages
 use `<done>##DONE##</done>`, and no-tool sentinel loops use bare
 `##DONE##`. Set `done_sentinel` to a non-empty string to require a
-sentinel, or `nil` for no sentinel. Native-tool persistent loops default
-to `nil`; text/no-tool persistent loops default to `"##DONE##"`.
+sentinel, or `nil` for no sentinel. Native-tool loop-until-done loops default
+to `nil`; text/no-tool loop-until-done loops default to `"##DONE##"`.
 
 Returns a namespaced dict: top-level `status`, `text`, `visible_text`
 (last iteration's prose with tool calls stripped), `task_ledger`,
@@ -1627,7 +1626,8 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`,
 - `agent_session_current_id()` returns the innermost active session id or `nil`.
 - `agent_session_reset(id)` / `_fork(src, dst?)` / `_fork_at(src, keep_first, dst?)` / `_trim(id, keep_last)`
 - `agent_session_inject(id, {role, content, …})` — missing `role` errors.
-- `agent_session_compact(id, opts)` — unknown keys in `opts` error.
+- `agent_session_compact(id, opts)` — supports LLM/truncate/observation-mask/custom
+  compaction and errors on unknown option keys.
 - `agent_session_length(id)` / `_snapshot(id)` / `_ancestry(id)` for read-only inspection.
 
 ### Daemon wrappers

@@ -36,6 +36,7 @@ struct TranscriptCompactOptions {
     target_tokens: Option<usize>,
     summarize_prompt: Option<String>,
     summary: Option<String>,
+    custom_compactor: Option<VmValue>,
 }
 
 async fn compact_transcript_impl(
@@ -49,6 +50,7 @@ async fn compact_transcript_impl(
         compact_strategy: options.strategy.clone(),
         hard_limit_strategy: options.strategy.clone(),
         summarize_prompt: options.summarize_prompt.clone(),
+        custom_compactor: options.custom_compactor.clone(),
         ..Default::default()
     };
     if let Some(target_tokens) = options.target_tokens {
@@ -164,6 +166,7 @@ fn parse_options(
         target_tokens: None,
         summarize_prompt: None,
         summary: None,
+        custom_compactor: None,
     };
     if let Some(value) = options
         .and_then(|dict| {
@@ -176,12 +179,6 @@ fn parse_options(
         })
     {
         parsed.strategy = crate::orchestration::parse_compact_strategy(value)?;
-    }
-    if parsed.strategy == CompactStrategy::Custom {
-        return Err(VmError::Runtime(
-            "transcript_compact: strategy 'custom' is not supported; use 'llm', 'truncate', or 'observation_mask'"
-                .into(),
-        ));
     }
     if let Some(value) = options
         .and_then(|dict| dict.get("keep_last"))
@@ -217,6 +214,22 @@ fn parse_options(
             VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
             _ => None,
         });
+    if let Some(value) = options
+        .and_then(|dict| dict.get("custom_compactor"))
+        .cloned()
+    {
+        if !matches!(value, VmValue::Closure(_)) {
+            return Err(VmError::Runtime(
+                "transcript_compact: custom_compactor must be a closure".into(),
+            ));
+        }
+        parsed.custom_compactor = Some(value);
+    }
+    if parsed.strategy == CompactStrategy::Custom && parsed.custom_compactor.is_none() {
+        return Err(VmError::Runtime(
+            "transcript_compact: custom_compactor is required with strategy 'custom'".into(),
+        ));
+    }
     if parsed.summarize_prompt.is_some() && parsed.strategy != CompactStrategy::Llm {
         return Err(VmError::Runtime(
             "transcript_compact: summarize_prompt is only supported with strategy 'llm'".into(),

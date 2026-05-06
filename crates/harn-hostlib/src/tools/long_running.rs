@@ -33,6 +33,7 @@
 //! sees an exit caused by cancellation.
 
 use std::collections::BTreeMap;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
@@ -52,6 +53,12 @@ struct CancelState {
     /// Set to `true` when `cancel_handle` / `cancel_session_handles` runs.
     /// The waiter checks this before pushing feedback.
     cancelled: AtomicBool,
+}
+
+#[derive(Default)]
+struct OutputState {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
 }
 
 /// Shared state for a single in-flight child process.
@@ -94,6 +101,43 @@ pub struct LongRunningHandleInfo {
     pub command_display: String,
 }
 
+pub(crate) struct LongRunningSpawnOptions {
+    pub(crate) env_mode: EnvMode,
+    pub(crate) capture: CaptureConfig,
+    pub(crate) session_id: String,
+    pub(crate) progress_interval: Option<Duration>,
+    pub(crate) progress_max_inline_bytes: usize,
+}
+
+struct WaiterContext {
+    command_id: String,
+    handle_id: String,
+    session_id: String,
+    started_at: String,
+    process_group_id: Option<u32>,
+    command_display: String,
+    progress_interval: Option<Duration>,
+    progress_max_inline_bytes: usize,
+}
+
+struct ProgressThreadContext {
+    command_id: String,
+    handle_id: String,
+    session_id: String,
+    started_at: String,
+    command_display: String,
+    process_group_id: Option<u32>,
+    output_path: PathBuf,
+    stdout_path: PathBuf,
+    stderr_path: PathBuf,
+    output_state: Arc<Mutex<OutputState>>,
+    cancel_state: Arc<CancelState>,
+    done: Arc<AtomicBool>,
+    started: std::time::Instant,
+    interval: Duration,
+    max_inline_bytes: usize,
+}
+
 impl LongRunningHandleInfo {
     /// Convert into the standard handle response dict returned to the agent.
     pub fn into_handle_response(self) -> VmValue {
@@ -126,9 +170,13 @@ pub fn spawn_long_running(
         args,
         cwd,
         env,
-        EnvMode::InheritClean,
-        CaptureConfig::default(),
-        session_id,
+        LongRunningSpawnOptions {
+            env_mode: EnvMode::InheritClean,
+            capture: CaptureConfig::default(),
+            session_id,
+            progress_interval: None,
+            progress_max_inline_bytes: CaptureConfig::default().max_inline_bytes,
+        },
     )
 }
 
@@ -138,9 +186,7 @@ pub(crate) fn spawn_long_running_with_options(
     args: Vec<String>,
     cwd: Option<PathBuf>,
     env: BTreeMap<String, String>,
-    env_mode: EnvMode,
-    capture: CaptureConfig,
-    session_id: String,
+    options: LongRunningSpawnOptions,
 ) -> Result<LongRunningHandleInfo, HostlibError> {
     let spec = SpawnSpec {
         builtin,
@@ -148,7 +194,7 @@ pub(crate) fn spawn_long_running_with_options(
         args: args.clone(),
         cwd,
         env,
-        env_mode,
+        env_mode: options.env_mode,
         use_stdin: false,
         configure_process_group: true,
     };
@@ -180,31 +226,29 @@ pub(crate) fn spawn_long_running_with_options(
             HandleEntry {
                 handle: Some(handle),
                 killer,
-                session_id: session_id.clone(),
+                session_id: options.session_id.clone(),
                 cancel_state: cancel_state.clone(),
                 completion_tx: None,
             },
         );
     }
 
-    let waiter_command_id = command_id.clone();
-    let waiter_handle_id = handle_id.clone();
-    let waiter_session_id = session_id;
-    let waiter_started_at = started_at.clone();
-    let waiter_command_display = command_display.clone();
+    let waiter_context = WaiterContext {
+        command_id: command_id.clone(),
+        handle_id: handle_id.clone(),
+        session_id: options.session_id,
+        started_at: started_at.clone(),
+        process_group_id,
+        command_display: command_display.clone(),
+        progress_interval: options.progress_interval,
+        progress_max_inline_bytes: options.progress_max_inline_bytes,
+    };
+    let waiter_thread_name = waiter_context.handle_id.clone();
+    let capture = options.capture;
     std::thread::Builder::new()
-        .name(format!("hto-waiter-{waiter_handle_id}"))
+        .name(format!("hto-waiter-{waiter_thread_name}"))
         .spawn(move || {
-            waiter_thread(
-                waiter_command_id,
-                waiter_handle_id,
-                waiter_session_id,
-                cancel_state,
-                capture,
-                waiter_started_at,
-                process_group_id,
-                waiter_command_display,
-            );
+            waiter_thread(waiter_context, cancel_state, capture);
         })
         .map_err(|e| HostlibError::Backend {
             builtin,
@@ -222,16 +266,7 @@ pub(crate) fn spawn_long_running_with_options(
 }
 
 /// Background thread that waits for a child process and fires feedback.
-fn waiter_thread(
-    command_id: String,
-    handle_id: String,
-    session_id: String,
-    cancel_state: Arc<CancelState>,
-    capture: CaptureConfig,
-    started_at: String,
-    process_group_id: Option<u32>,
-    command_display: String,
-) {
+fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture: CaptureConfig) {
     let waiter_start = std::time::Instant::now();
 
     // Take the handle out of the store. If the entry is already gone (i.e.
@@ -240,7 +275,7 @@ fn waiter_thread(
         let mut store = HANDLE_STORE
             .lock()
             .expect("long-running handle store poisoned");
-        match store.entries.get_mut(&handle_id) {
+        match store.entries.get_mut(&context.handle_id) {
             Some(entry) => match entry.handle.take() {
                 Some(h) => h,
                 None => return, // already cancelled before we ran
@@ -249,34 +284,76 @@ fn waiter_thread(
         }
     };
 
-    // Drain stdout/stderr on separate threads to prevent pipe deadlock.
-    use std::io::Read;
-    let mut stdout_bytes = Vec::new();
-    let mut stderr_bytes = Vec::new();
-    let (out_tx, out_rx) = std::sync::mpsc::channel::<Vec<u8>>();
-    let (err_tx, err_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let output_state = Arc::new(Mutex::new(OutputState::default()));
+    let done = Arc::new(AtomicBool::new(false));
+    let planned = proc::planned_artifact_paths(&context.command_id);
+    if let Some(parent) = planned.output_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::File::create(&planned.stdout_path);
+    let _ = std::fs::File::create(&planned.stderr_path);
+    let combined_file = std::fs::File::create(&planned.output_path)
+        .ok()
+        .map(|file| Arc::new(Mutex::new(file)));
 
-    if let Some(mut out) = handle.take_stdout() {
-        std::thread::spawn(move || {
-            let _ = out.read_to_end(&mut stdout_bytes);
-            let _ = out_tx.send(stdout_bytes);
+    let stdout_thread = handle.take_stdout().map(|out| {
+        spawn_output_drain(
+            out,
+            output_state.clone(),
+            planned.stdout_path.clone(),
+            combined_file.clone(),
+            true,
+        )
+    });
+    let stderr_thread = handle.take_stderr().map(|err| {
+        spawn_output_drain(
+            err,
+            output_state.clone(),
+            planned.stderr_path.clone(),
+            combined_file.clone(),
+            false,
+        )
+    });
+
+    let progress_thread = context
+        .progress_interval
+        .filter(|interval| !interval.is_zero())
+        .map(|interval| {
+            spawn_progress_thread(ProgressThreadContext {
+                command_id: context.command_id.clone(),
+                handle_id: context.handle_id.clone(),
+                session_id: context.session_id.clone(),
+                started_at: context.started_at.clone(),
+                command_display: context.command_display.clone(),
+                process_group_id: context.process_group_id,
+                output_path: planned.output_path.clone(),
+                stdout_path: planned.stdout_path.clone(),
+                stderr_path: planned.stderr_path.clone(),
+                output_state: output_state.clone(),
+                cancel_state: cancel_state.clone(),
+                done: done.clone(),
+                started: waiter_start,
+                interval,
+                max_inline_bytes: context.progress_max_inline_bytes,
+            })
         });
-    }
-    if let Some(mut err) = handle.take_stderr() {
-        std::thread::spawn(move || {
-            let _ = err.read_to_end(&mut stderr_bytes);
-            let _ = err_tx.send(stderr_bytes);
-        });
-    }
 
     let status = handle.wait().ok();
 
-    let stdout = out_rx
-        .recv_timeout(Duration::from_secs(5))
-        .unwrap_or_default();
-    let stderr = err_rx
-        .recv_timeout(Duration::from_secs(5))
-        .unwrap_or_default();
+    if let Some(thread) = stdout_thread {
+        let _ = thread.join();
+    }
+    if let Some(thread) = stderr_thread {
+        let _ = thread.join();
+    }
+    done.store(true, Ordering::Release);
+    drop(progress_thread);
+    let (stdout, stderr) = {
+        let state = output_state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        (state.stdout.clone(), state.stderr.clone())
+    };
 
     // Remove our entry from the store, taking the completion notifier on
     // the way out so we can signal it after the feedback push completes.
@@ -286,7 +363,7 @@ fn waiter_thread(
             .expect("long-running handle store poisoned");
         store
             .entries
-            .remove(&handle_id)
+            .remove(&context.handle_id)
             .and_then(|mut e| e.completion_tx.take())
     };
 
@@ -310,7 +387,12 @@ fn waiter_thread(
     };
     let duration = waiter_start.elapsed();
     let duration_ms = duration.as_millis() as i64;
-    let artifacts = match proc::persist_artifacts(&command_id, &stdout, &stderr, Some(&handle_id)) {
+    let artifacts = match proc::persist_artifacts(
+        &context.command_id,
+        &stdout,
+        &stderr,
+        Some(&context.handle_id),
+    ) {
         Ok(artifacts) => artifacts,
         Err(_) => return,
     };
@@ -319,18 +401,24 @@ fn waiter_thread(
     let mut payload = serde_json::Map::new();
     payload.insert(
         "command_id".into(),
-        serde_json::Value::String(command_id.clone()),
+        serde_json::Value::String(context.command_id.clone()),
     );
     payload.insert(
         "status".into(),
         serde_json::Value::String(CommandStatus::Completed.as_str().to_string()),
     );
-    payload.insert("handle_id".into(), serde_json::Value::String(handle_id));
+    payload.insert(
+        "handle_id".into(),
+        serde_json::Value::String(context.handle_id),
+    );
     payload.insert(
         "command_or_op_descriptor".into(),
-        serde_json::Value::String(command_display),
+        serde_json::Value::String(context.command_display),
     );
-    payload.insert("started_at".into(), serde_json::Value::String(started_at));
+    payload.insert(
+        "started_at".into(),
+        serde_json::Value::String(context.started_at),
+    );
     payload.insert(
         "ended_at".into(),
         serde_json::Value::String(proc::now_rfc3339()),
@@ -369,7 +457,7 @@ fn waiter_thread(
         "output_sha256".into(),
         serde_json::Value::String(artifacts.output_sha256),
     );
-    if let Some(pgid) = process_group_id {
+    if let Some(pgid) = context.process_group_id {
         payload.insert(
             "process_group_id".into(),
             serde_json::Value::Number((pgid as u64).into()),
@@ -382,8 +470,96 @@ fn waiter_thread(
     }
 
     let content = serde_json::to_string(&payload).unwrap_or_default();
-    harn_vm::push_pending_feedback_global(&session_id, "tool_result", &content);
+    harn_vm::push_pending_feedback_global(&context.session_id, "tool_result", &content);
     signal_done();
+}
+
+fn spawn_output_drain(
+    mut reader: Box<dyn Read + Send>,
+    state: Arc<Mutex<OutputState>>,
+    path: std::path::PathBuf,
+    combined_file: Option<Arc<Mutex<std::fs::File>>>,
+    stdout: bool,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut file = std::fs::File::create(path).ok();
+        let mut buf = [0_u8; 8192];
+        loop {
+            let read = match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(read) => read,
+                Err(_) => break,
+            };
+            let chunk = &buf[..read];
+            if let Some(file) = file.as_mut() {
+                let _ = file.write_all(chunk);
+            }
+            if let Some(combined) = combined_file.as_ref() {
+                if let Ok(mut combined) = combined.lock() {
+                    let _ = combined.write_all(chunk);
+                }
+            }
+            if let Ok(mut state) = state.lock() {
+                if stdout {
+                    state.stdout.extend_from_slice(chunk);
+                } else {
+                    state.stderr.extend_from_slice(chunk);
+                }
+            }
+        }
+    })
+}
+
+fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        while !context.done.load(Ordering::Acquire)
+            && !context.cancel_state.cancelled.load(Ordering::Acquire)
+        {
+            std::thread::sleep(context.interval);
+            if context.done.load(Ordering::Acquire)
+                || context.cancel_state.cancelled.load(Ordering::Acquire)
+            {
+                break;
+            }
+            let (stdout, stderr) = {
+                let state = context
+                    .output_state
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner());
+                (state.stdout.clone(), state.stderr.clone())
+            };
+            let capture = CaptureConfig {
+                max_inline_bytes: context.max_inline_bytes,
+                ..CaptureConfig::default()
+            };
+            let (inline_stdout, inline_stderr) = proc::inline_output(&stdout, &stderr, capture);
+            let byte_count = stdout.len().saturating_add(stderr.len());
+            let payload = serde_json::json!({
+                "command_id": &context.command_id,
+                "handle_id": &context.handle_id,
+                "status": CommandStatus::Running.as_str(),
+                "command_or_op_descriptor": &context.command_display,
+                "started_at": &context.started_at,
+                "ended_at": null,
+                "duration_ms": context.started.elapsed().as_millis() as i64,
+                "exit_code": null,
+                "signal": null,
+                "stdout": inline_stdout,
+                "stderr": inline_stderr,
+                "output_path": context.output_path.display().to_string(),
+                "stdout_path": context.stdout_path.display().to_string(),
+                "stderr_path": context.stderr_path.display().to_string(),
+                "byte_count": byte_count as i64,
+                "line_count": stdout.iter().chain(stderr.iter()).filter(|byte| **byte == b'\n').count() as i64,
+                "process_group_id": context.process_group_id,
+            });
+            harn_vm::push_pending_feedback_global(
+                &context.session_id,
+                "tool_progress",
+                &payload.to_string(),
+            );
+        }
+    })
 }
 
 /// Cancel a specific in-flight long-running handle. Kills the process and

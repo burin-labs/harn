@@ -72,9 +72,13 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             args_tail,
             cwd_path,
             BTreeMap::new(),
-            EnvMode::InheritClean,
-            CaptureConfig::default(),
-            session_id,
+            super::long_running::LongRunningSpawnOptions {
+                env_mode: EnvMode::InheritClean,
+                capture: CaptureConfig::default(),
+                session_id,
+                progress_interval: None,
+                progress_max_inline_bytes: CaptureConfig::default().max_inline_bytes,
+            },
         )?;
         return Ok(info.into_handle_response());
     }

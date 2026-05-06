@@ -77,8 +77,8 @@ impl OutputFormat {
     }
 }
 
-/// Which tool-search variant to use. Two shapes today, matching the
-/// Anthropic variants and reused as the local fallback's scoring modes.
+/// Which tool-search variant to use. BM25/regex match the provider-native
+/// variants; hybrid is a Harn client-mode scorer.
 /// Scripts write the lower-case short name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ToolSearchVariant {
@@ -87,6 +87,8 @@ pub(crate) enum ToolSearchVariant {
     Bm25,
     /// Python-regex queries (more precise, less ergonomic).
     Regex,
+    /// Client-side reciprocal-rank fusion over BM25 and weighted field matches.
+    Hybrid,
 }
 
 impl ToolSearchVariant {
@@ -94,6 +96,7 @@ impl ToolSearchVariant {
         match self {
             ToolSearchVariant::Bm25 => "bm25",
             ToolSearchVariant::Regex => "regex",
+            ToolSearchVariant::Hybrid => "hybrid",
         }
     }
 }

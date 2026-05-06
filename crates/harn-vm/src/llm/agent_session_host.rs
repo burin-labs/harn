@@ -41,7 +41,6 @@ const HOST_SESSION_REPLACE_MESSAGES: &str = "__host_agent_session_replace_messag
 const HOST_SESSION_CLAIM_TOOL_FORMAT: &str = "__host_agent_session_claim_tool_format";
 const HOST_SKILL_SCORE: &str = "__host_skill_score";
 const HOST_BUDGET_PRE_CALL: &str = "__host_agent_budget_pre_call_blocked";
-const HOST_BUILD_TURN_SYSTEM: &str = "__host_agent_build_turn_system";
 const HOST_AUTONOMY_BUDGET_CHECK: &str = "__host_autonomy_budget_check";
 const HOST_DAEMON_SNAPSHOT: &str = "__host_agent_daemon_snapshot";
 const HOST_DAEMON_WAIT: &str = "__host_agent_daemon_wait";
@@ -777,13 +776,27 @@ fn host_agent_session_record_usage_builtin(
 }
 
 fn host_agent_session_drain_feedback_builtin(
-    _args: &[VmValue],
+    args: &[VmValue],
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
-    // Drained per-session feedback is no longer plumbed through Rust;
-    // the new Harn loop drives `agent_inject_feedback` in-process. Keep
-    // the primitive registered as a no-op for source compatibility.
-    Ok(VmValue::List(Rc::new(Vec::new())))
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_DRAIN_FEEDBACK}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let drained = crate::llm::drain_global_pending_feedback(&session_id)
+        .into_iter()
+        .map(|(kind, content)| {
+            let mut item = BTreeMap::new();
+            item.insert("kind".to_string(), VmValue::String(Rc::from(kind)));
+            item.insert("content".to_string(), VmValue::String(Rc::from(content)));
+            VmValue::Dict(Rc::new(item))
+        })
+        .collect::<Vec<_>>();
+    Ok(VmValue::List(Rc::new(drained)))
 }
 
 fn host_agent_session_totals_builtin(
@@ -1244,99 +1257,6 @@ fn host_agent_session_claim_tool_format_builtin(
     Ok(VmValue::Nil)
 }
 
-fn host_agent_build_turn_system_builtin(
-    args: &[VmValue],
-    _out: &mut String,
-) -> Result<VmValue, VmError> {
-    let _session_id = args.first().map(|v| v.display()).unwrap_or_default();
-    let opts_map = opts_dict(args.get(1));
-    let mut parts: Vec<String> = Vec::new();
-    if let Some(system) = opt_str(&opts_map, "system") {
-        if !system.is_empty() {
-            parts.push(system);
-        }
-    }
-    if let Some(skill_prompt) = render_active_skill_prompt(opts_map.get("active_skills")) {
-        parts.push(skill_prompt);
-    }
-    if opts_map.contains_key("tools") {
-        let tool_format = opt_str(&opts_map, "tool_format").unwrap_or_else(|| "text".to_string());
-        if tool_format != "native" {
-            parts.push(
-                include_str!(
-                    "../../../harn-stdlib/src/stdlib/agent/prompts/tool_contract_text.harn.prompt"
-                )
-                .to_string(),
-            );
-        }
-    }
-    Ok(VmValue::String(Rc::from(parts.join("\n\n"))))
-}
-
-fn render_active_skill_prompt(value: Option<&VmValue>) -> Option<String> {
-    let active = match value {
-        Some(VmValue::List(list)) => list,
-        _ => return None,
-    };
-    if active.is_empty() {
-        return None;
-    }
-    let mut out = String::from("## Active skills\n");
-    for skill in active.iter() {
-        let Some(dict) = skill.as_dict() else {
-            continue;
-        };
-        let name = dict
-            .get("id")
-            .or_else(|| dict.get("name"))
-            .map(VmValue::display);
-        let Some(name) = name.filter(|name| !name.is_empty()) else {
-            continue;
-        };
-        out.push_str(&format!("\n### {name}\n"));
-        if let Some(description) = dict
-            .get("description")
-            .map(VmValue::display)
-            .filter(|text| !text.trim().is_empty())
-        {
-            out.push_str(description.trim());
-            out.push('\n');
-        }
-        if let Some(when_to_use) = dict
-            .get("when_to_use")
-            .map(VmValue::display)
-            .filter(|text| !text.trim().is_empty())
-        {
-            out.push_str("When to use: ");
-            out.push_str(when_to_use.trim());
-            out.push('\n');
-        }
-        let allowed_tools = match dict.get("allowed_tools") {
-            Some(VmValue::List(list)) => list
-                .iter()
-                .map(VmValue::display)
-                .filter(|text| !text.is_empty())
-                .collect::<Vec<_>>(),
-            _ => Vec::new(),
-        };
-        if !allowed_tools.is_empty() {
-            out.push_str("Scoped tools: ");
-            out.push_str(&allowed_tools.join(", "));
-            out.push('\n');
-        }
-        if let Some(prompt) = dict
-            .get("prompt")
-            .map(VmValue::display)
-            .filter(|text| !text.trim().is_empty())
-        {
-            out.push('\n');
-            out.push_str(prompt.trim());
-            out.push('\n');
-        }
-    }
-    Some(out)
-}
-
 fn host_agent_daemon_snapshot_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1717,10 +1637,6 @@ const HOST_SESSION_PRIMITIVES_SYNC: &[SyncBuiltin] = &[
         .signature("__host_agent_budget_pre_call_blocked(session_id, envelope)")
         .arity(VmBuiltinArity::Exact(2))
         .doc("Pre-call budget projection hook (returns false for now)."),
-    SyncBuiltin::new(HOST_BUILD_TURN_SYSTEM, host_agent_build_turn_system_builtin)
-        .signature("__host_agent_build_turn_system(session_id, options, iteration)")
-        .arity(VmBuiltinArity::Exact(3))
-        .doc("Compose the per-turn system prompt from system + tool contract."),
     SyncBuiltin::new(HOST_DAEMON_SNAPSHOT, host_agent_daemon_snapshot_builtin)
         .signature("__host_agent_daemon_snapshot(session_id, options)")
         .arity(VmBuiltinArity::Exact(2))

@@ -22,7 +22,7 @@ fn scenario_veto_then_confirm() {
     "you are an agent.",
     {
       provider: "mock",
-      persistent: true,
+      loop_until_done: true,
       max_iterations: 5,
       done_sentinel: "##DONE##",
       verify_completion: cb,
@@ -46,7 +46,7 @@ fn scenario_max_verify_exhausted() {
     "you are an agent.",
     {
       provider: "mock",
-      persistent: true,
+      loop_until_done: true,
       max_iterations: 10,
       done_sentinel: "##DONE##",
       verify_completion: always_veto,
@@ -66,7 +66,7 @@ fn scenario_confirm_immediately() {
     "you are an agent.",
     {
       provider: "mock",
-      persistent: true,
+      loop_until_done: true,
       max_iterations: 5,
       done_sentinel: "##DONE##",
       verify_completion: always_confirm,

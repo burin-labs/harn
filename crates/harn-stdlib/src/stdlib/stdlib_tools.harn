@@ -1,0 +1,43 @@
+fn __tool_spec_config(spec) {
+  if type_of(spec) != "dict" {
+    throw "tool_define_many: each spec must be a dict"
+  }
+  var config = spec?.config ?? {}
+  for key in spec.keys() {
+    if !contains(["name", "description", "desc", "config"], key) {
+      config = config + {[key]: spec[key]}
+    }
+  }
+  return config
+}
+
+/** tool_define_many adds a list of tool specs to a registry. */
+pub fn tool_define_many(registry, specs = nil) {
+  var target = registry
+  var items = specs
+  if items == nil {
+    target = tool_registry()
+    items = registry
+  }
+  if type_of(items) != "list" {
+    throw "tool_define_many: specs must be a list"
+  }
+  var tools = target ?? tool_registry()
+  for spec in items {
+    let name = spec?.name
+    let description = spec?.description ?? spec?.desc
+    if name == nil || name == "" {
+      throw "tool_define_many: each spec needs a non-empty name"
+    }
+    if description == nil || description == "" {
+      throw "tool_define_many: each spec needs a non-empty description"
+    }
+    tools = tool_define(tools, name, description, __tool_spec_config(spec))
+  }
+  return tools
+}
+
+/** tool_registry_from creates a registry from a list of tool specs. */
+pub fn tool_registry_from(specs) {
+  return tool_define_many(tool_registry(), specs)
+}

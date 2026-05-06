@@ -2001,8 +2001,9 @@ judge_duration_ms}`.
 
 `agent_turn(prompt, options?)` is the high-level wrapper for a single complete
 agent request. It uses `agent_loop`, folds `options.system` into the system
-prompt with generic progress guidance, defaults to a persistent sentinel loop,
-and requires `done_judge` (omitted means the default judge).
+prompt with generic progress guidance, defaults to explicit
+`loop_until_done` completion, and requires `done_judge` (omitted means the
+default judge).
 
 Execute tools that can emit large result artifacts declare this in
 `ToolAnnotations`:
@@ -2104,8 +2105,10 @@ provider-agnostic client fallback:
   `gpt-5.4+`.
 - **Everyone else (and any of the above on older models)** — Harn
   injects a synthetic `__harn_tool_search` tool and runs the configured
-  strategy (BM25, regex, semantic, or host-delegated) in-VM, promoting
-  matching deferred tools into the next turn's schema list.
+  client strategy in Harn/VM space, promoting matching deferred tools into the
+  next turn's schema list. Built-in client strategies are `bm25`, `regex`, and
+  `hybrid`; custom scorer closures and `{handler}` strategy objects can replace
+  the search step completely.
 
 Tool entries may also set `namespace: "<label>"` to group deferred tools
 for the OpenAI meta-tool's `namespaces` field. The field is a harmless

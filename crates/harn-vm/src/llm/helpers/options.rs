@@ -866,7 +866,7 @@ pub(crate) fn extract_llm_options(
     };
 
     // tool_search option parsing: three shapes accepted.
-    //   - shorthand string: "bm25" | "regex" (mode: auto)
+    //   - shorthand string: "bm25" | "regex" | "hybrid" (mode: auto)
     //   - bool: true (defaults to bm25/auto), false (no tool_search)
     //   - dict: { variant, mode, strategy, always_loaded, name }
     // Unset / false / nil all leave tool_search absent — tools ship eagerly.
@@ -891,6 +891,11 @@ pub(crate) fn extract_llm_options(
         // `tool_search` + `defer_loading` unchanged.
         let forced = provider_overrides_force_native(options.as_ref(), &provider);
         let provider_has_native = model_based_native || forced;
+        if cfg.variant == ToolSearchVariant::Hybrid && cfg.mode == ToolSearchMode::Native {
+            return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                "tool_search: variant \"hybrid\" is client-only; set mode: \"client\" or use \"bm25\"/\"regex\" for native provider tool search",
+            ))));
+        }
         // If the forced path is active, use OpenAI's default variants
         // so the injection below picks the right shape.
         let effective_variants: Vec<String> = if forced && native_variants.is_empty() {
@@ -915,7 +920,9 @@ pub(crate) fn extract_llm_options(
             }
             ToolSearchMode::Client => ToolSearchResolution::Client,
             ToolSearchMode::Auto => {
-                if provider_has_native {
+                if cfg.variant == ToolSearchVariant::Hybrid {
+                    ToolSearchResolution::Client
+                } else if provider_has_native {
                     ToolSearchResolution::Native
                 } else {
                     ToolSearchResolution::Client
@@ -1354,8 +1361,10 @@ fn validate_anthropic_beta_feature_name(feature: &str) -> Result<(), VmError> {
 /// Accepts:
 ///   - `nil` / absent / `false` → None (no tool_search engaged)
 ///   - `true` → default (bm25 + auto)
-///   - `"bm25"` | `"regex"` → that variant + auto
-///   - `{ variant?, mode?, strategy?, always_loaded?, name? }` → explicit
+///   - `"bm25"` | `"regex"` | `"hybrid"` → that variant + auto
+///   - `{ variant?, mode?, strategy?, always_loaded?, name? }` → explicit.
+///     Non-string strategies are Harn-side custom scorers, so they force
+///     client-mode resolution.
 fn parse_tool_search_option(
     options: Option<&BTreeMap<String, VmValue>>,
 ) -> Result<Option<crate::llm::api::ToolSearchConfig>, VmError> {
@@ -1370,8 +1379,11 @@ fn parse_tool_search_option(
         match s {
             "bm25" => Ok(ToolSearchVariant::Bm25),
             "regex" => Ok(ToolSearchVariant::Regex),
+            "hybrid" => Ok(ToolSearchVariant::Hybrid),
             other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
-                format!("tool_search.variant: expected \"bm25\" or \"regex\", got \"{other}\""),
+                format!(
+                    "tool_search.variant: expected \"bm25\", \"regex\", or \"hybrid\", got \"{other}\""
+                ),
             )))),
         }
     };
@@ -1389,9 +1401,11 @@ fn parse_tool_search_option(
     };
     let validate_strategy = |s: &str| -> Result<(), VmError> {
         match s {
-            "bm25" | "regex" => Ok(()),
+            "bm25" | "regex" | "hybrid" => Ok(()),
             other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
-                format!("tool_search.strategy: expected \"bm25\" | \"regex\", got \"{other}\""),
+                format!(
+                    "tool_search.strategy: expected \"bm25\" | \"regex\" | \"hybrid\", got \"{other}\""
+                ),
             )))),
         }
     };
@@ -1431,15 +1445,33 @@ fn parse_tool_search_option(
                     ))));
                 }
             };
-            match d.get("strategy") {
-                Some(VmValue::String(s)) => validate_strategy(s.as_ref())?,
+            let custom_strategy = match d.get("strategy") {
+                Some(VmValue::String(s)) => {
+                    validate_strategy(s.as_ref())?;
+                    false
+                }
+                Some(VmValue::Closure(_)) => true,
+                Some(VmValue::Dict(strategy)) => {
+                    if matches!(strategy.get("handler"), Some(VmValue::Closure(_))) {
+                        true
+                    } else {
+                        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                            "tool_search.strategy: expected \"bm25\" | \"regex\" | \"hybrid\", a scorer closure, or {handler: closure}",
+                        ))));
+                    }
+                }
                 Some(_) => {
                     return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
-                        "tool_search.strategy: expected a string",
+                        "tool_search.strategy: expected \"bm25\" | \"regex\" | \"hybrid\", a scorer closure, or {handler: closure}",
                     ))));
                 }
-                None => {}
+                None => false,
             };
+            if custom_strategy && matches!(mode, ToolSearchMode::Native) {
+                return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    "tool_search.strategy: custom scorers are client-only; set mode: \"client\" or \"auto\"",
+                ))));
+            }
             match d.get("name") {
                 Some(VmValue::String(s)) => {
                     let s = s.as_ref().trim();
@@ -1456,10 +1488,17 @@ fn parse_tool_search_option(
                     ))));
                 }
             };
-            Ok(Some(ToolSearchConfig { variant, mode }))
+            Ok(Some(ToolSearchConfig {
+                variant: if custom_strategy {
+                    ToolSearchVariant::Hybrid
+                } else {
+                    variant
+                },
+                mode,
+            }))
         }
         _ => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
-            "tool_search: expected bool, string (\"bm25\"/\"regex\"), or dict \
+            "tool_search: expected bool, string (\"bm25\"/\"regex\"/\"hybrid\"), or dict \
              ({variant, mode, strategy, always_loaded, name})",
         )))),
     }

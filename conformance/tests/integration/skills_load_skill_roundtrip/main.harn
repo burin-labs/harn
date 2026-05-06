@@ -30,7 +30,7 @@ pipeline test(task) {
       model: "gpt-5.4",
       tools: tools,
       tool_format: "native",
-      persistent: true,
+      loop_until_done: true,
       max_iterations: 3,
       session_id: "skills-load-skill",
       skills: skills,

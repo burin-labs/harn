@@ -5,8 +5,9 @@ pub fn agent_mcp_bootstrap_if_needed(session, opts) {
     return opts
   }
   let result = __host_mcp_bootstrap(session.session_id, specs)
+  let out = opts + {_mcp_bootstrap: result, _mcp_server_info: result?.server_info ?? []}
   if len(result.tools_added) == 0 {
-    return opts
+    return out
   }
   let existing = opts?.tools
   let existing_tools = if existing?._type == "tool_registry" {
@@ -15,5 +16,5 @@ pub fn agent_mcp_bootstrap_if_needed(session, opts) {
     []
   }
   let reg = {_type: "tool_registry", tools: existing_tools + result.tools_added}
-  return opts + {tools: reg}
+  return out + {tools: reg}
 }

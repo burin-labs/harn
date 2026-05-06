@@ -27,6 +27,12 @@ let info = mcp_server_info(client)
 println("Connected to: ${info.name}")
 ```
 
+`mcp_server_info(...)` also exposes the raw initialize response and an
+`instructions` string when the server supplied one. `agent_loop(...,
+{mcp_servers: [...]})` can include those instructions as advisory context in
+the Harn-built system prompt; set `mcp_initialize_advisory: false` when a
+harness wants to keep server-provided advice out of model context.
+
 ### Listing and calling tools
 
 ```harn

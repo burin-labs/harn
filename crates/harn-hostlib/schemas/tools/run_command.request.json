@@ -52,6 +52,21 @@
     "stdin": { "type": "string" },
     "timeout_ms": { "type": "integer", "minimum": 0 },
     "background": { "type": "boolean", "default": false },
+    "background_after_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Spawn the command in the background, wait this many milliseconds for an initial progress snapshot, then return either the snapshot or the running handle."
+    },
+    "progress_interval_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "When the command runs in the background, publish progress feedback at this interval."
+    },
+    "progress_max_inline_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Maximum stdout/stderr bytes included inline in each background progress item."
+    },
     "long_running": {
       "type": "boolean",
       "default": false,

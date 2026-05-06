@@ -85,7 +85,7 @@ fn __workflow_add_loop_option(options, model_policy, key) {
 
 fn __workflow_agent_loop_options(config, model_policy, tool_format) {
   var options = {
-    persistent: true,
+    loop_until_done: true,
     max_iterations: model_policy?.max_iterations ?? 16,
     max_nudges: model_policy?.max_nudges ?? 3,
     tool_retries: 0,

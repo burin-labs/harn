@@ -355,9 +355,9 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
       break
     }
     consecutive_text_only = __next_text_only_count(tool_count, consecutive_text_only)
-    let turn_persistent = turn_opts?.persistent ?? false
     let turn_max_nudges = turn_opts?.max_nudges ?? 8
-    if turn_persistent && tool_count == 0 && consecutive_text_only > turn_max_nudges {
+    let turn_loop_until_done = turn_opts?.loop_until_done ?? false
+    if turn_loop_until_done && tool_count == 0 && consecutive_text_only > turn_max_nudges {
       final_status = "stuck"
       stop_reason = "max_nudges"
       break

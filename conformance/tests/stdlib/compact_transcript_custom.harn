@@ -1,0 +1,25 @@
+pipeline test(task) {
+  let base = transcript_from_messages(
+    [
+      {role: "user", content: "one"},
+      {role: "assistant", content: "two"},
+      {role: "user", content: "three"},
+      {role: "assistant", content: "four"},
+    ],
+  )
+  let compacted = transcript_compact(
+    base,
+    {
+      strategy: "custom",
+      keep_last: 1,
+      target_tokens: 1,
+      custom_compactor: { messages -> "CUSTOM SUMMARY " + to_string(len(messages)) },
+    },
+  )
+  assert(transcript_summary(compacted).contains("CUSTOM SUMMARY 1"), "custom summary retained")
+  assert(
+    transcript_events_by_kind(compacted, "compaction")[0].metadata?.strategy == "custom",
+    "custom event recorded",
+  )
+  log("compact_transcript_custom tests passed")
+}

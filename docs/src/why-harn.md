@@ -59,7 +59,7 @@ pipeline analyze(task) {
   let steps = json_parse(plan.text)
 
   let results = parallel each steps { step ->
-    agent_loop(step, "You are a coding assistant.", {persistent: true})
+    agent_loop(step, "You are a coding assistant.", {loop_until_done: true})
   }
 
   write_file("results.json", json_stringify(results))

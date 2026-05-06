@@ -4,6 +4,6 @@ pipeline test(task) {
   agent_loop(
     "do work",
     nil,
-    {provider: "mock", persistent: true, max_iterations: 1, done_sentinel: ""},
+    {provider: "mock", loop_until_done: true, max_iterations: 1, done_sentinel: ""},
   )
 }

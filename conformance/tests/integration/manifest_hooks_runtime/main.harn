@@ -22,7 +22,7 @@ pipeline default() {
     {
       provider: "mock",
       tools: registry,
-      persistent: true,
+      loop_until_done: true,
       max_iterations: 4,
       session_id: "manifest-hooks-runtime",
     },

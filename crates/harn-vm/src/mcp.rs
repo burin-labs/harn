@@ -118,6 +118,7 @@ pub struct VmMcpClientHandle {
     pub name: String,
     inner: Arc<Mutex<Option<McpClientInner>>>,
     last_roots: Arc<Mutex<Vec<McpRoot>>>,
+    pub(crate) initialize_result: Arc<Mutex<Option<serde_json::Value>>>,
 }
 
 impl std::fmt::Debug for VmMcpClientHandle {
@@ -932,6 +933,7 @@ async fn mcp_connect_stdio_impl(
             },
         )))),
         last_roots: Arc::new(Mutex::new(Vec::new())),
+        initialize_result: Arc::new(Mutex::new(None)),
     };
 
     initialize_client(&handle).await?;
@@ -959,6 +961,7 @@ async fn mcp_connect_http_impl(spec: &McpServerSpec) -> Result<VmMcpClientHandle
             get_stream_task: None,
         })))),
         last_roots: Arc::new(Mutex::new(Vec::new())),
+        initialize_result: Arc::new(Mutex::new(None)),
     };
 
     initialize_client(&handle).await?;
@@ -966,7 +969,7 @@ async fn mcp_connect_http_impl(spec: &McpServerSpec) -> Result<VmMcpClientHandle
 }
 
 async fn initialize_client(handle: &VmMcpClientHandle) -> Result<(), VmError> {
-    handle
+    let initialize_result = handle
         .call(
             "initialize",
             serde_json::json!({
@@ -985,6 +988,7 @@ async fn initialize_client(handle: &VmMcpClientHandle) -> Result<(), VmError> {
             }),
         )
         .await?;
+    *handle.initialize_result.lock().await = Some(initialize_result);
 
     handle
         .notify("notifications/initialized", serde_json::json!({}))
@@ -1330,6 +1334,30 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             VmValue::String(Rc::from(client.name.as_str())),
         );
         info.insert("connected".to_string(), VmValue::Bool(true));
+        let initialize = client
+            .initialize_result
+            .lock()
+            .await
+            .clone()
+            .unwrap_or(serde_json::Value::Null);
+        if !initialize.is_null() {
+            if let Some(instructions) = initialize
+                .get("instructions")
+                .or_else(|| {
+                    initialize
+                        .get("serverInfo")
+                        .and_then(|value| value.get("instructions"))
+                })
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.is_empty())
+            {
+                info.insert(
+                    "instructions".to_string(),
+                    VmValue::String(Rc::from(instructions)),
+                );
+            }
+            info.insert("initialize".to_string(), json_to_vm_value(&initialize));
+        }
         Ok(VmValue::Dict(Rc::new(info)))
     });
 
@@ -1938,6 +1966,7 @@ mod tests {
                         get_stream_task: None,
                     })))),
                     last_roots: Arc::new(Mutex::new(Vec::new())),
+                    initialize_result: Arc::new(Mutex::new(None)),
                 };
 
                 handle.notify_roots_list_changed_if_needed().await.unwrap();

@@ -33,7 +33,7 @@ pipeline test(task) {
       provider: "mock",
       tools: registry,
       tool_search: {mode: "client", name: "find_a_tool"},
-      persistent: true,
+      loop_until_done: true,
       max_iterations: 3,
     },
   )
@@ -103,7 +103,7 @@ pipeline test(task) {
       provider: "mock",
       tools: big,
       tool_search: {variant: "bm25", mode: "client", budget_tokens: 150},
-      persistent: true,
+      loop_until_done: true,
       max_iterations: 5,
     },
   )

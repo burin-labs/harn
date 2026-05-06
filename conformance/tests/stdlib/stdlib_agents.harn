@@ -6,7 +6,7 @@ pipeline default() {
     {
       name: "demo",
       model_tier: "mid",
-      persistent: false,
+      loop_until_done: false,
       act: {mode: "llm", context: context([section("brief", "Stay concise.", nil)], nil)},
       verify: {assert_text: "not present"},
       repair: {mode: "llm", model_tier: "frontier"},

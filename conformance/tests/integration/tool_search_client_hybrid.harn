@@ -1,0 +1,43 @@
+pipeline test(task) {
+  llm_mock_clear()
+  var registry = tool_registry()
+  registry = tool_define(registry, "anchor", "Always visible", {parameters: {}, handler: { _ -> "ok" }})
+  registry = tool_define(
+    registry,
+    "run_command",
+    "Execute a shell process",
+    {parameters: {argv: {type: "array"}}, defer_loading: true, handler: { _ -> "ran" }},
+  )
+  registry = tool_define(
+    registry,
+    "read_command_output",
+    "Read process output",
+    {parameters: {command_id: {type: "string"}}, defer_loading: true, handler: { _ -> "output" }},
+  )
+  llm_mock(
+    {
+      text: "searching",
+      tool_calls: [{id: "s1", name: "__harn_tool_search", arguments: {query: "run command"}}],
+    },
+  )
+  llm_mock({text: "<done>##DONE##</done>"})
+  let result = agent_loop(
+    "run a command",
+    nil,
+    {provider: "mock", tools: registry, tool_search: "hybrid", loop_until_done: true, max_iterations: 3},
+  )
+  let events = transcript_events(result?.transcript)
+  var saw_hybrid = false
+  var promoted_run = false
+  for ev in events {
+    if ev.kind == "tool_search_query" {
+      saw_hybrid = ev.metadata?.strategy == "hybrid"
+    }
+    if ev.kind == "tool_search_result" {
+      promoted_run = len(ev.metadata?.promoted ?? []) > 0 && ev.metadata.promoted[0] == "run_command"
+    }
+  }
+  assert(saw_hybrid, "query event records hybrid strategy")
+  assert(promoted_run, "hybrid promotes the intended command runner first")
+  log("tool_search_client_hybrid tests passed")
+}

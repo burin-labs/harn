@@ -218,7 +218,7 @@ let result = agent_loop(
   {
     provider: "mock",
     model: "gpt-5.4",
-    persistent: true,
+    loop_until_done: true,
     skills: skills,
   },
 )

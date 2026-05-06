@@ -1,0 +1,45 @@
+pipeline test(task) {
+  llm_mock_clear()
+  llm_mock({text: "<done>##DONE##</done>"})
+  agent_loop(
+    "finish quickly",
+    "Base system.",
+    {
+      provider: "mock",
+      loop_until_done: true,
+      max_iterations: 2,
+      timestamp_messages: true,
+      prompts: {["agent.loop_contract"]: {text: "CUSTOM LOOP CONTRACT {{ done_sentinel }}"}},
+    },
+  )
+  let calls = llm_mock_calls()
+  assert(contains(calls[0].system, "CUSTOM LOOP CONTRACT ##DONE##"), "prompt override rendered")
+  assert(!contains(calls[0].system, "Keep working until"), "default loop prompt was replaced")
+  assert(contains(calls[0].messages[0].content, "[harn timestamp:"), "message timestamp visible")
+  llm_mock_clear()
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "greet",
+    "Say hello.",
+    {handler: { args -> "hello " + args.name }, parameters: {name: {type: "string"}}},
+  )
+  llm_mock({text: "<user_response>done</user_response>\n<done>##DONE##</done>"})
+  agent_loop(
+    "finish with a tool contract",
+    "Base system.",
+    {
+      provider: "mock",
+      tools: tools,
+      tool_format: "text",
+      loop_until_done: true,
+      max_iterations: 1,
+      done_judge: nil,
+    },
+  )
+  let text_contract = llm_mock_calls()[0].system
+  assert(contains(text_contract, "name({ key: value })"), "text tool syntax is Harn-call shaped")
+  assert(contains(text_contract, "### greet"), "Harn-rendered tool listing included")
+  assert(!contains(text_contract, "{\"name\": \"tool_name\""), "legacy JSON tool syntax removed")
+  log("agent_prompt_overrides_and_timestamps tests passed")
+}

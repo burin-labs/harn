@@ -70,7 +70,7 @@ the "one-shot" call shape.
 | `agent_session_fork(src, dst?)` | `string` | Copies transcript, sets parent/child lineage, and does NOT copy subscribers. |
 | `agent_session_fork_at(src, keep_first, dst?)` | `string` | Forks then keeps only the first `keep_first` messages on the child. Records `branched_at_event_index`. |
 | `agent_session_trim(id, keep_last)` | `int` | Retains last `keep_last` messages. Returns kept count. |
-| `agent_session_compact(id, opts)` | `int` | Runs the LLM/truncate/observation-mask compactor. Unknown keys in `opts` error. |
+| `agent_session_compact(id, opts)` | `int` | Runs the LLM/truncate/observation-mask/custom compactor. Unknown keys in `opts` error. |
 | `agent_session_inject(id, message)` | `nil` | Appends a `{role, content, …}` message. Missing `role` errors. |
 | `agent_session_close(id)` | `nil` | Evicts immediately. |
 
@@ -87,6 +87,11 @@ Accepts any subset of these keys; anything else is a hard error:
 - `custom_compactor` (closure)
 - `mask_callback` (closure)
 - `compress_callback` (closure)
+
+Use `compact_strategy: "custom"` with `custom_compactor` to replace the
+compaction scheme completely. `mask_callback` and `compress_callback` customize
+the built-in observation-mask path without changing the rest of the session
+lifecycle.
 
 ## Storage model
 

@@ -147,6 +147,25 @@ fn __agent_host_read_file_request(args, options) {
   return req
 }
 
+fn __agent_host_list_directory_request(args, options) {
+  var req = {path: __agent_host_resolve_path(args.path ?? ".", options)}
+  if args?.include_hidden != nil {
+    req = req + {include_hidden: args.include_hidden}
+  }
+  if args?.max_entries != nil {
+    req = req + {max_entries: args.max_entries}
+  }
+  return req
+}
+
+fn __agent_host_file_outline_request(args, options) {
+  var req = {path: __agent_host_resolve_path(args.path, options)}
+  if args?.max_depth != nil {
+    req = req + {max_depth: args.max_depth}
+  }
+  return req
+}
+
 fn __agent_host_search_request(args, options) {
   var req = {pattern: args.pattern}
   let search_path = args?.path ?? "."
@@ -353,6 +372,7 @@ fn __agent_host_command_request(args, options) {
 
 fn __agent_host_command_request_common(base_request, args, options) {
   let opts = __agent_host_options(options)
+  let behavior = opts?.command_behavior ?? opts?.run_command_behavior ?? {}
   var req = base_request
   let timeout = args?.timeout_ms ?? opts?.timeout_ms
   if timeout != nil {
@@ -384,6 +404,12 @@ fn __agent_host_command_request_common(base_request, args, options) {
   }
   if len(capture.keys()) > 0 {
     req = req + {capture: capture}
+  }
+  for key in ["background", "background_after_ms", "progress_interval_ms", "progress_max_inline_bytes"] {
+    let value = args?[key] ?? behavior[key]
+    if value != nil {
+      req = req + {[key]: value}
+    }
   }
   return req
 }
@@ -450,9 +476,7 @@ fn __agent_host_command_result_readers(options, read_name, tail_name) {
   return readers
 }
 
-/**
- * agent_read_tools adds root-scoped read_file, read_file_tail, search_files, and git_inspect tools.
- */
+/** agent_read_tools adds root-scoped read, directory, outline, search, and git inspection tools. */
 pub fn agent_read_tools(registry = nil, options = nil) {
   let opts = __agent_host_options(options)
   let _enabled = hostlib_enable("tools:deterministic")
@@ -502,6 +526,62 @@ pub fn agent_read_tools(registry = nil, options = nil) {
           returns: {type: "object"},
           annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
           handler: { args -> __agent_host_render(hostlib_tools_read_file(__agent_host_tail_file_request(args, opts)), opts, key) },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "list_directory", "read") {
+    let key = "list_directory"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "list_directory"),
+      __agent_host_description(
+        opts,
+        key,
+        "List entries in a directory under the configured root. Use this before guessing paths; prefer read_file once you know the exact file.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            path: {type: "string", required: false},
+            include_hidden: {type: "boolean", required: false},
+            max_entries: {type: "integer", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
+          handler: { args -> __agent_host_render(
+            hostlib_tools_list_directory(__agent_host_list_directory_request(args, opts)),
+            opts,
+            key,
+          ) },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "get_file_outline", "read") {
+    let key = "get_file_outline"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "get_file_outline"),
+      __agent_host_description(
+        opts,
+        key,
+        "Return a structural outline of a source file under the configured root. Use this to inspect symbols before reading or editing large files.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {path: {type: "string"}, max_depth: {type: "integer", required: false}},
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
+          handler: { args -> __agent_host_render(
+            hostlib_tools_get_file_outline(__agent_host_file_outline_request(args, opts)),
+            opts,
+            key,
+          ) },
         },
       ),
     )
@@ -590,7 +670,7 @@ pub fn agent_command_tools(registry = nil, options = nil) {
       __agent_host_description(
         opts,
         key,
-        "Run one argv-based command from the configured cwd. Pass argv as an array of strings. Output is capped inline; use the returned command_id with the command-output reader tools for full stdout/stderr.",
+        "Run one argv-based command from the configured cwd. Pass argv as an array of strings. Output is capped inline; use the returned command_id with the command-output reader tools for full stdout/stderr. Background progress can be enabled per call or through agent_command_tools command_behavior.",
       ),
       __agent_host_config(
         opts,
@@ -609,6 +689,10 @@ pub fn agent_command_tools(registry = nil, options = nil) {
             interactive: {type: "boolean", required: false},
             capture: {type: "object", required: false},
             max_inline_bytes: {type: "integer", required: false},
+            background: {type: "boolean", required: false},
+            background_after_ms: {type: "integer", required: false},
+            progress_interval_ms: {type: "integer", required: false},
+            progress_max_inline_bytes: {type: "integer", required: false},
           },
           returns: {type: "object"},
           annotations: __agent_host_annotations(

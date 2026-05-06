@@ -107,7 +107,7 @@ pipeline test(task) {
       provider: "mock",
       tools: list_tools(),
       tool_format: "native",
-      persistent: true,
+      loop_until_done: true,
       max_iterations: 3,
       post_turn_callback: { info ->
         if len(info?.successful_tool_names ?? []) > 0 {
@@ -139,7 +139,7 @@ pipeline test(task) {
       provider: "mock",
       tools: list_tools(),
       tool_format: "native",
-      persistent: true,
+      loop_until_done: true,
       max_iterations: 3,
       max_nudges: 0,
       post_turn_callback: { info ->
@@ -147,7 +147,7 @@ pipeline test(task) {
           return {
             message: "finalize without tools",
             llm_options: {tool_choice: "none", tools: final_tools},
-            next_options: {tools: final_tools, persistent: false, max_nudges: 0},
+            next_options: {tools: final_tools, loop_until_done: false, max_nudges: 0},
           }
         }
         return nil

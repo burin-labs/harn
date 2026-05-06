@@ -542,7 +542,7 @@ pipeline default(task) {
     "You are a helpful file assistant.",
     {
       tools: tools,
-      persistent: true,
+      loop_until_done: true,
       max_iterations: 10
     }
   )

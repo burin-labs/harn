@@ -34,14 +34,17 @@ fn __agent_turn_options(options) {
   if contains(opts.keys(), "done_judge") && __false_or_nil(opts?.done_judge) {
     throw "agent_turn: done_judge is mandatory; pass a dict, true, or omit it"
   }
-  if contains(opts.keys(), "persistent") && __false_or_nil(opts?.persistent) {
-    throw "agent_turn: persistent completion looping is required; pass true or omit it"
+  if contains(opts.keys(), "persistent") {
+    throw "agent_turn: `persistent` was removed; use `loop_until_done` for completion looping"
+  }
+  if contains(opts.keys(), "loop_until_done") && __false_or_nil(opts?.loop_until_done) {
+    throw "agent_turn: completion looping is required; pass loop_until_done: true or omit it"
   }
   if !contains(opts.keys(), "done_judge") {
     opts = opts + {done_judge: true}
   }
-  if !contains(opts.keys(), "persistent") {
-    opts = opts + {persistent: true}
+  if !contains(opts.keys(), "loop_until_done") {
+    opts = opts + {loop_until_done: true}
   }
   let loop_opts = agent_loop_options(opts)
   if loop_opts?.done_sentinel == nil && !__agent_turn_native_natural_completion(loop_opts) {

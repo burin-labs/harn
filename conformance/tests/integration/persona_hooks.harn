@@ -29,7 +29,7 @@ fn admin_merge(ctx) -> string {
       tools: audit_tools(),
       tool_format: "native",
       max_iterations: 2,
-      persistent: true,
+      loop_until_done: true,
       session_id: "persona-hooks-composition",
     },
   )

@@ -34,7 +34,7 @@ pub fn workflow_options(config) {
       cache: config?.cache,
       timeout: config?.timeout,
       structural_experiment: config?.structural_experiment,
-      persistent: config?.persistent,
+      loop_until_done: config?.loop_until_done,
       max_iterations: config?.max_iterations,
       max_nudges: config?.max_nudges,
       nudge: config?.nudge,
@@ -84,10 +84,14 @@ pub fn run_stage(task, config) {
   if config?.mode == "completion" {
     return llm_completion(prompt?.prompt, config?.suffix, prompt?.system, opts)
   }
-  if config?.mode == "llm" || !config?.persistent {
+  if config?.mode == "llm" || !config?.loop_until_done {
     return llm_call(prompt?.prompt, prompt?.system, opts)
   }
-  return agent_loop(prompt?.prompt, prompt?.system, opts + {persistent: config?.persistent ?? true})
+  return agent_loop(
+    prompt?.prompt,
+    prompt?.system,
+    opts + {loop_until_done: config?.loop_until_done ?? true},
+  )
 }
 
 /** verify_command. */

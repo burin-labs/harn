@@ -15,7 +15,9 @@ This keeps the tool contract explicit:
 ## Pattern
 
 Build a registry with `tool_define(...)`, give each tool a precise input and
-output shape, and keep the handler body purely stdlib:
+output shape, and keep the handler body purely stdlib. For repeated
+declarative specs, import `tool_define_many(...)` or `tool_registry_from(...)`
+from `std/tools`.
 
 ```harn
 import "std/vision"
@@ -107,7 +109,7 @@ let result = agent_loop(
   "Read the screenshot, hash the extracted order id, and summarize the UI state.",
   "Use deterministic tools first. Prefer pure stdlib tools over free-form reasoning when possible.",
   {
-    persistent: true,
+    loop_until_done: true,
     tools: deterministic_tools(),
     max_iterations: 12,
   }
@@ -148,6 +150,11 @@ import { agent_command_tools, agent_host_tools } from "std/agent/host_tools"
 let tools = agent_command_tools(nil, {
   cwd: repo_root,
   max_inline_bytes: 12000,
+  command_behavior: {
+    background_after_ms: 750,
+    progress_interval_ms: 3000,
+    progress_max_inline_bytes: 1600,
+  },
   allow_argv_prefixes: [
     ["git", "status"],
     ["git", "log"],
@@ -166,15 +173,16 @@ agent_loop(task, system, {
 `agent_command_tools(...)` installs:
 
 - `run_command` — argv-first process execution through
-  `hostlib_tools_run_command`
+  `hostlib_tools_run_command`; can return an immediate progress snapshot while
+  the command continues in the background
 - `read_command_output` — range-read stdout, stderr, or combined artifacts by
   `command_id`, `handle_id`, or artifact path
 - `read_command_output_tail` — read the last bytes of command output without
   requiring the model to calculate offsets
 
 `agent_read_tools(...)` installs root-scoped `read_file`, `read_file_tail`,
-`search_files`, and read-only `git_inspect`. `agent_host_tools(...)` composes
-both groups.
+`list_directory`, `get_file_outline`, `search_files`, and read-only
+`git_inspect`. `agent_host_tools(...)` composes both groups.
 
 The helpers are deliberately configurable so harness authors can keep their
 script surface product-specific without duplicating implementation details:
@@ -219,6 +227,7 @@ Useful options:
 | `descriptions` | Override model-facing descriptions per logical tool. |
 | `enabled_tools`, `disabled_tools` | Include logical keys (`run_command`) or groups (`read`, `command`). |
 | `max_inline_bytes` | Cap inline command output. If the model asks for a larger inline capture, the helper clamps it to this ceiling so full output still flows through command-output artifact readers. |
+| `command_behavior` / `run_command_behavior` | Defaults for every generated `run_command` request. `background_after_ms` gives the command a short foreground startup window, then returns `{status: "running", stdout, stderr, output_path, ...}` while progress events continue in the session. `progress_interval_ms` controls later feedback cadence and `progress_max_inline_bytes` caps snippets. |
 | `search_max_matches` / `max_search_matches` | Default `search_files.max_matches` when the model omits one; callers can still request a different cap per call. |
 | `exclude_globs` / `search_exclude_globs` | Baseline exclusions for `search_files` using root-relative globs. Tool-call `exclude_globs` are merged with these defaults, not substituted for them. |
 | `allow_argv_prefixes` | Deny `run_command` calls unless `argv` starts with a listed string or list prefix. |
@@ -275,6 +284,7 @@ Accepted shapes:
 | `tool_search: true` | Default: `bm25` variant, mode `auto`. |
 | `tool_search: "bm25"` | Natural-language queries. |
 | `tool_search: "regex"` | Python-regex queries. |
+| `tool_search: "hybrid"` | Client-mode BM25 plus field-weighted ranking. |
 | `tool_search: false` | Explicit off (same as omitting). |
 | `tool_search: {variant, mode, strategy, always_loaded, budget_tokens, name, include_stub_listing}` | Explicit dict form. |
 
@@ -365,8 +375,9 @@ Strategies (client mode only):
 |---|---|---|
 | `"bm25"` *(default)* | VM | Tokenized BM25 over `name + description + param text`. Matches `open_file` from query `open file`. |
 | `"regex"` | VM | Case-insensitive Rust-regex over the same corpus. No backreferences, no lookaround. |
-| `"semantic"` | Host (bridge) | Delegated to the host via `tool_search/query` so integrators can wire embeddings without Harn pulling in ML crates. |
-| `"host"` | Host (bridge) | Pure host-side; the VM round-trips the query and promotes whatever the host returns. |
+| `"hybrid"` | VM | Reciprocal-rank fusion over BM25 and field-weighted name/description/parameter matches. Useful for coding-agent tools where exact names like `run_command` should beat broad prose matches. |
+| closure | Harn | Called as `strategy(query, deferred_tools, state)`; return a list of tool names, a JSON string, or `{tool_names: [...]}`. |
+| `{handler: closure, name?: string}` | Harn | Named custom searcher with the same return shapes as a closure. Use this to wire embeddings, LLM rerankers, trigram indexes, project-specific ontologies, or host calls from ordinary Harn code. |
 
 Extra client-mode knobs:
 
