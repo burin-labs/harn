@@ -6,6 +6,26 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## v0.7.59
+
+### Added
+
+- **Categorical timing breakdown for `harn run`.** Added `--profile` support that
+  reports categorical performance metrics, including a new `profile` crate and
+  CLI integration for detailed runtime insights.
+- **`pr-finish-pass` skill and slash command.** Introduced a new skill and
+  associated slash commands for Claude Code and Codex to streamline PR
+  finishing workflows.
+- **Agent loop policy scoping to tool dispatch.** Refined the Harn agent loop
+  to scope policies specifically to tool dispatch, adding conformance tests
+  for loop unwinding, prefill feedback, and worker policies.
+
+### Changed
+
+- **Agent loop policy enforcement.** Updated the Harn stdlib and VM orchestration
+  to enforce agent loop policies during tool dispatch, improving safety and
+  control over agent behavior.
+
 ## v0.7.58
 
 ### Added
