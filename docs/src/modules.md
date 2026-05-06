@@ -80,10 +80,10 @@ code or inside any pipeline.
 `import "std/..."` is only needed for the Harn-written helper modules
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/path`, `std/vision`, `std/context`, `std/agent_state`, `std/agents`,
-`std/runtime`, `std/review`, `std/experiments`, `std/project`, `std/memory`,
-`std/prompt_library`, `std/monitors`, `std/worktree`, `std/checkpoint`,
-`std/personas/prelude`, `std/connectors/shared`, and provider-specific
-`std/connectors/...` modules).
+`std/runtime`, `std/command`, `std/review`, `std/experiments`,
+`std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
+`std/worktree`, `std/checkpoint`, `std/personas/prelude`,
+`std/connectors/shared`, and provider-specific `std/connectors/...` modules).
 These add layered
 utilities on top of the core builtins; the core builtins themselves are
 always available.
@@ -408,6 +408,62 @@ Generic host/runtime helpers that are useful across many hosts:
 | `interaction_ask(question)` | Ask the host/user a question through the typed interaction contract |
 | `interaction_ask_with_kind(question, kind)` | Ask the host/user a question with an explicit interaction kind |
 | `record_run_metadata(run, workflow_name)` | Persist normalized workflow run metadata through the runtime contract |
+
+### std/command
+
+Deterministic command-runner helpers for Harn scripts and harnesses. These use
+the same hostlib command runner and artifact reader substrate as model-facing
+host tools, but return script-friendly step records with retry bookkeeping and
+compact recovery context:
+
+| Function | Description |
+|---|---|
+| `command_run(spec, options?)` | Run an argv-first command through `hostlib_tools_run_command` and return normalized success, status, output, artifact, and timing fields |
+| `command_output_range(locator, options?)` | Range-read a command output artifact by command result, `command_id`, `handle_id`, or artifact path |
+| `command_output_tail(locator, options?)` | Read the last bytes of a command output artifact without calculating offsets |
+| `command_step(name, spec, options?)` | Run one named command and return a normalized step record with artifacts, tail text, optional classification, optional recovery hint, and attempts |
+| `command_step_with_retry(name, spec, options?)` | Explicit alias for `command_step` with a retry policy in options |
+| `command_steps_append(steps, name, spec, options?)` | Run a step, append it to a step list, and return `{steps, step, success, status, exit_code}` |
+| `command_steps_failed(steps, options?)` | Return whether any step failed and was not caller-marked recovered |
+| `command_last_failed_step(steps, options?)` | Return the last unrecovered failed step, or `nil` |
+| `command_step_ref(step, options?)` | Return compact agent/recovery context with command identity, status, artifacts, classification, recovery hint, and capped tail |
+
+`spec` is either an argv list, such as `["git", "status", "--short"]`, or a
+dict with `argv`, `cwd`, `env`, `env_mode`, `stdin`, `timeout_ms`, `capture`,
+and `max_inline_bytes`. Shell execution is disabled unless the spec explicitly
+sets `{mode: "shell", command: "...", shell_id: ...}` or supplies a host shell
+object.
+
+Retry and classification stay generic. Harnesses provide domain-specific
+closures instead of teaching stdlib about a release, repository, package
+manager, or host:
+
+```harn,ignore
+import { command_step } from "std/command"
+
+let step = command_step("verify package", ["cargo", "test", "-p", "harn-vm"], {
+  cwd: repo_root,
+  capture: {max_inline_bytes: 12000},
+  tail_bytes: 8000,
+  retry: {
+    max_attempts: 2,
+    delay_ms: 0,
+    should_retry: { step, _attempt -> return step.exit_code == 101 },
+  },
+  classify: { step ->
+    if contains(step.failure_tail ?? "", "permission denied") {
+      return {kind: "permission", retryable: false}
+    }
+    return nil
+  },
+  recovery_hint: { step ->
+    if step?.classification?.kind == "permission" {
+      return "Check credentials or filesystem permissions, then rerun the same step."
+    }
+    return nil
+  },
+})
+```
 
 ### std/review
 

@@ -184,6 +184,14 @@ agent_loop(task, system, {
 `list_directory`, `get_file_outline`, `search_files`, and read-only
 `git_inspect`. `agent_host_tools(...)` composes both groups.
 
+Use `std/command` for deterministic script-side harness work, such as "run this
+named step, retry according to this policy, keep a normalized step record, and
+hand a compact failure reference to a recovery agent." Use
+`std/agent/host_tools.agent_command_tools(...)` when the command runner itself
+should be exposed as model-facing tools inside an agent loop. Both layers share
+`hostlib_tools_run_command` and `hostlib_tools_read_command_output`, so command
+artifacts, IDs, output paths, and range readers behave the same.
+
 The helpers are deliberately configurable so harness authors can keep their
 script surface product-specific without duplicating implementation details:
 
