@@ -1129,6 +1129,30 @@ fn execution_policy_rejects_process_exec_when_read_only() {
 }
 
 #[test]
+fn execution_policy_allows_llm_call_under_read_only_side_effect_ceiling() {
+    push_execution_policy(CapabilityPolicy {
+        side_effect_level: Some("read_only".to_string()),
+        capabilities: BTreeMap::from([("llm".to_string(), vec!["call".to_string()])]),
+        ..Default::default()
+    });
+    let result = enforce_current_policy_for_builtin("llm_call", &[]);
+    pop_execution_policy();
+    assert!(result.is_ok());
+}
+
+#[test]
+fn execution_policy_rejects_llm_call_without_llm_capability() {
+    push_execution_policy(CapabilityPolicy {
+        side_effect_level: Some("network".to_string()),
+        capabilities: BTreeMap::from([("workspace".to_string(), vec!["read_text".to_string()])]),
+        ..Default::default()
+    });
+    let result = enforce_current_policy_for_builtin("llm_call", &[]);
+    pop_execution_policy();
+    assert!(result.is_err());
+}
+
+#[test]
 fn reset_thread_local_state_clears_execution_policy_stack() {
     push_execution_policy(CapabilityPolicy {
         side_effect_level: Some("read_only".to_string()),
