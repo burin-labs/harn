@@ -1,0 +1,178 @@
+import { with_audit_receipt } from "std/personas/prelude"
+import { prompt_fragment, prompt_library, prompt_library_payload } from "std/prompt_library"
+import {
+  assert_golden_transcript,
+  assert_receipt_field,
+  assert_step_emitted,
+  assert_step_received,
+  assert_steps_ran,
+  step_assertions_begin,
+  step_assertions_end,
+} from "std/testing"
+
+fn release_receipt(step, result) {
+  let wrapped = with_audit_receipt(
+    fn() { return result },
+    {persona: "release_captain", step: step, started_at: "2026-01-01T00:00:00Z"},
+  )
+  return wrapped()
+}
+
+@persona(name: "release_captain")
+fn release_captain(fixture) {
+  let branch = setup_branch(fixture)
+  let stash = stash_dirty_worktree(branch.result)
+  let changelog = analyze_changelog(stash.result)
+  let notes = rewrite_release_notes(changelog.result)
+  let recovered = recover_shell_error({step: "cargo publish --dry-run", stderr: "network unavailable"})
+  let pr = plan_release_pr(notes.result + {recovery: recovered.result})
+  let merge = enable_auto_merge(pr.result)
+  return {
+    branch: branch,
+    stash: stash,
+    changelog: changelog,
+    notes: notes,
+    recovery: recovered,
+    pr: pr,
+    auto_merge: merge,
+  }
+}
+
+@step(name: "setup_branch")
+fn setup_branch(fixture) {
+  return release_receipt(
+    "setup_branch",
+    {
+      repo: fixture.repo,
+      from: fixture.starting_branch,
+      to: fixture.release_branch,
+      mode: "fake_git",
+      side_effect: "planned",
+    },
+  )
+}
+
+@step(name: "stash_dirty_worktree")
+fn stash_dirty_worktree(branch) {
+  return release_receipt(
+    "stash_dirty_worktree",
+    {stashed: true, branch: branch.to, unstash_policy: "restore_after_plan"},
+  )
+}
+
+@step(name: "analyze_changelog")
+fn analyze_changelog(state) {
+  return release_receipt(
+    "analyze_changelog",
+    {
+      branch: state.branch,
+      latest_tag: "v0.7.55",
+      missing_entries: ["fix release harness fixture ingest"],
+      deterministic: true,
+    },
+  )
+}
+
+@step(name: "rewrite_release_notes")
+fn rewrite_release_notes(changelog) {
+  let library = prompt_library(
+    [
+      prompt_fragment(
+        "release-note-rewrite",
+        "Rewrite {{count}} changelog entries for maintainers.",
+        {path: "prompts/release-note-rewrite.harn.prompt", provenance: "release-harness-fixture"},
+      ),
+    ],
+  )
+  let payload = prompt_library_payload(library, "release-note-rewrite", {count: len(changelog.missing_entries)})
+  return release_receipt(
+    "rewrite_release_notes",
+    {text: payload.text, prompt: payload, agentic_checkpoint: true, review_required: true},
+  )
+}
+
+@step(name: "recover_shell_error")
+fn recover_shell_error(error) {
+  return release_receipt(
+    "recover_shell_error",
+    {
+      failed_step: error.step,
+      stderr_digest: "sha256:" + sha256(error.stderr),
+      fed_back_to_model_context: true,
+      advice: "retry after network recovers; do not tag or publish in shadow mode",
+    },
+  )
+}
+
+@step(name: "plan_release_pr")
+fn plan_release_pr(notes) {
+  return release_receipt(
+    "plan_release_pr",
+    {
+      title: "Release v0.7.56",
+      body: notes.text,
+      auto_merge_requested: true,
+      safe_side_effects: ["create_pr_plan"],
+    },
+  )
+}
+
+@step(name: "enable_auto_merge")
+fn enable_auto_merge(pr) {
+  return release_receipt(
+    "enable_auto_merge",
+    {title: pr.title, status: "planned", live_github_side_effects: false},
+  )
+}
+
+pipeline test() {
+  step_assertions_begin("release_captain")
+  let result = release_captain(
+    {repo: "burin-labs/harn", starting_branch: "feature/release", release_branch: "release/0.7.x"},
+  )
+  assert_steps_ran(
+    [
+      "setup_branch",
+      "stash_dirty_worktree",
+      "analyze_changelog",
+      "rewrite_release_notes",
+      "recover_shell_error",
+      "plan_release_pr",
+      "enable_auto_merge",
+    ],
+  )
+  assert_step_received(
+    "setup_branch",
+    { event -> event.args[0].starting_branch == "feature/release" },
+  )
+  assert_step_emitted(
+    "rewrite_release_notes",
+    { event -> event.output.result.prompt.provenance == "release-harness-fixture" },
+  )
+  assert_step_emitted(
+    "recover_shell_error",
+    { event -> event.output.result.fed_back_to_model_context },
+  )
+  assert_receipt_field(result.auto_merge.receipt, "/status", "success")
+  assert_golden_transcript(
+    {
+      persona: "release_captain",
+      steps: [
+        {name: "setup_branch", elapsed_ms: "<ms>"},
+        {name: "rewrite_release_notes", payload: {prompt: {provenance: "release-harness-fixture"}}},
+        {name: "enable_auto_merge", payload: {live_github_side_effects: false}},
+      ],
+    },
+    {
+      persona: "release_captain",
+      steps: [
+        {name: "setup_branch", elapsed_ms: 12, extra: "ignored"},
+        {name: "rewrite_release_notes", payload: result.notes.result},
+        {name: "enable_auto_merge", payload: result.auto_merge.result},
+      ],
+    },
+  )
+  step_assertions_end()
+  println("persona_steel_thread release")
+  println(result.pr.result.auto_merge_requested)
+}

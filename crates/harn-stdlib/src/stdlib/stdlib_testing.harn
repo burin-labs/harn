@@ -1,4 +1,6 @@
 /** std/testing — helpers for writing Harn tests. */
+var __testing_step_events = []
+
 fn params_subset_match(expected, actual) {
   if expected == nil {
     return true
@@ -73,7 +75,7 @@ pub fn host_was_called(cap: string, op: string, expected_params) -> bool {
 }
 
 /** assert_host_called. */
-pub fn assert_host_called(cap: string, op: string, params, message) {
+pub fn assert_host_called(cap: string, op: string, params = nil, message = nil) {
   if host_was_called(cap, op, params) {
     return nil
   }
@@ -82,14 +84,23 @@ pub fn assert_host_called(cap: string, op: string, params, message) {
   } else {
     "Expected host call " + cap + "." + op + " with params " + to_string(params) + " to be recorded"
   }
-  return assert(false, message ?? default_message)
+  require false, message ?? default_message
+  return nil
 }
 
 /** assert_host_call_count. */
-pub fn assert_host_call_count(expected_count: int, cap: string, op: string, message) {
+pub fn assert_host_call_count(expected_count: int, cap: string, op: string, message = nil) {
   let actual_count = host_call_count_for(cap, op)
   let default_message = "Expected " + to_string(expected_count) + " host calls, got " + to_string(actual_count)
-  return assert_eq(actual_count, expected_count, message ?? default_message)
+  require actual_count == expected_count, message ?? default_message
+  return actual_count
+}
+
+/** assert_no_host_calls. */
+pub fn assert_no_host_calls(message = nil) {
+  let actual_count = host_call_count()
+  require actual_count == 0, message ?? "Expected no host calls, got " + to_string(actual_count)
+  return actual_count
 }
 
 /**
@@ -139,6 +150,107 @@ pub fn with_host_mocks(mocks, body) {
     host_mock_pop_scope()
     throw e
   }
+}
+
+fn __testing_is_callable(value) -> bool {
+  let kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __testing_step_event_record(ctx) {
+  var record = {
+    event: ctx?.event,
+    target: ctx?.target,
+    persona: ctx?.persona,
+    step_name: ctx?.step?.name,
+    function: ctx?.step?.function,
+    args: ctx?.step?.args ?? [],
+  }
+  if ctx?.output != nil {
+    record = record + {output: ctx.output}
+  }
+  return record
+}
+
+fn __testing_step_events_for(kind) {
+  var out = []
+  for event in __testing_step_events {
+    if event.event == kind {
+      out = out.push(event)
+    }
+  }
+  return out
+}
+
+fn __testing_event_matches(candidate, predicate) -> bool {
+  if predicate == nil {
+    return true
+  }
+  if __testing_is_callable(predicate) {
+    return predicate(candidate)
+  }
+  if type_of(predicate) == "dict" {
+    return params_subset_match(predicate, candidate)
+  }
+  return candidate == predicate
+}
+
+fn __testing_handoff_target_matches(handoff, target) -> bool {
+  if target == nil {
+    return true
+  }
+  let resolved = handoff?.target_persona_or_human ?? {}
+  return resolved?.id == target
+    || resolved?.label == target
+    || resolved?.kind == target
+    || handoff?.target == target
+    || handoff?.target_persona == target
+}
+
+fn __testing_golden_match(expected, actual) -> bool {
+  if expected == "<ms>" {
+    let kind = type_of(actual)
+    return kind == "int" || kind == "float"
+      || (kind == "string" && len(regex_captures("^[0-9]+$", actual)) == 1)
+  }
+  if expected == "<uuid>" {
+    return type_of(actual) == "string"
+      && len(
+      regex_captures(
+        "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        actual,
+      ),
+    )
+      == 1
+  }
+  if expected == "<any>" {
+    return actual != nil
+  }
+  if type_of(expected) != type_of(actual) {
+    return false
+  }
+  if type_of(expected) == "dict" {
+    for entry in entries(expected) {
+      if !__testing_golden_match(entry.value, actual[entry.key]) {
+        return false
+      }
+    }
+    return true
+  }
+  if type_of(expected) == "list" {
+    if len(expected) != len(actual) {
+      return false
+    }
+    var idx = 0
+    while idx < len(expected) {
+      if !__testing_golden_match(expected[idx], actual[idx]) {
+        return false
+      }
+      idx += 1
+    }
+    return true
+  }
+  return expected == actual
 }
 
 /** llm_calls. Returns the LLM mock call log for the current scope. */
@@ -214,4 +326,121 @@ pub fn with_mocks(config, body) {
     host_mock_pop_scope()
     throw e
   }
+}
+
+/** Clear recorded persona step events. */
+pub fn step_events_clear() {
+  __testing_step_events = []
+  return nil
+}
+
+/** Return recorded PreStep/PostStep payloads captured by step_assertions_begin. */
+pub fn step_events() {
+  return __testing_step_events
+}
+
+/**
+ * Start recording persona step hook payloads for Harn-level tests.
+ *
+ * This resets existing persona hooks because the helper owns the hook
+ * registrations during a conformance fixture. Register any fixture-specific
+ * hooks after calling this helper.
+ */
+pub fn step_assertions_begin(persona_pattern = "*") {
+  clear_persona_hooks()
+  step_events_clear()
+  register_persona_hook(
+    persona_pattern,
+    "PreStep",
+    { ctx ->
+      __testing_step_events = __testing_step_events.push(__testing_step_event_record(ctx))
+      return nil
+    },
+  )
+  register_persona_hook(
+    persona_pattern,
+    "PostStep",
+    { ctx ->
+      __testing_step_events = __testing_step_events.push(__testing_step_event_record(ctx))
+      return nil
+    },
+  )
+  return nil
+}
+
+/** Stop recording persona step hook payloads. */
+pub fn step_assertions_end() {
+  clear_persona_hooks()
+  return nil
+}
+
+/** Assert the exact ordered list of @step names that ran. */
+pub fn assert_steps_ran(expected_names, message = nil) {
+  var actual = []
+  for event in __testing_step_events_for("PreStep") {
+    actual = actual.push(event.step_name)
+  }
+  for name in expected_names {
+    require contains(actual, name), message ?? "step '" + name + "' not callable: not annotated `@step`"
+  }
+  require actual == expected_names, message ?? "step order mismatch"
+  return actual
+}
+
+/** Assert that a step received an input matching a closure, dict subset, or value. */
+pub fn assert_step_received(step_name, predicate = nil, message = nil) {
+  for event in __testing_step_events_for("PreStep") {
+    if event.step_name == step_name && __testing_event_matches(event, predicate) {
+      return event
+    }
+  }
+  require false, message ?? "step '" + step_name + "' did not receive the expected input"
+  return nil
+}
+
+/** Assert that a step emitted an output matching a closure, dict subset, or value. */
+pub fn assert_step_emitted(step_name, predicate = nil, message = nil) {
+  for event in __testing_step_events_for("PostStep") {
+    if event.step_name == step_name && __testing_event_matches(event, predicate) {
+      return event
+    }
+  }
+  require false, message ?? "step '" + step_name + "' did not emit the expected output"
+  return nil
+}
+
+/** Assert that a handoff list or run record contains a handoff of kind and optional target. */
+pub fn assert_handoff_emitted(source, handoff_kind, target = nil) {
+  let handoffs = source?.handoffs ?? source
+  for item in handoffs ?? [] {
+    if item?.kind == handoff_kind && __testing_handoff_target_matches(item, target) {
+      return item
+    }
+  }
+  let suffix = if target == nil {
+    ""
+  } else {
+    " to " + to_string(target)
+  }
+  require false, "handoff '" + handoff_kind + "'" + suffix + " was not emitted"
+  return nil
+}
+
+/** Assert an RFC 6901 JSON Pointer field inside a receipt or envelope. */
+pub fn assert_receipt_field(receipt, path, value) {
+  let actual = json_pointer(receipt, path)
+  require actual == value, "receipt field " + path + " mismatch"
+  return actual
+}
+
+/**
+ * Assert a structured golden against an actual transcript-like value.
+ *
+ * The expected value may contain `<ms>`, `<uuid>`, or `<any>` sentinel strings.
+ * Dict expected values are subset matches so tests can preserve the payload
+ * fields that matter without pinning every implementation detail.
+ */
+pub fn assert_golden_transcript(expected, actual, message = nil) {
+  require __testing_golden_match(expected, actual), message ?? "golden transcript mismatch"
+  return actual
 }

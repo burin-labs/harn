@@ -1,6 +1,7 @@
 import {
   assert_host_call_count,
   assert_host_called,
+  assert_no_host_calls,
   clear_host_mocks,
   host_call_count,
   host_call_count_for,
@@ -14,6 +15,7 @@ import {
 
 pipeline test(task) {
   clear_host_mocks()
+  assert_no_host_calls()
   mock_host_result("workspace", "read_text", "hello", {path: "note.txt"})
   mock_host_response(
     "project",
@@ -30,12 +32,12 @@ pipeline test(task) {
   assert_eq(facts?.value, "facts")
   assert(is_err(denied))
   assert(host_was_called("workspace", "read_text", {path: "note.txt"}))
-  assert_host_called("project", "metadata_get", {namespace: "facts"}, nil)
+  assert_host_called("project", "metadata_get", {namespace: "facts"})
   assert_eq(host_call_count(), 3)
   assert_eq(host_call_count_for("project", "metadata_get"), 1)
   assert_eq(host_call_count_for("project", "metadata_set"), 1)
   assert_eq(len(host_calls()), 3)
   assert_eq(len(host_calls_for("project", "metadata_get")), 1)
-  assert_host_call_count(1, "workspace", "read_text", nil)
+  assert_host_call_count(1, "workspace", "read_text")
   println("ok")
 }
