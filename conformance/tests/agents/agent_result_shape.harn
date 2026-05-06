@@ -1,12 +1,16 @@
-// Asserts the namespaced `agent_loop` result shape introduced in
-// burin-labs/harn#532. The flat keys (`iterations`, `duration_ms`,
-// `tools_used`, `successful_tools`, `rejected_tools`, `tool_calling_mode`)
-// were removed; callers read them via `result.llm.*` and `result.tools.*`.
+/**
+ * Asserts the namespaced `agent_loop` result shape introduced in
+ * burin-labs/harn#532. The flat keys (`iterations`, `duration_ms`,
+ * `tools_used`, `successful_tools`, `rejected_tools`, `tool_calling_mode`)
+ * were removed; callers read them via `result.llm.*` and `result.tools.*`.
+ */
 pipeline test(task) {
+  llm_mock_clear()
+  llm_mock({text: "still working"})
   let result = agent_loop(
     "Just keep replying",
     "You are helpful",
-    {provider: "mock", persistent: true, max_iterations: 1, max_nudges: 1},
+    {provider: "mock", persistent: true, done_sentinel: "##DONE##", max_iterations: 1, max_nudges: 1},
   )
   println(result.status == "budget_exhausted")
   println(type_of(result.llm) == "dict")
