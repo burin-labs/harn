@@ -1326,6 +1326,13 @@ let result = try { host_call("project.scan", {}) }
 assert(is_err(result))
 ```
 
+`std/testing` also includes persona steel-thread assertions:
+`step_assertions_begin`, `step_events`, `assert_steps_ran`,
+`assert_step_received`, `assert_step_emitted`, `assert_handoff_emitted`,
+`assert_receipt_field`, and `assert_golden_transcript`. These helpers record
+existing `PreStep` / `PostStep` hook payloads and assert Harn-level step,
+handoff, receipt, and structured transcript boundaries.
+
 ## Git Stdlib
 
 The `git` namespace provides typed local repository operations over the

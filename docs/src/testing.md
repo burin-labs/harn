@@ -89,9 +89,28 @@ import { mock_host_result, assert_host_called, clear_host_mocks } from "std/test
 |----------|-------------|
 | `host_calls()` | Return all recorded host calls |
 | `host_calls_for(cap, op)` | Return calls for a specific capability/operation |
+| `host_call_count()` / `host_call_count_for(cap, op)` | Return recorded host call counts |
 | `assert_host_called(cap, op, params?)` | Assert a host call was made |
-| `assert_host_call_count(cap, op, expected_count)` | Assert exact call count |
+| `assert_host_call_count(expected_count, cap, op)` | Assert exact call count |
 | `assert_no_host_calls()` | Assert no host calls were made |
+
+### Persona step assertions
+
+Persona steel-thread tests can assert Harn orchestration boundaries without
+depending on Rust internals. `step_assertions_begin(pattern?)` installs
+`PreStep` / `PostStep` hooks for matching personas and records the hook
+payloads until `step_assertions_end()`.
+
+| Helper | Description |
+|----------|-------------|
+| `step_assertions_begin(persona_pattern?)` | Clear persona hooks and start recording matching step payloads |
+| `step_events()` / `step_events_clear()` | Inspect or reset captured step payloads |
+| `assert_steps_ran(names)` | Assert the exact ordered list of `@step` names |
+| `assert_step_received(step, predicate?)` | Assert a `PreStep` payload matched a closure, dict subset, or value |
+| `assert_step_emitted(step, predicate?)` | Assert a `PostStep` payload matched a closure, dict subset, or value |
+| `assert_handoff_emitted(source, kind, target?)` | Assert a run record or handoff list contains a typed handoff |
+| `assert_receipt_field(receipt, pointer, value)` | Assert an RFC 6901 JSON Pointer field in a receipt |
+| `assert_golden_transcript(expected, actual)` | Structured subset matcher with `<ms>`, `<uuid>`, and `<any>` sentinels |
 
 ### Example
 

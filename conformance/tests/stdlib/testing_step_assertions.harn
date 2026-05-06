@@ -1,0 +1,48 @@
+import { with_audit_receipt } from "std/personas/prelude"
+import {
+  assert_golden_transcript,
+  assert_receipt_field,
+  assert_step_emitted,
+  assert_step_received,
+  assert_steps_ran,
+  step_assertions_begin,
+  step_assertions_end,
+} from "std/testing"
+
+@persona(name: "test_captain")
+fn test_captain(ctx) {
+  return checked_step(ctx)
+}
+
+@step(name: "checked_step")
+fn checked_step(ctx) {
+  let wrapped = with_audit_receipt(
+    fn() { return {value: ctx.value + ":done"} },
+    {persona: "test_captain", step: "checked_step", started_at: "2026-01-01T00:00:00Z"},
+  )
+  return wrapped()
+}
+
+pipeline test() {
+  step_assertions_begin("test_captain")
+  let result = test_captain({value: "input"})
+  assert_steps_ran(["checked_step"])
+  assert_step_received("checked_step", { event -> event.args[0].value == "input" })
+  assert_step_emitted("checked_step", { event -> event.output.result.value == "input:done" })
+  assert_receipt_field(result.receipt, "/status", "success")
+  assert_golden_transcript(
+    {events: [{type: "step", elapsed_ms: "<ms>", id: "<uuid>", payload: {value: "input:done"}}]},
+    {
+      events: [
+        {
+          type: "step",
+          elapsed_ms: 17,
+          id: "123e4567-e89b-12d3-a456-426614174000",
+          payload: {value: "input:done", extra: true},
+        },
+      ],
+    },
+  )
+  step_assertions_end()
+  println("testing_step_assertions ok")
+}
