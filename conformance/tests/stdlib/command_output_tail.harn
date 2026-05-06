@@ -1,0 +1,24 @@
+import { command_output_range, command_output_tail, command_run } from "std/command"
+
+fn no_newline_echo(text) {
+  if platform() == "windows" {
+    return ["cmd", "/C", "echo|set /p=" + text]
+  }
+  return ["printf", text]
+}
+
+pipeline default() {
+  let payload = "0123456789".repeat(20) + "TAIL"
+  let result = command_run(no_newline_echo(payload), {capture: {max_inline_bytes: 8}})
+  assert_eq(result.success, true)
+  assert_eq(len(result.stdout), 8)
+  assert_eq(result.byte_count, len(payload))
+  assert(result.output_path != nil)
+  let tail = command_output_tail(result, {length: 4})
+  assert_eq(tail.content, "TAIL")
+  assert_eq(tail.total_bytes, len(payload))
+  assert_eq(tail.eof, true)
+  let range = command_output_range({path: result.output_path}, {offset: 10, length: 5})
+  assert_eq(range.content, "01234")
+  println("ok")
+}

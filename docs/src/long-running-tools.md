@@ -17,6 +17,14 @@ Supported host tools:
 - `tools.run_test`
 - `tools.run_build_command`
 
+`std/command` is the script-facing foreground command-step layer. It can pass
+background-related request fields through to the hostlib command runner and will
+surface the returned `handle_id`, planned `output_path`, and live-log artifact
+when the host returns a running snapshot. It does not wait on background handles
+itself; completion feedback and cancellation remain hostlib/agent-loop
+responsibilities. A dedicated Harn-facing background wait primitive can be added
+later if scripts need that lifecycle without involving an agent loop.
+
 ## Handle envelope
 
 A long-running call returns immediately with a handle envelope:

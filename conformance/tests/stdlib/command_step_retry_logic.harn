@@ -1,0 +1,95 @@
+import {
+  command_last_failed_step,
+  command_run,
+  command_step,
+  command_step_ref,
+  command_steps_append,
+  command_steps_failed,
+} from "std/command"
+
+fn failed_result(code, text) {
+  return {status: "completed", exit_code: code, stdout: text, stderr: "", timed_out: false}
+}
+
+fn success_result(text) {
+  return {status: "completed", exit_code: 0, stdout: text, stderr: "", timed_out: false}
+}
+
+pipeline default() {
+  mock_time(1700000000000)
+  let retry_runner = { _spec, _options ->
+    if now_ms() == 1700000000000 {
+      return failed_result(2, "try-1")
+    }
+    return success_result("try-2")
+  }
+  let retried = command_step(
+    "retry",
+    ["fake"],
+    {runner: retry_runner, retry: {max_attempts: 3, delay_ms: 25}, tail_bytes: 50},
+  )
+  assert_eq(retried.success, true)
+  assert_eq(retried.stdout, "try-2")
+  assert_eq(len(retried.attempts), 2)
+  assert_eq(retried.attempts[0].attempt, 1)
+  assert_eq(retried.attempts[0].exit_code, 2)
+  assert_eq(retried.attempts[1].attempt, 2)
+  assert_eq(now_ms(), 1700000000025)
+  let exhausted_runner = { _spec, _options -> return failed_result(9, "still failing") }
+  let exhausted = command_step(
+    "exhausted",
+    ["fake"],
+    {runner: exhausted_runner, retry: {max_attempts: 3}, tail_bytes: 20},
+  )
+  assert_eq(exhausted.success, false)
+  assert_eq(exhausted.exit_code, 9)
+  assert_eq(len(exhausted.attempts), 3)
+  assert(contains(exhausted.failure_tail, "still failing"))
+  let classified = command_step(
+    "classified",
+    ["fake"],
+    {
+      runner: { _spec, _options -> return {status: "completed", exit_code: 13, stdout: "", stderr: "denied", timed_out: false} },
+      classify: { step ->
+        if contains(step.stderr, "denied") {
+          return {kind: "permission", retryable: false}
+        }
+        return nil
+      },
+      recovery_hint: { _step -> return "check credentials" },
+    },
+  )
+  assert_eq(classified.classification.kind, "permission")
+  assert_eq(classified.classification.retryable, false)
+  assert_eq(classified.recovery_hint, "check credentials")
+  assert_eq(classified.attempts[0].classification.kind, "permission")
+  let appended = command_steps_append(
+    [],
+    "classified",
+    ["fake"],
+    {
+      runner: { _spec, _options -> return {status: "completed", exit_code: 13, stdout: "", stderr: "denied", timed_out: false} },
+      classify: { _step -> return {kind: "permission"} },
+    },
+  )
+  assert_eq(len(appended.steps), 1)
+  assert_eq(appended.success, false)
+  assert_eq(command_steps_failed(appended.steps), true)
+  let recovered = { step -> return step?.classification?.kind == "permission" }
+  assert_eq(command_steps_failed(appended.steps, {is_recovered: recovered}), false)
+  assert_eq(command_last_failed_step(appended.steps).name, "classified")
+  assert_eq(command_last_failed_step(appended.steps, {is_recovered: recovered}), nil)
+  let compact = command_step_ref(appended.step, {tail_bytes: 4})
+  assert_eq(compact.name, "classified")
+  assert_eq(compact.status, "completed")
+  assert_eq(compact.tail, "nied")
+  let shell_err = try {
+    command_run({command: "echo nope"})
+    "unreachable"
+  } catch (e) {
+    e
+  }
+  assert(contains(shell_err, "mode: \"shell\""))
+  unmock_time()
+  println("ok")
+}

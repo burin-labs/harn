@@ -1,0 +1,598 @@
+/** std/command - deterministic command steps for Harn scripts. */
+fn __command_options(options) {
+  return options ?? {}
+}
+
+fn __command_is_callable(value) -> bool {
+  let kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __command_require_argv(argv) {
+  if type_of(argv) != "list" || len(argv) == 0 {
+    throw "command_run: argv must be a non-empty list"
+  }
+  return argv
+}
+
+fn __command_copy_common(req, source) {
+  if source == nil {
+    return req
+  }
+  var out = req
+  for key in [
+    "cwd",
+    "env",
+    "env_mode",
+    "stdin",
+    "timeout_ms",
+    "background",
+    "background_after_ms",
+    "progress_interval_ms",
+    "progress_max_inline_bytes",
+    "policy_context",
+  ] {
+    if source?[key] != nil {
+      out = out + {[key]: source[key]}
+    }
+  }
+  var capture = source?.capture
+  if source?.max_inline_bytes != nil {
+    let base_capture = capture ?? {}
+    capture = base_capture + {max_inline_bytes: source.max_inline_bytes}
+  }
+  if capture != nil {
+    out = out + {capture: capture}
+  }
+  return out
+}
+
+fn __command_apply_option_defaults(req, options) {
+  let opts = __command_options(options)
+  var out = req
+  for key in [
+    "cwd",
+    "env",
+    "env_mode",
+    "stdin",
+    "timeout_ms",
+    "background",
+    "background_after_ms",
+    "progress_interval_ms",
+    "progress_max_inline_bytes",
+    "policy_context",
+  ] {
+    if out?[key] == nil && opts?[key] != nil {
+      out = out + {[key]: opts[key]}
+    }
+  }
+  if out.mode == "shell" {
+    for key in ["shell", "shell_id", "login", "interactive"] {
+      if out?[key] == nil && opts?[key] != nil {
+        out = out + {[key]: opts[key]}
+      }
+    }
+  }
+  var capture = out?.capture ?? opts?.capture
+  if opts?.max_inline_bytes != nil && capture?.max_inline_bytes == nil {
+    let base_capture = capture ?? {}
+    capture = base_capture + {max_inline_bytes: opts.max_inline_bytes}
+  }
+  if capture != nil {
+    out = out + {capture: capture}
+  }
+  return out
+}
+
+fn __command_request(spec, options) {
+  if type_of(spec) == "list" {
+    return __command_apply_option_defaults({mode: "argv", argv: __command_require_argv(spec)}, options)
+  }
+  if type_of(spec) != "dict" {
+    throw "command_run: spec must be an argv list or command spec dict"
+  }
+  let mode = spec?.mode ?? "argv"
+  var req = {}
+  if mode == "argv" {
+    if spec?.command != nil && spec?.argv == nil {
+      throw "command_run: shell mode requires mode: \"shell\""
+    }
+    req = {mode: "argv", argv: __command_require_argv(spec?.argv)}
+  } else if mode == "shell" {
+    if type_of(spec?.command) != "string" || trim(spec.command) == "" {
+      throw "command_run: shell mode requires a non-empty command"
+    }
+    req = {mode: "shell", command: spec.command}
+    for key in ["shell", "shell_id", "login", "interactive"] {
+      if spec?[key] != nil {
+        req = req + {[key]: spec[key]}
+      }
+    }
+  } else {
+    throw "command_run: unsupported mode " + to_string(mode)
+  }
+  return __command_apply_option_defaults(__command_copy_common(req, spec), options)
+}
+
+fn __command_success(result) -> bool {
+  if result?.success != nil {
+    return result.success ? true : false
+  }
+  let status = result?.status ?? "completed"
+  let exit_code = result?.exit_code ?? -1
+  return status == "completed" && exit_code == 0 && !(result?.timed_out ?? false)
+}
+
+fn __command_combined(result) -> string {
+  if result?.combined != nil {
+    return result.combined
+  }
+  if result?.inline_output != nil {
+    return result.inline_output
+  }
+  let stdout = result?.stdout ?? ""
+  let stderr = result?.stderr ?? ""
+  return stdout + stderr
+}
+
+fn __command_normalize_result(result) {
+  let raw = result ?? {}
+  let success = __command_success(raw)
+  let status = if raw?.status != nil {
+    raw.status
+  } else {
+    if success {
+      "completed"
+    } else {
+      "failed"
+    }
+  }
+  return raw
+    + {
+    ok: success,
+    success: success,
+    status: status,
+    exit_code: raw?.exit_code,
+    timed_out: raw?.timed_out ?? (raw?.status == "timed_out"),
+    command_id: raw?.command_id,
+    handle_id: raw?.handle_id,
+    stdout: raw?.stdout ?? "",
+    stderr: raw?.stderr ?? "",
+    combined: __command_combined(raw),
+    output_path: raw?.output_path,
+    stdout_path: raw?.stdout_path,
+    stderr_path: raw?.stderr_path,
+    byte_count: raw?.byte_count,
+    line_count: raw?.line_count,
+    output_sha256: raw?.output_sha256,
+    started_at: raw?.started_at,
+    ended_at: raw?.ended_at,
+    duration_ms: raw?.duration_ms,
+  }
+}
+
+/** command_run runs an argv-first hostlib command and returns a normalized result. */
+pub fn command_run(spec, options = nil) -> dict {
+  let _enabled = hostlib_enable("tools:deterministic")
+  return __command_normalize_result(hostlib_tools_run_command(__command_request(spec, options)))
+}
+
+fn __command_locator(locator, options) {
+  let opts = __command_options(options)
+  if type_of(locator) == "string" {
+    return {path: locator}
+  }
+  if type_of(locator) != "dict" {
+    throw "command_output_range: locator must be a dict or path string"
+  }
+  let source = opts?.source ?? opts?.stream ?? "combined"
+  if source == "stdout" && locator?.stdout_path != nil {
+    return {path: locator.stdout_path}
+  }
+  if source == "stderr" && locator?.stderr_path != nil {
+    return {path: locator.stderr_path}
+  }
+  if (source == "combined" || source == "output") && locator?.output_path != nil {
+    return {path: locator.output_path}
+  }
+  if locator?.command_id != nil {
+    return {command_id: locator.command_id}
+  }
+  if locator?.handle_id != nil {
+    return {handle_id: locator.handle_id}
+  }
+  if locator?.path != nil {
+    return {path: locator.path}
+  }
+  if locator?.output_path != nil {
+    return {path: locator.output_path}
+  }
+  throw "command_output_range: pass command_id, handle_id, path, or command result"
+}
+
+/** command_output_range reads a command output artifact by command result, id, handle, or path. */
+pub fn command_output_range(locator, options = nil) -> dict {
+  let opts = __command_options(options)
+  let _enabled = hostlib_enable("tools:deterministic")
+  let req = __command_locator(locator, opts)
+    + {offset: opts?.offset ?? 0, length: opts?.length ?? 65536}
+  let result = hostlib_tools_read_command_output(req)
+  return {
+    content: result?.content ?? "",
+    total_bytes: result?.total_bytes ?? 0,
+    offset: result?.offset ?? 0,
+    bytes_read: result?.bytes_read ?? 0,
+    eof: result?.eof ?? true,
+    path: result?.path,
+  }
+}
+
+/** command_output_tail reads the last bytes of a command output artifact. */
+pub fn command_output_tail(locator, options = nil) -> dict {
+  let opts = __command_options(options)
+  let length = opts?.length ?? opts?.tail_bytes ?? 12000
+  let base = __command_locator(locator, opts)
+  let meta = command_output_range(base, {offset: 0, length: 0})
+  let offset = if meta.total_bytes > length {
+    meta.total_bytes - length
+  } else {
+    0
+  }
+  return command_output_range(base, opts + {offset: offset, length: length})
+}
+
+fn __command_tail_inline(result, length) -> string {
+  let content = __command_combined(result)
+  if length == nil || len(content) <= length {
+    return content
+  }
+  return substring(content, len(content) - length, length)
+}
+
+fn __command_tail(result, options) {
+  let opts = __command_options(options)
+  let length = opts?.tail_bytes ?? 12000
+  if length == 0 {
+    return ""
+  }
+  if result?.output_path != nil {
+    let read = try {
+      command_output_tail(result, {length: length, source: opts?.tail_source ?? "combined"})
+    } catch (_e) {
+      nil
+    }
+    if read != nil {
+      return read.content
+    }
+  }
+  return __command_tail_inline(result, length)
+}
+
+fn __command_artifacts(result) {
+  return {
+    combined: result?.output_path,
+    stdout: result?.stdout_path,
+    stderr: result?.stderr_path,
+    output_sha256: result?.output_sha256,
+    byte_count: result?.byte_count,
+    line_count: result?.line_count,
+  }
+}
+
+fn __command_spec_field(spec, key) {
+  if type_of(spec) == "dict" {
+    return spec?[key]
+  }
+  if key == "argv" && type_of(spec) == "list" {
+    return spec
+  }
+  return nil
+}
+
+fn __command_apply_advice(step, options) {
+  let opts = __command_options(options)
+  var out = step
+  if opts?.classify != nil {
+    if !__command_is_callable(opts.classify) {
+      throw "command_step: classify must be callable"
+    }
+    let classification = opts.classify(out)
+    if classification != nil {
+      out = out + {classification: classification}
+    }
+  }
+  if opts?.recovery_hint != nil {
+    if !__command_is_callable(opts.recovery_hint) {
+      throw "command_step: recovery_hint must be callable"
+    }
+    let hint = opts.recovery_hint(out)
+    if hint != nil {
+      out = out + {recovery_hint: hint}
+    }
+  }
+  return out
+}
+
+fn __command_step_from_result(name, spec, result, options, attempts) {
+  let normalized = __command_normalize_result(result)
+  let tail = __command_tail(normalized, options)
+  var step = {
+    name: name,
+    argv: __command_spec_field(spec, "argv"),
+    command: __command_spec_field(spec, "command") ?? normalized?.command,
+    cwd: __command_spec_field(spec, "cwd"),
+    success: normalized.success,
+    ok: normalized.ok,
+    status: normalized.status,
+    exit_code: normalized.exit_code,
+    timed_out: normalized.timed_out,
+    stdout: normalized.stdout,
+    stderr: normalized.stderr,
+    combined: normalized.combined,
+    command_id: normalized.command_id,
+    handle_id: normalized.handle_id,
+    live_log: normalized.output_path,
+    output_path: normalized.output_path,
+    stdout_path: normalized.stdout_path,
+    stderr_path: normalized.stderr_path,
+    artifacts: __command_artifacts(normalized),
+    tail: tail,
+    failure_tail: normalized.success ? nil : tail,
+    started_at: normalized.started_at,
+    ended_at: normalized.ended_at,
+    duration_ms: normalized.duration_ms,
+    attempts: attempts ?? [],
+  }
+  return __command_apply_advice(step, options)
+}
+
+fn __command_result_summary(step) {
+  return {
+    success: step.success,
+    ok: step.ok,
+    status: step.status,
+    exit_code: step.exit_code,
+    timed_out: step.timed_out,
+    command_id: step.command_id,
+    handle_id: step.handle_id,
+    output_path: step.output_path,
+    stdout_path: step.stdout_path,
+    stderr_path: step.stderr_path,
+    byte_count: step.artifacts?.byte_count,
+    line_count: step.artifacts?.line_count,
+    output_sha256: step.artifacts?.output_sha256,
+  }
+}
+
+fn __command_attempt_record(number, spec, step) {
+  return {
+    attempt: number,
+    number: number,
+    spec: spec,
+    argv: step?.argv,
+    command: step?.command,
+    cwd: step?.cwd,
+    result: __command_result_summary(step),
+    success: step?.success,
+    ok: step?.ok,
+    status: step?.status,
+    exit_code: step?.exit_code,
+    timed_out: step?.timed_out,
+    command_id: step?.command_id,
+    handle_id: step?.handle_id,
+    output_path: step?.output_path,
+    stdout_path: step?.stdout_path,
+    stderr_path: step?.stderr_path,
+    tail: step?.tail,
+    classification: step?.classification,
+    recovery_hint: step?.recovery_hint,
+  }
+}
+
+fn __command_run_options(options) {
+  let opts = __command_options(options)
+  var out = {}
+  for key in [
+    "cwd",
+    "env",
+    "env_mode",
+    "stdin",
+    "timeout_ms",
+    "capture",
+    "max_inline_bytes",
+    "background",
+    "background_after_ms",
+    "progress_interval_ms",
+    "progress_max_inline_bytes",
+    "policy_context",
+    "shell",
+    "shell_id",
+    "login",
+    "interactive",
+  ] {
+    if opts?[key] != nil {
+      out = out + {[key]: opts[key]}
+    }
+  }
+  return out
+}
+
+fn __command_invoke_runner(spec, options) {
+  let opts = __command_options(options)
+  if opts?.runner != nil {
+    if !__command_is_callable(opts.runner) {
+      throw "command_step: runner must be callable"
+    }
+    return opts.runner(spec, __command_run_options(opts))
+  }
+  return command_run(spec, __command_run_options(opts))
+}
+
+fn __command_retry_delay_ms(policy, attempt_number) -> int {
+  let base = policy?.delay_ms ?? 0
+  if base <= 0 {
+    return 0
+  }
+  if policy?.jitter ?? false {
+    throw "command_step: retry.jitter is not supported by the deterministic stdlib runner"
+  }
+  let backoff = policy?.backoff
+  if backoff == "linear" {
+    return base * attempt_number
+  }
+  if backoff == "exponential" {
+    var multiplier = 1
+    var index = 1
+    while index < attempt_number {
+      multiplier = multiplier * 2
+      index += 1
+    }
+    return base * multiplier
+  }
+  return base
+}
+
+fn __command_should_retry(policy, step, attempt_number) -> bool {
+  if step.success {
+    return false
+  }
+  if policy?.should_retry == nil {
+    return true
+  }
+  if !__command_is_callable(policy.should_retry) {
+    throw "command_step: retry.should_retry must be callable"
+  }
+  return policy.should_retry(step, attempt_number) ? true : false
+}
+
+fn __command_before_retry(policy, step, attempt_number) {
+  if policy?.before_retry == nil {
+    return nil
+  }
+  if !__command_is_callable(policy.before_retry) {
+    throw "command_step: retry.before_retry must be callable"
+  }
+  return policy.before_retry(step, attempt_number)
+}
+
+/** command_step runs one named command and returns a normalized step record. */
+pub fn command_step(name: string, spec, options = nil) -> dict {
+  let opts = __command_options(options)
+  let policy = opts?.retry ?? {}
+  let configured_max_attempts = policy?.max_attempts ?? 1
+  let max_attempts = configured_max_attempts < 1 ? 1 : configured_max_attempts
+  var attempts = []
+  var attempt_number = 1
+  var final_step = nil
+  while attempt_number <= max_attempts {
+    let result = __command_invoke_runner(spec, opts)
+    var step = __command_step_from_result(name, spec, result, opts, attempts)
+    let attempt = __command_attempt_record(attempt_number, spec, step)
+    attempts = attempts + [attempt]
+    step = step + {attempts: attempts}
+    final_step = step
+    if step.success || attempt_number >= max_attempts
+      || !__command_should_retry(policy, step, attempt_number) {
+      return final_step
+    }
+    __command_before_retry(policy, step, attempt_number)
+    let delay = __command_retry_delay_ms(policy, attempt_number)
+    if delay > 0 {
+      sleep_ms(delay)
+    }
+    attempt_number += 1
+  }
+  return final_step
+}
+
+/** command_step_with_retry is an explicit alias for command_step retry policies. */
+pub fn command_step_with_retry(name: string, spec, options = nil) -> dict {
+  return command_step(name, spec, options)
+}
+
+/** command_steps_append runs a command step and appends its record to an existing step list. */
+pub fn command_steps_append(steps, name: string, spec, options = nil) -> dict {
+  let current = steps ?? []
+  let step = command_step(name, spec, options)
+  let out = current + [step]
+  return {
+    steps: out,
+    step: step,
+    success: step.success,
+    ok: step.ok,
+    status: step.status,
+    exit_code: step.exit_code,
+  }
+}
+
+fn __command_step_success(step) -> bool {
+  let success = step?.success ?? step?.ok ?? false
+  return success ? true : false
+}
+
+fn __command_is_recovered(step, options) -> bool {
+  let opts = __command_options(options)
+  if opts?.is_recovered == nil {
+    return false
+  }
+  if !__command_is_callable(opts.is_recovered) {
+    throw "command_steps_failed: is_recovered must be callable"
+  }
+  return opts.is_recovered(step) ? true : false
+}
+
+/** command_steps_failed reports whether any step failed and was not caller-marked recovered. */
+pub fn command_steps_failed(steps, options = nil) -> bool {
+  for step in steps ?? [] {
+    if !__command_step_success(step) && !__command_is_recovered(step, options) {
+      return true
+    }
+  }
+  return false
+}
+
+/** command_last_failed_step returns the last unrecovered failed step, if any. */
+pub fn command_last_failed_step(steps, options = nil) {
+  var failed = nil
+  for step in steps ?? [] {
+    if !__command_step_success(step) && !__command_is_recovered(step, options) {
+      failed = step
+    }
+  }
+  return failed
+}
+
+fn __command_suffix(value, limit) {
+  if value == nil {
+    return nil
+  }
+  let text = to_string(value)
+  if limit == nil || len(text) <= limit {
+    return text
+  }
+  return substring(text, len(text) - limit, limit)
+}
+
+/** command_step_ref returns compact context for agents or recovery reports. */
+pub fn command_step_ref(step, options = nil) -> dict {
+  let opts = __command_options(options)
+  let tail_bytes = opts?.tail_bytes ?? 4000
+  return {
+    name: step?.name,
+    argv: step?.argv,
+    command: step?.command,
+    cwd: step?.cwd,
+    success: step?.success,
+    ok: step?.ok,
+    status: step?.status,
+    exit_code: step?.exit_code,
+    timed_out: step?.timed_out,
+    classification: step?.classification,
+    recovery_hint: step?.recovery_hint,
+    live_log: step?.live_log,
+    output_path: step?.output_path,
+    stdout_path: step?.stdout_path,
+    stderr_path: step?.stderr_path,
+    tail: __command_suffix(step?.failure_tail ?? step?.tail ?? step?.combined, tail_bytes),
+  }
+}

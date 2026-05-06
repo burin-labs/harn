@@ -86,6 +86,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_runtime.harn"),
     },
     StdlibSource {
+        module: "command",
+        source: include_str!("stdlib/stdlib_command.harn"),
+    },
+    StdlibSource {
         module: "review",
         source: include_str!("stdlib/stdlib_review.harn"),
     },
@@ -672,6 +676,7 @@ mod tests {
     fn key_stdlib_modules_resolve() {
         for module in [
             "context",
+            "command",
             "waitpoint",
             "personas/prelude",
             "agent/host_tools",
@@ -715,6 +720,24 @@ mod tests {
         );
         assert_eq!(exports[0].required_params, 2);
         assert_eq!(exports[0].total_params, 4);
+    }
+
+    #[test]
+    fn command_stdlib_module_exports_step_helpers() {
+        let exports = public_functions_for_module("command")
+            .into_iter()
+            .map(|function| function.name)
+            .collect::<BTreeSet<_>>();
+        for name in [
+            "command_run",
+            "command_output_tail",
+            "command_step",
+            "command_steps_append",
+            "command_last_failed_step",
+            "command_step_ref",
+        ] {
+            assert!(exports.contains(name), "std/command should export {name}");
+        }
     }
 
     #[test]
