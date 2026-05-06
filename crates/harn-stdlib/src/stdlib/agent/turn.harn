@@ -4,8 +4,8 @@ import { agent_loop } from "std/agent/loop"
 import { agent_loop_options } from "std/agent/options"
 import { agent_turn_preamble_prompt } from "std/agent/prompts"
 
-fn __agent_turn_system(user_system) {
-  let preamble = agent_turn_preamble_prompt()
+fn __agent_turn_system(user_system, opts = nil) {
+  let preamble = agent_turn_preamble_prompt(opts)
   if user_system == nil || user_system == "" {
     return preamble
   }
@@ -120,7 +120,7 @@ pub fn agent_turn(prompt, options = nil) {
   let loop_opts = __agent_turn_options(opts)
   let captured = agent_capture_events(
     loop_opts.session_id,
-    fn() { return agent_loop(prompt, __agent_turn_system(opts?.system), loop_opts) },
+    fn() { return agent_loop(prompt, __agent_turn_system(opts?.system, loop_opts), loop_opts) },
   )
   let result = captured.result
   if type_of(result) != "dict" {

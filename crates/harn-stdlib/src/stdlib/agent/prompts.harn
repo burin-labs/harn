@@ -1,16 +1,153 @@
+type AgentPromptId = "agent.action_required_feedback" | "agent.action_turn_nudge" | "agent.completion_judge_feedback" | "agent.completion_judge_system" | "agent.completion_judge_user" | "agent.daemon_timer_feedback" | "agent.daemon_watch_feedback" | "agent.default_nudge" | "agent.deferred_tool_listing" | "agent.loop_contract" | "agent.native_tool_contract_feedback" | "agent.parse_guidance" | "agent.protocol_violation_feedback" | "agent.tool_contract_action_native" | "agent.tool_contract_action_text" | "agent.tool_contract_deferred_tools" | "agent.tool_contract_native" | "agent.tool_contract_task_ledger" | "agent.tool_contract_text" | "agent.tool_contract_text_response_protocol" | "agent.turn_preamble" | "agent.verification_gate_feedback"
+
+type AgentPromptEntry = string | {path: string} | {text: string} | fn(dict) -> string
+
+type AgentPromptOverrides = {
+  action_required_feedback?: AgentPromptEntry,
+  action_turn_nudge?: AgentPromptEntry,
+  completion_judge_feedback?: AgentPromptEntry,
+  completion_judge_system?: AgentPromptEntry,
+  completion_judge_user?: AgentPromptEntry,
+  daemon_timer_feedback?: AgentPromptEntry,
+  daemon_watch_feedback?: AgentPromptEntry,
+  default_nudge?: AgentPromptEntry,
+  deferred_tool_listing?: AgentPromptEntry,
+  loop_contract?: AgentPromptEntry,
+  native_tool_contract_feedback?: AgentPromptEntry,
+  parse_guidance?: AgentPromptEntry,
+  protocol_violation_feedback?: AgentPromptEntry,
+  tool_contract_action_native?: AgentPromptEntry,
+  tool_contract_action_text?: AgentPromptEntry,
+  tool_contract_deferred_tools?: AgentPromptEntry,
+  tool_contract_native?: AgentPromptEntry,
+  tool_contract_task_ledger?: AgentPromptEntry,
+  tool_contract_text?: AgentPromptEntry,
+  tool_contract_text_response_protocol?: AgentPromptEntry,
+  turn_preamble?: AgentPromptEntry,
+  verification_gate_feedback?: AgentPromptEntry,
+}
+
+fn __agent_prompt_ids() {
+  return [
+    "agent.action_required_feedback",
+    "agent.action_turn_nudge",
+    "agent.completion_judge_feedback",
+    "agent.completion_judge_system",
+    "agent.completion_judge_user",
+    "agent.daemon_timer_feedback",
+    "agent.daemon_watch_feedback",
+    "agent.default_nudge",
+    "agent.deferred_tool_listing",
+    "agent.loop_contract",
+    "agent.native_tool_contract_feedback",
+    "agent.parse_guidance",
+    "agent.protocol_violation_feedback",
+    "agent.tool_contract_action_native",
+    "agent.tool_contract_action_text",
+    "agent.tool_contract_deferred_tools",
+    "agent.tool_contract_native",
+    "agent.tool_contract_task_ledger",
+    "agent.tool_contract_text",
+    "agent.tool_contract_text_response_protocol",
+    "agent.turn_preamble",
+    "agent.verification_gate_feedback",
+  ]
+}
+
 fn __agent_default_prompt_catalog() {
   return {
-    ["agent.action_turn_nudge"]: "action_turn_nudge.harn.prompt",
-    ["agent.loop_contract"]: "loop_until_done_system.harn.prompt",
-    ["agent.default_nudge"]: "default_nudge.harn.prompt",
-    ["agent.completion_judge_system"]: "completion_judge_default.harn.prompt",
-    ["agent.completion_judge_feedback"]: "completion_judge_feedback_fallback.harn.prompt",
-    ["agent.completion_judge_user"]: "completion_judge_user.harn.prompt",
-    ["agent.native_tool_contract_feedback"]: "native_tool_contract_feedback.harn.prompt",
-    ["agent.turn_preamble"]: "agent_turn_preamble.harn.prompt",
-    ["agent.tool_contract_native"]: "tool_contract_native.harn.prompt",
-    ["agent.tool_contract_text"]: "tool_contract_text.harn.prompt",
+    "agent.action_required_feedback": "action_required_feedback.harn.prompt",
+    "agent.action_turn_nudge": "action_turn_nudge.harn.prompt",
+    "agent.completion_judge_feedback": "completion_judge_feedback_fallback.harn.prompt",
+    "agent.completion_judge_system": "completion_judge_default.harn.prompt",
+    "agent.completion_judge_user": "completion_judge_user.harn.prompt",
+    "agent.daemon_timer_feedback": "daemon_timer_feedback.harn.prompt",
+    "agent.daemon_watch_feedback": "daemon_watch_feedback.harn.prompt",
+    "agent.default_nudge": "default_nudge.harn.prompt",
+    "agent.deferred_tool_listing": "deferred_tool_listing.harn.prompt",
+    "agent.loop_contract": "loop_until_done_system.harn.prompt",
+    "agent.native_tool_contract_feedback": "native_tool_contract_feedback.harn.prompt",
+    "agent.parse_guidance": "parse_guidance.harn.prompt",
+    "agent.protocol_violation_feedback": "protocol_violation_feedback.harn.prompt",
+    "agent.tool_contract_action_native": "tool_contract_action_native.harn.prompt",
+    "agent.tool_contract_action_text": "tool_contract_action_text.harn.prompt",
+    "agent.tool_contract_deferred_tools": "tool_contract_deferred_tools.harn.prompt",
+    "agent.tool_contract_native": "tool_contract_native.harn.prompt",
+    "agent.tool_contract_task_ledger": "tool_contract_task_ledger.harn.prompt",
+    "agent.tool_contract_text": "tool_contract_text.harn.prompt",
+    "agent.tool_contract_text_response_protocol": "tool_contract_text_response_protocol.harn.prompt",
+    "agent.turn_preamble": "agent_turn_preamble.harn.prompt",
+    "agent.verification_gate_feedback": "verification_gate_feedback.harn.prompt",
   }
+}
+
+fn __agent_prompt_expected_ids() {
+  return join(__agent_prompt_ids(), ", ")
+}
+
+fn __agent_is_known_prompt_id(id) {
+  return contains(__agent_prompt_ids(), id)
+}
+
+fn __agent_validate_prompt_entry(id, entry) {
+  let entry_type = type_of(entry)
+  if entry_type == "string" || entry_type == "closure" {
+    return entry
+  }
+  if entry_type != "dict" {
+    throw "agent_prompt_catalog: prompt override " + id
+      + " must be a path string, closure, {text}, or {path}"
+  }
+  for key in entry.keys() {
+    if !contains(["path", "text"], key) {
+      throw "agent_prompt_catalog: prompt override " + id + " has unknown entry key '" + key
+        + "'; expected text or path"
+    }
+  }
+  let has_text = entry?.text != nil
+  let has_path = entry?.path != nil
+  if has_text && has_path {
+    throw "agent_prompt_catalog: prompt override " + id + " must set only one of text or path"
+  }
+  if !has_text && !has_path {
+    throw "agent_prompt_catalog: prompt override " + id + " must set text or path"
+  }
+  if has_text && type_of(entry.text) != "string" {
+    throw "agent_prompt_catalog: prompt override " + id + ".text must be a string"
+  }
+  if has_path && type_of(entry.path) != "string" {
+    throw "agent_prompt_catalog: prompt override " + id + ".path must be a string"
+  }
+  return entry
+}
+
+fn __agent_validate_prompt_overrides(overrides) {
+  if overrides == nil {
+    return {}
+  }
+  if type_of(overrides) != "dict" {
+    throw "agent_prompt_catalog: prompt overrides must be a dict keyed by logical prompt id"
+  }
+  for id in overrides.keys() {
+    if !__agent_is_known_prompt_id(id) {
+      throw "agent_prompt_catalog: unknown prompt id " + id + "; expected one of: "
+        + __agent_prompt_expected_ids()
+    }
+    __agent_validate_prompt_entry(id, overrides[id])
+  }
+  return overrides
+}
+
+fn __agent_options_are_direct_prompt_catalog(options) {
+  if type_of(options) != "dict" {
+    return false
+  }
+  for key in options.keys() {
+    if __agent_is_known_prompt_id(key) || starts_with(key, "agent.") {
+      return true
+    }
+  }
+  return false
 }
 
 fn __agent_prompt_overrides(options = nil) {
@@ -20,7 +157,111 @@ fn __agent_prompt_overrides(options = nil) {
   if type_of(options) != "dict" {
     return {}
   }
-  return options?.prompts ?? options?.prompt_overrides ?? options
+  if options?.prompts != nil {
+    return __agent_validate_prompt_overrides(options.prompts)
+  }
+  if options?.prompt_overrides != nil {
+    return __agent_validate_prompt_overrides(options.prompt_overrides)
+  }
+  if __agent_options_are_direct_prompt_catalog(options) {
+    return __agent_validate_prompt_overrides(options)
+  }
+  return {}
+}
+
+fn __agent_add_prompt_override(out, id, entry) {
+  if entry == nil {
+    return out
+  }
+  return out + {[id]: entry}
+}
+
+/** agent_prompt_ids lists every logical prompt id accepted by the agent prompt catalog. */
+pub fn agent_prompt_ids() -> list<string> {
+  return __agent_prompt_ids()
+}
+
+/** agent_prompt_text creates an inline text prompt override entry. */
+pub fn agent_prompt_text(text: string) -> AgentPromptEntry {
+  return {text: text}
+}
+
+/** agent_prompt_path creates a prompt asset path override entry. */
+pub fn agent_prompt_path(path: string) -> AgentPromptEntry {
+  return {path: path}
+}
+
+/** agent_prompt_override_map converts typed prompt overrides into the logical prompt-id map. */
+pub fn agent_prompt_override_map(overrides: AgentPromptOverrides) -> dict {
+  var out = {}
+  out = __agent_add_prompt_override(
+    out,
+    "agent.action_required_feedback",
+    overrides.action_required_feedback,
+  )
+  out = __agent_add_prompt_override(out, "agent.action_turn_nudge", overrides.action_turn_nudge)
+  out = __agent_add_prompt_override(
+    out,
+    "agent.completion_judge_feedback",
+    overrides.completion_judge_feedback,
+  )
+  out = __agent_add_prompt_override(out, "agent.completion_judge_system", overrides.completion_judge_system)
+  out = __agent_add_prompt_override(out, "agent.completion_judge_user", overrides.completion_judge_user)
+  out = __agent_add_prompt_override(out, "agent.daemon_timer_feedback", overrides.daemon_timer_feedback)
+  out = __agent_add_prompt_override(out, "agent.daemon_watch_feedback", overrides.daemon_watch_feedback)
+  out = __agent_add_prompt_override(out, "agent.default_nudge", overrides.default_nudge)
+  out = __agent_add_prompt_override(out, "agent.deferred_tool_listing", overrides.deferred_tool_listing)
+  out = __agent_add_prompt_override(out, "agent.loop_contract", overrides.loop_contract)
+  out = __agent_add_prompt_override(
+    out,
+    "agent.native_tool_contract_feedback",
+    overrides.native_tool_contract_feedback,
+  )
+  out = __agent_add_prompt_override(out, "agent.parse_guidance", overrides.parse_guidance)
+  out = __agent_add_prompt_override(
+    out,
+    "agent.protocol_violation_feedback",
+    overrides.protocol_violation_feedback,
+  )
+  out = __agent_add_prompt_override(
+    out,
+    "agent.tool_contract_action_native",
+    overrides.tool_contract_action_native,
+  )
+  out = __agent_add_prompt_override(
+    out,
+    "agent.tool_contract_action_text",
+    overrides.tool_contract_action_text,
+  )
+  out = __agent_add_prompt_override(
+    out,
+    "agent.tool_contract_deferred_tools",
+    overrides.tool_contract_deferred_tools,
+  )
+  out = __agent_add_prompt_override(out, "agent.tool_contract_native", overrides.tool_contract_native)
+  out = __agent_add_prompt_override(
+    out,
+    "agent.tool_contract_task_ledger",
+    overrides.tool_contract_task_ledger,
+  )
+  out = __agent_add_prompt_override(out, "agent.tool_contract_text", overrides.tool_contract_text)
+  out = __agent_add_prompt_override(
+    out,
+    "agent.tool_contract_text_response_protocol",
+    overrides.tool_contract_text_response_protocol,
+  )
+  out = __agent_add_prompt_override(out, "agent.turn_preamble", overrides.turn_preamble)
+  out = __agent_add_prompt_override(
+    out,
+    "agent.verification_gate_feedback",
+    overrides.verification_gate_feedback,
+  )
+  return __agent_validate_prompt_overrides(out)
+}
+
+/** agent_prompt_overrides wraps typed prompt overrides for direct use in agent-loop options. */
+pub fn agent_prompt_overrides(overrides: AgentPromptOverrides) -> dict {
+  return {prompts: agent_prompt_override_map(overrides)}
 }
 
 /** agent_prompt_catalog returns the logical prompt-id map used by the agent stdlib. */
@@ -32,19 +273,20 @@ fn __agent_render_prompt_entry(entry, bindings) {
   if type_of(entry) == "closure" {
     return entry(bindings ?? {})
   }
-  if type_of(entry) == "dict" {
-    if entry?.text != nil {
-      return render_string(entry.text, bindings ?? {})
+  var prompt_entry = entry
+  if type_of(prompt_entry) == "dict" {
+    if prompt_entry?.text != nil {
+      return render_string(prompt_entry.text, bindings ?? {})
     }
-    entry = entry?.path
+    prompt_entry = prompt_entry?.path
   }
-  if type_of(entry) != "string" {
-    throw "render_agent_prompt_id: prompt entry must be a path string, closure, or {path|text}"
+  if type_of(prompt_entry) != "string" {
+    throw "render_agent_prompt_id: prompt entry must be a path string, closure, {path}, or {text}"
   }
-  let path = if starts_with(entry, "std/") {
-    entry
+  let path = if starts_with(prompt_entry, "std/") {
+    prompt_entry
   } else {
-    "std/agent/prompts/" + entry
+    "std/agent/prompts/" + prompt_entry
   }
   return render_prompt(path, bindings ?? {})
 }
@@ -62,6 +304,11 @@ pub fn render_agent_prompt_id(id, bindings = nil, options = nil) {
 /** render_agent_prompt renders a std agent prompt asset by filename/path. */
 pub fn render_agent_prompt(path, bindings = nil) {
   return __agent_render_prompt_entry(path, bindings ?? {})
+}
+
+/** action_required_feedback_prompt. */
+pub fn action_required_feedback_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.action_required_feedback", bindings, options)
 }
 
 /** action_turn_nudge_prompt. */
@@ -94,12 +341,77 @@ pub fn completion_judge_user_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.completion_judge_user", bindings, options)
 }
 
+/** daemon_timer_feedback_prompt. */
+pub fn daemon_timer_feedback_prompt(options = nil) {
+  return render_agent_prompt_id("agent.daemon_timer_feedback", {}, options)
+}
+
+/** daemon_watch_feedback_prompt. */
+pub fn daemon_watch_feedback_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.daemon_watch_feedback", bindings, options)
+}
+
+/** deferred_tool_listing_prompt. */
+pub fn deferred_tool_listing_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.deferred_tool_listing", bindings, options)
+}
+
 /** native_tool_contract_feedback_prompt. */
 pub fn native_tool_contract_feedback_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.native_tool_contract_feedback", bindings, options)
 }
 
+/** parse_guidance_prompt. */
+pub fn parse_guidance_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.parse_guidance", bindings, options)
+}
+
+/** protocol_violation_feedback_prompt. */
+pub fn protocol_violation_feedback_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.protocol_violation_feedback", bindings, options)
+}
+
+/** tool_contract_action_native_prompt. */
+pub fn tool_contract_action_native_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.tool_contract_action_native", bindings, options)
+}
+
+/** tool_contract_action_text_prompt. */
+pub fn tool_contract_action_text_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.tool_contract_action_text", bindings, options)
+}
+
+/** tool_contract_deferred_tools_prompt. */
+pub fn tool_contract_deferred_tools_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.tool_contract_deferred_tools", bindings, options)
+}
+
+/** tool_contract_native_prompt. */
+pub fn tool_contract_native_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.tool_contract_native", bindings, options)
+}
+
+/** tool_contract_task_ledger_prompt. */
+pub fn tool_contract_task_ledger_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.tool_contract_task_ledger", bindings, options)
+}
+
+/** tool_contract_text_prompt. */
+pub fn tool_contract_text_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.tool_contract_text", bindings, options)
+}
+
+/** tool_contract_text_response_protocol_prompt. */
+pub fn tool_contract_text_response_protocol_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.tool_contract_text_response_protocol", bindings, options)
+}
+
 /** agent_turn_preamble_prompt. */
 pub fn agent_turn_preamble_prompt(options = nil) {
   return render_agent_prompt_id("agent.turn_preamble", {}, options)
+}
+
+/** verification_gate_feedback_prompt. */
+pub fn verification_gate_feedback_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.verification_gate_feedback", bindings, options)
 }

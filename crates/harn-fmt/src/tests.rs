@@ -95,6 +95,16 @@ fn test_roundtrip_computed_dict_key() {
 }
 
 #[test]
+fn test_format_literal_dict_keys() {
+    let source = r#"pipeline default(task) {
+  let d = {["a.b.c"]: "x", k: "y", ["with space"]: 1}
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(result.contains(r#"{"a.b.c": "x", k: "y", "with space": 1}"#));
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_roundtrip_interface() {
     assert_roundtrip(
         "interface Printable {\n  fn to_display() -> string\n}\npipeline default(task) { log(1) }",

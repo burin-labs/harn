@@ -1,4 +1,5 @@
 // @harn-entrypoint-category agent.stdlib
+import { daemon_timer_feedback_prompt, daemon_watch_feedback_prompt } from "std/agent/prompts"
 import { agent_session_inject_feedback } from "std/agent/state"
 
 fn __daemon_compaction_summary(opts) {
@@ -22,6 +23,28 @@ fn __daemon_compaction_summary(opts) {
   return nil
 }
 
+fn __agent_daemon_feedback(wake, opts) {
+  if wake?.reason == "timer" {
+    return {kind: wake?.feedback_kind ?? "timer", text: daemon_timer_feedback_prompt(opts)}
+  }
+  if wake?.reason == "watch" || wake?.changed_paths != nil {
+    let changed_paths = wake?.changed_paths ?? []
+    let changed_paths_text = if type_of(changed_paths) == "list" {
+      join(changed_paths, ", ")
+    } else {
+      to_string(changed_paths)
+    }
+    return {
+      kind: wake?.feedback_kind ?? wake?.reason ?? "daemon",
+      text: daemon_watch_feedback_prompt({changed_paths: changed_paths_text}, opts),
+    }
+  }
+  if wake?.feedback != nil {
+    return {kind: wake?.feedback_kind ?? wake?.reason ?? "daemon", text: wake.feedback}
+  }
+  return nil
+}
+
 /** agent_daemon_snapshot. */
 pub fn agent_daemon_snapshot(session, opts, daemon_state = "idle", iteration = 0) {
   let summary = __daemon_compaction_summary(opts)
@@ -40,12 +63,9 @@ pub fn agent_daemon_step(session, opts, iteration) {
   while wake?.reason == nil && timeout > 0 {
     wake = __host_agent_daemon_wait(session.session_id, timeout)
   }
-  if wake?.feedback != nil {
-    agent_session_inject_feedback(
-      session.session_id,
-      wake?.feedback_kind ?? wake?.reason ?? "daemon",
-      wake.feedback,
-    )
+  let feedback = __agent_daemon_feedback(wake, opts)
+  if feedback != nil {
+    agent_session_inject_feedback(session.session_id, feedback.kind, feedback.text)
   }
   return {snapshot: snapshot, wake: wake}
 }

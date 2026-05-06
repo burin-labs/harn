@@ -306,13 +306,20 @@ fn stdlib_prompt_asset_renders_and_includes_embedded_partial() {
 fn stdlib_prompt_provenance_uses_stable_template_uris() {
     let asset =
         TemplateAsset::render_target("std/agent/prompts/tool_contract_text.harn.prompt").unwrap();
-    let (out, spans) = render_asset_with_provenance_result(&asset, Some(&dict(&[])), true).unwrap();
+    let bindings = dict(&[
+        ("mode", s("text")),
+        ("text_response_protocol", s("rendered response protocol")),
+        ("expanded_schemas", s("rendered schemas")),
+    ]);
+    let (out, spans) = render_asset_with_provenance_result(&asset, Some(&bindings), true).unwrap();
     assert!(out.contains("## Tool Calling Contract"));
+    assert!(out.contains("rendered response protocol"));
     assert!(spans
         .iter()
         .any(|span| span.template_uri == "std://agent/prompts/tool_contract_text.harn.prompt"));
-    assert!(spans.iter().any(|span| span.template_uri
-        == "std://agent/prompts/tool_contract_text_response_protocol.harn.prompt"));
+    assert!(spans
+        .iter()
+        .any(|span| span.bound_value.as_deref() == Some("rendered response protocol")));
 }
 
 #[test]

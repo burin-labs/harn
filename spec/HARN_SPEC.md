@@ -606,8 +606,10 @@ arg_element        ::= '...' expression | expression
 ```
 
 Dict keys written as bare identifiers are converted to string literals
-(e.g., `{name: "x"}` becomes `{"name": "x"}`).
-Computed keys use bracket syntax: `{[expr]: value}`.
+(e.g., `{name: "x"}` becomes `{"name": "x"}`). String-literal keys may contain
+dots or other non-identifier characters; the formatter keeps identifier string
+keys bare and keeps non-identifier string keys quoted (for example,
+`{"a.b.c": "x", k: "y"}`). Computed keys use bracket syntax: `{[expr]: value}`.
 
 ## Operator precedence table
 

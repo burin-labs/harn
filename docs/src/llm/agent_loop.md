@@ -134,7 +134,7 @@ Same as `llm_call`, plus additional options:
 | `context_filter` | closure | nil | Alias for `context_callback` |
 | `timestamp_messages` | bool | `false` | Decorate prompt-visible transcript messages with the current harness timestamp before each LLM call without mutating the stored transcript |
 | `message_decorator` | closure | nil | Per-message hook called as `message_decorator(message, context)` before each LLM call. The context includes `session_id`, `iteration`, `index`, and `timestamp` |
-| `prompts` / `prompt_overrides` | dict | nil | Override logical agent prompt ids such as `agent.loop_contract`, `agent.tool_contract_text`, and `agent.completion_judge_system` with a prompt asset path, `{text}`, `{path}`, or render closure |
+| `prompts` / `prompt_overrides` | dict | nil | Override validated logical agent prompt ids such as `agent.loop_contract`, `agent.tool_contract_text`, and `agent.completion_judge_system` with a prompt asset path, `{text}`, `{path}`, or render closure. Unknown ids are rejected. For typo-resistant authoring, pass the typed override shape through `agent_prompt_overrides(...)` from `std/agent/prompts` |
 | `post_turn_callback` | closure | nil | Hook called after each turn. Receives turn metadata and may inject a message, request an immediate stage stop, or merge next-turn options such as `llm_options: {tool_choice: "none"}` |
 | `verify_completion` | closure | nil | Hook called when the loop is about to stop naturally. Return `nil`/`true` to accept the stop or feedback text to veto and continue |
 | `verify_completion_judge` | bool/dict | nil | Built-in structured judge for any natural stop. `true` uses defaults; a dict may set `provider`, `model`, `system`, and `feedback_fallback` |
