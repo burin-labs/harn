@@ -1,0 +1,31 @@
+import { agent_session_finalize } from "std/agent/state"
+
+pipeline main(task) {
+  let failed = try {
+    agent_loop(
+      "This loop should fail during bootstrap",
+      nil,
+      {
+        provider: "mock",
+        session_id: "failed-bootstrap-cleanup",
+        max_iterations: 1,
+        mcp_servers: "not-a-server-list",
+      },
+    )
+  }
+  println(is_err(failed))
+  let stale_finalize = try {
+    agent_session_finalize(
+      "failed-bootstrap-cleanup",
+      {final_status: "done", stop_reason: "test", iterations: 0},
+    )
+  }
+  println(is_err(stale_finalize))
+  llm_mock({text: "<done>##DONE##</done>"})
+  let result = agent_loop(
+    "A later loop should not inherit failed-loop state",
+    nil,
+    {provider: "mock", max_iterations: 1},
+  )
+  println(result.status)
+}

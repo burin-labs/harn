@@ -1129,6 +1129,18 @@ fn execution_policy_rejects_process_exec_when_read_only() {
 }
 
 #[test]
+fn reset_thread_local_state_clears_execution_policy_stack() {
+    push_execution_policy(CapabilityPolicy {
+        side_effect_level: Some("read_only".to_string()),
+        capabilities: BTreeMap::from([("workspace".to_string(), vec!["read_text".to_string()])]),
+        ..Default::default()
+    });
+    assert!(current_execution_policy().is_some());
+    crate::reset_thread_local_state();
+    assert!(current_execution_policy().is_none());
+}
+
+#[test]
 fn execution_policy_rejects_unlisted_tool() {
     push_execution_policy(CapabilityPolicy {
         tools: vec!["read".to_string()],

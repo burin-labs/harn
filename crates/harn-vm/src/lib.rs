@@ -302,6 +302,8 @@ pub fn reset_thread_local_state() {
     stdlib::reset_stdlib_state();
     connectors::clear_active_connector_clients();
     orchestration::clear_runtime_hooks();
+    orchestration::clear_execution_policy_stacks();
+    orchestration::clear_command_policies();
     triggers::clear_dispatcher_state();
     triggers::clear_trigger_registry();
     events::reset_event_sinks();

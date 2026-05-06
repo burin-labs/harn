@@ -38,6 +38,12 @@ pub fn pop_execution_policy() {
     });
 }
 
+pub fn clear_execution_policy_stacks() {
+    EXECUTION_POLICY_STACK.with(|stack| stack.borrow_mut().clear());
+    EXECUTION_APPROVAL_POLICY_STACK.with(|stack| stack.borrow_mut().clear());
+    TRUSTED_BRIDGE_CALL_DEPTH.with(|depth| *depth.borrow_mut() = 0);
+}
+
 pub fn current_execution_policy() -> Option<CapabilityPolicy> {
     EXECUTION_POLICY_STACK.with(|stack| stack.borrow().last().cloned())
 }

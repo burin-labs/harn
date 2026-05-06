@@ -5,7 +5,7 @@ fn write_tools() {
     "write_note",
     "Write a note",
     {
-      handler: { args -> "" },
+      handler: { _args -> "" },
       parameters: {path: {type: "string", description: "Path to write"}},
       returns: {type: "string"},
     },
@@ -29,4 +29,19 @@ pipeline main() {
   let transcript = json_stringify(transcript_messages(denied?.transcript))
   println(transcript.contains("permission_denied"))
   println(transcript.contains("write_note"))
+  let read_only_denied = agent_loop(
+    "Try to write a note",
+    "You are helpful",
+    {
+      provider: "mock",
+      tools: write_tools(),
+      tool_format: "native",
+      max_iterations: 1,
+      policy: {tools: ["read_only"], capabilities: {workspace: ["read_text"]}, side_effect_level: "read_only"},
+    },
+  )
+  println(read_only_denied?.tools?.rejected[0] == "write_note")
+  let read_only_transcript = json_stringify(transcript_messages(read_only_denied?.transcript))
+  println(read_only_transcript.contains("permission_denied"))
+  println(read_only_transcript.contains("write_note"))
 }

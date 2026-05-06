@@ -480,6 +480,8 @@ pub fn reset_llm_state() {
     rate_limit::reset_rate_limit_state();
     mock::reset_llm_mock_state();
     autonomy_budget::reset_autonomy_budget_state();
+    agent_session_host::reset_agent_session_host_state();
+    permissions::clear_dynamic_permission_state();
     trigger_predicate::reset_trigger_predicate_state();
     capabilities::clear_user_overrides();
     // Per-`@step` registry, active stack, and completed-step log are
@@ -1227,6 +1229,7 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
         .unwrap_or(1000)
         .max(1) as u64;
     let bridge = current_host_bridge();
+    let _policy_guard = agent_session_host::install_session_policy_guard(&options)?;
 
     if let Err(error) =
         crate::orchestration::enforce_current_policy_for_tool(&tool_name).and_then(|_| {

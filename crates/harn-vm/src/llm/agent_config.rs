@@ -17,6 +17,7 @@ use super::helpers::{
 use super::tools::build_assistant_response_message;
 
 const AGENT_STDLIB_ENTRYPOINT_CATEGORY: &str = "agent.stdlib";
+const PREFILL_ASSISTANT_FEEDBACK_KIND: &str = "prefill_assistant";
 
 const AGENT_CONTROL_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("agent_subscribe", agent_subscribe_builtin)
@@ -32,6 +33,22 @@ const AGENT_CONTROL_PRIMITIVES: &[SyncBuiltin] = &[
 const AGENT_CONTROL_GROUP: BuiltinGroup<'static> = BuiltinGroup::new()
     .category("agent.host")
     .sync(AGENT_CONTROL_PRIMITIVES);
+
+pub(crate) fn agent_feedback_message(kind: &str, content: &str) -> VmValue {
+    let mut msg = std::collections::BTreeMap::new();
+    if kind == PREFILL_ASSISTANT_FEEDBACK_KIND {
+        msg.insert("role".to_string(), VmValue::String(Rc::from("assistant")));
+        msg.insert(
+            "content".to_string(),
+            VmValue::String(Rc::from(content.to_string())),
+        );
+        return VmValue::Dict(Rc::new(msg));
+    }
+    let body = format!("<runtime_feedback kind=\"{kind}\">\n{content}\n</runtime_feedback>");
+    msg.insert("role".to_string(), VmValue::String(Rc::from("user")));
+    msg.insert("content".to_string(), VmValue::String(Rc::from(body)));
+    VmValue::Dict(Rc::new(msg))
+}
 
 pub(crate) fn agent_loop_result_from_llm(
     result: &super::api::LlmResult,
@@ -301,11 +318,8 @@ fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<
             ))
         }
     };
-    let body = format!("<runtime_feedback kind=\"{kind}\">\n{content}\n</runtime_feedback>");
-    let mut msg = std::collections::BTreeMap::new();
-    msg.insert("role".to_string(), VmValue::String(Rc::from("user")));
-    msg.insert("content".to_string(), VmValue::String(Rc::from(body)));
-    let _ = crate::agent_sessions::inject_message(&session_id, VmValue::Dict(Rc::new(msg)));
+    let _ =
+        crate::agent_sessions::inject_message(&session_id, agent_feedback_message(&kind, &content));
     Ok(VmValue::Nil)
 }
 
