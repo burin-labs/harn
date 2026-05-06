@@ -2107,7 +2107,7 @@ pub fn normalize_inbound(_raw) {
   return {type: "reject", status: 400}
 }
 "#,
-                "LLM/network ceiling",
+                "llm.call ceiling",
             ),
             (
                 "file",

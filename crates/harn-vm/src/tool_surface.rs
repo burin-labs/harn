@@ -286,12 +286,20 @@ pub fn tool_capability_policy_from_spec(value: &serde_json::Value) -> Capability
             entry.sort();
         }
     }
-    let side_effect_level = max_side_effect_level(
-        tool_annotations
-            .values()
-            .map(|annotations| annotations.side_effect_level.as_str().to_string())
-            .filter(|level| level != "none"),
-    );
+    if !capabilities.is_empty() {
+        let entry = capabilities.entry("llm".to_string()).or_default();
+        let op = "call".to_string();
+        if !entry.contains(&op) {
+            entry.push(op);
+            entry.sort();
+        }
+    }
+    let side_effect_levels: Vec<String> = tool_annotations
+        .values()
+        .map(|annotations| annotations.side_effect_level.as_str().to_string())
+        .filter(|level| level != "none")
+        .collect();
+    let side_effect_level = max_side_effect_level(side_effect_levels.into_iter());
     CapabilityPolicy {
         tools,
         capabilities,
@@ -1207,6 +1215,56 @@ mod tests {
             emits_artifacts: true,
             ..ToolAnnotations::default()
         }
+    }
+
+    #[test]
+    fn tool_policy_preserves_agent_loop_transport_ceiling() {
+        let mut annotations = ToolAnnotations {
+            kind: ToolKind::Search,
+            side_effect_level: SideEffectLevel::ReadOnly,
+            ..ToolAnnotations::default()
+        };
+        annotations
+            .capabilities
+            .insert("workspace".into(), vec!["read_text".into()]);
+        let policy = tool_capability_policy_from_spec(&serde_json::json!({
+            "_type": "tool_registry",
+            "tools": [
+                {
+                    "name": "look",
+                    "parameters": {"type": "object"},
+                    "policy": annotations
+                }
+            ]
+        }));
+
+        assert_eq!(policy.tools, vec!["look".to_string()]);
+        assert_eq!(policy.side_effect_level.as_deref(), Some("read_only"));
+        assert!(policy
+            .capabilities
+            .get("llm")
+            .is_some_and(|ops| ops.contains(&"call".to_string())));
+        assert!(policy
+            .capabilities
+            .get("workspace")
+            .is_some_and(|ops| ops.contains(&"read_text".to_string())));
+    }
+
+    #[test]
+    fn tool_policy_without_capabilities_keeps_capability_ceiling_unspecified() {
+        let policy = tool_capability_policy_from_spec(&serde_json::json!({
+            "_type": "tool_registry",
+            "tools": [
+                {
+                    "name": "look",
+                    "parameters": {"type": "object"}
+                }
+            ]
+        }));
+
+        assert_eq!(policy.tools, vec!["look".to_string()]);
+        assert!(policy.capabilities.is_empty());
+        assert!(policy.side_effect_level.is_none());
     }
 
     #[test]
