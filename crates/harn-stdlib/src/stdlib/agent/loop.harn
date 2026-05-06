@@ -134,11 +134,135 @@ fn __sync_tool_search_state(opts, turn_opts) {
   return opts + {_tool_search_client: turn_opts._tool_search_client}
 }
 
+fn __dispatch_results_list(dispatch) {
+  if dispatch == nil {
+    return []
+  }
+  if type_of(dispatch) == "list" {
+    return dispatch
+  }
+  return dispatch?.results ?? []
+}
+
+fn __tool_result_ok(result) {
+  if result?.ok != nil {
+    return result.ok ? true : false
+  }
+  if result?.success != nil {
+    return result.success ? true : false
+  }
+  let status = result?.status ?? ""
+  return status == "ok" || status == "success"
+}
+
+fn __tool_result_name(result) {
+  return result?.tool_name ?? result?.name ?? ""
+}
+
+fn __tool_names_by_status(dispatch, want_ok) {
+  let results = __dispatch_results_list(dispatch)
+  var names = []
+  for result in results {
+    let name = __tool_result_name(result)
+    if name != "" && __tool_result_ok(result) == want_ok {
+      names = names.push(name)
+    }
+  }
+  return names
+}
+
+fn __merge_tool_names(existing, additions) {
+  var merged = existing ?? []
+  let values = additions ?? []
+  for name in values {
+    if name != "" && !contains(merged, name) {
+      merged = merged.push(name)
+    }
+  }
+  return merged
+}
+
+fn __merge_hook_dict(base, patch, label) {
+  if patch == nil {
+    return base
+  }
+  if type_of(patch) != "dict" {
+    throw "agent_loop: post_turn_callback `" + label + "` must be a dict"
+  }
+  return base + patch
+}
+
+fn __apply_post_turn_options(opts, outcome) {
+  var updated = opts
+  updated = __merge_hook_dict(updated, outcome?.next_options, "next_options")
+  let llm_patch = outcome?.llm_options
+  if llm_patch != nil {
+    if type_of(llm_patch) != "dict" {
+      throw "agent_loop: post_turn_callback `llm_options` must be a dict"
+    }
+    let base_llm_options = updated?.llm_options ?? {}
+    updated = updated + {llm_options: base_llm_options + llm_patch}
+  }
+  return updated
+}
+
 fn __next_text_only_count(tool_count, consecutive_text_only) {
   if tool_count == 0 {
     return consecutive_text_only + 1
   }
   return 0
+}
+
+fn __requirement_satisfied(requirement, successful) {
+  if type_of(requirement) == "list" {
+    for candidate in requirement {
+      if contains(successful, candidate) {
+        return true
+      }
+    }
+    return false
+  }
+  return contains(successful, requirement)
+}
+
+fn __requirement_label(requirement) {
+  if type_of(requirement) == "list" {
+    return join(requirement, "|")
+  }
+  return to_string(requirement)
+}
+
+fn __missing_required_successful_tools(result, opts) {
+  let required = opts?.require_successful_tools
+  if required == nil || len(required) == 0 {
+    return []
+  }
+  let successful = result?.tools?.successful ?? []
+  var missing = []
+  for requirement in required {
+    if !__requirement_satisfied(requirement, successful) {
+      missing = missing.push(__requirement_label(requirement))
+    }
+  }
+  return missing
+}
+
+fn __enforce_required_successful_tools(result, opts) {
+  let missing = __missing_required_successful_tools(result, opts)
+  if len(missing) == 0 {
+    return result
+  }
+  if result?.status != "done" {
+    return result + {missing_required_tools: missing}
+  }
+  return result
+    + {
+    status: "failed",
+    final_status: "failed",
+    stop_reason: "missing_required_tools",
+    missing_required_tools: missing,
+    error: "Required tools did not succeed: " + join(missing, ", "),
+  }
 }
 
 /** agent_loop. */
@@ -164,6 +288,8 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
   var verify_attempts = 0
   var consecutive_text_only = 0
   var fallback_index = 0
+  var successful_tools_seen = []
+  var rejected_tools_seen = []
   let max_verify_attempts = opts?.max_verify_attempts ?? 20
   let max_iterations = opts?.max_iterations ?? 50
   let max_nudges = opts?.max_nudges ?? 8
@@ -184,7 +310,8 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
     }
     let turn_system = agent_build_turn_system(session, turn_opts, turn_index)
     let turn_messages = agent_build_turn_messages(session, turn_opts, turn_index)
-    let base_opts = turn_opts?.llm_options ?? turn_opts ?? {}
+    let llm_overrides = turn_opts?.llm_options ?? {}
+    let base_opts = turn_opts + llm_overrides
     let llm_opts = base_opts
       + {messages: turn_messages, session_id: session.session_id, tool_format: turn_opts.tool_format}
     let call = __invoke_llm(message, turn_system, llm_opts)
@@ -216,6 +343,8 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
     let dispatched = __dispatch_tool_calls(session.session_id, tool_calls, turn_opts)
     let dispatch = dispatched.dispatch
     opts = __sync_tool_search_state(opts, dispatched.turn_opts)
+    successful_tools_seen = __merge_tool_names(successful_tools_seen, __tool_names_by_status(dispatch, true))
+    rejected_tools_seen = __merge_tool_names(rejected_tools_seen, __tool_names_by_status(dispatch, false))
     let totals = agent_session_record_usage(session.session_id, llm_result)
     let tool_count = len(tool_calls)
     agent_emit_event(
@@ -233,13 +362,16 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
       stop_reason = "max_nudges"
       break
     }
+    let post_turn_opts = turn_opts
+      + {_session_successful_tools: successful_tools_seen, _session_rejected_tools: rejected_tools_seen}
     let outcome = agent_compute_post_turn(
       session,
-      normalized + {parsed_done_marker: parsed?.done_marker ?? ""},
+      normalized + {raw_text: raw_text, parsed_done_marker: parsed?.done_marker ?? ""},
       dispatch,
-      turn_opts,
+      post_turn_opts,
       turn_index,
     )
+    opts = __apply_post_turn_options(opts, outcome)
     if outcome.kind == "continue" {
       if opts?.daemon && len(tool_calls) == 0 {
         agent_daemon_step(session, opts, iteration)
@@ -267,8 +399,9 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
   if opts?.daemon && final_status != "" {
     agent_daemon_snapshot(session, opts, final_status, iteration)
   }
-  return agent_session_finalize(
+  let result = agent_session_finalize(
     session.session_id,
     {final_status: final_status, stop_reason: stop_reason ?? "", iterations: iteration},
   )
+  return __enforce_required_successful_tools(result, opts)
 }

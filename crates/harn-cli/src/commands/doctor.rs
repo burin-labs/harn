@@ -265,6 +265,7 @@ async fn check_manifest() -> Vec<DoctorCheck> {
     if !extensions.triggers.is_empty() {
         let mut vm = harn_vm::Vm::new();
         harn_vm::register_vm_stdlib(&mut vm);
+        crate::install_default_hostlib(&mut vm);
         harn_vm::clear_trigger_registry();
         match package::install_manifest_triggers(&mut vm, &extensions).await {
             Ok(()) => {

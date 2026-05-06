@@ -1547,6 +1547,12 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
         }
         Err(error) => {
             let category = crate::value::error_to_category(&error);
+            let error_text = error.to_string();
+            let observation = format!(
+                "[error from {name}]\n{error}\n[end of {name} error]\n",
+                name = tool_name,
+                error = error_text
+            );
             Ok(json_to_vm_value(&serde_json::json!({
                 "ok": false,
                 "status": "error",
@@ -1554,8 +1560,9 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
                 "tool_call_id": tool_id,
                 "arguments": tool_args,
                 "result": null,
-                "rendered_result": "",
-                "error": error.to_string(),
+                "rendered_result": error_text,
+                "observation": observation,
+                "error": error_text,
                 "error_category": category.as_str(),
                 "executor": executor,
                 "approval": approval_status,
@@ -2327,6 +2334,13 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                         let tools: Vec<VmValue> = t.iter().map(json_to_vm_value).collect();
                         VmValue::List(Rc::new(tools))
                     }
+                    None => VmValue::Nil,
+                },
+            );
+            dict.insert(
+                "tool_choice".to_string(),
+                match &c.tool_choice {
+                    Some(choice) => json_to_vm_value(choice),
                     None => VmValue::Nil,
                 },
             );

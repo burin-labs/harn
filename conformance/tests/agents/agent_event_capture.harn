@@ -9,7 +9,7 @@ pipeline default() {
     fn() { return agent_loop(
       "Say captured",
       nil,
-      {provider: "mock", max_iterations: 1, session_id: session, done_sentinel: false, done_judge: false},
+      {provider: "mock", max_iterations: 1, session_id: session, done_judge: false},
     ) },
   )
   let types = captured.events.map({ event -> event.type })

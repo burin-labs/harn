@@ -19,6 +19,10 @@ fn __false_or_nil(value) {
   return value == nil || (type_of(value) == "bool" && !value)
 }
 
+fn __agent_turn_native_natural_completion(opts) {
+  return opts?.tools != nil && opts?.tool_format == "native" && opts?.done_sentinel == nil
+}
+
 fn __agent_turn_options(options) {
   var opts = options ?? {}
   if type_of(opts) != "dict" {
@@ -30,22 +34,19 @@ fn __agent_turn_options(options) {
   if contains(opts.keys(), "done_judge") && __false_or_nil(opts?.done_judge) {
     throw "agent_turn: done_judge is mandatory; pass a dict, true, or omit it"
   }
-  if contains(opts.keys(), "done_sentinel") && __false_or_nil(opts?.done_sentinel) {
-    throw "agent_turn: done_sentinel is required; pass true, a string, or omit it"
-  }
   if contains(opts.keys(), "persistent") && __false_or_nil(opts?.persistent) {
-    throw "agent_turn: persistent sentinel looping is required; pass true or omit it"
+    throw "agent_turn: persistent completion looping is required; pass true or omit it"
   }
   if !contains(opts.keys(), "done_judge") {
     opts = opts + {done_judge: true}
-  }
-  if !contains(opts.keys(), "done_sentinel") {
-    opts = opts + {done_sentinel: true}
   }
   if !contains(opts.keys(), "persistent") {
     opts = opts + {persistent: true}
   }
   let loop_opts = agent_loop_options(opts)
+  if loop_opts?.done_sentinel == nil && !__agent_turn_native_natural_completion(loop_opts) {
+    throw "agent_turn: done_sentinel is required for non-native loops; pass a non-empty string or omit it"
+  }
   if contains(loop_opts.keys(), "session_id") {
     return loop_opts
   }

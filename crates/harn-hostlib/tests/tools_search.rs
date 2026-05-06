@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::path::Path;
 use std::rc::Rc;
 
 use harn_hostlib::tools::permissions;
@@ -37,6 +38,21 @@ fn matches_in(result: &VmValue) -> &Rc<Vec<VmValue>> {
         },
         other => panic!("expected dict result, got {other:?}"),
     }
+}
+
+fn assert_path_ends_with(path: &str, components: &[&str]) {
+    let actual: Vec<String> = Path::new(path)
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    let expected: Vec<String> = components
+        .iter()
+        .map(|component| component.to_string())
+        .collect();
+    assert!(
+        actual.ends_with(&expected),
+        "got path components {actual:?}, expected suffix {expected:?}"
+    );
 }
 
 #[test]
@@ -88,7 +104,40 @@ fn search_respects_glob_filter() {
     assert_eq!(rows.len(), 1);
     if let VmValue::Dict(d) = &rows[0] {
         if let Some(VmValue::String(s)) = d.get("path") {
-            assert!(s.ends_with("hit.rs"), "got {s}");
+            assert_path_ends_with(s, &["hit.rs"]);
+        }
+    }
+}
+
+#[test]
+fn search_respects_exclude_globs() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("logs")).unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(
+        dir.path().join("logs/llm_transcript.jsonl"),
+        "target from transcript\n",
+    )
+    .unwrap();
+    fs::write(dir.path().join("src/release.txt"), "target from source\n").unwrap();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let result = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("target")),
+        ("path", vm_string(&dir.path().to_string_lossy())),
+        ("fixed_strings", VmValue::Bool(true)),
+        (
+            "exclude_globs",
+            VmValue::List(Rc::new(vec![vm_string("logs/**")])),
+        ),
+    ]))
+    .unwrap();
+    let rows = matches_in(&result);
+    assert_eq!(rows.len(), 1);
+    if let VmValue::Dict(d) = &rows[0] {
+        if let Some(VmValue::String(s)) = d.get("path") {
+            assert_path_ends_with(s, &["src", "release.txt"]);
         }
     }
 }

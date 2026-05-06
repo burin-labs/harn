@@ -1,0 +1,45 @@
+fn tools() {
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "lookup",
+    "Return evidence",
+    {
+      handler: { _args -> "evidence ok" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return registry
+}
+
+pipeline main() {
+  llm_mock_clear()
+  llm_mock({text: "", tool_calls: [{id: "lookup1", name: "lookup", arguments: {}}]})
+  llm_mock({text: "Final answer without sentinel."})
+  llm_mock({text: "##DONE##"})
+  let result = agent_loop(
+    "Use the tool, then finish.",
+    nil,
+    {
+      provider: "mock",
+      tools: tools(),
+      tool_format: "native",
+      persistent: true,
+      done_sentinel: "##DONE##",
+      done_judge: nil,
+      max_iterations: 4,
+      max_nudges: 2,
+    },
+  )
+  println(result.status)
+  println(result.stop_reason)
+  println(result.llm.iterations)
+  println(result.text)
+  println(!contains(result.text, "##DONE##"))
+  let calls = llm_mock_calls()
+  println(contains(calls[0].system, "##DONE##"))
+  println(contains(calls[1].system, "##DONE##"))
+  println(contains(calls[2].system, "##DONE##"))
+}

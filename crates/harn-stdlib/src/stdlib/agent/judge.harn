@@ -1,14 +1,44 @@
 import { agent_typed_output_checkpoint } from "std/agent/primitives"
 import { completion_judge_user_prompt } from "std/agent/prompts"
-import { agent_emit_event, agent_session_inject_feedback } from "std/agent/state"
+import {
+  agent_emit_event,
+  agent_session_inject_feedback,
+  agent_session_messages,
+} from "std/agent/state"
+
+fn __unique_names(names) {
+  var unique = []
+  for name in names {
+    if name != "" && !contains(unique, name) {
+      unique = unique.push(name)
+    }
+  }
+  return unique
+}
+
+fn __session_tool_names(messages) {
+  var names = []
+  for message in messages {
+    if message?.role == "tool" {
+      names = names.push(message?.name ?? "")
+    }
+  }
+  return __unique_names(names)
+}
 
 fn __judge_payload(session, opts, stop_reason, text, iteration) {
+  let messages = agent_session_messages(session.session_id)
+  let tool_names = __session_tool_names(messages)
   return {
     session_id: session.session_id,
     task: session?.task ?? "",
     stop_reason: stop_reason,
     text: text,
     visible_text: text,
+    last_text: text,
+    transcript: json_stringify(messages),
+    all_tools_used: join(tool_names, ", "),
+    successful_tools_used: join(tool_names, ", "),
     iteration: iteration,
   }
 }
@@ -37,7 +67,11 @@ fn __judge_invoke_structured(judge_cfg, opts, payload) {
   let user = completion_judge_user_prompt(payload)
   let schema = {
     type: "object",
-    properties: {verdict: {type: "string"}, reasoning: {type: "string"}, next_step: {type: "string"}},
+    properties: {
+      verdict: {type: "string", description: "Use `done` or `continue`."},
+      reasoning: {type: "string"},
+      next_step: {type: "any"},
+    },
     required: ["verdict"],
   }
   let base = opts?.llm_options ?? {}
@@ -64,10 +98,11 @@ fn __judge_invoke_structured(judge_cfg, opts, payload) {
     }
   }
   let result = checkpoint.data
-  let verdict = result?.verdict ?? "done"
+  let verdict = lowercase(trim(to_string(result?.verdict ?? "continue")))
   let reasoning = result?.reasoning ?? ""
   let next_step = result?.next_step ?? ""
-  let outcome = if verdict == "done" {
+  let done_verdicts = ["done", "pass", "passed", "safe", "true", "yes", "yield", "yield_to_user", "complete", "completed"]
+  let outcome = if contains(done_verdicts, verdict) {
     {vetoed: false}
   } else {
     let feedback = result?.next_step ?? result?.reasoning

@@ -1989,10 +1989,11 @@ diagnostics for workflow and stage surfaces.
 `agent_loop` may gate a pending stop with `verify_completion`,
 `verify_completion_judge`, or `done_judge`. `verify_completion` is a Harn
 closure hook. `verify_completion_judge` runs the built-in structured judge for
-any natural stop. `done_judge` is sentinel-specific: it runs only after the
-model emits the configured done sentinel, expects either `pass: bool` or
-`verdict: "done" | "continue"`, and injects judge feedback before continuing
-when the verdict rejects completion. Each built-in judge call emits
+any natural stop. `done_judge` runs after a native-tool loop naturally
+completes or after the model emits the configured done sentinel. The structured
+judge returns `verdict: "done" | "continue"` plus optional `reasoning` and
+`next_step`, and injects judge feedback before continuing when the verdict
+rejects completion. Each built-in judge call emits
 `JudgeDecision {session_id, iteration, verdict, reasoning, next_step,
 judge_duration_ms}`.
 

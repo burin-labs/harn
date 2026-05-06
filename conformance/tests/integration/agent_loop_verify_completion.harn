@@ -3,7 +3,7 @@
    - returning a string vetoes the stop and injects feedback,
    - returning `nil`/`true` confirms the stop and the loop yields,
    - `max_verify_attempts` caps the veto loop with status `verify_exhausted`,
-   - `done_sentinel: true` keeps the legacy default ON for this mock provider.
+   - `done_sentinel: "##DONE##"` keeps sentinel completion explicit for this mock provider.
    Decisions are keyed on `info.iteration` rather than captured `var` state
    so the test stays deterministic without depending on closure mutation
    semantics. */
@@ -20,7 +20,13 @@ fn scenario_veto_then_confirm() {
   let result = agent_loop(
     "do work",
     "you are an agent.",
-    {provider: "mock", persistent: true, max_iterations: 5, done_sentinel: true, verify_completion: cb},
+    {
+      provider: "mock",
+      persistent: true,
+      max_iterations: 5,
+      done_sentinel: "##DONE##",
+      verify_completion: cb,
+    },
   )
   println("scenario1.status=${result.status}")
   println("scenario1.iters=${result.llm.iterations}")
@@ -42,7 +48,7 @@ fn scenario_max_verify_exhausted() {
       provider: "mock",
       persistent: true,
       max_iterations: 10,
-      done_sentinel: true,
+      done_sentinel: "##DONE##",
       verify_completion: always_veto,
       max_verify_attempts: 2,
     },
@@ -62,7 +68,7 @@ fn scenario_confirm_immediately() {
       provider: "mock",
       persistent: true,
       max_iterations: 5,
-      done_sentinel: true,
+      done_sentinel: "##DONE##",
       verify_completion: always_confirm,
     },
   )

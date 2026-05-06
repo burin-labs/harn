@@ -1,0 +1,53 @@
+fn tools() {
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "lookup",
+    "Lookup evidence",
+    {
+      handler: { _args -> "evidence" },
+      parameters: {query: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return registry
+}
+
+pipeline main() {
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "x"}}]})
+  llm_mock({text: "Finished."})
+  let failed = agent_loop(
+    "Use one tool.",
+    nil,
+    {
+      provider: "mock",
+      tools: tools(),
+      tool_format: "native",
+      persistent: true,
+      max_iterations: 3,
+      require_successful_tools: ["missing_tool"],
+    },
+  )
+  println(failed.status)
+  println(failed.stop_reason)
+  println(failed.missing_required_tools[0])
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "lookup_2", name: "lookup", arguments: {query: "x"}}]})
+  llm_mock({text: "Finished."})
+  let satisfied = agent_loop(
+    "Use one tool.",
+    nil,
+    {
+      provider: "mock",
+      tools: tools(),
+      tool_format: "native",
+      persistent: true,
+      max_iterations: 3,
+      require_successful_tools: [["lookup", "alternate_reader"]],
+    },
+  )
+  println(satisfied.status)
+  println(len(satisfied.missing_required_tools ?? []))
+}

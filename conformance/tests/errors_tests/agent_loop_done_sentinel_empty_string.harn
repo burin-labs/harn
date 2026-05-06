@@ -1,0 +1,9 @@
+// `done_sentinel: nil` is the only no-sentinel value. Empty strings are
+// rejected so completion mode cannot accidentally depend on stringiness.
+pipeline test(task) {
+  agent_loop(
+    "do work",
+    nil,
+    {provider: "mock", persistent: true, max_iterations: 1, done_sentinel: ""},
+  )
+}

@@ -1,22 +1,11 @@
 import { agent_session_inject_feedback } from "std/agent/state"
 
 fn __default_done_sentinel(opts) {
-  let sentinel = opts?.done_sentinel
-  if sentinel == nil {
-    return "##DONE##"
-  }
-  if type_of(sentinel) == "bool" {
-    return if sentinel {
-      "##DONE##"
-    } else {
-      ""
-    }
-  }
-  return sentinel
+  return opts?.done_sentinel
 }
 
 fn __sentinel_hit(text, sentinel, parsed_done_marker) {
-  if sentinel == "" {
+  if sentinel == nil {
     return false
   }
   if parsed_done_marker != nil && parsed_done_marker != "" {
@@ -33,6 +22,33 @@ fn __dispatch_results_list(dispatch) {
     return dispatch
   }
   return dispatch?.results ?? []
+}
+
+fn __tool_result_ok(result) {
+  if result?.ok != nil {
+    return result.ok ? true : false
+  }
+  if result?.success != nil {
+    return result.success ? true : false
+  }
+  let status = result?.status ?? ""
+  return status == "ok" || status == "success"
+}
+
+fn __tool_result_name(result) {
+  return result?.tool_name ?? result?.name ?? ""
+}
+
+fn __tool_names_by_status(dispatch, want_ok) {
+  let results = __dispatch_results_list(dispatch)
+  var names = []
+  for result in results {
+    let name = __tool_result_name(result)
+    if name != "" && __tool_result_ok(result) == want_ok {
+      names = names.push(name)
+    }
+  }
+  return names
 }
 
 fn __post_turn_callback_verdict(opts, payload) {
@@ -60,22 +76,23 @@ fn __interpret_verdict(verdict) {
   }
   if type_of(verdict) == "dict" {
     let stop = verdict?.stop ?? false
-    let message = verdict?.message
-    let inject = verdict?.inject
-    return {kind: "rich", stop: stop, message: message, inject: inject}
+    return {
+      kind: "rich",
+      stop: stop,
+      message: verdict?.message,
+      next_options: verdict?.next_options,
+      llm_options: verdict?.llm_options,
+    }
   }
   return {kind: "none"}
 }
 
 fn __successful_tool_names(dispatch) {
-  let results = __dispatch_results_list(dispatch)
-  var names = []
-  for result in results {
-    if result?.success {
-      names = names.push(result?.name ?? "")
-    }
-  }
-  return names
+  return __tool_names_by_status(dispatch, true)
+}
+
+fn __rejected_tool_names(dispatch) {
+  return __tool_names_by_status(dispatch, false)
 }
 
 fn __stop_after_successful_tools(opts, dispatch) {
@@ -90,6 +107,22 @@ fn __stop_after_successful_tools(opts, dispatch) {
     }
   }
   return false
+}
+
+fn __native_tool_text_completion(opts, has_tool_calls, text) {
+  if !(opts?.persistent ?? false) || opts?.daemon {
+    return false
+  }
+  if opts?.tool_format != "native" || opts?.tools == nil {
+    return false
+  }
+  if __default_done_sentinel(opts) != nil {
+    return false
+  }
+  if has_tool_calls {
+    return false
+  }
+  return trim(text) != ""
 }
 
 /** agent_extract_tool_calls. */
@@ -108,10 +141,13 @@ pub fn agent_extract_tool_calls(llm_result, opts) {
 pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   let sentinel = __default_done_sentinel(opts)
   let text = llm_result?.text ?? ""
+  let sentinel_text = llm_result?.raw_text ?? text
   let parsed_done_marker = llm_result?.parsed_done_marker
   let dispatch_results = __dispatch_results_list(dispatch)
+  let successful_tool_names = __successful_tool_names(dispatch)
+  let rejected_tool_names = __rejected_tool_names(dispatch)
   let has_tool_calls = len(llm_result?.tool_calls ?? []) > 0 || len(dispatch_results) > 0
-  if __sentinel_hit(text, sentinel, parsed_done_marker) {
+  if __sentinel_hit(sentinel_text, sentinel, parsed_done_marker) {
     return {
       kind: "break",
       stop_reason: "sentinel",
@@ -129,6 +165,10 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
     dispatch: dispatch,
     tool_results: dispatch_results,
     tool_count: len(dispatch_results),
+    successful_tool_names: successful_tool_names,
+    rejected_tool_names: rejected_tool_names,
+    session_successful_tools: opts?._session_successful_tools ?? successful_tool_names,
+    session_rejected_tools: opts?._session_rejected_tools ?? rejected_tool_names,
     text: text,
     visible_text: text,
   }
@@ -144,7 +184,25 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
     agent_session_inject_feedback(session.session_id, "post_turn", verdict.message)
   }
   if verdict.kind == "rich" && verdict.stop {
-    return {kind: "break", stop_reason: "post_turn_stop", needs_verify: opts?.verify_completion != nil}
+    return {
+      kind: "break",
+      stop_reason: "post_turn_stop",
+      needs_verify: opts?.verify_completion != nil,
+      next_options: verdict?.next_options,
+      llm_options: verdict?.llm_options,
+    }
+  }
+  if verdict.kind == "rich"
+    && (verdict.message != nil || verdict?.next_options != nil || verdict?.llm_options != nil) {
+    return {kind: "continue", next_options: verdict?.next_options, llm_options: verdict?.llm_options}
+  }
+  if __native_tool_text_completion(opts, has_tool_calls, text) {
+    return {
+      kind: "break",
+      stop_reason: "natural",
+      needs_verify: opts?.done_judge != nil || opts?.verify_completion != nil
+        || opts?.verify_completion_judge != nil,
+    }
   }
   let persistent = opts?.persistent ?? false
   let daemon = opts?.daemon ?? false

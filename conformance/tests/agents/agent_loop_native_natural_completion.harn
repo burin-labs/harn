@@ -1,0 +1,42 @@
+fn lookup_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "lookup",
+    "Return release evidence",
+    {
+      handler: { args -> "evidence for " + args.query },
+      parameters: {query: {type: "string", description: "Lookup query"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+pipeline main() {
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]})
+  llm_mock({text: "<user_response>Release notes are ready.</user_response>"})
+  llm_mock({text: "{\"verdict\":\"done\",\"reasoning\":\"natural final text is complete\"}"})
+  let result = agent_loop(
+    "Inspect evidence and finish.",
+    nil,
+    {
+      provider: "mock",
+      tools: lookup_tools(),
+      tool_format: "native",
+      persistent: true,
+      done_judge: true,
+      max_iterations: 4,
+    },
+  )
+  let calls = llm_mock_calls()
+  println(result.status)
+  println(result.text)
+  println(result.llm.iterations)
+  println(len(calls))
+  println(!contains(calls[0].system, "##DONE##"))
+  println(!contains(calls[1].system, "##DONE##"))
+  println(contains(json_stringify(calls[1].messages), "evidence for release"))
+}

@@ -105,6 +105,7 @@ pub async fn run_test_file(
             local.run_until(async {
                 let mut vm = harn_vm::Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
+                crate::install_default_hostlib(&mut vm);
                 let source_parent = path.parent().unwrap_or(std::path::Path::new("."));
                 let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
                 let store_base = project_root.as_deref().unwrap_or(source_parent);

@@ -4,9 +4,11 @@
 
 Use `agent_turn(prompt, opts?)` for the common "make one agent complete this
 request" case. It wraps `agent_loop`, puts `opts.system` into the system prompt
-alongside generic progress guidance, defaults to a persistent `##DONE##`
-sentinel loop, and requires a sentinel completion judge. Pass `judge: {...}` or
-`done_judge: {...}` to customize that judge; omit it to use the default judge.
+alongside generic progress guidance, defaults to persistent completion, and
+requires a completion judge. Native-tool turns complete naturally when the model
+returns final text with no tool calls; text/no-tool turns use the normal
+sentinel path. Pass `judge: {...}` or `done_judge: {...}` to customize that
+judge; omit it to use the default judge.
 
 The return value is the normal `agent_loop` result with two extra summaries:
 `iterations` (`[{iteration, started, ended?, tool_count?, prose_chars?}]`) and `judge_decisions`
@@ -25,11 +27,11 @@ println(result.judge_decisions[0].verdict)
 ## agent_loop
 
 Run an agent that keeps working until it's done. The agent maintains
-conversation history across turns and loops until it emits the
-completion sentinel `##DONE##`. In tagged text-tool stages the runtime
-wraps it as `<done>##DONE##</done>`; in no-tool and native-tool stages
-the model emits bare `##DONE##`. Returns a dict with canonical visible text,
-tool usage, transcript state, and any deferred queued human messages.
+conversation history across turns. Native-tool loops stop naturally when the
+model returns final assistant text with no tool calls; tagged text-tool loops
+use the completion sentinel `<done>##DONE##</done>`, and no-tool sentinel loops
+use bare `##DONE##`. Returns a dict with canonical visible text, tool usage,
+transcript state, and any deferred queued human messages.
 
 ```harn
 let result = agent_loop(
@@ -47,11 +49,11 @@ println(result.llm.iterations) // number of LLM round-trips
 1. Sends the prompt to the model
 2. Reads the response
 3. If `persistent: true`:
-   - Checks if the response contains the completion sentinel
-     (`##DONE##`, optionally wrapped as `<done>...</done>`
-     in tagged text-tool stages)
-   - If yes, stops and returns the accumulated output
-   - If no, sends a nudge message asking the agent to continue
+   - In native-tool mode, treats final text with no tool calls as completion
+   - In text-tool or no-tool sentinel mode, checks for the completion sentinel
+     (`<done>##DONE##</done>` or bare `##DONE##`)
+   - If completion is detected, stops and returns the accumulated output
+   - If no completion is detected, sends a nudge message asking the agent to continue
    - Repeats until done or limits are hit
 4. If `persistent: false` (default): returns after the first response
 
@@ -92,8 +94,13 @@ Nested `tools` fields:
 |---|---|---|
 | `calls` | list | Names of tools that were attempted |
 | `successful` | list | Tools that returned `status: "ok"` at least once |
-| `rejected` | list | Tools rejected by approval policy or capability ceiling |
+| `rejected` | list | Tools rejected by approval policy, capability ceiling, handler error, or failed dispatch |
 | `mode` | string | Tool-calling contract used for the loop (`"native"`, `"text"`, …) |
+
+Every dispatched tool attempt is injected into the next model turn as a tool
+result observation. Failed Harn-side handlers and blocked host-tool calls carry
+their error text in that observation, so the model can recover from prior failed
+attempts instead of inferring from an empty result.
 
 ### agent_loop options
 
@@ -102,7 +109,8 @@ Same as `llm_call`, plus additional options:
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `profile` | string | `"tool_using"` | Named preset for common loop shapes. One of `"tool_using"`, `"researcher"`, `"verifier"`, or `"completer"`; explicit option keys override profile defaults |
-| `persistent` | bool | `false` | Keep looping until the completion sentinel is emitted (`##DONE##`, or `<done>##DONE##</done>` in tagged text-tool stages) |
+| `persistent` | bool | `false` | Keep looping until completion. Native-tool loops complete on final text with no tool calls; text-tool/no-tool sentinel loops complete on `##DONE##` or `<done>##DONE##</done>` |
+| `done_sentinel` | string\|nil | mode-aware | Completion sentinel for sentinel-based loops. Use a non-empty string such as `"##DONE##"` to require sentinel completion, or `nil` for no sentinel. Native-tool persistent loops default to `nil`; text/no-tool persistent loops default to `"##DONE##"` |
 | `max_iterations` | int | `50` | Maximum number of LLM round-trips |
 | `max_nudges` | int | `8` | Max consecutive text-only responses before stopping |
 | `nudge` | string | see below | Custom message to send when nudging the agent |
@@ -124,15 +132,15 @@ Same as `llm_call`, plus additional options:
 | `idle_watchdog_attempts` | int | nil (disabled) | Max consecutive idle-wait ticks that may return no wake reason before the daemon terminates with `status = "watchdog"`. Guards against a misconfigured daemon (e.g. bridge never signals, no timer, no watch paths) hanging the session silently |
 | `context_callback` | closure | nil | Per-turn hook that can rewrite prompt-visible `messages` and/or the effective `system` prompt before the next LLM call |
 | `context_filter` | closure | nil | Alias for `context_callback` |
-| `post_turn_callback` | closure | nil | Hook called after each tool turn. Receives turn metadata and may inject a message, request an immediate stage stop, or both |
+| `post_turn_callback` | closure | nil | Hook called after each turn. Receives turn metadata and may inject a message, request an immediate stage stop, or merge next-turn options such as `llm_options: {tool_choice: "none"}` |
 | `verify_completion` | closure | nil | Hook called when the loop is about to stop naturally. Return `nil`/`true` to accept the stop or feedback text to veto and continue |
-| `verify_completion_judge` | bool/dict | nil | Built-in structured judge for any natural stop. `true` uses defaults; a dict may set `provider`, `model`, `system`, `max_tokens`, `temperature`, `feedback_fallback`, and final-response options |
-| `done_judge` | bool/dict | nil | Sentinel-specific structured judge. It runs only when the model emits the done sentinel and may veto by returning `verdict: "continue"`/`pass: false` plus feedback |
+| `verify_completion_judge` | bool/dict | nil | Built-in structured judge for any natural stop. `true` uses defaults; a dict may set `provider`, `model`, `system`, and `feedback_fallback` |
+| `done_judge` | bool/dict | nil | Completion structured judge. It runs when the model naturally completes a native-tool loop or emits the done sentinel, and may veto by returning `verdict: "continue"` plus `next_step` or `reasoning` |
 | `llm_transcript_dir` | string | nil | Per-loop directory for Harn's existing `llm_transcript.jsonl` sidecar. This is equivalent to scoping `HARN_LLM_TRANSCRIPT_DIR` to one agent loop and is preferred when a script needs run-specific auditable model-turn JSONL |
 | `turn_policy` | dict | nil | Turn-shape policy for action stages. Supports `require_action_or_yield: bool`, `allow_done_sentinel: bool` (default `true`; set to `false` in workflow-owned action stages so nudges stop advertising the done sentinel), and `max_prose_chars: int` |
 | `native_tool_fallback` | string | `"allow"` | Native-tool-stage policy when the provider emits text-mode `<tool_call>` content instead of native tool calls. `"allow"` preserves the current recovery path, `"allow_once"` accepts the first fallback turn then rejects later repeats with corrective feedback, and `"reject"` fails closed on the first text fallback |
 | `stop_after_successful_tools` | `list<string>` | nil | Stop after a tool-calling turn whose successful results include one of these tool names. Useful for workflow-owned verify loops such as `["edit", "scaffold"]` |
-| `require_successful_tools` | `list<string>` | nil | Mark the loop `status = "failed"` unless at least one of these tool names succeeds at some point during the interaction. Keeps action stages honest when every attempted effect was rejected or errored |
+| `require_successful_tools` | `list<string\|list<string>>` | nil | Mark a cleanly completed loop `status = "failed"` unless every required tool succeeds at least once. A nested list is an OR group, e.g. `["run_command", ["read_command_output", "read_command_output_tail"]]`. Keeps action stages honest when attempted effects were rejected, errored, or skipped |
 | `loop_detect_warn` | int | `2` | Consecutive identical tool calls before appending a redirection hint |
 | `loop_detect_block` | int | `3` | Consecutive identical tool calls before replacing the result with a hard redirect |
 | `loop_detect_skip` | int | `4` | Consecutive identical tool calls before skipping execution entirely |
@@ -203,21 +211,24 @@ Default nudge message:
 
 > The nudge is mode-aware:
 > In tagged text-tool stages it asks for concrete tool progress and reserves `<done>##DONE##</done>` for real completion.
-> In no-tool or native-tool stages it asks for concrete progress and reserves bare `##DONE##` for completion.
+> In native-tool stages it asks for concrete tool progress and treats final text with no tool calls as completion.
+> In no-tool sentinel stages it asks for concrete progress and reserves bare `##DONE##` for completion.
 
 When `persistent: true`, the system prompt is automatically extended with:
 
 > IMPORTANT: You MUST keep working until the task is complete.
 > The completion instruction is mode-aware:
-> tagged text-tool stages use `<done>##DONE##</done>`, while no-tool and native-tool stages use bare `##DONE##`.
+> native-tool stages complete by returning final text with no tool calls,
+> tagged text-tool stages use `<done>##DONE##</done>`, and no-tool sentinel
+> stages use bare `##DONE##`.
 
-`done_judge` adds a second gate after the sentinel is emitted. The loop renders
-the transcript for a structured judge call and expects either `pass: bool` or
-`verdict: "done" | "continue"` plus optional `reasoning`, `feedback`,
-`next_step`, and `final_response`. A veto injects runtime feedback and the loop
-continues until the judge accepts or `max_verify_attempts` is exhausted.
-Every judge call emits `JudgeDecision` with `session_id`, `iteration`,
-`verdict`, `reasoning`, `next_step`, and `judge_duration_ms`.
+`done_judge` adds a second gate after completion is detected. The loop renders
+the transcript for a structured judge call and expects
+`verdict: "done" | "continue"` plus optional `reasoning` and `next_step`.
+A veto injects runtime feedback and the loop
+continues until the judge accepts or `max_verify_attempts` is exhausted. Every
+judge call emits `JudgeDecision` with `session_id`, `iteration`, `verdict`,
+`reasoning`, `next_step`, and `judge_duration_ms`.
 
 ## Daemon stdlib wrappers
 
@@ -264,7 +275,7 @@ history on each turn.
 
 The callback receives one argument:
 
-```harn
+```harn,ignore
 {
   iteration: int,
   system: string?,
@@ -322,38 +333,48 @@ model to emit another message.
 
 The callback receives:
 
-```harn
+```harn,ignore
 {
-  tool_names: list,
-  tool_results: list,
-  successful_tool_names: list,
-  tool_count: int,
+  session_id: string,
   iteration: int,
-  consecutive_single_tool_turns: int,
-  session_tools_used: list,
+  has_tool_calls: bool,
+  dispatch: list | dict | nil,
+  tool_results: list,
+  tool_count: int,
+  successful_tool_names: list,
+  rejected_tool_names: list,
   session_successful_tools: list,
+  session_rejected_tools: list,
+  text: string,
+  visible_text: string,
 }
 ```
 
 Each `tool_results` entry has:
 
-```harn
-{tool_name: string, status: string, rejected: bool}
+```harn,ignore
+{tool_name: string, ok: bool, status: string, rendered_result: string, error: string?}
 ```
 
 It may return:
 
 - a `string` to inject as the next user-visible message
 - a `bool` where `true` stops the current stage immediately after the turn
-- a `dict` with optional `message` and `stop` fields
+- a `dict` with optional `message`, `stop`, `next_options`, and `llm_options`
+  fields. `message` is injected as runtime feedback. `next_options` merges into
+  the next loop iteration's options; `llm_options` merges into the next LLM
+  call's `llm_options` dict.
 
-Example: stop after the first successful write turn, but still allow multiple
-edits in that same turn.
+Example: after a required read succeeds, ask the model to synthesize the final
+answer with no more native tool calls:
 
 ```harn
-fn stop_after_successful_write(turn) {
-  if turn?.successful_tool_names?.contains("edit") {
-    return {stop: true}
+fn finalize_after_read(turn) {
+  if turn?.session_successful_tools?.contains("read_file") {
+    return {
+      message: "You have the required file evidence. Produce the final answer now.",
+      llm_options: {tool_choice: "none"},
+    }
   }
   return ""
 }

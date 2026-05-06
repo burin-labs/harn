@@ -1,11 +1,13 @@
 text
 false
 false
-true
+##DONE##
 dict
 text
 native
 false
+true
+true
 false
 Build feature
 2

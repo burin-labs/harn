@@ -5,7 +5,7 @@ fn list_tools() {
     "list_directory",
     "List directory contents",
     {
-      handler: { args -> "" },
+      handler: { _args -> "" },
       parameters: {path: {type: "string", description: "Directory path"}},
       returns: {type: "string"},
     },
@@ -97,4 +97,35 @@ pipeline test(task) {
     json_stringify(transcript_messages(stopped_after_tool_turn?.transcript))
       .contains("handoff now"),
   )
+  llm_mock_clear()
+  llm_mock({text: "", tool_calls: [{id: "hook_1", name: "list_directory", arguments: {path: "."}}]})
+  llm_mock({text: "Final answer from the model."})
+  let hook_driven_final = agent_loop(
+    "Inspect the workspace",
+    "You are helpful",
+    {
+      provider: "mock",
+      tools: list_tools(),
+      tool_format: "native",
+      persistent: true,
+      max_iterations: 3,
+      post_turn_callback: { info ->
+        if len(info?.successful_tool_names ?? []) > 0 {
+          return {
+            message: "finalize now current=${info.successful_tool_names[0]} session=${info.session_successful_tools[0]} rejected=${len(info?.session_rejected_tools ?? [])}",
+            llm_options: {tool_choice: "none"},
+          }
+        }
+        return nil
+      },
+    },
+  )
+  let hook_calls = llm_mock_calls()
+  let second_call = json_stringify(hook_calls[1].messages)
+  println(hook_driven_final?.llm?.iterations == 2)
+  println(second_call.contains("current=list_directory"))
+  println(second_call.contains("session=list_directory"))
+  println(second_call.contains("rejected=0"))
+  println(hook_calls[1].tool_choice == "none")
+  println(second_call.contains("finalize now"))
 }

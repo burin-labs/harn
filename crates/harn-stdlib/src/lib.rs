@@ -154,6 +154,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/mcp.harn"),
     },
     StdlibSource {
+        module: "agent/host_tools",
+        source: include_str!("stdlib/agent/host_tools.harn"),
+    },
+    StdlibSource {
         module: "agent/budget",
         source: include_str!("stdlib/agent/budget.harn"),
     },
@@ -662,6 +666,7 @@ mod tests {
             "context",
             "waitpoint",
             "personas/prelude",
+            "agent/host_tools",
             "connectors/shared",
             "connectors/github",
             "connectors/linear",

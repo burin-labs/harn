@@ -612,6 +612,7 @@ pub async fn execute_run(
 
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
+    crate::install_default_hostlib(&mut vm);
     let source_parent = std::path::Path::new(path)
         .parent()
         .unwrap_or(std::path::Path::new("."));
@@ -1091,6 +1092,7 @@ pub(crate) async fn run_file_mcp_serve(
 
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
+    crate::install_default_hostlib(&mut vm);
     let source_parent = std::path::Path::new(path)
         .parent()
         .unwrap_or(std::path::Path::new("."));
@@ -1334,5 +1336,85 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
             None,
         )
         .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{execute_run, CliLlmMockMode};
+    use std::collections::HashSet;
+
+    #[cfg(feature = "hostlib")]
+    #[tokio::test]
+    async fn execute_run_installs_hostlib_gate() {
+        let temp = tempfile::NamedTempFile::new().expect("temp file");
+        std::fs::write(
+            temp.path(),
+            r#"
+pipeline main() {
+  let _ = hostlib_enable("tools:deterministic")
+  println("enabled")
+}
+"#,
+        )
+        .expect("write script");
+
+        let outcome = execute_run(
+            &temp.path().to_string_lossy(),
+            false,
+            HashSet::new(),
+            Vec::new(),
+            Vec::new(),
+            CliLlmMockMode::Off,
+            None,
+        )
+        .await;
+
+        assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+        assert_eq!(outcome.stdout.trim(), "enabled");
+    }
+
+    #[cfg(all(feature = "hostlib", unix))]
+    #[tokio::test]
+    async fn execute_run_can_read_hostlib_command_artifacts() {
+        let temp = tempfile::NamedTempFile::new().expect("temp file");
+        std::fs::write(
+            temp.path(),
+            r#"
+pipeline main() {
+  let _ = hostlib_enable("tools:deterministic")
+  let result = hostlib_tools_run_command({
+    argv: ["sh", "-c", "i=0; while [ $i -lt 2000 ]; do printf x; i=$((i+1)); done"],
+    capture: {max_inline_bytes: 8},
+    timeout_ms: 5000,
+  })
+  println(starts_with(result.command_id, "cmd_"))
+  println(len(result.stdout))
+  println(result.byte_count)
+  let window = hostlib_tools_read_command_output({
+    command_id: result.command_id,
+    offset: 1990,
+    length: 20,
+  })
+  println(len(window.content))
+  println(window.eof)
+}
+"#,
+        )
+        .expect("write script");
+
+        let outcome = execute_run(
+            &temp.path().to_string_lossy(),
+            false,
+            HashSet::new(),
+            Vec::new(),
+            Vec::new(),
+            CliLlmMockMode::Off,
+            None,
+        )
+        .await;
+
+        assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+        assert_eq!(outcome.stdout.trim(), "true\n8\n2000\n10\ntrue");
     }
 }

@@ -246,6 +246,7 @@ fn repl_completion_entries() -> Vec<String> {
 fn repl_builtin_names() -> Vec<String> {
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
+    crate::install_default_hostlib(&mut vm);
     let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     harn_vm::register_store_builtins(&mut vm, &base_dir);
     harn_vm::register_metadata_builtins(&mut vm, &base_dir);

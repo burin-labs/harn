@@ -1,0 +1,80 @@
+import { agent_host_tools } from "std/agent/host_tools"
+
+pipeline main() {
+  let root = path_join(temp_dir(), "harn-host-tools-" + uuid())
+  let outside = path_join(temp_dir(), "harn-host-tools-outside-" + uuid())
+  mkdir(root, true)
+  mkdir(outside, true)
+  mkdir(path_join(root, "logs"), true)
+  write_file(path_join(root, "README.md"), "alpha\nbeta\ngamma\n")
+  write_file(path_join(root, "logs/llm_transcript.jsonl"), "beta from transcript\n")
+  let tools = agent_host_tools(
+    nil,
+    {
+      root: root,
+      cwd: root,
+      max_inline_bytes: 4,
+      allow_argv_prefixes: [["sh", "-c"]],
+      names: {
+        run_command: "release_run",
+        read_command_output: "release_read_output",
+        read_command_output_tail: "release_output_tail",
+      },
+      annotations: {run_command: {fixture_marker: "custom"}},
+      exclude_globs: ["logs/**"],
+    },
+  )
+  let surface = tool_surface_validate({tools: tools, policy: {side_effect_level: "process_exec"}})
+  println(surface.valid)
+  println(tool_find(tools, "release_run").annotations.result_readers[0])
+  println(tool_find(tools, "release_run").annotations.fixture_marker)
+  let read = agent_dispatch_tool_call(
+    {id: "r1", name: "read_file", arguments: {path: "README.md", limit_bytes: 5}},
+    tools,
+  )
+  let read_data = json_parse(read.rendered_result)
+  println(read_data.content)
+  let search = agent_dispatch_tool_call(
+    {
+      id: "s1",
+      name: "search_files",
+      arguments: {pattern: "beta", fixed_strings: true, exclude_globs: ["*.none"]},
+    },
+    tools,
+  )
+  let search_data = json_parse(search.rendered_result)
+  println(search_data.matches[0].line)
+  let run = agent_dispatch_tool_call(
+    {
+      id: "c1",
+      name: "release_run",
+      arguments: {argv: ["sh", "-c", "printf abcdefghij"], capture: {max_inline_bytes: 100}},
+    },
+    tools,
+  )
+  println(run.ok)
+  let data = json_parse(run.rendered_result)
+  println(data.stdout)
+  println(data.byte_count)
+  let tail = agent_dispatch_tool_call(
+    {id: "c2", name: "release_output_tail", arguments: {command_id: data.command_id, length: 3}},
+    tools,
+  )
+  let tail_data = json_parse(tail.rendered_result)
+  println(tail_data.content)
+  let cwd_blocked = agent_dispatch_tool_call(
+    {id: "c3", name: "release_run", arguments: {argv: ["sh", "-c", "pwd"], cwd: outside}},
+    tools,
+  )
+  println(cwd_blocked.ok)
+  println(contains(cwd_blocked.error, "absolute paths are disabled"))
+  let git_blocked = agent_dispatch_tool_call(
+    {id: "g1", name: "git_inspect", arguments: {operation: "status", repo: outside}},
+    tools,
+  )
+  println(git_blocked.ok)
+  println(contains(git_blocked.error, "absolute paths are disabled"))
+  let blocked = agent_dispatch_tool_call({id: "c3", name: "release_run", arguments: {argv: ["echo", "no"]}}, tools)
+  let blocked_data = json_parse(blocked.rendered_result)
+  println(blocked_data.blocked)
+}

@@ -16,5 +16,8 @@ pipeline default() {
   println(result.status)
   println(result.visible_text)
   println(result.llm.iterations)
-  println(len(llm_mock_calls()))
+  let calls = llm_mock_calls()
+  println(len(calls))
+  println(!json_stringify(calls[1].messages).contains("{{"))
+  println(json_stringify(calls[3].messages).contains("The concrete result is 4."))
 }

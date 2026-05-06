@@ -1332,14 +1332,16 @@ artifacts through this builtin before the prompt is rendered.
 `agent_turn(prompt, options?)` is the high-level wrapper for the common
 "complete this request" shape. It builds on `agent_loop`, moves
 `options.system` into the system prompt, adds generic progress guidance,
-defaults to a persistent `##DONE##` sentinel loop, and requires the
-sentinel completion judge. Pass `judge: {...}` or `done_judge: {...}`
-to customize the judge; omit both to use the default judge.
+defaults to persistent completion, and requires the completion judge.
+Native-tool turns complete naturally when the model returns final text
+with no tool calls; text/no-tool turns use the normal sentinel path.
+Pass `judge: {...}` or `done_judge: {...}` to customize the judge; omit
+both to use the default judge.
 
 The result is the normal `agent_loop` dict plus:
 
 - `iterations` — compact per-turn summaries from live loop events.
-- `judge_decisions` — structured sentinel judge decisions with
+- `judge_decisions` — structured completion judge decisions with
   `iteration`, `verdict`, `reasoning`, `next_step`, and
   `judge_duration_ms`.
 
@@ -1356,10 +1358,12 @@ println(result.judge_decisions[0].verdict)
 ### `agent_loop`
 
 `agent_loop(prompt, system?, options?)` runs a multi-turn loop with
-tool dispatch. Completion uses the `##DONE##` sentinel: tagged
-text-tool stages emit `<done>##DONE##</done>`, while no-tool and
-native-tool stages emit bare `##DONE##`. The sentinel is configurable
-via `done_sentinel`.
+tool dispatch. Native-tool loops complete naturally when the model
+returns final assistant text with no tool calls. Tagged text-tool stages
+use `<done>##DONE##</done>`, and no-tool sentinel loops use bare
+`##DONE##`. Set `done_sentinel` to a non-empty string to require a
+sentinel, or `nil` for no sentinel. Native-tool persistent loops default
+to `nil`; text/no-tool persistent loops default to `"##DONE##"`.
 
 Returns a namespaced dict: top-level `status`, `text`, `visible_text`
 (last iteration's prose with tool calls stripped), `task_ledger`,
@@ -1367,9 +1371,11 @@ Returns a namespaced dict: top-level `status`, `text`, `visible_text`
 `deferred_user_messages`; LLM execution metrics nested under `llm`
 (`iterations`, `duration_ms`, `input_tokens`, `output_tokens`); tool
 invocation data nested under `tools` (`calls`, `successful`, `rejected`,
-`mode`). Respects the same `llm_retries` / `llm_backoff_ms` options
-as `llm_call`, plus its own `profile`, `tool_retries`,
-`max_iterations`, `max_nudges`, and `native_tool_fallback`
+`mode`). Failed tool dispatches are fed back to the next model turn as
+error observations and appear under `tools.rejected`. Respects the same
+`llm_retries` / `llm_backoff_ms` options as `llm_call`, plus its own
+`profile`, `tool_retries`, `max_iterations`, `max_nudges`, and
+`native_tool_fallback`
 (`"allow"`, `"allow_once"`, or `"reject"` for native-tool stages that
 receive text-mode `<tool_call>` fallback output). `thinking`,
 `interleaved_thinking`, and `anthropic_beta_features` apply to every
@@ -1406,14 +1412,14 @@ iterations are skipped. The loop exits with `status = "done"` and
 the tool name appears in `tools.successful`.
 
 Pass `done_judge: true` or `done_judge: {...}` to run a structured
-sentinel-only completion judge after the model emits `##DONE##`.
-The judge accepts either `pass: bool` or
-`verdict: "done" | "continue"` plus optional `reasoning`, `feedback`,
-`next_step`, and `final_response`. A veto injects feedback and the loop
+completion judge after a native-tool loop naturally completes or after
+the model emits `##DONE##` in a sentinel loop.
+The judge returns `verdict: "done" | "continue"` plus optional
+`reasoning` and `next_step`. A veto injects feedback and the loop
 continues until the judge accepts or `max_verify_attempts` is exhausted.
 Each judge call emits a `JudgeDecision` agent event. Use
-`verify_completion_judge` instead when every natural stop, not only the
-sentinel, should be judged.
+`verify_completion_judge` instead when every natural stop should be
+judged.
 
 Pass `permissions` to scope one agent below the ambient `policy` ceiling:
 
@@ -1467,29 +1473,29 @@ shape; new keys are additive):
 {
   session_id: string,                // live agent_session id (use this with agent_session_*)
   iteration: int,                    // 0-based turn index
+  has_tool_calls: bool,
+  dispatch: list | dict | nil,
   tool_count: int,                   // calls dispatched this turn
-  tool_names: list<string>,          // names dispatched this turn
   tool_results: list<dict>,          // structured per-call results
   successful_tool_names: list<string>,
-  failed: bool,                      // any tool result not "ok", or parse error
-  consecutive_single_tool_turns: int,
-  session_tools_used: list<string>,
+  rejected_tool_names: list<string>,
   session_successful_tools: list<string>,
+  session_rejected_tools: list<string>,
+  text: string,
+  visible_text: string,
 }
 ```
 
 The return value drives the loop. Accepted shapes:
 
 - `nil` / `""` — no-op, loop continues
-- `string s` — wrap as `<runtime_feedback>` user note (legacy convenience)
+- `string s` — inject as runtime feedback for the next turn
 - `bool b` — set the stop flag
 - dict with any combination of:
   - `message: string` — same as the bare-string shape
   - `stop: bool` — terminate the loop after this turn
-  - `inject: dict | list<dict>` — typed messages with explicit
-    `{role, content}` to push onto the next turn (no `<runtime_feedback>`
-    wrapping). Roles outside `user|assistant|system|tool_result` are
-    silently dropped.
+  - `next_options: dict` — merge into the next loop iteration's options
+  - `llm_options: dict` — merge into the next LLM call's `llm_options`
 
 Because `session_id` is exposed, the closure can call any
 `agent_session_*` builtin against the live transcript. The minimal
@@ -1505,13 +1511,28 @@ let judge = { info ->
     schema: {approved: "bool", feedback: "string"},
   })
   if !verdict.approved {
-    return {inject: [{role: "system", content: "judge: " + verdict.feedback}]}
+    return {message: "judge: " + verdict.feedback}
   }
   if verdict.approved && info.iteration > 5 { return {stop: true} }
   nil
 }
 
 agent_loop(task, system, {tools: registry, post_turn_callback: judge})
+```
+
+Hooks can also shape the next model turn. For example, once the required tool
+evidence exists, ask the provider to stop calling tools and synthesize:
+
+```harn
+let finalize_after_evidence = { info ->
+  if info?.session_successful_tools?.contains("read_file") {
+    return {
+      message: "Use the gathered evidence and produce the final answer now.",
+      llm_options: {tool_choice: "none"},
+    }
+  }
+  nil
+}
 ```
 
 Other strategies compose from existing primitives — no new runtime
