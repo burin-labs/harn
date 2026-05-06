@@ -36,8 +36,8 @@ jobs:
         with:
           components: rustfmt
       - run: make fmt-check
-      - name: Check canonical stdlib package
-        run: cargo package -p harn-stdlib --allow-dirty --no-verify
+      - name: Check published crate packages
+        run: ./scripts/verify_crate_packages.sh
 
   lint-md:
     name: Markdown lint

@@ -903,17 +903,16 @@ mod tests {
     use time::Duration;
 
     const RECORD_SCHEMA_JSON: &str =
-        include_str!("../../../opentrustgraph-spec/schemas/trust-record.v0.schema.json");
-    const CHAIN_SCHEMA_JSON: &str =
-        include_str!("../../../opentrustgraph-spec/schemas/trust-chain.v0.schema.json");
+        include_str!("trust_graph/schemas/trust-record.v0.schema.json");
+    const CHAIN_SCHEMA_JSON: &str = include_str!("trust_graph/schemas/trust-chain.v0.schema.json");
     const VALID_DECISION_CHAIN_JSON: &str =
-        include_str!("../../../opentrustgraph-spec/fixtures/valid/decision-chain.json");
+        include_str!("trust_graph/fixtures/valid/decision-chain.json");
     const VALID_TIER_TRANSITION_JSON: &str =
-        include_str!("../../../opentrustgraph-spec/fixtures/valid/tier-transition.json");
+        include_str!("trust_graph/fixtures/valid/tier-transition.json");
     const INVALID_TAMPERED_CHAIN_JSON: &str =
-        include_str!("../../../opentrustgraph-spec/fixtures/invalid/tampered-chain.json");
+        include_str!("trust_graph/fixtures/invalid/tampered-chain.json");
     const INVALID_MISSING_APPROVAL_JSON: &str =
-        include_str!("../../../opentrustgraph-spec/fixtures/invalid/missing-approval.json");
+        include_str!("trust_graph/fixtures/invalid/missing-approval.json");
 
     #[derive(Debug, serde::Deserialize)]
     struct TrustChainFixture {
@@ -930,6 +929,44 @@ mod tests {
         verified: bool,
         generated_at: String,
         producer: BTreeMap<String, serde_json::Value>,
+    }
+
+    #[test]
+    fn embedded_trust_graph_fixtures_match_workspace_spec_when_available() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let spec_dir = manifest_dir.join("../../opentrustgraph-spec");
+        if !spec_dir.exists() {
+            return;
+        }
+
+        for (relative, embedded) in [
+            ("schemas/trust-record.v0.schema.json", RECORD_SCHEMA_JSON),
+            ("schemas/trust-chain.v0.schema.json", CHAIN_SCHEMA_JSON),
+            (
+                "fixtures/valid/decision-chain.json",
+                VALID_DECISION_CHAIN_JSON,
+            ),
+            (
+                "fixtures/valid/tier-transition.json",
+                VALID_TIER_TRANSITION_JSON,
+            ),
+            (
+                "fixtures/invalid/tampered-chain.json",
+                INVALID_TAMPERED_CHAIN_JSON,
+            ),
+            (
+                "fixtures/invalid/missing-approval.json",
+                INVALID_MISSING_APPROVAL_JSON,
+            ),
+        ] {
+            let source = std::fs::read_to_string(spec_dir.join(relative)).unwrap_or_else(|e| {
+                panic!("failed to read opentrustgraph fixture {relative}: {e}")
+            });
+            assert_eq!(
+                embedded, source,
+                "embedded trust graph fixture {relative} drifted from opentrustgraph-spec"
+            );
+        }
     }
 
     #[tokio::test]
