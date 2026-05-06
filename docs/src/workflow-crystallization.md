@@ -364,6 +364,51 @@ candidate steps generated for `agent_recovery_advice` events carry an
 boundary so hosts must not re-run a failing step without a human
 acknowledging the advice.
 
+## Persona-aware crystallization
+
+Generic crystallization mines repeated traces. Persona-aware crystallization is
+the narrower loop for durable personas that repeatedly call a repair-worker for
+the same shape of problem. The stdlib helper
+`persona_crystallization_bundle(history, options?)` lives in
+`std/personas/prelude` and keeps recurrence selection in Harn orchestration:
+Rust provides receipt/run history, bundle validation, diff, and replay
+primitives, while Harn persona code decides whether a recurring worker result
+should become a deterministic `@step`.
+
+The helper is deliberately conservative. It proposes only exact recurrence:
+
+- same persona and repair worker
+- same repair-worker input shape
+- same repair-worker output shape
+- same downstream action
+- at least `min_examples` successful records
+- at least `min_hosted_history_days` of hosted history, defaulting to 90 days
+
+When the gate passes, the returned proposal uses the existing
+`harn.crystallization.candidate.bundle` shape. It includes source trace
+references, a deterministic shadow comparison over the matched records, savings
+from avoided repair-worker model calls, and a literal Harn `@step` patch. The
+patch is review material, not an automatic mutation: promotion still runs
+historical shadow fixtures, eval-pack delta, human approval, a package version
+bump, and a normal PR against the persona package.
+
+```harn
+import { persona_crystallization_bundle } from "std/personas/prelude"
+
+pipeline propose_persona_step(repair_runs) {
+  return persona_crystallization_bundle(
+    repair_runs,
+    {
+      persona: "merge_captain",
+      hosted_history_days: 91,
+      min_examples: 3,
+      package_name: "merge-captain-workflows",
+      approver: "release-lead@example.com",
+    },
+  )
+}
+```
+
 ### Out of scope here
 
 This subcommand is intentionally a one-shot ingest path. It does not:
@@ -374,7 +419,5 @@ This subcommand is intentionally a one-shot ingest path. It does not:
 - introduce a new workflow loader or Burin UI mechanism (Burin local
   loading lives in
   [burin-code#516](https://github.com/burin-labs/burin-code/issues/516)),
-- host a tenant candidate inbox (that lives in
-  [harn-cloud#145](https://github.com/burin-labs/harn-cloud/issues/145)),
-- or mine across many production histories (that lives in
-  [harn#1080](https://github.com/burin-labs/harn/issues/1080)).
+- or host a tenant candidate inbox (that lives in
+  [harn-cloud#145](https://github.com/burin-labs/harn-cloud/issues/145)).

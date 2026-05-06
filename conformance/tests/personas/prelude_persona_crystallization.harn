@@ -1,0 +1,64 @@
+import {
+  persona_crystallization_bundle,
+  persona_crystallization_candidates,
+} from "std/personas/prelude"
+
+fn repair_run(id, repo, status = "completed") {
+  return {
+    _type: "merge_captain.repair_run",
+    id: id,
+    persona: "merge_captain",
+    status: status,
+    trace_id: id + "-trace",
+    bundle: {
+      kind: "ci_failure",
+      repo: repo,
+      failing_checks: ["ci / rust"],
+      allowed_write_scope: ["crates/harn-vm/**"],
+      required_verification: [{name: "vm", command: "cargo test -p harn-vm"}],
+    },
+    output: {
+      diagnosis: "retry-safe deterministic validator drift",
+      files_changed: [{path: "crates/harn-vm/src/lib.rs", action: "modified"}],
+      tests_run: [{name: "vm", command: "cargo test -p harn-vm", status: "ok"}],
+      commits_created: [{sha: "abc123", subject: "fix validator drift"}],
+      push_result: {pushed: true, ref: "origin/fix", sha: "abc123", force_with_lease: true},
+      residual_risk: "low",
+    },
+    downstream_action: "enqueue_merge_queue",
+    agent_loop: {model_calls: 1, input_tokens: 100, output_tokens: 20, cost_usd: 0.01, wall_ms: 5000},
+    validation_errors: [],
+  }
+}
+
+pipeline test(task) {
+  let gated = persona_crystallization_candidates(
+    [
+      repair_run("r1", "burin-labs/harn"),
+      repair_run("r2", "burin-labs/harn"),
+      repair_run("r3", "burin-labs/harn"),
+    ],
+    {hosted_history_days: 30},
+  )
+  println(gated.status)
+  println(len(gated.candidates))
+  let history = [
+    repair_run("r1", "burin-labs/harn"),
+    repair_run("r2", "burin-labs/harn"),
+    repair_run("r3", "burin-labs/harn"),
+    repair_run("bad", "burin-labs/harn", "validators_failed"),
+  ]
+  let bundle = persona_crystallization_bundle(
+    history,
+    {hosted_history_days: 91, min_examples: 3, package_name: "merge-captain-workflows"},
+  )
+  println(bundle.schema)
+  println(bundle.kind)
+  println(len(bundle.source_traces))
+  println(bundle.shadow.pass)
+  println(bundle.savings.model_calls_avoided)
+  println(bundle.workflow.package_name)
+  println(bundle.patch.contains("@step"))
+  println(bundle.patch.contains("dispatch"))
+  println(len(bundle.report.rejected))
+}
