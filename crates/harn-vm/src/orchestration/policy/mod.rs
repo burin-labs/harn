@@ -831,8 +831,8 @@ mod turn_policy_tests {
     fn deserializing_partial_dict_preserves_done_sentinel_pathway() {
         // Pre-existing workflows passed `turn_policy: { require_action_or_yield: true }`
         // without knowing about `allow_done_sentinel`. Deserializing such a dict
-        // must keep the done-sentinel pathway enabled so persistent agent loops
-        // don't lose their completion signal in this release.
+        // must keep the done-sentinel pathway enabled so loop-until-done agents
+        // don't lose their completion signal.
         let policy: TurnPolicy =
             serde_json::from_value(serde_json::json!({ "require_action_or_yield": true }))
                 .expect("deserialize");

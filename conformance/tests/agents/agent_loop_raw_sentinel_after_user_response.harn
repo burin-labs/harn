@@ -4,7 +4,7 @@ pipeline default() {
   let result = agent_loop(
     "finish cleanly",
     nil,
-    {provider: "mock", persistent: true, max_iterations: 3, done_sentinel: "##DONE##"},
+    {provider: "mock", loop_until_done: true, max_iterations: 3, done_sentinel: "##DONE##"},
   )
   println(result.status)
   println(result.text)

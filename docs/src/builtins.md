@@ -1443,7 +1443,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `with_rate_limit(provider, fn, options?)` | provider: string, fn: closure, options: dict | whatever `fn` returns | Acquire a permit from the provider's sliding-window rate limiter, invoke `fn`, and retry with exponential backoff on retryable errors (`rate_limit`, `overloaded`, `transient_network`, `timeout`). Options: `max_retries` (default 5), `backoff_ms` (default 1000, capped at 30s after doubling) |
 | `llm_completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns `{text, model, input_tokens, output_tokens}` |
 | `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with natural completion for native-tool loops, sentinel completion for text/no-tool loops (`<done>##DONE##</done>` in tagged text-tool stages), daemon/idling support, and optional per-turn context filtering. Returns `{status, text, visible_text, llm: {iterations, duration_ms, input_tokens, output_tokens}, tools: {calls, successful, rejected, mode}, transcript, task_ledger, trace, …}` |
-| `agent_turn(prompt, options?)` | prompt: string, options: dict | dict | High-level agent turn wrapper around `agent_loop`. It installs generic user-visible progress guidance, requires the completion judge (`done_judge`), defaults to persistent completion (natural for native-tool turns, sentinel-based for text/no-tool turns), and returns the normal loop result plus `iterations` and `judge_decisions` summaries |
+| `agent_turn(prompt, options?)` | prompt: string, options: dict | dict | High-level agent turn wrapper around `agent_loop`. It installs generic user-visible progress guidance, requires the completion judge (`done_judge`), defaults to loop-until-done completion (natural for native-tool turns, sentinel-based for text/no-tool turns), and returns the normal loop result plus `iterations` and `judge_decisions` summaries |
 | `agent_llm_turn(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Low-level one-turn LLM request used by stdlib orchestration; equivalent to `llm_call` but intentionally lives under the agent primitive surface |
 | `agent_parse_tool_calls(text, tools?)` | text: string, tools: registry or nil | dict | Parse tagged/text-mode tool calls into `{tool_calls, prose, canonical_text, protocol_violations, tool_parse_errors, done_marker}` |
 | `agent_dispatch_tool_call(call, tools?, options?)` | call: dict, tools: registry or nil, options: dict | dict | Dispatch one normalized tool call through the runtime parser/enforcement path and return `{ok, status, rendered_result, error_category, executor, ...}` |
@@ -1557,7 +1557,7 @@ llm_mock_clear()
 | `transcript_import(json_text)` | json_text: string | dict | Import transcript JSON |
 | `transcript_fork(transcript, options?)` | transcript: dict, options: dict | dict | Fork transcript, optionally dropping messages or summary |
 | `transcript_summarize(transcript, options?)` | transcript: dict, options: dict | dict | Summarize and compact a transcript via `llm_call` |
-| `transcript_compact(transcript, options?)` | transcript: dict, options: dict | dict | Compact a transcript with the runtime compaction engine, preserving durable artifacts and compaction events |
+| `transcript_compact(transcript, options?)` | transcript: dict, options: dict | dict | Compact a transcript with the runtime compaction engine, preserving durable artifacts and compaction events. `strategy: "custom"` requires `custom_compactor`, a closure that returns the replacement transcript state |
 | `transcript_auto_compact(messages, options?)` | messages: list, options: dict | list | Apply the agent-loop compaction pipeline to a message list using `llm`, `truncate`, or `custom` strategy |
 
 ### Provider configuration
@@ -1734,6 +1734,11 @@ Low-level tool management functions for building and inspecting tool
 registries programmatically. For MCP serving, see the `tool_define` /
 `mcp_tools` API above.
 
+For declarative batches, `import { tool_define_many, tool_registry_from } from
+"std/tools"`. `tool_define_many(registry, specs)` adds a list of `{name,
+description, parameters, handler, ...}` specs to a registry, and
+`tool_registry_from(specs)` creates a fresh registry from the same shape.
+
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `tool_remove(registry, name)` | registry, name: string | dict | Remove a tool by name |
@@ -1850,7 +1855,7 @@ MCP servers.
 | `mcp_read_resource(client, uri)` | client: mcp\_client, uri: string | string or list | Read a resource by URI |
 | `mcp_list_prompts(client)` | client: mcp\_client | list | List available prompts from the server |
 | `mcp_get_prompt(client, name, arguments?)` | client: mcp\_client, name: string, arguments: dict | dict | Get a prompt with optional arguments |
-| `mcp_server_info(client)` | client: mcp\_client | dict | Get connection info (`name`, `connected`) |
+| `mcp_server_info(client)` | client: mcp\_client | dict | Get connection info (`name`, `connected`) plus the server initialize response and extracted advisory `instructions` when supplied |
 | `mcp_disconnect(client)` | client: mcp\_client | nil | Kill the server process and release resources |
 
 Example:
@@ -1968,6 +1973,8 @@ tool registry dict.
 |---|---|---|---|
 | `tool_registry()` | — | dict | Create an empty tool registry |
 | `tool_define(registry, name, desc, config)` | registry, name, desc: string, config: dict | dict | Add a tool (config: `{parameters, handler, returns?, annotations?, ...}`) |
+| `tool_define_many(registry, specs)` | registry: dict, specs: list | dict | Stdlib helper from `std/tools`; add many declarative tool specs to a registry |
+| `tool_registry_from(specs)` | specs: list | dict | Stdlib helper from `std/tools`; create a registry from declarative tool specs |
 | `tool_synthesize(config)` | config: dict | closure | Synthesize a deterministic callable tool from a natural-language description |
 | `tool_synthesis_cache()` | — | list | Inspect pinned synthesized tool specs for the current run |
 | `tool_synthesis_clear()` | — | nil | Clear the current run's synthesized tool cache |
@@ -2418,7 +2425,7 @@ See the [Sessions](./sessions.md) chapter for the full model.
 | `agent_session_fork(src, dst?)` | src, dst | string | Copies transcript, sets `dst.parent_id`, and appends `dst` to `src.child_ids` |
 | `agent_session_fork_at(src, keep_first, dst?)` | src, keep_first: int, dst | string | Forks then keeps the first `keep_first` messages on the child; records `branched_at_event_index` |
 | `agent_session_trim(id, keep_last)` | id, keep_last: int | int | Retain last `keep_last` messages; returns kept count |
-| `agent_session_compact(id, opts)` | id, opts: dict | int | Runs the LLM/truncate/observation-mask compactor |
+| `agent_session_compact(id, opts)` | id, opts: dict | int | Runs the LLM/truncate/observation-mask/custom compactor; custom strategies use `custom_compactor`, `mask_callback`, or `compress_callback` closures |
 | `agent_session_inject(id, message)` | id, message: dict | nil | Appends `{role, content, …}`; missing `role` errors |
 | `agent_session_close(id)` | id | nil | Evicts immediately regardless of LRU cap |
 
@@ -2446,7 +2453,7 @@ and offline analysis.
 | `transcript_archive(transcript)` | transcript | transcript | Mark transcript archived and append an internal lifecycle event |
 | `transcript_abandon(transcript)` | transcript | transcript | Mark transcript abandoned and append an internal lifecycle event |
 | `transcript_resume(transcript)` | transcript | transcript | Mark transcript active again and append an internal lifecycle event |
-| `transcript_compact(transcript, options?)` | transcript, options | transcript | Compact a transcript with the runtime compaction engine |
+| `transcript_compact(transcript, options?)` | transcript, options | transcript | Compact a transcript with the runtime compaction engine, including `strategy: "custom"` plus `custom_compactor` |
 | `transcript_summarize(transcript, options?)` | transcript, options | transcript | Compact via LLM-generated summary |
 | `transcript_auto_compact(messages, options?)` | messages, options | list | Apply the agent-loop compaction pipeline to a message list |
 | `transcript_render_visible(transcript)` | transcript | string | Render only public/human-visible messages |

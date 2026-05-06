@@ -4616,13 +4616,13 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                // `persistent: true` keeps the loop iterating on a
+                // `loop_until_done: true` keeps the loop iterating on a
                 // text-only mock turn, and `max_iterations: 1` forces
                 // the cap to fire on iteration 1 → ACP `max_turn_requests`.
                 let body = "llm_mock_clear()\n\
                             llm_mock({text: \"still working\"})\n\
                             llm_mock({text: \"still working\"})\n\
-                            agent_loop(\"hello\", nil, {provider: \"mock\", persistent: true, max_iterations: 1})";
+                            agent_loop(\"hello\", nil, {provider: \"mock\", loop_until_done: true, max_iterations: 1})";
                 let stop_reason = run_acp_agent_loop_prompt(body).await;
                 assert_eq!(stop_reason, "max_turn_requests");
             })

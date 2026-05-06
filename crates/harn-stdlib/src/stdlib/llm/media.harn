@@ -1,0 +1,130 @@
+fn __llm_media_is_url(source) {
+  return starts_with(source, "http://") || starts_with(source, "https://") || starts_with(source, "data:")
+}
+
+fn __llm_media_source_field(source, media_type) {
+  if __llm_media_is_url(source) {
+    return {url: source}
+  }
+  return {base64: bytes_to_base64(read_file_bytes(source)), media_type: media_type}
+}
+
+/** media_type_for_path returns a best-effort MIME type from a filename extension. */
+pub fn media_type_for_path(path, fallback = nil) {
+  let ext = extname(path).lower()
+  if ext == ".png" {
+    return "image/png"
+  }
+  if ext == ".jpg" || ext == ".jpeg" {
+    return "image/jpeg"
+  }
+  if ext == ".webp" {
+    return "image/webp"
+  }
+  if ext == ".gif" {
+    return "image/gif"
+  }
+  if ext == ".pdf" {
+    return "application/pdf"
+  }
+  if ext == ".wav" {
+    return "audio/wav"
+  }
+  if ext == ".mp3" {
+    return "audio/mpeg"
+  }
+  if ext == ".m4a" {
+    return "audio/mp4"
+  }
+  if ext == ".flac" {
+    return "audio/flac"
+  }
+  if ext == ".ogg" || ext == ".oga" {
+    return "audio/ogg"
+  }
+  return fallback ?? "application/octet-stream"
+}
+
+/** text_content creates a provider-neutral text content block. */
+pub fn text_content(text) {
+  return {type: "text", text: text}
+}
+
+/** image_content creates an llm_call-compatible image block from a URL or local path. */
+pub fn image_content(source, options = nil) {
+  if type_of(source) == "dict" {
+    return source
+  }
+  let opts = options ?? {}
+  let media_type = opts?.media_type ?? opts?.mime_type ?? media_type_for_path(source, "image/png")
+  var block = {type: "image"} + __llm_media_source_field(source, media_type)
+  if block?.media_type == nil {
+    block = block + {media_type: media_type}
+  }
+  if opts?.detail != nil {
+    block = block + {detail: opts.detail}
+  }
+  return block
+}
+
+/**
+ * document_content creates an llm_call-compatible PDF/document block from a URL, file id, or path.
+ */
+pub fn document_content(source, options = nil) {
+  if type_of(source) == "dict" {
+    return source
+  }
+  let opts = options ?? {}
+  let media_type = opts?.media_type ?? opts?.mime_type ?? media_type_for_path(source, "application/pdf")
+  if opts?.file_id != nil {
+    return {type: "pdf", file_id: opts.file_id, media_type: media_type}
+  }
+  var block = {type: "pdf"} + __llm_media_source_field(source, media_type)
+  if block?.media_type == nil {
+    block = block + {media_type: media_type}
+  }
+  return block
+}
+
+/** audio_content creates an llm_call-compatible audio block from a URL, file id, or path. */
+pub fn audio_content(source, options = nil) {
+  if type_of(source) == "dict" {
+    return source
+  }
+  let opts = options ?? {}
+  let media_type = opts?.media_type ?? opts?.mime_type ?? media_type_for_path(source, "audio/wav")
+  if opts?.file_id != nil {
+    return {type: "audio", file_id: opts.file_id, media_type: media_type}
+  }
+  var block = {type: "audio"} + __llm_media_source_field(source, media_type)
+  if block?.media_type == nil {
+    block = block + {media_type: media_type}
+  }
+  return block
+}
+
+/** image_message builds a user message containing text plus one image. */
+pub fn image_message(source, prompt = "", options = nil) {
+  let text = if prompt == nil || prompt == "" {
+    "Analyze this image."
+  } else {
+    prompt
+  }
+  return {role: "user", content: [text_content(text), image_content(source, options)]}
+}
+
+/** image_vision_context returns OCR/vision output beside an LLM-ready image message. */
+pub fn image_vision_context(source, options = nil) {
+  let opts = options ?? {}
+  let image = image_content(source, opts?.image ?? opts)
+  let ocr_result = try {
+    vision_ocr(source, opts?.ocr ?? {})
+  } catch (_e) {
+    nil
+  }
+  return {
+    image: image,
+    ocr: ocr_result,
+    messages: [image_message(source, opts?.prompt ?? "Analyze this image.", opts?.image ?? opts)],
+  }
+}

@@ -1,15 +1,15 @@
 # LLM and agents
 
 Harn has built-in support for calling language models, streaming responses,
-running persistent agent loops, and delegating work to child agents. This page is
-the map; the detailed references now live in focused pages.
+running loop-until-done agents, and delegating work to child agents. This page
+is the map; the detailed references now live in focused pages.
 
 ## Start here
 
 | Topic | Use it for |
 |---|---|
 | [`llm_call`](./llm/llm_call.md) | Single model requests, structured JSON output, completions, budgets, and mock responses |
-| [`agent_loop`](./llm/agent_loop.md) | Persistent agents, profiles, daemon loops, skills, and delegated workers |
+| [`agent_loop`](./llm/agent_loop.md) | Loop-until-done agents, profiles, daemon loops, skills, and delegated workers |
 | [Tools](./llm/tools.md) | Typed tools, Tool Vault progressive disclosure, and MCP server tools |
 | [Streaming](./llm/streaming.md) | `llm_stream`, `llm_stream_call`, partial deltas, transcripts, workflow sessions, and token usage summaries |
 | [Providers](./llm/providers.md) | Provider setup, API details, local servers, enterprise cloud providers, and capability overrides |
@@ -83,7 +83,7 @@ policy fails.
 let result = agent_loop(
   "Write a function that sorts a list, then write tests for it.",
   "You are a senior engineer.",
-  {persistent: true, profile: "tool_using"}
+  {loop_until_done: true, profile: "tool_using"}
 )
 println(result.status)
 println(result.llm.iterations)

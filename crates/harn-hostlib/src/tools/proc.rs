@@ -32,8 +32,7 @@ use crate::tools::response::ResponseBuilder;
 
 mod artifacts;
 
-use self::artifacts::planned_artifact_paths;
-pub(crate) use self::artifacts::{persist_artifacts, resolve_output_path};
+pub(crate) use self::artifacts::{persist_artifacts, planned_artifact_paths, resolve_output_path};
 
 static COMMAND_COUNTER: AtomicU64 = AtomicU64::new(1);
 

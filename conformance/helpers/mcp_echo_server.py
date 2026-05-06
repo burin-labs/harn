@@ -23,6 +23,7 @@ def handle_request(msg):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
+                "instructions": "Use echo server tools only for conformance.",
                 "serverInfo": {"name": "test-echo-server", "version": "1.0.0"},
             },
         }

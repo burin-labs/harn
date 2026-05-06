@@ -390,7 +390,7 @@ Set a timeout on a block of work:
 ```harn
 deadline 30s {
   // must complete within 30 seconds
-  agent_loop(task, system, {persistent: true})
+  agent_loop(task, system, {loop_until_done: true})
 }
 ```
 

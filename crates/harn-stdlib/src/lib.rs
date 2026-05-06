@@ -54,6 +54,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_json.harn"),
     },
     StdlibSource {
+        module: "tools",
+        source: include_str!("stdlib/stdlib_tools.harn"),
+    },
+    StdlibSource {
         module: "graphql",
         source: include_str!("stdlib/stdlib_graphql.harn"),
     },
@@ -108,6 +112,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
     StdlibSource {
         module: "agent/prompts",
         source: include_str!("stdlib/agent/prompts.harn"),
+    },
+    StdlibSource {
+        module: "llm/media",
+        source: include_str!("stdlib/llm/media.harn"),
     },
     StdlibSource {
         module: "agent/options",
@@ -351,8 +359,8 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
         source: include_str!("stdlib/agent/prompts/default_nudge.harn.prompt"),
     },
     StdlibPromptAsset {
-        path: "agent/prompts/persistent_loop_system.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/persistent_loop_system.harn.prompt"),
+        path: "agent/prompts/loop_until_done_system.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/loop_until_done_system.harn.prompt"),
     },
     StdlibPromptAsset {
         path: "agent/prompts/completion_judge_default.harn.prompt",

@@ -15,7 +15,7 @@ pipeline test(task) {
       provider: "mock",
       model: "gpt-5.4",
       tool_format: "native",
-      persistent: true,
+      loop_until_done: true,
       max_iterations: 3,
       session_id: "skills-unsigned-reject",
       skills: skills,

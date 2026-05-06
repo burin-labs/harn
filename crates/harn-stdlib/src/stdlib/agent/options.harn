@@ -16,9 +16,12 @@ fn __profile_defaults(profile) {
   throw "agent_loop: profile must be one of tool_using, researcher, verifier, completer"
 }
 
-fn __completion_judge_defaults(value) {
+fn __completion_judge_defaults(value, opts) {
   if type_of(value) == "bool" && value {
-    return {system: completion_judge_system_prompt(), feedback_fallback: completion_judge_feedback_prompt()}
+    return {
+      system: completion_judge_system_prompt(opts),
+      feedback_fallback: completion_judge_feedback_prompt(opts),
+    }
   }
   return value
 }
@@ -162,6 +165,9 @@ pub fn autonomy_policy(tier = "act_auto", options = nil) {
 /** agent_loop_options. */
 pub fn agent_loop_options(options = nil) {
   var opts = options ?? {}
+  if __has_key(opts, "persistent") {
+    throw "agent_loop: `persistent` was removed; use `loop_until_done` for completion looping and `session_id` for transcript persistence"
+  }
   if __has_key(opts, "done_sentinel") {
     __validate_done_sentinel(opts.done_sentinel)
   }
@@ -187,7 +193,7 @@ pub fn agent_loop_options(options = nil) {
     && (opts?.tools == nil || __client_tool_search_requested(opts?.tool_search)) {
     opts = opts + {tool_format: "text"}
   }
-  if opts?.persistent ?? false && !__has_key(opts, "done_sentinel") {
+  if opts?.loop_until_done ?? false && !__has_key(opts, "done_sentinel") {
     opts = opts
       + {
       done_sentinel: if __native_tools_complete_naturally(opts) {
@@ -205,14 +211,14 @@ pub fn agent_loop_options(options = nil) {
   if __has_key(opts, "verify_completion_judge") {
     if __judge_enabled(opts?.verify_completion_judge) {
       opts = opts
-        + {verify_completion_judge: __completion_judge_defaults(opts?.verify_completion_judge)}
+        + {verify_completion_judge: __completion_judge_defaults(opts?.verify_completion_judge, opts)}
     } else {
       opts = opts + {verify_completion_judge: nil}
     }
   }
   if __has_key(opts, "done_judge") {
     if __judge_enabled(opts?.done_judge) {
-      opts = opts + {done_judge: __completion_judge_defaults(opts?.done_judge)}
+      opts = opts + {done_judge: __completion_judge_defaults(opts?.done_judge, opts)}
     } else {
       opts = opts + {done_judge: nil}
     }

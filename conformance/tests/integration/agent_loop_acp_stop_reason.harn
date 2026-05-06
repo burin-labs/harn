@@ -33,6 +33,6 @@ pipeline default() {
   llm_mock_clear()
   llm_mock({text: "still working"})
   llm_mock({text: "still working"})
-  let capped = agent_loop("hi", nil, {provider: "mock", persistent: true, max_iterations: 1})
+  let capped = agent_loop("hi", nil, {provider: "mock", loop_until_done: true, max_iterations: 1})
   println(capped.acp_stop_reason)
 }

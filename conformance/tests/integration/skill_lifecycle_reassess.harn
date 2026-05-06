@@ -41,7 +41,7 @@ pipeline test(task) {
       tools: tools,
       tool_format: "native",
       max_iterations: 2,
-      persistent: true,
+      loop_until_done: true,
       skills: registry,
       skill_match: {strategy: "metadata", top_n: 1, sticky: false},
       post_turn_callback: { info ->

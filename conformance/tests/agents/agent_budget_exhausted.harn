@@ -1,14 +1,20 @@
 pipeline test(task) {
   llm_mock_clear()
   llm_mock({text: "still working"})
-  // Run a persistent agent loop against the mock provider with a small
+  // Run a loop-until-done agent loop against the mock provider with a small
   // max_iterations budget. The fixture response intentionally omits the
   // configured ##DONE## sentinel, so the loop exhausts its iteration budget
   // rather than finishing naturally.
   let result = agent_loop(
     "Just keep replying",
     "You are helpful",
-    {provider: "mock", persistent: true, done_sentinel: "##DONE##", max_iterations: 1, max_nudges: 5},
+    {
+      provider: "mock",
+      loop_until_done: true,
+      done_sentinel: "##DONE##",
+      max_iterations: 1,
+      max_nudges: 5,
+    },
   )
   println(result.status)
   assert(result.status == "budget_exhausted", "status should be budget_exhausted")

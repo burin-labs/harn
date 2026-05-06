@@ -593,6 +593,34 @@ fn run_command_long_running_returns_handle_immediately() {
 }
 
 #[test]
+fn run_command_background_after_returns_progress_snapshot() {
+    let mut config = MockProcessConfig::running();
+    config.stdout = b"started\n".to_vec();
+    let (_spawner, _controller, _guard) = install_mock_with(config);
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "10"]));
+    req.insert("background_after_ms".into(), VmValue::Int(50));
+    req.insert("progress_max_inline_bytes".into(), VmValue::Int(200));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    assert_eq!(require_str(&resp, "status"), "running");
+    assert_eq!(require_str(&resp, "feedback_kind"), "tool_progress");
+    assert_eq!(require_str(&resp, "stdout"), "started\n");
+    assert!(require_str(&resp, "output_path").contains("harn-command-"));
+    let handle_id = require_str(&resp, "handle_id");
+
+    let completion_rx = register_completion_notifier(&handle_id);
+    let mut cancel_req = dict();
+    cancel_req.insert("handle_id".into(), vstr(&handle_id));
+    let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    assert!(require_bool(&cancel_resp, "cancelled"));
+    if let Some(rx) = completion_rx {
+        let _ = rx.recv();
+    }
+}
+
+#[test]
 fn run_command_long_running_feedback_fires_after_exit() {
     // Use a process-unique session id so parallel tests don't interfere.
     let session_id = format!(

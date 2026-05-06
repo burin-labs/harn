@@ -27,9 +27,58 @@ fn __tool_search_config(value) {
   }
 }
 
+fn __tool_search_provider_has_native(opts, cfg) {
+  if type_of(cfg?.strategy) != "string" {
+    return false
+  }
+  if cfg.variant == "hybrid" {
+    return false
+  }
+  let info = try {
+    if opts?.model != nil {
+      llm_model_info(opts.model)
+    } else {
+      if opts?.provider != nil {
+        llm_model_info(opts.provider)
+      } else {
+        nil
+      }
+    }
+  } catch (_e) {
+    nil
+  }
+  let caps = try {
+    if info != nil && info?.capabilities != nil {
+      info.capabilities
+    } else {
+      if info != nil {
+        provider_capabilities(info.provider, info.id)
+      } else {
+        if opts?.provider != nil && opts?.model != nil {
+          provider_capabilities(opts.provider, opts.model)
+        } else {
+          nil
+        }
+      }
+    }
+  } catch (_e) {
+    nil
+  }
+  return caps != nil && caps?.defer_loading && len(caps?.tool_search ?? []) > 0
+}
+
 fn __tool_search_client_requested(opts) {
   let cfg = __tool_search_config(opts?.tool_search)
-  return cfg != nil && cfg.mode == "client"
+  if cfg == nil {
+    return false
+  }
+  if cfg.mode == "client" {
+    return true
+  }
+  if cfg.mode == "native" {
+    return false
+  }
+  return !__tool_search_provider_has_native(opts, cfg)
 }
 
 fn __tool_search_tools(registry) {
@@ -73,29 +122,107 @@ fn __tool_search_estimate_tokens(entry) {
 
 fn __tool_search_strategy(cfg) {
   let strategy = cfg?.strategy ?? cfg?.variant ?? "bm25"
-  if strategy != "bm25" && strategy != "regex" {
-    throw "tool_search.strategy: Harn client mode currently supports \"bm25\" or \"regex\""
+  if type_of(strategy) == "closure" {
+    return strategy
+  }
+  if type_of(strategy) == "dict" && type_of(strategy?.handler) == "closure" {
+    return strategy
+  }
+  if type_of(strategy) != "string" {
+    throw "tool_search.strategy: expected \"bm25\", \"regex\", \"hybrid\", a scorer closure, or {handler}"
+  }
+  if strategy != "bm25" && strategy != "regex" && strategy != "hybrid" {
+    throw "tool_search.strategy: Harn client mode supports \"bm25\", \"regex\", \"hybrid\", or custom scorers"
   }
   return strategy
 }
 
+fn __tool_search_strategy_label(strategy) {
+  if type_of(strategy) == "string" {
+    return strategy
+  }
+  if type_of(strategy) == "dict" && strategy?.name != nil {
+    return strategy.name
+  }
+  return "custom"
+}
+
 fn __tool_search_description(strategy) {
-  if strategy == "regex" {
+  let label = __tool_search_strategy_label(strategy)
+  if label == "regex" {
     return "Search for deferred tools. Pass `query` as a case-insensitive regex. The result is JSON with `tool_names` in rank order; only those tools will be visible next turn."
+  }
+  if label == "hybrid" {
+    return "Search for deferred tools. Pass `query` as natural-language keywords; Harn will fuse lexical and BM25 rankings. The result is JSON with `tool_names` in rank order; only those tools will be visible next turn."
   }
   return "Search for deferred tools. Pass `query` as natural-language keywords. The result is JSON with `tool_names` in rank order; only those tools will be visible next turn."
 }
 
+fn __tool_search_normalize_result(value) {
+  if type_of(value) == "string" {
+    let parsed = try {
+      json_parse(value)
+    }
+    if is_ok(parsed) {
+      return __tool_search_normalize_result(unwrap(parsed))
+    }
+    return {tool_names: []}
+  }
+  if type_of(value) == "dict" {
+    if value?.tool_names != nil {
+      return value
+    }
+    if value?.ranked != nil {
+      return __tool_search_normalize_result(value.ranked)
+    }
+    if value?.tool_name != nil {
+      return {tool_names: [value.tool_name], ranked: [value]}
+    }
+    if value?.name != nil {
+      return {tool_names: [value.name], ranked: [value + {tool_name: value.name}]}
+    }
+    return {tool_names: []}
+  }
+  if type_of(value) == "list" {
+    var names = []
+    var ranked = []
+    for item in value {
+      if type_of(item) == "string" {
+        names = names.push(item)
+        ranked = ranked.push({tool_name: item, score: nil, snippet: ""})
+      } else if type_of(item) == "dict" {
+        let name = item?.tool_name ?? item?.name
+        if name != nil {
+          names = names.push(name)
+          ranked = ranked.push(item + {tool_name: name})
+        }
+      }
+    }
+    return {tool_names: names, ranked: ranked}
+  }
+  return {tool_names: []}
+}
+
 fn __tool_search_run(args, state) {
   let query = args?.query ?? ""
-  let ranked = __host_tool_search_score(
-    query,
-    state.deferred_registry,
-    {strategy: state.strategy, variant: state.variant},
-  )
+  let raw_result = if type_of(state.strategy) == "closure" {
+    state.strategy(query, state.deferred_registry, {variant: state.variant})
+  } else {
+    if type_of(state.strategy) == "dict" && type_of(state.strategy?.handler) == "closure" {
+      state.strategy.handler(query, state.deferred_registry, state.strategy)
+    } else {
+      __host_tool_search_score(
+        query,
+        state.deferred_registry,
+        {strategy: state.strategy, variant: state.variant},
+      )
+    }
+  }
+  let normalized = __tool_search_normalize_result(raw_result)
+  let ranked = normalized?.ranked ?? []
   var names = []
-  for hit in ranked {
-    names = names.push(hit.tool_name)
+  for name in normalized?.tool_names ?? [] {
+    names = names.push(name)
   }
   let diagnostic = if len(names) == 0 {
     "no deferred tools matched the query; try broader terms"
@@ -139,6 +266,7 @@ fn __tool_search_initial_state(opts) {
     name: cfg.name,
     variant: cfg.variant,
     strategy: __tool_search_strategy(cfg),
+    strategy_label: __tool_search_strategy_label(__tool_search_strategy(cfg)),
     budget_tokens: cfg.budget_tokens,
     original_registry: opts?.tools,
     eager_tools: eager,
@@ -189,9 +317,9 @@ pub fn agent_tool_search_emit_queries(session_id, tool_calls, opts) {
         "tool_search_query",
         {
           tool_use_id: __tool_search_call_id(call),
-          name: "tool_search_tool_" + state.variant,
+          name: "tool_search_tool_" + state.strategy_label,
           query: call?.arguments ?? {},
-          strategy: state.strategy,
+          strategy: state.strategy_label,
           mode: "client",
         },
       )
@@ -277,7 +405,7 @@ pub fn agent_tool_search_record_results(session_id, tool_calls, dispatch, opts) 
       {
         tool_use_id: __tool_search_call_id(call),
         promoted: promoted,
-        strategy: state.strategy,
+        strategy: state.strategy_label,
         mode: "client",
       },
     )

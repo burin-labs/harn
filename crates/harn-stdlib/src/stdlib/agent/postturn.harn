@@ -110,7 +110,7 @@ fn __stop_after_successful_tools(opts, dispatch) {
 }
 
 fn __native_tool_text_completion(opts, has_tool_calls, text) {
-  if !(opts?.persistent ?? false) || opts?.daemon {
+  if !(opts?.loop_until_done ?? false) || opts?.daemon {
     return false
   }
   if opts?.tool_format != "native" || opts?.tools == nil {
@@ -204,9 +204,9 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
         || opts?.verify_completion_judge != nil,
     }
   }
-  let persistent = opts?.persistent ?? false
+  let loop_until_done = opts?.loop_until_done ?? false
   let daemon = opts?.daemon ?? false
-  if !has_tool_calls && !persistent && !daemon {
+  if !has_tool_calls && !loop_until_done && !daemon {
     return {
       kind: "break",
       stop_reason: "natural",

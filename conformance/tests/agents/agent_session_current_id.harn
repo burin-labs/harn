@@ -30,7 +30,7 @@ pipeline main(task) {
       provider: "mock",
       tools: tools,
       tool_format: "native",
-      persistent: true,
+      loop_until_done: true,
       max_iterations: 4,
       session_id: session,
     },

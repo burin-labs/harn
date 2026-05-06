@@ -1,44 +1,105 @@
-/** render_agent_prompt. */
+fn __agent_default_prompt_catalog() {
+  return {
+    ["agent.action_turn_nudge"]: "action_turn_nudge.harn.prompt",
+    ["agent.loop_contract"]: "loop_until_done_system.harn.prompt",
+    ["agent.default_nudge"]: "default_nudge.harn.prompt",
+    ["agent.completion_judge_system"]: "completion_judge_default.harn.prompt",
+    ["agent.completion_judge_feedback"]: "completion_judge_feedback_fallback.harn.prompt",
+    ["agent.completion_judge_user"]: "completion_judge_user.harn.prompt",
+    ["agent.native_tool_contract_feedback"]: "native_tool_contract_feedback.harn.prompt",
+    ["agent.turn_preamble"]: "agent_turn_preamble.harn.prompt",
+    ["agent.tool_contract_native"]: "tool_contract_native.harn.prompt",
+    ["agent.tool_contract_text"]: "tool_contract_text.harn.prompt",
+  }
+}
+
+fn __agent_prompt_overrides(options = nil) {
+  if options == nil {
+    return {}
+  }
+  if type_of(options) != "dict" {
+    return {}
+  }
+  return options?.prompts ?? options?.prompt_overrides ?? options
+}
+
+/** agent_prompt_catalog returns the logical prompt-id map used by the agent stdlib. */
+pub fn agent_prompt_catalog(options = nil) {
+  return __agent_default_prompt_catalog() + __agent_prompt_overrides(options)
+}
+
+fn __agent_render_prompt_entry(entry, bindings) {
+  if type_of(entry) == "closure" {
+    return entry(bindings ?? {})
+  }
+  if type_of(entry) == "dict" {
+    if entry?.text != nil {
+      return render_string(entry.text, bindings ?? {})
+    }
+    entry = entry?.path
+  }
+  if type_of(entry) != "string" {
+    throw "render_agent_prompt_id: prompt entry must be a path string, closure, or {path|text}"
+  }
+  let path = if starts_with(entry, "std/") {
+    entry
+  } else {
+    "std/agent/prompts/" + entry
+  }
+  return render_prompt(path, bindings ?? {})
+}
+
+/** render_agent_prompt_id renders a logical prompt id with optional overrides. */
+pub fn render_agent_prompt_id(id, bindings = nil, options = nil) {
+  let catalog = agent_prompt_catalog(options)
+  let entry = catalog[id]
+  if entry == nil {
+    throw "render_agent_prompt_id: unknown prompt id " + id
+  }
+  return __agent_render_prompt_entry(entry, bindings ?? {})
+}
+
+/** render_agent_prompt renders a std agent prompt asset by filename/path. */
 pub fn render_agent_prompt(path, bindings = nil) {
-  return render_prompt("std/agent/prompts/" + path, bindings ?? {})
+  return __agent_render_prompt_entry(path, bindings ?? {})
 }
 
 /** action_turn_nudge_prompt. */
-pub fn action_turn_nudge_prompt(bindings) {
-  return render_agent_prompt("action_turn_nudge.harn.prompt", bindings)
+pub fn action_turn_nudge_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.action_turn_nudge", bindings, options)
 }
 
-/** persistent_loop_system_prompt. */
-pub fn persistent_loop_system_prompt(bindings) {
-  return render_agent_prompt("persistent_loop_system.harn.prompt", bindings)
+/** loop_until_done_system_prompt. */
+pub fn loop_until_done_system_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.loop_contract", bindings, options)
 }
 
 /** default_nudge_prompt. */
-pub fn default_nudge_prompt(bindings) {
-  return render_agent_prompt("default_nudge.harn.prompt", bindings)
+pub fn default_nudge_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.default_nudge", bindings, options)
 }
 
 /** completion_judge_system_prompt. */
-pub fn completion_judge_system_prompt() {
-  return render_agent_prompt("completion_judge_default.harn.prompt", {})
+pub fn completion_judge_system_prompt(options = nil) {
+  return render_agent_prompt_id("agent.completion_judge_system", {}, options)
 }
 
 /** completion_judge_feedback_prompt. */
-pub fn completion_judge_feedback_prompt() {
-  return render_agent_prompt("completion_judge_feedback_fallback.harn.prompt", {})
+pub fn completion_judge_feedback_prompt(options = nil) {
+  return render_agent_prompt_id("agent.completion_judge_feedback", {}, options)
 }
 
 /** completion_judge_user_prompt. */
-pub fn completion_judge_user_prompt(bindings) {
-  return render_agent_prompt("completion_judge_user.harn.prompt", bindings)
+pub fn completion_judge_user_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.completion_judge_user", bindings, options)
 }
 
 /** native_tool_contract_feedback_prompt. */
-pub fn native_tool_contract_feedback_prompt(bindings) {
-  return render_agent_prompt("native_tool_contract_feedback.harn.prompt", bindings)
+pub fn native_tool_contract_feedback_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.native_tool_contract_feedback", bindings, options)
 }
 
 /** agent_turn_preamble_prompt. */
-pub fn agent_turn_preamble_prompt() {
-  return render_agent_prompt("agent_turn_preamble.harn.prompt", {})
+pub fn agent_turn_preamble_prompt(options = nil) {
+  return render_agent_prompt_id("agent.turn_preamble", {}, options)
 }

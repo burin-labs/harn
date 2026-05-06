@@ -59,7 +59,7 @@ pipeline test(task) {
       provider: "mock",
       tools: registry,
       tool_search: {variant: "regex", mode: "client"},
-      persistent: true,
+      loop_until_done: true,
       max_iterations: 5,
     },
   )

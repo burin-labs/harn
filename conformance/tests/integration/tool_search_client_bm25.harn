@@ -65,7 +65,7 @@ pipeline test(task) {
       provider: "mock",
       tools: registry,
       tool_search: {variant: "bm25", mode: "client"},
-      persistent: true,
+      loop_until_done: true,
       max_iterations: 5,
     },
   )

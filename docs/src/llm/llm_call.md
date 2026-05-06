@@ -39,7 +39,8 @@ println(result.text)
 With image content:
 
 ```harn
-let image = bytes_to_base64(read_file_bytes("diagram.png"))
+import { image_content } from "std/llm/media"
+
 let result = llm_call("", nil, {
   provider: "openai",
   model: "gpt-4o",
@@ -47,7 +48,7 @@ let result = llm_call("", nil, {
     role: "user",
     content: [
       {type: "text", text: "Summarize this diagram."},
-      {type: "image", base64: image, media_type: "image/png", detail: "auto"},
+      image_content("diagram.png", {detail: "auto"}),
     ],
   }],
 })
@@ -60,7 +61,9 @@ Exactly one of `url` or `base64` is required. Harn translates it to
 Anthropic `source`, OpenAI `image_url`, Gemini `inline_data`/`file_data`,
 or Ollama `images` fields at the provider boundary. Ollama's REST API
 only accepts base64 image data, so `url` image blocks are rejected for
-`provider: "ollama"`.
+`provider: "ollama"`. `std/llm/media` also provides `image_message(...)`
+and `image_vision_context(...)` helpers when a harness wants the same image
+as both LLM content and deterministic `vision_ocr(...)` context.
 
 ### Parameters
 

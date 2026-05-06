@@ -53,7 +53,6 @@ fn stdlib_facades_and_host_primitives_are_discoverable() {
         "__host_agent_session_replace_messages",
         "__host_agent_session_claim_tool_format",
         "__host_agent_budget_pre_call_blocked",
-        "__host_agent_build_turn_system",
         "__host_agent_emit_event",
         "__host_skill_score",
         "__host_agent_capture_events",

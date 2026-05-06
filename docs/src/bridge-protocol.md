@@ -419,39 +419,12 @@ A host may also wake the daemon by sending a queued `user_message`, `session/inp
 When a Harn script opts into `tool_search` against a provider that lacks
 native defer-loading support, the runtime switches to a client-executed
 fallback (see the [LLM tools guide](./llm/tools.md#client-executed-fallback)).
-For the
-`"bm25"` and `"regex"` strategies everything stays in-VM; the
-`"semantic"` and `"host"` strategies round-trip the query through the
-bridge.
-
-### `tool_search/query`
-
-Request payload (harn-issued, host response required):
-
-```json
-{
-  "strategy": "semantic",
-  "query": "deploy a new service version",
-  "candidates": ["deploy_service", "rollback_service", "query_metrics", "..."]
-}
-```
-
-- `strategy`: one of `"semantic"` or `"host"`. The in-tree strategies
-  (`"bm25"` / `"regex"`) never hit the bridge.
-- `query`: the raw query string the model passed to the synthetic
-  search tool. For `strategy: "regex"` / `"bm25"` hosts *don't* see
-  this; those strategies run inside the VM.
-- `candidates`: full list of deferred tool names the host may choose
-  from. The host should return a subset.
-
-Response payload (host-issued):
-
-```json
-{
-  "tool_names": ["deploy_service", "rollback_service"],
-  "diagnostic": "matched by vector similarity"
-}
-```
+Built-in `bm25`, `regex`, and `hybrid` strategies stay in Harn/VM space. Hosts
+that want embeddings, LLM reranking, project-specific indexes, or remote search
+services should provide those through ordinary Harn callbacks, host-backed
+tools, or MCP tools and pass the closure as `tool_search.strategy`. The bridge
+observes only the resulting `tool_search_query` and `tool_search_result`
+transcript events; there is no special `tool_search/query` RPC.
 
 - `tool_names` (required): ordered list of tool names to promote.
   Unknown names are ignored by the runtime — they can't be surfaced

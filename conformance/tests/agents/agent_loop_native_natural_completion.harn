@@ -26,7 +26,7 @@ pipeline main() {
       provider: "mock",
       tools: lookup_tools(),
       tool_format: "native",
-      persistent: true,
+      loop_until_done: true,
       done_judge: true,
       max_iterations: 4,
     },

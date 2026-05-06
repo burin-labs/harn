@@ -14,7 +14,7 @@ pipeline default() {
   println(explicit_native.tool_format)
   println(contains(explicit_native.keys(), "done_sentinel"))
   let persistent_native = agent_loop_options(
-    {provider: "mock", tools: tool_registry(), tool_format: "native", persistent: true},
+    {provider: "mock", tools: tool_registry(), tool_format: "native", loop_until_done: true},
   )
   println(persistent_native.done_sentinel == nil)
   let judged_native = agent_loop_options(
@@ -22,7 +22,7 @@ pipeline default() {
       provider: "mock",
       tools: tool_registry(),
       tool_format: "native",
-      persistent: true,
+      loop_until_done: true,
       done_judge: true,
     },
   )

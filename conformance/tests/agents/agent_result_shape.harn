@@ -10,7 +10,13 @@ pipeline test(task) {
   let result = agent_loop(
     "Just keep replying",
     "You are helpful",
-    {provider: "mock", persistent: true, done_sentinel: "##DONE##", max_iterations: 1, max_nudges: 1},
+    {
+      provider: "mock",
+      loop_until_done: true,
+      done_sentinel: "##DONE##",
+      max_iterations: 1,
+      max_nudges: 1,
+    },
   )
   println(result.status == "budget_exhausted")
   println(type_of(result.llm) == "dict")

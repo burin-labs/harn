@@ -1,0 +1,3 @@
+pipeline test(task) {
+  agent_turn("do work", {provider: "mock", persistent: true})
+}

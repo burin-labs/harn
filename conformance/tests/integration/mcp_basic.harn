@@ -21,6 +21,7 @@ pipeline default() {
   // Server info
   let info = mcp_server_info(client)
   println(info.connected)
+  println(info.instructions.contains("echo server tools"))
   // Disconnect
   mcp_disconnect(client)
 }

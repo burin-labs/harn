@@ -1622,6 +1622,7 @@ async fn host_mcp_bootstrap_impl(args: Vec<VmValue>) -> Result<VmValue, VmError>
 
     let mut clients: BTreeMap<String, crate::mcp::VmMcpClientHandle> = BTreeMap::new();
     let mut tools_added: Vec<serde_json::Value> = Vec::new();
+    let mut server_infos: Vec<serde_json::Value> = Vec::new();
     let mut errors: Vec<serde_json::Value> = Vec::new();
 
     for spec in &specs_list {
@@ -1643,6 +1644,27 @@ async fn host_mcp_bootstrap_impl(args: Vec<VmValue>) -> Result<VmValue, VmError>
                 }));
             }
             Ok(handle) => {
+                let initialize = handle
+                    .initialize_result
+                    .lock()
+                    .await
+                    .clone()
+                    .unwrap_or(serde_json::Value::Null);
+                let instructions = initialize
+                    .get("instructions")
+                    .or_else(|| {
+                        initialize
+                            .get("serverInfo")
+                            .and_then(|value| value.get("instructions"))
+                    })
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                server_infos.push(serde_json::json!({
+                    "name": server_name.clone(),
+                    "initialize": initialize,
+                    "instructions": instructions,
+                }));
                 let list_result = handle.call("tools/list", serde_json::json!({})).await;
                 match list_result {
                     Err(e) => {
@@ -1697,6 +1719,7 @@ async fn host_mcp_bootstrap_impl(args: Vec<VmValue>) -> Result<VmValue, VmError>
 
     Ok(json_to_vm_value(&serde_json::json!({
         "tools_added": tools_added,
+        "server_info": server_infos,
         "errors": errors,
     })))
 }

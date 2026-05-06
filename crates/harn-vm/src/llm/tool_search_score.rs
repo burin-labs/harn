@@ -69,6 +69,7 @@ pub(crate) fn score_tools(
     let candidates = candidates_from_registry(registry);
     match strategy {
         "regex" => score_regex(query, &candidates, max_results),
+        "hybrid" => score_hybrid(query, &candidates, max_results),
         _ => score_bm25(query, &candidates, max_results),
     }
 }
@@ -231,6 +232,109 @@ fn score_regex(pattern: &str, candidates: &[Candidate], max_results: usize) -> V
         .collect()
 }
 
+fn score_hybrid(query: &str, candidates: &[Candidate], max_results: usize) -> Vec<RankedTool> {
+    let field = score_field_weighted(
+        query,
+        candidates,
+        max_results.saturating_mul(4).max(max_results),
+    );
+    let lists = vec![
+        score_bm25(
+            query,
+            candidates,
+            max_results.saturating_mul(4).max(max_results),
+        ),
+        field.clone(),
+        field,
+    ];
+    reciprocal_rank_fuse(lists, candidates, max_results)
+}
+
+fn score_field_weighted(
+    query: &str,
+    candidates: &[Candidate],
+    max_results: usize,
+) -> Vec<RankedTool> {
+    let query_tokens = tokenize(query);
+    if query_tokens.is_empty() {
+        return Vec::new();
+    }
+    let mut scored = candidates
+        .iter()
+        .filter_map(|candidate| {
+            let name = candidate.name.to_lowercase();
+            let name_parts: Vec<&str> = name.split(['_', '-', '.', ':']).collect();
+            let description = candidate.description.to_lowercase();
+            let params = candidate.param_text.join(" ").to_lowercase();
+            let mut score = 0.0;
+            for token in &query_tokens {
+                if name == *token {
+                    score += 10.0;
+                } else if name_parts.iter().any(|part| *part == token) {
+                    score += 7.0;
+                } else if name.contains(token) {
+                    score += 5.0;
+                }
+                if description.contains(token) {
+                    score += 2.0;
+                }
+                if params.contains(token) {
+                    score += 1.0;
+                }
+            }
+            if query_tokens
+                .iter()
+                .all(|token| name_parts.iter().any(|part| *part == token) || name.contains(token))
+            {
+                score += 1.0 / name_parts.len().max(1) as f64;
+            }
+            (score > 0.0).then(|| ranked(candidate, score))
+        })
+        .collect::<Vec<_>>();
+    scored.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.tool_name.cmp(&b.tool_name))
+    });
+    scored.truncate(max_results);
+    scored
+}
+
+fn reciprocal_rank_fuse(
+    lists: Vec<Vec<RankedTool>>,
+    candidates: &[Candidate],
+    max_results: usize,
+) -> Vec<RankedTool> {
+    const RRF_K: f64 = 60.0;
+    let mut scores: HashMap<String, f64> = HashMap::new();
+    for list in lists {
+        for (rank, item) in list.into_iter().enumerate() {
+            *scores.entry(item.tool_name).or_insert(0.0) += 1.0 / (RRF_K + rank as f64 + 1.0);
+        }
+    }
+    let by_name = candidates
+        .iter()
+        .map(|candidate| (candidate.name.as_str(), candidate))
+        .collect::<HashMap<_, _>>();
+    let mut fused = scores
+        .into_iter()
+        .filter_map(|(name, score)| {
+            by_name
+                .get(name.as_str())
+                .map(|candidate| ranked(candidate, score))
+        })
+        .collect::<Vec<_>>();
+    fused.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.tool_name.cmp(&b.tool_name))
+    });
+    fused.truncate(max_results);
+    fused
+}
+
 fn ranked(candidate: &Candidate, score: f64) -> RankedTool {
     RankedTool {
         tool_name: candidate.name.clone(),
@@ -292,5 +396,21 @@ mod tests {
         );
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].tool_name, "edit_file");
+    }
+
+    #[test]
+    fn hybrid_boosts_exact_name_matches() {
+        let registry = serde_json::json!({
+            "tools": [
+                {"name": "run_command", "description": "Execute a shell process", "parameters": {}},
+                {"name": "read_command_output", "description": "Read process output", "parameters": {}}
+            ]
+        });
+        let ranked = score_tools(
+            "command",
+            &registry,
+            &serde_json::json!({"strategy": "hybrid"}),
+        );
+        assert_eq!(ranked[0].tool_name, "run_command");
     }
 }

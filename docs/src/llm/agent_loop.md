@@ -4,7 +4,7 @@
 
 Use `agent_turn(prompt, opts?)` for the common "make one agent complete this
 request" case. It wraps `agent_loop`, puts `opts.system` into the system prompt
-alongside generic progress guidance, defaults to persistent completion, and
+alongside generic progress guidance, defaults to loop-until-done completion, and
 requires a completion judge. Native-tool turns complete naturally when the model
 returns final text with no tool calls; text/no-tool turns use the normal
 sentinel path. Pass `judge: {...}` or `done_judge: {...}` to customize that
@@ -37,7 +37,7 @@ transcript state, and any deferred queued human messages.
 let result = agent_loop(
   "Write a function that sorts a list, then write tests for it.",
   "You are a senior engineer.",
-  {persistent: true}
+  {loop_until_done: true}
 )
 println(result.text)           // the accumulated output
 println(result.status)         // "done", "stuck", "budget_exhausted", "idle", "watchdog", or "failed"
@@ -48,14 +48,14 @@ println(result.llm.iterations) // number of LLM round-trips
 
 1. Sends the prompt to the model
 2. Reads the response
-3. If `persistent: true`:
+3. If `loop_until_done: true`:
    - In native-tool mode, treats final text with no tool calls as completion
    - In text-tool or no-tool sentinel mode, checks for the completion sentinel
      (`<done>##DONE##</done>` or bare `##DONE##`)
    - If completion is detected, stops and returns the accumulated output
    - If no completion is detected, sends a nudge message asking the agent to continue
    - Repeats until done or limits are hit
-4. If `persistent: false` (default): returns after the first response
+4. If `loop_until_done: false` (default): returns after the first response
 
 ### agent_loop return value
 
@@ -109,8 +109,8 @@ Same as `llm_call`, plus additional options:
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `profile` | string | `"tool_using"` | Named preset for common loop shapes. One of `"tool_using"`, `"researcher"`, `"verifier"`, or `"completer"`; explicit option keys override profile defaults |
-| `persistent` | bool | `false` | Keep looping until completion. Native-tool loops complete on final text with no tool calls; text-tool/no-tool sentinel loops complete on `##DONE##` or `<done>##DONE##</done>` |
-| `done_sentinel` | string\|nil | mode-aware | Completion sentinel for sentinel-based loops. Use a non-empty string such as `"##DONE##"` to require sentinel completion, or `nil` for no sentinel. Native-tool persistent loops default to `nil`; text/no-tool persistent loops default to `"##DONE##"` |
+| `loop_until_done` | bool | `false` | Keep looping until completion. Native-tool loops complete on final text with no tool calls; text-tool/no-tool sentinel loops complete on `##DONE##` or `<done>##DONE##</done>` |
+| `done_sentinel` | string\|nil | mode-aware | Completion sentinel for sentinel-based loops. Use a non-empty string such as `"##DONE##"` to require sentinel completion, or `nil` for no sentinel. Native-tool loop-until-done loops default to `nil`; text/no-tool loop-until-done loops default to `"##DONE##"` |
 | `max_iterations` | int | `50` | Maximum number of LLM round-trips |
 | `max_nudges` | int | `8` | Max consecutive text-only responses before stopping |
 | `nudge` | string | see below | Custom message to send when nudging the agent |
@@ -132,6 +132,9 @@ Same as `llm_call`, plus additional options:
 | `idle_watchdog_attempts` | int | nil (disabled) | Max consecutive idle-wait ticks that may return no wake reason before the daemon terminates with `status = "watchdog"`. Guards against a misconfigured daemon (e.g. bridge never signals, no timer, no watch paths) hanging the session silently |
 | `context_callback` | closure | nil | Per-turn hook that can rewrite prompt-visible `messages` and/or the effective `system` prompt before the next LLM call |
 | `context_filter` | closure | nil | Alias for `context_callback` |
+| `timestamp_messages` | bool | `false` | Decorate prompt-visible transcript messages with the current harness timestamp before each LLM call without mutating the stored transcript |
+| `message_decorator` | closure | nil | Per-message hook called as `message_decorator(message, context)` before each LLM call. The context includes `session_id`, `iteration`, `index`, and `timestamp` |
+| `prompts` / `prompt_overrides` | dict | nil | Override logical agent prompt ids such as `agent.loop_contract`, `agent.tool_contract_text`, and `agent.completion_judge_system` with a prompt asset path, `{text}`, `{path}`, or render closure |
 | `post_turn_callback` | closure | nil | Hook called after each turn. Receives turn metadata and may inject a message, request an immediate stage stop, or merge next-turn options such as `llm_options: {tool_choice: "none"}` |
 | `verify_completion` | closure | nil | Hook called when the loop is about to stop naturally. Return `nil`/`true` to accept the stop or feedback text to veto and continue |
 | `verify_completion_judge` | bool/dict | nil | Built-in structured judge for any natural stop. `true` uses defaults; a dict may set `provider`, `model`, `system`, and `feedback_fallback` |
@@ -214,7 +217,7 @@ Default nudge message:
 > In native-tool stages it asks for concrete tool progress and treats final text with no tool calls as completion.
 > In no-tool sentinel stages it asks for concrete progress and reserves bare `##DONE##` for completion.
 
-When `persistent: true`, the system prompt is automatically extended with:
+When `loop_until_done: true`, the system prompt is automatically extended with:
 
 > IMPORTANT: You MUST keep working until the task is complete.
 > The completion instruction is mode-aware:
@@ -320,7 +323,7 @@ fn hide_old_assistant_turns(ctx) {
 }
 
 let result = agent_loop(task, "You are a coding assistant.", {
-  persistent: true,
+  loop_until_done: true,
   context_callback: hide_old_assistant_turns
 })
 ```
@@ -388,7 +391,7 @@ retry 3 {
     task,
     "You are a coding assistant.",
     {
-      persistent: true,
+      loop_until_done: true,
       max_iterations: 30,
       max_nudges: 5,
       provider: "anthropic",

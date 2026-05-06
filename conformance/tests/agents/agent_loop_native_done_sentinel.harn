@@ -26,7 +26,7 @@ pipeline main() {
       provider: "mock",
       tools: tools(),
       tool_format: "native",
-      persistent: true,
+      loop_until_done: true,
       done_sentinel: "##DONE##",
       done_judge: nil,
       max_iterations: 4,
