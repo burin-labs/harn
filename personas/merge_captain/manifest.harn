@@ -10,6 +10,83 @@ import { open_checkpoints } from "lib/checkpoint_store"
 import { fixture_adapter, live_adapter } from "lib/github_adapter"
 import { load_policies, sweep } from "lib/scheduler"
 
+@persona(name: "merge_captain", description: "Harn-native multi-repo PR queue captain.", tools: [github, ci], autonomy: act_with_approval, receipts: required, triggers: [github.pr_opened, github.pr_synchronized, github.check_failed, github.merge_group_completed])
+/** Static persona graph used by `harn persona inspect` to expose Merge Captain's durable steps. */
+pub fn merge_captain_persona(ctx) {
+  let resolved = resolve_input_step(ctx)
+  let policies = load_policies_step(resolved)
+  let adapter = select_adapter_step(resolved)
+  let checkpoint = open_checkpoint_step(resolved)
+  let discovered = discover_open_prs_step({input: resolved, policies: policies, adapter: adapter})
+  let observed = normalize_observations_step(discovered)
+  let classified = classify_pull_requests_step(observed)
+  let repaired = dispatch_repair_workers_step(classified)
+  let gated = gate_mutations_step(repaired)
+  let acted = apply_actions_step(gated)
+  let receipted = emit_receipts_step(acted)
+  return summarize_sweep_step({checkpoint: checkpoint, receipts: receipted})
+}
+
+@step(name: "resolve_input", receipt: audit, error_boundary: fail)
+fn resolve_input_step(ctx) {
+  return ctx
+}
+
+@step(name: "load_repo_policies", receipt: audit, error_boundary: fail)
+fn load_policies_step(ctx) {
+  return ctx
+}
+
+@step(name: "select_github_adapter", receipt: audit, error_boundary: fail)
+fn select_adapter_step(ctx) {
+  return ctx
+}
+
+@step(name: "open_checkpoint_store", receipt: audit, error_boundary: fail)
+fn open_checkpoint_step(ctx) {
+  return ctx
+}
+
+@step(name: "discover_open_prs", receipt: audit, error_boundary: continue, retry: {max_attempts: 2})
+fn discover_open_prs_step(ctx) {
+  return ctx
+}
+
+@step(name: "normalize_observations", receipt: audit, error_boundary: fail)
+fn normalize_observations_step(ctx) {
+  return ctx
+}
+
+@step(name: "classify_pull_requests", receipt: audit, error_boundary: fail)
+fn classify_pull_requests_step(ctx) {
+  return ctx
+}
+
+@step(name: "dispatch_repair_workers", model: "gpt-5.4", approval: required, receipt: audit, error_boundary: continue)
+fn dispatch_repair_workers_step(ctx) {
+  return ctx
+}
+
+@step(name: "gate_mutations", approval: required, receipt: audit, error_boundary: fail)
+fn gate_mutations_step(ctx) {
+  return ctx
+}
+
+@step(name: "apply_actions", approval: required, receipt: audit, error_boundary: escalate)
+fn apply_actions_step(ctx) {
+  return ctx
+}
+
+@step(name: "emit_receipts", receipt: audit, error_boundary: fail)
+fn emit_receipts_step(ctx) {
+  return ctx
+}
+
+@step(name: "summarize_sweep", receipt: audit, error_boundary: fail)
+fn summarize_sweep_step(ctx) {
+  return ctx
+}
+
 fn _default_input() {
   return {
     mode: "fixture",
