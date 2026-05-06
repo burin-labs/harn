@@ -7,7 +7,7 @@ use time::OffsetDateTime;
 
 pub const RECEIPT_SCHEMA_ID: &str = "https://harnlang.com/schemas/receipt.v1.json";
 pub const RECEIPT_SCHEMA_VERSION: &str = "harn.receipt.v1";
-pub const RECEIPT_SCHEMA_JSON: &str = include_str!("../../../../docs/schemas/receipt.v1.json");
+pub const RECEIPT_SCHEMA_JSON: &str = include_str!("receipt.v1.json");
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -294,6 +294,21 @@ mod tests {
             .as_array()
             .unwrap()
             .contains(&json!("receipt_only")));
+    }
+
+    #[test]
+    fn embedded_receipt_schema_matches_workspace_docs_when_available() {
+        let docs_schema = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/schemas/receipt.v1.json");
+        if !docs_schema.exists() {
+            return;
+        }
+        let source = std::fs::read_to_string(&docs_schema)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", docs_schema.display()));
+        assert_eq!(
+            RECEIPT_SCHEMA_JSON, source,
+            "embedded receipt schema drifted from docs/schemas/receipt.v1.json"
+        );
     }
 
     #[test]

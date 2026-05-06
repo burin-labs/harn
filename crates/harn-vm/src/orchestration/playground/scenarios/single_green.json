@@ -1,0 +1,52 @@
+{
+  "_type": "merge_captain_playground_scenario",
+  "scenario": "single_green",
+  "description": "Smallest possible scenario — one repo, one green PR. Use as a sanity check that the playground init succeeds end-to-end.",
+  "owner": "burin-labs",
+  "repos": [
+    {
+      "name": "solo",
+      "default_branch": "main",
+      "files": {
+        "README.md": "# solo\n",
+        "src/lib.rs": "pub fn solo() -> i32 { 0 }\n"
+      },
+      "branches": [
+        {
+          "name": "feature/tiny",
+          "files_set": {
+            "src/lib.rs": "pub fn solo() -> i32 { 1 }\n"
+          },
+          "commit_message": "feat(solo): bump return"
+        }
+      ]
+    }
+  ],
+  "pull_requests": [
+    {
+      "repo": "solo",
+      "number": 1,
+      "title": "solo: bump return",
+      "body": "",
+      "state": "open",
+      "head_branch": "feature/tiny",
+      "base_branch": "main",
+      "user": "alice",
+      "labels": ["ready-to-merge"],
+      "checks": [
+        {"name": "ci", "status": "completed", "conclusion": "success"}
+      ],
+      "mergeable": true,
+      "mergeable_state": "clean"
+    }
+  ],
+  "steps": [
+    {
+      "name": "merge",
+      "description": "Merge the PR.",
+      "actions": [
+        {"kind": "merge_pull_request", "repo": "solo", "pr_number": 1}
+      ]
+    }
+  ]
+}
