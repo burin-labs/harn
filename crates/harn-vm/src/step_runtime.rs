@@ -85,6 +85,10 @@ pub struct ActiveStep {
     pub cost_usd: f64,
     pub llm_calls: u32,
     pub last_model: Option<String>,
+    /// Tracing span id opened when the step's frame was pushed; ended on
+    /// completion. 0 when tracing was disabled at push time, in which
+    /// case `span_end` is a no-op anyway.
+    pub span_id: u64,
 }
 
 impl ActiveStep {
@@ -93,6 +97,7 @@ impl ActiveStep {
         definition: Rc<StepDefinition>,
         persona: Option<String>,
         args: Vec<VmValue>,
+        span_id: u64,
     ) -> Self {
         Self {
             frame_depth,
@@ -104,6 +109,7 @@ impl ActiveStep {
             cost_usd: 0.0,
             llm_calls: 0,
             last_model: None,
+            span_id,
         }
     }
 
@@ -425,12 +431,29 @@ pub fn maybe_push_active_step(function_name: &str, frame_depth: usize, args: &[V
         return false;
     };
     let persona = current_persona_name();
+    let span_id =
+        crate::tracing::span_start(crate::tracing::SpanKind::Step, definition.name.clone());
+    if let Some(persona_name) = persona.as_deref() {
+        crate::tracing::span_set_metadata(
+            span_id,
+            "persona",
+            serde_json::Value::String(persona_name.to_string()),
+        );
+    }
+    if let Some(model) = definition.model.as_deref() {
+        crate::tracing::span_set_metadata(
+            span_id,
+            "model",
+            serde_json::Value::String(model.to_string()),
+        );
+    }
     STEP_STACK.with(|stack| {
         stack.borrow_mut().push(ActiveStep::new(
             frame_depth,
             definition,
             persona,
             args.to_vec(),
+            span_id,
         ));
     });
     true
@@ -509,6 +532,34 @@ pub fn pop_and_record(current_frame_depth: usize, status: &str, error: Option<St
 }
 
 fn finish_step(step: ActiveStep, status: &str, error: Option<String>) {
+    crate::tracing::span_set_metadata(
+        step.span_id,
+        "status",
+        serde_json::Value::String(status.to_string()),
+    );
+    crate::tracing::span_set_metadata(
+        step.span_id,
+        "llm_calls",
+        serde_json::Value::Number(step.llm_calls.into()),
+    );
+    crate::tracing::span_set_metadata(
+        step.span_id,
+        "input_tokens",
+        serde_json::Value::Number(step.input_tokens.into()),
+    );
+    crate::tracing::span_set_metadata(
+        step.span_id,
+        "output_tokens",
+        serde_json::Value::Number(step.output_tokens.into()),
+    );
+    if let Some(cost_n) = serde_json::Number::from_f64(step.cost_usd) {
+        crate::tracing::span_set_metadata(
+            step.span_id,
+            "cost_usd",
+            serde_json::Value::Number(cost_n),
+        );
+    }
+    crate::tracing::span_end(step.span_id);
     let summary = CompletedStep {
         name: step.definition.name.clone(),
         function: step.definition.function.clone(),

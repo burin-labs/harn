@@ -128,6 +128,22 @@ pub struct RunAttestationOptions {
     pub agent_id: Option<String>,
 }
 
+/// Opt-in profiling. When `text` is true the run prints a categorical
+/// breakdown to stderr after execution; when `json_path` is set the same
+/// rollup is serialized to that path. Either flag enables span tracing
+/// (i.e. `harn_vm::tracing::set_tracing_enabled(true)`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RunProfileOptions {
+    pub text: bool,
+    pub json_path: Option<PathBuf>,
+}
+
+impl RunProfileOptions {
+    pub fn is_enabled(&self) -> bool {
+        self.text || self.json_path.is_some()
+    }
+}
+
 /// Captured outcome of an in-process `execute_run` invocation. Tests use this
 /// instead of spawning the `harn` binary; the binary entry point translates
 /// it into real stdout/stderr writes + `process::exit`.
@@ -467,6 +483,7 @@ pub(crate) async fn run_file(
     script_argv: Vec<String>,
     llm_mock_mode: CliLlmMockMode,
     attestation: Option<RunAttestationOptions>,
+    profile: RunProfileOptions,
 ) {
     run_file_with_skill_dirs(
         path,
@@ -476,6 +493,7 @@ pub(crate) async fn run_file(
         Vec::new(),
         llm_mock_mode,
         attestation,
+        profile,
     )
     .await;
 }
@@ -488,6 +506,7 @@ pub(crate) async fn run_file_with_skill_dirs(
     skill_dirs_raw: Vec<String>,
     llm_mock_mode: CliLlmMockMode,
     attestation: Option<RunAttestationOptions>,
+    profile: RunProfileOptions,
 ) {
     // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
     let cancelled = install_signal_shutdown_handler();
@@ -500,6 +519,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         skill_dirs_raw,
         llm_mock_mode,
         attestation,
+        profile,
     )
     .await;
 
@@ -563,6 +583,7 @@ pub async fn execute_run(
     skill_dirs_raw: Vec<String>,
     llm_mock_mode: CliLlmMockMode,
     attestation: Option<RunAttestationOptions>,
+    profile: RunProfileOptions,
 ) -> RunOutcome {
     let mut stderr = String::new();
     let mut stdout = String::new();
@@ -600,6 +621,9 @@ pub async fn execute_run(
 
     if trace {
         harn_vm::llm::enable_tracing();
+    }
+    if profile.is_enabled() {
+        harn_vm::tracing::set_tracing_enabled(true);
     }
     if let Err(error) = install_cli_llm_mock_mode(&llm_mock_mode) {
         stderr.push_str(&format!("error: {error}\n"));
@@ -765,6 +789,11 @@ pub async fn execute_run(
             if trace {
                 stderr.push_str(&render_trace_summary());
             }
+            if profile.is_enabled() {
+                if let Err(error) = render_and_persist_profile(&profile, &mut stderr) {
+                    stderr.push_str(&format!("warning: failed to write profile: {error}\n"));
+                }
+            }
             if exit_code != 0 {
                 stderr.push_str(&render_return_value_error(&return_value));
             }
@@ -776,6 +805,11 @@ pub async fn execute_run(
         }
         Err(rendered_error) => {
             stderr.push_str(&rendered_error);
+            if profile.is_enabled() {
+                if let Err(error) = render_and_persist_profile(&profile, &mut stderr) {
+                    stderr.push_str(&format!("warning: failed to write profile: {error}\n"));
+                }
+            }
             RunOutcome {
                 stdout,
                 stderr,
@@ -783,6 +817,29 @@ pub async fn execute_run(
             }
         }
     }
+}
+
+fn render_and_persist_profile(
+    options: &RunProfileOptions,
+    stderr: &mut String,
+) -> Result<(), String> {
+    let spans = harn_vm::tracing::peek_spans();
+    let profile = harn_vm::profile::build(&spans);
+    if options.text {
+        stderr.push_str(&harn_vm::profile::render(&profile));
+    }
+    if let Some(path) = options.json_path.as_ref() {
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)
+                    .map_err(|error| format!("create {}: {error}", parent.display()))?;
+            }
+        }
+        let json = serde_json::to_string_pretty(&profile)
+            .map_err(|error| format!("serialize profile: {error}"))?;
+        fs::write(path, json).map_err(|error| format!("write {}: {error}", path.display()))?;
+    }
+    Ok(())
 }
 
 async fn append_run_provenance_event(
@@ -1279,6 +1336,7 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
         Vec::new(),
         CliLlmMockMode::Off,
         None,
+        RunProfileOptions::default(),
     )
     .await;
 
@@ -1334,6 +1392,7 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
             Vec::new(),
             CliLlmMockMode::Off,
             None,
+            RunProfileOptions::default(),
         )
         .await;
     }
@@ -1341,7 +1400,7 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{execute_run, CliLlmMockMode};
+    use super::{execute_run, CliLlmMockMode, RunProfileOptions};
     use std::collections::HashSet;
 
     #[cfg(feature = "hostlib")]
@@ -1367,6 +1426,7 @@ pipeline main() {
             Vec::new(),
             CliLlmMockMode::Off,
             None,
+            RunProfileOptions::default(),
         )
         .await;
 
@@ -1411,6 +1471,7 @@ pipeline main() {
             Vec::new(),
             CliLlmMockMode::Off,
             None,
+            RunProfileOptions::default(),
         )
         .await;
 

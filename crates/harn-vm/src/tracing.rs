@@ -24,6 +24,8 @@ pub enum SpanKind {
     Import,
     Parallel,
     Spawn,
+    /// A `@step`-annotated function while its frame is on the call stack.
+    Step,
 }
 
 impl SpanKind {
@@ -36,6 +38,7 @@ impl SpanKind {
             Self::Import => "import",
             Self::Parallel => "parallel",
             Self::Spawn => "spawn",
+            Self::Step => "step",
         }
     }
 }
