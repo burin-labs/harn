@@ -128,4 +128,34 @@ pipeline test(task) {
   println(second_call.contains("rejected=0"))
   println(hook_calls[1].tool_choice == "none")
   println(second_call.contains("finalize now"))
+  llm_mock_clear()
+  llm_mock({text: "", tool_calls: [{id: "hook_2", name: "list_directory", arguments: {path: "."}}]})
+  llm_mock({text: "Final answer after clearing tools."})
+  let final_tools = tool_registry()
+  let cleared_final = agent_loop(
+    "Inspect the workspace",
+    "You are helpful",
+    {
+      provider: "mock",
+      tools: list_tools(),
+      tool_format: "native",
+      persistent: true,
+      max_iterations: 3,
+      max_nudges: 0,
+      post_turn_callback: { info ->
+        if len(info?.successful_tool_names ?? []) > 0 {
+          return {
+            message: "finalize without tools",
+            llm_options: {tool_choice: "none", tools: final_tools},
+            next_options: {tools: final_tools, persistent: false, max_nudges: 0},
+          }
+        }
+        return nil
+      },
+    },
+  )
+  let cleared_calls = llm_mock_calls()
+  println(cleared_final?.status == "done")
+  println(cleared_final?.llm?.iterations == 2)
+  println(len(cleared_calls[1]?.tools ?? []) == 0)
 }
