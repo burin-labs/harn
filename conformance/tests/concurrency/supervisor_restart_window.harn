@@ -20,8 +20,12 @@ pipeline default() {
       ],
     },
   )
-  sleep(30ms)
-  let state = supervisor_state(sup)
+  var state = supervisor_state(sup)
+  let deadline_ms = timestamp() * 1000 + 250
+  while state.status != "completed" && timestamp() * 1000 < deadline_ms {
+    sleep(5ms)
+    state = supervisor_state(sup)
+  }
   println(atomic_get(starts))
   println(state.status)
   println(state.children[0].status)

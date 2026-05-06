@@ -10,6 +10,13 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Persona-aware crystallization proposals (#1080).** `std/personas/prelude`
+  now includes `persona_crystallization_candidates(...)` and
+  `persona_crystallization_bundle(...)` for mining successful repair-worker
+  receipts after the hosted-history gate. The helper emits the existing
+  `harn.crystallization.candidate.bundle` shape with matched traces, shadow
+  comparison, savings estimates, and a literal Harn `@step` patch for persona
+  package review.
 - **Skill provenance endorsement chains (#933).** Skill signatures now use
   `harn-skill-sig/v2` with an author signature plus one or more trusted
   endorsement signatures. Added `harn skill endorse`, `harn skill who-signed`,

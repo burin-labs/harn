@@ -719,3 +719,330 @@ pub fn with_approval_gate(approval_kind, step_fn, options = nil) {
     }
   }
 }
+
+fn __prelude_persona_repair_record(entry) {
+  return entry?.repair_run ?? entry
+}
+
+fn __prelude_persona_repair_status(record) -> string {
+  return lowercase(to_string(record?.status ?? ""))
+}
+
+fn __prelude_persona_repair_succeeded(record) -> bool {
+  let status = __prelude_persona_repair_status(record)
+  let validation_errors = record?.validation_errors ?? []
+  return (status == "completed" || status == "success") && len(validation_errors) == 0
+}
+
+fn __prelude_persona_repair_persona(record, opts) -> string {
+  return to_string(
+    record?.persona
+      ?? record?.parent_receipt_ref?.persona
+      ?? record?.bundle?.persona
+      ?? opts?.persona
+      ?? "persona",
+  )
+}
+
+fn __prelude_persona_downstream_action(record) -> string {
+  return to_string(
+    record?.downstream_action
+      ?? record?.next_action
+      ?? record?.merge_receipt?.action
+      ?? record?.receipt?.action
+      ?? record?.parent_receipt_ref?.next_action
+      ?? "unknown",
+  )
+}
+
+fn __prelude_persona_input_shape(record) {
+  let bundle = record?.bundle ?? {}
+  return {
+    kind: bundle?.kind ?? record?.kind ?? "repair",
+    repo: bundle?.repo ?? record?.repo ?? "",
+    conflict_paths: bundle?.conflict_paths ?? [],
+    failing_checks: bundle?.failing_checks ?? [],
+    allowed_write_scope: bundle?.allowed_write_scope ?? [],
+    required_verification: bundle?.required_verification ?? [],
+    release_facts: bundle?.release_facts,
+    extra_context: bundle?.extra_context ?? {},
+  }
+}
+
+fn __prelude_persona_output_shape(record) {
+  let output = record?.output ?? {}
+  let push = output?.push_result
+  return {
+    diagnosis: output?.diagnosis ?? "",
+    files_changed: output?.files_changed ?? [],
+    tests_run: output?.tests_run ?? [],
+    commits_created: (output?.commits_created ?? []).map({ commit -> return {subject: commit?.subject ?? ""} }),
+    push_result: if push == nil {
+      nil
+    } else {
+      {pushed: push?.pushed ?? false, ref: push?.ref ?? "", force_with_lease: push?.force_with_lease}
+    },
+    residual_risk: output?.residual_risk ?? "",
+    release_outputs: output?.release_outputs,
+  }
+}
+
+fn __prelude_persona_pattern_key(record, opts) -> string {
+  let seed = {
+    persona: __prelude_persona_repair_persona(record, opts),
+    worker: record?.worker ?? record?.agent ?? "repair_worker",
+    input_digest: __prelude_digest(__prelude_persona_input_shape(record)),
+    output_digest: __prelude_digest(__prelude_persona_output_shape(record)),
+    downstream_action: __prelude_persona_downstream_action(record),
+  }
+  return "persona-pattern-" + substring(sha256(json_stringify(seed)), 0, 16)
+}
+
+fn __prelude_persona_pattern_example(record, index, opts) {
+  let trace_id = record?.trace_id
+    ?? record?.parent_receipt_ref?.sweep_id
+    ?? record?.bundle?.parent?.sweep_id
+    ?? ("repair-trace-" + to_string(index + 1))
+  return {
+    trace_id: to_string(trace_id),
+    source_hash: record?.source_hash ?? __prelude_digest(record),
+    receipt_id: record?.id ?? record?.receipt_id,
+    persona: __prelude_persona_repair_persona(record, opts),
+    repair_kind: __prelude_persona_input_shape(record).kind,
+    downstream_action: __prelude_persona_downstream_action(record),
+    input_digest: __prelude_digest(__prelude_persona_input_shape(record)),
+    output_digest: __prelude_digest(__prelude_persona_output_shape(record)),
+  }
+}
+
+fn __prelude_persona_identifier(value) -> string {
+  var clean = regex_replace("[^A-Za-z0-9_]+", "_", lowercase(trim(to_string(value ?? "repair"))))
+  clean = regex_replace("^_+|_+$", "", clean)
+  if clean == "" {
+    return "repair"
+  }
+  if regex_match("^[0-9]", clean) != nil {
+    clean = "step_" + clean
+  }
+  return clean
+}
+
+fn __prelude_persona_patch_for_group(group, opts) -> string {
+  let persona = __prelude_persona_identifier(group.persona)
+  let kind = __prelude_persona_identifier(group.repair_kind)
+  let downstream = __prelude_persona_identifier(group.downstream_action)
+  let step_name = opts?.step_name ?? "crystallized_${persona}_${kind}_${downstream}"
+  let function_name = opts?.function_name ?? (step_name + "_step")
+  let key = group.key
+  let input_digest = group.input_digest
+  let output_digest = group.output_digest
+  let action = group.downstream_action
+  let anchor_step = opts?.anchor_step ?? "dispatch_repair_workers"
+  return "// Insert after persona step: ${anchor_step}\n@step(name: \"${step_name}\", receipt: audit, error_boundary: fail)\nfn ${function_name}(ctx) {\n  return {\n    _type: \"harn.persona.crystallized_repair.v1\",\n    pattern_key: \"${key}\",\n    status: \"matched\",\n    input_digest: \"${input_digest}\",\n    output_digest: \"${output_digest}\",\n    downstream_action: \"${action}\",\n    context: ctx,\n  }\n}"
+}
+
+fn __prelude_persona_candidate(group, opts) {
+  let step_name = opts?.step_name
+    ?? "crystallized_${__prelude_persona_identifier(group.persona)}_${__prelude_persona_identifier(group.repair_kind)}_${__prelude_persona_identifier(group.downstream_action)}"
+  let package_name = opts?.package_name ?? "${__prelude_persona_identifier(group.persona)}-workflows"
+  let model_calls = group.model_calls
+  let input_tokens = group.input_tokens
+  let output_tokens = group.output_tokens
+  let cost_usd = group.cost_usd
+  let wall_ms = group.wall_ms
+  let patch = __prelude_persona_patch_for_group(group, opts + {step_name: step_name})
+  return {
+    id: "candidate-" + substring(sha256(group.key), 0, 16),
+    name: step_name,
+    confidence: 0.9,
+    examples: group.examples,
+    repair_kind: group.repair_kind,
+    downstream_action: group.downstream_action,
+    deterministic_step: {
+      name: step_name,
+      anchor_step: opts?.anchor_step ?? "dispatch_repair_workers",
+      patch: patch,
+      input_digest: group.input_digest,
+      output_digest: group.output_digest,
+    },
+    savings: {
+      model_calls_avoided: model_calls,
+      input_tokens_avoided: input_tokens,
+      output_tokens_avoided: output_tokens,
+      estimated_cost_usd_avoided: cost_usd,
+      wall_ms_avoided: wall_ms,
+      cpu_runtime_cost_usd: 0.0,
+      remaining_model_calls: 0,
+    },
+    shadow: {
+      pass: true,
+      compared_traces: group.count,
+      failures: [],
+      traces: group.examples
+        .map(
+        { example -> return {trace_id: example.trace_id, pass: true, details: ["exact input/output/downstream recurrence"]} },
+      ),
+    },
+    promotion: {
+      package_name: package_name,
+      workflow_version: opts?.workflow_version ?? "0.1.0",
+      rollout_policy: opts?.rollout_policy ?? "shadow_then_canary",
+      rollback_target: "remove the promoted @step and fall back to repair_worker",
+      approver: opts?.approver,
+      author: opts?.author,
+    },
+  }
+}
+
+/**
+ * Mine successful repair-worker records for exact repeated
+ * input/output/downstream patterns that are safe to propose as a
+ * deterministic persona `@step`.
+ */
+pub fn persona_crystallization_candidates(history, options = nil) {
+  let opts = options ?? {}
+  let min_examples = opts?.min_examples ?? 3
+  let hosted_history_days = opts?.hosted_history_days ?? 0
+  let min_hosted_history_days = opts?.min_hosted_history_days ?? 90
+  if hosted_history_days < min_hosted_history_days {
+    return {
+      ok: false,
+      status: "gated",
+      candidates: [],
+      rejected: [],
+      observed_records: len(history ?? []),
+      min_examples: min_examples,
+      hosted_history_days: hosted_history_days,
+      min_hosted_history_days: min_hosted_history_days,
+      warnings: ["persona crystallization requires hosted-run history before promotion"],
+    }
+  }
+  var groups = {}
+  var order = []
+  var rejected = []
+  var index = 0
+  for entry in history ?? [] {
+    let record = __prelude_persona_repair_record(entry)
+    if !__prelude_persona_repair_succeeded(record) {
+      rejected = rejected + [{index: index, reason: "repair run did not complete cleanly"}]
+      index += 1
+      continue
+    }
+    let key = __prelude_persona_pattern_key(record, opts)
+    if groups[key] == nil {
+      let input_shape = __prelude_persona_input_shape(record)
+      groups[key] = {
+        key: key,
+        count: 0,
+        examples: [],
+        persona: __prelude_persona_repair_persona(record, opts),
+        repair_kind: input_shape.kind,
+        downstream_action: __prelude_persona_downstream_action(record),
+        input_digest: __prelude_digest(input_shape),
+        output_digest: __prelude_digest(__prelude_persona_output_shape(record)),
+        model_calls: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        cost_usd: 0.0,
+        wall_ms: 0,
+      }
+      order = order + [key]
+    }
+    let group = groups[key]
+    let model_calls_inc = record?.agent_loop?.model_calls ?? record?.agent_loop?.llm?.iterations ?? 1
+    let input_tokens_inc = record?.agent_loop?.input_tokens ?? record?.agent_loop?.llm?.input_tokens ?? 0
+    let output_tokens_inc = record?.agent_loop?.output_tokens ?? record?.agent_loop?.llm?.output_tokens ?? 0
+    let cost_usd_inc = record?.agent_loop?.cost_usd ?? 0.0
+    let wall_ms_inc = record?.agent_loop?.wall_ms ?? record?.duration_ms ?? 0
+    groups[key] = group
+      + {
+      count: group.count + 1,
+      examples: group.examples + [__prelude_persona_pattern_example(record, index, opts)],
+      model_calls: group.model_calls + model_calls_inc,
+      input_tokens: group.input_tokens + input_tokens_inc,
+      output_tokens: group.output_tokens + output_tokens_inc,
+      cost_usd: group.cost_usd + cost_usd_inc,
+      wall_ms: group.wall_ms + wall_ms_inc,
+    }
+    index += 1
+  }
+  var candidates = []
+  for key in order {
+    let group = groups[key]
+    if group.count >= min_examples {
+      candidates = candidates + [__prelude_persona_candidate(group, opts)]
+    } else {
+      rejected = rejected + [{pattern_key: key, reason: "fewer than min_examples", examples: group.count}]
+    }
+  }
+  return {
+    ok: len(candidates) > 0,
+    status: if len(candidates) > 0 {
+      "candidate"
+    } else {
+      "no_candidate"
+    },
+    candidates: candidates,
+    rejected: rejected,
+    observed_records: len(history ?? []),
+    min_examples: min_examples,
+    hosted_history_days: hosted_history_days,
+    min_hosted_history_days: min_hosted_history_days,
+    warnings: [],
+  }
+}
+
+/**
+ * Return a `harn.crystallization.candidate.bundle`-shaped proposal for
+ * the strongest persona recurrence candidate. The patch is Harn source
+ * that reviewers can apply to the persona package after shadow/eval review.
+ */
+pub fn persona_crystallization_bundle(history, options = nil) {
+  let opts = options ?? {}
+  let report = persona_crystallization_candidates(history, opts)
+  if !report.ok {
+    return {
+      schema: "harn.crystallization.candidate.bundle",
+      schema_version: 1,
+      kind: "rejected",
+      candidate_id: nil,
+      title: "persona crystallization candidate",
+      report: report,
+      warnings: report.warnings,
+    }
+  }
+  var candidate = report.candidates[0]
+  for current in report.candidates {
+    if len(current.examples) > len(candidate.examples)
+      || (len(current.examples) == len(candidate.examples)
+      && current.savings.model_calls_avoided > candidate.savings.model_calls_avoided) {
+      candidate = current
+    }
+  }
+  return {
+    schema: "harn.crystallization.candidate.bundle",
+    schema_version: 1,
+    kind: "candidate",
+    candidate_id: candidate.id,
+    title: candidate.name,
+    workflow: {
+      path: "workflow.harn",
+      name: candidate.name,
+      package_name: candidate.promotion.package_name,
+      package_version: candidate.promotion.workflow_version,
+    },
+    source_traces: candidate.examples,
+    deterministic_steps: [candidate.deterministic_step],
+    fuzzy_steps: [],
+    side_effects: [],
+    capabilities: [],
+    required_secrets: [],
+    savings: candidate.savings,
+    shadow: candidate.shadow,
+    eval_pack: {path: "harn.eval.toml", link: opts?.eval_pack_link},
+    promotion: candidate.promotion,
+    patch: candidate.deterministic_step.patch,
+    report: report,
+    warnings: [],
+  }
+}

@@ -16,6 +16,8 @@ import {
   parallel_sweep_with_circuit_breaker,
   with_audit_receipt,
   with_approval_gate,
+  persona_crystallization_candidates,
+  persona_crystallization_bundle,
 } from "std/personas/prelude"
 ```
 
@@ -74,3 +76,21 @@ wrapper that requires an approval before running `step_fn`. Pass a recorded
 runtime for one; without either, the wrapper returns `status: "suspended"` and
 does not block indefinitely. Denied approvals return `status: "denied"` with
 the approval recorded in the receipt.
+
+`persona_crystallization_candidates(history, options?)` scans successful
+repair-worker records for exact recurrence: the same persona, repair-worker
+input shape, repair-worker output shape, and downstream action. It defaults to
+`min_examples: 3` and `min_hosted_history_days: 90`, so short local fixtures
+return `status: "gated"` instead of pretending they are production signal.
+Callers can pass `hosted_history_days` from their hosted history query, plus
+`persona`, `package_name`, `author`, `approver`, and `rollout_policy` metadata.
+
+`persona_crystallization_bundle(history, options?)` wraps the strongest
+candidate in the existing
+`harn.crystallization.candidate.bundle`-shaped envelope. The bundle includes
+the matched source traces, a deterministic shadow comparison over the exact
+recurrence set, savings estimates from the avoided repair-worker model calls,
+and a literal Harn `@step` patch that reviewers can apply to the persona
+package after eval review. The helper does not edit files or mutate a persona;
+promotion still goes through review, shadow/eval gates, human approval, and a
+normal package PR.
