@@ -6,57 +6,87 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.7.58
 
 ### Added
 
-- **Persona-aware crystallization proposals (#1080).** `std/personas/prelude`
-  now includes `persona_crystallization_candidates(...)` and
+- **Persona-aware crystallization proposals.** `std/personas/prelude` now
+  includes `persona_crystallization_candidates(...)` and
   `persona_crystallization_bundle(...)` for mining successful repair-worker
   receipts after the hosted-history gate. The helper emits the existing
   `harn.crystallization.candidate.bundle` shape with matched traces, shadow
   comparison, savings estimates, and a literal Harn `@step` patch for persona
   package review.
-- **Skill provenance endorsement chains (#933).** Skill signatures now use
+- **Skill provenance endorsement chains.** Skill signatures now use
   `harn-skill-sig/v2` with an author signature plus one or more trusted
   endorsement signatures. Added `harn skill endorse`, `harn skill who-signed`,
-  Harn-visible `skill_who_signed(...)` registry queries, and transcript metadata
-  that exposes signer trust-policy inputs for `trust.query`.
-- **Merge Captain cheap-model prompt pack (#1016).** Added a Harn-native
-  value-model prompt pack with narrow prompts for PR classification,
-  deterministic action choice, CI diagnosis, repair summaries, approval
-  decisions, and release changelog audit/rewrite. The pack ships strict JSON
-  schemas, golden examples, compact context budgets that exclude raw logs
-  unless selected spans are provided, and revision gates for transcript-oracle
-  diffs plus timeout-ladder results.
+  Harn-visible `skill_who_signed(...)` registry queries, and transcript
+  metadata that exposes signer trust-policy inputs for `trust.query`.
+- **Merge Captain cheap-model prompt pack.** Added a Harn-native value-model
+  prompt pack with narrow prompts for PR classification, deterministic action
+  choice, CI diagnosis, repair summaries, approval decisions, and release
+  changelog audit/rewrite. The pack ships strict JSON schemas, golden examples,
+  compact context budgets that exclude raw logs unless selected spans are
+  provided, and revision gates for transcript-oracle diffs plus
+  timeout-ladder results.
 - **ACP authentication flow.** `harn serve acp` now advertises configured
   `authMethods`, implements ACP `authenticate`, and returns `auth_required`
   before protected session methods until the connection authenticates.
-- **A2A canonical HTTP+JSON/REST binding.** The A2A server now exposes the spec-blessed
-  REST surface under `/v1` (`POST /v1/message:send`, `POST /v1/message:stream`,
-  `GET /v1/tasks/{id}`, `POST /v1/tasks/{id}:cancel`, `POST /v1/tasks/{id}:subscribe`,
-  push-notification-config CRUD under `/v1/tasks/{id}/pushNotificationConfigs`, and
-  `GET /v1/card`). The agent card advertises both `JSONRPC` and `HTTP+JSON` transports
-  in `additionalInterfaces`. The previous non-canonical paths (`/message/send`,
-  `/message/stream`, `/tasks/send`, `/tasks/send_and_wait`, `/tasks/cancel`,
-  `/tasks/resubscribe`) keep working for one minor cycle and now emit a `Deprecation`
-  header pointing at the canonical replacement.
-- **MCP logging notifications.** `harn mcp serve` now forwards Harn's structured audit
-  and observability event-log streams (signature-verify, secret-scan, egress, trigger
-  operations, DLQ, action graph) as MCP `notifications/message` per the
-  [MCP logging spec](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/logging).
-  `logging/setLevel` is now honored per session and filters notifications by severity;
-  events can override the assigned level via a `severity` header.
-- **MCP `notifications/progress` from long-running tools.** Tool handlers
-  can call the new `mcp_report_progress(progress, opts?)` builtin to
-  emit `notifications/progress` updates for the in-flight call. The
-  builtin no-ops when the client did not opt in via
-  `_meta.progressToken`, so scripts can sprinkle it without preflight
-  checks. Both stdio and HTTP MCP transports thread the token through
-  to script-defined tools (`mcp_tools`) and exported-function tools
-  (`harn serve mcp <script>`). The orchestrator-mode
-  `harn.trigger.fire` tool also emits its own milestones (loading
-  runtime, preparing event, firing trigger, complete). Closes #885.
+- **A2A canonical HTTP+JSON/REST binding.** The A2A server now exposes the
+  spec-blessed REST surface under `/v1` (`POST /v1/message:send`, `POST
+  /v1/message:stream`, `GET /v1/tasks/{id}`, `POST /v1/tasks/{id}:cancel`,
+  `POST /v1/tasks/{id}:subscribe`, push-notification-config CRUD under
+  `/v1/tasks/{id}/pushNotificationConfigs`, and `GET /v1/card`). The agent card
+  advertises both `JSONRPC` and `HTTP+JSON` transports in `additionalInterfaces`.
+  The previous non-canonical paths (`/message/send`, `/message/stream`,
+  `/tasks/send`, `/tasks/send_and_wait`, `/tasks/cancel`,
+  `/tasks/resubscribe`) keep working for one minor cycle and now emit a
+  `Deprecation` header pointing at the canonical replacement.
+- **MCP logging notifications.** `harn mcp serve` now forwards Harn's structured
+  audit and observability event-log streams (signature-verify, secret-scan,
+  egress, trigger operations, DLQ, action graph) as MCP `notifications/message`
+  per the MCP logging spec. `logging/setLevel` is now honored per session and
+  filters notifications by severity; events can override the assigned level via
+  a `severity` header.
+- **MCP `notifications/progress` from long-running tools.** Tool handlers can
+  call the new `mcp_report_progress(progress, opts?)` builtin to emit
+  `notifications/progress` updates for the in-flight call. The builtin no-ops
+  when the client did not opt in via `_meta.progressToken`, so scripts can
+  sprinkle it without preflight checks. Both stdio and HTTP MCP transports
+  thread the token through to script-defined tools (`mcp_tools`) and
+  exported-function tools (`harn serve mcp SCRIPT`). The orchestrator-mode
+  `harn.trigger.fire` tool also emits its own milestones (loading runtime,
+  preparing event, firing trigger, complete).
+
+### Changed
+
+- **Agent loop orchestration core.** Overhauled the agent orchestration core,
+  moving sub-agent request shaping into Harn stdlib and wire-turn/judge events,
+  tool_format claim, and option validation. The agent loop now honors post-turn
+  options in the stuck guard and exposes Merge Captain persona steps. Client
+  tool search is moved into stdlib, and workflow stage execution primitives are
+  split for better modularity.
+- **Agent prompt overrides.** Tightened agent prompt overrides to ensure
+  consistent behavior across sessions. Updated prompt assets and validation
+  logic in the VM to reflect stricter constraints on tool contracts and native
+  completions.
+- **Persona steel-thread conformance.** Added a conformance harness for persona
+  steel-thread scenarios, including deploy, merge, and release captain tests.
+  This ensures persona lifecycle hooks and autonomy tiers are enforced
+  correctly under VM constraints.
+- **VM and stdlib refactoring.** Moved remaining Rust-owned prompt prose into
+  stdlib assets, deleted legacy Rust agent orchestration modules, and wired
+  per-agent permissions through the Harn agent loop. The parse guidance prose is
+  now in a prompt asset, and workflow stage options are moved into Harn.
+
+### Fixed
+
+- **Ollama tool history replay.** Fixed issues with Ollama tool history replay
+  to ensure accurate state restoration during agent turns.
+- **Native tool history replay.** Fixed native tool history replay to maintain
+  consistency in tool execution traces.
+- **Harn orchestration boundary.** Polished the Harn orchestration boundary to
+  ensure clean separation between the VM and stdlib components.
 
 ## v0.7.57
 
