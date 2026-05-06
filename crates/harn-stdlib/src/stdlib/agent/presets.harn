@@ -1,0 +1,317 @@
+// @harn-entrypoint-category agent.stdlib
+//
+// Generic role presets and adaptive iteration budget sugar built on top of
+// `agent_loop`. Harness authors should be able to say "audit", "repair",
+// "summary", or "verify" and get sensible defaults for completion behavior,
+// iteration budgeting, and provider-specific reasoning configuration —
+// without hand-tuning `max_iterations`, `max_nudges`, `done_sentinel`, or
+// `thinking` for every script. All defaults remain caller-overridable.
+import { agent_loop } from "std/agent/loop"
+
+fn __dict_or_empty(value) {
+  if value == nil {
+    return {}
+  }
+  if type_of(value) != "dict" {
+    throw "agent_preset: options must be a dict or nil; got " + type_of(value)
+  }
+  return value
+}
+
+fn __has_key(opts, key) {
+  return contains(opts.keys(), key)
+}
+
+fn __preset_kind(value) {
+  if value == nil {
+    throw "agent_preset(kind, options?): kind is required"
+  }
+  if type_of(value) != "string" {
+    throw "agent_preset(kind, options?): kind must be a string; got " + type_of(value)
+  }
+  let kind = lowercase(trim(value))
+  if kind != "audit" && kind != "repair" && kind != "summary" && kind != "verify" {
+    throw "agent_preset: kind must be one of audit, repair, summary, verify; got " + value
+  }
+  return kind
+}
+
+fn __caller_set_thinking(opts) {
+  if __has_key(opts, "thinking") {
+    return true
+  }
+  let llm_overrides = opts?.llm_options
+  if type_of(llm_overrides) == "dict" && contains(llm_overrides.keys(), "thinking") {
+    return true
+  }
+  return false
+}
+
+fn __provider_capabilities_for(opts) {
+  let provider = opts?.provider
+  let model = opts?.model
+  if provider == nil || provider == "" || model == nil || model == "" {
+    return nil
+  }
+  let caps = try {
+    provider_capabilities(provider, model)
+  }
+  if is_err(caps) {
+    return nil
+  }
+  return unwrap(caps)
+}
+
+fn __caps_supports(caps, mode) {
+  if caps == nil {
+    return false
+  }
+  let modes = caps?.thinking_modes ?? []
+  return contains(modes, mode)
+}
+
+fn __caps_reasoning_effort(caps) {
+  if caps == nil {
+    return false
+  }
+  return caps?.reasoning_effort_supported ?? false
+}
+
+fn __thinking_choice_for_kind(kind, caps) {
+  if kind == "summary" {
+    if __caps_supports(caps, "disabled") {
+      return {mode: "disabled"}
+    }
+    return nil
+  }
+  if kind == "verify" {
+    if __caps_reasoning_effort(caps) {
+      return {mode: "effort", level: "low"}
+    }
+    if __caps_supports(caps, "adaptive") {
+      return {mode: "adaptive"}
+    }
+    return nil
+  }
+  // audit + repair: prefer adaptive thinking when offered, else medium
+  // reasoning effort. Fall back to nothing when neither is available so we
+  // don't break local/Ollama-style providers.
+  if __caps_supports(caps, "adaptive") {
+    return {mode: "adaptive"}
+  }
+  if __caps_reasoning_effort(caps) {
+    return {mode: "effort", level: "medium"}
+  }
+  return nil
+}
+
+fn __preset_thinking(kind, opts) {
+  if __caller_set_thinking(opts) {
+    return nil
+  }
+  let caps = __provider_capabilities_for(opts)
+  return __thinking_choice_for_kind(kind, caps)
+}
+
+fn __default_budget_for_kind(kind) {
+  if kind == "audit" {
+    return {mode: "adaptive", initial: 4, max: 12, extend_by: 2}
+  }
+  if kind == "repair" {
+    return {mode: "adaptive", initial: 4, max: 16, extend_by: 2}
+  }
+  if kind == "summary" {
+    return {mode: "fixed", initial: 1, max: 1, extend_by: 0}
+  }
+  if kind == "verify" {
+    return {mode: "adaptive", initial: 1, max: 5, extend_by: 1}
+  }
+  return {mode: "fixed", initial: 50, max: 50, extend_by: 0}
+}
+
+fn __resolve_iteration_budget(kind, opts) {
+  if __has_key(opts, "iteration_budget") {
+    let raw = opts.iteration_budget
+    if type_of(raw) == "string" {
+      // Sugar: `iteration_budget: "adaptive"` keeps the kind's defaults but
+      // forces adaptive mode.
+      let defaults = __default_budget_for_kind(kind)
+      return defaults + {mode: raw}
+    }
+    return raw
+  }
+  if __has_key(opts, "max_iterations") {
+    return nil
+  }
+  return __default_budget_for_kind(kind)
+}
+
+fn __turn_policy_for_kind(kind, opts) {
+  if __has_key(opts, "turn_policy") {
+    return opts.turn_policy
+  }
+  if kind == "summary" {
+    return {allow_done_sentinel: false, max_prose_chars: 8000}
+  }
+  if kind == "verify" {
+    return {allow_done_sentinel: false, max_prose_chars: 12000}
+  }
+  return {allow_done_sentinel: false, max_prose_chars: 30000}
+}
+
+fn __summary_defaults(opts) {
+  var defaults = {profile: "completer", loop_until_done: false, done_sentinel: nil, done_judge: nil, max_nudges: 0}
+  if !__has_key(opts, "tools") || opts?.tools == nil {
+    defaults = defaults + {tool_choice: "none"}
+  } else if !__has_key(opts, "tool_choice") {
+    defaults = defaults + {tool_choice: "none"}
+  }
+  return defaults
+}
+
+fn __verify_defaults() {
+  return {profile: "verifier", loop_until_done: false, max_nudges: 0, done_judge: true}
+}
+
+fn __tool_using_defaults(kind) {
+  let profile = if kind == "audit" {
+    "verifier"
+  } else {
+    "tool_using"
+  }
+  let max_nudges = if kind == "audit" {
+    1
+  } else {
+    2
+  }
+  return {
+    profile: profile,
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: nil,
+    done_judge: nil,
+    native_tool_fallback: "allow_once",
+    max_nudges: max_nudges,
+  }
+}
+
+fn __kind_defaults(kind, opts) {
+  if kind == "summary" {
+    return __summary_defaults(opts)
+  }
+  if kind == "verify" {
+    return __verify_defaults()
+  }
+  return __tool_using_defaults(kind)
+}
+
+fn __apply_thinking(opts, kind) {
+  let preset = __preset_thinking(kind, opts)
+  if preset == nil {
+    return opts
+  }
+  return opts + {thinking: preset, _preset_thinking_applied: preset}
+}
+
+fn __apply_iteration_budget(opts, kind) {
+  let budget = __resolve_iteration_budget(kind, opts)
+  if budget == nil {
+    return opts
+  }
+  return opts + {iteration_budget: budget}
+}
+
+fn __apply_turn_policy(opts, kind) {
+  return opts + {turn_policy: __turn_policy_for_kind(kind, opts)}
+}
+
+fn __apply_kind_defaults(kind, raw_opts) {
+  let defaults = __kind_defaults(kind, raw_opts)
+  return defaults + raw_opts
+}
+
+/**
+ * agent_preset returns normalized agent_loop options for a generic role.
+ *
+ * `kind` is one of "audit", "repair", "summary", "verify". The returned
+ * dict is a plain `agent_loop` options dict — callers can spread it into
+ * `agent_loop(...)` directly, or merge further overrides on top.
+ */
+pub fn agent_preset(kind, options = nil) {
+  let resolved_kind = __preset_kind(kind)
+  var opts = __dict_or_empty(options)
+  opts = __apply_kind_defaults(resolved_kind, opts)
+  opts = __apply_iteration_budget(opts, resolved_kind)
+  opts = __apply_turn_policy(opts, resolved_kind)
+  opts = __apply_thinking(opts, resolved_kind)
+  return opts + {_preset_kind: resolved_kind}
+}
+
+/**
+ * agent_budget returns an `iteration_budget` dict shape suitable for
+ * embedding directly under `agent_loop` options.
+ *
+ * `kind_or_options` can be:
+ *   - a role kind ("audit"/"repair"/"summary"/"verify"): returns that
+ *     role's default adaptive (or fixed) budget,
+ *   - the string "adaptive" or "fixed": returns a generic shape,
+ *   - a dict: returns the same shape with role-aware defaults filled in
+ *     (when `kind` is provided in the second argument).
+ */
+pub fn agent_budget(kind_or_options, options = nil) {
+  if type_of(kind_or_options) == "dict" {
+    return kind_or_options
+  }
+  if type_of(kind_or_options) != "string" {
+    throw "agent_budget: first argument must be a kind string or budget dict; got "
+      + type_of(kind_or_options)
+  }
+  let kind = lowercase(trim(kind_or_options))
+  let overrides = __dict_or_empty(options)
+  if kind == "adaptive" || kind == "fixed" {
+    let base = if kind == "adaptive" {
+      {mode: "adaptive", initial: 4, max: 16, extend_by: 2}
+    } else {
+      {mode: "fixed", initial: 16, max: 16, extend_by: 0}
+    }
+    return base + overrides
+  }
+  let resolved = __preset_kind(kind)
+  return __default_budget_for_kind(resolved) + overrides
+}
+
+/**
+ * audit_agent runs a tool-using audit/inspection loop with an adaptive
+ * iteration budget and native completion. Inherits from the audit preset.
+ */
+pub fn audit_agent(prompt, options = nil) {
+  let opts = agent_preset("audit", options)
+  return agent_loop(prompt, opts?.system, opts)
+}
+
+/**
+ * repair_agent runs a tool-using repair loop with a wider adaptive budget
+ * and native completion.
+ */
+pub fn repair_agent(prompt, options = nil) {
+  let opts = agent_preset("repair", options)
+  return agent_loop(prompt, opts?.system, opts)
+}
+
+/**
+ * summary_agent runs a single-turn summarization loop with no tools by
+ * default.
+ */
+pub fn summary_agent(prompt, options = nil) {
+  let opts = agent_preset("summary", options)
+  return agent_loop(prompt, opts?.system, opts)
+}
+
+/**
+ * verify_agent runs a short, judged pass/fail loop intended for completion
+ * verification.
+ */
+pub fn verify_agent(prompt, options = nil) {
+  let opts = agent_preset("verify", options)
+  return agent_loop(prompt, opts?.system, opts)
+}

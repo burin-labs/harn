@@ -509,6 +509,21 @@ pub enum AgentEvent {
         kind: String,
         outcome: String,
     },
+    /// Emitted by the agent loop's adaptive iteration budget /
+    /// `loop_control` policy when a budget extension or early stop fires.
+    /// Generic enough to cover both shapes — `action` distinguishes them.
+    /// Carries the iteration the decision applied to, the previous /
+    /// resulting iteration limit, the policy reason string, and (for
+    /// stops) the loop status.
+    LoopControlDecision {
+        session_id: String,
+        iteration: usize,
+        action: String,
+        old_limit: usize,
+        new_limit: usize,
+        reason: String,
+        status: String,
+    },
 }
 
 impl AgentEvent {
@@ -537,7 +552,8 @@ impl AgentEvent {
             | Self::FsWatch { session_id, .. }
             | Self::WorkerUpdate { session_id, .. }
             | Self::HitlRequested { session_id, .. }
-            | Self::HitlResolved { session_id, .. } => session_id,
+            | Self::HitlResolved { session_id, .. }
+            | Self::LoopControlDecision { session_id, .. } => session_id,
         }
     }
 }

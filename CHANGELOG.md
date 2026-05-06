@@ -6,6 +6,28 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Adaptive iteration budgeting and `loop_control` policy on `agent_loop`.**
+  `iteration_budget: {mode, initial, max, extend_by}` lets a loop start with a
+  small cap and extend it transparently when there's evidence of progress;
+  pass `loop_control: { state -> ... }` for a fully custom policy that sees a
+  stable normalized loop-state snapshot (`budget`, `turn`, `session`,
+  `completion`, `progress`) and returns `nil`, `{action: "extend"}`, or
+  `{action: "stop"}`. `max_iterations` keeps working as a fixed cap. Decisions
+  are surfaced under `result.adaptive_budget` and as `LoopControlDecision`
+  events on the live event stream / ACP wire.
+- **Generic role presets in `std/agent/presets`.** `agent_preset(kind,
+  options?)`, `agent_budget(...)`, and `audit_agent` / `repair_agent` /
+  `summary_agent` / `verify_agent` package the common harness shapes (audit /
+  repair / summary / verify) so scripts don't have to hand-tune
+  `max_iterations`, `max_nudges`, `done_sentinel`, `done_judge`, or
+  `thinking`. Presets pick a provider-aware `thinking` mode (adaptive vs.
+  effort vs. disabled) only when the caller hasn't set one, using
+  `provider_capabilities` introspection.
+
 ## v0.7.60
 
 ### Fixed

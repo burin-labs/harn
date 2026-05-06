@@ -111,7 +111,9 @@ Same as `llm_call`, plus additional options:
 | `profile` | string | `"tool_using"` | Named preset for common loop shapes. One of `"tool_using"`, `"researcher"`, `"verifier"`, or `"completer"`; explicit option keys override profile defaults |
 | `loop_until_done` | bool | `false` | Keep looping until completion. Native-tool loops complete on final text with no tool calls; text-tool/no-tool sentinel loops complete on `##DONE##` or `<done>##DONE##</done>` |
 | `done_sentinel` | string\|nil | mode-aware | Completion sentinel for sentinel-based loops. Use a non-empty string such as `"##DONE##"` to require sentinel completion, or `nil` for no sentinel. Native-tool loop-until-done loops default to `nil`; text/no-tool loop-until-done loops default to `"##DONE##"` |
-| `max_iterations` | int | `50` | Maximum number of LLM round-trips |
+| `max_iterations` | int | `50` | Maximum number of LLM round-trips. Equivalent to `iteration_budget: {mode: "fixed", initial: N, max: N}` |
+| `iteration_budget` | string\|dict | nil | Adaptive or fixed iteration cap. Pass a dict `{mode, initial, max, extend_by}` or the string `"adaptive"` / `"fixed"`. See [Adaptive iteration budget](#adaptive-iteration-budget) |
+| `loop_control` | closure | nil | Per-iteration policy callback `state -> command`. Receives a normalized loop-state snapshot and returns a command (`extend`/`stop`/`none`). See [Adaptive iteration budget](#adaptive-iteration-budget) |
 | `max_nudges` | int | `8` | Max consecutive text-only responses before stopping |
 | `nudge` | string | see below | Custom message to send when nudging the agent |
 | `llm_retries` | int | `2` | Retries on transient HTTP / provider errors. Explicit option keys override profile defaults |
@@ -197,6 +199,181 @@ verify which policy ran.
 | `researcher` | 30 | 4 | 0 | 2 | 0 |
 | `verifier` | 5 | 0 | 0 | 2 | 3 |
 | `completer` | 1 | 0 | 0 | 2 | 0 |
+
+### Adaptive iteration budget
+
+Plain integer `max_iterations` is a hard cap. `iteration_budget` lets the loop
+start with a small initial limit and extend it transparently when there is
+evidence of forward progress, instead of forcing harness authors to guess a
+single number.
+
+```harn
+let result = agent_loop(prompt, system, {
+  iteration_budget: {mode: "adaptive", initial: 4, max: 16, extend_by: 2},
+})
+```
+
+Fields:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `mode` | string | `"fixed"` | `"fixed"` (no extension) or `"adaptive"` |
+| `initial` | int | `max / 4` (adaptive), `max` (fixed) | Iteration cap to start with |
+| `max` | int | `16` (adaptive), `50` (fixed) | Hard upper bound; extensions never raise the cap above this |
+| `extend_by` | int | `2` (adaptive), `0` (fixed) | Default extension delta when policy returns `{action: "extend"}` without `by` / `until` |
+| `expose_decisions` | bool | `mode == "adaptive"` | When true, the result includes an `adaptive_budget` summary with the decision log |
+
+`max_iterations: N` and `iteration_budget: {mode: "fixed", initial: N, max: N}`
+are equivalent. Passing both `iteration_budget` and `max_iterations` is allowed;
+the budget's `max` wins for the host's autonomy/ACP tracking.
+
+### loop_control policy
+
+When the budget is `"adaptive"` (or any time you set `loop_control`), the loop
+calls a policy closure once per iteration with a normalized state snapshot and
+applies the returned command:
+
+```harn,ignore
+loop_control: { state ->
+  if state.budget.remaining > 1 {
+    return nil
+  }
+  if state.completion.vetoed {
+    return {action: "extend", by: 2, reason: "completion gate vetoed"}
+  }
+  if state.turn.tool_call_count > 0 && state.progress.changed {
+    return {action: "extend", by: 2, reason: "recent turn made progress"}
+  }
+  return nil
+}
+```
+
+State snapshot fields:
+
+| Field | Description |
+|---|---|
+| `iteration` | 1-based iteration just completed |
+| `budget.current_limit` | Active iteration cap before this decision |
+| `budget.max` | Configured upper bound |
+| `budget.remaining` | `current_limit - iteration`; `0` means the next iteration would exceed the cap |
+| `budget.extension_count` | Number of prior extensions applied |
+| `turn.tool_call_count` | Tool calls executed this turn |
+| `turn.successful_tool_names` / `turn.rejected_tool_names` | Names from this turn's dispatch |
+| `turn.text_chars` | Visible-text length this turn |
+| `turn.native_fallback_used` | True when `native_tool_fallback` accepted text-mode tool calls this turn |
+| `session.successful_tool_names` / `session.rejected_tool_names` | Cumulative deduplicated tool name sets |
+| `session.required_tools_satisfied` / `session.required_tools_missing` | `require_successful_tools` postcondition status |
+| `completion.proposed` | True when post-turn logic proposed a natural / sentinel break this turn |
+| `completion.vetoed` | True when `verify_completion` / `verify_completion_judge` / `done_judge` vetoed |
+| `completion.verdict` / `completion.feedback` | Judge verdict and feedback string when present |
+| `progress.changed` | True if this turn made tool calls, produced new successful tool names, or wrote visible text |
+| `progress.summary` | Human-readable progress hint (`"executed N tool call(s)"`, `"completion gate vetoed"`, etc.) |
+
+Return value is one of:
+
+| Command | Meaning |
+|---|---|
+| `nil` / `{action: "none"}` | No-op; loop continues until the next decision |
+| `{action: "extend", by: N, reason}` | Raise `current_limit` by `N` (capped by `budget.max`) |
+| `{action: "extend", until: M, reason}` | Raise `current_limit` to `M` (capped by `budget.max`) |
+| `{action: "stop", status: "incomplete", reason}` | Break the loop with the given final status |
+
+When no `loop_control` is provided and the budget is adaptive, the stdlib
+installs a small default policy that extends only when one of these is true at
+the cap edge:
+
+- the latest verify/done judge vetoed completion,
+- `require_successful_tools` is unsatisfied, or
+- the most recent turn executed at least one tool call (i.e. real progress).
+
+All decisions are recorded:
+
+- in the result under `adaptive_budget.decisions` (when `expose_decisions` is
+  true, which is the default for adaptive budgets), and
+- as `LoopControlDecision` events on the live event stream
+  (`{type: "loop_control_decision", action, oldLimit, newLimit, reason, ...}`),
+  also surfaced to ACP/A2A bridges.
+
+```harn
+let result = agent_loop(prompt, system, {iteration_budget: {mode: "adaptive", initial: 4, max: 12}})
+println(result.adaptive_budget.extensions_used)
+println(result.adaptive_budget.final_limit)
+for decision in result.adaptive_budget.decisions {
+  println(decision.action + ": " + decision.reason)
+}
+```
+
+### Generic role presets
+
+`std/agent/presets` packages the common harness shapes — audit, repair,
+summary, verify — so script authors don't have to hand-tune `max_iterations`,
+`max_nudges`, `done_sentinel`, `done_judge`, `turn_policy`, and `thinking` on
+every call. Presets compose with `agent_loop`: they return ordinary options
+dicts (caller overrides always win) and the `*_agent` helpers call
+`agent_loop` directly.
+
+```harn
+import {audit_agent, repair_agent, summary_agent, agent_preset} from "std/agent/presets"
+
+// Inspect / read-only audit. Native completion, no done sentinel,
+// adaptive budget {initial: 4, max: 12}, max_nudges: 1.
+let audit = audit_agent("Audit the release", {
+  provider: "anthropic",
+  model: "claude-opus-4-7",
+  tools: release_tools,
+  require_successful_tools: ["release_run"],
+})
+
+// Tool-using repair. Wider budget {initial: 4, max: 16}, max_nudges: 2.
+let repair = repair_agent("Fix the regression", {
+  provider: "openai",
+  model: "o3",
+  tools: repair_tools,
+})
+
+// Cheap one-shot summary. tool_choice="none", iteration_budget fixed at 1.
+let summary = summary_agent("Summarize the audit findings.", {
+  provider: "openai",
+  model: "gpt-4o-mini",
+})
+
+// Customize a preset before passing to agent_loop directly:
+let opts = agent_preset("repair", {
+  tools: repair_tools,
+  iteration_budget: {mode: "adaptive", initial: 6, max: 20},
+})
+let result = agent_loop(prompt, system, opts)
+```
+
+Preset roles, defaults summarized:
+
+| Preset | `profile` | `tool_format` | `loop_until_done` | `max_nudges` | Default `iteration_budget` | `done_sentinel` / `done_judge` |
+|---|---|---|---|---:|---|---|
+| `audit` | `verifier` | `native` | true | 1 | adaptive `{initial: 4, max: 12, extend_by: 2}` | both `nil` (natural completion) |
+| `repair` | `tool_using` | `native` | true | 2 | adaptive `{initial: 4, max: 16, extend_by: 2}` | both `nil` |
+| `summary` | `completer` | unset | false | 0 | fixed `{initial: 1, max: 1}` | both `nil`, `tool_choice: "none"` |
+| `verify` | `verifier` | unset | false | 0 | adaptive `{initial: 1, max: 5, extend_by: 1}` | `done_judge: true` |
+
+Each preset also installs a provider-aware `thinking` choice when the caller
+hasn't already set one:
+
+- adaptive thinking on models that advertise `"adaptive"` in `thinking_modes`,
+- `effort` (medium for audit/repair, low for verify) on models with
+  `reasoning_effort_supported`,
+- `disabled` for `summary` when supported,
+- otherwise leaves `thinking` unset.
+
+Caller-supplied `thinking` and `iteration_budget` always win. Sugar:
+`iteration_budget: "adaptive"` keeps the preset's numeric defaults and
+explicitly switches the mode to adaptive.
+
+`agent_budget(kind_or_options, overrides?)` returns a budget shape suitable for
+embedding directly:
+
+```harn
+{iteration_budget: agent_budget("repair", {max: 24})}
+{iteration_budget: agent_budget("adaptive", {initial: 2, max: 6})}
+```
 
 When `daemon: true`, the loop transitions `active -> idle -> active` instead of
 terminating on a text-only turn. Idle daemons can be woken by queued human

@@ -141,6 +141,100 @@ fn __validate_judge_dict_or_bool(label, value) {
   }
 }
 
+fn __positive_int_default(value, fallback) {
+  if value == nil {
+    return fallback
+  }
+  if type_of(value) != "int" {
+    throw "agent_loop: iteration_budget numeric fields must be integers; got " + type_of(value)
+  }
+  if value < 1 {
+    return fallback
+  }
+  return value
+}
+
+fn __validate_loop_control(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "closure" {
+    throw "agent_loop: `loop_control` must be a closure or nil; got " + type_of(value)
+  }
+}
+
+fn __normalize_iteration_budget(opts) {
+  let raw = opts?.iteration_budget
+  let legacy = opts?.max_iterations
+  if raw == nil && legacy == nil {
+    return {mode: "fixed", initial: 50, max: 50, extend_by: 0, expose_decisions: false}
+  }
+  let user_budget = if type_of(raw) == "string" {
+    {mode: raw}
+  } else {
+    raw
+  }
+  if user_budget == nil {
+    let cap = __positive_int_default(legacy, 50)
+    return {mode: "fixed", initial: cap, max: cap, extend_by: 0, expose_decisions: false}
+  }
+  if type_of(user_budget) != "dict" {
+    throw "agent_loop: iteration_budget must be a dict, string, or nil; got "
+      + type_of(user_budget)
+  }
+  let mode = user_budget.mode ?? "fixed"
+  if mode != "fixed" && mode != "adaptive" {
+    throw "agent_loop: iteration_budget.mode must be \"fixed\" or \"adaptive\"; got "
+      + to_string(mode)
+  }
+  let legacy_cap = if legacy != nil {
+    __positive_int_default(legacy, 50)
+  } else {
+    nil
+  }
+  let max_default = if mode == "adaptive" {
+    16
+  } else {
+    if legacy_cap != nil {
+      legacy_cap
+    } else {
+      50
+    }
+  }
+  let max_cap = __positive_int_default(user_budget?.max, max_default)
+  let initial_default = if mode == "adaptive" {
+    let candidate = max_cap / 4
+    if candidate < 1 {
+      1
+    } else {
+      candidate
+    }
+  } else {
+    max_cap
+  }
+  var initial = __positive_int_default(user_budget?.initial, initial_default)
+  if initial > max_cap {
+    initial = max_cap
+  }
+  let extend_by = if mode == "adaptive" {
+    __positive_int_default(user_budget?.extend_by, 2)
+  } else {
+    0
+  }
+  let expose_decisions = if user_budget?.expose_decisions != nil {
+    user_budget.expose_decisions
+  } else {
+    mode == "adaptive"
+  }
+  return {
+    mode: mode,
+    initial: initial,
+    max: max_cap,
+    extend_by: extend_by,
+    expose_decisions: expose_decisions,
+  }
+}
+
 fn __autonomy_tier(value) {
   let tier = value ?? "act_auto"
   if tier == "shadow" || tier == "suggest" || tier == "act_with_approval" || tier == "act_auto" {
@@ -179,6 +273,9 @@ pub fn agent_loop_options(options = nil) {
   }
   if __has_key(opts, "done_judge") {
     __validate_judge_dict_or_bool("done_judge", opts.done_judge)
+  }
+  if __has_key(opts, "loop_control") {
+    __validate_loop_control(opts.loop_control)
   }
   let profile = opts?.profile ?? "tool_using"
   let defaults = __profile_defaults(profile)
@@ -224,5 +321,7 @@ pub fn agent_loop_options(options = nil) {
     }
   }
   opts = __with_task_ledger_shorthand(opts)
+  let budget = __normalize_iteration_budget(opts)
+  opts = opts + {iteration_budget: budget, max_iterations: budget.max}
   return opts
 }
