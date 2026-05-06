@@ -101,6 +101,11 @@ pub(crate) fn pop_dynamic_permission_policy() {
     });
 }
 
+pub(crate) fn clear_dynamic_permission_state() {
+    DYNAMIC_PERMISSION_STACK.with(|stack| stack.borrow_mut().clear());
+    SESSION_PERMISSION_GRANTS.with(|store| store.borrow_mut().clear());
+}
+
 pub(crate) fn current_dynamic_permission_policies() -> Vec<DynamicPermissionPolicy> {
     DYNAMIC_PERMISSION_STACK.with(|stack| stack.borrow().clone())
 }

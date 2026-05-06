@@ -84,14 +84,13 @@ struct AgentHostSession {
     /// the last call truncated due to its `max_tokens` parameter) and
     /// `refusal` (Anthropic refusal stop_reason).
     last_llm_stop_reason: Option<String>,
-    installed_policies: InstalledPolicies,
 }
 
-/// Tracks which scoped policy stacks were pushed during session init so
-/// finalize can pop them in reverse order. The agent loop honours
-/// per-agent ceilings by intersecting outer policies with the requested
-/// per-agent ones before pushing — so child sub-agents never widen
-/// permissions beyond their parents.
+/// Tracks which scoped policy stacks were pushed for a guarded tool
+/// dispatch so `Drop` can pop them in reverse order. The agent loop
+/// honours per-agent ceilings by intersecting outer policies with the
+/// requested per-agent ones before pushing, so child sub-agents never
+/// widen permissions beyond their parents.
 #[derive(Default)]
 struct InstalledPolicies {
     pushed_execution: bool,
@@ -100,9 +99,23 @@ struct InstalledPolicies {
     pushed_permissions: bool,
 }
 
+pub(crate) struct SessionPolicyGuard {
+    installed: InstalledPolicies,
+}
+
+impl Drop for SessionPolicyGuard {
+    fn drop(&mut self) {
+        release_session_policies(&self.installed);
+    }
+}
+
 thread_local! {
     static AGENT_HOST_SESSIONS: RefCell<BTreeMap<String, AgentHostSession>> =
         const { RefCell::new(BTreeMap::new()) };
+}
+
+pub(crate) fn reset_agent_session_host_state() {
+    AGENT_HOST_SESSIONS.with(|sessions| sessions.borrow_mut().clear());
 }
 
 fn with_session<R>(
@@ -207,7 +220,6 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         None => 0,
     };
 
-    let installed_policies = install_session_policies(&opts_map)?;
     if let Some(config) = autonomy_budget.as_ref() {
         super::autonomy_budget::note_decision(config);
     }
@@ -248,7 +260,6 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         daemon_idle_backoff_ms: 100,
         host_bridge,
         last_llm_stop_reason: None,
-        installed_policies,
     };
 
     AGENT_HOST_SESSIONS.with(|sessions| {
@@ -353,9 +364,6 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
                 "{HOST_SESSION_FINALIZE}: unknown session `{session_id}`"
             ))
         })?;
-    // Unwind the per-agent policy stacks pushed in init, in reverse
-    // order — outer scopes (workflow stage, parent agent) survive intact.
-    release_session_policies(&session.installed_policies);
     permissions::clear_session_grants(&session_id);
     if session.pushed_transcript_dir {
         super::agent_observe::pop_llm_transcript_dir();
@@ -820,11 +828,10 @@ fn host_agent_session_inject_feedback_builtin(
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let kind = args.get(1).map(|v| v.display()).unwrap_or_default();
     let content = args.get(2).map(|v| v.display()).unwrap_or_default();
-    let body = format!("<runtime_feedback kind=\"{kind}\">\n{content}\n</runtime_feedback>");
-    let mut msg = BTreeMap::new();
-    msg.insert("role".to_string(), VmValue::String(Rc::from("user")));
-    msg.insert("content".to_string(), VmValue::String(Rc::from(body)));
-    let _ = crate::agent_sessions::inject_message(&session_id, VmValue::Dict(Rc::new(msg)));
+    let _ = crate::agent_sessions::inject_message(
+        &session_id,
+        super::agent_config::agent_feedback_message(&kind, &content),
+    );
     Ok(VmValue::Nil)
 }
 
@@ -1455,21 +1462,21 @@ async fn host_autonomy_budget_check(args: Vec<VmValue>) -> Result<VmValue, VmErr
 }
 
 /// Install per-agent execution / approval / command / dynamic permission
-/// policies onto the thread-local stacks for the lifetime of this agent
-/// session. Each scope intersects with the currently-active outer policy
-/// (when any) so a sub-agent cannot widen its parent's ceiling — only
-/// narrow it. Dynamic permissions are stack-checked, so push as-is and
-/// rely on the dispatch path to honour every active scope.
+/// policies onto the thread-local stacks for the lifetime of a guarded
+/// tool dispatch. Each scope intersects with the currently-active outer
+/// policy (when any) so a sub-agent cannot widen its parent's ceiling —
+/// only narrow it. Dynamic permissions are stack-checked, so push as-is
+/// and rely on the dispatch path to honour every active scope.
 ///
 /// On any failure the partially-pushed stacks are unwound before
 /// returning, so the caller never has to worry about leaked policy
 /// state.
-fn install_session_policies(
+pub(crate) fn install_session_policy_guard(
     opts_map: &BTreeMap<String, VmValue>,
-) -> Result<InstalledPolicies, VmError> {
+) -> Result<SessionPolicyGuard, VmError> {
     let mut installed = InstalledPolicies::default();
     match install_session_policies_inner(opts_map, &mut installed) {
-        Ok(()) => Ok(installed),
+        Ok(()) => Ok(SessionPolicyGuard { installed }),
         Err(error) => {
             release_session_policies(&installed);
             Err(error)

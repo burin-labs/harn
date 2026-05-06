@@ -101,6 +101,9 @@ pub fn parse_command_policy_value(
     let Some(value) = value else {
         return Ok(None);
     };
+    if matches!(value, VmValue::Nil) {
+        return Ok(None);
+    }
     let Some(map) = value.as_dict() else {
         return Err(VmError::Runtime(format!(
             "{label}: command_policy must be a dict"
