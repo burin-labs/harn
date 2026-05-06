@@ -5,6 +5,14 @@ pub(crate) struct RunArgs {
     /// Print the LLM trace summary after execution.
     #[arg(long)]
     pub trace: bool,
+    /// Print a categorical timing breakdown after execution (LLM vs tools
+    /// vs steps vs VM/residual). Implies tracing instrumentation; OK to
+    /// combine with `--trace`.
+    #[arg(long)]
+    pub profile: bool,
+    /// Write the profile rollup as JSON to the given path. Implies `--profile`.
+    #[arg(long = "profile-json", value_name = "PATH")]
+    pub profile_json: Option<String>,
     /// Deny specific builtins as a comma-separated list.
     #[arg(long, conflicts_with = "allow")]
     pub deny: Option<String>,

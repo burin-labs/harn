@@ -34,6 +34,7 @@ pub mod observability;
 pub mod orchestration;
 pub mod personas;
 pub mod process_sandbox;
+pub mod profile;
 pub mod provenance;
 pub mod receipts;
 pub mod record_filter;

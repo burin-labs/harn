@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 
 use harn_cli::commands::playground::{execute_playground_inputs, PlaygroundInputs};
-use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome};
+use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
 use harn_cli::tests::common::{cwd_lock, env_lock};
 use tempfile::TempDir;
 
@@ -490,6 +490,7 @@ fn burin_mini_semantic_evaluator_heuristic_passes_for_rate_limit_fixture() {
             Vec::new(),
             CliLlmMockMode::Off,
             None,
+            RunProfileOptions::default(),
         )
         .await;
         std::env::remove_var("BURIN_MINI_SEMANTIC_EVAL_MODE");

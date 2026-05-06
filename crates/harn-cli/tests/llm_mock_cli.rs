@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 
 use harn_cli::commands::playground::{execute_playground_inputs, PlaygroundInputs};
-use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome};
+use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
 use harn_cli::tests::common::{cwd_lock, env_lock};
 use tempfile::TempDir;
 
@@ -88,6 +88,7 @@ fn run_harn_in_process(
             Vec::new(),
             llm_mock_mode,
             None,
+            RunProfileOptions::default(),
         )
         .await;
         for (key, prev) in originals.iter().rev() {

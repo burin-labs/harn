@@ -72,6 +72,7 @@ async fn async_main() {
             Vec::new(),
             commands::run::CliLlmMockMode::Off,
             None,
+            commands::run::RunProfileOptions::default(),
         )
         .await;
         return;
@@ -125,6 +126,10 @@ async fn async_main() {
                 receipt_out: args.receipt_out.as_ref().map(PathBuf::from),
                 agent_id: args.attest_agent.clone(),
             });
+            let profile_options = commands::run::RunProfileOptions {
+                text: args.profile,
+                json_path: args.profile_json.as_ref().map(PathBuf::from),
+            };
 
             match (args.eval.as_deref(), args.file.as_deref()) {
                 (Some(code), None) => {
@@ -153,6 +158,7 @@ async fn async_main() {
                         args.skill_dir.clone(),
                         llm_mock_mode.clone(),
                         attestation.clone(),
+                        profile_options.clone(),
                     )
                     .await;
                     drop(tmp);
@@ -166,6 +172,7 @@ async fn async_main() {
                         args.skill_dir.clone(),
                         llm_mock_mode,
                         attestation,
+                        profile_options,
                     )
                     .await
                 }
