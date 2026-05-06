@@ -6,6 +6,17 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## v0.7.60
+
+### Fixed
+
+- **Workflow LLM policy ceilings.** Fix an over-restrictive policy ceiling so that
+  LLM operations such as `llm_call` and `agent_loop` require only the
+  `llm.call` capability, not `side_effect=network`. Workflow stages with
+  read-only, workspace-write, or process-exec tool ceilings can now call the
+  configured LLM. Tool-derived policies with no capability annotations now leave
+  capability ceilings unspecified instead of narrowing custom node capabilities.
+
 ## v0.7.59
 
 ### Added
