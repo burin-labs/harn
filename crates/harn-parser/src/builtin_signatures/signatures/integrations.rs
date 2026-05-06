@@ -1200,6 +1200,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         where_clauses: &[],
     },
     BuiltinSignature {
+        name: "__host_current_tool_registry",
+        params: &[],
+        returns: TY_DICT_OR_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "tool_count",
         params: &[Param::new("registry", TY_TOOL_REGISTRY)],
         returns: TY_INT,

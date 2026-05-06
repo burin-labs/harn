@@ -771,6 +771,17 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         where_clauses: &[],
     },
     BuiltinSignature {
+        name: "sub_agent_request",
+        params: &[
+            Param::new("task", TY_STRING),
+            Param::optional("options", TY_DICT),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "transcript",
         params: &[Param::optional("metadata", TY_DICT)],
         returns: TY_DICT,

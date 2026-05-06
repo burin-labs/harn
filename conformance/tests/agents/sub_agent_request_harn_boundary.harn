@@ -1,0 +1,47 @@
+fn worker_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_note",
+    "Read a note",
+    {handler: { args -> "read " + args.path }, parameters: {path: {type: "string"}}},
+  )
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note",
+    {handler: { args -> "wrote " + args.path }, parameters: {path: {type: "string"}}},
+  )
+  return tools
+}
+
+pipeline main() {
+  let tools = worker_tools()
+  tool_bind(tools)
+  let request = sub_agent_request(
+    "Inspect notes.",
+    {
+      name: "note-reader",
+      system: "Stay terse.",
+      provider: "mock",
+      allowed_tools: ["read_note", "read_note"],
+      background: true,
+      returns: {schema: {type: "object"}},
+      policy: {tools: ["read_note", "write_note"]},
+    },
+  )
+  println(request?._type)
+  println(request?.name)
+  println(request?.system)
+  println(request?.background)
+  println(request?.options?.provider)
+  println(starts_with(request?.session_id, "sub_agent_session_"))
+  println(len(request?.allowed_tools) == 1)
+  println(tool_count(request?.options?.tools))
+  println(tool_find(request?.options?.tools, "read_note")?.name)
+  println(tool_find(request?.options?.tools, "write_note") == nil)
+  println(request?.options?.policy == nil)
+  println(request?.policy?.tools[0])
+  println(request?.returns_schema?.type)
+  tool_bind(nil)
+}

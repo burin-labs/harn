@@ -2324,6 +2324,7 @@ artifact list and bake the packed chunks into the system prompt.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `spawn_agent(config)` | config: dict | dict | Start a worker from a workflow graph or delegated stage config |
+| `sub_agent_request(task, options?)` | task: string, options: dict | dict | Build the normalized child-agent request that `sub_agent_run` sends to the host execution primitive |
 | `sub_agent_run(task, options?)` | task: string, options: dict | dict | Run an isolated child agent loop and return a clean envelope `{summary, artifacts, evidence_added, tokens_used, budget_exceeded, ...}` without leaking the child transcript into the parent |
 | `send_input(handle, task)` | handle, task | dict | Re-run a completed worker with a new task, carrying forward worker state where applicable |
 | `resume_agent(id_or_snapshot_path)` | id or path | dict | Restore a persisted worker snapshot into the current runtime |
@@ -2365,8 +2366,9 @@ When a worker-scoped policy denies a tool call, the agent receives a structured
 tool result payload: `{error: "permission_denied", tool: "...", reason: "..."}`.
 
 `sub_agent_run(task, options?)` is the lighter-weight context-firewall primitive.
-It starts a child session, runs a full `agent_loop`, and returns only a single
-typed envelope to the parent:
+It builds a Harn-owned `sub_agent_request(...)`, starts a child session through
+the host execution primitive, runs a full `agent_loop`, and returns only a
+single typed envelope to the parent:
 
 - `summary`, `artifacts`, `evidence_added`, `tokens_used`, `budget_exceeded`,
   `session_id`, and optional `data`
