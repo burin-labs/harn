@@ -32,12 +32,12 @@ pipeline run(task) {
     summary: "structured review receipt for PR #${review.pr_number}",
     focus: ["regressions", "missing tests", "risky diffs"],
     receipt: {
-    kind: "review_receipt",
-    verdict: verdict,
-    missing_tests: review.missing_tests,
-    risky_paths: review.risky_paths,
-    changed_files: review.changed_files,
-  },
+      kind: "review_receipt",
+      verdict: verdict,
+      missing_tests: review.missing_tests,
+      risky_paths: review.risky_paths,
+      changed_files: review.changed_files,
+    },
     handoff: handoff,
   }
   println(json_stringify(result))

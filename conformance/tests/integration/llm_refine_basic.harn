@@ -1,0 +1,20 @@
+// Conformance test for std/llm/refine::refine_prompt — extracts the
+// rewritten prompt and the trailing `DIFF: ...` summary.
+import { refine_prompt } from "std/llm/refine"
+
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "You are an expert.\nDIFF: shortened from 200 to 80 tokens."})
+  let result = refine_prompt(
+    {
+      user_prompt: "Please please please be careful and verbose and ramble about this topic at length",
+      style: "concise",
+      model: "mock-model",
+      provider: "mock",
+    },
+  )
+  println(result.ok)
+  println(result.refined)
+  println(result.diff_summary)
+  println(result.style)
+}

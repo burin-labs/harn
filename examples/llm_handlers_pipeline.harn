@@ -1,0 +1,53 @@
+// Demo: std/llm/handlers — compose(with_logging, with_retry, with_cache)
+//
+// Shows the composable middleware shape. Each layer wraps the next and
+// passes through a synthetic base caller (no real LLM).
+//
+// Run with: cargo run --quiet --bin harn -- run examples/llm_handlers_pipeline.harn
+import { compose, with_cache, with_logging, with_retry } from "std/llm/handlers"
+
+pipeline default() {
+  // Synthetic base — counts attempts via atomic, fails once then succeeds.
+  let counter = atomic(0)
+  let base = { _call ->
+    let n = atomic_add(counter, 1)
+    if n < 1 {
+      println("[base]   attempt " + to_string(n + 1) + " -> transient blip")
+      return {ok: false, status: "transient", error: "blip"}
+    }
+    println("[base]   attempt " + to_string(n + 1) + " -> success")
+    return {
+      ok: true,
+      value: {
+        text: "hello",
+        model: "mock",
+        provider: "mock",
+        input_tokens: 0,
+        output_tokens: 0,
+        usage: {input_tokens: 0, output_tokens: 0},
+      },
+    }
+  }
+  // compose([logging, retry, cache])(base) == logging(retry(cache(base))).
+  let log_sink = { record -> println(
+    "[logging] status=" + to_string(record?.status) + " latency_ms=" + to_string(record?.latency_ms),
+  ) }
+  let stack = compose(
+    [
+      { next -> with_logging(next, {sink: log_sink}) },
+      { next -> with_retry(next, {max_attempts: 3, base_ms: 1}) },
+      { next -> with_cache(next) },
+    ],
+  )
+  let caller = stack(base)
+  let env = caller(
+    {
+      prompt: "hi",
+      system: "",
+      opts: {provider: "mock"},
+      turn: {iteration: 0, session_id: "", attempt: 1},
+    },
+  )
+  println("final: ok=" + to_string(env.ok) + " text=" + to_string(env.value.text))
+  println("retries_attempted=" + to_string(env?.retries_attempted ?? 0))
+}

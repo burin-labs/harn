@@ -344,6 +344,37 @@ pub(crate) fn vm_resolve_model(
     llm_config::default_model_for_provider(provider)
 }
 
+/// Build the canonical "no provider credentials" guidance line. The list of
+/// env vars is derived from the live providers config so it can't drift from
+/// the catalog; providers with `auth_style == "none"` (e.g. ollama) are skipped.
+pub fn no_credentials_message() -> String {
+    use crate::llm_config;
+    let mut envs: Vec<String> = Vec::new();
+    for name in llm_config::provider_names() {
+        if let Some(def) = llm_config::provider_config(&name) {
+            if def.auth_style == "none" {
+                continue;
+            }
+            for env in llm_config::auth_env_names(&def.auth_env) {
+                if !envs.contains(&env) {
+                    envs.push(env);
+                }
+            }
+        }
+    }
+    envs.sort();
+    envs.dedup();
+    let env_list = if envs.is_empty() {
+        "(no providers declared)".to_string()
+    } else {
+        envs.join(", ")
+    };
+    format!(
+        "No LLM providers configured. Set one of these env vars: {env_list} (or run a local Ollama). \
+         For diagnostics: `harn doctor`. For a recommended setup: `harn models recommend` (when available)."
+    )
+}
+
 pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
     use crate::llm_config;
 
@@ -378,11 +409,12 @@ pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
         if pdef.auth_style == "none" {
             return Ok(String::new());
         }
+        let aggregate_hint = no_credentials_message();
         match &pdef.auth_env {
             llm_config::AuthEnv::Single(env) => {
                 return std::env::var(env).map_err(|_| {
                     VmError::Thrown(VmValue::String(Rc::from(format!(
-                        "Missing API key: set {env} environment variable{selection_hint}"
+                        "Missing API key: set {env} environment variable{selection_hint}\n{aggregate_hint}"
                     ))))
                 });
             }
@@ -395,16 +427,17 @@ pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
                     }
                 }
                 return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "Missing API key: set one of {} environment variables{selection_hint}",
+                    "Missing API key: set one of {} environment variables{selection_hint}\n{aggregate_hint}",
                     envs.join(", ")
                 )))));
             }
             llm_config::AuthEnv::None => return Ok(String::new()),
         }
     }
+    let aggregate_hint = no_credentials_message();
     std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
         VmError::Thrown(VmValue::String(Rc::from(format!(
-            "Missing API key: set ANTHROPIC_API_KEY environment variable{selection_hint}"
+            "Missing API key: set ANTHROPIC_API_KEY environment variable{selection_hint}\n{aggregate_hint}"
         ))))
     })
 }
@@ -460,5 +493,26 @@ impl ResolvedProvider {
             }
         }
         req
+    }
+}
+
+#[cfg(test)]
+mod no_credentials_tests {
+    use super::no_credentials_message;
+
+    #[test]
+    fn message_includes_canonical_env_vars_and_doctor_hint() {
+        let msg = no_credentials_message();
+        assert!(
+            msg.contains("ANTHROPIC_API_KEY"),
+            "expected ANTHROPIC_API_KEY in: {msg}"
+        );
+        assert!(
+            msg.contains("OPENAI_API_KEY"),
+            "expected OPENAI_API_KEY in: {msg}"
+        );
+        assert!(msg.contains("harn doctor"));
+        assert!(msg.contains("harn models recommend"));
+        assert!(msg.contains("local Ollama"));
     }
 }

@@ -12,11 +12,18 @@ pipeline default(task) {
   let inc = { x -> x + 1 }
   let double_then_inc = compose(inc, double)
   log("Compose: ${double_then_inc(5)}")
-  let people = [{name: "Alice", scores: [90, 85, 92]}, {name: "Bob", scores: [70, 75, 80]}, {name: "Charlie", scores: [95, 98, 100]}]
-  let summaries = people.map({ p ->
-    let total = p.scores.reduce(0, { acc, s -> acc + s })
-    {name: p.name, total: total, avg: total / p.scores.count}
-  })
+  let people = [
+    {name: "Alice", scores: [90, 85, 92]},
+    {name: "Bob", scores: [70, 75, 80]},
+    {name: "Charlie", scores: [95, 98, 100]},
+  ]
+  let summaries = people
+    .map(
+    { p ->
+      let total = p.scores.reduce(0, { acc, s -> acc + s })
+      {name: p.name, total: total, avg: total / p.scores.count}
+    },
+  )
   for s in summaries {
     log("${s.name}: total=${s.total}, avg=${s.avg}")
   }
@@ -46,7 +53,8 @@ pipeline default(task) {
   let b = nil
   let c = "found"
   log("Coalesce: ${a ?? b ?? c}")
-  let processed = "  Hello, World!  " |> { s -> s.trim() } |> { s -> s.lowercase() } |> { s -> s.replace("world", "harn") }
+  let processed = "  Hello, World!  " |> { s -> s.trim() } |> { s -> s.lowercase() }
+    |> { s -> s.replace("world", "harn") }
   log("Processed: ${processed}")
   log("All stress tests passed!")
 }

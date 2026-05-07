@@ -36,16 +36,16 @@ pipeline run(task) {
     pr_number: pr.number,
     summary: "dry-run plan for PR #${pr.number}",
     plan: [
-    "Summarize failing checks and stale review threads.",
-    "Ask for approval before posting receipts or mutating labels.",
-    "Hand off review risk when unresolved comments remain.",
-  ],
+      "Summarize failing checks and stale review threads.",
+      "Ask for approval before posting receipts or mutating labels.",
+      "Hand off review risk when unresolved comments remain.",
+    ],
     review_risk: risk,
     receipt: {
-    kind: "merge_receipt",
-    status: "pending_approval",
-    blockers: pr.failing_checks + pr.stale_threads + pr.release_blockers,
-  },
+      kind: "merge_receipt",
+      status: "pending_approval",
+      blockers: pr.failing_checks + pr.stale_threads + pr.release_blockers,
+    },
     handoff: handoff,
   }
   println(json_stringify(result))

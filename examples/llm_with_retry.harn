@@ -1,0 +1,35 @@
+// Demo: std/llm/handlers — with_retry
+//
+// Wraps a synthetic caller that fails twice then succeeds. with_retry
+// re-invokes the inner caller up to max_attempts before giving up.
+//
+// Run with: cargo run --quiet --bin harn -- run examples/llm_with_retry.harn
+import { with_retry } from "std/llm/handlers"
+
+pipeline default() {
+  let counter = atomic(0)
+  let synthetic = { _call ->
+    let n = atomic_add(counter, 1)
+    if n < 2 {
+      println("attempt " + to_string(n + 1) + " -> transient")
+      return {ok: false, status: "transient", error: "blip"}
+    }
+    println("attempt " + to_string(n + 1) + " -> success")
+    return {
+      ok: true,
+      value: {
+        text: "all-ok",
+        model: "mock",
+        provider: "mock",
+        input_tokens: 0,
+        output_tokens: 0,
+        usage: {input_tokens: 0, output_tokens: 0},
+      },
+    }
+  }
+  let caller = with_retry(synthetic, {max_attempts: 5, base_ms: 1})
+  let env = caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  println("final ok = " + to_string(env.ok))
+  println("final text = " + env.value.text)
+  println("retries_attempted = " + to_string(env.retries_attempted))
+}

@@ -63,6 +63,14 @@ const LLM_CONFIG_SYNC_BUILTINS: &[SyncBuiltin] = &[
         .signature("llm_qc_default_model(provider)")
         .arity(VmBuiltinArity::Exact(1))
         .doc("Return the configured cheap QC/repair model for a provider."),
+    SyncBuiltin::new("llm_resolved_options", llm_resolved_options_builtin)
+        .signature("llm_resolved_options(opts)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Return the fully-merged llm_call options for `opts`. Requires opts.model."),
+    SyncBuiltin::new("llm_model_defaults", llm_model_defaults_builtin)
+        .signature("llm_model_defaults(model_id)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Return glob-merged model_defaults for `model_id`."),
     SyncBuiltin::new("llm_provider_catalog", llm_provider_catalog_builtin)
         .signature("llm_provider_catalog()")
         .arity(VmBuiltinArity::Exact(0))
@@ -192,6 +200,82 @@ fn llm_qc_default_model_builtin(args: &[VmValue], _out: &mut String) -> Result<V
     Ok(llm_config::qc_default_model(&provider)
         .map(|model| VmValue::String(Rc::from(model)))
         .unwrap_or(VmValue::Nil))
+}
+
+fn llm_model_defaults_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let model_id = args.first().map(|a| a.display()).unwrap_or_default();
+    if model_id.is_empty() {
+        return Err(VmError::Runtime(
+            "llm_model_defaults: model_id is required".to_string(),
+        ));
+    }
+    let params = llm_config::model_params(&model_id);
+    let mut dict = BTreeMap::new();
+    for (k, v) in &params {
+        dict.insert(k.clone(), toml_value_to_vm_value(v));
+    }
+    Ok(VmValue::Dict(Rc::new(dict)))
+}
+
+fn llm_resolved_options_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let opts = args
+        .first()
+        .and_then(|a| a.as_dict())
+        .ok_or_else(|| VmError::Runtime("llm_resolved_options: opts must be a dict".to_string()))?;
+
+    let model = opts
+        .get("model")
+        .map(|v| v.display())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            VmError::Runtime("llm_resolved_options: opts.model is required".to_string())
+        })?;
+
+    let user_provider = opts
+        .get("provider")
+        .map(|v| v.display())
+        .filter(|s| !s.is_empty());
+
+    let (resolved_id, provider_from_alias) = llm_config::resolve_model(&model);
+    let final_provider = user_provider.unwrap_or_else(|| {
+        provider_from_alias.unwrap_or_else(|| llm_config::infer_provider(&resolved_id))
+    });
+
+    let defaults = llm_config::model_params(&resolved_id);
+
+    let mut out = opts.clone();
+    for (k, v) in &defaults {
+        if !out.contains_key(k) {
+            out.insert(k.clone(), toml_value_to_vm_value(v));
+        }
+    }
+    out.insert(
+        "provider".to_string(),
+        VmValue::String(Rc::from(final_provider)),
+    );
+    out.insert("model".to_string(), VmValue::String(Rc::from(resolved_id)));
+    Ok(VmValue::Dict(Rc::new(out)))
+}
+
+fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
+    match value {
+        toml::Value::String(s) => VmValue::String(Rc::from(s.as_str())),
+        toml::Value::Integer(i) => VmValue::Int(*i),
+        toml::Value::Float(f) => VmValue::Float(*f),
+        toml::Value::Boolean(b) => VmValue::Bool(*b),
+        toml::Value::Datetime(dt) => VmValue::String(Rc::from(dt.to_string())),
+        toml::Value::Array(items) => {
+            let list: Vec<VmValue> = items.iter().map(toml_value_to_vm_value).collect();
+            VmValue::List(Rc::new(list))
+        }
+        toml::Value::Table(table) => {
+            let mut dict = BTreeMap::new();
+            for (k, v) in table {
+                dict.insert(k.clone(), toml_value_to_vm_value(v));
+            }
+            VmValue::Dict(Rc::new(dict))
+        }
+    }
 }
 
 fn llm_provider_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -859,4 +943,145 @@ fn healthcheck_result_with_meta(
     dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
     dict.insert("metadata".to_string(), VmValue::Dict(Rc::new(meta)));
     VmValue::Dict(Rc::new(dict))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_dict(entries: Vec<(&str, VmValue)>) -> VmValue {
+        let mut map = BTreeMap::new();
+        for (k, v) in entries {
+            map.insert(k.to_string(), v);
+        }
+        VmValue::Dict(Rc::new(map))
+    }
+
+    #[test]
+    fn test_llm_model_defaults_returns_empty_for_unknown_model() {
+        llm_config::clear_user_overrides();
+        let mut out = String::new();
+        let args = vec![VmValue::String(Rc::from(
+            "definitely-not-a-real-model-id-zzzzz",
+        ))];
+        let result = llm_model_defaults_builtin(&args, &mut out).expect("builtin returned error");
+        let dict = result.as_dict().expect("expected dict");
+        assert!(
+            dict.is_empty(),
+            "unknown model should yield empty defaults dict, got {dict:?}"
+        );
+    }
+
+    #[test]
+    fn test_llm_resolved_options_requires_model() {
+        llm_config::clear_user_overrides();
+        let mut out = String::new();
+        let args = vec![build_dict(vec![])];
+        let err =
+            llm_resolved_options_builtin(&args, &mut out).expect_err("missing model should error");
+        match err {
+            VmError::Runtime(message) => {
+                assert!(
+                    message.contains("opts.model is required"),
+                    "unexpected message: {message}"
+                );
+            }
+            other => panic!("expected Runtime error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_llm_resolved_options_user_wins_over_defaults() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        llm_config::clear_user_overrides();
+        let mut overlay = llm_config::ProvidersConfig::default();
+        let mut model_defaults = BTreeMap::new();
+        model_defaults.insert(
+            "fake-resolved-options-model".to_string(),
+            toml::Value::Float(0.5),
+        );
+        overlay
+            .model_defaults
+            .insert("fake-resolved-options-model".to_string(), model_defaults);
+        llm_config::set_user_overrides(Some(overlay));
+
+        let mut out = String::new();
+        let args = vec![build_dict(vec![
+            (
+                "model",
+                VmValue::String(Rc::from("fake-resolved-options-model")),
+            ),
+            ("temperature", VmValue::Float(0.9)),
+        ])];
+        let result = llm_resolved_options_builtin(&args, &mut out).expect("builtin returned error");
+        let dict = result.as_dict().expect("expected dict");
+        match dict.get("temperature") {
+            Some(VmValue::Float(f)) => assert!((*f - 0.9).abs() < 1e-9, "user value lost: {f}"),
+            other => panic!("expected Float(0.9), got {other:?}"),
+        }
+        match dict.get("model") {
+            Some(VmValue::String(s)) => assert_eq!(s.as_ref(), "fake-resolved-options-model"),
+            other => panic!("expected model string, got {other:?}"),
+        }
+
+        llm_config::clear_user_overrides();
+    }
+
+    #[test]
+    fn test_llm_resolved_options_default_fills_unspecified() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        llm_config::clear_user_overrides();
+        let mut overlay = llm_config::ProvidersConfig::default();
+        let mut model_defaults = BTreeMap::new();
+        model_defaults.insert("temperature".to_string(), toml::Value::Float(0.5));
+        overlay
+            .model_defaults
+            .insert("fake-fill-defaults-model".to_string(), model_defaults);
+        llm_config::set_user_overrides(Some(overlay));
+
+        let mut out = String::new();
+        let args = vec![build_dict(vec![(
+            "model",
+            VmValue::String(Rc::from("fake-fill-defaults-model")),
+        )])];
+        let result = llm_resolved_options_builtin(&args, &mut out).expect("builtin returned error");
+        let dict = result.as_dict().expect("expected dict");
+        match dict.get("temperature") {
+            Some(VmValue::Float(f)) => assert!((*f - 0.5).abs() < 1e-9, "default lost: {f}"),
+            other => panic!("expected Float(0.5), got {other:?}"),
+        }
+
+        llm_config::clear_user_overrides();
+    }
+
+    #[test]
+    fn test_llm_resolved_options_resolves_provider() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
+        unsafe {
+            std::env::remove_var("HARN_DEFAULT_PROVIDER");
+        }
+        llm_config::clear_user_overrides();
+
+        let mut out = String::new();
+        let args = vec![build_dict(vec![(
+            "model",
+            VmValue::String(Rc::from("claude-sonnet-4-20250514")),
+        )])];
+        let result = llm_resolved_options_builtin(&args, &mut out).expect("builtin returned error");
+        let dict = result.as_dict().expect("expected dict");
+        match dict.get("provider") {
+            Some(VmValue::String(s)) => {
+                assert_eq!(s.as_ref(), "anthropic", "provider mismatch: {s}");
+            }
+            other => panic!("expected provider string, got {other:?}"),
+        }
+
+        unsafe {
+            match prev_default_provider {
+                Some(value) => std::env::set_var("HARN_DEFAULT_PROVIDER", value),
+                None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
+            }
+        }
+    }
 }

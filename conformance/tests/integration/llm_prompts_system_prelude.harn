@@ -1,0 +1,24 @@
+// std/llm/prompts.system_prelude is deterministic for the same input.
+import { system_prelude } from "std/llm/prompts"
+
+pipeline default() {
+  let opts = {
+    persona: "You are a careful research assistant.",
+    tools: ["web_search", "fetch"],
+    constraints: ["Cite all sources.", "Never speculate."],
+    output_contract: {format: "JSON", fields: "title,summary"},
+    examples: [{input: "what is rust?", output: "{\"title\":\"Rust\"}"}],
+    tone: "professional",
+  }
+  let first = system_prelude(opts)
+  let second = system_prelude(opts)
+  println(first == second)
+  println(contains(first, "research assistant"))
+  println(contains(first, "web_search"))
+  println(contains(first, "Cite all sources."))
+  println(contains(first, "Output:"))
+  println(contains(first, "Examples:"))
+  // tone variation
+  let terse = system_prelude({persona: "Hi", tone: "terse"})
+  println(contains(terse, "terse and direct"))
+}

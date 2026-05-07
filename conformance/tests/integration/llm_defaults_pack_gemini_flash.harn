@@ -1,0 +1,9 @@
+// pack_for(gemini-2.5-flash, thinking="auto") → thinkingBudget = -1 (dynamic).
+import { pack_for } from "std/llm/defaults"
+
+pipeline test(task) {
+  let r = pack_for({model: "gemini-2.5-flash", thinking: "auto"})
+  assert_eq(r.provider, "gemini")
+  assert_eq(r.thinkingBudget, -1)
+  log("llm_defaults_pack_gemini_flash passed")
+}

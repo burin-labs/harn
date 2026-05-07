@@ -1,0 +1,9 @@
+pipeline test(task) {
+  let r = llm_resolved_options({model: "claude-sonnet-4-20250514", temperature: 0.42})
+  assert_eq(type_of(r), "dict")
+  assert_eq(r.temperature, 0.42)
+  assert_eq(r.model, "claude-sonnet-4-20250514")
+  // provider should be inferred or echoed; for this claude id it must be "anthropic".
+  assert_eq(r.provider, "anthropic")
+  log("llm_resolved_options_basic passed")
+}

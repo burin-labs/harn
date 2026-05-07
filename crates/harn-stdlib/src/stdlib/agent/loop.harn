@@ -26,7 +26,7 @@ import {
   agent_tool_search_record_results,
 } from "std/agent/tool_search"
 
-fn __invoke_llm(message, turn_system, llm_opts) {
+fn __default_invoke_llm(message, turn_system, llm_opts) {
   let result = try {
     llm_call(message, turn_system, llm_opts)
   }
@@ -43,6 +43,43 @@ fn __invoke_llm(message, turn_system, llm_opts) {
     return {ok: false, status: "budget_exhausted"}
   }
   throw err
+}
+
+fn __validate_caller_result(r) {
+  if type_of(r) != "dict" {
+    throw "agent_loop: llm_caller must return a dict; got " + type_of(r)
+  }
+  if r?.ok == nil {
+    throw "agent_loop: llm_caller result missing `ok`"
+  }
+  if r.ok && type_of(r?.value) != "dict" {
+    throw "agent_loop: llm_caller returned ok=true but `value` is not a dict"
+  }
+  if !r.ok && type_of(r?.status) != "string" {
+    throw "agent_loop: llm_caller returned ok=false but `status` is not a string"
+  }
+}
+
+fn __invoke_llm(message, turn_system, llm_opts) {
+  let caller = llm_opts?._llm_caller
+  if caller == nil {
+    return __default_invoke_llm(message, turn_system, llm_opts)
+  }
+  let call = {
+    prompt: message,
+    system: turn_system,
+    opts: llm_opts,
+    turn: {iteration: llm_opts?._turn_iteration ?? 0, session_id: llm_opts?.session_id ?? "", attempt: 1},
+  }
+  let result = try {
+    caller(call)
+  }
+  if is_err(result) {
+    throw unwrap_err(result)
+  }
+  let r = unwrap(result)
+  __validate_caller_result(r)
+  return r
 }
 
 fn __visible_text(parsed, raw_text) {
@@ -199,9 +236,26 @@ fn __merge_hook_dict(base, patch, label) {
   return base + patch
 }
 
+fn __strip_internal_keys(patch) {
+  if patch == nil {
+    return patch
+  }
+  if type_of(patch) != "dict" {
+    return patch
+  }
+  var clean = {}
+  for key in patch.keys() {
+    if !starts_with(key, "_") {
+      clean = clean + {[key]: patch[key]}
+    }
+  }
+  return clean
+}
+
 fn __apply_post_turn_options(opts, outcome) {
   var updated = opts
-  updated = __merge_hook_dict(updated, outcome?.next_options, "next_options")
+  let next_patch = __strip_internal_keys(outcome?.next_options)
+  updated = __merge_hook_dict(updated, next_patch, "next_options")
   let llm_patch = outcome?.llm_options
   if llm_patch != nil {
     if type_of(llm_patch) != "dict" {
@@ -639,7 +693,12 @@ fn __agent_loop_run(message, session, initial_opts) {
       let llm_overrides = turn_opts?.llm_options ?? {}
       let base_opts = turn_opts + llm_overrides
       let llm_opts = base_opts
-        + {messages: turn_messages, session_id: session.session_id, tool_format: turn_opts.tool_format}
+        + {
+        messages: turn_messages,
+        session_id: session.session_id,
+        tool_format: turn_opts.tool_format,
+        _turn_iteration: turn_index + 1,
+      }
       let call = __invoke_llm(message, turn_system, llm_opts)
       if !call.ok {
         final_status = call.status

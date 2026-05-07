@@ -1,0 +1,42 @@
+/**
+ * Cross-slice integration: agent_loop's llm_caller seam composes with
+ * std/llm/ensemble::best_of_n. The custom caller routes the per-turn call to
+ * best_of_n, which samples 3 candidates from the mock backend and asks a
+ * structured judge to pick the best. The chosen text becomes agent_loop's
+ * visible_text.
+ */
+import { best_of_n } from "std/llm/ensemble"
+
+pipeline default() {
+  llm_mock_clear()
+  // 3 candidate samples consumed in order by best_of_n's sequential sampler.
+  llm_mock({text: "candidate-A"})
+  llm_mock({text: "candidate-B"})
+  llm_mock({text: "candidate-C"})
+  // Structured judge response — picks index 1.
+  llm_mock({text: "{\"best_index\": 1, \"scores\": [0.2, 0.9, 0.3], \"reasoning\": \"B wins\"}"})
+  let bon_caller = { call ->
+    let result = best_of_n(
+      call.prompt,
+      call.system,
+      {n: 3, parallel: false, call_opts: {provider: "mock"}, judge_opts: {provider: "mock"}},
+    )
+    if !(result?.ok ?? false) {
+      return {ok: false, status: "exception", error: "best_of_n failed"}
+    }
+    return {
+      ok: true,
+      value: {
+        text: result.best.text,
+        model: "mock",
+        provider: "mock",
+        input_tokens: 0,
+        output_tokens: 0,
+        usage: {input_tokens: 0, output_tokens: 0},
+      },
+    }
+  }
+  let result = agent_loop("hi", nil, {provider: "mock", llm_caller: bon_caller, max_iterations: 1})
+  println(result.status)
+  println(result.visible_text)
+}

@@ -31,6 +31,7 @@
   - [LLM reranking](./llm/rerank.md)
   - [Agent loops](./llm/agent_loop.md)
   - [Prompt optimization](./llm/optimize.md)
+  - [Composable callers and middleware](./stdlib/llm-handlers.md)
   - [Tools, Tool Vault, and MCP](./llm/tools.md)
   - [Streaming and transcripts](./llm/streaming.md)
   - [LLM providers](./llm/providers.md)

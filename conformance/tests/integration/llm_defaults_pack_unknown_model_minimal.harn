@@ -1,0 +1,13 @@
+// Unknown model id → pack_for must not throw; final dict carries at least
+// model + provider. family_of() returns "generic" for inferred default-
+// provider fallbacks where catalog-side capability data is absent.
+import { pack_for } from "std/llm/defaults"
+
+pipeline test(task) {
+  let r = pack_for({model: "totally-fake-model-id"})
+  assert_eq(type_of(r), "dict")
+  assert_eq(r.model, "totally-fake-model-id")
+  assert_eq(type_of(r.provider), "string")
+  assert(r.provider != "", "provider must be a non-empty string")
+  log("llm_defaults_pack_unknown_model_minimal passed")
+}

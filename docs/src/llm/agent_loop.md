@@ -116,8 +116,9 @@ Same as `llm_call`, plus additional options:
 | `loop_control` | closure | nil | Per-iteration policy callback `state -> command`. Receives a normalized loop-state snapshot and returns a command (`extend`/`stop`/`none`). See [Adaptive iteration budget](#adaptive-iteration-budget) |
 | `max_nudges` | int | `8` | Max consecutive text-only responses before stopping |
 | `nudge` | string | see below | Custom message to send when nudging the agent |
-| `llm_retries` | int | `2` | Retries on transient HTTP / provider errors. Explicit option keys override profile defaults |
-| `llm_backoff_ms` | int | `2000` | Base exponential backoff in ms between LLM retries |
+| `llm_caller` | closure | nil | Custom caller wrapping the per-turn `llm_call`. Preferred resilience surface. See [Composable callers and middleware](../stdlib/llm-handlers.md). |
+| `llm_retries` | int | `2` | (deprecated; prefer `llm_caller` with `with_retry` from `std/llm/handlers`) Retries on transient HTTP / provider errors. Off-by-one: `llm_retries: K` ≈ `with_retry(..., {max_attempts: K + 1})`. |
+| `llm_backoff_ms` | int | `2000` | (deprecated; prefer `with_retry`) Base exponential backoff in ms between LLM retries |
 | `tool_retries` | int | `0` | Number of retry attempts for failed tool calls |
 | `tool_backoff_ms` | int | `1000` | Base backoff delay in ms for tool retries (doubles each attempt) |
 | `policy` | dict | nil | Capability ceiling applied to this agent loop |
@@ -161,6 +162,34 @@ thinking and the Anthropic interleaved-thinking beta header.
 
 Profiles preload the common loop-budget and retry keys below. Pass any
 key explicitly to override the profile's value for that call.
+
+### Resilience knobs
+
+The preferred surface for retry / fallback / shadow / budget / cache /
+circuit-breaker behavior on `agent_loop` is `llm_caller:`. Pass a
+closure that wraps the per-turn `llm_call(...)` and the loop will
+route every turn through it:
+
+```harn,ignore
+import {default_llm_caller, with_retry, with_fallback, compose} from "std/llm/handlers"
+
+let caller = compose([
+  with_retry({max_attempts: 4, backoff: "exponential"}),
+])(default_llm_caller())
+
+let result = agent_loop(task, system, {
+  loop_until_done: true,
+  llm_caller: caller,
+})
+```
+
+Caller contract: `fn(call) -> {ok, value | status, error?}` where
+`call = {prompt, system, opts, turn: {iteration, session_id, attempt}}`.
+The legacy `llm_retries` / `llm_backoff_ms` options are still accepted
+for back-compat and will be removed in v0.9; the lint rule
+`deprecated_llm_options` warns on usage. See
+[Composable callers and middleware](../stdlib/llm-handlers.md) for the
+full middleware catalog.
 
 ### Agent-loop compaction
 

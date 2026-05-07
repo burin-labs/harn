@@ -1,0 +1,9 @@
+// User-supplied opts always win over family/task calibration.
+// task: "judge" defaults to temperature: 0.0; user override 0.42 must win.
+import { pack_for } from "std/llm/defaults"
+
+pipeline test(task) {
+  let r = pack_for({model: "claude-sonnet-4-5", task: "judge", temperature: 0.42})
+  assert_eq(r.temperature, 0.42)
+  log("llm_defaults_pack_user_wins passed")
+}

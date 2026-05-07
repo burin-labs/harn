@@ -17,18 +17,18 @@ pipeline run(task) {
     service: incident.service,
     summary: "verification plan for ${incident.service}",
     plan: [
-    "Check the current deploy and the most recent rollback candidate.",
-    "Query Honeycomb and Splunk through MCP before proposing side effects.",
-    "Record whether the hypothesis is confirmed, disproven, or unresolved.",
-  ],
+      "Check the current deploy and the most recent rollback candidate.",
+      "Query Honeycomb and Splunk through MCP before proposing side effects.",
+      "Record whether the hypothesis is confirmed, disproven, or unresolved.",
+    ],
     status: "unresolved",
     receipt: {
-    kind: "incident_receipt",
-    outcome: "unresolved",
-    hypothesis: incident.hypothesis,
-    backends: incident.observability_backends,
-    owner: incident.human_owner,
-  },
+      kind: "incident_receipt",
+      outcome: "unresolved",
+      hypothesis: incident.hypothesis,
+      backends: incident.observability_backends,
+      owner: incident.human_owner,
+    },
     handoff: "review_captain",
   }
   println(json_stringify(result))

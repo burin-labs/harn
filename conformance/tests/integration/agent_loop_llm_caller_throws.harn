@@ -1,0 +1,14 @@
+/**
+ * When the user's caller throws, agent_loop propagates the thrown value.
+ * The test catches it with try {} and asserts the unwrapped reason matches.
+ */
+pipeline default() {
+  let throwing_caller = { _call ->
+    throw "caller boom"
+  }
+  let result = try {
+    agent_loop("hi", nil, {provider: "mock", llm_caller: throwing_caller})
+  }
+  println(is_err(result))
+  println(unwrap_err(result))
+}

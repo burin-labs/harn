@@ -1,0 +1,10 @@
+/**
+ * Passing a non-closure as `llm_caller` is rejected at option-normalization
+ * time with a friendly diagnostic from __validate_llm_caller.
+ */
+pipeline default() {
+  let result = try {
+    agent_loop("hi", nil, {provider: "mock", llm_caller: 42})
+  }
+  println(unwrap_err(result))
+}

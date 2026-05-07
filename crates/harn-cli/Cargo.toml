@@ -76,6 +76,7 @@ rustls = { version = "0.23", features = ["aws-lc-rs"] }
 tracing = "0.1"
 fs2 = "0.4"
 thiserror = "2"
+which = "6"
 
 [features]
 default = ["hostlib"]

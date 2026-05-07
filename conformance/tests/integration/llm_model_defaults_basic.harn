@@ -1,0 +1,10 @@
+pipeline test(task) {
+  // model_defaults may be populated or empty depending on harn.toml in the
+  // surrounding environment. Assert only that the builtin returns a dict
+  // rather than coupling the test to specific user/global config.
+  let defaults = llm_model_defaults("claude-sonnet-4-20250514")
+  assert_eq(type_of(defaults), "dict")
+  let unknown = llm_model_defaults("definitely-not-a-real-model-id-zzzzz")
+  assert_eq(type_of(unknown), "dict")
+  log("llm_model_defaults_basic passed")
+}

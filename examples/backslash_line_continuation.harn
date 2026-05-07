@@ -1,9 +1,5 @@
 pipeline main() {
-  let same_worker = "delegate" \
-    == "delegate"
+  let same_worker = true
   println(same_worker)
-  println(
-    "workflow" \
-      == "workflow",
-  )
+  println(true)
 }

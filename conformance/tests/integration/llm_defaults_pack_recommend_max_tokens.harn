@@ -1,0 +1,28 @@
+// pack_for(prompt: <long>) must end up with a non-nil max_tokens. For
+// claude-sonnet-4-5 the effort patch (balanced) already sets max_tokens
+// to 4096, which is the "effort wins over recommend" precedence. We
+// assert max_tokens is set and is a positive integer.
+import { pack_for } from "std/llm/defaults"
+
+pipeline test(task) {
+  // ~1000-char prompt; precise length isn't load-bearing.
+  let prompt = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu "
+    + "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu "
+    + "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu "
+    + "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu "
+    + "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu "
+    + "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu "
+  let r = pack_for({model: "claude-sonnet-4-5", task: "summarize", prompt: prompt})
+  assert_eq(type_of(r.max_tokens), "int")
+  assert(r.max_tokens > 0, "max_tokens must be positive")
+  // Now exercise the recommend_max_output_tokens path explicitly with a
+  // model whose family-effort patch does NOT pin max_tokens (gpt-5
+  // family only sets reasoning_effort). For summarize the recommended
+  // value is bounded above by ~30% of the input token estimate (~256
+  // floor when input is small).
+  let r2 = pack_for({model: "gpt-5", task: "summarize", prompt: prompt})
+  assert_eq(type_of(r2.max_tokens), "int")
+  assert(r2.max_tokens >= 64, "recommended max_tokens must respect the 64 floor")
+  assert(r2.max_tokens <= 8192, "recommended summarize max_tokens must stay sane")
+  log("llm_defaults_pack_recommend_max_tokens passed")
+}

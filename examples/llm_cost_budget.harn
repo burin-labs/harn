@@ -1,0 +1,39 @@
+// Demo: std/llm/handlers — with_budget short-circuits when token total is hit.
+//
+// The synthetic caller burns 100 input + 100 output tokens per call. The
+// budget cap is 350 total tokens, so calls 1 and 2 succeed, call 3 returns
+// budget_exhausted without invoking the inner caller.
+//
+// Run with: cargo run --quiet --bin harn -- run examples/llm_cost_budget.harn
+import { with_budget } from "std/llm/handlers"
+
+pipeline default() {
+  let synthetic = { _call -> return {
+    ok: true,
+    value: {
+      text: "ok",
+      model: "mock",
+      provider: "mock",
+      input_tokens: 100,
+      output_tokens: 100,
+      usage: {input_tokens: 100, output_tokens: 100},
+    },
+  } }
+  let caller = with_budget(synthetic, {max_total_tokens: 350, on_exceed: "short_circuit"})
+  let call = {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}}
+  var i = 0
+  var exceeded_at = -1
+  while i < 5 {
+    let env = caller(call)
+    if !(env?.ok ?? false) {
+      println("call " + to_string(i + 1) + " -> " + to_string(env.status))
+      if exceeded_at < 0 {
+        exceeded_at = i + 1
+      }
+    } else {
+      println("call " + to_string(i + 1) + " -> ok")
+    }
+    i = i + 1
+  }
+  println("exceeded after " + to_string(exceeded_at - 1) + " successful calls")
+}

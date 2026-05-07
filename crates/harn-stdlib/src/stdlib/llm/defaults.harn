@@ -1,0 +1,464 @@
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/defaults — task-pinned, provider/family-aware option packs that
+// produce a complete `llm_call`-ready dict by layering:
+//
+//   1. resolved_options(opts)         (runtime catalog defaults)
+//   2. family + effort patch          (family default behavior)
+//   3. family + thinking patch        (explicit caller intent — wins on
+//                                       overlapping keys, e.g. `reasoning_effort`
+//                                       for the openai_gpt5_family)
+//   4. task overlay                   (only fills unset fields)
+//   5. recommend_max_output_tokens()  (only when prompt is provided and
+//                                       neither user nor effort already
+//                                       set max_tokens)
+//   6. user opts                      (highest precedence — wins)
+//
+// User opts always win. Example: pack_for({task: "judge", temperature: 0.42})
+// returns temperature == 0.42 (overrides judge's 0.0 task default).
+//
+// Calibration sources (each table cites its source above the lookup fn):
+//   - Anthropic extended thinking budgets:
+//     <https://platform.claude.com/docs/en/build-with-claude/extended-thinking>
+//   - Anthropic Opus 4.7 adaptive thinking (manual budget returns 400):
+//     <https://platform.claude.com/docs/en/about-claude/models/whats-new-claude-4-7>
+//   - OpenAI reasoning_effort levels:
+//     <https://developers.openai.com/api/docs/guides/reasoning>
+//   - OpenAI GPT-5.5 ("none"-allowed reasoning_effort):
+//     <https://developers.openai.com/api/docs/models/gpt-5.5>
+//   - Gemini thinkingBudget (0=off, -1=dynamic, max 24576 Flash / 32768 Pro):
+//     <https://ai.google.dev/gemini-api/docs/thinking>
+//   - Ollama num_predict default 128:
+//     <https://docs.ollama.com/modelfile>
+//   - Per-task temperature/top_p/output_format defaults: tunable; not a
+//     published recommendation. Match commonly-cited cookbook values.
+import { agent_emit_event } from "std/agent/state"
+import { recommend_max_output_tokens } from "std/llm/budget"
+import { family_of, resolved_options } from "std/llm/catalog"
+
+fn __has_key(d, key) {
+  if type_of(d) != "dict" {
+    return false
+  }
+  return contains(d.keys(), key)
+}
+
+// -------------------------------------------------------------------------------------------------
+// thinking patches
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Map (family, thinking) → patch dict. thinking ∈ {"off","low","medium",
+ * "high","auto"}. An empty dict means "omit the thinking knob entirely".
+ *
+ * - Anthropic Sonnet/Opus (pre-4.7): extended thinking budgets per
+ * <https://platform.claude.com/docs/en/build-with-claude/extended-thinking>
+ * - Anthropic Opus 4.7+: adaptive thinking; manual budgets return 400 —
+ * strip the field. See __maybe_emit_strip for the warn event.
+ * - Anthropic Haiku 4.x: no extended-thinking support; omit.
+ * - OpenAI GPT-5/5.5: reasoning_effort levels per
+ * <https://developers.openai.com/api/docs/guides/reasoning>; "off"
+ * maps to "minimal" (safe floor across GPT-5 + GPT-5.5).
+ * - OpenAI legacy GPT-4o/4.1: omit.
+ * - Gemini 2.5 Flash max thinkingBudget = 24576; Pro max = 32768; "auto"
+ * maps to -1 (dynamic per
+ * <https://ai.google.dev/gemini-api/docs/thinking>).
+ * - Ollama qwen3: host injects /no_think capability-side; don't
+ * duplicate. All other Ollama: omit.
+ */
+fn __thinking_patch(family, thinking) {
+  if family == "anthropic_sonnet_opus" {
+    if thinking == "off" {
+      return {}
+    }
+    if thinking == "low" {
+      return {thinking: {enabled: true, budget_tokens: 1024}}
+    }
+    if thinking == "high" {
+      return {thinking: {enabled: true, budget_tokens: 16000}}
+    }
+    // medium and auto both map to a moderate budget; non-adaptive families
+    // can't honor "auto" the way Opus 4.7 can, so we treat auto≡medium.
+    return {thinking: {enabled: true, budget_tokens: 4096}}
+  }
+  if family == "anthropic_opus_adaptive" {
+    // Opus 4.7+ rejects manual `thinking` budgets — always omit.
+    return {}
+  }
+  if family == "anthropic_haiku" {
+    return {}
+  }
+  if family == "openai_gpt5_family" {
+    if thinking == "off" {
+      // "minimal" is the safe floor across GPT-5 + GPT-5.5.
+      return {reasoning_effort: "minimal"}
+    }
+    if thinking == "low" {
+      return {reasoning_effort: "low"}
+    }
+    if thinking == "high" {
+      return {reasoning_effort: "high"}
+    }
+    // medium and auto.
+    return {reasoning_effort: "medium"}
+  }
+  if family == "openai_legacy" {
+    return {}
+  }
+  if family == "gemini_pro" {
+    if thinking == "off" {
+      return {thinkingBudget: 0}
+    }
+    if thinking == "low" {
+      return {thinkingBudget: 1024}
+    }
+    if thinking == "high" {
+      return {thinkingBudget: 16384}
+    }
+    if thinking == "auto" {
+      return {thinkingBudget: -1}
+    }
+    // medium.
+    return {thinkingBudget: 8192}
+  }
+  if family == "gemini_flash" {
+    if thinking == "off" {
+      return {thinkingBudget: 0}
+    }
+    if thinking == "low" {
+      return {thinkingBudget: 1024}
+    }
+    if thinking == "high" {
+      // Flash max budget 24576.
+      return {thinkingBudget: 24576}
+    }
+    if thinking == "auto" {
+      return {thinkingBudget: -1}
+    }
+    return {thinkingBudget: 8192}
+  }
+  // ollama_qwen3, ollama_generic, generic — no thinking knob to set here;
+  // the host's capability-driven /no_think directive (Qwen3) handles "off".
+  // Note on Gemini 3: family_of() does not yet distinguish Gemini 3
+  // models; if a future model can't disable thinking, callers should
+  // observe model_info(model).capabilities.thinking_modes. Treated as
+  // a hand-wavy area until Gemini 3 ships and family_of learns it.
+  return {}
+}
+
+// -------------------------------------------------------------------------------------------------
+// effort patches
+// -------------------------------------------------------------------------------------------------
+
+//
+// effort ∈ {"fast","balanced","quality","auto"}. "auto" defers to
+// "balanced" across all families.
+//
+// Anthropic temperatures sweep 0.2 / 0.7 / 1.0 (cookbook values).
+// max_tokens caps reflect typical Claude messages-API budgets:
+// Sonnet/Opus 1024/4096/8192; Haiku is capped lower (1024/2048/4096).
+// OpenAI GPT-5 family piggybacks on reasoning_effort; GPT-4o/4.1 use
+// temperature only (their max_tokens default flows from the catalog).
+// Gemini effort dial maps to thinkingBudget steps.
+// Ollama exposes num_predict (default 128 per Modelfile reference) so
+// we override it for "balanced" / "quality" to give meaningful output.
+@complexity(allow)
+fn __effort_patch(family, effort) {
+  let kind = if effort == "auto" {
+    "balanced"
+  } else {
+    effort
+  }
+  if family == "anthropic_sonnet_opus" {
+    if kind == "fast" {
+      return {temperature: 0.2, max_tokens: 1024}
+    }
+    if kind == "quality" {
+      // Quality bumps the thinking budget to medium (4096) implicitly via
+      // the layered thinking patch — we don't double-set it here.
+      return {temperature: 1.0, max_tokens: 8192}
+    }
+    return {temperature: 0.7, max_tokens: 4096}
+  }
+  if family == "anthropic_opus_adaptive" {
+    if kind == "fast" {
+      return {temperature: 0.2, max_tokens: 1024}
+    }
+    if kind == "quality" {
+      // Opus 4.7+ does its own adaptive thinking; no manual thinking knob.
+      return {temperature: 1.0, max_tokens: 8192}
+    }
+    return {temperature: 0.7, max_tokens: 4096}
+  }
+  if family == "anthropic_haiku" {
+    if kind == "fast" {
+      return {temperature: 0.2, max_tokens: 1024}
+    }
+    if kind == "quality" {
+      return {temperature: 1.0, max_tokens: 4096}
+    }
+    return {temperature: 0.7, max_tokens: 2048}
+  }
+  if family == "openai_gpt5_family" {
+    if kind == "fast" {
+      return {reasoning_effort: "low"}
+    }
+    if kind == "quality" {
+      return {reasoning_effort: "high"}
+    }
+    return {reasoning_effort: "medium"}
+  }
+  if family == "openai_legacy" {
+    if kind == "fast" {
+      return {temperature: 0.2}
+    }
+    if kind == "quality" {
+      return {temperature: 1.0, max_tokens: 8192}
+    }
+    return {temperature: 0.7}
+  }
+  if family == "gemini_pro" {
+    if kind == "fast" {
+      return {thinkingBudget: 0}
+    }
+    if kind == "quality" {
+      return {thinkingBudget: 16384}
+    }
+    return {thinkingBudget: 4096}
+  }
+  if family == "gemini_flash" {
+    if kind == "fast" {
+      return {thinkingBudget: 0}
+    }
+    if kind == "quality" {
+      return {thinkingBudget: 16384}
+    }
+    return {thinkingBudget: 2048}
+  }
+  if family == "ollama_qwen3" || family == "ollama_generic" {
+    if kind == "fast" {
+      return {num_predict: 512}
+    }
+    if kind == "quality" {
+      return {num_predict: 4096}
+    }
+    return {num_predict: 2048}
+  }
+  // generic
+  return {}
+}
+
+// -------------------------------------------------------------------------------------------------
+// task overlay
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Per-task defaults; tunable, NOT a published vendor recommendation.
+ * Only fills fields that effort/thinking layers haven't already set.
+ * task ∈ {"chat","agent","refine","judge","summarize","code","json"}.
+ */
+fn __task_overlay(task) {
+  if task == "chat" {
+    return {temperature: 0.7, top_p: 0.95, schema_retries: 0, output_format: {kind: "text"}}
+  }
+  if task == "agent" {
+    return {temperature: 0.5, top_p: 0.95, schema_retries: 0, output_format: {kind: "text"}}
+  }
+  if task == "refine" {
+    return {temperature: 0.4, top_p: 0.9, schema_retries: 1, output_format: {kind: "text"}}
+  }
+  if task == "judge" {
+    return {temperature: 0.0, top_p: 1.0, schema_retries: 2, output_format: {kind: "json_schema"}}
+  }
+  if task == "summarize" {
+    return {temperature: 0.3, top_p: 0.9, schema_retries: 0, output_format: {kind: "text"}}
+  }
+  if task == "code" {
+    return {temperature: 0.2, top_p: 0.95, schema_retries: 0, output_format: {kind: "text"}}
+  }
+  if task == "json" {
+    return {temperature: 0.1, top_p: 1.0, schema_retries: 2, output_format: {kind: "json_object"}}
+  }
+  // unknown task → no overlay
+  return {}
+}
+
+// -------------------------------------------------------------------------------------------------
+// helpers
+// -------------------------------------------------------------------------------------------------
+
+fn __safe_resolved_options(opts) {
+  // Fall back to a minimal echo dict if resolved_options throws (e.g. when
+  // opts.model is missing). pack_for already requires opts.model, so this
+  // is defensive — never hit in normal paths.
+  let r = try {
+    resolved_options(opts)
+  }
+  if is_err(r) {
+    return {model: opts?.model ?? "", provider: opts?.provider ?? ""}
+  }
+  return unwrap(r)
+}
+
+fn __maybe_emit_strip(opts, requested) {
+  // Best-effort warn when manual thinking is stripped on opus_4_7. If no
+  // session_id is in opts (the usual case for pack_for), skip silently.
+  // This mirrors the "emit when bound; punt otherwise" pattern from
+  // std/llm/budget.
+  let sid = opts?.session_id ?? opts?._session_id
+  if sid == nil || sid == "" {
+    return
+  }
+  try {
+    agent_emit_event(
+      sid,
+      "pack_thinking_stripped",
+      {model: opts?.model, requested: requested, reason: "opus_4_7_adaptive"},
+    )
+  }
+}
+
+fn __fill_unset(result, overlay) {
+  // task_overlay's "fill only when unset" semantics. Iterate overlay keys,
+  // assign only those missing from result.
+  var out = result
+  for key in overlay.keys() {
+    if !__has_key(out, key) {
+      out[key] = overlay[key]
+    }
+  }
+  return out
+}
+
+// -------------------------------------------------------------------------------------------------
+// public API
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * pack_for(opts) -> dict
+ *
+ * Returns an `llm_call`-ready options dict, calibrated for the model's
+ * provider/family and pinned to a task. User opts always win.
+ *
+ * Required: opts.model
+ * Optional: opts.provider, opts.task, opts.thinking, opts.effort,
+ *           opts.prompt, opts.system, opts.max_tokens, opts.temperature,
+ *           opts.tool_format, opts.schema_retries, opts.session_id
+ *
+ * Example: pack_for({model: "claude-sonnet-4-5", task: "judge", temperature: 0.42})
+ * → result has temperature == 0.42 (user override wins over judge's 0.0
+ * default).
+ *
+ * Side effect: when a knob conflicts with a known model constraint
+ * (e.g. manual thinking on Opus 4.7), may emit an agent event tagged
+ * "pack_thinking_stripped" if a session_id is present in opts.
+ */
+pub fn pack_for(opts) {
+  if type_of(opts) != "dict" {
+    throw "pack_for: opts must be a dict"
+  }
+  if opts?.model == nil || opts.model == "" {
+    throw "pack_for: opts.model is required"
+  }
+  let model = opts.model
+  // 1. Runtime catalog defaults. Pass only model+provider so unrelated
+  //    user-supplied keys (task, thinking, effort, etc.) don't leak into
+  //    the resolved dict prematurely.
+  let resolved_input = if opts?.provider != nil {
+    {model: model, provider: opts.provider}
+  } else {
+    {model: model}
+  }
+  var result = __safe_resolved_options(resolved_input)
+  // family classification (uses the inferred provider in the catalog).
+  let family = family_of(model)
+  // 2. Effort patch. Applied BEFORE the thinking patch so that on families
+  //    where both knobs write to the same key (notably openai_gpt5_family
+  //    where both target `reasoning_effort`) an explicit `thinking: ...`
+  //    can override the family default.
+  let effort = opts?.effort ?? "balanced"
+  let e_patch = __effort_patch(family, effort)
+  result = result + e_patch
+  // 3. Thinking patch. Strip + warn for Opus 4.7 adaptive when caller
+  //    asked for a manual mode.
+  let thinking_req = opts?.thinking ?? "auto"
+  if family == "anthropic_opus_adaptive" && thinking_req != "auto" && thinking_req != nil {
+    __maybe_emit_strip(opts, thinking_req)
+  }
+  let t_patch = __thinking_patch(family, thinking_req)
+  result = result + t_patch
+  // 4. Task overlay — only fill fields not already set above.
+  let task = opts?.task ?? "chat"
+  let overlay = __task_overlay(task)
+  result = __fill_unset(result, overlay)
+  // 5. Recommended max_tokens when caller supplied a prompt and neither
+  //    they nor the effort patch already set max_tokens.
+  if opts?.prompt != nil && opts?.max_tokens == nil && !__has_key(result, "max_tokens") {
+    let recommended = try {
+      recommend_max_output_tokens(
+        {prompt: opts.prompt, system: opts?.system ?? "", model: model, task_kind: task, headroom: 0.1},
+      )
+    }
+    if !is_err(recommended) {
+      result = result + {max_tokens: unwrap(recommended)}
+    }
+  }
+  // 6. User opts — highest precedence. Only project the fields llm_call
+  //    actually consumes; we still let arbitrary user keys through so
+  //    callers can pass provider-specific knobs. (Internal pack control
+  //    keys task/thinking/effort are stripped so they don't leak into
+  //    the final llm_call dict.)
+  var user_overrides = opts
+  for key in ["task", "thinking", "effort"] {
+    if __has_key(user_overrides, key) {
+      user_overrides = user_overrides.remove(key)
+    }
+  }
+  result = result + user_overrides
+  // 7. Re-pin model. resolved_options already set provider, but if the
+  //    caller passed a different model id at the top level it must win.
+  result = result + {model: model}
+  return result
+}
+
+/** pack_chat(model, opts) — convenience wrapper for task: "chat". */
+pub fn pack_chat(model, opts = nil) {
+  let base = opts ?? {}
+  return pack_for(base + {model: model, task: "chat"})
+}
+
+/** pack_agent(model, opts) — convenience wrapper for task: "agent". */
+pub fn pack_agent(model, opts = nil) {
+  let base = opts ?? {}
+  return pack_for(base + {model: model, task: "agent"})
+}
+
+/** pack_refine(model, opts) — convenience wrapper for task: "refine". */
+pub fn pack_refine(model, opts = nil) {
+  let base = opts ?? {}
+  return pack_for(base + {model: model, task: "refine"})
+}
+
+/** pack_judge(model, opts) — convenience wrapper for task: "judge". */
+pub fn pack_judge(model, opts = nil) {
+  let base = opts ?? {}
+  return pack_for(base + {model: model, task: "judge"})
+}
+
+/** pack_summarize(model, opts) — convenience wrapper for task: "summarize". */
+pub fn pack_summarize(model, opts = nil) {
+  let base = opts ?? {}
+  return pack_for(base + {model: model, task: "summarize"})
+}
+
+/** pack_code(model, opts) — convenience wrapper for task: "code". */
+pub fn pack_code(model, opts = nil) {
+  let base = opts ?? {}
+  return pack_for(base + {model: model, task: "code"})
+}
+
+/** pack_json(model, opts) — convenience wrapper for task: "json". */
+pub fn pack_json(model, opts = nil) {
+  let base = opts ?? {}
+  return pack_for(base + {model: model, task: "json"})
+}

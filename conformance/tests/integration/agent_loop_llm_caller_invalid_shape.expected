@@ -1,0 +1,2 @@
+agent_loop: llm_caller must return a dict; got string
+agent_loop: llm_caller returned ok=true but `value` is not a dict

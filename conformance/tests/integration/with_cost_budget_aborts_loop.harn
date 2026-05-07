@@ -1,0 +1,36 @@
+/**
+ * Cross-slice integration: agent_loop's llm_caller seam composes with
+ * std/llm/handlers::with_budget. The synthetic caller burns 200 tokens per
+ * call (100 in + 100 out). max_total_tokens=350 is exceeded after the 2nd
+ * call, so the 3rd invocation short-circuits with status budget_exhausted,
+ * which agent_loop surfaces as the final status.
+ */
+import { with_budget } from "std/llm/handlers"
+
+pipeline default() {
+  let synthetic = { _call -> return {
+    ok: true,
+    value: {
+      text: "tick",
+      model: "mock",
+      provider: "mock",
+      input_tokens: 100,
+      output_tokens: 100,
+      usage: {input_tokens: 100, output_tokens: 100},
+    },
+  } }
+  let caller = with_budget(synthetic, {max_total_tokens: 350, on_exceed: "short_circuit"})
+  let result = agent_loop(
+    "hi",
+    nil,
+    {
+      provider: "mock",
+      llm_caller: caller,
+      max_iterations: 5,
+      max_nudges: 5,
+      loop_until_done: true,
+      done_sentinel: "STOP",
+    },
+  )
+  println(result.status)
+}

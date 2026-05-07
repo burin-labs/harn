@@ -1,0 +1,28 @@
+// Conformance test for std/llm/ensemble::self_consistency — majority vote
+// across 5 mocked samples picks the answer with 3 votes.
+import { self_consistency } from "std/llm/ensemble"
+
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "A"})
+  llm_mock({text: "B"})
+  llm_mock({text: "A"})
+  llm_mock({text: "C"})
+  llm_mock({text: "A"})
+  let result = self_consistency(
+    "Pick a letter",
+    "",
+    {
+      n: 5,
+      parallel: false,
+      sampler_opts: {temperature: 1.2},
+      call_opts: {provider: "mock"},
+      extract: { text -> text },
+    },
+  )
+  println(result.ok)
+  println(result.answer)
+  println(result.answer_count)
+  println(result.total)
+  println(result.entropy > 0.0)
+}

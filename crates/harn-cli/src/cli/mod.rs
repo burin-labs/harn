@@ -25,6 +25,7 @@ mod init;
 mod lint_fmt;
 mod mcp;
 mod merge_captain;
+mod models;
 mod orchestrator;
 mod package;
 mod persona;
@@ -40,6 +41,7 @@ mod test;
 mod trace;
 mod trigger;
 mod trust;
+mod try_cmd;
 mod util;
 mod verify;
 mod viz;
@@ -82,6 +84,7 @@ pub(crate) use merge_captain::{
     MergeCaptainMockCommand, MergeCaptainMockInitArgs, MergeCaptainMockServeArgs,
     MergeCaptainMockStatusArgs, MergeCaptainMockStepArgs, MergeCaptainRunArgs,
 };
+pub(crate) use models::{ModelsArgs, ModelsCommand, ModelsInstallArgs, ModelsListArgs};
 pub(crate) use orchestrator::{
     OrchestratorArgs, OrchestratorCommand, OrchestratorDeployArgs, OrchestratorDeployProvider,
     OrchestratorDlqArgs, OrchestratorFireArgs, OrchestratorInspectArgs, OrchestratorLocalArgs,
@@ -122,6 +125,7 @@ pub(crate) use skills::{
 pub(crate) use test::TestArgs;
 pub(crate) use trace::{TraceArgs, TraceCommand, TraceImportArgs};
 pub(crate) use trigger::{TriggerArgs, TriggerCancelArgs, TriggerCommand, TriggerReplayArgs};
+pub(crate) use try_cmd::TryArgs;
 // `TrustOutcomeArg` / `TrustTierArg` are referenced from the cli
 // parser tests only; they're matched via destructuring elsewhere.
 #[allow(unused_imports)]
@@ -235,7 +239,6 @@ SCRIPTING
     /// Start the orchestrator process that hosts triggers and connector dispatch.
     Orchestrator(OrchestratorArgs),
     /// Run a pipeline against a Harn-native host module for fast iteration.
-    #[command(visible_alias = "try")]
     Playground(PlaygroundArgs),
     /// Inspect persisted workflow run records.
     Runs(RunsArgs),
@@ -278,6 +281,13 @@ SCRIPTING
     ProviderCatalog(ProviderCatalogArgs),
     /// Probe a provider's /models endpoint and optionally verify a served model.
     ProviderReady(ProviderReadyArgs),
+    /// List or install LLM models. Convenience wrapper around the catalog
+    /// and (for `install`) Ollama.
+    Models(ModelsArgs),
+    /// One-shot agent_loop with a prompt. Routes through the configured
+    /// provider (or `HARN_LLM_PROVIDER=mock` for offline use).
+    #[command(name = "try")]
+    Try(TryArgs),
     /// Manage and inspect Harn skills (list, inspect, match, install, new).
     Skills(SkillsArgs),
     /// Manage skill provenance: keys, signatures, verification, and trust policy.

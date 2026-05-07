@@ -1,0 +1,33 @@
+// Demo: std/llm/handlers — with_fallback wrapped into agent_loop.
+//
+// Primary caller fails with auth error; secondary caller succeeds. The
+// fallback envelope's text becomes agent_loop's visible_text. Both callers
+// are synthetic so the example runs in CI without credentials.
+//
+// Run with: cargo run --quiet --bin harn -- run examples/agent_with_fallback.harn
+import { with_fallback } from "std/llm/handlers"
+
+pipeline default() {
+  let primary = { _call ->
+    println("[primary]   -> auth failure")
+    return {ok: false, status: "auth", error: "no creds"}
+  }
+  let secondary = { _call ->
+    println("[secondary] -> success")
+    return {
+      ok: true,
+      value: {
+        text: "answer-from-secondary",
+        model: "mock",
+        provider: "mock",
+        input_tokens: 0,
+        output_tokens: 0,
+        usage: {input_tokens: 0, output_tokens: 0},
+      },
+    }
+  }
+  let caller = with_fallback([primary, secondary])
+  let result = agent_loop("hi", nil, {provider: "mock", llm_caller: caller})
+  println("status      = " + result.status)
+  println("visible     = " + result.visible_text)
+}

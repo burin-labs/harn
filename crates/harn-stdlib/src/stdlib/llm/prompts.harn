@@ -1,0 +1,202 @@
+/**
+ * @harn-entrypoint-category llm.stdlib
+ *
+ * std/llm/prompts — system-prompt builders for non-agent_loop callers.
+ * Deterministic-by-design so callers benefit from prompt caching.
+ */
+fn __tone_voice(tone) {
+  if tone == "terse" {
+    return "Voice: terse and direct. Skip pleasantries; keep responses brief."
+  }
+  if tone == "conversational" {
+    return "Voice: warm and conversational. Sound like a helpful colleague."
+  }
+  return "Voice: professional and precise. Use clear, neutral language."
+}
+
+fn __bulleted(items) {
+  var lines = []
+  for item in items {
+    lines = lines.push("- " + to_string(item))
+  }
+  return join(lines, "\n")
+}
+
+fn __examples_block(examples) {
+  var blocks = []
+  for ex in examples {
+    let input = to_string(ex?.input ?? "")
+    let output = to_string(ex?.output ?? "")
+    blocks = blocks.push("Input:\n" + input + "\n\nOutput:\n" + output)
+  }
+  return join(blocks, "\n\n---\n\n")
+}
+
+fn __output_contract_block(contract) {
+  if type_of(contract) != "dict" {
+    return ""
+  }
+  var lines = []
+  let keys = contract.keys().sort()
+  for key in keys {
+    let value = contract[key]
+    let rendered = if type_of(value) == "dict" || type_of(value) == "list" {
+      json_stringify(value)
+    } else {
+      to_string(value)
+    }
+    lines = lines.push("- " + to_string(key) + ": " + rendered)
+  }
+  return join(lines, "\n")
+}
+
+/**
+ * Build a structured system prompt from typed parts. Deterministic for
+ * caching. Required: opts.persona (string). Optional: opts.tools
+ * (list<string>), opts.constraints (list<string>), opts.output_contract
+ * (dict), opts.examples (list<dict {input, output}>), opts.tone
+ * ("professional" | "terse" | "conversational"; default "professional").
+ */
+pub fn system_prelude(opts) {
+  if type_of(opts) != "dict" {
+    throw "system_prelude: opts must be a dict"
+  }
+  let persona = opts?.persona
+  if persona == nil || to_string(persona) == "" {
+    throw "system_prelude: opts.persona is required"
+  }
+  let tone = opts?.tone ?? "professional"
+  let tools = opts?.tools ?? []
+  let constraints = opts?.constraints ?? []
+  let output_contract = opts?.output_contract
+  let examples = opts?.examples ?? []
+  var sections = [to_string(persona), __tone_voice(tone)]
+  if type_of(tools) == "list" && len(tools) > 0 {
+    sections = sections.push("Tools available:\n" + __bulleted(tools))
+  }
+  if type_of(constraints) == "list" && len(constraints) > 0 {
+    sections = sections.push("Constraints:\n" + __bulleted(constraints))
+  }
+  if type_of(output_contract) == "dict" && len(output_contract.keys()) > 0 {
+    sections = sections.push("Output:\n" + __output_contract_block(output_contract))
+  }
+  if type_of(examples) == "list" && len(examples) > 0 {
+    sections = sections.push("Examples:\n\n" + __examples_block(examples))
+  }
+  return join(sections, "\n\n")
+}
+
+fn __tools_listing(tools) {
+  if type_of(tools) != "list" || len(tools) == 0 {
+    return "(no tools currently registered)"
+  }
+  return __bulleted(tools)
+}
+
+/**
+ * Render a tool-use prelude for non-agent_loop callers. format ∈
+ * {"native", "text"}. Returns a deterministic string.
+ *
+ * Note: this is an inline rendering rather than re-using the existing
+ * agent/prompts/tool_contract_*.harn.prompt assets because those expect
+ * a richer binding context (done_sentinel, native_contract, etc.) than
+ * plain non-loop callers can supply. Could be refactored in the future
+ * to share a common prompt asset.
+ */
+pub fn tool_use_prelude(tools, format) {
+  let normalized = lowercase(to_string(format ?? "text"))
+  let listing = __tools_listing(tools)
+  if normalized == "native" {
+    return join(
+      [
+        "## Native tool protocol",
+        "Tools are available via the provider's native tool-calling channel.",
+        "- Invoke tools through the native tool-calling API only.",
+        "- Do not emit tool-call syntax in assistant prose, code fences, or JSON envelopes.",
+        "- Keep assistant prose short and operational.",
+        "Tools available:",
+        listing,
+      ],
+      "\n",
+    )
+  }
+  return join(
+    [
+      "## Text tool protocol",
+      "Tools are invoked via fenced ```call``` blocks containing JSON arguments.",
+      "- Emit one ```call <tool_name>``` block per invocation.",
+      "- Use only tools listed below.",
+      "- Wait for tool results before continuing.",
+      "Tools available:",
+      listing,
+    ],
+    "\n",
+  )
+}
+
+fn __schema_property_lines(properties) {
+  if type_of(properties) != "dict" {
+    return []
+  }
+  var lines = []
+  let keys = properties.keys().sort()
+  for key in keys {
+    let prop = properties[key]
+    let kind = if type_of(prop) == "dict" {
+      to_string(prop?.type ?? "any")
+    } else {
+      "any"
+    }
+    let desc = if type_of(prop) == "dict" && prop?.description != nil {
+      ": " + to_string(prop.description)
+    } else {
+      ""
+    }
+    lines = lines.push("- " + to_string(key) + " (" + kind + ")" + desc)
+  }
+  return lines
+}
+
+/**
+ * Render a structured-output preface from a JSON schema with optional
+ * hints. If opts.template (path string) is provided, that prompt asset
+ * is rendered with bindings {schema, schema_json, prompt}. Otherwise
+ * builds a deterministic inline preface from schema.required and
+ * schema.properties (sorted).
+ */
+pub fn structured_output_preface(schema, opts) {
+  let options = opts ?? {}
+  let template = options?.template
+  if template != nil {
+    let bindings = {schema: schema, schema_json: json_stringify(schema), prompt: options?.prompt ?? ""}
+    return render_prompt(to_string(template), bindings)
+  }
+  let required = if type_of(schema) == "dict" && type_of(schema?.required) == "list" {
+    schema.required.sort()
+  } else {
+    []
+  }
+  let required_line = if len(required) > 0 {
+    "Required keys: " + join(required, ", ") + "."
+  } else {
+    "No required keys are declared."
+  }
+  let properties = if type_of(schema) == "dict" {
+    schema?.properties
+  } else {
+    nil
+  }
+  let prop_lines = __schema_property_lines(properties)
+  var sections = [
+    "Respond with valid JSON matching this schema. Do not wrap in markdown fences. Do not include prose, commentary, or trailing text.",
+    required_line,
+  ]
+  if len(prop_lines) > 0 {
+    sections = sections.push("Properties:\n" + join(prop_lines, "\n"))
+  }
+  let hint = options?.hint
+  if hint != nil && to_string(hint) != "" {
+    sections = sections.push("Hint: " + to_string(hint))
+  }
+  return join(sections, "\n\n")
+}

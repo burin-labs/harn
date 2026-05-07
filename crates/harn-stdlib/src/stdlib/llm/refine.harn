@@ -1,66 +1,50 @@
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/refine — meta-prompt-based prompt refinement.
+//
+// Inspired by:
+//   - DSPy MIPROv2 (Khattab et al.) — instruction tuning via meta-prompting.
+//   - OpenAI Prompt Optimizer guide
+//     (https://platform.openai.com/docs/guides/prompt-engineering).
+//   - OpenAI Cookbook meta-prompting recipe
+//     (https://cookbook.openai.com/examples/enhance_your_prompts_with_meta_prompting).
+//
+// The refinement is a single LLM call against a meta-prompt that asks the
+// model to rewrite the user's prompt while preserving original intent. The
+// model is instructed to emit a single "DIFF: <summary>" trailer line that
+// we strip out. If the trailer is missing, the entire response is treated as
+// the rewritten prompt.
+import { estimate_text_tokens } from "std/llm/budget"
+import { with_prompt_rewrite } from "std/llm/handlers"
+import { safe_call } from "std/llm/safe"
+
 fn __copy_llm_option(current, opts, key) {
   var out = current
-  if opts != nil && opts[key] != nil {
+  if contains(opts.keys(), key) {
     out[key] = opts[key]
   }
   return out
 }
 
 fn __llm_options(options) {
-  let opts = options?.llm ?? options?.llm_options ?? options ?? {}
+  let opts = options ?? {}
+  if type_of(opts) != "dict" {
+    throw "std/llm/refine: options must be a dict"
+  }
   var out = {}
   for key in [
     "provider",
     "model",
-    "model_tier",
     "temperature",
-    "top_p",
-    "top_k",
     "max_tokens",
-    "frequency_penalty",
-    "presence_penalty",
-    "seed",
-    "stop",
-    "timeout",
-    "system",
-    "response_format",
-    "output_format",
-    "output_validation",
-    "schema_retries",
-    "retries",
-    "repair",
-    "thinking",
-    "interleaved_thinking",
-    "anthropic_beta_features",
-    "vision",
-    "tools",
-    "tool_choice",
-    "tool_search",
-    "budget",
-    "cache",
-    "stream",
-    "messages",
-    "structural_experiment",
-    "transcript",
+    "timeout_ms",
     "llm_retries",
     "llm_backoff_ms",
+    "schema_retries",
+    "repair",
+    "stream",
   ] {
     out = __copy_llm_option(out, opts, key)
-  }
-  return out
-}
-
-fn __dedupe_strings(values) {
-  var seen = []
-  var out = []
-  for value in values {
-    if value != nil {
-      let text = trim(to_string(value))
-      if text != "" && !seen.contains(text) {
-        seen = seen.push(text)
-        out = out.push(text)
-      }
-    }
   }
   return out
 }
@@ -69,71 +53,353 @@ fn __string_values(value) {
   if value == nil {
     return []
   }
-  if type_of(value) == "list" {
-    return value
+  if type_of(value) == "string" {
+    return [value]
   }
-  return [value]
+  if type_of(value) != "list" {
+    throw "propose_instructions: instruction_proposals must be a string or list"
+  }
+  var out = []
+  for item in value {
+    let text = trim(to_string(item))
+    if text != "" && !contains(out, text) {
+      out = out.push(text)
+    }
+  }
+  return out
 }
 
 fn __configured_proposals(options) {
-  return options?.instruction_proposals ?? options?.proposals ?? options?.instructions
+  return __string_values((options ?? {})?.instruction_proposals)
 }
 
 fn __proposal_prompt(base_prompt, count) {
-  return "Propose "
+  return "Given this base prompt, propose "
     + to_string(count)
-    + " concise alternative task instructions for this base prompt. Return JSON only.\n\nBase prompt:\n"
+    + " concise improved instruction variants as JSON {\"instructions\": [string, ...]}.\n\nBase prompt:\n"
     + base_prompt
 }
 
-fn __refine_prompt(base_prompt) {
-  return "Rewrite this task instruction to be more precise. Return JSON only.\n\nInstruction:\n"
+fn __legacy_refine_meta_prompt(base_prompt) {
+  return "Rewrite the following prompt to be clearer, more specific, and easier for an LLM to follow. Return JSON {\"prompt\": string, \"notes\": string}.\n\nPrompt:\n"
     + base_prompt
 }
 
-/** Rewrite one prompt instruction with a closure, configured proposal, or structured LLM call. */
-pub fn refine_prompt(base_prompt, options = nil) {
-  require type_of(base_prompt) == "string", "refine_prompt: base_prompt must be a string"
-  if options?.refine != nil {
-    return trim(to_string(options.refine({base_prompt: base_prompt, options: options})))
+fn __auto_target_size(est_tokens) {
+  if est_tokens <= 60 {
+    return "small"
   }
-  let configured = __configured_proposals(options)
-  if configured != nil {
-    let proposals = __dedupe_strings(__string_values(configured))
-    if len(proposals) > 0 {
-      return proposals[0]
+  if est_tokens <= 1200 {
+    return "medium"
+  }
+  return "large"
+}
+
+fn __target_size_clause(target_size) {
+  if target_size == "small" {
+    return "<= 80 tokens (under ~320 characters)"
+  }
+  if target_size == "medium" {
+    return "<= 350 tokens (under ~1400 characters)"
+  }
+  if target_size == "large" {
+    return "<= 1200 tokens (under ~4800 characters)"
+  }
+  return "a similar size to the original"
+}
+
+fn __style_clause(style) {
+  if style == "imperative" {
+    return "imperative"
+  }
+  if style == "structured" {
+    return "structured (sectioned with headings)"
+  }
+  if style == "chain_of_draft" {
+    return "chain-of-draft (terse intermediate notes, then final answer)"
+  }
+  return "concise"
+}
+
+fn __bullet_list(prefix, items) {
+  if type_of(items) != "list" || len(items) == 0 {
+    return ""
+  }
+  var lines = []
+  for item in items {
+    lines = lines.push("  - " + to_string(item))
+  }
+  return prefix + "\n" + join(lines, "\n")
+}
+
+fn __build_meta_prompt(user_prompt, style, target_size, keep, strip) {
+  let style_clause = __style_clause(style)
+  let size_clause = __target_size_clause(target_size)
+  let keep_block = __bullet_list("- Keep verbatim:", keep)
+  let strip_block = __bullet_list("- Remove:", strip)
+  var lines = [
+    "You are a prompt-engineering reviewer. Rewrite the user prompt below"
+      + " into a "
+      + style_clause
+      + " prompt of "
+      + size_clause
+      + ". Preserve original intent.",
+    "",
+    "Strict rules:",
+    "- Do not invent goals or constraints not present in the original.",
+    "- Preserve every \"MUST\" / \"MUST NOT\" verbatim.",
+  ]
+  if keep_block != "" {
+    lines = lines.push(keep_block)
+  }
+  if strip_block != "" {
+    lines = lines.push(strip_block)
+  }
+  lines = lines
+    .push(
+    "- Output ONLY the rewritten prompt, then a single line beginning with"
+      + " \"DIFF: \" summarizing what changed in <=120 chars.",
+  )
+  lines = lines.push("")
+  lines = lines.push("Original prompt:")
+  lines = lines.push("\"\"\"")
+  lines = lines.push(to_string(user_prompt))
+  lines = lines.push("\"\"\"")
+  return join(lines, "\n")
+}
+
+fn __split_refined_and_diff(text) {
+  let s = to_string(text)
+  let marker = "DIFF: "
+  if !contains(s, marker) {
+    return {refined: trim(s), diff_summary: ""}
+  }
+  let parts = split(s, marker)
+  if len(parts) < 2 {
+    return {refined: trim(s), diff_summary: ""}
+  }
+  let refined_part = trim(parts[0])
+  // Re-join any DIFF: occurrences after the first by joining with the marker.
+  var tail_pieces = []
+  var i = 1
+  while i < len(parts) {
+    tail_pieces = tail_pieces.push(parts[i])
+    i = i + 1
+  }
+  let diff_part = trim(join(tail_pieces, marker))
+  return {refined: refined_part, diff_summary: diff_part}
+}
+
+fn __cache_key(user_prompt, style, target_size) {
+  return sha256(to_string(user_prompt) + "::" + style + "::" + target_size)
+}
+
+/**
+ * refine_prompt(opts) -> dict
+ *
+ * Required: opts.user_prompt
+ * Optional: opts.model, opts.provider, opts.session, opts.target_size,
+ *           opts.style, opts.goals (list<string>), opts.keep (list<string>),
+ *           opts.strip (list<string>), opts.meta_prompt
+ *
+ * target_size ∈ {"auto","small","medium","large"} (default "auto").
+ * style ∈ {"imperative","concise","structured","chain_of_draft"} (default
+ * "concise").
+ *
+ * "auto" heuristic over `estimate_text_tokens(user_prompt, model)`:
+ *   <= 60   → "small"
+ *   <= 1200 → "medium"
+ *   else    → "large"
+ *
+ * Returns: {ok, refined, original, diff_summary, est_tokens_before,
+ *           est_tokens_after, style, target_size, model}
+ *
+ * If opts.session is provided, refine_prompt looks up
+ * `session._refine_cache[hash(user_prompt + style + target_size)]` and reuses
+ * the cached result. Note: this requires the caller to thread a mutable
+ * session dict through subsequent calls; Harn does not currently support
+ * out-of-closure mutation of session state.
+ */
+fn __refine_prompt_dict(opts) {
+  if type_of(opts) != "dict" {
+    throw "refine_prompt: opts must be a dict"
+  }
+  if opts?.user_prompt == nil || to_string(opts.user_prompt) == "" {
+    throw "refine_prompt: opts.user_prompt is required"
+  }
+  let user_prompt = to_string(opts.user_prompt)
+  let style = opts?.style ?? "concise"
+  let model = opts?.model ?? ""
+  let provider = opts?.provider
+  let keep = opts?.keep ?? []
+  let strip = opts?.strip ?? []
+  let est_before = estimate_text_tokens(user_prompt, model)
+  let target_size = if opts?.target_size ?? "auto" == "auto" {
+    __auto_target_size(est_before)
+  } else {
+    to_string(opts.target_size)
+  }
+  let cache_key = __cache_key(user_prompt, style, target_size)
+  let session = opts?.session
+  if type_of(session) == "dict" {
+    let cache = session?._refine_cache
+    if type_of(cache) == "dict" {
+      let hit = cache?[cache_key]
+      if type_of(hit) == "dict" {
+        return hit
+      }
     }
   }
-  let schema = {type: "object", required: ["instruction"], properties: {instruction: {type: "string"}}}
-  let result = llm_call_structured_result(__refine_prompt(base_prompt), schema, __llm_options(options))
-  if result.ok {
-    return trim(result.data.instruction)
+  let meta_prompt = if opts?.meta_prompt != nil && to_string(opts.meta_prompt) != "" {
+    to_string(opts.meta_prompt)
+  } else {
+    __build_meta_prompt(user_prompt, style, target_size, keep, strip)
+  }
+  var call_opts = {}
+  if model != "" {
+    call_opts = call_opts + {model: model}
+  }
+  if provider != nil {
+    call_opts = call_opts + {provider: provider}
+  }
+  // Force determinism on the meta-call so cached refinements stay stable.
+  call_opts = call_opts + {temperature: 0.0}
+  let envelope = safe_call(meta_prompt, "", call_opts)
+  if !(envelope?.ok ?? false) {
+    return {
+      ok: false,
+      refined: user_prompt,
+      original: user_prompt,
+      diff_summary: "",
+      est_tokens_before: est_before,
+      est_tokens_after: est_before,
+      style: style,
+      target_size: target_size,
+      model: model,
+      error: envelope?.error,
+      status: envelope?.status,
+    }
+  }
+  let value = envelope.value
+  let raw_text = to_string(value?.text ?? "")
+  let parsed = __split_refined_and_diff(raw_text)
+  let refined = if parsed.refined == "" {
+    user_prompt
+  } else {
+    parsed.refined
+  }
+  let est_after = estimate_text_tokens(refined, model)
+  return {
+    ok: true,
+    refined: refined,
+    original: user_prompt,
+    diff_summary: parsed.diff_summary,
+    est_tokens_before: est_before,
+    est_tokens_after: est_after,
+    style: style,
+    target_size: target_size,
+    model: to_string(value?.model ?? model),
+  }
+}
+
+/**
+ * refine_prompt accepts the newer dict API and the legacy
+ * refine_prompt(base_prompt, options?) form used by prompt optimization.
+ */
+pub fn refine_prompt(input, options = nil) {
+  if type_of(input) == "dict" {
+    return __refine_prompt_dict(input)
+  }
+  if type_of(input) != "string" {
+    throw "refine_prompt: base_prompt must be a string"
+  }
+  let schema = {
+    type: "object",
+    properties: {prompt: {type: "string"}, notes: {type: "string"}},
+    required: ["prompt"],
+  }
+  let result = llm_call_structured_result(__legacy_refine_meta_prompt(input), schema, __llm_options(options))
+  if result?.ok ?? false {
+    return result.data.prompt
   }
   throw "refine_prompt: " + to_string(result.error ?? "LLM refinement failed")
 }
 
-/** Generate instruction proposals for prompt search. */
+/**
+ * Return candidate instruction prompts for optimization workflows.
+ *
+ * If `options.instruction_proposals` is provided, those proposals are
+ * deduplicated and returned with the base prompt first. Otherwise this calls an
+ * LLM for JSON `{instructions: [...]}` using the supplied provider/model
+ * options.
+ */
 pub fn propose_instructions(base_prompt, options = nil) {
-  require type_of(base_prompt) == "string", "propose_instructions: base_prompt must be a string"
-  if options?.proposal_fn != nil {
-    return __dedupe_strings(
-      [base_prompt]
-        + __string_values(options.proposal_fn({base_prompt: base_prompt, options: options})),
-    )
+  if type_of(base_prompt) != "string" {
+    throw "propose_instructions: base_prompt must be a string"
   }
-  let configured = __configured_proposals(options)
-  if configured != nil {
-    return __dedupe_strings([base_prompt] + __string_values(configured))
+  let opts = options ?? {}
+  if type_of(opts) != "dict" {
+    throw "propose_instructions: options must be a dict"
   }
-  let count = options?.proposal_count ?? options?.count ?? options?.trials ?? 4
+  var proposals = __configured_proposals(opts)
+  if len(proposals) > 0 {
+    if !contains(proposals, base_prompt) {
+      proposals = [base_prompt] + proposals
+    }
+    return proposals
+  }
+  let count = to_int(opts?.proposal_count ?? 4)
   let schema = {
     type: "object",
-    required: ["instructions"],
     properties: {instructions: {type: "array", items: {type: "string"}}},
+    required: ["instructions"],
   }
-  let result = llm_call_structured_result(__proposal_prompt(base_prompt, count), schema, __llm_options(options))
-  if result.ok {
-    return __dedupe_strings([base_prompt] + result.data.instructions)
+  let call_opts = __llm_options(opts) + {system: opts?.system ?? "You improve prompts for reliable task execution."}
+  let result = llm_call_structured_result(__proposal_prompt(base_prompt, count), schema, call_opts)
+  if result?.ok ?? false {
+    var generated = __string_values(result.data.instructions)
+    if !contains(generated, base_prompt) {
+      generated = [base_prompt] + generated
+    }
+    return generated
   }
   throw "propose_instructions: " + to_string(result.error ?? "LLM instruction proposal failed")
+}
+
+/**
+ * refine_caller(next, refine_opts) -> caller
+ *
+ * Returns a caller that runs refine_prompt on the FIRST visible prompt and
+ * threads the refined text through every subsequent invocation. Caches the
+ * refined prompt on a per-(prompt, style, target_size) basis using an
+ * atomic-guarded module-local memo.
+ *
+ * Note: because Harn closures capture by value, the in-flight memo is held
+ * in a process-level dict at the rewriter layer. For multi-session isolation
+ * pass `refine_opts.session` so refine_prompt can short-circuit via the
+ * session-scoped cache.
+ */
+pub fn refine_caller(next, refine_opts = nil) {
+  let base_opts = if type_of(refine_opts) == "dict" {
+    refine_opts
+  } else {
+    {}
+  }
+  return with_prompt_rewrite(
+    next,
+    { prompt, system, opts ->
+      let merged = base_opts + {user_prompt: to_string(prompt ?? "")}
+      let refined = try {
+        __refine_prompt_dict(merged)
+      }
+      if is_err(refined) {
+        return {prompt: prompt, system: system, opts: opts}
+      }
+      let r = unwrap(refined)
+      if !(r?.ok ?? false) {
+        return {prompt: prompt, system: system, opts: opts}
+      }
+      return {prompt: r.refined, system: system, opts: opts}
+    },
+  )
 }

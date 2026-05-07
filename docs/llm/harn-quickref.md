@@ -857,8 +857,9 @@ println(response.logprobs)       // present when requested and returned
 | `output_validation` | string | `"off"` | `"error"` throws on mismatch; `"warn"` logs. |
 | `schema_retries` | int | 1 | When validation fails, re-prompt up to N times with a corrective user turn. Each retry is a single-turn correction — the invalid response is NOT persisted; the original messages are replayed with one appended user-role correction citing the validation errors + schema. Works alongside `output_validation: "error"`. |
 | `schema_retry_nudge` | string \| bool | auto | String = verbatim corrective message (+ validation errors appended). `true` = auto nudge from schema required/properties keys. `false` = bare retry — replays the original messages unchanged, no correction appended. |
-| `llm_retries` | int | 0 | Retries on transient HTTP / provider errors. Raw `llm_call` is fail-fast by default; set to N to allow N retries after the first attempt. |
-| `llm_backoff_ms` | int | 250 | Base exponential backoff in milliseconds. |
+| `llm_retries` | int | 0 | (deprecated; see `with_retry`) Retries on transient HTTP / provider errors. Raw `llm_call` is fail-fast by default; set to N to allow N retries after the first attempt. Note off-by-one: `llm_retries: 3` ≈ `with_retry(..., {max_attempts: 4})`. |
+| `llm_backoff_ms` | int | 250 | (deprecated; see `with_retry`) Base exponential backoff in milliseconds. |
+| `llm_caller` | closure | nil | (`agent_loop` only) Custom caller wrapping the per-turn `llm_call`. See "Composable LLM callers" below. |
 | `stream` | bool | true | SSE streaming transport. |
 
 Provider auto-resolution precedence:
@@ -1404,9 +1405,11 @@ Returns a namespaced dict: top-level `status`, `text`, `visible_text`
 (`iterations`, `duration_ms`, `input_tokens`, `output_tokens`); tool
 invocation data nested under `tools` (`calls`, `successful`, `rejected`,
 `mode`). Failed tool dispatches are fed back to the next model turn as
-error observations and appear under `tools.rejected`. Respects the same
-`llm_retries` / `llm_backoff_ms` options as `llm_call`, plus its own
-`profile`, `tool_retries`, `max_iterations`, `max_nudges`, and
+error observations and appear under `tools.rejected`. The preferred
+resilience surface is the `llm_caller:` seam (see "Composable LLM
+callers"); the legacy `llm_retries` / `llm_backoff_ms` options are
+still accepted for back-compat but emit a deprecation lint. Plus its
+own `profile`, `tool_retries`, `max_iterations`, `max_nudges`, and
 `native_tool_fallback`
 (`"allow"`, `"allow_once"`, or `"reject"` for native-tool stages that
 receive text-mode `<tool_call>` fallback output). `thinking`,
@@ -1918,6 +1921,38 @@ two stages sharing an id share their conversation automatically. The
 pre-0.7 `transcript_policy` dict (with `mode: "reset" | "fork"`) was
 removed — call the lifecycle verbs explicitly.
 
+## Stdlib LLM helpers (`std/llm/*`)
+
+Eight opinionated modules wrap common LLM patterns:
+
+- `std/llm/handlers` — composable middleware: `default_llm_caller`,
+  `with_retry`, `with_fallback`, `with_shadow`, `with_prompt_rewrite`,
+  `with_logging`, `with_budget`, `with_cache`, `with_circuit_breaker`,
+  `compose([...])`.
+- `std/llm/ensemble` — multi-call quality strategies: `best_of_n`,
+  `self_consistency`, `parallel_judge`, `debate`. Cites Wang 2022
+  (arxiv:2203.11171) and Du 2023 (arxiv:2305.14325).
+- `std/llm/refine` — `refine_prompt`, `refine_caller`. One-shot
+  meta-prompt rewrite with a `DIFF:` summary trailer.
+- `std/llm/budget` — `estimate_text_tokens`, `context_window_for`,
+  `recommend_max_output_tokens`, `budget_summary`, `fits_in_context`.
+- `std/llm/defaults` — `pack_for(opts)` and convenience wrappers
+  (`pack_chat`, `pack_agent`, `pack_refine`, `pack_judge`,
+  `pack_summarize`, `pack_code`, `pack_json`). Calibrated for
+  Anthropic Sonnet/Opus/Haiku 4.x, OpenAI GPT-5/5.5/4o/4.1, Gemini
+  2.5 Pro/Flash, Ollama Qwen3/Llama 3.x.
+- `std/llm/safe` — `safe_call`, `safe_field`, `dict_get_ci`,
+  `with_case_insensitive_keys`, `structured_envelope_or_default`,
+  `judge_payload`, `verdict_normalize`, `schema_retry_nudge_for`.
+- `std/llm/prompts` — `system_prelude`, `tool_use_prelude`,
+  `structured_output_preface`.
+- `std/llm/catalog` — `model_info(selector)`, `resolved_options(opts)`,
+  `has_capability(model, cap)`, `family_of(model_id)`. Note:
+  Harn-side names are `model_info` / `resolved_options` to avoid
+  shadowing the same-named builtins.
+
+Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/docs/stdlib/llm-handlers.html).
+
 ## Resilient LLM patterns
 
 `llm_call` throws on transport / schema / budget failures. The thrown
@@ -2007,6 +2042,33 @@ assert(!r.ok)
 assert(r.error.category == "rate_limit")
 ```
 
+## Composable LLM callers
+
+`agent_loop` accepts `llm_caller:` — a closure that owns the per-turn
+`llm_call(...)` invocation. Wrap with middleware from
+`std/llm/handlers` to compose retry / fallback / shadow / logging /
+budget behavior without forking the loop:
+
+```harn,ignore
+import {default_llm_caller, with_retry, with_fallback, compose} from "std/llm/handlers"
+
+let caller = compose([
+  with_retry({max_attempts: 4, backoff: "exponential"}),
+  with_fallback,    // pseudo: with_fallback expects a list of callers
+])(default_llm_caller())
+
+agent_loop(task, system, {loop_until_done: true, llm_caller: caller})
+```
+
+The caller signature is `fn(call) -> {ok, value | status, error?}`
+where `call = {prompt, system, opts, turn: {iteration, session_id, attempt}}`.
+
+**Off-by-one in retry semantics:** `llm_retries: 3` historically meant
+4 total attempts; `with_retry`'s `max_attempts: N` means N total
+attempts. To migrate `llm_retries: K`, pass `max_attempts: K + 1`.
+
+Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/docs/stdlib/llm-handlers.html).
+
 ## Cancellation
 
 `llm_call` and `agent_loop` cooperate with the VM's cancellation token,
@@ -2066,9 +2128,9 @@ in-flight work. Use both when batching LLM calls at scale.
   the `local:` prefix and routes to Ollama. Without `"auto"`, an
   explicit provider such as `"local"` still wins.
 - `schema_retries` retries schema-validation failures with a
-  corrective nudge. `llm_retries` retries transient provider errors.
-  They compose orthogonally — each schema retry starts a fresh
-  transient budget.
+  corrective nudge. `llm_retries` (deprecated; prefer `with_retry`)
+  retries transient provider errors. They compose orthogonally —
+  each schema retry starts a fresh transient budget.
 - A schema retry is a **single-turn correction**, not a multi-turn
   conversation. The invalid response is not persisted; the retry
   replays the original messages with one appended user-role correction

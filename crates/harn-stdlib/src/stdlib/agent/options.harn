@@ -163,6 +163,15 @@ fn __validate_loop_control(value) {
   }
 }
 
+fn __validate_llm_caller(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "closure" {
+    throw "agent_loop: `llm_caller` must be a closure or nil; got " + type_of(value)
+  }
+}
+
 fn __normalize_iteration_budget(opts) {
   let raw = opts?.iteration_budget
   let legacy = opts?.max_iterations
@@ -277,6 +286,10 @@ pub fn agent_loop_options(options = nil) {
   if __has_key(opts, "loop_control") {
     __validate_loop_control(opts.loop_control)
   }
+  if __has_key(opts, "llm_caller") {
+    __validate_llm_caller(opts.llm_caller)
+  }
+  let llm_caller = opts?.llm_caller
   let profile = opts?.profile ?? "tool_using"
   let defaults = __profile_defaults(profile)
   opts = defaults + opts
@@ -323,5 +336,6 @@ pub fn agent_loop_options(options = nil) {
   opts = __with_task_ledger_shorthand(opts)
   let budget = __normalize_iteration_budget(opts)
   opts = opts + {iteration_budget: budget, max_iterations: budget.max}
+  opts = opts + {_llm_caller: llm_caller}
   return opts
 }
