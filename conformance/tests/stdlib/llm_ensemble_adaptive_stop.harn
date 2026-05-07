@@ -1,0 +1,41 @@
+import { debate } from "std/llm/ensemble"
+import { llm_call_count } from "std/testing"
+
+pipeline default() {
+  llm_mock_clear()
+  let topic = "llm.ensemble.debate"
+  let cursor = event_log.latest(topic)
+  let events = if cursor == nil {
+    event_log.subscribe({topic: topic})
+  } else {
+    event_log.subscribe({topic: topic, from_cursor: cursor})
+  }
+  llm_mock({text: "Paris is the capital of France."})
+  llm_mock({text: "The answer is Paris, France."})
+  llm_mock({text: "Paris is the capital of France."})
+  llm_mock({text: "The answer is Paris, France."})
+  llm_mock({text: "Paris is the capital of France."})
+  llm_mock({text: "The answer is Paris, France."})
+  llm_mock({text: "unused round four a"})
+  llm_mock({text: "unused round four b"})
+  let result = debate(
+    {
+      prompt: "What is the capital of France?",
+      debaters: ["alpha", "beta"],
+      n_rounds: 5,
+      adaptive_stop: true,
+      stability_threshold: 0.15,
+      provider: "mock",
+    },
+  )
+  let event = events.next().value
+  println(result.completed_rounds)
+  println(result.stopped_early)
+  println(result.stop_reason)
+  println(llm_call_count())
+  println(event.kind)
+  println(event.payload.round)
+  println(event.payload.requested_rounds)
+  println(event.payload.consecutive_stable_rounds)
+  println(event.payload.max_round_drift < 0.15)
+}
