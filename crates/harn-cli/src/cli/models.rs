@@ -14,6 +14,8 @@ pub(crate) enum ModelsCommand {
     Install(ModelsInstallArgs),
     /// Recommend a starter model for the current machine and credentials.
     Recommend(ModelRecommendArgs),
+    /// Round-trip a small prompt through a model and report timing, tokens, and cost.
+    Test(ModelsTestArgs),
 }
 
 #[derive(Debug, Args)]
@@ -45,5 +47,20 @@ pub(crate) struct ModelsInstallArgs {
 pub(crate) struct ModelRecommendArgs {
     /// Emit the recommendation and hardware snapshot as JSON.
     #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsTestArgs {
+    /// Model alias or provider-native model id.
+    pub model: String,
+    /// Prompt text to send to the model.
+    #[arg(long, default_value = "Reply with the word pong.")]
+    pub prompt: String,
+    /// Provider id to use instead of inferring one from the model selector.
+    #[arg(long)]
+    pub provider: Option<String>,
+    /// Emit a structured JSON result.
+    #[arg(long, default_value_t = false)]
     pub json: bool,
 }

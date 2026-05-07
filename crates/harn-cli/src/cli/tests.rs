@@ -1802,6 +1802,32 @@ fn test_parses_model_info_args() {
 }
 
 #[test]
+fn test_parses_models_test_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "test",
+        "qwen3:30b",
+        "--provider",
+        "ollama",
+        "--prompt",
+        "say pong",
+        "--json",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Test(args) = args.command else {
+        panic!("expected models test command");
+    };
+    assert_eq!(args.model, "qwen3:30b");
+    assert_eq!(args.provider.as_deref(), Some("ollama"));
+    assert_eq!(args.prompt, "say pong");
+    assert!(args.json);
+}
+
+#[test]
 fn test_parses_provider_catalog_args() {
     let cli = Cli::parse_from(["harn", "provider-catalog", "--available-only"]);
 
