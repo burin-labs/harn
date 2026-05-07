@@ -511,6 +511,7 @@ pub(crate) async fn run_file_with_skill_dirs(
     // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
     let cancelled = install_signal_shutdown_handler();
 
+    let _stdout_passthrough = StdoutPassthroughGuard::enable();
     let outcome = execute_run(
         path,
         trace,
@@ -523,8 +524,8 @@ pub(crate) async fn run_file_with_skill_dirs(
     )
     .await;
 
-    // Drain stderr before stdout so users see diagnostics first when streams
-    // interleave on the terminal.
+    // `harn run` streams normal program stdout during execution. Any stdout
+    // left here came from older capture paths, so flush it after diagnostics.
     if !outcome.stderr.is_empty() {
         io::stderr().write_all(outcome.stderr.as_bytes()).ok();
     }
@@ -538,6 +539,24 @@ pub(crate) async fn run_file_with_skill_dirs(
     }
     if exit_code != 0 {
         process::exit(exit_code);
+    }
+}
+
+struct StdoutPassthroughGuard {
+    previous: bool,
+}
+
+impl StdoutPassthroughGuard {
+    fn enable() -> Self {
+        Self {
+            previous: harn_vm::set_stdout_passthrough(true),
+        }
+    }
+}
+
+impl Drop for StdoutPassthroughGuard {
+    fn drop(&mut self) {
+        harn_vm::set_stdout_passthrough(self.previous);
     }
 }
 
@@ -1400,8 +1419,18 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{execute_run, CliLlmMockMode, RunProfileOptions};
+    use super::{execute_run, CliLlmMockMode, RunProfileOptions, StdoutPassthroughGuard};
     use std::collections::HashSet;
+
+    #[test]
+    fn stdout_passthrough_guard_restores_previous_state() {
+        let original = harn_vm::set_stdout_passthrough(false);
+        {
+            let _guard = StdoutPassthroughGuard::enable();
+            assert!(harn_vm::set_stdout_passthrough(true));
+        }
+        assert!(!harn_vm::set_stdout_passthrough(original));
+    }
 
     #[cfg(feature = "hostlib")]
     #[tokio::test]
