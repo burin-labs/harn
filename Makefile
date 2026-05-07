@@ -1,4 +1,4 @@
-.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast conformance protocol-conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets sync-language-spec check-language-spec lint-test-patterns check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression
+.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast conformance protocol-conformance bench-vm bench-llm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets sync-language-spec check-language-spec lint-test-patterns check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -74,6 +74,9 @@ protocol-conformance:
 
 bench-vm:
 	./scripts/bench_vm.sh
+
+bench-llm:
+	cargo bench -p harn-llm-perf --bench bench_llm_options_roundtrip -- --output-format bencher
 
 # Lint markdown files
 lint-md:

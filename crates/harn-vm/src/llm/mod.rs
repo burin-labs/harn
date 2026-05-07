@@ -169,6 +169,25 @@ pub use self::api::{
     OllamaWarmupResult,
 };
 
+#[cfg(feature = "llm-bench-internals")]
+#[doc(hidden)]
+pub mod bench_internals {
+    use super::*;
+
+    pub fn llm_options_roundtrip_probe(
+        args: &[VmValue],
+        options: &Option<std::collections::BTreeMap<String, VmValue>>,
+    ) -> Result<usize, VmError> {
+        let resolved_provider = helpers::vm_resolve_provider(options);
+        let extracted = extract_llm_options(args)?;
+        let pricing_per_1k = cost::pricing_per_1k_for(&extracted.provider, &extracted.model);
+        Ok(resolved_provider.len()
+            + extracted.provider.len()
+            + extracted.model.len()
+            + usize::from(pricing_per_1k.is_some()))
+    }
+}
+
 pub fn install_current_host_bridge(bridge: Rc<crate::bridge::HostBridge>) {
     agent_runtime::install_current_host_bridge(bridge);
 }
