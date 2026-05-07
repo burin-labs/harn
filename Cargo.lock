@@ -1900,6 +1900,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-orchestration-perf"
+version = "0.0.0"
+dependencies = [
+ "criterion",
+ "futures",
+ "harn-vm",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "harn-parser"
 version = "0.7.62"
 dependencies = [

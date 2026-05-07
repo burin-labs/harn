@@ -96,10 +96,21 @@ condensed series summaries instead of full per-patch history.
   provider with `with_retry`-wrapped `default_llm_caller`.
 - **`harn doctor --json`.** Doctor now also checks Ollama, hardware,
   Harn version, and prints a "Next step" suggestion.
+- **Orchestration hook dispatch benchmark.** Added `harn-orchestration-perf`
+  and `make bench-orchestration` to measure no-op VM lifecycle hook fanout
+  costs across 1, 8, 32, and 128 trigger-shaped events.
 - **Lint rule `deprecated_llm_options`.** Warns on `llm_retries` /
   `llm_backoff_ms` in dict literals passed to `llm_call` /
   `llm_call_safe` / `llm_call_structured` / `llm_call_structured_result` /
   `agent_loop`.
+- **`harn quickstart` setup wizard (#1331).** Added an interactive and
+  non-interactive setup flow that detects provider credentials, local Ollama,
+  free disk space, and local GPU availability, then writes starter
+  `providers.toml`, `harn.toml`, and `.env` files.
+- **Tiktoken-grade token counting.** Added `tiktoken_count_tokens(text, model)`
+  and `std/llm/budget` helpers so budget checks use exact OpenAI tiktoken
+  counts when available, labeled tiktoken approximations for Claude/Gemini
+  model families, and the heuristic fallback only for unknown model IDs.
 
 ### Changed
 
@@ -107,6 +118,9 @@ condensed series summaries instead of full per-patch history.
 - Improved no-providers-configured error message names every supported
   env var dynamically and points at `harn doctor` and (when available)
   `harn models recommend`.
+- **`std/async` predicate retry rename.** Renamed `retry_with_backoff` to
+  `retry_predicate_with_backoff` and removed the old export, with lint autofix
+  support for stale call sites.
 
 ### Deprecated
 
@@ -153,25 +167,6 @@ agent_loop(task, sys, {
   llm_caller: with_retry(default_llm_caller(), {max_attempts: 4}),
 })
 ```
-
-## Unreleased
-
-### Added
-
-- **`harn quickstart` setup wizard (#1331).** Added an interactive and
-  non-interactive setup flow that detects provider credentials, local Ollama,
-  free disk space, and local GPU availability, then writes starter
-  `providers.toml`, `harn.toml`, and `.env` files.
-
-### Changed
-
-- **`std/async` predicate retry rename.** Renamed `retry_with_backoff` to
-  `retry_predicate_with_backoff` and removed the old export, with lint autofix
-  support for stale call sites.
-- **Tiktoken-grade token counting.** Added `tiktoken_count_tokens(text, model)`
-  and `std/llm/budget` helpers so budget checks use exact OpenAI tiktoken
-  counts when available, labeled tiktoken approximations for Claude/Gemini
-  model families, and the heuristic fallback only for unknown model IDs.
 
 ## v0.7.61
 
