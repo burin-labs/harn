@@ -6,7 +6,7 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.7.61
 
 ### Added
 
@@ -27,6 +27,9 @@ condensed series summaries instead of full per-patch history.
   `thinking`. Presets pick a provider-aware `thinking` mode (adaptive vs.
   effort vs. disabled) only when the caller hasn't set one, using
   `provider_capabilities` introspection.
+- **`std/command` step runner.** New `stdlib_command.harn` provides a reusable
+  command-step primitive for harness scripts, with conformance tests covering
+  basic execution and retry logic.
 
 ### Fixed
 
