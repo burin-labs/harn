@@ -28,6 +28,7 @@ thread_local! {
     static STDIN_LINES: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
     static STDERR_BUFFER: RefCell<String> = const { RefCell::new(String::new()) };
     static STDERR_CAPTURING: RefCell<bool> = const { RefCell::new(false) };
+    static STDOUT_PASSTHROUGH: RefCell<bool> = const { RefCell::new(false) };
     static TTY_MOCK: RefCell<TtyMock> = const { RefCell::new(TtyMock { stdin: None, stdout: None, stderr: None }) };
     static COLOR_MODE: RefCell<ColorMode> = const { RefCell::new(ColorMode::Auto) };
 }
@@ -38,8 +39,23 @@ pub(crate) fn reset_io_state() {
     STDIN_LINES.with(|s| *s.borrow_mut() = None);
     STDERR_BUFFER.with(|s| s.borrow_mut().clear());
     STDERR_CAPTURING.with(|s| *s.borrow_mut() = false);
+    STDOUT_PASSTHROUGH.with(|s| *s.borrow_mut() = false);
     TTY_MOCK.with(|t| *t.borrow_mut() = TtyMock::default());
     COLOR_MODE.with(|m| *m.borrow_mut() = ColorMode::Auto);
+}
+
+/// Enable or disable direct stdout writes for CLI-style runs.
+///
+/// The VM normally captures stdout in-memory so tests and embedding callers
+/// can inspect it after execution. Interactive CLI programs need prompts to
+/// appear before `read_line()` blocks, so `harn run` enables this mode and
+/// streams `print`/`println`/`log` immediately.
+pub fn set_stdout_passthrough(enabled: bool) -> bool {
+    STDOUT_PASSTHROUGH.with(|state| {
+        let previous = *state.borrow();
+        *state.borrow_mut() = enabled;
+        previous
+    })
 }
 
 /// Drain and return the buffered stderr output. The CLI flushes this to
@@ -57,6 +73,20 @@ fn write_stderr(line: &str) {
         // accumulated before capture toggled, but normally nothing does.
         let _ = std::io::stderr().write_all(line.as_bytes());
     }
+}
+
+fn write_stdout(out: &mut String, text: &str) {
+    if stdout_passthrough_enabled() {
+        let mut stdout = std::io::stdout().lock();
+        let _ = stdout.write_all(text.as_bytes());
+        let _ = stdout.flush();
+    } else {
+        out.push_str(text);
+    }
+}
+
+fn stdout_passthrough_enabled() -> bool {
+    STDOUT_PASSTHROUGH.with(|state| *state.borrow())
 }
 
 fn read_stdin_all_real() -> Option<String> {
@@ -141,17 +171,17 @@ fn ansi_enabled_for_stream(stream: &str) -> bool {
 pub(crate) fn register_io_builtins(vm: &mut Vm) {
     vm.register_builtin("log", |args, out| {
         let msg = args.first().map(|a| a.display()).unwrap_or_default();
-        out.push_str(&format!("[harn] {msg}\n"));
+        write_stdout(out, &format!("[harn] {msg}\n"));
         Ok(VmValue::Nil)
     });
     vm.register_builtin("print", |args, out| {
         let msg = args.first().map(|a| a.display()).unwrap_or_default();
-        out.push_str(&msg);
+        write_stdout(out, &msg);
         Ok(VmValue::Nil)
     });
     vm.register_builtin("println", |args, out| {
         let msg = args.first().map(|a| a.display()).unwrap_or_default();
-        out.push_str(&format!("{msg}\n"));
+        write_stdout(out, &format!("{msg}\n"));
         Ok(VmValue::Nil)
     });
 
@@ -354,7 +384,7 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
 
     vm.register_builtin("prompt_user", |args, out| {
         let msg = args.first().map(|a| a.display()).unwrap_or_default();
-        out.push_str(&msg);
+        write_stdout(out, &msg);
         let mut input = String::new();
         if std::io::stdin().lock().read_line(&mut input).is_ok() {
             Ok(VmValue::String(Rc::from(input.trim_end())))
@@ -400,7 +430,7 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
     // Standalone mode writes a structured log line; bridge/ACP mode overrides
     // this to emit structured notifications.
     vm.register_builtin("progress", |args, out| {
-        out.push_str(&render_progress_line(args));
+        write_stdout(out, &render_progress_line(args));
         Ok(VmValue::Nil)
     });
 
@@ -409,12 +439,13 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
         let value = args.get(1).cloned().unwrap_or(VmValue::Nil);
         let json_val = super::logging::vm_value_to_json_fragment(&value);
         let ts = super::logging::vm_format_timestamp_utc();
-        out.push_str(&format!(
+        let line = format!(
             "{{\"ts\":{},\"key\":{},\"value\":{}}}\n",
             vm_escape_json_str_quoted(&ts),
             vm_escape_json_str_quoted(&key),
             json_val,
-        ));
+        );
+        write_stdout(out, &line);
         Ok(VmValue::Nil)
     });
 }
@@ -517,7 +548,7 @@ fn vm_write_log(level: &str, level_num: u8, args: &[VmValue], out: &mut String) 
         }
     });
     let line = vm_build_log_line(level, &msg, fields);
-    out.push_str(&line);
+    write_stdout(out, &line);
 }
 
 fn ansi_colorize(text: &str, name: &str) -> String {
@@ -550,7 +581,22 @@ mod tests {
 
     use crate::value::VmValue;
 
-    use super::{render_progress_bar, render_progress_line, spinner_frame};
+    use super::{
+        render_progress_bar, render_progress_line, reset_io_state, set_stdout_passthrough,
+        spinner_frame, stdout_passthrough_enabled,
+    };
+
+    #[test]
+    fn stdout_passthrough_state_toggles() {
+        reset_io_state();
+
+        assert!(!stdout_passthrough_enabled());
+        assert!(!set_stdout_passthrough(true));
+        assert!(stdout_passthrough_enabled());
+
+        assert!(set_stdout_passthrough(false));
+        assert!(!stdout_passthrough_enabled());
+    }
 
     #[test]
     fn progress_bar_mode_renders_hash_bar() {
