@@ -261,6 +261,24 @@ fn test_cross_module_imported_call_is_allowed() {
 }
 
 #[test]
+fn test_renamed_stdlib_call_suggests_replacement() {
+    let diags = check_source_with_imports(
+        r#"pipeline t(task) { retry_with_backoff(1, 0, fn() { return true }) }"#,
+        &["retry_predicate_with_backoff"],
+    );
+    let errs: Vec<&String> = diags
+        .iter()
+        .filter(|d| d.severity == DiagnosticSeverity::Error)
+        .map(|d| &d.message)
+        .collect();
+    assert!(
+        errs.iter()
+            .any(|m| m.contains("did you mean `retry_predicate_with_backoff`")),
+        "expected renamed stdlib suggestion, got: {errs:?}"
+    );
+}
+
+#[test]
 fn test_cross_module_local_fn_not_flagged() {
     let diags = check_source_with_imports(
         r#"fn local_fn() { 42 }

@@ -161,6 +161,13 @@ agent_loop(task, sys, {
   non-interactive setup flow that detects provider credentials, local Ollama,
   free disk space, and local GPU availability, then writes starter
   `providers.toml`, `harn.toml`, and `.env` files.
+## Unreleased
+
+### Changed
+
+- **`std/async` predicate retry rename.** Renamed `retry_with_backoff` to
+  `retry_predicate_with_backoff` and removed the old export, with lint autofix
+  support for stale call sites.
 
 ## v0.7.61
 

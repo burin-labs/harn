@@ -61,6 +61,39 @@ pub(crate) fn simple_ident_rename_fix(
     }])
 }
 
+/// Replace the first identifier occurrence of `old` inside `span`.
+pub(crate) fn replace_identifier_text_fix(
+    source: Option<&str>,
+    span: Span,
+    old: &str,
+    new: &str,
+) -> Option<Vec<FixEdit>> {
+    let src = source?;
+    let region = src.get(span.start..span.end)?;
+    let offset = find_identifier_offset(region, old)?;
+    let start = span.start + offset;
+    Some(vec![FixEdit {
+        span: Span::with_offsets(start, start + old.len(), span.line, span.column + offset),
+        replacement: new.to_string(),
+    }])
+}
+
+fn find_identifier_offset(region: &str, name: &str) -> Option<usize> {
+    region.match_indices(name).find_map(|(offset, _)| {
+        let before_ok = offset == 0
+            || !region
+                .as_bytes()
+                .get(offset.wrapping_sub(1))
+                .is_some_and(|byte| is_ident_byte(*byte));
+        let end = offset + name.len();
+        let after_ok = region
+            .as_bytes()
+            .get(end)
+            .is_none_or(|byte| !is_ident_byte(*byte));
+        (before_ok && after_ok).then_some(offset)
+    })
+}
+
 /// Replace an unnecessary conversion call (e.g. `to_string("hi")`) with
 /// the inner expression's source text. The outer call's span is replaced
 /// verbatim with the inner span's source slice, so formatting and any

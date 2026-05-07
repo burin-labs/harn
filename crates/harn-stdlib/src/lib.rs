@@ -803,6 +803,22 @@ mod tests {
     }
 
     #[test]
+    fn async_stdlib_exports_predicate_backoff_name_only() {
+        let exports = public_functions_for_module("async")
+            .into_iter()
+            .map(|function| function.name)
+            .collect::<BTreeSet<_>>();
+        assert!(
+            exports.contains("retry_predicate_with_backoff"),
+            "std/async should export retry_predicate_with_backoff"
+        );
+        assert!(
+            !exports.contains("retry_with_backoff"),
+            "std/async should not retain the old retry_with_backoff export"
+        );
+    }
+
+    #[test]
     fn harn_entrypoint_catalog_is_declared_by_stdlib_sources() {
         let modules = entrypoint_modules();
         let entries = modules

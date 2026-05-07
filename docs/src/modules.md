@@ -95,24 +95,36 @@ Harn includes built-in modules that are compiled into the interpreter.
 Import them with the `std/` prefix:
 
 ```harn
-import "std/text"
-import "std/collections"
-import "std/math"
-import "std/path"
-import "std/vision"
-import "std/json"
-import "std/cache"
-import "std/llm/handlers"
-import "std/context"
 import "std/agent_state"
 import "std/agents"
+import "std/async"
+import { retry_predicate_with_backoff } from "std/async"
+import "std/cache"
+import "std/collections"
+import "std/connectors/shared"
+import "std/context"
+import "std/experiments"
+import "std/json"
+import "std/math"
+import "std/monitors"
+import "std/path"
+import "std/personas/prelude"
 import "std/prompt_library"
 import "std/review"
-import "std/experiments"
-import "std/monitors"
-import "std/personas/prelude"
-import "std/connectors/shared"
+import "std/text"
+import "std/vision"
 ```
+
+### std/async
+
+Polling and retry helpers for closure-shaped conditions:
+
+| Function | Description |
+|---|---|
+| `wait_for(timeout_ms, interval_ms, predicate)` | Poll `predicate()` until it returns a truthy value or the timeout expires |
+| `retry_until(max_attempts, predicate)` | Retry `predicate()` without delay until it returns a truthy value or attempts are exhausted |
+| `retry_predicate_with_backoff(max_attempts, base_ms, predicate)` | Retry `predicate()` with exponential backoff between attempts |
+| `circuit_call(name, closure)` | Run `closure()` only while the named circuit breaker allows calls, recording success or failure |
 
 ### std/connectors/shared
 

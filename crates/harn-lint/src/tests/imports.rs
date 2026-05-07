@@ -120,3 +120,27 @@ fn test_hostlib_prefix_skips_undefined_function_warning() {
         "hostlib_-prefixed calls should not raise undefined-function, got: {diags:?}"
     );
 }
+
+#[test]
+fn renamed_stdlib_symbol_warns_and_fixes_selective_import_and_call() {
+    let source = "import { retry_with_backoff } from \"std/async\"\n\npipeline default() {\n  retry_with_backoff(1, 0, fn() { return true })\n}\n";
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "renamed-stdlib-symbol"),
+        2,
+        "expected import and call rename diagnostics, got: {diags:?}"
+    );
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains("import { retry_predicate_with_backoff } from \"std/async\""),
+        "expected import rename, got: {fixed}"
+    );
+    assert!(
+        fixed.contains("retry_predicate_with_backoff(1, 0"),
+        "expected call rename, got: {fixed}"
+    );
+    assert!(
+        !fixed.contains("retry_with_backoff"),
+        "old name should be fully removed, got: {fixed}"
+    );
+}

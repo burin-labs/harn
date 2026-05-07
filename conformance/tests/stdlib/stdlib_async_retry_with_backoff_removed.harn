@@ -1,0 +1,5 @@
+import { retry_with_backoff } from "std/async"
+
+pipeline default() {
+  retry_with_backoff(1, 0, fn() { return true })
+}
