@@ -36,6 +36,13 @@ fn __llm_budget_model(model) {
   return to_string(model)
 }
 
+fn __llm_budget_text(text) {
+  if text == nil {
+    return ""
+  }
+  return to_string(text)
+}
+
 fn __ceil_int(x) {
   let f = floor(x)
   if x == f {
@@ -51,7 +58,7 @@ pub fn token_count_encoder(model) {
 
 /** estimate_text_tokens returns a model-aware text-token estimate. */
 pub fn estimate_text_tokens(text, model = nil) {
-  let normalized = to_string(text)
+  let normalized = __llm_budget_text(text)
   let model_id = __llm_budget_model(model)
   let info = tiktoken_tokenizer_info(model_id)
   if info.known_model_family {
@@ -62,7 +69,7 @@ pub fn estimate_text_tokens(text, model = nil) {
 
 /** estimate_text_tokens_detail returns token count plus the encoder or heuristic source. */
 pub fn estimate_text_tokens_detail(text, model = nil) {
-  let normalized = to_string(text)
+  let normalized = __llm_budget_text(text)
   let model_id = __llm_budget_model(model)
   let info = tiktoken_tokenizer_info(model_id)
   if info.known_model_family {

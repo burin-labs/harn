@@ -1143,6 +1143,15 @@ fn build_agent_event(
             reason: get_string("reason"),
             status: get_string("status"),
         }),
+        "tool_call_audit" => Ok(AgentEvent::ToolCallAudit {
+            session_id: session_id.to_string(),
+            tool_call_id: get_string("tool_call_id"),
+            tool_name: get_string("tool_name"),
+            audit: payload_obj
+                .and_then(|m| m.get("audit"))
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        }),
         other => Err(VmError::Runtime(format!(
             "{HOST_AGENT_EMIT_EVENT}: unsupported event type `{other}`"
         ))),

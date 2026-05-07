@@ -860,6 +860,7 @@ println(response.logprobs)       // present when requested and returned
 | `llm_retries` | int | 0 | (deprecated; see `with_retry`) Retries on transient HTTP / provider errors. Raw `llm_call` is fail-fast by default; set to N to allow N retries after the first attempt. Note off-by-one: `llm_retries: 3` ≈ `with_retry(..., {max_attempts: 4})`. |
 | `llm_backoff_ms` | int | 250 | (deprecated; see `with_retry`) Base exponential backoff in milliseconds. |
 | `llm_caller` | closure | nil | (`agent_loop` only) Custom caller wrapping the per-turn `llm_call`. See "Composable LLM callers" below. |
+| `tool_caller` | closure | nil | (`agent_loop` only) Custom caller wrapping every tool dispatch. Signature `fn(call, next) -> result_dict`. See "Composable tool middleware" below. |
 | `stream` | bool | true | SSE streaming transport. |
 
 Provider auto-resolution precedence:
@@ -1923,12 +1924,19 @@ removed — call the lifecycle verbs explicitly.
 
 ## Stdlib LLM helpers (`std/llm/*`)
 
-Eight opinionated modules wrap common LLM patterns:
+Nine opinionated modules wrap common LLM patterns:
 
 - `std/llm/handlers` — composable middleware: `default_llm_caller`,
   `with_retry`, `with_fallback`, `with_shadow`, `with_prompt_rewrite`,
   `with_logging`, `with_budget`, `with_cache`, `with_circuit_breaker`,
   `compose([...])`.
+- `std/llm/tool_middleware` — composable middleware around tool execution
+  (parallel to handlers, but for tools): `default_tool_caller`,
+  `compose_tool_callers([...])`, `tools_use_middleware` (schema
+  decorator), `tool_inject_param`, plus the bundled library
+  (`with_required_reason`, `with_audit_log`, `with_consent`,
+  `with_dry_run`, `with_redaction`, `with_idempotency`,
+  `with_rate_limit`, `with_telemetry`, `with_summary`).
 - `std/llm/ensemble` — multi-call quality strategies: `best_of_n`,
   `self_consistency`, `parallel_judge`, `debate`. Cites Wang 2022
   (arxiv:2203.11171) and Du 2023 (arxiv:2305.14325).
@@ -2068,6 +2076,52 @@ where `call = {prompt, system, opts, turn: {iteration, session_id, attempt}}`.
 attempts. To migrate `llm_retries: K`, pass `max_attempts: K + 1`.
 
 Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/docs/stdlib/llm-handlers.html).
+
+## Composable tool middleware
+
+`agent_loop` also accepts `tool_caller:` — the parallel seam for tool
+**execution**. While `llm_caller` wraps the model call, `tool_caller`
+wraps every tool dispatch. Combined with the `tools_use_middleware`
+**schema-time** decorator, you get two composable seams that let you:
+
+- force every tool call to provide a `reason` (or any other extra arg)
+  that the harness reasons about, not the tool — and surface that reason
+  as a user-facing chip ("Searched codebase to find rate limiter")
+- add audit logs / consent prompts / dry-run preview / redaction /
+  rate-limit / telemetry to all tool calls without touching individual
+  tool definitions
+
+```harn,ignore
+import {
+  with_required_reason, with_audit_log, with_consent,
+  compose_tool_callers, tools_use_middleware,
+} from "std/llm/tool_middleware"
+
+let mw = with_required_reason()
+let registry = tools_use_middleware(my_registry, mw.schema_transform)
+
+let caller = compose_tool_callers([
+  with_audit_log({ record -> persist_audit(record) }),
+  with_consent({ call -> ask_human(call) }),
+  mw.caller,
+])
+
+agent_loop(task, system, {tools: registry, tool_caller: caller})
+```
+
+The caller signature is `fn(call, next) -> result_dict` where
+`call = {tool_name, tool_args, call_id, declared_executor, schema, description, turn}`
+and `next(call)` runs the default dispatch (with any envelope mutations
+the layer applied — typically `tool_args` rewrites). Short-circuit by
+returning a result dict without calling `next`.
+
+Middleware-attached metadata rides on `result.audit` (free-form dict
+aligned with A2A `metadata` / ACP `kind` / OpenAI `summary_text` / OTel
+`gen_ai.tool.description` conventions). Each call also emits a
+`tool_call_audit` AgentEvent so live ACP/A2A consumers can render
+chips alongside the standard `tool_call_update` stream.
+
+Full reference: [`docs/src/stdlib/tool-middleware.md`](https://harnlang.com/docs/stdlib/tool-middleware.html).
 
 ## Cancellation
 
