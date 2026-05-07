@@ -13,6 +13,7 @@ harn run -e 'println("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
 harn run --yes <file.harn>
+harn run --explain-cost <file.harn>
 harn run --attest <file.harn>
 harn run --attest --receipt-out receipt.json <file.harn>
 ```
@@ -20,6 +21,7 @@ harn run --attest --receipt-out receipt.json <file.harn>
 | Flag | Description |
 |---|---|
 | `--trace` | Print LLM trace summary after execution |
+| `--explain-cost` | Print static LLM token/cost estimates without executing the script |
 | `-e <code>` | Evaluate inline code instead of a file |
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
@@ -53,6 +55,11 @@ and run as a temp file in the current directory, so:
 - A read-only working directory falls back to the system temp dir;
   pure-expression `-e` still works there but relative imports won't
   resolve.
+
+`--explain-cost` stops after the static pass. It scans direct `llm_call(...)`
+and `agent_loop(...)` callsites, estimates statically known prompt/system input
+tokens, applies literal `agent_loop` iteration caps, and reports unresolved
+dynamic model or prompt expressions without executing pipeline code.
 
 When `--attest` is present, Harn records run start/finish events in an
 EventLog, stamps each record with `prev_hash` and `record_hash` provenance

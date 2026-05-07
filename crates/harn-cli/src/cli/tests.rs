@@ -103,6 +103,17 @@ fn test_parses_run_yes_flag() {
 }
 
 #[test]
+fn test_parses_run_explain_cost_flag() {
+    let cli = Cli::parse_from(["harn", "run", "--explain-cost", "main.harn"]);
+
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.explain_cost);
+    assert_eq!(args.file.as_deref(), Some("main.harn"));
+}
+
+#[test]
 fn test_parses_run_attestation_flags() {
     let cli = Cli::parse_from([
         "harn",
