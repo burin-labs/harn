@@ -1,5 +1,7 @@
 use clap::{Args, Subcommand};
 
+use super::util::trigger_provider_completion_parser;
+
 #[derive(Debug, Args)]
 pub(crate) struct ConnectorArgs {
     #[command(subcommand)]
@@ -19,7 +21,12 @@ pub(crate) struct ConnectorCheckArgs {
     /// Package directory, harn.toml, or file under the package to check.
     pub package: String,
     /// Restrict the check to one provider id. Repeatable.
-    #[arg(long = "provider", value_name = "ID")]
+    #[arg(
+        long = "provider",
+        value_name = "ID",
+        value_parser = trigger_provider_completion_parser(),
+        hide_possible_values = true
+    )]
     pub providers: Vec<String>,
     /// Run poll bindings long enough to execute the first poll_tick.
     #[arg(long = "run-poll-tick")]
@@ -35,7 +42,12 @@ pub(crate) struct ConnectorTestArgs {
     #[arg(default_value = ".")]
     pub package: String,
     /// Restrict the gate to one provider id. Repeatable.
-    #[arg(long = "provider", value_name = "ID")]
+    #[arg(
+        long = "provider",
+        value_name = "ID",
+        value_parser = trigger_provider_completion_parser(),
+        hide_possible_values = true
+    )]
     pub providers: Vec<String>,
     /// Run poll bindings long enough to execute the first poll_tick.
     #[arg(long = "run-poll-tick")]

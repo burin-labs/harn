@@ -58,6 +58,19 @@ Verification recomputes the EventLog record chain, the receipt event root, the
 receipt hash, and the Ed25519 signature. It exits non-zero if any receipt event
 or signature material has been changed.
 
+## harn completions
+
+Print shell completion scripts.
+
+```bash
+harn completions bash
+harn completions zsh
+harn completions fish
+```
+
+Generated completions include subcommands plus static candidates for known
+provider and model values.
+
 ## harn playground
 
 Run a pipeline against a Harn-native host module for fast local iteration.

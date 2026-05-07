@@ -12,6 +12,7 @@
 
 mod bench;
 mod check;
+mod completions;
 mod connect;
 mod connector;
 mod contracts;
@@ -46,6 +47,7 @@ mod watch;
 
 pub(crate) use bench::BenchArgs;
 pub(crate) use check::{CheckArgs, CheckOutputFormat};
+pub(crate) use completions::{CompletionShell, CompletionsArgs};
 pub(crate) use connect::{
     ConnectArgs, ConnectCommand, ConnectGenericArgs, ConnectGithubArgs, ConnectLinearArgs,
     ConnectOAuthArgs,
@@ -228,6 +230,8 @@ SCRIPTING
     TrustGraph(TrustArgs),
     /// Verify a signed Harn provenance receipt.
     Verify(VerifyArgs),
+    /// Print shell completion script to stdout.
+    Completions(CompletionsArgs),
     /// Start the orchestrator process that hosts triggers and connector dispatch.
     Orchestrator(OrchestratorArgs),
     /// Run a pipeline against a Harn-native host module for fast iteration.
