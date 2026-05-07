@@ -15,6 +15,7 @@ members = [
     "crates/harn-lint",
     "crates/harn-hostlib",
     "perf/llm",
+    "perf/vm",
 ]
 # Build harn-wasm separately: cd crates/harn-wasm && wasm-pack build
 exclude = ["crates/harn-wasm"]

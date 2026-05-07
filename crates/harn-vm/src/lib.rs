@@ -229,6 +229,10 @@ pub use trust_graph::{
 pub use value::*;
 pub use vm::*;
 
+#[cfg(feature = "vm-bench-internals")]
+#[doc(hidden)]
+pub mod bench_internals;
+
 /// Lex, parse, type-check, and compile source to bytecode in one call.
 /// Bails on the first type error. For callers that need diagnostics
 /// rather than early exit, use `harn_parser::check_source` directly

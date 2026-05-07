@@ -10,6 +10,7 @@ description = "Async bytecode virtual machine for the Harn programming language"
 [features]
 default = []
 llm-bench-internals = []
+vm-bench-internals = []
 otel = [
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",

@@ -398,7 +398,6 @@ fn detect_ram_gb() -> Option<u64> {
         for line in text.lines() {
             if let Some(rest) = line.strip_prefix("MemTotal:") {
                 let kb: u64 = rest
-                    .trim()
                     .split_whitespace()
                     .next()
                     .and_then(|n| n.parse().ok())?;
