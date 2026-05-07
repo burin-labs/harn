@@ -15,10 +15,53 @@ const TY_DURATION_OR_INT: Ty = Ty::Union(&[TY_DURATION, TY_INT]);
 
 pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature {
+        name: "__cache_clear",
+        params: &[Param::optional("options", TY_DICT_OR_NIL)],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "__cache_get",
+        params: &[
+            Param::new("key", TY_STRING),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "__cache_put",
+        params: &[
+            Param::new("key", TY_STRING),
+            Param::new("value", TY_ANY),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "__files_upload",
         params: &[
             Param::new("path", TY_STRING),
             Param::new("provider", TY_STRING),
+        ],
+        returns: TY_STRING,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "__llm_cache_key",
+        params: &[
+            Param::new("prompt", TY_ANY),
+            Param::optional("system", TY_ANY),
+            Param::optional("options", TY_DICT_OR_NIL),
         ],
         returns: TY_STRING,
         type_params: &[],

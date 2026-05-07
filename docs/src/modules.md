@@ -79,8 +79,9 @@ code or inside any pipeline.
 
 `import "std/..."` is only needed for the Harn-written helper modules
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
-`std/path`, `std/vision`, `std/context`, `std/agent_state`, `std/agents`,
-`std/runtime`, `std/command`, `std/review`, `std/experiments`,
+`std/path`, `std/cache`, `std/llm/handlers`, `std/vision`, `std/context`,
+`std/agent_state`, `std/agents`, `std/runtime`, `std/command`, `std/review`,
+`std/experiments`,
 `std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
 `std/worktree`, `std/checkpoint`, `std/personas/prelude`,
 `std/connectors/shared`, and provider-specific `std/connectors/...` modules).
@@ -100,6 +101,8 @@ import "std/math"
 import "std/path"
 import "std/vision"
 import "std/json"
+import "std/cache"
+import "std/llm/handlers"
 import "std/context"
 import "std/agent_state"
 import "std/agents"
@@ -319,6 +322,36 @@ let merged = merge({a: 1}, {b: 2})    // {a: 1, b: 2}
 let subset = pick({a: 1, b: 2, c: 3}, ["a", "c"])  // {a: 1, c: 3}
 let rest = omit({a: 1, b: 2, c: 3}, ["b"])          // {a: 1, c: 3}
 ```
+
+### std/cache
+
+Persistent cache helpers backed by sqlite or filesystem storage:
+
+| Function | Description |
+|---|---|
+| `cache_get(key, options?)` | Return `{hit: bool, value?}` for a persistent cache key |
+| `cache_put(key, value, options?)` | Store a value with TTL and LRU eviction |
+| `cache_clear(options?)` | Remove all entries in the configured namespace |
+
+Options accept `store: "namespace"` or
+`store: {backend: "sqlite"|"fs", namespace?, path?}`, plus `ttl`,
+`ttl_seconds`, `max_age_seconds`, and `max_entries`.
+
+### std/llm/handlers
+
+LLM call wrappers and middleware helpers:
+
+| Function | Description |
+|---|---|
+| `llm_cache_key(prompt, system?, options?)` | Derive the canonical `sha256:` key for a cached LLM call |
+| `with_cache(prompt, system?, options?)` | Return a cached `llm_call` envelope when available, otherwise call and store the response |
+| `with_circuit_breaker(handler, options?)` | Wrap a call handler with per-`(provider, model)` circuit-breaker pooling, or pass `name` to share one circuit |
+
+`with_cache` keys `{prompt, system, provider, model, temperature, top_p,
+max_tokens}` after defaults resolve. Its default store is sqlite namespace
+`llm.with_cache` with TTL `10m` and LRU size 256. Calls with `tools` bypass the
+cache by default; set `skip_when` to a bool or predicate closure to override
+that policy.
 
 ### std/context
 
@@ -579,14 +612,6 @@ Helpers for isolated git worktree execution built on `exec_at(...)` and
 | `worktree_status(path)` | Run `git status --short --branch` in the worktree |
 | `worktree_diff(path, base_ref?)` | Render diff output for the worktree |
 | `worktree_shell(path, script)` | Run an arbitrary shell command inside the worktree |
-
-### std/llm/handlers
-
-Middleware helpers for LLM call handlers:
-
-| Function | Description |
-|---|---|
-| `with_circuit_breaker(handler, options?)` | Wrap a call handler with per-`(provider, model)` circuit-breaker pooling, or pass `name` to share one circuit |
 
 ### std/personas/prelude
 

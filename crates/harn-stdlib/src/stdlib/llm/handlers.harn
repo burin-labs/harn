@@ -1,4 +1,6 @@
 /** std/llm/handlers — small middleware helpers for LLM call handlers. */
+import { cache_get, cache_put } from "std/cache"
+
 var __llm_handler_circuits = []
 
 fn __llm_handler_is_callable(value) -> bool {
@@ -30,6 +32,36 @@ fn __circuit_open_error(call, name) {
     provider: opts?.provider ?? "<unset>",
     model: opts?.model ?? "<unset>",
     circuit: name,
+  }
+}
+
+fn __llm_handler_should_skip_cache(prompt, system, opts) -> bool {
+  let predicate = opts?.skip_when
+  if predicate == nil {
+    return opts?.tools != nil
+  }
+  if __llm_handler_is_callable(predicate) {
+    return predicate({prompt: prompt, system: system, options: opts}) ? true : false
+  }
+  return predicate ? true : false
+}
+
+fn __llm_handler_cache_options(opts) -> dict {
+  var ttl = opts?.ttl
+  if ttl == nil && opts?.ttl_seconds == nil && opts?.max_age_seconds == nil {
+    ttl = "10m"
+  }
+  return {
+    store: opts?.store ?? "llm.with_cache",
+    backend: opts?.backend,
+    namespace: opts?.namespace,
+    name: opts?.name,
+    path: opts?.path,
+    cache_dir: opts?.cache_dir,
+    ttl: ttl,
+    ttl_seconds: opts?.ttl_seconds,
+    max_age_seconds: opts?.max_age_seconds,
+    max_entries: opts?.max_entries ?? 256,
   }
 }
 
@@ -66,4 +98,31 @@ pub fn with_circuit_breaker(handler, options = nil) {
     circuit_record_success(name)
     return result
   }
+}
+
+/** llm_cache_key returns the canonical sha256 cache key used by with_cache. */
+pub fn llm_cache_key(prompt, system = nil, options = nil) -> string {
+  return __llm_cache_key(prompt, system, options ?? {})
+}
+
+/**
+ * with_cache executes llm_call behind a persistent content-addressed cache.
+ *
+ * Cache identity is based on prompt, system, provider, model, temperature,
+ * top_p, and max_tokens. By default calls with tools are not cached.
+ */
+pub fn with_cache(prompt, system = nil, options = nil) -> dict {
+  let opts = options ?? {}
+  if __llm_handler_should_skip_cache(prompt, system, opts) {
+    return llm_call(prompt, system, opts)
+  }
+  let key = llm_cache_key(prompt, system, opts)
+  let cache_options = __llm_handler_cache_options(opts)
+  let cached = cache_get(key, cache_options)
+  if cached.hit {
+    return cached.value
+  }
+  let result = llm_call(prompt, system, opts)
+  cache_put(key, result, cache_options)
+  return result
 }

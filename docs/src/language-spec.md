@@ -3286,6 +3286,35 @@ Without `prefer`, `fallback_strategy: cheapest_first` and
 `cheapest_over_quality(quality)` / `fastest_over_quality(quality)` policy,
 using `quality` or `min_quality` when present and `mid` otherwise.
 
+For call sites that want Harn-managed response reuse, `std/llm/handlers`
+exports `with_cache(prompt, system?, options?)`. It returns the same envelope as
+`llm_call`, but first checks a persistent content-addressed cache. The key is
+`sha256:` plus canonical JSON over `{prompt, system, provider, model,
+temperature, top_p, max_tokens}` after provider/model defaults resolve. Cache
+storage defaults to a sqlite store under Harn state with namespace
+`llm.with_cache`, a 10-minute TTL, and LRU eviction at 256 entries. Calls with
+`options.tools != nil` bypass the cache by default because tool results can
+carry side effects; callers may set `skip_when` to a bool or predicate closure
+to override that policy.
+
+```harn
+import { with_cache } from "std/llm/handlers"
+
+let r = with_cache("Summarize this file", nil, {
+  provider: "anthropic",
+  model: "claude-haiku-4-5",
+  store: {backend: "fs", namespace: "summaries"},
+  ttl: "10m",
+  max_entries: 256,
+})
+```
+
+`std/cache` exposes the underlying `{hit, value?}` primitive with
+`cache_get(key, options?)`, `cache_put(key, value, options?)`, and
+`cache_clear(options?)`. Cache options accept either `store: "namespace"` or
+`store: {backend: "sqlite"|"fs", namespace?, path?}` plus `ttl`,
+`ttl_seconds`, `max_age_seconds`, and `max_entries`.
+
 The emitted schema follows canonical JSON-Schema conventions (objects
 with `properties`/`required`, arrays with `items`, literal unions as
 `{type, enum}`) so it is compatible with structured-output validators

@@ -133,6 +133,30 @@ as both LLM content and deterministic `vision_ocr(...)` context.
 | `transcript` | dict | nil | Continue from a previous transcript; prompt is appended as the next user turn |
 | `model_tier` | string | nil | Resolve a configured tier alias such as `"small"`, `"mid"`, or `"frontier"` |
 
+The `cache` option above enables provider-side prompt caching when a provider
+supports it. It does not memoize full LLM responses. For Harn-owned response
+caching, import `with_cache` from `std/llm/handlers`:
+
+```harn
+import { with_cache } from "std/llm/handlers"
+
+let result = with_cache("Summarize this file", nil, {
+  provider: "anthropic",
+  model: "claude-haiku-4-5",
+  store: {backend: "sqlite", namespace: "summaries"},
+  ttl: "10m",
+  max_entries: 256,
+})
+```
+
+`with_cache` returns the same envelope as `llm_call`. Its key is
+content-addressed as `sha256:` over canonical JSON for `{prompt, system,
+provider, model, temperature, top_p, max_tokens}` after defaults resolve. The
+default store is sqlite under Harn state, namespace `llm.with_cache`, TTL 10
+minutes, and LRU size 256. Use `store: {backend: "fs", namespace, path?}` for
+one-file-per-entry storage. Calls with `tools` bypass the cache by default;
+set `skip_when` to a bool or predicate closure to override that policy.
+
 Provider-specific overrides can be passed as sub-dicts:
 
 ```harn

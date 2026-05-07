@@ -1,0 +1,15 @@
+// std/cache: Persistent cache helpers.
+/** cache_get returns {hit: bool, value?} for a persistent cache key. */
+pub fn cache_get(key: string, options = nil) -> dict {
+  return __cache_get(key, options ?? {})
+}
+
+/** cache_put stores value under key with the configured TTL and LRU policy. */
+pub fn cache_put(key: string, value, options = nil) -> dict {
+  return __cache_put(key, value, options ?? {})
+}
+
+/** cache_clear removes all entries in the configured cache namespace. */
+pub fn cache_clear(options = nil) {
+  return __cache_clear(options ?? {})
+}

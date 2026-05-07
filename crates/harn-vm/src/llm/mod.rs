@@ -18,6 +18,7 @@ mod agent_session_host;
 mod agent_tools;
 pub(crate) mod api;
 pub(crate) mod autonomy_budget;
+mod cache;
 pub mod capabilities;
 mod config_builtins;
 pub(crate) mod content;
@@ -2187,6 +2188,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     agent_session_host::register_agent_session_host_primitives(vm);
 
     conversation::register_conversation_builtins(vm);
+    cache::register_cache_builtins(vm);
     config_builtins::register_config_builtins(vm);
     cost::register_cost_builtins(vm);
     register_llm_mock_builtins(vm);
