@@ -13,7 +13,7 @@ pipeline default() {
   println(audit?.thinking == nil)
   let summary = agent_preset("summary")
   println(summary.profile)
-  println(summary.tool_choice)
+  println(summary?.tool_choice == nil)
   println(summary.iteration_budget.mode)
   println(summary.iteration_budget.initial)
   println(summary.iteration_budget.max)
