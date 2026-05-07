@@ -235,6 +235,7 @@ SCRIPTING
     /// Start the orchestrator process that hosts triggers and connector dispatch.
     Orchestrator(OrchestratorArgs),
     /// Run a pipeline against a Harn-native host module for fast iteration.
+    #[command(visible_alias = "try")]
     Playground(PlaygroundArgs),
     /// Inspect persisted workflow run records.
     Runs(RunsArgs),

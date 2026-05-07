@@ -271,6 +271,7 @@ fn default_mid() -> String {
 /// Load and cache the providers config. Called once at VM startup.
 pub fn load_config() -> &'static ProvidersConfig {
     CONFIG.get_or_init(|| {
+        let mut config = default_config();
         let verbose_config_logging = matches!(
             std::env::var("HARN_VERBOSE_CONFIG").ok().as_deref(),
             Some("1" | "true" | "TRUE" | "yes" | "YES")
@@ -279,36 +280,50 @@ pub fn load_config() -> &'static ProvidersConfig {
             Some("1" | "true" | "TRUE" | "yes" | "YES")
         );
         if let Ok(path) = std::env::var("HARN_PROVIDERS_CONFIG") {
-            match std::fs::read_to_string(&path) {
-                Ok(content) => match toml::from_str::<ProvidersConfig>(&content) {
-                    Ok(config) => {
-                        if verbose_config_logging {
-                            eprintln!(
-                                "[llm_config] Loaded {} providers, {} aliases from {}",
-                                config.providers.len(),
-                                config.aliases.len(),
-                                path
-                            );
-                        }
-                        let _ = CONFIG_PATH.set(path);
-                        return config;
-                    }
-                    Err(e) => eprintln!("[llm_config] TOML parse error in {}: {}", path, e),
-                },
-                Err(e) => eprintln!("[llm_config] Cannot read {}: {}", path, e),
+            if let Some(overlay) = read_external_config(&path, verbose_config_logging) {
+                config.merge_from(&overlay);
+                let _ = CONFIG_PATH.set(path);
+                return config;
             }
         }
         if let Some(home) = dirs_or_home() {
             let path = format!("{home}/.config/harn/providers.toml");
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Ok(config) = toml::from_str::<ProvidersConfig>(&content) {
-                    let _ = CONFIG_PATH.set(path);
-                    return config;
-                }
+            if let Some(overlay) = read_external_config(&path, false) {
+                config.merge_from(&overlay);
+                let _ = CONFIG_PATH.set(path);
+                return config;
             }
         }
-        default_config()
+        config
     })
+}
+
+fn read_external_config(path: &str, verbose: bool) -> Option<ProvidersConfig> {
+    match std::fs::read_to_string(path) {
+        Ok(content) => match toml::from_str::<ProvidersConfig>(&content) {
+            Ok(config) => {
+                if verbose {
+                    eprintln!(
+                        "[llm_config] Loaded {} providers, {} aliases from {}",
+                        config.providers.len(),
+                        config.aliases.len(),
+                        path
+                    );
+                }
+                Some(config)
+            }
+            Err(error) => {
+                eprintln!("[llm_config] TOML parse error in {}: {}", path, error);
+                None
+            }
+        },
+        Err(error) => {
+            if verbose {
+                eprintln!("[llm_config] Cannot read {}: {}", path, error);
+            }
+            None
+        }
+    }
 }
 
 /// Returns the filesystem path of the currently-loaded providers config, if
@@ -1852,6 +1867,30 @@ mod tests {
         assert!(!config.inference_rules.is_empty());
         assert!(!config.tier_rules.is_empty());
         assert_eq!(config.tier_defaults.default, "mid");
+    }
+
+    #[test]
+    fn test_external_config_overlays_default_catalog() {
+        let mut config = default_config();
+        let mut overlay = ProvidersConfig {
+            default_provider: Some("ollama".to_string()),
+            ..Default::default()
+        };
+        overlay.providers.insert(
+            "custom".to_string(),
+            ProviderDef {
+                base_url: "https://llm.example.test/v1".to_string(),
+                chat_endpoint: "/chat/completions".to_string(),
+                ..Default::default()
+            },
+        );
+
+        config.merge_from(&overlay);
+
+        assert_eq!(config.default_provider.as_deref(), Some("ollama"));
+        assert!(config.providers.contains_key("custom"));
+        assert!(config.providers.contains_key("anthropic"));
+        assert!(config.providers.contains_key("ollama"));
     }
 
     #[test]

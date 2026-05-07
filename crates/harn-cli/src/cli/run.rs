@@ -43,6 +43,9 @@ pub(crate) struct RunArgs {
         conflicts_with = "llm_mock"
     )]
     pub llm_mock_record: Option<String>,
+    /// Accept first-run provider setup prompts.
+    #[arg(long)]
+    pub yes: bool,
     /// Emit a signed provenance receipt after the run.
     #[arg(long)]
     pub attest: bool,

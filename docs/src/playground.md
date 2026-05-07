@@ -1,8 +1,8 @@
 # Playground
 
 `harn playground` runs a pipeline against a Harn-native host module in the same
-process. It is intended for fast pipeline iteration without wiring a JSON-RPC
-host or booting a larger app shell.
+process. `harn try` is an alias for the same command. It is intended for fast
+pipeline iteration without wiring a JSON-RPC host or booting a larger app shell.
 
 ## Quick start
 
@@ -17,6 +17,12 @@ harn playground \
 
 `--task` is exposed to the script through the `HARN_TASK` environment variable,
 so the example reads it with `env_or("HARN_TASK", "")`.
+
+On a fresh install, playground runs that call provider-backed LLM builtins such
+as `llm_call`, `llm_stream_call`, or `agent_loop` detect local Ollama at
+`http://127.0.0.1:11434/api/tags` and offer to write
+`~/.config/harn/providers.toml` with Ollama as the default provider. Use `--yes`
+to accept that setup in non-interactive runs.
 
 If you want an offline smoke test, force the mock provider:
 

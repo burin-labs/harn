@@ -12,6 +12,7 @@ harn run --trace <file.harn>
 harn run -e 'println("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
+harn run --yes <file.harn>
 harn run --attest <file.harn>
 harn run --attest --receipt-out receipt.json <file.harn>
 ```
@@ -22,6 +23,7 @@ harn run --attest --receipt-out receipt.json <file.harn>
 | `-e <code>` | Evaluate inline code instead of a file |
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
+| `--yes` | Accept first-run provider setup prompts, including local Ollama config seeding |
 | `--attest` | Emit a signed provenance receipt after execution |
 | `--receipt-out <path>` | Write the receipt to a specific JSON path |
 | `--attest-agent <id>` | Agent id used to load or create the Ed25519 signing key |
@@ -87,11 +89,13 @@ provider and model values.
 ## harn playground
 
 Run a pipeline against a Harn-native host module for fast local iteration.
+`harn try` is an alias for the same command.
 
 ```bash
 harn playground --host host.harn --script pipeline.harn --task "Explain this repo"
 harn playground --watch --task "Refine the prompt"
 harn playground --llm ollama:qwen2.5-coder:latest --task "Use a local model"
+harn try --yes --task "Use local Ollama"
 ```
 
 | Flag | Description |
@@ -102,6 +106,7 @@ harn playground --llm ollama:qwen2.5-coder:latest --task "Use a local model"
 | `--llm <provider:model>` | Override the provider/model selection for this invocation |
 | `--llm-mock <path>` | Replay LLM responses from a JSONL fixture file instead of calling the provider |
 | `--llm-mock-record <path>` | Record executed LLM responses into a JSONL fixture file |
+| `--yes` | Accept first-run provider setup prompts, including local Ollama config seeding |
 | `--watch` | Re-run when the host module or script changes |
 
 `harn playground` type-checks the host module, merges its exported function

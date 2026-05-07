@@ -26,6 +26,14 @@ For model-specific feature support, see the generated
 Ollama runs locally and doesn't require an API key. The default host is
 `http://localhost:11434`.
 
+On a fresh install, `harn run` and `harn playground`/`harn try` detect Harn
+programs that call provider-backed LLM builtins such as `llm_call`,
+`llm_stream_call`, or `agent_loop`. If no user or project provider config is
+present and local Ollama responds at
+`http://127.0.0.1:11434/api/tags`, Harn offers to write
+`~/.config/harn/providers.toml` with Ollama as the default provider. Pass
+`--yes` to accept that setup without an interactive prompt.
+
 For a generic OpenAI-compatible local server, set `LOCAL_LLM_BASE_URL` to
 something like `http://192.168.86.250:8000` and either pass
 `{provider: "local", model: "qwen2.5-coder-32b"}` or set
