@@ -1,0 +1,139 @@
+fn __copy_llm_option(current, opts, key) {
+  var out = current
+  if opts != nil && opts[key] != nil {
+    out[key] = opts[key]
+  }
+  return out
+}
+
+fn __llm_options(options) {
+  let opts = options?.llm ?? options?.llm_options ?? options ?? {}
+  var out = {}
+  for key in [
+    "provider",
+    "model",
+    "model_tier",
+    "temperature",
+    "top_p",
+    "top_k",
+    "max_tokens",
+    "frequency_penalty",
+    "presence_penalty",
+    "seed",
+    "stop",
+    "timeout",
+    "system",
+    "response_format",
+    "output_format",
+    "output_validation",
+    "schema_retries",
+    "retries",
+    "repair",
+    "thinking",
+    "interleaved_thinking",
+    "anthropic_beta_features",
+    "vision",
+    "tools",
+    "tool_choice",
+    "tool_search",
+    "budget",
+    "cache",
+    "stream",
+    "messages",
+    "structural_experiment",
+    "transcript",
+    "llm_retries",
+    "llm_backoff_ms",
+  ] {
+    out = __copy_llm_option(out, opts, key)
+  }
+  return out
+}
+
+fn __dedupe_strings(values) {
+  var seen = []
+  var out = []
+  for value in values {
+    if value != nil {
+      let text = trim(to_string(value))
+      if text != "" && !seen.contains(text) {
+        seen = seen.push(text)
+        out = out.push(text)
+      }
+    }
+  }
+  return out
+}
+
+fn __string_values(value) {
+  if value == nil {
+    return []
+  }
+  if type_of(value) == "list" {
+    return value
+  }
+  return [value]
+}
+
+fn __configured_proposals(options) {
+  return options?.instruction_proposals ?? options?.proposals ?? options?.instructions
+}
+
+fn __proposal_prompt(base_prompt, count) {
+  return "Propose "
+    + to_string(count)
+    + " concise alternative task instructions for this base prompt. Return JSON only.\n\nBase prompt:\n"
+    + base_prompt
+}
+
+fn __refine_prompt(base_prompt) {
+  return "Rewrite this task instruction to be more precise. Return JSON only.\n\nInstruction:\n"
+    + base_prompt
+}
+
+/** Rewrite one prompt instruction with a closure, configured proposal, or structured LLM call. */
+pub fn refine_prompt(base_prompt, options = nil) {
+  require type_of(base_prompt) == "string", "refine_prompt: base_prompt must be a string"
+  if options?.refine != nil {
+    return trim(to_string(options.refine({base_prompt: base_prompt, options: options})))
+  }
+  let configured = __configured_proposals(options)
+  if configured != nil {
+    let proposals = __dedupe_strings(__string_values(configured))
+    if len(proposals) > 0 {
+      return proposals[0]
+    }
+  }
+  let schema = {type: "object", required: ["instruction"], properties: {instruction: {type: "string"}}}
+  let result = llm_call_structured_result(__refine_prompt(base_prompt), schema, __llm_options(options))
+  if result.ok {
+    return trim(result.data.instruction)
+  }
+  throw "refine_prompt: " + to_string(result.error ?? "LLM refinement failed")
+}
+
+/** Generate instruction proposals for prompt search. */
+pub fn propose_instructions(base_prompt, options = nil) {
+  require type_of(base_prompt) == "string", "propose_instructions: base_prompt must be a string"
+  if options?.proposal_fn != nil {
+    return __dedupe_strings(
+      [base_prompt]
+        + __string_values(options.proposal_fn({base_prompt: base_prompt, options: options})),
+    )
+  }
+  let configured = __configured_proposals(options)
+  if configured != nil {
+    return __dedupe_strings([base_prompt] + __string_values(configured))
+  }
+  let count = options?.proposal_count ?? options?.count ?? options?.trials ?? 4
+  let schema = {
+    type: "object",
+    required: ["instructions"],
+    properties: {instructions: {type: "array", items: {type: "string"}}},
+  }
+  let result = llm_call_structured_result(__proposal_prompt(base_prompt, count), schema, __llm_options(options))
+  if result.ok {
+    return __dedupe_strings([base_prompt] + result.data.instructions)
+  }
+  throw "propose_instructions: " + to_string(result.error ?? "LLM instruction proposal failed")
+}

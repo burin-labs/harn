@@ -28,6 +28,7 @@
 - [LLM and agents](./llm-and-agents.md)
   - [LLM calls](./llm/llm_call.md)
   - [Agent loops](./llm/agent_loop.md)
+  - [Prompt optimization](./llm/optimize.md)
   - [Tools, Tool Vault, and MCP](./llm/tools.md)
   - [Streaming and transcripts](./llm/streaming.md)
   - [LLM providers](./llm/providers.md)
