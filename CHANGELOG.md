@@ -14,6 +14,10 @@ condensed series summaries instead of full per-patch history.
   `with_circuit_breaker`, which derives circuit names from each call's
   `(provider, model)` by default while preserving `name` for intentionally
   shared circuit state.
+- **Persistent LLM response caching (#1322).** Added `std/cache` and
+  `std/llm/handlers.with_cache` with sqlite and filesystem backends,
+  content-addressed LLM keys, TTL, LRU eviction, and default bypass for calls
+  that include tools.
 
 ## v0.7.61
 
