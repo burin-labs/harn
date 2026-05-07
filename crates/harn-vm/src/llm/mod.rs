@@ -38,6 +38,7 @@ pub(crate) mod schema_recover;
 pub(crate) mod skill_score;
 pub(crate) mod structural_experiments;
 pub(crate) mod structured_envelope;
+mod token_count;
 mod tool_search_score;
 mod transcript_stats;
 
@@ -136,7 +137,7 @@ pub(crate) fn env_lock() -> &'static std::sync::Mutex<()> {
 pub const LLM_CALLS_DISABLED_ENV: &str = "HARN_LLM_CALLS_DISABLED";
 
 pub fn estimate_text_tokens(text: &str) -> i64 {
-    cost::estimate_text_tokens(text)
+    token_count::estimate_text_tokens(text, None).tokens
 }
 
 pub fn llm_pricing_per_1k(provider: &str, model: &str) -> Option<(f64, f64)> {

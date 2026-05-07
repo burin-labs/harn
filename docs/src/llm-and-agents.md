@@ -141,9 +141,10 @@ policy, context policy, artifacts, and retries inside Harn. See
 ## Cost tracking
 
 `llm_call`, `agent_loop`, and workflow sessions expose normalized token usage.
-Use `llm_cost`, `llm_session_cost`, `llm_budget`, `llm_budget_remaining`, and
-per-call `budget` envelopes to estimate and enforce spend before provider
-requests leave the process. See [LLM calls](./llm/llm_call.md#cost-tracking).
+Use `llm_cost`, `llm_session_cost`, `llm_budget`, `llm_budget_remaining`,
+`tiktoken_count_tokens`, `std/llm/budget`, and per-call `budget` envelopes to
+estimate and enforce spend before provider requests leave the process. See
+[LLM calls](./llm/llm_call.md#cost-tracking).
 
 ## Provider API details
 

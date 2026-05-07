@@ -79,9 +79,9 @@ code or inside any pipeline.
 
 `import "std/..."` is only needed for the Harn-written helper modules
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
-`std/path`, `std/cache`, `std/llm/handlers`, `std/vision`, `std/context`,
-`std/agent_state`, `std/agents`, `std/runtime`, `std/command`, `std/review`,
-`std/experiments`,
+`std/path`, `std/cache`, `std/llm/handlers`, `std/llm/budget`, `std/vision`,
+`std/context`, `std/agent_state`, `std/agents`, `std/runtime`, `std/command`,
+`std/review`, `std/experiments`,
 `std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
 `std/worktree`, `std/checkpoint`, `std/personas/prelude`,
 `std/connectors/shared`, and provider-specific `std/connectors/...` modules).
@@ -105,6 +105,7 @@ import "std/connectors/shared"
 import "std/context"
 import "std/experiments"
 import "std/json"
+import "std/llm/budget"
 import "std/math"
 import "std/monitors"
 import "std/path"
@@ -166,6 +167,16 @@ Text processing utilities for LLM output and code analysis:
 | `detect_compile_error(output)` | Check for compile error patterns (SyntaxError, etc.) |
 | `has_got_want(output)` | Check for got/want test failure patterns |
 | `format_test_errors(output)` | Extract error-relevant lines (max 20) |
+
+### std/llm/budget
+
+Model-aware token budget helpers:
+
+| Function | Description |
+|---|---|
+| `estimate_text_tokens(text, model?)` | Count text tokens with tiktoken for known OpenAI models, labeled tiktoken approximations for Claude/Gemini families, or a heuristic fallback |
+| `estimate_text_tokens_detail(text, model?)` | Return `{tokens, encoder, source, exact, model_family, known_model_family}` for budget/debug UI |
+| `token_count_encoder(model)` | Return encoder metadata for a model without counting text |
 
 ### std/experiments
 

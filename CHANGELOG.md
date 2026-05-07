@@ -168,6 +168,10 @@ agent_loop(task, sys, {
 - **`std/async` predicate retry rename.** Renamed `retry_with_backoff` to
   `retry_predicate_with_backoff` and removed the old export, with lint autofix
   support for stale call sites.
+- **Tiktoken-grade token counting.** Added `tiktoken_count_tokens(text, model)`
+  and `std/llm/budget` helpers so budget checks use exact OpenAI tiktoken
+  counts when available, labeled tiktoken approximations for Claude/Gemini
+  model families, and the heuristic fallback only for unknown model IDs.
 
 ## v0.7.61
 
