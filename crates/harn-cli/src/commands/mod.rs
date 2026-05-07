@@ -10,6 +10,7 @@ pub(crate) mod dump_highlight_keywords;
 pub(crate) mod dump_trigger_quickref;
 pub(crate) mod explain;
 pub mod flow;
+pub(crate) mod hardware;
 pub(crate) mod init;
 pub(crate) mod mcp;
 pub(crate) mod merge_captain;
