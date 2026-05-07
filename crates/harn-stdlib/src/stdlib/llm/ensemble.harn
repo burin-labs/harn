@@ -1,0 +1,413 @@
+type DebateDebater = string | {name: string?, system: string?, instruction: string?, llm_options: dict?}
+
+type DebateResponse = {
+  debater: string,
+  text: string,
+  provider: string?,
+  model: string?,
+  input_tokens: int?,
+  output_tokens: int?,
+}
+
+type DebateRound = {
+  round: int,
+  responses: list<DebateResponse>,
+  max_round_drift: float?,
+  stable: bool?,
+  drifts: list<dict>?,
+}
+
+type DebateResult = {
+  prompt: string,
+  debaters: list<string>,
+  requested_rounds: int,
+  n_rounds: int,
+  completed_rounds: int,
+  stopped_early: bool,
+  stop_reason: string?,
+  rounds: list<DebateRound>,
+  stability: list<dict>,
+  final_responses: list<DebateResponse>,
+  short_circuit_event_id: int?,
+}
+
+fn __debate_prompt_value(opts) {
+  let prompt = opts?.prompt ?? opts?.question ?? opts?.task
+  if type_of(prompt) != "string" || trim(prompt) == "" {
+    throw "debate: opts.prompt must be a non-empty string"
+  }
+  return prompt
+}
+
+fn __debate_int(value, fallback, label) {
+  let parsed = to_int(value ?? fallback)
+  if parsed == nil || parsed < 1 {
+    throw "debate: " + label + " must be a positive integer"
+  }
+  return parsed
+}
+
+fn __debate_float(value, fallback, label) {
+  let parsed = to_float(value ?? fallback)
+  if parsed == nil {
+    throw "debate: " + label + " must be numeric"
+  }
+  return parsed
+}
+
+fn __debate_debaters(opts) {
+  let debaters = opts?.debaters ?? opts?.agents ?? ["debater_1", "debater_2"]
+  if type_of(debaters) != "list" || len(debaters) == 0 {
+    throw "debate: opts.debaters must be a non-empty list"
+  }
+  return debaters
+}
+
+fn __debater_name(debater, index) {
+  if type_of(debater) == "string" {
+    let name = trim(debater)
+    if name != "" {
+      return name
+    }
+  }
+  if type_of(debater) == "dict" {
+    let name = debater?.name
+    if type_of(name) == "string" && trim(name) != "" {
+      return trim(name)
+    }
+    return "debater_" + to_string(index + 1)
+  }
+  throw "debate: each debater must be a string or dict"
+}
+
+fn __debater_instruction(debater) {
+  if type_of(debater) == "dict" && type_of(debater?.instruction) == "string" {
+    return trim(debater.instruction)
+  }
+  return ""
+}
+
+fn __debater_names(debaters) {
+  var names = []
+  var index = 0
+  while index < len(debaters) {
+    names = names.push(__debater_name(debaters[index], index))
+    index += 1
+  }
+  return names
+}
+
+fn __debate_options(raw) {
+  if type_of(raw) != "dict" {
+    throw "debate: opts must be a dict"
+  }
+  if contains(raw.keys(), "adaptive_stop") && type_of(raw.adaptive_stop) != "bool" {
+    throw "debate: opts.adaptive_stop must be a bool"
+  }
+  let threshold = __debate_float(raw?.stability_threshold ?? raw?.threshold, 0.15, "stability_threshold")
+  if threshold <= 0.0 || threshold > 1.0 {
+    throw "debate: stability_threshold must be > 0 and <= 1"
+  }
+  return raw
+    + {
+    prompt: __debate_prompt_value(raw),
+    debaters: __debate_debaters(raw),
+    n_rounds: __debate_int(raw?.n_rounds ?? raw?.rounds ?? raw?.max_rounds, 3, "n_rounds"),
+    adaptive_stop: raw?.adaptive_stop ?? false,
+    stability_threshold: threshold,
+    stability_patience: 2,
+  }
+}
+
+fn __copy_top_level_llm_options(opts, base) {
+  var out = {} + base
+  for key in [
+    "provider",
+    "model",
+    "temperature",
+    "max_tokens",
+    "timeout_ms",
+    "llm_retries",
+    "llm_backoff_ms",
+    "budget",
+    "response_format",
+    "schema_retries",
+    "session_id",
+  ] {
+    if contains(opts.keys(), key) {
+      out[key] = opts[key]
+    }
+  }
+  return out
+}
+
+fn __debate_llm_options(opts, debater) {
+  var out = opts?.llm_options ?? {}
+  if type_of(out) != "dict" {
+    throw "debate: opts.llm_options must be a dict when provided"
+  }
+  out = __copy_top_level_llm_options(opts, out)
+  if type_of(debater) == "dict" {
+    let debater_options = debater?.llm_options ?? {}
+    if type_of(debater_options) != "dict" {
+      throw "debate: debater.llm_options must be a dict when provided"
+    }
+    out = out + debater_options
+  }
+  return out
+}
+
+fn __debate_system(opts, debater) {
+  var parts = []
+  if type_of(opts?.system) == "string" && trim(opts.system) != "" {
+    parts = parts.push(trim(opts.system))
+  }
+  if type_of(debater) == "dict" && type_of(debater?.system) == "string" && trim(debater.system) != "" {
+    parts = parts.push(trim(debater.system))
+  }
+  parts = parts
+    .push(
+    "You are participating in a multi-agent debate. Answer from your assigned perspective, revise when prior rounds change your view, and keep the response concise.",
+  )
+  return join(parts, "\n\n")
+}
+
+fn __debate_history(rounds) {
+  var lines = []
+  for round in rounds {
+    lines = lines.push("Round " + to_string(round.round) + ":")
+    for response in round.responses {
+      lines = lines.push(response.debater + ": " + response.text)
+    }
+  }
+  return join(lines, "\n")
+}
+
+fn __debate_call_prompt(opts, debater, debater_name, round_number, previous_rounds) {
+  var parts = [
+    "Question:\n" + opts.prompt,
+    "Debater: " + debater_name,
+    "Round: " + to_string(round_number) + " of " + to_string(opts.n_rounds),
+  ]
+  let instruction = __debater_instruction(debater)
+  if instruction != "" {
+    parts = parts.push("Perspective:\n" + instruction)
+  }
+  let history = __debate_history(previous_rounds)
+  if history != "" {
+    parts = parts.push("Previous rounds:\n" + history)
+  }
+  parts = parts.push("Return only this debater's next response.")
+  return join(parts, "\n\n")
+}
+
+fn __debate_response_text(result) {
+  if type_of(result) == "dict" {
+    if result?.text != nil {
+      return to_string(result.text)
+    }
+    if result?.data != nil {
+      return to_string(result.data)
+    }
+  }
+  return to_string(result)
+}
+
+fn __debate_response(debater_name, result) {
+  var response = {debater: debater_name, text: __debate_response_text(result)}
+  if type_of(result) == "dict" {
+    for key in ["provider", "model", "input_tokens", "output_tokens"] {
+      if result[key] != nil {
+        response[key] = result[key]
+      }
+    }
+  }
+  return response
+}
+
+fn __debate_run_round(opts, round_number, previous_rounds) {
+  var responses = []
+  var index = 0
+  while index < len(opts.debaters) {
+    let debater = opts.debaters[index]
+    let name = __debater_name(debater, index)
+    let result = llm_call(
+      __debate_call_prompt(opts, debater, name, round_number, previous_rounds),
+      __debate_system(opts, debater),
+      __debate_llm_options(opts, debater),
+    )
+    responses = responses.push(__debate_response(name, result))
+    index += 1
+  }
+  return responses
+}
+
+fn __debate_tokens(text) {
+  let cleaned = trim(regex_replace("[^A-Za-z0-9_]+", " ", lowercase(to_string(text))))
+  if cleaned == "" {
+    return []
+  }
+  return split(cleaned, " ").filter({ token -> return token != "" })
+}
+
+fn __ngram_counts(tokens, width) {
+  var counts = {}
+  if len(tokens) < width {
+    return counts
+  }
+  var index = 0
+  while index <= len(tokens) - width {
+    let key = join(tokens[index:index + width], " ")
+    let current = counts[key] ?? 0
+    counts[key] = current + 1
+    index += 1
+  }
+  return counts
+}
+
+fn __ngram_precision(reference_tokens, candidate_tokens, width) {
+  let candidate_counts = __ngram_counts(candidate_tokens, width)
+  let reference_counts = __ngram_counts(reference_tokens, width)
+  var overlap = 0
+  var total = 0
+  for entry in entries(candidate_counts) {
+    overlap += min(entry.value, reference_counts[entry.key] ?? 0)
+    total += entry.value
+  }
+  if total == 0 {
+    return 0.0
+  }
+  return overlap * 1.0 / total
+}
+
+fn __bleu_lite(reference_text, candidate_text) {
+  let reference_tokens = __debate_tokens(reference_text)
+  let candidate_tokens = __debate_tokens(candidate_text)
+  if len(reference_tokens) == 0 && len(candidate_tokens) == 0 {
+    return 1.0
+  }
+  if len(reference_tokens) == 0 || len(candidate_tokens) == 0 {
+    return 0.0
+  }
+  let unigram = __ngram_precision(reference_tokens, candidate_tokens, 1)
+  var precision_sum = unigram
+  var precision_count = 1.0
+  if len(reference_tokens) >= 2 && len(candidate_tokens) >= 2 {
+    precision_sum += __ngram_precision(reference_tokens, candidate_tokens, 2)
+    precision_count += 1.0
+  }
+  let brevity = if len(candidate_tokens) < len(reference_tokens) {
+    len(candidate_tokens) * 1.0 / len(reference_tokens)
+  } else {
+    1.0
+  }
+  return brevity * precision_sum / precision_count
+}
+
+fn __text_drift(previous_text, current_text) {
+  let similarity = __bleu_lite(previous_text, current_text)
+  if similarity < 0.0 {
+    return 1.0
+  }
+  if similarity > 1.0 {
+    return 0.0
+  }
+  return 1.0 - similarity
+}
+
+fn __round_stability(previous_round, current_round, threshold) {
+  var drifts = []
+  var max_drift = 0.0
+  var index = 0
+  while index < len(current_round.responses) {
+    let current = current_round.responses[index]
+    let previous = previous_round.responses[index]
+    let drift = __text_drift(previous?.text ?? "", current?.text ?? "")
+    drifts = drifts.push({debater: current.debater, drift: drift})
+    max_drift = max(max_drift, drift)
+    index += 1
+  }
+  return {
+    round: current_round.round,
+    max_round_drift: max_drift,
+    threshold: threshold,
+    stable: max_drift < threshold,
+    drifts: drifts,
+  }
+}
+
+fn __emit_stability_short_circuit(opts, stability) {
+  return event_log
+    .emit(
+    "llm.ensemble.debate",
+    "debate_stability_short_circuit",
+    {
+      round: stability.round,
+      requested_rounds: opts.n_rounds,
+      max_round_drift: stability.max_round_drift,
+      threshold: opts.stability_threshold,
+      consecutive_stable_rounds: opts.stability_patience,
+      drifts: stability.drifts,
+    },
+    {round: to_string(stability.round), requested_rounds: to_string(opts.n_rounds)},
+  )
+}
+
+/**
+ * Run a multi-debater LLM debate. Set `adaptive_stop: true` to stop after
+ * two consecutive stable rounds when every debater's response drift is below
+ * `stability_threshold` (default `0.15`).
+ */
+pub fn debate(opts) -> DebateResult {
+  let config = __debate_options(opts)
+  var rounds = []
+  var stability = []
+  var consecutive_stable = 0
+  var short_circuit_event_id = nil
+  var round_number = 1
+  while round_number <= config.n_rounds {
+    let responses = __debate_run_round(config, round_number, rounds)
+    var round = {round: round_number, responses: responses}
+    if len(rounds) > 0 {
+      let round_stability = __round_stability(rounds[-1], round, config.stability_threshold)
+      stability = stability.push(round_stability)
+      round = round
+        + {
+        max_round_drift: round_stability.max_round_drift,
+        stable: round_stability.stable,
+        drifts: round_stability.drifts,
+      }
+      if config.adaptive_stop {
+        if round_stability.stable {
+          consecutive_stable += 1
+        } else {
+          consecutive_stable = 0
+        }
+      }
+    }
+    rounds = rounds.push(round)
+    if config.adaptive_stop && consecutive_stable >= config.stability_patience {
+      short_circuit_event_id = __emit_stability_short_circuit(config, stability[-1])
+      break
+    }
+    round_number += 1
+  }
+  let stopped_early = short_circuit_event_id != nil
+  return {
+    prompt: config.prompt,
+    debaters: __debater_names(config.debaters),
+    requested_rounds: config.n_rounds,
+    n_rounds: config.n_rounds,
+    completed_rounds: len(rounds),
+    stopped_early: stopped_early,
+    stop_reason: if stopped_early {
+      "stability"
+    } else {
+      nil
+    },
+    rounds: rounds,
+    stability: stability,
+    final_responses: rounds[-1].responses,
+    short_circuit_event_id: short_circuit_event_id,
+  }
+}

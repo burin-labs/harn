@@ -480,6 +480,14 @@ Type aliases:
 - `ReviewRound`
 - `ReviewResult`
 
+### std/llm/ensemble
+
+LLM ensemble helpers:
+
+| Function | Description |
+|---|---|
+| `debate(opts)` | Run a multi-debater LLM debate. Pass `adaptive_stop: true` to stop after two consecutive stable rounds when each debater's consecutive-round drift is below `stability_threshold` (default `0.15`) and emit `debate_stability_short_circuit` on `llm.ensemble.debate` |
+
 ### std/project
 
 Project metadata helpers plus deterministic project evidence scanning:
