@@ -586,6 +586,11 @@ async fn async_main() {
         }
         Command::Models(args) => commands::models::run(args).await,
         Command::Try(args) => commands::try_cmd::run(args).await,
+        Command::Quickstart(args) => {
+            if let Err(error) = commands::quickstart::run_quickstart(&args).await {
+                command_error(&error);
+            }
+        }
         Command::Serve(args) => match args.command {
             ServeCommand::Acp(args) => {
                 if let Err(error) = commands::serve::run_acp_server(&args).await {

@@ -1577,8 +1577,9 @@ are configured via a TOML file. The VM searches for config in this order:
 3. Installed package `[llm]` tables in `.harn/packages/*/harn.toml`
 4. The nearest project `harn.toml` `[llm]` table
 
-The `[llm]` section uses the same schema as `providers.toml`, so project and
-package manifests can ship provider adapters declaratively:
+The files in steps 2-4 are overlays on the built-in defaults. The `[llm]`
+section uses the same schema as `providers.toml`, so project and package
+manifests can ship provider adapters declaratively:
 
 ```toml
 [llm.providers.anthropic]

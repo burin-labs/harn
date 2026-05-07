@@ -81,7 +81,22 @@ user's request when Harn is used as an agent backend.
 
 ## Calling an LLM
 
-Harn has native LLM support. Set your API key and call a model directly:
+Harn has native LLM support. Run quickstart to inspect available provider
+credentials, local Ollama status, disk space, and GPU availability, then write
+starter `harn.toml`, `providers.toml`, and `.env` files:
+
+```bash
+harn quickstart
+source .env
+```
+
+For CI or scripts, use deterministic defaults:
+
+```bash
+harn quickstart --non-interactive --provider ollama --model llama3.2
+```
+
+You can also set an API key yourself and call a model directly:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -132,6 +147,8 @@ Scaffold a new project with `harn init` or pick a starter with `harn new`:
 ```bash
 harn new my-agent --template agent
 cd my-agent
+harn quickstart --non-interactive
+source .env
 harn doctor --no-network
 ```
 
