@@ -110,6 +110,101 @@ fn typecheck_with_imports(
     checker.check_with_source(program, source)
 }
 
+/// Build the wrapped source and temp file backing a `harn run -e` invocation.
+///
+/// `import` is a top-level declaration in Harn, so the leading prefix of
+/// import lines (with surrounding blanks/comments) is hoisted out of the
+/// `pipeline main(task) { ... }` wrapper. The temp file is created in the
+/// current working directory so relative imports (`import "./lib"`) and
+/// `harn.toml` discovery resolve against the user's project, not the
+/// system temp dir. If the CWD is unwritable we fall back to the system
+/// temp dir with a stderr warning — pure-expression `-e` still works,
+/// but relative imports will fail to resolve.
+pub(crate) fn prepare_eval_temp_file(
+    code: &str,
+) -> Result<(String, tempfile::NamedTempFile), String> {
+    let (header, body) = split_eval_header(code);
+    let wrapped = if header.is_empty() {
+        format!("pipeline main(task) {{\n{body}\n}}")
+    } else {
+        format!("{header}\npipeline main(task) {{\n{body}\n}}")
+    };
+
+    let tmp = create_eval_temp_file()?;
+    Ok((wrapped, tmp))
+}
+
+/// Try to place the `-e` temp file in the current working directory so
+/// relative imports and `harn.toml` discovery resolve against the user's
+/// project. Fall back to the system temp dir on failure (with a warning),
+/// so pure-expression `-e` keeps working in read-only contexts.
+fn create_eval_temp_file() -> Result<tempfile::NamedTempFile, String> {
+    if let Some(dir) = std::env::current_dir().ok().as_deref() {
+        // Hidden prefix on Unix so editors / tree-walkers are less likely
+        // to pick the file up during its short lifetime.
+        match tempfile::Builder::new()
+            .prefix(".harn-eval-")
+            .suffix(".harn")
+            .tempfile_in(dir)
+        {
+            Ok(tmp) => return Ok(tmp),
+            Err(error) => eprintln!(
+                "warning: harn run -e: could not create temp file in {}: {error}; \
+                 relative imports will not resolve",
+                dir.display()
+            ),
+        }
+    }
+    tempfile::Builder::new()
+        .prefix("harn-eval-")
+        .suffix(".harn")
+        .tempfile()
+        .map_err(|e| format!("failed to create temp file for -e: {e}"))
+}
+
+/// Split the `-e` input into a header (top-level imports + leading
+/// blanks/comments) and a body (everything else, to be wrapped in
+/// `pipeline main(task)`). The header may be empty.
+///
+/// Lines whose first non-whitespace token is `import` or `pub import`
+/// are treated as imports. Scanning stops at the first non-blank,
+/// non-comment, non-import line.
+fn split_eval_header(code: &str) -> (String, String) {
+    let mut header_end = 0usize;
+    let mut last_kept = 0usize;
+    for (idx, line) in code.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            header_end = idx + 1;
+            continue;
+        }
+        let is_import = trimmed.starts_with("import ")
+            || trimmed.starts_with("import\t")
+            || trimmed.starts_with("import\"")
+            || trimmed.starts_with("pub import ")
+            || trimmed.starts_with("pub import\t");
+        if is_import {
+            header_end = idx + 1;
+            last_kept = idx + 1;
+        } else {
+            break;
+        }
+    }
+    if last_kept == 0 {
+        return (String::new(), code.to_string());
+    }
+    let mut header_lines: Vec<&str> = Vec::new();
+    let mut body_lines: Vec<&str> = Vec::new();
+    for (idx, line) in code.lines().enumerate() {
+        if idx < header_end {
+            header_lines.push(line);
+        } else {
+            body_lines.push(line);
+        }
+    }
+    (header_lines.join("\n"), body_lines.join("\n"))
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum CliLlmMockMode {
     #[default]
@@ -1419,8 +1514,44 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{execute_run, CliLlmMockMode, RunProfileOptions, StdoutPassthroughGuard};
+    use super::{
+        execute_run, split_eval_header, CliLlmMockMode, RunProfileOptions, StdoutPassthroughGuard,
+    };
     use std::collections::HashSet;
+
+    #[test]
+    fn split_eval_header_no_imports_returns_full_body() {
+        let (header, body) = split_eval_header("println(1 + 2)");
+        assert_eq!(header, "");
+        assert_eq!(body, "println(1 + 2)");
+    }
+
+    #[test]
+    fn split_eval_header_lifts_leading_imports() {
+        let code = "import \"./lib\"\nimport { x } from \"std/math\"\nprintln(x)";
+        let (header, body) = split_eval_header(code);
+        assert_eq!(header, "import \"./lib\"\nimport { x } from \"std/math\"");
+        assert_eq!(body, "println(x)");
+    }
+
+    #[test]
+    fn split_eval_header_keeps_pub_import_and_comments_in_header() {
+        let code = "// header comment\npub import { y } from \"./lib\"\n\nfoo()";
+        let (header, body) = split_eval_header(code);
+        assert_eq!(
+            header,
+            "// header comment\npub import { y } from \"./lib\"\n"
+        );
+        assert_eq!(body, "foo()");
+    }
+
+    #[test]
+    fn split_eval_header_does_not_lift_imports_after_other_statements() {
+        let code = "let a = 1\nimport \"./lib\"";
+        let (header, body) = split_eval_header(code);
+        assert_eq!(header, "");
+        assert_eq!(body, "let a = 1\nimport \"./lib\"");
+    }
 
     #[test]
     fn stdout_passthrough_guard_restores_previous_state() {

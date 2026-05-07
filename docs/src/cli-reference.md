@@ -36,8 +36,21 @@ Before starting the VM, `harn run <file>` builds the cross-module
 graph for the entry file. When all imports resolve, unknown call
 targets produce a static error and the VM is never started — the same
 `call target ... is not defined or imported` message you see from
-`harn check`. The inline `-e <code>` form has no importing file and
-therefore skips the cross-module check.
+`harn check`.
+
+The inline `-e <code>` form is wrapped in `pipeline main(task) { ... }`
+and run as a temp file in the current directory, so:
+
+- Leading `import "..."` (and `pub import { ... } from "..."`) lines
+  are hoisted out of the wrapper. They must come first; imports that
+  appear after another statement are not lifted.
+- Relative imports resolve against the working directory:
+  `harn run -e $'import "./lib"\nprintln(answer())'` looks for
+  `./lib.harn` next to where you invoked `harn`.
+- Stdlib imports (`import "std/..."`) work the same as in a file.
+- A read-only working directory falls back to the system temp dir;
+  pure-expression `-e` still works there but relative imports won't
+  resolve.
 
 When `--attest` is present, Harn records run start/finish events in an
 EventLog, stamps each record with `prev_hash` and `record_hash` provenance
