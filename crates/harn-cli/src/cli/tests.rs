@@ -1410,14 +1410,14 @@ fn test_parses_playground_args() {
 }
 
 #[test]
-fn test_parses_try_alias_as_playground() {
-    let cli = Cli::parse_from(["harn", "try", "--yes", "--task", "hi"]);
+fn test_parses_try_command() {
+    let cli = Cli::parse_from(["harn", "try", "hi", "--max-iterations", "7"]);
 
-    let Command::Playground(args) = cli.command.unwrap() else {
-        panic!("expected playground command");
+    let Command::Try(args) = cli.command.unwrap() else {
+        panic!("expected try command");
     };
-    assert_eq!(args.task.as_deref(), Some("hi"));
-    assert!(args.yes);
+    assert_eq!(args.prompt, "hi");
+    assert_eq!(args.max_iterations, 7);
 }
 
 #[test]
