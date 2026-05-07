@@ -35,5 +35,7 @@ pipeline test(task) {
   assert_eq(unknown.encoder, nil)
   assert_eq(unknown.source, "heuristic")
   assert(!unknown.known_model_family, "unknown model falls back to heuristic")
+  assert_eq(estimate_text_tokens(nil, "gpt-4"), 0)
+  assert_eq(estimate_text_tokens_detail(nil, "unknown-local-model").tokens, 0)
   log("llm_budget_token_counts tests passed")
 }
