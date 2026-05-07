@@ -65,6 +65,9 @@ pub(crate) fn init_project(name: Option<&str>, template: ProjectTemplate) {
             println!("  harn run main.harn       # run the program");
             println!("  harn test tests/         # run the tests");
         }
+        ProjectTemplate::Chat => {
+            println!("  harn run main.harn       # run the program");
+        }
         ProjectTemplate::McpServer => {
             println!("  harn serve mcp main.harn # expose the starter MCP server");
         }
@@ -200,6 +203,104 @@ pipeline test_add(task) {
 }
 "###
                 .to_string(),
+            ),
+        ],
+        ProjectTemplate::Chat => vec![
+            (
+                "harn.toml",
+                format!(
+                    r#"[package]
+name = "{project_name}"
+version = "0.1.0"
+
+[dependencies]
+
+[llm.aliases]
+chat = {{ id = "llama3.2", provider = "ollama" }}
+"#
+                ),
+            ),
+            (
+                "main.harn",
+                r#"fn build_chat_prompt(history, message) {
+  if history == "" {
+    return "User: " + message
+  }
+  return history + "\nUser: " + message
+}
+
+fn stream_reply(prompt, system, options) {
+  var answer = ""
+  let chunks = llm_stream_call(prompt, system, options)
+  for chunk in chunks {
+    print(chunk.visible_delta)
+    answer = chunk.partial
+  }
+  println("")
+  return answer
+}
+
+pipeline default(task) {
+  let system = env_or("HARN_CHAT_SYSTEM", "You are a concise, helpful assistant.")
+  let model = env_or("HARN_CHAT_MODEL", "chat")
+  let options = {model: model, max_tokens: 2048, temperature: 0.7}
+  var history = ""
+  println("Harn chat. Type /clear to reset history or /exit to quit.")
+  while true {
+    print("you> ")
+    let raw = read_line()
+    if raw == nil {
+      break
+    }
+    let message = trim(raw)
+    if message == "" {
+      continue
+    }
+    if message == "/exit" || message == "/quit" {
+      break
+    }
+    if message == "/clear" {
+      history = ""
+      println("history cleared")
+      continue
+    }
+    let prompt = build_chat_prompt(history, message)
+    print("assistant> ")
+    let answer = stream_reply(prompt, system, options)
+    history = prompt + "\nAssistant: " + answer + "\n"
+  }
+}
+"#
+                .to_string(),
+            ),
+            (
+                "README.md",
+                format!(
+                    r#"# {project_name}
+
+Streaming chat starter for Harn.
+
+## Provider
+
+`harn.toml` defines a `chat` model alias backed by Ollama's `llama3.2` model:
+
+```toml
+[llm.aliases]
+chat = {{ id = "llama3.2", provider = "ollama" }}
+```
+
+Edit that alias to use any configured provider, or set `HARN_CHAT_MODEL` when
+running the project.
+
+## Run
+
+```bash
+harn run main.harn
+```
+
+Inside the chat loop, type `/clear` to reset local history and `/exit` to quit.
+"#
+                ),
             ),
         ],
         ProjectTemplate::McpServer => vec![
@@ -683,6 +784,10 @@ mod tests {
         let mcp = template_files("sample", ProjectTemplate::McpServer);
         assert!(mcp.iter().any(|(path, _)| *path == "main.harn"));
 
+        let chat = template_files("sample", ProjectTemplate::Chat);
+        assert!(chat.iter().any(|(path, _)| *path == "main.harn"));
+        assert!(chat.iter().any(|(path, _)| *path == "README.md"));
+
         let eval = template_files("sample", ProjectTemplate::Eval);
         assert!(eval.iter().any(|(path, _)| *path == "eval-suite.json"));
 
@@ -702,6 +807,22 @@ mod tests {
         assert!(connector
             .iter()
             .any(|(path, _)| *path == "connectors/echo.harn"));
+    }
+
+    #[test]
+    fn chat_template_wires_streaming_loop_to_configured_alias() {
+        let files = template_files("sample", ProjectTemplate::Chat);
+        let content = |path: &str| {
+            files
+                .iter()
+                .find_map(|(candidate, content)| (*candidate == path).then_some(content.as_str()))
+                .unwrap_or_else(|| panic!("missing {path}"))
+        };
+
+        assert!(content("main.harn").contains("llm_stream_call(prompt, system, options)"));
+        assert!(content("main.harn").contains("read_line()"));
+        assert!(content("harn.toml").contains(r#"chat = { id = "llama3.2", provider = "ollama" }"#));
+        toml::from_str::<toml::Value>(content("harn.toml")).expect("chat manifest is valid TOML");
     }
 
     #[test]
