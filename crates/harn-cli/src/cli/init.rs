@@ -13,6 +13,7 @@ pub(crate) struct InitArgs {
 pub(crate) enum ProjectTemplate {
     Basic,
     Agent,
+    Chat,
     #[value(name = "mcp-server")]
     McpServer,
     Eval,

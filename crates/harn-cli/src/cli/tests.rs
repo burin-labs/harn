@@ -1348,6 +1348,17 @@ fn test_parses_pipeline_lab_template() {
 }
 
 #[test]
+fn test_parses_chat_template() {
+    let cli = Cli::parse_from(["harn", "new", "chat-demo", "--template", "chat"]);
+
+    let Command::New(args) = cli.command.unwrap() else {
+        panic!("expected new command");
+    };
+    assert_eq!(args.first.as_deref(), Some("chat-demo"));
+    assert_eq!(args.template, Some(ProjectTemplate::Chat));
+}
+
+#[test]
 fn test_parses_playground_args() {
     let cli = Cli::parse_from([
         "harn",

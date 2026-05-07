@@ -455,12 +455,15 @@ harn init --template eval
 ## harn new
 
 Scaffold a new project from a starter template. Supported templates are
-`basic`, `agent`, `mcp-server`, and `eval`.
+`basic`, `agent`, `chat`, `mcp-server`, `eval`, `pipeline-lab`, `package`, and
+`connector`.
 
 ```bash
 harn new my-agent --template agent
+harn new my-chat --template chat
 harn new local-mcp --template mcp-server
 harn new eval-suite --template eval
+harn new package my-lib
 ```
 
 `harn init` and `harn new` share the same scaffolding engine. Use `init` for

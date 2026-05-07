@@ -115,6 +115,18 @@ for the selected template. Run it with:
 harn run main.harn
 ```
 
+For a streaming local chat loop, use the chat starter:
+
+```bash
+harn new my-chat --template chat
+cd my-chat
+harn run main.harn
+```
+
+The generated `harn.toml` points the `chat` model alias at Ollama by default.
+Edit the alias or set `HARN_CHAT_MODEL` to use another configured provider.
+See [LLM providers](./llm/providers.md) for provider setup.
+
 ## Remote MCP quick start
 
 If you want to use a cloud MCP server such as Notion, authorize it once with
