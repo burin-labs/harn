@@ -170,6 +170,37 @@ agent_loop(task, system, {
 })
 ```
 
+For git-only workflows, prefer `std/git.git_tools(...)` when the model should
+see individual local git operations instead of a generic command runner or the
+coarse `git_inspect` operation switch:
+
+```harn,ignore
+import { git_tools } from "std/git"
+
+let tools = git_tools(nil, {
+  repo: repo_root,
+  enabled_tools: ["git_status", "git_log", "git_switch"],
+  names: {git_log: "release_git_log"},
+})
+```
+
+`git_tools(...)` also accepts `defer_loading`, `namespace`, and `tool_config`,
+so a large git surface can use the same Tool Vault path as any other registry.
+When small/local models struggle to choose among many individual git schemas,
+use the compact toolbox instead:
+
+```harn,ignore
+let tools = git_toolbox_tools(nil, {
+  repo: repo_root,
+  include_mutations: true,
+})
+```
+
+That registry exposes `find_git_tool` and `run_git_tool`. The finder uses a
+deterministic stdlib lexical scorer over a curated git-operation catalog; callers
+can still plug richer search globally through `tool_search.strategy` when they
+want BM25, hybrid ranking, embeddings, or an LLM reranker for deferred tools.
+
 `agent_command_tools(...)` installs:
 
 - `run_command` — argv-first process execution through

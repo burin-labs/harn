@@ -81,7 +81,8 @@ code or inside any pipeline.
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/path`, `std/cache`, `std/llm/handlers`, `std/llm/budget`, `std/vision`,
 `std/context`, `std/agent_state`, `std/agents`, `std/runtime`, `std/command`,
-`std/review`, `std/experiments`,
+`std/git`, `std/review`,
+`std/experiments`,
 `std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
 `std/worktree`, `std/checkpoint`, `std/personas/prelude`,
 `std/connectors/shared`, and provider-specific `std/connectors/...` modules).
@@ -97,13 +98,13 @@ Import them with the `std/` prefix:
 ```harn
 import "std/agent_state"
 import "std/agents"
-import "std/async"
 import { retry_predicate_with_backoff } from "std/async"
 import "std/cache"
 import "std/collections"
 import "std/connectors/shared"
 import "std/context"
 import "std/experiments"
+import "std/git"
 import "std/json"
 import "std/llm/budget"
 import "std/math"
@@ -518,6 +519,58 @@ let step = command_step("verify package", ["cargo", "test", "-p", "harn-vm"], {
     }
     return nil
   },
+})
+```
+
+### std/git
+
+Local filesystem git helpers for scripts and narrow agent tool registries. The
+module keeps existing receipt-producing `git.*` builtins available through
+function wrappers, and adds Harn-level argv-mode helpers for common checkout
+operations that should not require a generic shell or `run_command` tool.
+
+| Function | Description |
+|---|---|
+| `git_run(args, options?)` | Run one argv-mode local git command; `args` omit the leading `git` and inherit git-safe env removal |
+| `git_status(repo?)` | Return structured porcelain status using the receipt-producing `git.status` builtin |
+| `git_discover(path?)` | Return repository root/git-dir metadata using the receipt-producing discover builtin |
+| `git_diff(repo?, selector?)` | Return diff text using the receipt-producing `git.diff` builtin |
+| `git_current_branch(repo?, options?)` | Return `{success, branch, detached, ...}` for the current checkout |
+| `git_log(repo?, options?)` | Return recent commit log output with optional `rev`, `rev_range`, `max_count`, `oneline`, and `paths` |
+| `git_switch(branch, repo?, options?)` | Switch to a branch/ref, with optional `create`, `force_create`, `detach`, or `discard_changes` |
+| `git_pull_ff_only(repo?, remote?, branch?, options?)` | Run `git pull --ff-only` with optional quiet/prune flags |
+| `git_fetch(remote?, repo?, refspecs?)` | Fetch from an existing remote using the receipt-producing `git.fetch` builtin |
+| `git_tool_catalog(options?)` | Return searchable metadata for available git operations |
+| `git_find_tool(query, options?)` | Rank git operations for a natural-language query with a deterministic lexical scorer |
+| `git_run_tool(operation, args?, options?)` | Dispatch one catalogued git operation by id; mutating operations require `include_mutations: true` |
+| `git_tools(registry?, options?)` | Build an agent tool registry from selected granular git helpers |
+| `git_toolbox_tools(registry?, options?)` | Build a compact `find_git_tool` / `run_git_tool` registry for small/local models |
+
+`git_tools(...)` defaults to read-only helpers (`git_status`,
+`git_current_branch`, `git_log`, `git_diff`, `git_branch_list`, and
+`git_remote_list`). Mutating helpers such as `git_switch` and
+`git_pull_ff_only` are only added when requested through `enabled_tools`, so
+harnesses can expose just the git operations a model should be allowed to call.
+Pass `defer_loading`, `namespace`, or `tool_config` to make the generated tools
+participate in the existing Tool Vault / `tool_search` flow.
+
+```harn,ignore
+import { git_tools } from "std/git"
+
+let tools = git_tools(nil, {
+  repo: repo_root,
+  enabled_tools: ["git_status", "git_log", "git_switch"],
+  names: {git_log: "release_git_log"},
+})
+```
+
+For local models that do better with a tiny stable tool surface, use the
+two-tool toolbox:
+
+```harn,ignore
+let tools = git_toolbox_tools(nil, {
+  repo: repo_root,
+  include_mutations: true,
 })
 ```
 

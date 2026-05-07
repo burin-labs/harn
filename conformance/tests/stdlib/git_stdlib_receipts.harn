@@ -20,11 +20,66 @@ pipeline default() {
   run_git(root, ["git", "commit", "-m", "initial"])
   write_file(path_join(root, "README.md"), "changed\n")
   let status: GitReceipt = git.status(root)
+  let status_fn: GitReceipt = git_status(root)
   let records: list<TrustRecord> = trust_query({action: "git.status"})
   let remove: GitReceipt = git.worktree_remove(path_join(root, "missing-worktree"), {force: true})
   println(status.schema == "harn-stdlib-git-receipt-v1")
   println(status.operation == "git.status" && status.success)
   println(status.data.dirty && status.data.entries[0].path == "README.md")
+  println(status_fn.operation == "git.status" && status_fn.data.dirty)
   println(len(records) >= 1 && records[len(records) - 1].action == "git.status")
   println(remove.status == "no_op" && remove.data.idempotent)
+  run_git(root, ["git", "checkout", "--", "README.md"])
+  let branch = git_current_branch(root)
+  println(branch.success && branch.branch == "main")
+  let log_result = git_log(root, {max_count: 1})
+  println(log_result.success && contains(log_result.stdout, "initial"))
+  let switch_result = git_switch("feature/std-git", root, {create: true})
+  println(switch_result.success)
+  println(git_current_branch(root).branch == "feature/std-git")
+  println(git_switch("main", root).success)
+  let remote = path_join(temp_dir(), "harn_git_remote_" + to_string(random_int(100000, 999999)) + ".git")
+  run_git(root, ["git", "init", "--bare", remote])
+  run_git(root, ["git", "remote", "add", "origin", remote])
+  run_git(root, ["git", "push", "-u", "origin", "main"])
+  let pull = git_pull_ff_only(root, "origin", "main", {quiet: true})
+  println(pull.success)
+  let read_tools = git_tools(
+    nil,
+    {repo: root, enabled_tools: ["git_status", "git_log"], names: {git_log: "release_git_log"}},
+  )
+  let read_surface = tool_surface_validate({tools: read_tools, policy: {side_effect_level: "read_only"}})
+  println(read_surface.valid)
+  let status_call = agent_dispatch_tool_call({id: "status", name: "git_status", arguments: {}}, read_tools)
+  println(status_call.ok)
+  let log_call = agent_dispatch_tool_call(
+    {id: "log", name: "release_git_log", arguments: {max_count: 1}},
+    read_tools,
+  )
+  println(log_call.ok)
+  let switch_tools = git_tools(nil, {repo: root, enabled_tools: ["git_switch"]})
+  let switch_surface = tool_surface_validate({tools: switch_tools, policy: {side_effect_level: "process_exec"}})
+  println(switch_surface.valid)
+  let deferred_tools = git_tools(nil, {repo: root, defer_loading: true, tool_config: {git_status: {defer_loading: false}}})
+  println(tool_find(deferred_tools, "git_log").defer_loading)
+  println(!tool_find(deferred_tools, "git_status").defer_loading)
+  let found = git_find_tool("recent commits", {})
+  println(found.operations[0] == "log")
+  let blocked_switch = try {
+    git_run_tool("switch", {repo: root, branch: "main"})
+  }
+  println(is_err(blocked_switch))
+  let toolbox = git_toolbox_tools(nil, {repo: root, include_mutations: true})
+  let toolbox_surface = tool_surface_validate({tools: toolbox, policy: {side_effect_level: "process_exec"}})
+  println(toolbox_surface.valid)
+  let find_call = agent_dispatch_tool_call(
+    {id: "find", name: "find_git_tool", arguments: {query: "what branch am I on"}},
+    toolbox,
+  )
+  println(find_call.ok)
+  let run_call = agent_dispatch_tool_call(
+    {id: "run", name: "run_git_tool", arguments: {operation: "current_branch"}},
+    toolbox,
+  )
+  println(run_call.ok && contains(run_call.rendered_result, "main"))
 }

@@ -1360,6 +1360,28 @@ Canonical builtin names are also registered as `git.repo.discover`,
 `git.worktree.create`, and `git.worktree.remove`. The root aliases above are
 the ergonomic Harn call surface for nested operations.
 
+Import `std/git` for first-class Harn function wrappers around this namespace
+plus local argv-mode helpers that are suitable as granular agent tools. The
+receipt-producing wrappers (`git_status`, `git_diff`, `git_rebase`,
+`git_push`, and worktree helpers) delegate to the audited builtins above. The
+local command helpers (`git_run`, `git_current_branch`, `git_log`,
+`git_switch`, `git_pull_ff_only`, `git_fetch`, `git_branch_list`, and
+`git_remote_list`) run `git` through argv-mode `process.exec` with ambient git
+environment overrides removed.
+
+`git_tools(registry?, options?)` builds a selected tool registry from those
+functions. It defaults to read-only git inspection helpers and only exposes
+checkout-changing helpers such as `git_switch` or `git_pull_ff_only` when they
+are explicitly included in `enabled_tools`. It accepts the same Tool Vault
+metadata knobs used by host tool helpers: `defer_loading`, `namespace`, and
+per-tool `tool_config`.
+
+For small/local models, `git_toolbox_tools(registry?, options?)` exposes a
+compact two-tool surface: `find_git_tool` ranks available git operations with a
+deterministic lexical scorer, and `run_git_tool` executes one returned operation
+id. Mutating operations stay unavailable unless the toolbox is configured with
+`include_mutations: true`.
+
 ## Command Policy
 
 | Function | Parameters | Returns | Description |
