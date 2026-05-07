@@ -1,0 +1,94 @@
+import { tree_of_thoughts } from "std/llm/ensemble"
+
+fn grid_expand(state, k) {
+  let moves = [
+    {name: "right", x: state.x + 1, y: state.y},
+    {name: "up", x: state.x, y: state.y + 1},
+    {name: "left", x: state.x - 1, y: state.y},
+  ]
+  return moves
+    .filter({ move -> move.x >= 0 && move.x <= 2 && move.y >= 0 && move.y <= 2 })
+    .take(k)
+}
+
+fn grid_score(state) {
+  return 10 - abs(2 - state.x) - abs(2 - state.y)
+}
+
+fn grid_done(state) {
+  return state.x == 2 && state.y == 2
+}
+
+pipeline test(task) {
+  let bfs = tree_of_thoughts(
+    {
+      initial_state: {name: "start", x: 0, y: 0},
+      expand: grid_expand,
+      evaluate: grid_score,
+      is_terminal: grid_done,
+      search: "bfs",
+      k: 2,
+      max_depth: 4,
+    },
+  )
+  assert(bfs.ok, "bfs finds the goal")
+  assert_eq(bfs.best_score, 10)
+  assert_eq(bfs.best_path.map({ state -> state.name }), ["start", "right", "right", "up", "up"])
+  assert_eq(bfs.tree.best_id, bfs.best_node.id)
+  let dfs = tree_of_thoughts(
+    {
+      initial_state: {name: "start", x: 0, y: 0},
+      expand: grid_expand,
+      evaluate: grid_score,
+      is_terminal: grid_done,
+      search: "dfs",
+      k: 2,
+      max_depth: 4,
+    },
+  )
+  assert(dfs.ok, "dfs finds the goal")
+  assert_eq(dfs.best_path.map({ state -> state.name }), ["start", "right", "right", "up", "up"])
+  let shallow = tree_of_thoughts(
+    {
+      initial_state: {name: "start", x: 0, y: 0},
+      expand: grid_expand,
+      evaluate: grid_score,
+      is_terminal: grid_done,
+      search: "bfs",
+      k: 2,
+      max_depth: 1,
+    },
+  )
+  assert(!shallow.ok, "max_depth can bound search before a terminal state")
+  assert_eq(shallow.best_path.map({ state -> state.name }), ["start", "right"])
+  assert_eq(shallow.stop_reason, "exhausted")
+  let beam = tree_of_thoughts(
+    {
+      initial_state: {name: "start", x: 0, y: 0},
+      expand: grid_expand,
+      evaluate: grid_score,
+      is_terminal: grid_done,
+      search: "beam",
+      k: 2,
+      beam_width: 1,
+      max_depth: 4,
+    },
+  )
+  assert(beam.ok, "beam keeps the highest-scoring branch")
+  assert_eq(beam.best_path.map({ state -> state.name }), ["start", "right", "right", "up", "up"])
+  let stopped = tree_of_thoughts(
+    {
+      initial_state: {name: "start", x: 0, y: 0},
+      expand: grid_expand,
+      evaluate: grid_score,
+      is_terminal: grid_done,
+      search: "bfs",
+      k: 2,
+      max_depth: 4,
+      stop: { node -> node.depth == 2 },
+    },
+  )
+  assert(!stopped.ok, "stop predicate can end search before a terminal state")
+  assert_eq(stopped.stop_reason, "stop")
+  log("llm tree_of_thoughts ok")
+}
