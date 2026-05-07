@@ -690,6 +690,8 @@ pub(crate) fn extract_llm_options(
     let temperature = opt_float(&options, "temperature").or_else(|| default_float("temperature"));
     let top_p = opt_float(&options, "top_p").or_else(|| default_float("top_p"));
     let top_k = opt_int(&options, "top_k").or_else(|| default_int("top_k"));
+    let logprobs = opt_bool(&options, "logprobs");
+    let top_logprobs = opt_int(&options, "top_logprobs");
     let stop = opt_str_list(&options, "stop");
     let seed = opt_int(&options, "seed");
     let frequency_penalty =
@@ -1061,6 +1063,8 @@ pub(crate) fn extract_llm_options(
         temperature,
         top_p,
         top_k,
+        logprobs,
+        top_logprobs,
         stop,
         seed,
         frequency_penalty,

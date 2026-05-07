@@ -299,6 +299,7 @@ fn parse_cli_llm_mock_value(value: &serde_json::Value) -> Result<harn_vm::llm::L
     let model = optional_string_field(object, "model")?.unwrap_or_else(|| "mock".to_string());
     let provider = optional_string_field(object, "provider")?;
     let blocks = optional_vec_field(object, "blocks")?;
+    let logprobs = optional_vec_field(object, "logprobs")?.unwrap_or_default();
     let tool_calls = parse_cli_llm_tool_calls(object.get("tool_calls"))?;
     let error = parse_cli_llm_mock_error(object.get("error"))?;
 
@@ -317,6 +318,7 @@ fn parse_cli_llm_mock_value(value: &serde_json::Value) -> Result<harn_vm::llm::L
         model,
         provider,
         blocks,
+        logprobs,
         error,
     })
 }
@@ -557,6 +559,12 @@ fn serialize_cli_llm_mock(mock: harn_vm::llm::LlmMock) -> Result<String, String>
     }
     if let Some(blocks) = mock.blocks {
         object.insert("blocks".to_string(), serde_json::Value::Array(blocks));
+    }
+    if !mock.logprobs.is_empty() {
+        object.insert(
+            "logprobs".to_string(),
+            serde_json::Value::Array(mock.logprobs),
+        );
     }
     if let Some(error) = mock.error {
         object.insert(
@@ -1515,7 +1523,8 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
 #[cfg(test)]
 mod tests {
     use super::{
-        execute_run, split_eval_header, CliLlmMockMode, RunProfileOptions, StdoutPassthroughGuard,
+        execute_run, parse_cli_llm_mock_value, serialize_cli_llm_mock, split_eval_header,
+        CliLlmMockMode, RunProfileOptions, StdoutPassthroughGuard,
     };
     use std::collections::HashSet;
 
@@ -1551,6 +1560,24 @@ mod tests {
         let (header, body) = split_eval_header(code);
         assert_eq!(header, "");
         assert_eq!(body, "let a = 1\nimport \"./lib\"");
+    }
+
+    #[test]
+    fn cli_llm_mock_roundtrips_logprobs() {
+        let mock = parse_cli_llm_mock_value(&serde_json::json!({
+            "text": "visible",
+            "logprobs": [{"token": "visible", "logprob": 0.0}]
+        }))
+        .expect("parse mock");
+        assert_eq!(mock.logprobs.len(), 1);
+
+        let line = serialize_cli_llm_mock(mock).expect("serialize mock");
+        let value: serde_json::Value = serde_json::from_str(&line).expect("json line");
+        assert_eq!(value["logprobs"][0]["token"].as_str(), Some("visible"));
+
+        let reparsed = parse_cli_llm_mock_value(&value).expect("reparse mock");
+        assert_eq!(reparsed.logprobs.len(), 1);
+        assert_eq!(reparsed.logprobs[0]["logprob"].as_f64(), Some(0.0));
     }
 
     #[test]

@@ -10,7 +10,9 @@ use crate::value::{VmError, VmValue};
 
 use super::auth::apply_auth_headers;
 use super::options::LlmCallOptions;
-use super::response::{extract_cache_read_tokens, extract_cache_write_tokens};
+use super::response::{
+    extract_cache_read_tokens, extract_cache_write_tokens, extract_openai_choice_logprobs,
+};
 use super::result::{mock_completion_response, LlmResult};
 
 /// Execute a text completion / fill-in-the-middle call owned by Harn.
@@ -66,6 +68,9 @@ async fn vm_call_completion_openai_style(
     }
     if let Some(top_p) = opts.top_p {
         body["top_p"] = serde_json::json!(top_p);
+    }
+    if opts.logprobs {
+        body["logprobs"] = serde_json::json!(opts.top_logprobs.unwrap_or(0).max(0));
     }
     if let Some(stop) = &opts.stop {
         body["stop"] = serde_json::json!(stop);
@@ -131,6 +136,7 @@ async fn vm_call_completion_openai_style(
             "text": json["choices"][0]["text"].as_str().unwrap_or(""),
             "visibility": "public",
         })],
+        logprobs: extract_openai_choice_logprobs(&json["choices"][0]),
     })
 }
 
@@ -230,6 +236,7 @@ async fn vm_call_completion_ollama(
             "text": json["response"].as_str().unwrap_or(""),
             "visibility": "public",
         })],
+        logprobs: Vec::new(),
     })
 }
 

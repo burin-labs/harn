@@ -96,6 +96,7 @@ as both LLM content and deterministic `vision_ocr(...)` context.
 | `thinking` | string | Reasoning trace (when `thinking` is enabled) |
 | `private_reasoning` | string | Provider reasoning metadata kept separate from visible text |
 | `blocks` | list | Canonical structured content blocks across providers |
+| `logprobs` | list | Token log probability records when requested and returned by the provider |
 | `stop_reason` | string | `"end_turn"`, `"max_tokens"`, `"tool_use"`, `"stop_sequence"` |
 | `transcript` | dict | Transcript carrying message history, events, summary, metadata, and id |
 
@@ -113,6 +114,8 @@ as both LLM content and deterministic `vision_ocr(...)` context.
 | `seed` | int | nil | Reproducibility seed (OpenAI/Ollama) |
 | `frequency_penalty` | float | nil | Frequency penalty (OpenAI only) |
 | `presence_penalty` | float | nil | Presence penalty (OpenAI only) |
+| `logprobs` | bool | `false` | Request token log probabilities when the selected provider route supports them |
+| `top_logprobs` | int | nil | Request top alternative token log probabilities where supported |
 | `response_format` | string | `"text"` | `"text"` or `"json"` |
 | `schema` | dict | nil | JSON Schema, OpenAPI Schema Object, or canonical Harn schema dict for structured output |
 | `llm_retries` | int | `0` | Retries on transient HTTP / provider errors. Raw `llm_call` is fail-fast by default; set to N to allow N retries after the first attempt |
@@ -379,6 +382,9 @@ llm_mock({
   text: "Let me read that file.",
   tool_calls: [{name: "read_file", arguments: {path: "src/main.rs"}}],
 })
+
+// Queue token logprobs for confidence/reranking tests
+llm_mock({text: "certain", logprobs: [{token: "certain", logprob: 0.0}]})
 
 // Pattern-matched mocks (reusable by default, matched in declaration order)
 llm_mock({text: "I don't know.", match: "*unknown*"})

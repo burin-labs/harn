@@ -28,6 +28,7 @@
 - [LLM and agents](./llm-and-agents.md)
   - [LLM calls](./llm/llm_call.md)
   - [LLM handler helpers](./llm/handlers.md)
+  - [LLM reranking](./llm/rerank.md)
   - [Agent loops](./llm/agent_loop.md)
   - [Prompt optimization](./llm/optimize.md)
   - [Tools, Tool Vault, and MCP](./llm/tools.md)

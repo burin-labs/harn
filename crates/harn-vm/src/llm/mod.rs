@@ -31,6 +31,7 @@ pub(crate) mod mock;
 pub(crate) mod permissions;
 pub mod plan;
 pub mod readiness;
+mod rerank;
 pub(crate) mod schema_recover;
 pub(crate) mod skill_score;
 pub(crate) mod structural_experiments;
@@ -2208,6 +2209,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     conversation::register_conversation_builtins(vm);
     config_builtins::register_config_builtins(vm);
     cost::register_cost_builtins(vm);
+    rerank::register_rerank_builtins(vm);
     register_llm_mock_builtins(vm);
     transcript_stats::register_transcript_builtins(vm);
 }
@@ -2235,6 +2237,18 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             .map(helpers::vm_value_to_json)
             .collect::<Vec<_>>(),
         _ => Vec::new(),
+    };
+    let logprobs = match config.get("logprobs") {
+        Some(VmValue::List(list)) => list
+            .iter()
+            .map(helpers::vm_value_to_json)
+            .collect::<Vec<_>>(),
+        Some(VmValue::Nil) | None => Vec::new(),
+        _ => {
+            return Err(VmError::Runtime(
+                "llm_mock: logprobs must be a list of token logprob dicts".to_string(),
+            ))
+        }
     };
 
     let match_pattern = config.get("match").and_then(|v| {
@@ -2352,6 +2366,7 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         model,
         provider: None,
         blocks: None,
+        logprobs,
         error,
     });
     Ok(VmValue::Nil)
@@ -2625,6 +2640,8 @@ mod tests {
             temperature: None,
             top_p: None,
             top_k: None,
+            logprobs: false,
+            top_logprobs: None,
             stop: None,
             seed: None,
             frequency_penalty: None,
@@ -2759,6 +2776,7 @@ mod tests {
             model: "mock".to_string(),
             provider: Some("mock".to_string()),
             blocks: None,
+            logprobs: Vec::new(),
             error: None,
         });
         mock::push_llm_mock(mock::LlmMock {
@@ -2776,6 +2794,7 @@ mod tests {
             model: "mock".to_string(),
             provider: Some("mock".to_string()),
             blocks: None,
+            logprobs: Vec::new(),
             error: None,
         });
 

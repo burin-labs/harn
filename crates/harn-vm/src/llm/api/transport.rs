@@ -1081,6 +1081,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         thinking_summary: None,
         stop_reason,
         blocks,
+        logprobs: Vec::new(),
     })
 }
 
@@ -1248,6 +1249,7 @@ where
         thinking_summary: None,
         stop_reason: None,
         blocks,
+        logprobs: Vec::new(),
     })
 }
 

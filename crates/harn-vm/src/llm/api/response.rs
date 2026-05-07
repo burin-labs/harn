@@ -66,6 +66,125 @@ fn extract_openai_reasoning_summary(
     summary
 }
 
+fn normalize_top_logprobs(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(items) => serde_json::Value::Array(
+            items
+                .iter()
+                .filter_map(|item| {
+                    let logprob = item.get("logprob").and_then(|value| value.as_f64())?;
+                    Some(serde_json::json!({
+                        "token": item.get("token").and_then(|value| value.as_str()).unwrap_or(""),
+                        "logprob": logprob,
+                        "bytes": item.get("bytes").cloned().unwrap_or(serde_json::Value::Null),
+                    }))
+                })
+                .collect(),
+        ),
+        serde_json::Value::Object(object) => serde_json::Value::Array(
+            object
+                .iter()
+                .filter_map(|(token, item)| {
+                    let logprob = if let Some(logprob) = item.as_f64() {
+                        logprob
+                    } else {
+                        item.get("logprob").and_then(|value| value.as_f64())?
+                    };
+                    let bytes = item
+                        .get("bytes")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    Some(serde_json::json!({
+                        "token": token,
+                        "logprob": logprob,
+                        "bytes": bytes,
+                    }))
+                })
+                .collect(),
+        ),
+        _ => serde_json::Value::Array(Vec::new()),
+    }
+}
+
+fn normalize_logprob_entry(
+    token: &str,
+    logprob: f64,
+    bytes: serde_json::Value,
+    top_logprobs: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "token": token,
+        "logprob": logprob,
+        "bytes": bytes,
+        "top_logprobs": top_logprobs,
+    })
+}
+
+pub(super) fn extract_openai_choice_logprobs(choice: &serde_json::Value) -> Vec<serde_json::Value> {
+    if let Some(content) = choice
+        .get("logprobs")
+        .and_then(|value| value.get("content"))
+        .and_then(|value| value.as_array())
+    {
+        return content
+            .iter()
+            .filter_map(|item| {
+                let logprob = item.get("logprob").and_then(|value| value.as_f64())?;
+                let token = item
+                    .get("token")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("");
+                Some(normalize_logprob_entry(
+                    token,
+                    logprob,
+                    item.get("bytes")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                    normalize_top_logprobs(
+                        item.get("top_logprobs").unwrap_or(&serde_json::Value::Null),
+                    ),
+                ))
+            })
+            .collect();
+    }
+
+    let Some(logprobs) = choice.get("logprobs") else {
+        return Vec::new();
+    };
+    let Some(tokens) = logprobs.get("tokens").and_then(|value| value.as_array()) else {
+        return Vec::new();
+    };
+    let token_logprobs = logprobs
+        .get("token_logprobs")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let top_logprobs = logprobs
+        .get("top_logprobs")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    tokens
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, token)| {
+            let token = token.as_str().unwrap_or("");
+            let logprob = token_logprobs.get(idx).and_then(|value| value.as_f64())?;
+            Some(normalize_logprob_entry(
+                token,
+                logprob,
+                serde_json::Value::Null,
+                normalize_top_logprobs(
+                    top_logprobs
+                        .get(idx)
+                        .unwrap_or(&serde_json::Value::Array(Vec::new())),
+                ),
+            ))
+        })
+        .collect()
+}
+
 /// Parse a complete (non-streaming) LLM JSON response into an `LlmResult`.
 pub(crate) fn parse_llm_response(
     json: &serde_json::Value,
@@ -180,6 +299,7 @@ pub(crate) fn parse_llm_response(
             thinking_summary: None,
             stop_reason,
             blocks,
+            logprobs: Vec::new(),
         })
     } else {
         if let Some(err) = json["error"]["message"].as_str() {
@@ -344,6 +464,7 @@ pub(crate) fn parse_llm_response(
             },
             stop_reason,
             blocks,
+            logprobs: extract_openai_choice_logprobs(&json["choices"][0]),
         })
     }
 }
@@ -421,7 +542,10 @@ pub(super) fn extract_cache_write_tokens(usage: &serde_json::Value) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_cache_read_tokens, extract_cache_write_tokens, parse_llm_response};
+    use super::{
+        extract_cache_read_tokens, extract_cache_write_tokens, extract_openai_choice_logprobs,
+        parse_llm_response,
+    };
 
     // Build a ResolvedProvider for the Anthropic path without going through
     // the thread-local provider registry — these parser tests only need the
@@ -457,6 +581,63 @@ mod tests {
 
         assert_eq!(extract_cache_read_tokens(&usage), 120);
         assert_eq!(extract_cache_write_tokens(&usage), 40);
+    }
+
+    #[test]
+    fn extracts_chat_completion_logprobs() {
+        let choice = serde_json::json!({
+            "logprobs": {
+                "content": [
+                    {
+                        "token": "safe",
+                        "logprob": -0.1,
+                        "bytes": [115, 97, 102, 101],
+                        "top_logprobs": [
+                            {"token": "safe", "logprob": -0.1},
+                            {"token": "risky", "logprob": -2.4}
+                        ]
+                    }
+                ]
+            }
+        });
+
+        let logprobs = extract_openai_choice_logprobs(&choice);
+
+        assert_eq!(logprobs.len(), 1);
+        assert_eq!(logprobs[0]["token"].as_str(), Some("safe"));
+        assert_eq!(logprobs[0]["logprob"].as_f64(), Some(-0.1));
+        let top = logprobs[0]["top_logprobs"]
+            .as_array()
+            .expect("top logprobs array");
+        assert_eq!(top.len(), 2);
+        assert_eq!(top[1]["token"].as_str(), Some("risky"));
+    }
+
+    #[test]
+    fn extracts_legacy_completion_logprobs() {
+        let choice = serde_json::json!({
+            "logprobs": {
+                "tokens": ["safe"],
+                "token_logprobs": [-0.1],
+                "top_logprobs": [
+                    {"safe": -0.1, "risky": -2.4}
+                ]
+            }
+        });
+
+        let logprobs = extract_openai_choice_logprobs(&choice);
+
+        assert_eq!(logprobs.len(), 1);
+        assert_eq!(logprobs[0]["token"].as_str(), Some("safe"));
+        assert_eq!(logprobs[0]["logprob"].as_f64(), Some(-0.1));
+        let top = logprobs[0]["top_logprobs"]
+            .as_array()
+            .expect("top logprobs array");
+        assert_eq!(top.len(), 2);
+        assert!(top.iter().any(|item| {
+            item.get("token").and_then(|value| value.as_str()) == Some("risky")
+                && item.get("logprob").and_then(|value| value.as_f64()) == Some(-2.4)
+        }));
     }
 
     #[test]

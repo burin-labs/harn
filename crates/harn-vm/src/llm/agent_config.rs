@@ -464,6 +464,7 @@ mod tests {
             thinking: None,
             thinking_summary: None,
             stop_reason: None,
+            logprobs: Vec::new(),
             blocks: Vec::new(),
         };
 

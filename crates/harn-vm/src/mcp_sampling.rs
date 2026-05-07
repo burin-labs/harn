@@ -779,6 +779,7 @@ mod tests {
             model: "mock-model".to_string(),
             provider: Some("mock".to_string()),
             blocks: None,
+            logprobs: Vec::new(),
             error: None,
         });
 

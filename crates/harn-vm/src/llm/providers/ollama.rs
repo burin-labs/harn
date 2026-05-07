@@ -409,6 +409,7 @@ async fn parse_raw_generate_response(
             .get("done_reason")
             .and_then(|value| value.as_str())
             .map(str::to_string),
+        logprobs: Vec::new(),
     })
 }
 
@@ -499,6 +500,7 @@ async fn parse_raw_generate_stream(
         thinking: (!thinking.is_empty()).then_some(thinking),
         thinking_summary: None,
         stop_reason,
+        logprobs: Vec::new(),
     })
 }
 
@@ -564,6 +566,8 @@ mod tests {
             temperature: Some(0.0),
             top_p: None,
             top_k: None,
+            logprobs: false,
+            top_logprobs: None,
             stop: None,
             seed: None,
             frequency_penalty: None,

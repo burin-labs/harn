@@ -50,6 +50,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
                 model: "gpt-4o-mini".to_string(),
                 provider: Some("mock".to_string()),
                 blocks: None,
+                logprobs: Vec::new(),
                 error: None,
             });
 
@@ -134,6 +135,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
                 model: "gpt-4o-mini".to_string(),
                 provider: Some("mock".to_string()),
                 blocks: None,
+                logprobs: Vec::new(),
                 error: None,
             });
 
@@ -386,6 +388,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
                 model: "gpt-4o-mini".to_string(),
                 provider: Some("mock".to_string()),
                 blocks: None,
+                logprobs: Vec::new(),
                 error: None,
             });
 

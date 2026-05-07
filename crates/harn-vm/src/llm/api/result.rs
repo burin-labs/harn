@@ -28,6 +28,7 @@ pub(crate) struct LlmResult {
     pub thinking_summary: Option<String>,
     pub stop_reason: Option<String>,
     pub blocks: Vec<serde_json::Value>,
+    pub logprobs: Vec<serde_json::Value>,
 }
 
 fn build_usage_dict(result: &LlmResult) -> BTreeMap<String, VmValue> {
@@ -272,6 +273,18 @@ pub(crate) fn vm_build_llm_result(
                 .collect::<Vec<_>>(),
         )),
     );
+    if !result.logprobs.is_empty() {
+        dict.insert(
+            "logprobs".to_string(),
+            VmValue::List(Rc::new(
+                result
+                    .logprobs
+                    .iter()
+                    .map(json_to_vm_value)
+                    .collect::<Vec<_>>(),
+            )),
+        );
+    }
 
     VmValue::Dict(Rc::new(dict))
 }
@@ -304,5 +317,6 @@ pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> Ll
             "text": text,
             "visibility": "public",
         })],
+        logprobs: Vec::new(),
     }
 }

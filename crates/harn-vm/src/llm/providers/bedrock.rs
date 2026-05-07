@@ -608,6 +608,8 @@ aws_secret_access_key = dev-secret
             temperature: Some(0.1),
             top_p: Some(0.9),
             top_k: None,
+            logprobs: false,
+            top_logprobs: None,
             stop: None,
             seed: None,
             frequency_penalty: None,
