@@ -1,0 +1,74 @@
+/**
+ * with_required_reason — schema augmentation + execution-time strip + audit.
+ *
+ * 1. Calls without `reason` are short-circuited with status `schema_violation`.
+ * 2. Calls with `reason` strip it from the args passed to `next` and surface
+ *    it on `audit.summary`.
+ * 3. The paired schema_transform makes `reason` a required parameter.
+ */
+import { with_required_reason } from "std/llm/tool_middleware"
+
+fn synthetic_next() {
+  return { call -> return {
+    ok: true,
+    status: "ok",
+    tool_name: call.tool_name,
+    tool_call_id: call.call_id,
+    arguments: call.tool_args,
+    result: "ran",
+    rendered_result: "ran",
+    observation: "[result]\n",
+    error: nil,
+    error_category: nil,
+    executor: "harn",
+  } }
+}
+
+fn envelope(name, args) {
+  return {
+    tool_name: name,
+    tool_args: args,
+    call_id: "call-" + name,
+    declared_executor: "harn",
+    schema: nil,
+    description: "",
+    turn: {iteration: 1, session_id: ""},
+  }
+}
+
+pipeline default() {
+  let mw = with_required_reason()
+  let next = synthetic_next()
+  // (1) missing reason → reject.
+  let r1 = mw.caller(envelope("read", {path: "/tmp/x"}), next)
+  println(r1.ok)
+  println(r1.error_category)
+  // (2) reason present → strip + audit.summary populated.
+  let r2 = mw.caller(envelope("read", {reason: "checking the file", path: "/tmp/x"}), next)
+  println(r2.ok)
+  println(r2.audit.summary)
+  println(contains(r2.arguments.keys(), "reason"))
+  println(r2.arguments.path)
+  // (3) schema_transform injects `reason` as a required field.
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read",
+    "Read",
+    {
+      handler: { _ -> "" },
+      parameters: {type: "object", properties: {path: {type: "string"}}, required: ["path"]},
+      returns: {type: "string"},
+    },
+  )
+  let entry = mw.schema_transform(tools.tools[0])
+  println(contains(entry.parameters.properties.keys(), "reason"))
+  println(contains(entry.parameters.required, "reason"))
+  println(entry.parameters.properties.reason.description)
+  // (4) custom field name + audit_key.
+  let mw2 = with_required_reason({field: "intent", audit_key: "rationale"})
+  let r3 = mw2.caller(envelope("write", {intent: "ship the fix", body: "x"}), next)
+  println(r3.ok)
+  println(r3.audit.rationale)
+  println(contains(r3.arguments.keys(), "intent"))
+}

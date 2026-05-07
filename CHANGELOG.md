@@ -6,6 +6,28 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Composable tool middleware (`std/llm/tool_middleware`).** New parallel
+  seam to `llm_caller`: `agent_loop` now accepts a `tool_caller:` closure that
+  wraps every tool dispatch (across all executors — `harn`, `host_bridge`,
+  `mcp_server`, `provider_native`). Paired with a schema-time decorator
+  (`tools_use_middleware(registry, transform)` + `tool_inject_param`) so
+  middleware can also augment the tool schemas the model sees. Ships
+  `compose_tool_callers([..])`, `default_tool_caller()`, and a bundled
+  middleware library: `with_required_reason` (force a `reason` arg on every
+  tool call and surface it as a user-facing summary), `with_audit_log`,
+  `with_consent`, `with_dry_run`, `with_redaction`, `with_idempotency`,
+  `with_rate_limit`, `with_telemetry`, and `with_summary`. Middleware-attached
+  audit metadata rides on the dispatch result `audit` field (free-form dict
+  aligned with A2A `metadata` / ACP `kind` / OpenAI `summary_text` / OTel
+  `gen_ai.tool.description` conventions) and is also fanned out as a new
+  `tool_call_audit` AgentEvent for live ACP/A2A consumers. See
+  [`docs/src/stdlib/tool-middleware.md`](docs/src/stdlib/tool-middleware.md)
+  for the full reference.
+
 ## v0.7.62
 
 ### Added

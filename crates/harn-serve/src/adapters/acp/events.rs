@@ -786,6 +786,22 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::ToolCallAudit {
+                session_id,
+                tool_call_id,
+                tool_name,
+                audit,
+            } => {
+                self.emit_agent_event_ext(
+                    "tool_call_audit",
+                    session_id,
+                    serde_json::json!({
+                        "toolCallId": tool_call_id,
+                        "toolName": tool_name,
+                        "audit": audit,
+                    }),
+                );
+            }
         }
     }
 }

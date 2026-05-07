@@ -1,0 +1,55 @@
+/**
+ * with_dry_run — never invokes `next`; returns a synthetic OK result
+ * tagged status: "dry_run". Tools listed in `except` run normally.
+ */
+import { with_dry_run } from "std/llm/tool_middleware"
+
+fn next_marker() {
+  return { call -> return {
+    ok: true,
+    status: "ok",
+    tool_name: call.tool_name,
+    tool_call_id: call.call_id,
+    arguments: call.tool_args,
+    result: "REAL",
+    rendered_result: "REAL",
+    observation: "",
+    error: nil,
+    error_category: nil,
+    executor: "harn",
+  } }
+}
+
+fn envelope(name) {
+  return {
+    tool_name: name,
+    tool_args: {},
+    call_id: "c-" + name,
+    declared_executor: "harn",
+    schema: nil,
+    description: "",
+    turn: {iteration: 0, session_id: ""},
+  }
+}
+
+pipeline default() {
+  let next = next_marker()
+  // (1) dry-run everything.
+  let dry = with_dry_run()
+  let r1 = dry(envelope("write"), next)
+  println(r1.ok)
+  println(r1.status)
+  println(r1.result.dry_run)
+  // (2) `except` allows specific tools to actually run.
+  let dry_except_read = with_dry_run({except: ["read"]})
+  let r2 = dry_except_read(envelope("read"), next)
+  let r3 = dry_except_read(envelope("write"), next)
+  println(r2.result)
+  println(r3.status)
+  // (3) `only` runs dry-run only for listed tools.
+  let dry_only_write = with_dry_run({only: ["write"]})
+  let r4 = dry_only_write(envelope("read"), next)
+  let r5 = dry_only_write(envelope("write"), next)
+  println(r4.result)
+  println(r5.status)
+}

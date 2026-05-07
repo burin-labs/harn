@@ -1,0 +1,772 @@
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/tool_middleware — composable middleware around tool execution.
+//
+// Two seams (mirrors the LLM-caller pattern in std/llm/handlers):
+//
+//   1. Schema-time:    tools_use_middleware(registry, transform) -> registry'
+//   2. Execution-time: agent_loop({tool_caller: compose_tool_callers([..])})
+//
+// Middleware envelope (passed to every tool_caller):
+//
+//   call = {
+//     tool_name:          string,
+//     tool_args:          dict,
+//     call_id:            string,
+//     declared_executor:  "harn"|"host_bridge"|"mcp_server"|"provider_native"|nil,
+//     schema:             dict|nil,            // tool's parameter schema
+//     description:        string,              // tool's user-facing description
+//     turn:               {iteration, session_id},
+//   }
+//   next(call) -> result_dict                  // bottom of the stack runs the
+//                                              // default dispatch
+//
+// Result envelope (the dispatch-result dict, lightly enriched):
+//
+//   {
+//     ok, status, tool_name, tool_call_id, arguments,
+//     result, rendered_result, observation,
+//     error, error_category, executor, approval, execution_duration_ms,
+//     audit?,                                  // free-form middleware metadata
+//   }
+//
+// `audit` field convention (aligned with prevailing specs where they exist):
+//
+//   summary?:     string   // user-facing one-liner. Aligns with ACP `title`
+//                          // and OpenAI Responses `summary_text`.
+//   description?: string   // longer free-form rationale. Aligns with OTel
+//                          // `gen_ai.tool.description` + LangChain.
+//   kind?:        string   // "read"|"edit"|"delete"|"move"|"search"|
+//                          // "execute"|"think"|"fetch"|"other" — verbatim
+//                          // from ACP ToolCall.kind.
+//   hints?:       dict     // {read_only?, destructive?, idempotent?,
+//                          // open_world?} — verbatim from MCP tool annotations.
+//   consent?:     dict     // {decision, decided_by, decided_at} — coined.
+//   layers?:      list     // [{name, status, started_at, ended_at, error?}]
+//                          // per-layer audit trail.
+//   metadata?:    dict     // free-form extension slot — A2A/LangChain idiom.
+//
+// Reserved status values for short-circuited results (use these so
+// composition stays predictable):
+//
+//   "ok", "tool_not_found", "schema_violation", "consent_denied",
+//   "policy_blocked", "executor_error", "redacted", "dry_run",
+//   "rate_limited", "exception", "tool_middleware_exception".
+//
+// Composition uses `compose_tool_callers([outer, ..., inner])` — leftmost is
+// the outermost wrapper. Exactly mirrors std/llm/handlers `compose`.
+import { cache_get, cache_put } from "std/cache"
+
+// -------------------------------------------------------------------------------------------------
+// shared helpers
+// -------------------------------------------------------------------------------------------------
+
+fn __tool_mw_is_callable(value) -> bool {
+  let kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __tool_mw_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __tool_mw_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __tool_mw_short_circuit(envelope, status, fields) {
+  let base = {
+    ok: false,
+    status: "error",
+    tool_name: envelope.tool_name,
+    tool_call_id: envelope.call_id,
+    arguments: envelope.tool_args,
+    result: nil,
+    rendered_result: "",
+    observation: "[blocked: " + envelope.tool_name + " — " + status + "]",
+    error: status,
+    error_category: status,
+    executor: nil,
+  }
+  let extra = if fields == nil {
+    {}
+  } else {
+    fields
+  }
+  return base + extra
+}
+
+fn __merge_audit(existing, addition) {
+  if addition == nil {
+    return existing
+  }
+  let base = if type_of(existing) == "dict" {
+    existing
+  } else {
+    {}
+  }
+  let layers = __tool_mw_list(base?.layers) + __tool_mw_list(addition?.layers)
+  let merged = base + addition
+  if len(layers) > 0 {
+    return merged + {layers: layers}
+  }
+  return merged
+}
+
+fn __tool_mw_attach_audit(result, addition) {
+  if addition == nil {
+    return result
+  }
+  let merged = __merge_audit(result?.audit, addition)
+  return result + {audit: merged}
+}
+
+fn __tool_mw_now_iso() -> string {
+  return date_now_iso()
+}
+
+fn __safe_call_caller(caller, envelope, next) {
+  let outcome = try {
+    caller(envelope, next)
+  }
+  if is_err(outcome) {
+    let err = unwrap_err(outcome)
+    return {
+      ok: false,
+      status: "error",
+      tool_name: envelope.tool_name,
+      tool_call_id: envelope.call_id,
+      arguments: envelope.tool_args,
+      result: nil,
+      rendered_result: to_string(err),
+      observation: "[error from " + envelope.tool_name + "]\n" + to_string(err) + "\n",
+      error: to_string(err),
+      error_category: "tool_middleware_exception",
+      executor: nil,
+      audit: {
+        layers: [{name: "tool_caller", status: "exception", error: to_string(err), at: __tool_mw_now_iso()}],
+      },
+    }
+  }
+  return unwrap(outcome)
+}
+
+// -------------------------------------------------------------------------------------------------
+// Seam 1 — schema-time decorators
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * tools_use_middleware(registry, transform) -> registry
+ *
+ * Returns a NEW registry where each tool entry has been passed through
+ * `transform(entry)` and replaced with the returned dict. Use this to
+ * augment schemas before passing the registry to agent_loop:
+ *
+ *     let registry = tool_define(...)
+ *     let registry = tools_use_middleware(registry, with_required_reason_schema)
+ *     agent_loop({tools: registry, tool_caller: with_required_reason_caller()})
+ *
+ * `transform` may return the same entry unchanged. Returning nil drops
+ * the tool from the registry (use sparingly — most callers should keep
+ * the tool and reject calls in the execution-time middleware instead).
+ */
+pub fn tools_use_middleware(registry, transform) {
+  if !__tool_mw_is_callable(transform) {
+    throw "tools_use_middleware: transform must be callable; got " + type_of(transform)
+  }
+  if type_of(registry) != "dict" {
+    throw "tools_use_middleware: registry must be a tool registry dict; got " + type_of(registry)
+  }
+  let entries = __tool_mw_list(registry?.tools)
+  var rewritten = []
+  for entry in entries {
+    if type_of(entry) != "dict" {
+      rewritten = rewritten.push(entry)
+      continue
+    }
+    let mapped = try {
+      transform(entry)
+    }
+    if is_err(mapped) {
+      throw unwrap_err(mapped)
+    }
+    let value = unwrap(mapped)
+    if value == nil {
+      continue
+    }
+    if type_of(value) != "dict" {
+      throw "tools_use_middleware: transform returned " + type_of(value) + "; expected dict or nil"
+    }
+    rewritten = rewritten.push(value)
+  }
+  return registry + {tools: rewritten}
+}
+
+/**
+ * tool_inject_param(entry, name, schema_fragment, opts?) -> entry
+ *
+ * Helper for schema-time middleware: given a tool registry entry, returns
+ * a new entry whose `parameters` schema includes the given parameter.
+ * Honors both the bare `{x: "string"}` shorthand and the full JSON-schema
+ * `{type: "object", properties: {...}, required: [...]}` shape.
+ *
+ * `opts` (optional):
+ *   required: bool         (default true; adds the param to `required`)
+ *
+ * If the entry already declares the parameter, it is left untouched
+ * (assumes the caller knew what they were doing — middleware should be
+ * additive, not destructive).
+ */
+pub fn tool_inject_param(entry, name, schema_fragment, opts = nil) {
+  if type_of(entry) != "dict" {
+    return entry
+  }
+  let cfg = __tool_mw_dict(opts)
+  let required = cfg?.required ?? true
+  let params = entry?.parameters
+  if type_of(params) == "dict" && contains(params.keys(), "type")
+    && to_string(params.type) == "object" {
+    let props = __tool_mw_dict(params?.properties)
+    if contains(props.keys(), name) {
+      return entry
+    }
+    let new_props = props + {[name]: schema_fragment}
+    let req_list = __tool_mw_list(params?.required)
+    let new_req = if required && !contains(req_list, name) {
+      req_list.push(name)
+    } else {
+      req_list
+    }
+    let new_params = params + {properties: new_props, required: new_req}
+    return entry + {parameters: new_params}
+  }
+  // Bare-shorthand path: parameters is `{name: "type"}` or empty.
+  let bare = __tool_mw_dict(params)
+  if contains(bare.keys(), name) {
+    return entry
+  }
+  return entry + {parameters: bare + {[name]: schema_fragment}}
+}
+
+// -------------------------------------------------------------------------------------------------
+// Seam 2 — composition + default tool caller
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * default_tool_caller() -> caller
+ *
+ * Returns a closure that just delegates to the runtime default dispatch.
+ * Useful as the bottom of a `compose_tool_callers([..])` stack when you
+ * want to be explicit (the agent_loop runtime treats `tool_caller: nil`
+ * as "no middleware" and short-circuits to the same path automatically).
+ */
+pub fn default_tool_caller() {
+  return { call, next -> next(call) }
+}
+
+/**
+ * compose_tool_callers([outer, ..., inner]) -> caller
+ *
+ * Wrappers apply right-to-left: leftmost is the outermost wrapper, so
+ * `compose_tool_callers([a, b, c])` invokes `a` first; `a` may call
+ * `next` to reach `b`, and so on. If the list is empty, returns a
+ * passthrough caller.
+ *
+ * Each wrapper has signature `fn(call, next) -> result_dict`. To
+ * short-circuit (skip the rest of the stack), return without calling
+ * `next`. To mutate args, call `next(call + {tool_args: new_args})`.
+ */
+pub fn compose_tool_callers(wrappers) {
+  let list = __tool_mw_list(wrappers)
+  if len(list) == 0 {
+    return default_tool_caller()
+  }
+  return { call, next ->
+    var built = next
+    var i = len(list) - 1
+    while i >= 0 {
+      let layer = list[i]
+      let prev = built
+      built = { c -> __safe_call_caller(layer, c, prev) }
+      i = i - 1
+    }
+    return built(call)
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Bundled middleware library
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * with_required_reason(opts?) -> {schema_transform, caller}
+ *
+ * The originating use-case: forces every tool call to provide a `reason`
+ * (or a custom-named) string explaining WHY the model is making the call.
+ * Returns a paired transform + caller because the schema decoration must
+ * apply at registration time and the execution-time caller strips the
+ * reason out of args before delegating downstream so tools don't have
+ * to know about it.
+ *
+ * Options (all optional):
+ *   field:         string   // arg field name (default "reason")
+ *   description:   string   // schema description for the field
+ *   strip:         bool     // strip from args before next() (default true)
+ *   audit_key:     string   // where to store on `audit` (default "summary")
+ *   min_length:    int      // reject calls shorter than this (default 1)
+ *   on_missing:    string   // "reject" | "fill_blank" (default "reject")
+ *
+ * Apply with:
+ *
+ *     let mw = with_required_reason()
+ *     let registry = tools_use_middleware(registry, mw.schema_transform)
+ *     agent_loop({tools: registry, tool_caller: mw.caller})
+ */
+pub fn with_required_reason(opts = nil) {
+  let cfg = __tool_mw_dict(opts)
+  let field = to_string(cfg?.field ?? "reason")
+  let description = to_string(cfg?.description ?? "Brief one-line reason for invoking this tool")
+  let strip = cfg?.strip ?? true
+  let audit_key = to_string(cfg?.audit_key ?? "summary")
+  let min_length = cfg?.min_length ?? 1
+  let on_missing = to_string(cfg?.on_missing ?? "reject")
+  let schema_fragment = {type: "string", description: description}
+  let schema_transform = { entry -> return tool_inject_param(entry, field, schema_fragment, {required: true}) }
+  let caller = { call, next ->
+    let raw = call.tool_args?[field]
+    let value = if type_of(raw) == "string" {
+      trim(raw)
+    } else {
+      ""
+    }
+    if len(value) < min_length {
+      if on_missing == "fill_blank" {
+        let stripped_args = if strip {
+          var cleaned = {}
+          for key in call.tool_args.keys() {
+            if key != field {
+              cleaned = cleaned + {[key]: call.tool_args[key]}
+            }
+          }
+          cleaned
+        } else {
+          call.tool_args
+        }
+        let result = next(call + {tool_args: stripped_args})
+        return __tool_mw_attach_audit(
+          result,
+          {[audit_key]: "(no reason given)", layers: [{name: "with_required_reason", status: "fill_blank"}]},
+        )
+      }
+      return __tool_mw_short_circuit(
+        call,
+        "schema_violation",
+        {
+          error: "with_required_reason: tool `" + call.tool_name + "` was invoked without a `"
+            + field
+            + "` (required by middleware)",
+          error_category: "schema_violation",
+          audit: {layers: [{name: "with_required_reason", status: "rejected"}]},
+        },
+      )
+    }
+    let next_args = if strip {
+      var cleaned = {}
+      for key in call.tool_args.keys() {
+        if key != field {
+          cleaned = cleaned + {[key]: call.tool_args[key]}
+        }
+      }
+      cleaned
+    } else {
+      call.tool_args
+    }
+    let result = next(call + {tool_args: next_args})
+    return __tool_mw_attach_audit(
+      result,
+      {[audit_key]: value, layers: [{name: "with_required_reason", status: "ok"}]},
+    )
+  }
+  return {schema_transform: schema_transform, caller: caller}
+}
+
+/**
+ * with_audit_log(sink) -> caller
+ *
+ * Pushes one record per tool call into `sink(record)` after the call
+ * completes. `record` shape:
+ *
+ *   {
+ *     tool_name, tool_call_id, ok, status, executor,
+ *     duration_ms, args, result, error,
+ *     audit,                           // middleware-attached metadata
+ *     turn: {iteration, session_id},
+ *   }
+ *
+ * The sink runs after `next` returns; exceptions inside the sink are
+ * swallowed so audit failures don't break the agent loop.
+ */
+pub fn with_audit_log(sink) {
+  if !__tool_mw_is_callable(sink) {
+    throw "with_audit_log: sink must be callable; got " + type_of(sink)
+  }
+  return { call, next ->
+    let started = now_ms()
+    let result = next(call)
+    let duration = now_ms() - started
+    let record = {
+      tool_name: call.tool_name,
+      tool_call_id: call.call_id,
+      ok: result?.ok ?? false,
+      status: to_string(result?.status ?? ""),
+      executor: result?.executor,
+      duration_ms: duration,
+      args: call.tool_args,
+      result: result?.result,
+      error: result?.error,
+      audit: result?.audit,
+      turn: call.turn,
+    }
+    let _ = try {
+      sink(record)
+    }
+    return result
+  }
+}
+
+/**
+ * with_consent(prompt_fn) -> caller
+ *
+ * `prompt_fn(call) -> bool | dict` is consulted before each tool call.
+ * - `true` / `{decision: "approved"}`: proceed; record decision in audit.
+ * - `false` / `{decision: "denied", reason?}`: short-circuit with status
+ *   `consent_denied`.
+ *
+ * Use to gate destructive tools on host-side approval (e.g. burin-code).
+ * Read-only tools can opt out by returning `{decision: "auto"}`.
+ */
+pub fn with_consent(prompt_fn) {
+  if !__tool_mw_is_callable(prompt_fn) {
+    throw "with_consent: prompt_fn must be callable; got " + type_of(prompt_fn)
+  }
+  return { call, next ->
+    let outcome = try {
+      prompt_fn(call)
+    }
+    let raw = if is_err(outcome) {
+      {decision: "denied", reason: to_string(unwrap_err(outcome))}
+    } else {
+      unwrap(outcome)
+    }
+    let decision = if type_of(raw) == "bool" {
+      if raw {
+        {decision: "approved"}
+      } else {
+        {decision: "denied"}
+      }
+    } else {
+      __tool_mw_dict(raw)
+    }
+    let verdict = to_string(decision?.decision ?? "denied")
+    if verdict == "denied" {
+      return __tool_mw_short_circuit(
+        call,
+        "consent_denied",
+        {
+          error: to_string(decision?.reason ?? "consent denied by middleware"),
+          error_category: "consent_denied",
+          audit: {
+            consent: {
+              decision: "denied",
+              decided_by: to_string(decision?.decided_by ?? "with_consent"),
+              decided_at: __tool_mw_now_iso(),
+            },
+            layers: [{name: "with_consent", status: "denied"}],
+          },
+        },
+      )
+    }
+    let result = next(call)
+    return __tool_mw_attach_audit(
+      result,
+      {
+        consent: {
+          decision: verdict,
+          decided_by: to_string(decision?.decided_by ?? "with_consent"),
+          decided_at: __tool_mw_now_iso(),
+        },
+        layers: [{name: "with_consent", status: verdict}],
+      },
+    )
+  }
+}
+
+/**
+ * with_dry_run(opts?) -> caller
+ *
+ * Never invokes `next` — short-circuits with a synthetic OK result that
+ * echoes the args as the rendered output. Useful for previewing a tool
+ * sequence without performing side-effects (e.g. when scaffolding a new
+ * harness, or when the host wants to display "what would happen").
+ *
+ * Options:
+ *   message: string    (default "(dry run)")
+ *   only:    list      (only dry-run these tool names; others run normally)
+ *   except:  list      (run normally for these tools, dry-run the rest)
+ */
+pub fn with_dry_run(opts = nil) {
+  let cfg = __tool_mw_dict(opts)
+  let message = to_string(cfg?.message ?? "(dry run)")
+  let only = __tool_mw_list(cfg?.only)
+  let except = __tool_mw_list(cfg?.except)
+  return { call, next ->
+    let in_only = len(only) == 0 || contains(only, call.tool_name)
+    let in_except = contains(except, call.tool_name)
+    if !in_only || in_except {
+      return next(call)
+    }
+    let summary = message + " — " + call.tool_name + "(" + to_string(call.tool_args) + ")"
+    return {
+      ok: true,
+      status: "dry_run",
+      tool_name: call.tool_name,
+      tool_call_id: call.call_id,
+      arguments: call.tool_args,
+      result: {dry_run: true, args: call.tool_args},
+      rendered_result: summary,
+      observation: "[dry run of " + call.tool_name + "]\n" + summary + "\n",
+      error: nil,
+      error_category: nil,
+      executor: nil,
+      audit: {kind: "think", layers: [{name: "with_dry_run", status: "preview"}]},
+    }
+  }
+}
+
+/**
+ * with_redaction(redactor) -> caller
+ *
+ * `redactor(record) -> {args?, result?, redacted_fields?}`. Applied
+ * twice: once on the inbound args (before next), once on the outbound
+ * result (after next). The middleware records the list of redacted
+ * fields in audit for downstream observability.
+ */
+pub fn with_redaction(redactor) {
+  if !__tool_mw_is_callable(redactor) {
+    throw "with_redaction: redactor must be callable; got " + type_of(redactor)
+  }
+  return { call, next ->
+    let in_redact = try {
+      redactor({phase: "in", tool_name: call.tool_name, args: call.tool_args, result: nil})
+    }
+    let inbound = if is_err(in_redact) {
+      {args: call.tool_args, redacted_fields: []}
+    } else {
+      __tool_mw_dict(unwrap(in_redact))
+    }
+    let safe_args = if inbound?.args != nil {
+      inbound.args
+    } else {
+      call.tool_args
+    }
+    let result = next(call + {tool_args: safe_args})
+    let out_redact = try {
+      redactor({phase: "out", tool_name: call.tool_name, args: safe_args, result: result?.result})
+    }
+    let outbound = if is_err(out_redact) {
+      {result: result?.result, redacted_fields: []}
+    } else {
+      __tool_mw_dict(unwrap(out_redact))
+    }
+    let in_fields = __tool_mw_list(inbound?.redacted_fields)
+    let out_fields = __tool_mw_list(outbound?.redacted_fields)
+    let final_result = if outbound?.result != nil {
+      result + {result: outbound.result}
+    } else {
+      result
+    }
+    return __tool_mw_attach_audit(
+      final_result,
+      {
+        metadata: {redacted_in: in_fields, redacted_out: out_fields},
+        layers: [{name: "with_redaction", status: "ok"}],
+      },
+    )
+  }
+}
+
+/**
+ * with_idempotency(key_fn, opts?) -> caller
+ *
+ * Caches successful tool results keyed by `key_fn(call) -> string`.
+ * Identical keys reuse the cached result within the configured TTL.
+ *
+ * Backed by std/cache so the cache outlives the caller closure (the
+ * point — repeat queries across turns benefit). Opt out by setting
+ * `store: nil` to fall back to per-caller scope (no caching).
+ *
+ * Options (all optional):
+ *   store:       string  // cache store name (default "tool.idempotency")
+ *   ttl:         string  // cache TTL (default "10m"); see std/cache
+ *   namespace:   string  // cache namespace (default "tool_middleware")
+ */
+pub fn with_idempotency(key_fn, opts = nil) {
+  if !__tool_mw_is_callable(key_fn) {
+    throw "with_idempotency: key_fn must be callable; got " + type_of(key_fn)
+  }
+  let cfg = __tool_mw_dict(opts)
+  let cache_options = {
+    store: cfg?.store ?? "tool.idempotency",
+    namespace: cfg?.namespace ?? "tool_middleware",
+    ttl: cfg?.ttl ?? "10m",
+    max_entries: cfg?.max_entries ?? 256,
+  }
+  return { call, next ->
+    let key_outcome = try {
+      key_fn(call)
+    }
+    let key = if is_err(key_outcome) {
+      ""
+    } else {
+      to_string(unwrap(key_outcome) ?? "")
+    }
+    if key == "" {
+      return next(call)
+    }
+    let cached = cache_get(key, cache_options)
+    if cached?.hit ?? false {
+      return __tool_mw_attach_audit(
+        cached.value,
+        {layers: [{name: "with_idempotency", status: "hit", key: key}]},
+      )
+    }
+    let result = next(call)
+    if result?.ok ?? false {
+      let _ = cache_put(key, result, cache_options)
+    }
+    return __tool_mw_attach_audit(result, {layers: [{name: "with_idempotency", status: "miss", key: key}]})
+  }
+}
+
+/**
+ * with_rate_limit(opts) -> caller
+ *
+ * Caps the TOTAL number of tool calls processed by this caller. Once
+ * `max_calls` is hit, further calls short-circuit with
+ * `rate_limited`. Per-tool granularity is achievable by composing
+ * multiple instances under a `with_dispatch_filter` (future helper).
+ *
+ * Options:
+ *   max_calls: int       (required; total cap across all tools)
+ *   message:   string    (override error message)
+ */
+pub fn with_rate_limit(opts) {
+  let cfg = __tool_mw_dict(opts)
+  let cap = cfg?.max_calls
+  if type_of(cap) != "int" || cap < 0 {
+    throw "with_rate_limit: max_calls must be a non-negative int"
+  }
+  let counter = atomic(0)
+  let message = to_string(cfg?.message ?? "rate limit exceeded")
+  return { call, next ->
+    let count = atomic_get(counter)
+    if count >= cap {
+      return __tool_mw_short_circuit(
+        call,
+        "rate_limited",
+        {
+          error: message + " (cap: " + to_string(cap) + ", count: " + to_string(count) + ")",
+          error_category: "rate_limited",
+          audit: {layers: [{name: "with_rate_limit", status: "blocked", count: count, cap: cap}]},
+        },
+      )
+    }
+    let _ = atomic_add(counter, 1)
+    let result = next(call)
+    return __tool_mw_attach_audit(
+      result,
+      {layers: [{name: "with_rate_limit", status: "ok", count: count + 1, cap: cap}]},
+    )
+  }
+}
+
+/**
+ * with_telemetry(sink) -> caller
+ *
+ * Sink-style observer that emits one record per call with timings + the
+ * declared executor + status. Format-compatible with OTel `gen_ai.tool.*`
+ * attributes — sinks can map directly to spans:
+ *
+ *   {
+ *     gen_ai_tool_name, gen_ai_tool_call_id, gen_ai_tool_call_arguments,
+ *     gen_ai_tool_call_result, gen_ai_tool_executor,
+ *     status, duration_ms, error?,
+ *   }
+ */
+pub fn with_telemetry(sink) {
+  if !__tool_mw_is_callable(sink) {
+    throw "with_telemetry: sink must be callable; got " + type_of(sink)
+  }
+  return { call, next ->
+    let started = now_ms()
+    let result = next(call)
+    let duration = now_ms() - started
+    let record = {
+      gen_ai_tool_name: call.tool_name,
+      gen_ai_tool_call_id: call.call_id,
+      gen_ai_tool_call_arguments: call.tool_args,
+      gen_ai_tool_call_result: result?.result,
+      gen_ai_tool_executor: result?.executor,
+      status: to_string(result?.status ?? ""),
+      ok: result?.ok ?? false,
+      duration_ms: duration,
+      error: result?.error,
+    }
+    let _ = try {
+      sink(record)
+    }
+    return __tool_mw_attach_audit(
+      result,
+      {layers: [{name: "with_telemetry", status: "ok", duration_ms: duration}]},
+    )
+  }
+}
+
+/**
+ * with_summary(format_fn) -> caller
+ *
+ * Generates a user-facing one-liner summary for each tool call by
+ * invoking `format_fn(call, result) -> string`. The summary lands in
+ * the standard `audit.summary` slot (ACP `title` / OpenAI `summary_text`
+ * convention), so hosts can render "Searched codebase to find rate
+ * limiter middleware" in place of generic tool-call counters.
+ *
+ * Pair with the host UX layer (e.g. burin-code) that already consumes
+ * tool_call_audit events.
+ */
+pub fn with_summary(format_fn) {
+  if !__tool_mw_is_callable(format_fn) {
+    throw "with_summary: format_fn must be callable; got " + type_of(format_fn)
+  }
+  return { call, next ->
+    let result = next(call)
+    let outcome = try {
+      format_fn(call, result)
+    }
+    let summary = if is_err(outcome) {
+      ""
+    } else {
+      to_string(unwrap(outcome) ?? "")
+    }
+    if summary == "" {
+      return result
+    }
+    return __tool_mw_attach_audit(result, {summary: summary, layers: [{name: "with_summary", status: "ok"}]})
+  }
+}

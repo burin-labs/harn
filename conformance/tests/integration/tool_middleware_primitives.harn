@@ -1,0 +1,97 @@
+/**
+ * Exercises the std/llm/tool_middleware primitives at the closure level —
+ * default_tool_caller passthrough, compose_tool_callers right-to-left
+ * ordering, and tools_use_middleware schema decoration. No agent_loop
+ * needed; we hand-build envelopes and a synthetic `next`.
+ */
+import {
+  compose_tool_callers,
+  default_tool_caller,
+  tool_inject_param,
+  tools_use_middleware,
+} from "std/llm/tool_middleware"
+
+fn synthetic_next() {
+  return { call -> return {
+    ok: true,
+    status: "ok",
+    tool_name: call.tool_name,
+    tool_call_id: call.call_id,
+    arguments: call.tool_args,
+    result: "ran " + call.tool_name,
+    rendered_result: "ran " + call.tool_name,
+    observation: "[result of " + call.tool_name + "]\n",
+    error: nil,
+    error_category: nil,
+    executor: "harn",
+  } }
+}
+
+fn envelope(name, args) {
+  return {
+    tool_name: name,
+    tool_args: args,
+    call_id: "call-" + name,
+    declared_executor: "harn",
+    schema: nil,
+    description: "",
+    turn: {iteration: 0, session_id: ""},
+  }
+}
+
+pipeline default() {
+  let next = synthetic_next()
+  // (1) default_tool_caller passes through unchanged.
+  let dc = default_tool_caller()
+  let r1 = dc(envelope("read", {path: "/etc/hosts"}), next)
+  println(r1.ok)
+  println(r1.tool_name)
+  println(r1.arguments.path)
+  // (2) compose ordering: outer wrapper runs first; both args mutations
+  // reach `next`; outer's post-wrap field lands on the result.
+  let outer = { call, inner ->
+    let result = inner(call + {tool_args: call.tool_args + {seen_by: "outer"}})
+    return result + {wrapped_by: "outer"}
+  }
+  let middle = { call, inner -> return inner(call + {tool_args: call.tool_args + {seen_by_middle: "yes"}}) }
+  let composed = compose_tool_callers([outer, middle])
+  let r2 = composed(envelope("write", {path: "/tmp/x"}), next)
+  println(r2.wrapped_by)
+  println(r2.arguments.seen_by)
+  println(r2.arguments.seen_by_middle)
+  // (3) tools_use_middleware applies the schema transform per entry.
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read",
+    "Read a file",
+    {handler: { _ -> "" }, parameters: {path: {type: "string"}}, returns: {type: "string"}},
+  )
+  let added = tools_use_middleware(
+    tools,
+    { entry -> tool_inject_param(entry, "reason", {type: "string", description: "why"}) },
+  )
+  let read_entry = added.tools[0]
+  println(contains(read_entry.parameters.keys(), "reason"))
+  println(contains(read_entry.parameters.keys(), "path"))
+  println(read_entry.parameters.reason.description)
+  // (4) JSON-schema-shaped parameters keep `required` updated.
+  var tools2 = tool_registry()
+  tools2 = tool_define(
+    tools2,
+    "edit",
+    "Edit a file",
+    {
+      handler: { _ -> "" },
+      parameters: {type: "object", properties: {path: {type: "string"}}, required: ["path"]},
+      returns: {type: "string"},
+    },
+  )
+  let added2 = tools_use_middleware(
+    tools2,
+    { entry -> tool_inject_param(entry, "reason", {type: "string"}, {required: true}) },
+  )
+  let edit_entry = added2.tools[0]
+  println(contains(edit_entry.parameters.properties.keys(), "reason"))
+  println(contains(edit_entry.parameters.required, "reason"))
+}

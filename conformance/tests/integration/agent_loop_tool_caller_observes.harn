@@ -1,0 +1,53 @@
+/**
+ * agent_loop({tool_caller}) routes every dispatch through the supplied
+ * caller. The caller increments a counter, observes the envelope, and
+ * delegates. Asserts the counter matches the number of tool calls and
+ * that the audit data attached by the caller surfaces on the dispatch
+ * result that gets recorded into the session.
+ */
+import { with_required_reason } from "std/llm/tool_middleware"
+
+let observed = atomic(0)
+
+fn tools() {
+  let r = tool_registry()
+  return tool_define(
+    r,
+    "echo",
+    "Echo back",
+    {handler: { args -> "echoed: " + to_string(args?.msg ?? "") }, parameters: {msg: {type: "string"}}},
+  )
+}
+
+pipeline default() {
+  llm_mock_clear()
+  // Two tool calls in turn 1, then a finishing turn.
+  llm_mock(
+    {
+      tool_calls: [
+        {id: "c1", name: "echo", arguments: {msg: "first", reason: "first call"}},
+        {id: "c2", name: "echo", arguments: {msg: "second", reason: "second call"}},
+      ],
+    },
+  )
+  llm_mock({text: "##DONE##"})
+  let mw = with_required_reason()
+  let counting_caller = { call, next ->
+    let _ = atomic_add(observed, 1)
+    return mw.caller(call, next)
+  }
+  let result = agent_loop(
+    "do it",
+    nil,
+    {
+      provider: "mock",
+      tools: tools(),
+      tool_format: "native",
+      max_iterations: 3,
+      loop_until_done: true,
+      tool_caller: counting_caller,
+    },
+  )
+  println(result.status)
+  println(atomic_get(observed))
+}

@@ -524,6 +524,24 @@ pub enum AgentEvent {
         reason: String,
         status: String,
     },
+    /// Emitted when a `tool_caller` middleware (see std/llm/tool_middleware)
+    /// attaches structured audit metadata to a tool call — typically a
+    /// user-facing `summary`, a `description`, an ACP-style `kind`, an MCP
+    /// `hints` block, a `consent` decision, the per-layer `layers` log, or
+    /// free-form `metadata` keys (A2A-style extension slot).
+    ///
+    /// One-to-one with the underlying tool-call: hosts can join on
+    /// `tool_call_id` to render middleware-attached chips alongside the
+    /// existing `ToolCall` / `ToolCallUpdate` stream. The `audit` payload
+    /// is intentionally free-form JSON so middleware can carry whatever
+    /// shape the harness author chooses without needing protocol-level
+    /// changes per new middleware.
+    ToolCallAudit {
+        session_id: String,
+        tool_call_id: String,
+        tool_name: String,
+        audit: serde_json::Value,
+    },
 }
 
 impl AgentEvent {
@@ -553,7 +571,8 @@ impl AgentEvent {
             | Self::WorkerUpdate { session_id, .. }
             | Self::HitlRequested { session_id, .. }
             | Self::HitlResolved { session_id, .. }
-            | Self::LoopControlDecision { session_id, .. } => session_id,
+            | Self::LoopControlDecision { session_id, .. }
+            | Self::ToolCallAudit { session_id, .. } => session_id,
         }
     }
 }
@@ -1670,5 +1689,42 @@ mod tests {
             }
             other => panic!("expected ToolCallUpdate, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tool_call_audit_serializes_with_free_form_audit_payload() {
+        // Middleware-attached metadata is intentionally free-form JSON
+        // (A2A-style `metadata` extension slot). The wire format must
+        // preserve nested dicts + lists verbatim so hosts can read
+        // `summary`/`consent`/`layers`/etc. without per-field schema.
+        let audit = serde_json::json!({
+            "summary": "Searched codebase",
+            "kind": "search",
+            "consent": {"decision": "approved", "decided_by": "auto"},
+            "layers": [{"name": "with_required_reason", "status": "ok"}],
+        });
+        let event = AgentEvent::ToolCallAudit {
+            session_id: "s".into(),
+            tool_call_id: "tc-1".into(),
+            tool_name: "search_files".into(),
+            audit: audit.clone(),
+        };
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "tool_call_audit");
+        assert_eq!(json["session_id"], "s");
+        assert_eq!(json["tool_call_id"], "tc-1");
+        assert_eq!(json["tool_name"], "search_files");
+        assert_eq!(json["audit"], audit);
+    }
+
+    #[test]
+    fn tool_call_audit_session_id_routes_correctly() {
+        let event = AgentEvent::ToolCallAudit {
+            session_id: "abc".into(),
+            tool_call_id: "tc".into(),
+            tool_name: "read".into(),
+            audit: serde_json::Value::Null,
+        };
+        assert_eq!(event.session_id(), "abc");
     }
 }

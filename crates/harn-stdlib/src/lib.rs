@@ -150,6 +150,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/llm/handlers.harn"),
     },
     StdlibSource {
+        module: "llm/tool_middleware",
+        source: include_str!("stdlib/llm/tool_middleware.harn"),
+    },
+    StdlibSource {
         module: "llm/refine",
         source: include_str!("stdlib/llm/refine.harn"),
     },
@@ -767,6 +771,7 @@ mod tests {
             "command",
             "waitpoint",
             "llm/handlers",
+            "llm/tool_middleware",
             "llm/ensemble",
             "llm/rerank",
             "personas/prelude",

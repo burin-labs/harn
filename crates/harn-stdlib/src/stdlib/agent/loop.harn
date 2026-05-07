@@ -7,6 +7,7 @@ import { agent_mcp_bootstrap_if_needed } from "std/agent/mcp"
 import { agent_loop_options } from "std/agent/options"
 import { agent_compute_post_turn } from "std/agent/postturn"
 import { agent_build_turn_messages, agent_build_turn_system } from "std/agent/preflight"
+import { agent_dispatch_tool_batch, agent_dispatch_tool_call } from "std/agent/primitives"
 import { native_tool_contract_feedback_prompt } from "std/agent/prompts"
 import { agent_skills_match } from "std/agent/skills"
 import {
@@ -82,6 +83,204 @@ fn __invoke_llm(message, turn_system, llm_opts) {
   return r
 }
 
+// -------------------------------------------------------------------------------------------------
+
+// Tool middleware seam — composable tool_caller (mirrors __invoke_llm).
+//
+// Each tool dispatch is funneled through `tool_caller(envelope, next)` when
+// the agent_loop options carry one. The envelope normalizes the call shape
+// so middleware doesn't have to peek at the underlying registry/schema:
+//
+//   envelope = {
+//     tool_name, tool_args, call_id,
+//     declared_executor?, schema?, description?,
+//     turn: {iteration, session_id},
+//   }
+//
+// The middleware returns a dispatch-shape dict. Calling `next(envelope)`
+// runs the default dispatch (with any envelope mutations the middleware
+// applied — typically `tool_args` rewrites or argument stripping). Callers
+// can short-circuit by returning their own dict without invoking `next`.
+//
+// See std/llm/tool_middleware for the userspace primitives + the bundled
+// middleware library (with_required_reason, with_audit_log, …).
+
+// -------------------------------------------------------------------------------------------------
+
+fn __tool_registry_entry(tools, tool_name) {
+  if tools == nil {
+    return nil
+  }
+  let entries = tools?.tools
+  if type_of(entries) != "list" {
+    return nil
+  }
+  for entry in entries {
+    if type_of(entry) != "dict" {
+      continue
+    }
+    let entry_name = if entry?.name != nil {
+      to_string(entry.name)
+    } else {
+      let func = entry?.function
+      if type_of(func) == "dict" {
+        to_string(func?.name ?? "")
+      } else {
+        ""
+      }
+    }
+    if entry_name == tool_name {
+      return entry
+    }
+  }
+  return nil
+}
+
+fn __tool_envelope(call, tools, options) {
+  let tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  let tool_args_raw = call?.arguments ?? call?.tool_args
+  let tool_args = if type_of(tool_args_raw) == "dict" {
+    tool_args_raw
+  } else {
+    {}
+  }
+  let entry = __tool_registry_entry(tools, tool_name)
+  let declared_executor = if entry == nil {
+    nil
+  } else {
+    let direct = entry?.executor
+    if direct != nil {
+      to_string(direct)
+    } else {
+      let func = entry?.function
+      if type_of(func) == "dict" && func?.executor != nil {
+        to_string(func.executor)
+      } else {
+        nil
+      }
+    }
+  }
+  let schema = if entry == nil {
+    nil
+  } else {
+    entry?.parameters ?? entry?.input_schema ?? entry?.inputSchema
+  }
+  let description = if entry == nil {
+    ""
+  } else {
+    let direct = entry?.description
+    if direct != nil {
+      to_string(direct)
+    } else {
+      let func = entry?.function
+      if type_of(func) == "dict" && func?.description != nil {
+        to_string(func.description)
+      } else {
+        ""
+      }
+    }
+  }
+  return {
+    tool_name: tool_name,
+    tool_args: tool_args,
+    call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
+    declared_executor: declared_executor,
+    schema: schema,
+    description: description,
+    turn: {iteration: options?._turn_iteration ?? 0, session_id: to_string(options?.session_id ?? "")},
+  }
+}
+
+fn __default_invoke_tool(envelope, original_call, tools, options) {
+  let next_call = original_call
+    + {name: envelope.tool_name, tool_name: envelope.tool_name, arguments: envelope.tool_args}
+  return agent_dispatch_tool_call(next_call, tools, options)
+}
+
+fn __validate_tool_caller_result(r) {
+  if type_of(r) != "dict" {
+    throw "agent_loop: tool_caller must return a dict; got " + type_of(r)
+  }
+  let name = r?.tool_name ?? r?.name
+  if name == nil || to_string(name) == "" {
+    throw "agent_loop: tool_caller result missing `tool_name`"
+  }
+  let ok = r?.ok
+  if ok == nil {
+    let success = r?.success
+    if success == nil {
+      let status = r?.status
+      if status == nil {
+        throw "agent_loop: tool_caller result missing `ok`/`success`/`status`"
+      }
+    }
+  } else if type_of(ok) != "bool" {
+    throw "agent_loop: tool_caller result `ok` must be a bool; got " + type_of(ok)
+  }
+}
+
+fn __middleware_exception_result(envelope, err) {
+  let err_text = to_string(err)
+  let observation = "[error from " + envelope.tool_name + "]\n" + err_text
+    + "\n[end of "
+    + envelope.tool_name
+    + " error]\n"
+  return {
+    ok: false,
+    status: "error",
+    tool_name: envelope.tool_name,
+    tool_call_id: envelope.call_id,
+    arguments: envelope.tool_args,
+    result: nil,
+    rendered_result: err_text,
+    observation: observation,
+    error: err_text,
+    error_category: "tool_middleware_exception",
+    executor: nil,
+  }
+}
+
+fn __invoke_tool(call, tools, options) {
+  let caller = options?._tool_caller
+  if caller == nil {
+    return agent_dispatch_tool_call(call, tools, options)
+  }
+  let envelope = __tool_envelope(call, tools, options)
+  let next = { env_in -> __default_invoke_tool(env_in, call, tools, options) }
+  let outcome = try {
+    caller(envelope, next)
+  }
+  if is_err(outcome) {
+    let err = unwrap_err(outcome)
+    __maybe_emit_tool_audit(
+      envelope.turn.session_id,
+      envelope,
+      {layer: "tool_caller", status: "exception", error: to_string(err)},
+    )
+    return __middleware_exception_result(envelope, err)
+  }
+  let r = unwrap(outcome)
+  __validate_tool_caller_result(r)
+  __maybe_emit_tool_audit(envelope.turn.session_id, envelope, r?.audit)
+  return r
+}
+
+fn __maybe_emit_tool_audit(session_id, envelope, audit) {
+  if audit == nil {
+    return
+  }
+  if session_id == "" {
+    return
+  }
+  let _ = try {
+    agent_emit_event(
+      session_id,
+      "tool_call_audit",
+      {tool_call_id: envelope.call_id, tool_name: envelope.tool_name, audit: audit},
+    )
+  }
+}
+
 fn __visible_text(parsed, raw_text) {
   if parsed?.user_response != nil && parsed.user_response != "" {
     return parsed.user_response
@@ -152,23 +351,39 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
     return {dispatch: nil, turn_opts: turn_opts}
   }
   agent_tool_search_emit_queries(session_id, tool_calls, turn_opts)
-  let dispatch = agent_dispatch_tool_batch(
-    tool_calls,
-    turn_opts?.tools,
-    {
-      session_id: session_id,
-      tool_format: turn_opts.tool_format,
-      policy: turn_opts?.policy,
-      approval_policy: turn_opts?.approval_policy,
-      command_policy: turn_opts?.command_policy,
-      permissions: turn_opts?.permissions,
-    },
-  )
+  let tools = turn_opts?.tools
+  let dispatch_options = {
+    session_id: session_id,
+    tool_format: turn_opts.tool_format,
+    policy: turn_opts?.policy,
+    approval_policy: turn_opts?.approval_policy,
+    command_policy: turn_opts?.command_policy,
+    permissions: turn_opts?.permissions,
+    _turn_iteration: turn_opts?._turn_iteration ?? 0,
+    _tool_caller: turn_opts?._tool_caller,
+  }
+  let caller = turn_opts?._tool_caller
+  let dispatch = if caller == nil {
+    agent_dispatch_tool_batch(tool_calls, tools, dispatch_options)
+  } else {
+    __dispatch_tool_calls_with_middleware(tool_calls, tools, dispatch_options)
+  }
   agent_session_record_tool_results(session_id, dispatch)
   return {
     dispatch: dispatch,
     turn_opts: agent_tool_search_record_results(session_id, tool_calls, dispatch, turn_opts),
   }
+}
+
+fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options) {
+  // Middleware-enabled path: dispatch sequentially so each call observes
+  // the audit-log/consent/redaction order in source order. Authors that
+  // want concurrency can wrap the inner call themselves.
+  var results = []
+  for call in tool_calls {
+    results = results.push(__invoke_tool(call, tools, options))
+  }
+  return results
 }
 
 fn __sync_tool_search_state(opts, turn_opts) {
@@ -725,7 +940,11 @@ fn __agent_loop_run(message, session, initial_opts) {
       } else {
         __resolve_tool_calls(llm_result, parsed)
       }
-      let dispatched = __dispatch_tool_calls(session.session_id, tool_calls, turn_opts)
+      let dispatched = __dispatch_tool_calls(
+        session.session_id,
+        tool_calls,
+        turn_opts + {_turn_iteration: turn_index + 1, _tool_caller: opts?._tool_caller},
+      )
       let dispatch = dispatched.dispatch
       opts = __sync_tool_search_state(opts, dispatched.turn_opts)
       successful_tools_seen = __merge_tool_names(successful_tools_seen, __tool_names_by_status(dispatch, true))
