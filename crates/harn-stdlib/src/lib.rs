@@ -122,6 +122,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/llm/media.harn"),
     },
     StdlibSource {
+        module: "llm/handlers",
+        source: include_str!("stdlib/llm/handlers.harn"),
+    },
+    StdlibSource {
         module: "agent/options",
         source: include_str!("stdlib/agent/options.harn"),
     },
@@ -682,6 +686,7 @@ mod tests {
             "context",
             "command",
             "waitpoint",
+            "llm/handlers",
             "personas/prelude",
             "agent/host_tools",
             "connectors/shared",

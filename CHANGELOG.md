@@ -6,6 +6,15 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Per-upstream LLM handler circuit pooling.** `std/llm/handlers` now provides
+  `with_circuit_breaker`, which derives circuit names from each call's
+  `(provider, model)` by default while preserving `name` for intentionally
+  shared circuit state.
+
 ## v0.7.61
 
 ### Added

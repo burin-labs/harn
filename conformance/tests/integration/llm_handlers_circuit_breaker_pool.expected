@@ -1,0 +1,16 @@
+server_error
+closed
+server_error
+open
+closed
+healthy
+closed
+circuit_open
+llm:mock:bad-model
+3
+server_error
+circuit_open
+shared-model-circuit
+4
+generic
+open

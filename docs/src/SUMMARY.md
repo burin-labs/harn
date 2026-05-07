@@ -27,6 +27,7 @@
 
 - [LLM and agents](./llm-and-agents.md)
   - [LLM calls](./llm/llm_call.md)
+  - [LLM handler helpers](./llm/handlers.md)
   - [Agent loops](./llm/agent_loop.md)
   - [Tools, Tool Vault, and MCP](./llm/tools.md)
   - [Streaming and transcripts](./llm/streaming.md)
