@@ -1,0 +1,27 @@
+import { agent_preset } from "std/agent/presets"
+
+pipeline default() {
+  // Anthropic claude-opus-4-7 advertises adaptive thinking.
+  let audit_anthropic = agent_preset("audit", {provider: "anthropic", model: "claude-opus-4-7"})
+  println(audit_anthropic.thinking.mode)
+  // Caller-set thinking always wins.
+  let audit_explicit = agent_preset(
+    "audit",
+    {provider: "anthropic", model: "claude-opus-4-7", thinking: {mode: "disabled"}},
+  )
+  println(audit_explicit.thinking.mode)
+  // OpenAI o3 supports reasoning_effort but not adaptive.
+  let audit_openai = agent_preset("audit", {provider: "openai", model: "o3"})
+  println(audit_openai.thinking.mode)
+  println(audit_openai.thinking.level)
+  // verify preset prefers low effort on effort-capable providers.
+  let verify_openai = agent_preset("verify", {provider: "openai", model: "o3"})
+  println(verify_openai.thinking.mode)
+  println(verify_openai.thinking.level)
+  // Model with no advertised thinking modes leaves thinking unset.
+  let audit_unknown = agent_preset("audit", {provider: "ollama", model: "ollama-something-without-thinking"})
+  println(audit_unknown?.thinking == nil)
+  // summary preset prefers disabled mode when supported, else nothing.
+  let summary_anthropic = agent_preset("summary", {provider: "anthropic", model: "claude-opus-4-7"})
+  println(summary_anthropic?.thinking == nil || summary_anthropic.thinking.mode == "disabled")
+}

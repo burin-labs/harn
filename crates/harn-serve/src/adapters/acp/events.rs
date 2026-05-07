@@ -764,6 +764,28 @@ impl AgentEventSink for AcpAgentEventSink {
                     serde_json::json!({"attempts": attempts, "elapsedMs": elapsed_ms}),
                 );
             }
+            AgentEvent::LoopControlDecision {
+                session_id,
+                iteration,
+                action,
+                old_limit,
+                new_limit,
+                reason,
+                status,
+            } => {
+                self.emit_agent_event_ext(
+                    "loop_control_decision",
+                    session_id,
+                    serde_json::json!({
+                        "iteration": iteration,
+                        "action": action,
+                        "oldLimit": old_limit,
+                        "newLimit": new_limit,
+                        "reason": reason,
+                        "status": status,
+                    }),
+                );
+            }
         }
     }
 }

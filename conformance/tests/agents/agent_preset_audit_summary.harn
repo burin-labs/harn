@@ -1,0 +1,48 @@
+import { audit_agent, repair_agent, summary_agent } from "std/agent/presets"
+
+fn audit_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "inspect",
+    "Read evidence",
+    {
+      handler: { args -> "evidence: " + args.what },
+      parameters: {what: {type: "string", description: "what to inspect"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+pipeline default() {
+  // audit_agent: native completion, no done sentinel; must complete on
+  // final user_response text.
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "i1", name: "inspect", arguments: {what: "release"}}]})
+  llm_mock({text: "<user_response>Audit complete.</user_response>"})
+  let audit = audit_agent("Audit the release", {provider: "mock", tools: audit_tools()})
+  println(audit.status)
+  println(audit.text)
+  println(audit.adaptive_budget.mode)
+  let calls = llm_mock_calls()
+  // No `##DONE##` sentinel should leak into the system prompt.
+  println(!contains(calls[0].system, "##DONE##"))
+  // summary_agent: cheap one-shot, no tools, no looping.
+  llm_mock_clear()
+  llm_mock({text: "Just a summary."})
+  let summary = summary_agent("Summarize.", {provider: "mock"})
+  println(summary.status)
+  println(summary.text)
+  println(summary.llm.iterations)
+  // repair_agent: tool-using with adaptive budget defaults; ends on natural
+  // user_response.
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "r1", name: "inspect", arguments: {what: "fix"}}]})
+  llm_mock({text: "<user_response>Fixed.</user_response>"})
+  let repair = repair_agent("Repair the regression", {provider: "mock", tools: audit_tools()})
+  println(repair.status)
+  println(repair.adaptive_budget.mode)
+  println(repair.adaptive_budget.max >= repair.adaptive_budget.initial)
+}

@@ -216,6 +216,72 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         where_clauses: &[],
     },
     BuiltinSignature {
+        name: "agent_preset",
+        params: &[
+            Param::new("kind", TY_STRING),
+            Param::optional("options", TY_DICT),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "agent_budget",
+        params: &[
+            Param::new("kind_or_options", Ty::Union(&[TY_STRING, TY_DICT])),
+            Param::optional("options", TY_DICT),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "audit_agent",
+        params: &[
+            Param::new("prompt", TY_STRING),
+            Param::optional("options", TY_DICT),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "repair_agent",
+        params: &[
+            Param::new("prompt", TY_STRING),
+            Param::optional("options", TY_DICT),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "summary_agent",
+        params: &[
+            Param::new("prompt", TY_STRING),
+            Param::optional("options", TY_DICT),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "verify_agent",
+        params: &[
+            Param::new("prompt", TY_STRING),
+            Param::optional("options", TY_DICT),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "agent_name",
         params: &[Param::new("agent", TY_DICT)],
         returns: TY_STRING_OR_NIL,

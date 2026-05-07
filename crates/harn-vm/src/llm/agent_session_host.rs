@@ -1134,6 +1134,15 @@ fn build_agent_event(
                 mode: get_string("mode"),
             })
         }
+        "loop_control_decision" => Ok(AgentEvent::LoopControlDecision {
+            session_id: session_id.to_string(),
+            iteration: get_usize("iteration"),
+            action: get_string("action"),
+            old_limit: get_usize("old_limit"),
+            new_limit: get_usize("new_limit"),
+            reason: get_string("reason"),
+            status: get_string("status"),
+        }),
         other => Err(VmError::Runtime(format!(
             "{HOST_AGENT_EMIT_EVENT}: unsupported event type `{other}`"
         ))),

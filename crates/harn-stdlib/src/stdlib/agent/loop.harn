@@ -282,6 +282,315 @@ fn __agent_loop_finalize_failed(session, iteration) {
   }
 }
 
+fn __requirement_missing(requirement, successful) {
+  if type_of(requirement) == "list" {
+    for candidate in requirement {
+      if contains(successful, candidate) {
+        return false
+      }
+    }
+    return true
+  }
+  return !contains(successful, requirement)
+}
+
+fn __required_tools_missing_list(opts, successful_tools_seen) {
+  let required = opts?.require_successful_tools
+  if required == nil || len(required) == 0 {
+    return []
+  }
+  var missing = []
+  for requirement in required {
+    if __requirement_missing(requirement, successful_tools_seen) {
+      let label = if type_of(requirement) == "list" {
+        join(requirement, "|")
+      } else {
+        to_string(requirement)
+      }
+      missing = missing.push(label)
+    }
+  }
+  return missing
+}
+
+fn __build_loop_state(args) {
+  let current_limit = args.current_limit
+  let iteration = args.iteration
+  let remaining = if iteration >= current_limit {
+    0
+  } else {
+    current_limit - iteration
+  }
+  let missing = args.missing_required_tools
+  return {
+    iteration: iteration,
+    budget: {
+      current_limit: current_limit,
+      max: args.budget_max,
+      remaining: remaining,
+      extension_count: args.extensions_used,
+    },
+    turn: {
+      tool_call_count: args.turn_tool_count,
+      successful_tool_names: args.turn_successful,
+      rejected_tool_names: args.turn_rejected,
+      text_chars: args.turn_text_chars,
+      native_fallback_used: args.turn_native_fallback_used,
+    },
+    session: {
+      successful_tool_names: args.session_successful,
+      rejected_tool_names: args.session_rejected,
+      required_tools_satisfied: len(missing) == 0,
+      required_tools_missing: missing,
+    },
+    completion: {
+      proposed: args.completion_proposed,
+      vetoed: args.completion_vetoed,
+      verdict: args.completion_verdict,
+      feedback: args.completion_feedback,
+    },
+    progress: {changed: args.progress_changed, summary: args.progress_summary},
+  }
+}
+
+fn __default_loop_control(state) {
+  if state.budget.remaining > 0 {
+    return nil
+  }
+  if state.completion.vetoed {
+    return {action: "extend", reason: "completion gate vetoed"}
+  }
+  if !state.session.required_tools_satisfied {
+    return {action: "extend", reason: "required tools missing"}
+  }
+  if state.progress.changed && state.turn.tool_call_count > 0 {
+    return {action: "extend", reason: "recent turn made progress"}
+  }
+  return nil
+}
+
+fn __interpret_loop_command(command) {
+  if command == nil {
+    return {action: "none", by: 0, until: 0, reason: "", status: ""}
+  }
+  if type_of(command) != "dict" {
+    throw "agent_loop: loop_control must return nil or a dict; got " + type_of(command)
+  }
+  let action = command?.action ?? "none"
+  if action != "none" && action != "extend" && action != "stop" {
+    throw "agent_loop: loop_control action must be \"none\", \"extend\", or \"stop\"; got "
+      + to_string(action)
+  }
+  let by = command?.by ?? 0
+  if type_of(by) != "int" {
+    throw "agent_loop: loop_control `by` must be an integer; got " + type_of(by)
+  }
+  let until = command?.until ?? 0
+  if type_of(until) != "int" {
+    throw "agent_loop: loop_control `until` must be an integer; got " + type_of(until)
+  }
+  return {action: action, by: by, until: until, reason: command?.reason ?? "", status: command?.status ?? ""}
+}
+
+fn __loop_control_invoke(opts, budget, state) {
+  let policy = opts?.loop_control
+  if policy != nil {
+    return __interpret_loop_command(policy(state))
+  }
+  if budget?.mode == "adaptive" {
+    return __interpret_loop_command(__default_loop_control(state))
+  }
+  return __interpret_loop_command(nil)
+}
+
+fn __apply_extension(command, budget, current_max) {
+  let cap = budget?.max ?? current_max
+  let target = if command.until > 0 {
+    command.until
+  } else {
+    let by = if command.by > 0 {
+      command.by
+    } else {
+      budget?.extend_by ?? 0
+    }
+    current_max + by
+  }
+  let bounded = if target > cap {
+    cap
+  } else {
+    target
+  }
+  if bounded <= current_max {
+    return {extended: false, new_limit: current_max, delta: 0}
+  }
+  return {extended: true, new_limit: bounded, delta: bounded - current_max}
+}
+
+fn __record_budget_decision(decisions, iteration, action, old_limit, new_limit, reason, status) {
+  return decisions
+    .push(
+    {
+      iteration: iteration,
+      action: action,
+      old_limit: old_limit,
+      new_limit: new_limit,
+      reason: reason,
+      status: status,
+    },
+  )
+}
+
+fn __progress_summary_text(completion_vetoed, tool_count, visible_text) {
+  if completion_vetoed {
+    return "completion gate vetoed"
+  }
+  if tool_count > 0 {
+    return "executed " + to_string(tool_count) + " tool call(s)"
+  }
+  if trim(visible_text) != "" {
+    return "produced visible text"
+  }
+  return "no progress signal"
+}
+
+fn __snapshot_loop_state(args) {
+  let verdict = args.verdict
+  let completion_vetoed = verdict != nil && verdict?.vetoed
+  let completion_verdict = if verdict == nil {
+    nil
+  } else {
+    verdict?.verdict
+  }
+  let completion_feedback = if verdict == nil {
+    nil
+  } else {
+    verdict?.feedback
+  }
+  let visible_text = args.visible_text
+  let tool_count = args.tool_count
+  let turn_successful = args.turn_successful
+  let progress_changed = tool_count > 0 || len(turn_successful) > 0
+    || trim(visible_text) != ""
+  let progress_summary = __progress_summary_text(completion_vetoed, tool_count, visible_text)
+  return __build_loop_state(
+    {
+      iteration: args.iteration,
+      current_limit: args.current_limit,
+      budget_max: args.budget_max,
+      extensions_used: args.extensions_used,
+      turn_tool_count: tool_count,
+      turn_successful: turn_successful,
+      turn_rejected: args.turn_rejected,
+      turn_text_chars: len(visible_text),
+      turn_native_fallback_used: args.turn_native_fallback_used,
+      session_successful: args.session_successful,
+      session_rejected: args.session_rejected,
+      missing_required_tools: args.missing_required_tools,
+      completion_proposed: args.completion_proposed,
+      completion_vetoed: completion_vetoed,
+      completion_verdict: completion_verdict,
+      completion_feedback: completion_feedback,
+      progress_changed: progress_changed,
+      progress_summary: progress_summary,
+    },
+  )
+}
+
+fn __apply_loop_command(state) {
+  let command = state.command
+  let session_id = state.session_id
+  let iteration = state.iteration
+  let current_max = state.current_max
+  let budget = state.budget
+  if command.action == "stop" {
+    let stop_status = if command.status != "" {
+      command.status
+    } else {
+      "stopped"
+    }
+    let stop_reason = if command.reason != "" {
+      command.reason
+    } else {
+      "loop_control"
+    }
+    let decisions = __record_budget_decision(
+      state.decisions,
+      iteration,
+      "stop",
+      current_max,
+      current_max,
+      command.reason,
+      stop_status,
+    )
+    agent_emit_event(
+      session_id,
+      "loop_control_decision",
+      {
+        iteration: iteration,
+        action: "stop",
+        old_limit: current_max,
+        new_limit: current_max,
+        reason: command.reason,
+        status: stop_status,
+      },
+    )
+    return {
+      stop: true,
+      final_status: stop_status,
+      stop_reason: stop_reason,
+      current_max: current_max,
+      extensions_used: state.extensions_used,
+      decisions: decisions,
+    }
+  }
+  if command.action == "extend" {
+    let applied = __apply_extension(command, budget, current_max)
+    if applied.extended {
+      let old_limit = current_max
+      let new_limit = applied.new_limit
+      let extensions_used = state.extensions_used + 1
+      let decisions = __record_budget_decision(
+        state.decisions,
+        iteration,
+        "extend",
+        old_limit,
+        new_limit,
+        command.reason,
+        "",
+      )
+      agent_emit_event(
+        session_id,
+        "loop_control_decision",
+        {
+          iteration: iteration,
+          action: "extend",
+          old_limit: old_limit,
+          new_limit: new_limit,
+          reason: command.reason,
+          status: "",
+        },
+      )
+      return {
+        stop: false,
+        final_status: "",
+        stop_reason: nil,
+        current_max: new_limit,
+        extensions_used: extensions_used,
+        decisions: decisions,
+      }
+    }
+  }
+  return {
+    stop: false,
+    final_status: "",
+    stop_reason: nil,
+    current_max: current_max,
+    extensions_used: state.extensions_used,
+    decisions: state.decisions,
+  }
+}
+
+@complexity(allow)
 fn __agent_loop_run(message, session, initial_opts) {
   var opts = initial_opts
   var iteration = 0
@@ -296,8 +605,19 @@ fn __agent_loop_run(message, session, initial_opts) {
     var successful_tools_seen = []
     var rejected_tools_seen = []
     let max_verify_attempts = opts?.max_verify_attempts ?? 20
-    let max_iterations = opts?.max_iterations ?? 50
-    while iteration < max_iterations {
+    let budget = opts?.iteration_budget
+      ?? {
+      mode: "fixed",
+      initial: opts?.max_iterations ?? 50,
+      max: opts?.max_iterations ?? 50,
+      extend_by: 0,
+      expose_decisions: false,
+    }
+    var current_max = budget.initial
+    var extensions_used = 0
+    var budget_decisions = []
+    var last_tool_count = 0
+    while iteration < current_max {
       if agent_budget_pre_call_blocked(session, opts) {
         final_status = "budget_exhausted"
         break
@@ -360,6 +680,9 @@ fn __agent_loop_run(message, session, initial_opts) {
         break
       }
       consecutive_text_only = __next_text_only_count(tool_count, consecutive_text_only)
+      last_tool_count = tool_count
+      let turn_successful = __tool_names_by_status(dispatch, true)
+      let turn_rejected = __tool_names_by_status(dispatch, false)
       let turn_max_nudges = turn_opts?.max_nudges ?? 8
       let turn_loop_until_done = turn_opts?.loop_until_done ?? false
       if turn_loop_until_done && tool_count == 0 && consecutive_text_only > turn_max_nudges {
@@ -377,28 +700,71 @@ fn __agent_loop_run(message, session, initial_opts) {
         turn_index,
       )
       opts = __apply_post_turn_options(opts, outcome)
-      if outcome.kind == "continue" {
+      var should_continue = outcome.kind == "continue"
+      var verdict_record = nil
+      if should_continue {
         if opts?.daemon && len(tool_calls) == 0 {
           agent_daemon_step(session, opts, iteration)
         }
-        continue
-      }
-      if outcome.needs_verify {
-        if verify_attempts >= max_verify_attempts {
-          final_status = "verify_exhausted"
+      } else {
+        if outcome.needs_verify {
+          if verify_attempts >= max_verify_attempts {
+            final_status = "verify_exhausted"
+            stop_reason = outcome.stop_reason
+            break
+          }
+          let verdict = agent_verify_or_continue(session, turn_opts, outcome.stop_reason, llm_result.text, turn_index)
+          verdict_record = verdict
+          if verdict.vetoed {
+            verify_attempts = verify_attempts + 1
+            should_continue = true
+          }
+        }
+        if !should_continue {
           stop_reason = outcome.stop_reason
           break
         }
-        let verdict = agent_verify_or_continue(session, turn_opts, outcome.stop_reason, llm_result.text, turn_index)
-        if verdict.vetoed {
-          verify_attempts = verify_attempts + 1
-          continue
-        }
       }
-      stop_reason = outcome.stop_reason
-      break
+      let loop_state = __snapshot_loop_state(
+        {
+          iteration: iteration,
+          current_limit: current_max,
+          budget_max: budget.max,
+          extensions_used: extensions_used,
+          tool_count: tool_count,
+          turn_successful: turn_successful,
+          turn_rejected: turn_rejected,
+          visible_text: visible_text,
+          turn_native_fallback_used: fallback_outcome.triggered && fallback_outcome.accepted,
+          session_successful: successful_tools_seen,
+          session_rejected: rejected_tools_seen,
+          missing_required_tools: __required_tools_missing_list(opts, successful_tools_seen),
+          completion_proposed: outcome.kind == "break",
+          verdict: verdict_record,
+        },
+      )
+      let command = __loop_control_invoke(opts, budget, loop_state)
+      let applied = __apply_loop_command(
+        {
+          command: command,
+          session_id: session.session_id,
+          iteration: iteration,
+          current_max: current_max,
+          extensions_used: extensions_used,
+          decisions: budget_decisions,
+          budget: budget,
+        },
+      )
+      current_max = applied.current_max
+      extensions_used = applied.extensions_used
+      budget_decisions = applied.decisions
+      if applied.stop {
+        final_status = applied.final_status
+        stop_reason = applied.stop_reason
+        break
+      }
     }
-    if final_status == "" && iteration >= max_iterations && stop_reason == nil {
+    if final_status == "" && iteration >= current_max && stop_reason == nil {
       final_status = "budget_exhausted"
     }
     if opts?.daemon && final_status != "" {
@@ -409,7 +775,22 @@ fn __agent_loop_run(message, session, initial_opts) {
       {final_status: final_status, stop_reason: stop_reason ?? "", iterations: iteration},
     )
     session_finalized = true
-    __enforce_required_successful_tools(result, opts)
+    let enforced = __enforce_required_successful_tools(result, opts)
+    if budget.expose_decisions {
+      enforced
+        + {
+        adaptive_budget: {
+          mode: budget.mode,
+          initial: budget.initial,
+          max: budget.max,
+          final_limit: current_max,
+          extensions_used: extensions_used,
+          decisions: budget_decisions,
+        },
+      }
+    } else {
+      enforced
+    }
   }
   if is_err(run) {
     if !session_finalized {

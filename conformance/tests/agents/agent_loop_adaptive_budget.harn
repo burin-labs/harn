@@ -1,0 +1,125 @@
+fn lookup_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "lookup",
+    "Return release evidence",
+    {
+      handler: { args -> "evidence for " + args.query },
+      parameters: {query: {type: "string", description: "Lookup query"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+pipeline default() {
+  // Case 1: adaptive budget starts low, ends early on natural completion.
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "alpha"}}]})
+  llm_mock({text: "<user_response>All good.</user_response>"})
+  let early = agent_loop(
+    "Inspect alpha",
+    nil,
+    {
+      provider: "mock",
+      tools: lookup_tools(),
+      tool_format: "native",
+      loop_until_done: true,
+      iteration_budget: {mode: "adaptive", initial: 3, max: 8, extend_by: 2},
+    },
+  )
+  println(early.status)
+  println(early.llm.iterations)
+  println(early.adaptive_budget.mode)
+  println(early.adaptive_budget.initial)
+  println(early.adaptive_budget.max)
+  println(early.adaptive_budget.final_limit)
+  println(early.adaptive_budget.extensions_used)
+  println(len(early.adaptive_budget.decisions))
+  // Case 2: cap starts low; tool progress at the cap edge triggers default
+  // policy extension. Three tool turns, then a final natural-completion.
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "t1", name: "lookup", arguments: {query: "1"}}]})
+  llm_mock({tool_calls: [{id: "t2", name: "lookup", arguments: {query: "2"}}]})
+  llm_mock({tool_calls: [{id: "t3", name: "lookup", arguments: {query: "3"}}]})
+  llm_mock({text: "<user_response>Done after extension.</user_response>"})
+  let extended = agent_loop(
+    "Inspect everything",
+    nil,
+    {
+      provider: "mock",
+      tools: lookup_tools(),
+      tool_format: "native",
+      loop_until_done: true,
+      iteration_budget: {mode: "adaptive", initial: 2, max: 6, extend_by: 2},
+    },
+  )
+  println(extended.status)
+  println(extended.llm.iterations)
+  println(extended.adaptive_budget.extensions_used)
+  println(len(extended.adaptive_budget.decisions))
+  println(extended.adaptive_budget.decisions[0].action)
+  println(extended.adaptive_budget.decisions[0].old_limit)
+  println(extended.adaptive_budget.decisions[0].new_limit)
+  // Case 3: max cap is honored. With initial=2, max=4, three tool calls
+  // exhaust the budget after one extension; status becomes budget_exhausted.
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "tA", name: "lookup", arguments: {query: "x"}}]})
+  llm_mock({tool_calls: [{id: "tB", name: "lookup", arguments: {query: "y"}}]})
+  llm_mock({tool_calls: [{id: "tC", name: "lookup", arguments: {query: "z"}}]})
+  llm_mock({tool_calls: [{id: "tD", name: "lookup", arguments: {query: "w"}}]})
+  llm_mock({tool_calls: [{id: "tE", name: "lookup", arguments: {query: "q"}}]})
+  let capped = agent_loop(
+    "Keep working",
+    nil,
+    {
+      provider: "mock",
+      tools: lookup_tools(),
+      tool_format: "native",
+      loop_until_done: true,
+      iteration_budget: {mode: "adaptive", initial: 2, max: 4, extend_by: 2},
+    },
+  )
+  println(capped.status)
+  println(capped.adaptive_budget.final_limit)
+  println(capped.adaptive_budget.final_limit <= capped.adaptive_budget.max)
+  // Case 4: caller-supplied loop_control closure stops the loop early.
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "early1", name: "lookup", arguments: {query: "stop"}}]})
+  llm_mock({tool_calls: [{id: "early2", name: "lookup", arguments: {query: "now"}}]})
+  let controlled = agent_loop(
+    "Inspect stop",
+    nil,
+    {
+      provider: "mock",
+      tools: lookup_tools(),
+      tool_format: "native",
+      loop_until_done: true,
+      iteration_budget: {mode: "adaptive", initial: 5, max: 10, extend_by: 2},
+      loop_control: { state ->
+        if state.iteration >= 2 {
+          {action: "stop", status: "incomplete", reason: "policy stop"}
+        } else {
+          nil
+        }
+      },
+    },
+  )
+  println(controlled.status)
+  println(controlled.stop_reason)
+  println(controlled.llm.iterations)
+  println(controlled.adaptive_budget.decisions[len(controlled.adaptive_budget.decisions) - 1].action)
+  // Case 5: legacy fixed `max_iterations` still works without adaptive_budget surface.
+  llm_mock_clear()
+  llm_mock({text: "Plain final answer."})
+  let legacy = agent_loop(
+    "Do nothing fancy.",
+    nil,
+    {provider: "mock", tools: tool_registry(), tool_format: "native", max_iterations: 1},
+  )
+  println(legacy.status)
+  println(legacy.llm.iterations)
+  println(contains(legacy.keys(), "adaptive_budget"))
+}
