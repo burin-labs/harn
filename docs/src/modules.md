@@ -580,6 +580,14 @@ Helpers for isolated git worktree execution built on `exec_at(...)` and
 | `worktree_diff(path, base_ref?)` | Render diff output for the worktree |
 | `worktree_shell(path, script)` | Run an arbitrary shell command inside the worktree |
 
+### std/llm/handlers
+
+Middleware helpers for LLM call handlers:
+
+| Function | Description |
+|---|---|
+| `with_circuit_breaker(handler, options?)` | Wrap a call handler with per-`(provider, model)` circuit-breaker pooling, or pass `name` to share one circuit |
+
 ### std/personas/prelude
 
 Reusable orchestration primitives for durable persona workflows. See

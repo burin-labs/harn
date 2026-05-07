@@ -371,6 +371,8 @@ Imports starting with `std/` load embedded stdlib modules:
 - `import "std/postgres"` — Postgres persistence helpers (pg_pool,
   pg_connect, pg_query, pg_query_one, pg_execute, pg_transaction, pg_close,
   pg_mock_pool, pg_mock_calls)
+- `import "std/llm/handlers"` — LLM call-handler middleware
+  (with_circuit_breaker)
 - `import "std/personas/prelude"` — reusable persona orchestration helpers
   (verify_then_act, bounded_loop, cheap_classify_then_escalate,
   parallel_sweep_with_circuit_breaker, with_audit_receipt,

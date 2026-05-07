@@ -1,0 +1,69 @@
+/** std/llm/handlers — small middleware helpers for LLM call handlers. */
+var __llm_handler_circuits = []
+
+fn __llm_handler_is_callable(value) -> bool {
+  let kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __circuit_name_for(call) -> string {
+  let opts = call?.opts ?? {}
+  let provider = to_string(opts?.provider ?? "<unset>")
+  let model = to_string(opts?.model ?? "<unset>")
+  return "llm:" + provider + ":" + model
+}
+
+fn __ensure_llm_handler_circuit(name, threshold, reset_ms) {
+  if !contains(__llm_handler_circuits, name) {
+    circuit_breaker(name, threshold, reset_ms)
+    __llm_handler_circuits = __llm_handler_circuits + [name]
+  }
+}
+
+fn __circuit_open_error(call, name) {
+  let opts = call?.opts ?? {}
+  return {
+    kind: "terminal",
+    reason: "circuit_open",
+    category: "circuit_open",
+    message: "circuit open: " + name,
+    provider: opts?.provider ?? "<unset>",
+    model: opts?.model ?? "<unset>",
+    circuit: name,
+  }
+}
+
+/**
+ * Wrap an LLM call handler with circuit-breaker protection.
+ *
+ * By default each invocation uses a circuit derived from the call's
+ * `(opts.provider, opts.model)` pair, so one failing upstream cannot poison
+ * other models routed through the same wrapper. Pass `name` to intentionally
+ * share one circuit across calls.
+ */
+pub fn with_circuit_breaker(handler, options = nil) {
+  if !__llm_handler_is_callable(handler) {
+    throw "with_circuit_breaker: handler must be callable"
+  }
+  let opts = options ?? {}
+  let threshold = opts?.threshold ?? 5
+  let reset_ms = opts?.reset_ms ?? 30000
+  return fn(call) {
+    let name = opts?.name ?? __circuit_name_for(call)
+    __ensure_llm_handler_circuit(name, threshold, reset_ms)
+    let state = circuit_check(name)
+    if state == "open" {
+      throw __circuit_open_error(call, name)
+    }
+    let outcome = try {
+      handler(call)
+    }
+    if is_err(outcome) {
+      circuit_record_failure(name)
+      throw unwrap_err(outcome)
+    }
+    let result = unwrap(outcome)
+    circuit_record_success(name)
+    return result
+  }
+}
