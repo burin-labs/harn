@@ -1,0 +1,141 @@
+fn __as_candidate(value, index) {
+  if type_of(value) == "string" {
+    return {index: index, prompt: value, instruction: value, demos: []}
+  }
+  require type_of(value) == "dict", "parallel_judge: candidates must be strings or dicts"
+  let instruction = value?.instruction ?? value?.prompt ?? ""
+  let prompt = value?.prompt ?? instruction
+  return value
+    + {index: value?.index ?? index, prompt: prompt, instruction: instruction, demos: value?.demos ?? []}
+}
+
+fn __candidate_rows(candidates) {
+  let candidate_list = if type_of(candidates) == "list" {
+    candidates
+  } else {
+    [candidates]
+  }
+  require len(candidate_list) > 0, "parallel_judge: candidates must not be empty"
+  var rows = []
+  var idx = 0
+  while idx < len(candidate_list) {
+    rows = rows.push({index: idx, candidate: __as_candidate(candidate_list[idx], idx)})
+    idx = idx + 1
+  }
+  return rows
+}
+
+fn __case_rows(eval_set) {
+  require type_of(eval_set) == "list", "parallel_judge: eval_set must be a list"
+  require len(eval_set) > 0, "parallel_judge: eval_set must not be empty"
+  var rows = []
+  var idx = 0
+  while idx < len(eval_set) {
+    rows = rows.push({index: idx, case: eval_set[idx]})
+    idx = idx + 1
+  }
+  return rows
+}
+
+fn __case_id(case, index) {
+  if type_of(case) == "dict" && case?.id != nil {
+    return case.id
+  }
+  return "case-" + to_string(index)
+}
+
+fn __score_value(value) {
+  let raw = if type_of(value) == "dict" {
+    value?.score
+  } else {
+    value
+  }
+  let score = to_float(raw)
+  require score != nil, "parallel_judge: metric must return a numeric score or {score}"
+  return score
+}
+
+fn __score_case(candidate, case, case_index, candidate_index, metric) {
+  let output = metric(
+    {
+      prompt: candidate.prompt,
+      candidate: candidate,
+      case: case,
+      case_index: case_index,
+      candidate_index: candidate_index,
+    },
+  )
+  return {
+    case_id: __case_id(case, case_index),
+    case_index: case_index,
+    score: __score_value(output),
+    output: output,
+  }
+}
+
+fn __mean_case_score(case_scores) {
+  var total = 0.0
+  for row in case_scores {
+    total = total + row.score
+  }
+  return total / (len(case_scores) * 1.0)
+}
+
+fn __insert_ranked(ranked, entry) {
+  var out = []
+  var inserted = false
+  for existing in ranked {
+    if !inserted && entry.score > existing.score {
+      out = out.push(entry)
+      inserted = true
+    }
+    out = out.push(existing)
+  }
+  if !inserted {
+    out = out.push(entry)
+  }
+  return out
+}
+
+fn __rank(entries) {
+  var ranked = []
+  for entry in entries {
+    ranked = __insert_ranked(ranked, entry)
+  }
+  return ranked
+}
+
+/** Score candidate prompts against an eval set, evaluating cases in parallel. */
+pub fn parallel_judge(candidates, eval_set, metric, options = nil) {
+  require metric != nil, "parallel_judge: metric closure is required"
+  let candidate_rows = __candidate_rows(candidates)
+  let case_rows = __case_rows(eval_set)
+  let _max_concurrent = options?.max_concurrent ?? options?.budget?.max_concurrent
+  var scored = []
+  for row in candidate_rows {
+    let candidate = row.candidate
+    let case_scores = parallel each case_rows with { max_concurrent: _max_concurrent } { case_row ->
+      __score_case(candidate, case_row.case, case_row.index, row.index, metric)
+    }
+    scored = scored
+      .push(
+      {
+        index: row.index,
+        candidate: candidate,
+        prompt: candidate.prompt,
+        score: __mean_case_score(case_scores),
+        case_scores: case_scores,
+      },
+    )
+  }
+  let ranked = __rank(scored)
+  return {
+    ranked: ranked,
+    scores: scored,
+    best: if len(ranked) > 0 {
+      ranked[0]
+    } else {
+      nil
+    },
+  }
+}

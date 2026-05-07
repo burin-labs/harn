@@ -130,6 +130,18 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/options.harn"),
     },
     StdlibSource {
+        module: "llm/judge",
+        source: include_str!("stdlib/llm/judge.harn"),
+    },
+    StdlibSource {
+        module: "llm/refine",
+        source: include_str!("stdlib/llm/refine.harn"),
+    },
+    StdlibSource {
+        module: "llm/optimize",
+        source: include_str!("stdlib/llm/optimize.harn"),
+    },
+    StdlibSource {
         module: "agent/events",
         source: include_str!("stdlib/agent/events.harn"),
     },
@@ -689,6 +701,9 @@ mod tests {
             "llm/handlers",
             "personas/prelude",
             "agent/host_tools",
+            "llm/optimize",
+            "llm/judge",
+            "llm/refine",
             "connectors/shared",
             "connectors/github",
             "connectors/linear",
