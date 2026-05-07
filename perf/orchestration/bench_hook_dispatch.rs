@@ -91,12 +91,13 @@ fn install_noop_hook(runtime: &Runtime) -> Vm {
 }
 
 fn payload(index: usize) -> JsonValue {
+    let even = index.is_multiple_of(2);
     json!({
         "event": "trigger.dispatch",
         "target": format!("trigger.script_{index:03}"),
         "trigger": {
-            "provider": if index % 2 == 0 { "cron" } else { "webhook" },
-            "kind": if index % 2 == 0 { "schedule.tick" } else { "github.issue" },
+            "provider": if even { "cron" } else { "webhook" },
+            "kind": if even { "schedule.tick" } else { "github.issue" },
             "dedupe_key": format!("bench-delivery-{index:03}"),
         },
         "script": {
