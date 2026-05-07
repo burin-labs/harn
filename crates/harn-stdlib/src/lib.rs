@@ -126,8 +126,32 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/llm/media.harn"),
     },
     StdlibSource {
+        module: "llm/catalog",
+        source: include_str!("stdlib/llm/catalog.harn"),
+    },
+    StdlibSource {
+        module: "llm/safe",
+        source: include_str!("stdlib/llm/safe.harn"),
+    },
+    StdlibSource {
+        module: "llm/budget",
+        source: include_str!("stdlib/llm/budget.harn"),
+    },
+    StdlibSource {
+        module: "llm/prompts",
+        source: include_str!("stdlib/llm/prompts.harn"),
+    },
+    StdlibSource {
+        module: "llm/defaults",
+        source: include_str!("stdlib/llm/defaults.harn"),
+    },
+    StdlibSource {
         module: "llm/handlers",
         source: include_str!("stdlib/llm/handlers.harn"),
+    },
+    StdlibSource {
+        module: "llm/refine",
+        source: include_str!("stdlib/llm/refine.harn"),
     },
     StdlibSource {
         module: "llm/ensemble",
@@ -144,10 +168,6 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
     StdlibSource {
         module: "llm/judge",
         source: include_str!("stdlib/llm/judge.harn"),
-    },
-    StdlibSource {
-        module: "llm/refine",
-        source: include_str!("stdlib/llm/refine.harn"),
     },
     StdlibSource {
         module: "llm/optimize",

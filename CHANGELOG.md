@@ -48,6 +48,112 @@ condensed series summaries instead of full per-patch history.
   behavior for summary presets in the agent stdlib, ensuring correct tool
   selection in audit summaries.
 
+## v0.8.0
+
+### Added
+
+- **`llm_caller` seam on `agent_loop`.** New option accepts a closure
+  with the canonical shape `fn(call) -> {ok, value | status, error?}`
+  that owns each turn's `llm_call(...)`. The loop validates the
+  envelope shape, threads `_turn_iteration` through `call.turn`, and
+  rejects writes to underscore-prefixed runtime-private keys.
+- **`std/llm/handlers`.** Composable middleware: `default_llm_caller`,
+  `with_retry`, `with_fallback`, `with_shadow`, `with_prompt_rewrite`,
+  `with_logging`, `with_budget`, `with_cache`, `with_circuit_breaker`,
+  `compose([...])`. `compose` takes a single list (Harn does not yet
+  support user-defined variadics).
+- **`std/llm/ensemble`.** `best_of_n`, `self_consistency`,
+  `parallel_judge`, `debate`. Cites Wang et al. 2022
+  (arxiv:2203.11171) and Du et al. 2023 (arxiv:2305.14325).
+- **`std/llm/refine`.** `refine_prompt`, `refine_caller` —
+  meta-prompt-based prompt rewriting with a `DIFF:` summary trailer.
+  Best-effort session cache (Harn closures capture by value).
+- **`std/llm/budget`.** `estimate_text_tokens` (heuristic; not named
+  `estimate_tokens` to avoid colliding with the workflow builtin),
+  `context_window_for`, `recommend_max_output_tokens`,
+  `budget_summary`, `fits_in_context`.
+- **`std/llm/defaults`.** `pack_for(opts)` and convenience wrappers
+  (`pack_chat`, `pack_agent`, `pack_refine`, `pack_judge`,
+  `pack_summarize`, `pack_code`, `pack_json`). Calibrated for
+  Anthropic Sonnet/Opus/Haiku 4.x, OpenAI GPT-5/5.5/4o/4.1, Gemini
+  2.5 Pro/Flash, Ollama Qwen3/Llama 3.x.
+- **`std/llm/safe`.** `safe_call`, `safe_field`, `dict_get_ci`,
+  `with_case_insensitive_keys`, `structured_envelope_or_default`,
+  `judge_payload`, `verdict_normalize`, `schema_retry_nudge_for`.
+- **`std/llm/prompts`.** `system_prelude`, `tool_use_prelude`,
+  `structured_output_preface`.
+- **`std/llm/catalog`.** `model_info(selector)`,
+  `resolved_options(opts)`, `has_capability(model, cap)`,
+  `family_of(model_id)`. Harn-side names are deliberately shorter than
+  the underlying builtins to avoid shadowing.
+- **New Rust builtins.** `llm_resolved_options(opts)`,
+  `llm_model_defaults(model_id)`. `llm_model_info(model_id)` already
+  existed and is reused. Implemented in
+  `crates/harn-vm/src/llm/config_builtins.rs`.
+- **`harn models list [--provider NAME] [--json] [--installed-only]`.**
+- **`harn models install <model> [--yes] [--keep-alive VALUE]`.**
+- **`harn try "<prompt>"`.** One-shot prompt against the configured
+  provider with `with_retry`-wrapped `default_llm_caller`.
+- **`harn doctor --json`.** Doctor now also checks Ollama, hardware,
+  Harn version, and prints a "Next step" suggestion.
+- **Lint rule `deprecated_llm_options`.** Warns on `llm_retries` /
+  `llm_backoff_ms` in dict literals passed to `llm_call` /
+  `llm_call_safe` / `llm_call_structured` / `llm_call_structured_result` /
+  `agent_loop`.
+
+### Changed
+
+- `harn doctor` output splits credentials and network checks.
+- Improved no-providers-configured error message names every supported
+  env var dynamically and points at `harn doctor` and (when available)
+  `harn models recommend`.
+
+### Deprecated
+
+- `llm_retries` and `llm_backoff_ms` on `llm_call` family + `agent_loop`
+  — still functional in v0.8.x, removed in v0.9.0. Replace with
+  `with_retry(default_llm_caller(), {max_attempts: K + 1})` from
+  `std/llm/handlers`. `harn lint` warns on deprecated usage (rule:
+  `deprecated_llm_options`).
+- `llm_options` patch field on `post_turn_callback` outcomes —
+  soft-deprecated; emits one event per session when used. Replace by
+  wrapping `llm_caller` with a per-turn opts mutator (e.g.
+  `with_prompt_rewrite`).
+
+### Migration
+
+`llm_retries: K` historically meant **K retries after the first
+attempt** = K + 1 total attempts. `with_retry`'s `max_attempts: N`
+counts **total attempts**. Adjust the number when migrating.
+
+Before:
+
+```harn,ignore
+llm_call(prompt, sys, {llm_retries: 3, llm_backoff_ms: 250})
+```
+
+After:
+
+```harn,ignore
+import {default_llm_caller, with_retry} from "std/llm/handlers"
+
+let caller = with_retry(default_llm_caller(), {
+  max_attempts: 4,        // NOTE: total attempts; llm_retries: 3 == 4 attempts
+  base_ms: 250,
+  backoff: "exponential",
+})
+caller({prompt: prompt, system: sys, opts: {},
+        turn: {iteration: 0, session_id: "", attempt: 1}})
+```
+
+Or pass through the new `llm_caller:` option on `agent_loop`:
+
+```harn,ignore
+agent_loop(task, sys, {
+  llm_caller: with_retry(default_llm_caller(), {max_attempts: 4}),
+})
+```
+
 ## v0.7.61
 
 ### Added

@@ -6,6 +6,7 @@
 
 pub(crate) mod ast_walk;
 pub(crate) mod blank_lines;
+pub(crate) mod deprecated_llm_options;
 pub(crate) mod file_header;
 pub(crate) mod import_order;
 pub(crate) mod optional_shorthand;

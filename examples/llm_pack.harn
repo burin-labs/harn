@@ -1,0 +1,17 @@
+// Demo: std/llm/defaults — pack_for / pack_agent
+//
+// Shows how a single call to pack_agent produces a fully-resolved llm_call
+// option dict with provider/family-aware defaults (temperature, thinking
+// budget, max_tokens) baked in.
+//
+// Run with: cargo run --quiet --bin harn -- run examples/llm_pack.harn
+import { pack_agent } from "std/llm/defaults"
+
+pipeline default() {
+  let opts = pack_agent("claude-sonnet-4-5", {prompt: "Build a TODO list", system: "You are precise."})
+  println("model = " + to_string(opts?.model))
+  println("provider = " + to_string(opts?.provider))
+  println("temperature = " + to_string(opts?.temperature))
+  println("thinking budget = " + to_string(opts?.thinking?.budget_tokens))
+  println("max_tokens = " + to_string(opts?.max_tokens))
+}

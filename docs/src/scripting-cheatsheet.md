@@ -102,6 +102,33 @@ let total = stream.fold(
 Always pass a realistic `{max: N}` to `stream.collect` when the upstream
 can be unbounded.
 
+## LLM resilience patterns
+
+`agent_loop` accepts an `llm_caller:` closure that owns each turn's
+`llm_call(...)`. Wrap it with middleware from `std/llm/handlers` to
+compose retry / fallback / shadow / logging / budget behavior:
+
+```harn,ignore
+import {default_llm_caller, with_retry, with_fallback, compose} from "std/llm/handlers"
+
+let caller = compose([
+  with_retry({max_attempts: 4, base_ms: 250, backoff: "exponential"}),
+])(default_llm_caller())
+
+let result = agent_loop(task, system, {
+  loop_until_done: true,
+  llm_caller: caller,
+})
+```
+
+Migrating from `llm_retries: K` (deprecated): use
+`with_retry(default_llm_caller(), {max_attempts: K + 1})`. The off-by-one is
+deliberate — `llm_retries` historically counted retries after the first
+attempt; `max_attempts` counts total attempts. See
+[`stdlib/llm-handlers.md`](./stdlib/llm-handlers.md) for the full
+catalog (handlers, ensemble, refine, budget, defaults, safe, prompts,
+catalog).
+
 ## Module scope
 
 Top-level `let` / `var` and `fn` declarations are visible inside

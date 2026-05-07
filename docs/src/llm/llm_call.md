@@ -118,8 +118,8 @@ as both LLM content and deterministic `vision_ocr(...)` context.
 | `top_logprobs` | int | nil | Request top alternative token log probabilities where supported |
 | `response_format` | string | `"text"` | `"text"` or `"json"` |
 | `schema` | dict | nil | JSON Schema, OpenAPI Schema Object, or canonical Harn schema dict for structured output |
-| `llm_retries` | int | `0` | Retries on transient HTTP / provider errors. Raw `llm_call` is fail-fast by default; set to N to allow N retries after the first attempt |
-| `llm_backoff_ms` | int | `250` | Base exponential backoff in ms between LLM retries |
+| `llm_retries` | int | `0` | (deprecated; prefer `with_retry` from `std/llm/handlers`) Retries on transient HTTP / provider errors. Raw `llm_call` is fail-fast by default; set to N to allow N retries after the first attempt. Off-by-one: `llm_retries: 3` ≈ `with_retry(..., {max_attempts: 4})` |
+| `llm_backoff_ms` | int | `250` | (deprecated; prefer `with_retry`) Base exponential backoff in ms between LLM retries |
 | `thinking` | bool/dict | nil | Enable typed provider reasoning. `true` and `{budget_tokens: N}` remain shorthand for `{mode: "enabled"}`; use `{mode: "enabled", budget_tokens: N}`, `{mode: "adaptive"}`, or `{mode: "effort", level: "low" \| "medium" \| "high"}`. On Anthropic Opus models that declare interleaved-thinking support, `{mode: "enabled"}` also sends `anthropic-beta: interleaved-thinking-2025-05-14`. When `thinking: false` is set on a model whose chat template uses an in-prompt directive (Qwen3's `/no_think`), Harn auto-prepends the directive to the system message — `thinking: false` works uniformly across providers without scripts needing to know per-template prompt syntax. |
 | `interleaved_thinking` | bool | `false` | Add Anthropic's `interleaved-thinking-2025-05-14` beta header for this call. `thinking: true` enables it automatically on supported Anthropic Opus models. |
 | `anthropic_beta_features` | string/list | nil | Extra Anthropic beta feature names to pass in the comma-separated `anthropic-beta` header on Anthropic-style routes. |
@@ -321,6 +321,41 @@ Repair-pass semantics:
   `llm_call → response.data → safe_parse → json_extract → repair →
   schema_check` chain that downstream callers would otherwise
   hand-roll.
+
+## Composable callers
+
+`agent_loop` accepts an `llm_caller:` option — a closure that owns
+each turn's `llm_call(...)`. Wrap it with middleware from
+`std/llm/handlers` (retry / fallback / shadow / logging / budget /
+cache / circuit breaker) to compose resilience without forking the
+loop:
+
+```harn,ignore
+import {default_llm_caller, with_retry} from "std/llm/handlers"
+
+let caller = with_retry(default_llm_caller(), {max_attempts: 4})
+
+let result = agent_loop(task, system, {
+  loop_until_done: true,
+  llm_caller: caller,
+})
+```
+
+Caller contract:
+
+```harn,ignore
+fn(call) -> {ok: true, value: <llm dict>}
+          | {ok: false, status: <reserved>, error?: any, retryable?: bool}
+//   call = {prompt, system, opts, turn: {iteration, session_id, attempt}}
+```
+
+`with_retry`'s `max_attempts: N` counts total attempts. Migrating
+`llm_retries: K` (deprecated): pass `max_attempts: K + 1` — the legacy
+option counted retries *after* the first attempt.
+
+See [Composable callers and middleware](../stdlib/llm-handlers.md)
+for the full module catalog (`handlers`, `ensemble`, `refine`,
+`budget`, `defaults`, `safe`, `prompts`, `catalog`).
 
 ## llm_completion
 

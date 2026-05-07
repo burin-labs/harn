@@ -1,0 +1,17 @@
+// Conformance test for std/llm/handlers::with_retry — exhausting
+// max_attempts surfaces the last envelope plus retries_attempted.
+import { with_retry } from "std/llm/handlers"
+
+pipeline default() {
+  let counter = atomic(0)
+  let synthetic = { _call ->
+    let _ = atomic_add(counter, 1)
+    return {ok: false, status: "transient", error: "always blips"}
+  }
+  let caller = with_retry(synthetic, {max_attempts: 3, base_ms: 1})
+  let env = caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  println(env.ok)
+  println(env.status)
+  println(env.retries_attempted)
+  println(atomic_get(counter))
+}

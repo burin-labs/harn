@@ -481,6 +481,7 @@ pub use self::healthcheck::{
     ProviderHealthcheckOptions, ProviderHealthcheckResult,
 };
 pub(crate) use self::helpers::extract_llm_options;
+pub use self::helpers::no_credentials_message;
 pub use self::helpers::resolve_api_key;
 pub use self::helpers::vm_value_to_json;
 pub use self::mock::{

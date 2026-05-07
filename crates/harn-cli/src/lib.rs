@@ -577,7 +577,15 @@ async fn async_main() {
                 process::exit(1);
             }
         },
-        Command::Doctor(args) => commands::doctor::run_doctor(!args.no_network).await,
+        Command::Doctor(args) => {
+            commands::doctor::run_doctor_with_options(commands::doctor::DoctorOptions {
+                network: !args.no_network,
+                json: args.json,
+            })
+            .await
+        }
+        Command::Models(args) => commands::models::run(args).await,
+        Command::Try(args) => commands::try_cmd::run(args).await,
         Command::Serve(args) => match args.command {
             ServeCommand::Acp(args) => {
                 if let Err(error) = commands::serve::run_acp_server(&args).await {

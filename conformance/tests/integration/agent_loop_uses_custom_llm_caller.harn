@@ -1,0 +1,35 @@
+/**
+ * Cross-slice integration: agent_loop's llm_caller seam composes with
+ * std/llm/handlers::with_fallback. Caller A returns {ok: false, status: "auth"};
+ * caller B returns a successful envelope. The fallback merges
+ * {fallback_index, fallback_total} into the success envelope; agent_loop
+ * surfaces the visible text from caller B.
+ */
+import { with_fallback } from "std/llm/handlers"
+
+pipeline default() {
+  let caller_a = { _call -> return {ok: false, status: "auth", error: "bad-key"} }
+  let caller_b = { _call -> return {
+    ok: true,
+    value: {
+      text: "FROM-B",
+      model: "mock",
+      provider: "mock",
+      input_tokens: 0,
+      output_tokens: 0,
+      usage: {input_tokens: 0, output_tokens: 0},
+    },
+  } }
+  // Wrap the fallback in an outer caller so we can println the merged
+  // fallback_index for the test before returning to agent_loop.
+  let inner = with_fallback([caller_a, caller_b])
+  let observe = { call ->
+    let env = inner(call)
+    println("fallback_index=" + to_string(env?.fallback_index ?? -1))
+    println("fallback_total=" + to_string(env?.fallback_total ?? -1))
+    return env
+  }
+  let result = agent_loop("hi", nil, {provider: "mock", llm_caller: observe, max_iterations: 1})
+  println(result.status)
+  println(result.visible_text)
+}

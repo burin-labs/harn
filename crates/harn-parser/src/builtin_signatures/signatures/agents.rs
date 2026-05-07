@@ -724,6 +724,22 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         where_clauses: &[],
     },
     BuiltinSignature {
+        name: "llm_model_defaults",
+        params: &[Param::new("model_id", TY_STRING)],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "llm_resolved_options",
+        params: &[Param::new("opts", TY_DICT)],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "llm_known_models",
         params: &[],
         returns: TY_LIST,

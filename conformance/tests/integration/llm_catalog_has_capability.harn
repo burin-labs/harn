@@ -1,0 +1,18 @@
+// std/llm/catalog.has_capability returns true when the model supports
+// the given capability per the runtime catalog and false otherwise.
+import { has_capability } from "std/llm/catalog"
+
+pipeline default() {
+  let m = "claude-sonnet-4-20250514"
+  println(has_capability(m, "native_tools"))
+  println(has_capability(m, "prompt_caching"))
+  println(has_capability(m, "vision"))
+  println(has_capability(m, "files_api"))
+  println(has_capability(m, "thinking"))
+  println(has_capability(m, "tool_search"))
+  // unknown capability name → false
+  println(has_capability(m, "telekinesis"))
+  // unknown model → no catalog entry → all defaults false
+  println(has_capability("totally-unknown-model-xyz", "vision"))
+  println(has_capability("totally-unknown-model-xyz", "tool_search"))
+}

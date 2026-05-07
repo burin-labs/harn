@@ -1,0 +1,29 @@
+// Demo: std/llm/refine — refine_prompt
+//
+// Runs a single meta-prompt LLM call to rewrite the user prompt. The mock
+// model returns a refined prompt followed by a "DIFF: ..." trailer that
+// refine_prompt parses out.
+//
+// Run with: cargo run --quiet --bin harn -- run examples/llm_refine.harn
+import { refine_prompt } from "std/llm/refine"
+
+pipeline default() {
+  llm_mock_clear()
+  llm_mock(
+    {
+      text: "Summarize the article in 3 bullet points, each under 12 words.\nDIFF: tightened length, added bullet structure",
+    },
+  )
+  let result = refine_prompt(
+    {
+      user_prompt: "please summarize this article briefly with bullets",
+      provider: "mock",
+      model: "mock-small",
+      style: "imperative",
+    },
+  )
+  println("ok           = " + to_string(result.ok))
+  println("original     = " + result.original)
+  println("refined      = " + result.refined)
+  println("diff_summary = " + result.diff_summary)
+}

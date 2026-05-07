@@ -1,0 +1,262 @@
+/**
+ * @harn-entrypoint-category llm.stdlib
+ *
+ * std/llm/budget — token / context heuristics for sizing prompts and
+ * recommending max_output_tokens. Intentionally heuristic; designed to
+ * degrade gracefully when no model-specific tokenizer is exposed.
+ *
+ * Note: the spec calls for a one-shot warn agent_emit_event when the
+ * model's context window is unknown. We skip the event-emit here because
+ * no agent session is guaranteed at the call sites. Callers that want the
+ * signal should observe `budget_summary().assumptions`.
+ */
+fn __count_char(text, ch) {
+  if text == nil || text == "" {
+    return 0
+  }
+  return len(split(text, ch)) - 1
+}
+
+fn __cjk_char_count(text) {
+  if text == nil || text == "" {
+    return 0
+  }
+  let stripped = regex_replace_all("[\\x{4E00}-\\x{9FFF}]", "", text)
+  return len(text) - len(stripped)
+}
+
+fn __looks_code_like(text) {
+  if text == nil || text == "" {
+    return false
+  }
+  if contains(text, "```") {
+    return true
+  }
+  let braces = __count_char(text, "{") + __count_char(text, "}")
+    + __count_char(text, "(")
+    + __count_char(text, ")")
+  return braces >= 8
+}
+
+fn __looks_cjk_heavy(text) {
+  if text == nil || text == "" {
+    return false
+  }
+  let total = len(text)
+  if total == 0 {
+    return false
+  }
+  let cjk = __cjk_char_count(text)
+  return cjk * 100 >= total * 15
+}
+
+fn __ceil_int(x) {
+  let f = floor(x)
+  if x == f {
+    return to_int(f)
+  }
+  return to_int(f) + 1
+}
+
+/**
+ * Heuristic token estimator for a single string. Returns int. The
+ * `model` arg is reserved for forward-compat with a future Rust
+ * tokenizer builtin and is not currently used.
+ *
+ * Note: this function intentionally avoids the name `estimate_tokens`
+ * to prevent a parser-level collision with the existing
+ * `estimate_text_tokens(messages: list)` workflow builtin.
+ */
+pub fn estimate_text_tokens(text, _model) {
+  if text == nil {
+    return 0
+  }
+  let s = to_string(text)
+  if s == "" {
+    return 0
+  }
+  let length = len(s)
+  if __looks_cjk_heavy(s) {
+    return __ceil_int(length * 1.0)
+  }
+  if __looks_code_like(s) {
+    return __ceil_int(length / 3.5)
+  }
+  return __ceil_int(length / 4.0)
+}
+
+/**
+ * Look up the context window for a model. Falls back to 8192 if the
+ * catalog has no entry. Returns int.
+ */
+pub fn context_window_for(model) {
+  let info = try {
+    llm_model_info(model)
+  }
+  if is_err(info) {
+    return 8192
+  }
+  let resolved = unwrap(info)
+  if type_of(resolved) != "dict" {
+    return 8192
+  }
+  let catalog = resolved?.catalog
+  if type_of(catalog) != "dict" {
+    return 8192
+  }
+  let cw = catalog?.context_window
+  if cw == nil {
+    return 8192
+  }
+  return to_int(cw)
+}
+
+fn __model_max_output_tokens(model) {
+  let info = try {
+    llm_model_info(model)
+  }
+  if is_err(info) {
+    return 16384
+  }
+  let resolved = unwrap(info)
+  if type_of(resolved) != "dict" {
+    return 16384
+  }
+  let catalog = resolved?.catalog
+  if type_of(catalog) != "dict" {
+    return 16384
+  }
+  let mot = catalog?.max_output_tokens
+  if mot == nil {
+    return 16384
+  }
+  return to_int(mot)
+}
+
+fn __task_clamp(kind, capped, used, summary_ratio) {
+  if kind == "summarize" {
+    let ratio_floor = __ceil_int(used * summary_ratio)
+    let upper = if ratio_floor > 256 {
+      ratio_floor
+    } else {
+      256
+    }
+    return min(capped, upper)
+  }
+  if kind == "chat" {
+    return min(capped, 1024)
+  }
+  if kind == "plan" {
+    return min(capped, 2048)
+  }
+  if kind == "code" {
+    return min(capped, 8192)
+  }
+  if kind == "json" {
+    return min(capped, 4096)
+  }
+  if kind == "agent" {
+    return min(capped, 4096)
+  }
+  return capped
+}
+
+/**
+ * Recommend max_output_tokens for a given prompt/system/model/task_kind.
+ * Required: opts.prompt, opts.model. Optional: opts.system,
+ * opts.headroom (default 0.10), opts.task_kind (default "chat"),
+ * opts.summary_ratio (default 0.30).
+ */
+pub fn recommend_max_output_tokens(opts) {
+  if type_of(opts) != "dict" {
+    throw "recommend_max_output_tokens: opts must be a dict"
+  }
+  if opts?.prompt == nil {
+    throw "recommend_max_output_tokens: opts.prompt is required"
+  }
+  if opts?.model == nil || opts.model == "" {
+    throw "recommend_max_output_tokens: opts.model is required"
+  }
+  let model = opts.model
+  let headroom = opts?.headroom ?? 0.1
+  let kind = opts?.task_kind ?? "chat"
+  let summary_ratio = opts?.summary_ratio ?? 0.3
+  let ctx = context_window_for(model)
+  let prompt_tokens = estimate_text_tokens(opts.prompt, model)
+  let system_tokens = estimate_text_tokens(opts?.system ?? "", model)
+  let used = prompt_tokens + system_tokens
+  let headroom_tokens = __ceil_int(ctx * headroom)
+  let raw_remaining = ctx - used - headroom_tokens
+  let model_cap = __model_max_output_tokens(model)
+  let capped = min(raw_remaining, model_cap)
+  let clamped = __task_clamp(kind, capped, used, summary_ratio)
+  if clamped < 64 {
+    return 64
+  }
+  return clamped
+}
+
+/**
+ * Debug helper. Returns a dict with all intermediate values used by
+ * recommend_max_output_tokens, plus an `assumptions` list of strings.
+ */
+pub fn budget_summary(opts) {
+  if type_of(opts) != "dict" {
+    throw "budget_summary: opts must be a dict"
+  }
+  let model = opts?.model ?? ""
+  let info = llm_model_info(model)
+  let provider = if type_of(info) == "dict" {
+    to_string(info?.provider ?? "")
+  } else {
+    ""
+  }
+  let catalog = if type_of(info) == "dict" {
+    info?.catalog
+  } else {
+    nil
+  }
+  var assumptions = []
+  let ctx = if type_of(catalog) == "dict" && catalog?.context_window != nil {
+    to_int(catalog.context_window)
+  } else {
+    assumptions = assumptions.push("context_window unknown — using 8192 fallback")
+    8192
+  }
+  let headroom = opts?.headroom ?? 0.1
+  let kind = opts?.task_kind ?? "chat"
+  let summary_ratio = opts?.summary_ratio ?? 0.3
+  let prompt_tokens = estimate_text_tokens(opts?.prompt ?? "", model)
+  let system_tokens = estimate_text_tokens(opts?.system ?? "", model)
+  let headroom_tokens = __ceil_int(ctx * headroom)
+  let remaining = ctx - prompt_tokens - system_tokens - headroom_tokens
+  let model_cap = __model_max_output_tokens(model)
+  let capped = min(remaining, model_cap)
+  var clamped = __task_clamp(kind, capped, prompt_tokens + system_tokens, summary_ratio)
+  if clamped < 64 {
+    clamped = 64
+  }
+  return {
+    model: model,
+    provider: provider,
+    context_window: ctx,
+    prompt_tokens_est: prompt_tokens,
+    system_tokens_est: system_tokens,
+    headroom_tokens: headroom_tokens,
+    remaining_tokens: remaining,
+    recommended_max_output: clamped,
+    task_kind: kind,
+    assumptions: assumptions,
+  }
+}
+
+/**
+ * Returns a bool: does the rendered text fit in the model's context
+ * window after reserving `headroom` of the window?
+ */
+pub fn fits_in_context(text, model, headroom = 0.1) {
+  let ctx = context_window_for(model)
+  let used = estimate_text_tokens(text, model)
+  let reserved = __ceil_int(ctx * headroom)
+  return used + reserved <= ctx
+}

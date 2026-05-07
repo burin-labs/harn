@@ -1,0 +1,14 @@
+// std/llm/catalog.family_of classifies model IDs into per-family buckets
+// driven by the inferred provider.
+import { family_of } from "std/llm/catalog"
+
+pipeline default() {
+  println(family_of("claude-3-5-haiku-20241022"))
+  println(family_of("claude-opus-4-7-20260101"))
+  println(family_of("claude-sonnet-4-20250514"))
+  println(family_of("gpt-5-something"))
+  println(family_of("gpt-4o-mini"))
+  println(family_of("gemini-2.5-flash"))
+  println(family_of("ollama:qwen3:30b-a3b"))
+  println(family_of("mystery-model-xyz"))
+}

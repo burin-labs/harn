@@ -142,6 +142,26 @@ descriptions. For programmatic tool registration, use `tool_define(...)`,
 which also preserves extra config keys such as `policy` for capability
 enforcement.
 
+### Composable LLM middleware
+
+`agent_loop` accepts an `llm_caller:` closure that owns each turn's
+`llm_call(...)`. Wrap it with middleware from `std/llm/handlers` to
+compose retry / fallback / shadow / budget / cache behavior:
+
+```harn
+import {default_llm_caller, with_retry, with_fallback, compose} from "std/llm/handlers"
+
+let caller = compose([
+  with_retry({max_attempts: 4, backoff: "exponential"}),
+])(default_llm_caller())
+
+agent_loop(task, system, {loop_until_done: true, llm_caller: caller})
+```
+
+See [docs/src/stdlib/llm-handlers.md](docs/src/stdlib/llm-handlers.md)
+for the full module catalog (handlers, ensemble, refine, budget,
+defaults, safe, prompts, catalog).
+
 ## Core Capabilities
 
 - Typed workflow graphs via `workflow_graph(...)` and `workflow_execute(...)`

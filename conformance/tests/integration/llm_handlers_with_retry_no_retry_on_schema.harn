@@ -1,0 +1,17 @@
+// Conformance test for std/llm/handlers::with_retry — never retries on
+// non-retryable statuses such as schema_validation.
+import { with_retry } from "std/llm/handlers"
+
+pipeline default() {
+  let counter = atomic(0)
+  let synthetic = { _call ->
+    let _ = atomic_add(counter, 1)
+    return {ok: false, status: "schema_validation", error: "bad shape"}
+  }
+  let caller = with_retry(synthetic, {max_attempts: 5, base_ms: 1})
+  let env = caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  println(env.ok)
+  println(env.status)
+  println(env.retries_attempted)
+  println(atomic_get(counter))
+}

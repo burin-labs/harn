@@ -1,0 +1,28 @@
+// pack_for(claude-sonnet-4-5, agent, thinking="medium") layers:
+//   1. catalog defaults
+//   2. thinking patch → {thinking: {enabled: true, budget_tokens: 4096}}
+//   3. effort patch (balanced) → {temperature: 0.7, max_tokens: 4096}
+//   4. task overlay (agent) only fills unset fields, so temperature stays 0.7
+import { pack_for } from "std/llm/defaults"
+
+pipeline test(task) {
+  let r = pack_for({model: "claude-sonnet-4-5", task: "agent", thinking: "medium"})
+  assert_eq(type_of(r), "dict")
+  assert_eq(r.model, "claude-sonnet-4-5")
+  assert_eq(r.provider, "anthropic")
+  // Thinking patch wins.
+  assert_eq(type_of(r.thinking), "dict")
+  assert_eq(r.thinking.enabled, true)
+  assert_eq(r.thinking.budget_tokens, 4096)
+  // Effort (balanced) sets temperature 0.7 and max_tokens 4096.
+  assert_eq(r.temperature, 0.7)
+  assert_eq(r.max_tokens, 4096)
+  // Task overlay fills the unset agent slots.
+  assert_eq(r.top_p, 0.95)
+  assert_eq(r.schema_retries, 0)
+  assert_eq(r.output_format.kind, "text")
+  // Internal pack control keys do not leak.
+  assert_eq(r.has("task"), false)
+  assert_eq(r.has("thinking_request"), false)
+  log("llm_defaults_pack_anthropic_sonnet passed")
+}

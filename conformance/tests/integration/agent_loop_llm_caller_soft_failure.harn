@@ -1,0 +1,10 @@
+/**
+ * Caller returns {ok: false, status: "budget_exhausted"} → agent_loop
+ * finalizes with status budget_exhausted (mirrors the default-caller path
+ * when llm_call throws a budget_exceeded reason).
+ */
+pipeline default() {
+  let budget_caller = { _call -> return {ok: false, status: "budget_exhausted"} }
+  let result = agent_loop("hi", nil, {provider: "mock", llm_caller: budget_caller})
+  println(result.status)
+}

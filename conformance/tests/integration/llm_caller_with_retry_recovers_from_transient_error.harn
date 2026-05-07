@@ -1,0 +1,32 @@
+/**
+ * Cross-slice integration: agent_loop's llm_caller seam composes with
+ * std/llm/handlers::with_retry. Synthetic caller fails twice with
+ * {ok: false, status: "transient"} then succeeds; with_retry wraps it; the
+ * recovered text becomes agent_loop's visible_text.
+ */
+import { with_retry } from "std/llm/handlers"
+
+pipeline default() {
+  let counter = atomic(0)
+  let synthetic = { _call ->
+    let n = atomic_add(counter, 1)
+    if n < 2 {
+      return {ok: false, status: "transient", error: "blip"}
+    }
+    return {
+      ok: true,
+      value: {
+        text: "all-ok",
+        model: "mock",
+        provider: "mock",
+        input_tokens: 0,
+        output_tokens: 0,
+        usage: {input_tokens: 0, output_tokens: 0},
+      },
+    }
+  }
+  let caller = with_retry(synthetic, {max_attempts: 5, base_ms: 1})
+  let result = agent_loop("hi", nil, {provider: "mock", llm_caller: caller, max_iterations: 1})
+  println(result.status)
+  println(result.visible_text)
+}

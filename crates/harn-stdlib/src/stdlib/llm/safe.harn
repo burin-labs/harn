@@ -1,0 +1,236 @@
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/safe — DRY consolidations for envelope-shaped llm_call results,
+// case-insensitive dict access, and judge-payload reconstruction.
+import { agent_session_messages } from "std/agent/state"
+
+/**
+ * Try-wrap llm_call into the canonical envelope shape:
+ * {ok: true, value: <llm dict>} on success
+ * {ok: false, status: <"budget_exhausted" | "exception">, error?} on error.
+ */
+pub fn safe_call(prompt, system, options) {
+  let result = try {
+    llm_call(prompt, system, options)
+  }
+  if !is_err(result) {
+    return {ok: true, value: unwrap(result)}
+  }
+  let err = unwrap_err(result)
+  let reason = if type_of(err) == "dict" {
+    err?.reason ?? ""
+  } else {
+    ""
+  }
+  if reason == "budget_exceeded" {
+    return {ok: false, status: "budget_exhausted", error: err}
+  }
+  return {ok: false, status: "exception", error: err}
+}
+
+/** Direct case-insensitive single-key lookup on a dict. Returns nil on miss. */
+pub fn dict_get_ci(d, key) {
+  if type_of(d) != "dict" {
+    return nil
+  }
+  let target = lowercase(to_string(key))
+  for k in d.keys() {
+    if lowercase(to_string(k)) == target {
+      return d[k]
+    }
+  }
+  return nil
+}
+
+fn __value_is_present(value) {
+  if value == nil {
+    return false
+  }
+  let kind = type_of(value)
+  if kind == "string" {
+    return value != ""
+  }
+  if kind == "list" {
+    return len(value) > 0
+  }
+  if kind == "dict" {
+    return len(value.keys()) > 0
+  }
+  return true
+}
+
+/**
+ * Case-insensitive top-level dict lookup. Tries each name in order; returns
+ * the first non-nil non-empty value, else default. Top-level keys only.
+ */
+pub fn safe_field(envelope, names, default) {
+  if type_of(envelope) != "dict" {
+    return default
+  }
+  if type_of(names) != "list" {
+    return default
+  }
+  for name in names {
+    let value = dict_get_ci(envelope, name)
+    if __value_is_present(value) {
+      return value
+    }
+  }
+  return default
+}
+
+/**
+ * Recursively normalize all dict keys to lowercase. Lists pass through
+ * unchanged, but dicts within lists are recursed into. Idempotent.
+ */
+pub fn with_case_insensitive_keys(envelope) {
+  if type_of(envelope) == "dict" {
+    var out = {}
+    for k in envelope.keys() {
+      let new_key = lowercase(to_string(k))
+      out = out + {[new_key]: with_case_insensitive_keys(envelope[k])}
+    }
+    return out
+  }
+  if type_of(envelope) == "list" {
+    var out = []
+    for item in envelope {
+      out = out.push(with_case_insensitive_keys(item))
+    }
+    return out
+  }
+  return envelope
+}
+
+/**
+ * Merges defaults UNDER the envelope's data field. The envelope wins per-key.
+ * If envelope.ok is false or envelope is nil, returns {ok: false, ...defaults}.
+ */
+pub fn structured_envelope_or_default(envelope, defaults) {
+  let base = if type_of(defaults) == "dict" {
+    defaults
+  } else {
+    {}
+  }
+  if envelope == nil {
+    return {ok: false} + base
+  }
+  if type_of(envelope) != "dict" {
+    return {ok: false} + base
+  }
+  if !(envelope?.ok ?? false) {
+    return {ok: false} + base + envelope
+  }
+  let data = if type_of(envelope?.data) == "dict" {
+    envelope.data
+  } else {
+    {}
+  }
+  return envelope + {data: base + data}
+}
+
+fn __unique_names(names) {
+  var unique = []
+  for name in names {
+    if name != "" && !contains(unique, name) {
+      unique = unique.push(name)
+    }
+  }
+  return unique
+}
+
+fn __session_tool_names(messages) {
+  var names = []
+  for message in messages {
+    if message?.role == "tool" {
+      names = names.push(message?.name ?? "")
+    }
+  }
+  return __unique_names(names)
+}
+
+/**
+ * Build the canonical judge payload. Mirrors agent/judge.__judge_payload but
+ * callable from non-agent_loop contexts (e.g. parallel_judge in ensemble).
+ * Returns {session_id, task, stop_reason, text, visible_text, last_text,
+ * transcript, all_tools_used, successful_tools_used, iteration}.
+ */
+pub fn judge_payload(session, _opts, stop_reason, text, iteration) {
+  let session_id = session?.session_id ?? ""
+  let messages = if session_id != "" {
+    let m = try {
+      agent_session_messages(session_id)
+    }
+    if is_err(m) {
+      []
+    } else {
+      unwrap(m)
+    }
+  } else {
+    []
+  }
+  let tool_names = __session_tool_names(messages)
+  return {
+    session_id: session_id,
+    task: session?.task ?? "",
+    stop_reason: stop_reason,
+    text: text,
+    visible_text: text,
+    last_text: text,
+    transcript: json_stringify(messages),
+    all_tools_used: join(tool_names, ", "),
+    successful_tools_used: join(tool_names, ", "),
+    iteration: iteration,
+  }
+}
+
+/**
+ * Normalize a judge verdict string. Lowercases, trims, optionally maps via
+ * alias_groups (a list of {canonical, aliases}). Returns the canonical form
+ * or the lowered/trimmed original.
+ */
+pub fn verdict_normalize(text, alias_groups) {
+  let normalized = lowercase(trim(to_string(text ?? "")))
+  if alias_groups == nil || type_of(alias_groups) != "list" || len(alias_groups) == 0 {
+    return normalized
+  }
+  for group in alias_groups {
+    let canonical = group?.canonical ?? ""
+    let aliases = group?.aliases ?? []
+    if canonical != "" && type_of(aliases) == "list" && contains(aliases, normalized) {
+      return canonical
+    }
+  }
+  return normalized
+}
+
+/**
+ * Build a deterministic schema-retry nudge string from a JSON Schema.
+ * Lists required fields (sorted), enforces lowercase keys, no markdown,
+ * no fences. Optional hint string is appended.
+ */
+pub fn schema_retry_nudge_for(schema, hint) {
+  let required = if type_of(schema) == "dict" && type_of(schema?.required) == "list" {
+    schema.required
+  } else {
+    []
+  }
+  let sorted_required = required.sort()
+  let required_line = if len(sorted_required) > 0 {
+    "Required keys (lowercase): " + join(sorted_required, ", ") + "."
+  } else {
+    "No required keys are declared."
+  }
+  var lines = [
+    "Your previous response did not pass schema validation.",
+    "Re-emit valid JSON only:",
+    "- Use lowercase keys exactly as specified.",
+    "- Do not wrap in markdown fences.",
+    "- Do not include prose, commentary, or trailing text.",
+    required_line,
+  ]
+  if hint != nil && to_string(hint) != "" {
+    lines = lines.push("Hint: " + to_string(hint))
+  }
+  return join(lines, "\n")
+}

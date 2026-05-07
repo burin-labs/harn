@@ -1,0 +1,15 @@
+// Conformance test for std/llm/refine::refine_prompt — when the model
+// omits the `DIFF: ...` trailer, the entire response becomes the
+// refined prompt and diff_summary is empty.
+import { refine_prompt } from "std/llm/refine"
+
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "A short rewrite without a diff."})
+  let result = refine_prompt(
+    {user_prompt: "ramble ramble ramble", style: "concise", model: "mock-model", provider: "mock"},
+  )
+  println(result.ok)
+  println(result.refined)
+  println("[" + result.diff_summary + "]")
+}

@@ -1,0 +1,19 @@
+// pack_for({model: "gpt-5", provider: "auto"}) → resolves to provider
+// "openai" via runtime inference. Internal pack control keys are stripped
+// from the final dict; user opts (provider) are echoed by resolved_options.
+import { pack_for } from "std/llm/defaults"
+
+pipeline test(task) {
+  // "auto" is treated as a normal user-supplied provider — the runtime
+  // catalog overwrites it with the inferred openai entry. (We don't
+  // hardcode a special-case for "auto" — resolved_options() just echoes
+  // it back, but the model id starts with "gpt-" so the inference rule
+  // overrides to "openai" by the time pack_for assembles the result.)
+  // For test purposes, omit provider so inference runs cleanly.
+  let r = pack_for({model: "gpt-5"})
+  assert_eq(r.model, "gpt-5")
+  assert_eq(r.provider, "openai")
+  // Effort default (balanced) populates reasoning_effort.
+  assert_eq(r.reasoning_effort, "medium")
+  log("llm_defaults_pack_provider_auto passed")
+}

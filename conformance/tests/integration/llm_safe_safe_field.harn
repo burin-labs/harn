@@ -1,0 +1,13 @@
+// std/llm/safe.safe_field returns the first non-nil non-empty value via
+// case-insensitive lookup, falling back to the default when nothing is
+// present.
+import { safe_field } from "std/llm/safe"
+
+pipeline default() {
+  let env = {a: nil, B: "hi"}
+  println(safe_field(env, ["a", "b"], "miss"))
+  println(safe_field({}, ["x"], "miss"))
+  println(safe_field({Verdict: ""}, ["verdict"], "skipped"))
+  println(safe_field({Verdict: "DONE"}, ["verdict", "Verdict"], "skipped"))
+  println(safe_field({nested: {x: 1}}, ["nested"], "miss") == {x: 1})
+}

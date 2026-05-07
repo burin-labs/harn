@@ -1,0 +1,32 @@
+// Conformance test for std/llm/ensemble::best_of_n — structured judge
+// selects the highest-scoring candidate by index.
+import { best_of_n } from "std/llm/ensemble"
+
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "candidate-A"})
+  llm_mock({text: "candidate-B"})
+  llm_mock({text: "candidate-C"})
+  llm_mock({text: "candidate-D"})
+  // Structured judge response.
+  llm_mock(
+    {text: "{\"best_index\": 2, \"scores\": [0.1, 0.2, 0.9, 0.3], \"reasoning\": \"C is best\"}"},
+  )
+  let result = best_of_n(
+    "rate these",
+    "",
+    {
+      n: 4,
+      parallel: false,
+      sampler_opts: {temperature: 1.0, provider: "mock"},
+      call_opts: {provider: "mock"},
+      judge: "structured",
+      judge_opts: {provider: "mock"},
+    },
+  )
+  println(result.ok)
+  println(result.best.index)
+  println(result.best.text)
+  println(result.judge)
+  println(result.reasoning)
+}

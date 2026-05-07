@@ -14,6 +14,7 @@ pub(crate) mod init;
 pub(crate) mod mcp;
 pub(crate) mod merge_captain;
 pub(crate) mod merge_captain_mock;
+pub(crate) mod models;
 pub mod orchestrator;
 pub mod persona;
 pub mod persona_doctor;
@@ -30,6 +31,7 @@ pub(crate) mod test;
 pub(crate) mod trace;
 pub mod trigger;
 pub(crate) mod trust;
+pub(crate) mod try_cmd;
 pub(crate) mod viz;
 
 use std::path::{Path, PathBuf};

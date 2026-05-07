@@ -1,0 +1,37 @@
+// Demo: std/llm/ensemble — best_of_n with a custom closure judge.
+//
+// Seeds 3 mock candidates, then picks the longest text via a closure judge.
+//
+// Run with: cargo run --quiet --bin harn -- run examples/llm_ensemble.harn
+import { best_of_n } from "std/llm/ensemble"
+
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "short"})
+  llm_mock({text: "this is the longest answer of the bunch"})
+  llm_mock({text: "medium length"})
+  // Closure judge: pick the candidate with the longest text. The judge
+  // receives the list of valid samples (each {ok, index, text, value}).
+  let longest_judge = { samples ->
+    var best_i = samples[0].index
+    var best_len = len(samples[0].text)
+    var i = 1
+    while i < len(samples) {
+      let l = len(samples[i].text)
+      if l > best_len {
+        best_len = l
+        best_i = samples[i].index
+      }
+      i = i + 1
+    }
+    return {best_index: best_i, reasoning: "longest text wins"}
+  }
+  let result = best_of_n(
+    "Tell me a story.",
+    "",
+    {n: 3, parallel: false, judge: longest_judge, call_opts: {provider: "mock"}},
+  )
+  println("winner index = " + to_string(result.best.index))
+  println("winner text  = " + result.best.text)
+  println("reasoning    = " + result.reasoning)
+}

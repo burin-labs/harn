@@ -1,0 +1,24 @@
+// Conformance test for std/llm/ensemble::self_consistency — when the
+// extract closure returns nil for every sample, the result reports
+// {ok: false, status: "no_extractable_answers"}.
+import { self_consistency } from "std/llm/ensemble"
+
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "noise-1"})
+  llm_mock({text: "noise-2"})
+  llm_mock({text: "noise-3"})
+  let result = self_consistency(
+    "anything",
+    "",
+    {
+      n: 3,
+      parallel: false,
+      sampler_opts: {temperature: 1.2},
+      call_opts: {provider: "mock"},
+      extract: { _text -> nil },
+    },
+  )
+  println(result.ok)
+  println(result.status)
+}

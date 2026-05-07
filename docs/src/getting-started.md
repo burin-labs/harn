@@ -99,6 +99,19 @@ No imports, no SDK initialization, no response parsing. Harn ships with
 built-in configs for Anthropic, OpenAI, OpenRouter, Ollama, HuggingFace,
 and local OpenAI-compatible servers.
 
+For production callers, wrap with retry middleware from
+`std/llm/handlers`:
+
+```harn,ignore
+import {default_llm_caller, with_retry} from "std/llm/handlers"
+
+let caller = with_retry(default_llm_caller(), {max_attempts: 4})
+let result = agent_loop(task, system, {llm_caller: caller, loop_until_done: true})
+```
+
+See [Composable callers and middleware](./stdlib/llm-handlers.md) for
+fallback chains, shadowing, ensembles, and model-aware option packs.
+
 ## The REPL
 
 Start an interactive session:

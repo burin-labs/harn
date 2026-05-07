@@ -1,3 +1,566 @@
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/ensemble — multi-sample helpers (best_of_n, self_consistency,
+// parallel_judge, debate). Each function uses safe_call from std/llm/safe so
+// failures surface as {ok: false, status} envelopes rather than throws.
+//
+// Citations:
+//   - Wang et al. 2022 "Self-Consistency Improves Chain of Thought Reasoning"
+//     (arxiv:2203.11171).
+//   - Du et al. 2023 "Improving Factuality and Reasoning in Language Models
+//     through Multiagent Debate" (arxiv:2305.14325).
+//   - OpenAI best-of-n / reranking patterns (cookbook).
+import { agent_emit_event } from "std/agent/state"
+import { safe_call, with_case_insensitive_keys } from "std/llm/safe"
+
+fn __clamp_int(n, lo, hi) {
+  let v = to_int(n)
+  if v < lo {
+    return lo
+  }
+  if v > hi {
+    return hi
+  }
+  return v
+}
+
+fn __sampler_opts_for(opts) {
+  let so = opts?.sampler_opts
+  if type_of(so) == "dict" {
+    return so
+  }
+  return {temperature: 1.0}
+}
+
+fn __merge_call_opts(base, sampler_opts) {
+  let merged = if type_of(base) == "dict" {
+    base
+  } else {
+    {}
+  }
+  return merged + sampler_opts
+}
+
+// -------------------------------------------------------------------------------------------------
+// best_of_n
+// -------------------------------------------------------------------------------------------------
+
+fn __sample_one(prompt, system, call_opts, index) {
+  let envelope = safe_call(prompt, system, call_opts)
+  if !(envelope?.ok ?? false) {
+    return {ok: false, index: index, status: envelope?.status, error: envelope?.error, text: ""}
+  }
+  let text = to_string(envelope.value?.text ?? "")
+  return {ok: true, index: index, text: text, value: envelope.value}
+}
+
+fn __collect_samples(prompt, system, base_opts, sampler_opts, n, run_parallel) {
+  let call_opts = __merge_call_opts(base_opts, sampler_opts)
+  var indices = []
+  var i = 0
+  while i < n {
+    indices = indices.push(i)
+    i = i + 1
+  }
+  if run_parallel {
+    return parallel each indices { idx ->
+      __sample_one(prompt, system, call_opts, idx)
+    }
+  }
+  var out = []
+  for idx in indices {
+    out = out.push(__sample_one(prompt, system, call_opts, idx))
+  }
+  return out
+}
+
+fn __reward_filter(samples, reward) {
+  if reward == nil {
+    return samples
+  }
+  var scored = []
+  for s in samples {
+    if s?.ok ?? false {
+      let r = try {
+        reward(s.text)
+      }
+      if !is_err(r) {
+        scored = scored.push(s + {reward: to_float(unwrap(r))})
+      } else {
+        scored = scored.push(s + {reward: 0.0})
+      }
+    }
+  }
+  return scored
+}
+
+fn __structured_judge(samples, opts) {
+  var labelled = []
+  let total = len(samples)
+  var i = 0
+  while i < total {
+    let s = samples[i]
+    if s?.ok ?? false {
+      labelled = labelled.push("[" + to_string(i) + "] " + to_string(s.text))
+    }
+    i = i + 1
+  }
+  if len(labelled) == 0 {
+    return {ok: false, status: "no_valid_samples"}
+  }
+  let prompt = if opts?.judge_prompt != nil && to_string(opts.judge_prompt) != "" {
+    to_string(opts.judge_prompt) + "\n\n" + join(labelled, "\n\n")
+  } else {
+    "Given these candidate answers, pick the best one. Reply ONLY with"
+      + " a JSON object {\"best_index\": <int>, \"scores\": [..],"
+      + " \"reasoning\": \"<brief>\"}.\n\n"
+      + join(labelled, "\n\n")
+  }
+  let system = opts?.judge_system ?? ""
+  var jopts = if type_of(opts?.judge_opts) == "dict" {
+    opts.judge_opts
+  } else {
+    {}
+  }
+  if opts?.judge_model != nil && to_string(opts.judge_model) != "" {
+    jopts = jopts + {model: to_string(opts.judge_model)}
+  }
+  let schema = {
+    type: "object",
+    properties: {
+      best_index: {type: "integer"},
+      scores: {type: "array", items: {type: "number"}},
+      reasoning: {type: "string"},
+    },
+    required: ["best_index"],
+  }
+  let envelope = try {
+    llm_call_structured_result(prompt, schema, jopts + {system: system})
+  }
+  if is_err(envelope) {
+    return {ok: false, status: "exception", error: unwrap_err(envelope)}
+  }
+  let env = unwrap(envelope)
+  if !(env?.ok ?? false) {
+    return {ok: false, status: env?.status ?? "judge_failed", error: env?.error}
+  }
+  let data = with_case_insensitive_keys(env?.data ?? {})
+  let best = to_int(data?.best_index ?? 0)
+  return {
+    ok: true,
+    best_index: best,
+    scores: data?.scores ?? [],
+    reasoning: to_string(data?.reasoning ?? ""),
+  }
+}
+
+/**
+ * best_of_n(prompt, system, opts) -> dict
+ *
+ * Sample N candidates in parallel and ask a judge to pick the best.
+ *
+ * Options:
+ *   - n: int (default 5; clamped to [2, 32])
+ *   - sampler_opts: dict (default {temperature: 1.0})
+ *   - judge: "structured" | closure (default "structured")
+ *   - judge_opts, judge_model, judge_prompt, judge_system: optional
+ *   - parallel: bool (default true)
+ *   - reward: closure(text) -> float (optional pre-judge filter)
+ *
+ * Returns: {ok, best: {text, index, score?}, candidates, judge, reasoning}.
+ * On all-fail: {ok: false, status: "all_samples_failed"}.
+ */
+pub fn best_of_n(prompt, system, opts = nil) {
+  let cfg = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  let n = __clamp_int(cfg?.n ?? 5, 2, 32)
+  let sampler_opts = __sampler_opts_for(cfg)
+  let run_parallel = cfg?.parallel ?? true
+  let base_opts = if type_of(cfg?.call_opts) == "dict" {
+    cfg.call_opts
+  } else {
+    {}
+  }
+  let samples = __collect_samples(prompt, system, base_opts, sampler_opts, n, run_parallel)
+  let valid = samples.filter({ s -> s?.ok ?? false })
+  if len(valid) == 0 {
+    return {ok: false, status: "all_samples_failed", candidates: samples}
+  }
+  let reward_filtered = __reward_filter(samples, cfg?.reward)
+  let judge_kind = cfg?.judge ?? "structured"
+  if type_of(judge_kind) == "closure" || type_of(judge_kind) == "function" {
+    let r = try {
+      judge_kind(valid)
+    }
+    if is_err(r) {
+      return {ok: false, status: "exception", error: unwrap_err(r), candidates: samples}
+    }
+    let verdict = unwrap(r)
+    let chosen_idx = to_int(verdict?.best_index ?? 0)
+    let safe_idx = if chosen_idx >= 0 && chosen_idx < len(samples) {
+      chosen_idx
+    } else {
+      valid[0].index
+    }
+    let best = samples[safe_idx]
+    return {
+      ok: true,
+      best: {text: best?.text ?? "", index: safe_idx, score: verdict?.score ?? nil},
+      candidates: samples,
+      judge: "closure",
+      reasoning: to_string(verdict?.reasoning ?? ""),
+    }
+  }
+  let verdict = __structured_judge(samples, cfg)
+  if !(verdict?.ok ?? false) {
+    return {
+      ok: false,
+      status: to_string(verdict?.status ?? "judge_failed"),
+      candidates: samples,
+      reward_filtered: reward_filtered,
+    }
+  }
+  let chosen_idx = verdict.best_index
+  let safe_idx = if chosen_idx >= 0 && chosen_idx < len(samples) {
+    chosen_idx
+  } else {
+    valid[0].index
+  }
+  let best = samples[safe_idx]
+  return {
+    ok: true,
+    best: {text: best?.text ?? "", index: safe_idx},
+    candidates: samples,
+    judge: "structured",
+    reasoning: verdict.reasoning,
+    scores: verdict.scores,
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// self_consistency
+// -------------------------------------------------------------------------------------------------
+
+fn __log2(x) {
+  // log2(x) = ln(x) / ln(2). Harn provides `ln`/`log` via std/math; fall
+  // back on a manual approximation if not.
+  let lnx = ln(x)
+  let ln2 = ln(2.0)
+  return lnx / ln2
+}
+
+fn __shannon_entropy(counts, total) {
+  if total <= 0 {
+    return 0.0
+  }
+  var h = 0.0
+  for c in counts {
+    let cnt = to_float(c)
+    if cnt > 0.0 {
+      let p = cnt / to_float(total)
+      h = h - p * __log2(p)
+    }
+  }
+  return h
+}
+
+fn __answer_key(value) {
+  let kind = type_of(value)
+  if kind == "string" {
+    return value
+  }
+  if kind == "dict" || kind == "list" {
+    return json_stringify(value)
+  }
+  return to_string(value)
+}
+
+fn __extract_answer(sample, extract, normalize) {
+  if !(sample?.ok ?? false) {
+    return nil
+  }
+  let raw = try {
+    extract(sample.text)
+  }
+  if is_err(raw) {
+    return nil
+  }
+  var ans = unwrap(raw)
+  if normalize != nil && ans != nil {
+    let norm = try {
+      normalize(ans)
+    }
+    if !is_err(norm) {
+      ans = unwrap(norm)
+    }
+  }
+  return ans
+}
+
+fn __weight_for(sample, vote_mode, confidence_fn) {
+  if vote_mode != "weighted" {
+    return 0.0
+  }
+  let cv = try {
+    confidence_fn(sample)
+  }
+  if is_err(cv) {
+    return 1.0
+  }
+  return to_float(unwrap(cv))
+}
+
+fn __tally_samples(samples, extract, normalize, vote_mode, confidence_fn) {
+  var keys_in_order = []
+  var counts = {}
+  var first_seen = {}
+  var weights = {}
+  var extracted = []
+  var idx = 0
+  for s in samples {
+    let ans = __extract_answer(s, extract, normalize)
+    if ans == nil {
+      extracted = extracted.push(nil)
+    } else {
+      let key = __answer_key(ans)
+      if counts[key] == nil {
+        keys_in_order = keys_in_order.push(key)
+        counts = counts + {[key]: 0}
+        first_seen = first_seen + {[key]: idx}
+        weights = weights + {[key]: 0.0}
+      }
+      counts = counts + {[key]: counts[key] + 1}
+      let w = __weight_for(s, vote_mode, confidence_fn)
+      if w != 0.0 {
+        weights = weights + {[key]: weights[key] + w}
+      }
+      extracted = extracted.push(ans)
+    }
+    idx = idx + 1
+  }
+  return {
+    keys_in_order: keys_in_order,
+    counts: counts,
+    first_seen: first_seen,
+    weights: weights,
+    extracted: extracted,
+  }
+}
+
+fn __score_for(key, counts, weights, vote_mode) {
+  if vote_mode == "weighted" {
+    return weights[key]
+  }
+  return to_float(counts[key])
+}
+
+fn __pick_winner(tally, vote_mode) {
+  let keys = tally.keys_in_order
+  var best_key = keys[0]
+  var best_score = __score_for(best_key, tally.counts, tally.weights, vote_mode)
+  var best_first_seen = tally.first_seen[best_key]
+  var tie = false
+  var i = 1
+  while i < len(keys) {
+    let k = keys[i]
+    let score = __score_for(k, tally.counts, tally.weights, vote_mode)
+    if score > best_score {
+      best_key = k
+      best_score = score
+      best_first_seen = tally.first_seen[k]
+      tie = false
+    } else if score == best_score {
+      let fs = tally.first_seen[k]
+      if fs < best_first_seen {
+        best_key = k
+        best_first_seen = fs
+      }
+      tie = true
+    }
+    i = i + 1
+  }
+  return {key: best_key, tie: tie}
+}
+
+fn __canonical_answer(extracted, key) {
+  for e in extracted {
+    if e != nil && __answer_key(e) == key {
+      return e
+    }
+  }
+  return nil
+}
+
+fn __build_distribution(keys_in_order, counts) {
+  var distribution = []
+  var total = 0
+  for k in keys_in_order {
+    let c = counts[k]
+    total = total + c
+    distribution = distribution.push({answer: k, count: c})
+  }
+  return {distribution: distribution, total: total}
+}
+
+/**
+ * self_consistency(prompt, system, opts) -> dict
+ *
+ * Sample N times at temperature > 0, extract a canonical answer per sample,
+ * and majority-vote (Wang et al. 2022; arxiv:2203.11171).
+ *
+ * Options:
+ *   - n: int (default 8)
+ *   - sampler_opts: dict (default {temperature: 1.2})
+ *   - extract: closure(text) -> any (REQUIRED)
+ *   - normalize: closure(answer) -> any (default identity)
+ *   - vote: "majority" | "weighted" (default "majority")
+ *   - confidence_fn: closure(sample) -> float (REQUIRED for "weighted")
+ *   - parallel: bool (default true)
+ *   - _session_id: string (optional; emits "self_consistency_tie")
+ *
+ * Returns: {ok, answer, answer_count, total, distribution, candidates, entropy}.
+ * Ties: lowest-index extracted answer wins; emits "self_consistency_tie".
+ * No extractable answers: {ok: false, status: "no_extractable_answers"}.
+ */
+pub fn self_consistency(prompt, system, opts = nil) {
+  let cfg = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  let extract = cfg?.extract
+  if extract == nil {
+    throw "self_consistency: opts.extract is required"
+  }
+  let vote_mode = cfg?.vote ?? "majority"
+  let confidence_fn = cfg?.confidence_fn
+  if vote_mode == "weighted" && confidence_fn == nil {
+    throw "self_consistency: opts.confidence_fn is required for weighted voting"
+  }
+  let n = __clamp_int(cfg?.n ?? 8, 2, 64)
+  let sampler_opts = if type_of(cfg?.sampler_opts) == "dict" {
+    cfg.sampler_opts
+  } else {
+    {temperature: 1.2}
+  }
+  let run_parallel = cfg?.parallel ?? true
+  let base_opts = if type_of(cfg?.call_opts) == "dict" {
+    cfg.call_opts
+  } else {
+    {}
+  }
+  let samples = __collect_samples(prompt, system, base_opts, sampler_opts, n, run_parallel)
+  let tally = __tally_samples(samples, extract, cfg?.normalize, vote_mode, confidence_fn)
+  if len(tally.keys_in_order) == 0 {
+    return {ok: false, status: "no_extractable_answers", candidates: samples}
+  }
+  let winner = __pick_winner(tally, vote_mode)
+  let dist = __build_distribution(tally.keys_in_order, tally.counts)
+  var counts_only = []
+  for d in dist.distribution {
+    counts_only = counts_only.push(d.count)
+  }
+  let session_id = to_string(cfg?._session_id ?? "")
+  if winner.tie && session_id != "" {
+    let _ = try {
+      agent_emit_event(
+        session_id,
+        "self_consistency_tie",
+        {answer: winner.key, total: dist.total, distribution: dist.distribution},
+      )
+    }
+  }
+  return {
+    ok: true,
+    answer: __canonical_answer(tally.extracted, winner.key),
+    answer_count: tally.counts[winner.key],
+    total: dist.total,
+    distribution: dist.distribution,
+    candidates: samples,
+    entropy: __shannon_entropy(counts_only, dist.total),
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// parallel_judge
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * parallel_judge(items, judge_fn, opts) -> list<dict>
+ *
+ * Run `judge_fn(item) -> verdict` for each item. Output preserves input
+ * order. Each entry: {item, verdict?, ok, error?, duration_ms}.
+ *
+ * Options:
+ *   - max_concurrent: int (default 4)
+ *   - on_error: "skip" | "fail_fast" | "collect" (default "collect")
+ *   - on_progress: closure({index, total, item, verdict}) -> nil
+ */
+pub fn parallel_judge(items, judge_fn, opts = nil) {
+  let cfg = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  let on_error = cfg?.on_error ?? "collect"
+  let on_progress = cfg?.on_progress
+  let total = len(items)
+  if total == 0 {
+    return []
+  }
+  // index pairs to preserve order through parallel each
+  var indexed = []
+  var i = 0
+  for item in items {
+    indexed = indexed.push({index: i, item: item})
+    i = i + 1
+  }
+  let raw = parallel each indexed with { max_concurrent: __clamp_int(cfg?.max_concurrent ?? 4, 1, 64) } { entry ->
+    let started = now_ms()
+    let r = try {
+      judge_fn(entry.item)
+    }
+    let duration = now_ms() - started
+    if is_err(r) {
+      let err = unwrap_err(r)
+      let record = {index: entry.index, item: entry.item, ok: false, error: err, duration_ms: duration}
+      if on_progress != nil {
+        let _ = try {
+          on_progress({index: entry.index, total: total, item: entry.item, verdict: nil})
+        }
+      }
+      record
+    } else {
+      let verdict = unwrap(r)
+      let record = {index: entry.index, item: entry.item, ok: true, verdict: verdict, duration_ms: duration}
+      if on_progress != nil {
+        let _ = try {
+          on_progress({index: entry.index, total: total, item: entry.item, verdict: verdict})
+        }
+      }
+      record
+    }
+  }
+  // Sort by index to preserve input order. parallel each currently returns
+  // results in input-list order, but we sort defensively in case that ever
+  // changes.
+  let sorted = raw.sort({ a, b -> a.index - b.index })
+  var out = []
+  for r in sorted {
+    let failed = !(r?.ok ?? false)
+    if failed && on_error == "fail_fast" {
+      throw r?.error ?? "parallel_judge: judge_fn errored"
+    }
+    if !(failed && on_error == "skip") {
+      out = out.push(r)
+    }
+  }
+  return out
+}
+
 type DebateDebater = string | {name: string?, system: string?, instruction: string?, llm_options: dict?}
 
 type DebateResponse = {

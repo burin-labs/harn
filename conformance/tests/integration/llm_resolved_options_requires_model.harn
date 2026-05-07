@@ -1,0 +1,11 @@
+pipeline test(task) {
+  let err = try {
+    llm_resolved_options({})
+    nil
+  } catch (e) {
+    e
+  }
+  assert(err != nil, "missing opts.model must error")
+  assert(err.contains("opts.model is required"), "error mentions opts.model is required")
+  log("llm_resolved_options_requires_model passed")
+}
