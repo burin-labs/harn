@@ -1,4 +1,72 @@
+use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::time::Duration as StdDuration;
+
+use clap::builder::{PossibleValue, StringValueParser, TypedValueParser};
+
+#[derive(Clone)]
+pub(crate) struct CompletionValueParser {
+    candidates: fn() -> Vec<String>,
+}
+
+impl CompletionValueParser {
+    fn new(candidates: fn() -> Vec<String>) -> Self {
+        Self { candidates }
+    }
+}
+
+impl TypedValueParser for CompletionValueParser {
+    type Value = String;
+
+    fn parse_ref(
+        &self,
+        cmd: &clap::Command,
+        arg: Option<&clap::Arg>,
+        value: &OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        StringValueParser::new().parse_ref(cmd, arg, value)
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        let values = (self.candidates)().into_iter().map(PossibleValue::new);
+        Some(Box::new(values))
+    }
+}
+
+pub(crate) fn llm_provider_completion_parser() -> CompletionValueParser {
+    CompletionValueParser::new(llm_provider_candidates)
+}
+
+pub(crate) fn llm_model_completion_parser() -> CompletionValueParser {
+    CompletionValueParser::new(llm_model_candidates)
+}
+
+pub(crate) fn trigger_provider_completion_parser() -> CompletionValueParser {
+    CompletionValueParser::new(trigger_provider_candidates)
+}
+
+fn llm_provider_candidates() -> Vec<String> {
+    harn_vm::llm_config::provider_names()
+}
+
+fn llm_model_candidates() -> Vec<String> {
+    let mut candidates: BTreeSet<String> = harn_vm::llm_config::known_model_names()
+        .into_iter()
+        .collect();
+    candidates.extend(
+        harn_vm::llm_config::model_catalog_entries()
+            .into_iter()
+            .map(|(id, _model)| id),
+    );
+    candidates.into_iter().collect()
+}
+
+fn trigger_provider_candidates() -> Vec<String> {
+    harn_vm::registered_provider_metadata()
+        .into_iter()
+        .map(|metadata| metadata.provider)
+        .collect()
+}
 
 pub(crate) fn parse_duration_arg(raw: &str) -> Result<StdDuration, String> {
     let raw = raw.trim();

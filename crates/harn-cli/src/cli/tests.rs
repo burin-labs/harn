@@ -2,14 +2,14 @@ use std::path::PathBuf;
 use std::time::Duration as StdDuration;
 
 use super::{
-    CheckOutputFormat, Cli, Command, ConnectCommand, ConnectorCommand, CrystallizeCommand,
-    FlowArchivistCommand, FlowCommand, McpCommand, OrchestratorCommand, OrchestratorDeployProvider,
-    OrchestratorLogFormat, OrchestratorQueueCommand, OrchestratorTenantCommand,
-    PackageCacheCommand, PackageCommand, PersonaCommand, ProjectTemplate, RunsCommand,
-    SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TraceCommand, TriggerCommand,
-    TrustCommand, TrustOutcomeArg, TrustTierArg,
+    CheckOutputFormat, Cli, Command, CompletionShell, ConnectCommand, ConnectorCommand,
+    CrystallizeCommand, FlowArchivistCommand, FlowCommand, McpCommand, OrchestratorCommand,
+    OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
+    OrchestratorTenantCommand, PackageCacheCommand, PackageCommand, PersonaCommand,
+    ProjectTemplate, RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
+    TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
 };
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 
 #[test]
 fn test_parses_conformance_target_selection() {
@@ -1797,6 +1797,72 @@ fn test_parses_provider_ready_args() {
     assert_eq!(args.model.as_deref(), Some("mlx-qwen36-27b"));
     assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:8002"));
     assert!(args.json);
+}
+
+#[test]
+fn test_parses_completions_args() {
+    let cli = Cli::parse_from(["harn", "completions", "zsh"]);
+
+    let Command::Completions(args) = cli.command.unwrap() else {
+        panic!("expected completions command");
+    };
+    assert_eq!(args.shell, CompletionShell::Zsh);
+}
+
+#[test]
+fn test_provider_model_completion_candidates_stay_permissive() {
+    let cli = Cli::parse_from([
+        "harn",
+        "provider-ready",
+        "custom-provider",
+        "--model",
+        "vendor/custom-model",
+    ]);
+    let Command::ProviderReady(args) = cli.command.unwrap() else {
+        panic!("expected provider-ready command");
+    };
+    assert_eq!(args.provider, "custom-provider");
+    assert_eq!(args.model.as_deref(), Some("vendor/custom-model"));
+
+    let command = Cli::command();
+    let provider_ready = command
+        .find_subcommand("provider-ready")
+        .expect("provider-ready subcommand");
+    let provider_values: Vec<_> = provider_ready
+        .get_arguments()
+        .find(|arg| arg.get_id() == "provider")
+        .expect("provider argument")
+        .get_possible_values()
+        .into_iter()
+        .map(|value| value.get_name().to_string())
+        .collect();
+    assert!(provider_values.iter().any(|value| value == "openai"));
+
+    let model_values: Vec<_> = provider_ready
+        .get_arguments()
+        .find(|arg| arg.get_id() == "model")
+        .expect("model argument")
+        .get_possible_values()
+        .into_iter()
+        .map(|value| value.get_name().to_string())
+        .collect();
+    assert!(model_values.iter().any(|value| value == "gpt-4o-mini"));
+}
+
+#[test]
+fn test_completion_scripts_include_subcommands() {
+    let mut command = Cli::command();
+    let mut output = Vec::new();
+    clap_complete::generate(
+        clap_complete::Shell::Bash,
+        &mut command,
+        "harn",
+        &mut output,
+    );
+    let script = String::from_utf8(output).expect("completion script should be utf-8");
+
+    assert!(script.contains("completions"));
+    assert!(script.contains("provider-ready"));
 }
 
 #[test]

@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Args, Subcommand, ValueEnum};
 
+use super::util::trigger_provider_completion_parser;
+
 #[derive(Debug, Args)]
 pub(crate) struct PersonaArgs {
     #[command(subcommand)]
@@ -168,7 +170,11 @@ pub(crate) struct PersonaTriggerArgs {
     /// Persona name to wake from an external trigger.
     pub name: String,
     /// Provider name, for example github, linear, slack, or webhook.
-    #[arg(long)]
+    #[arg(
+        long,
+        value_parser = trigger_provider_completion_parser(),
+        hide_possible_values = true
+    )]
     pub provider: String,
     /// Provider event kind, for example pull_request, check_run, issue, or message.
     #[arg(long)]

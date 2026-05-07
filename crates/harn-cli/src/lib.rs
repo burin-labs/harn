@@ -19,9 +19,9 @@ use std::sync::Arc;
 use std::{env, fs, process, thread};
 
 use cli::{
-    Cli, Command, MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs, PackageCacheCommand,
-    PackageCommand, PersonaCommand, RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand,
-    SkillTrustCommand, SkillsCommand,
+    Cli, Command, CompletionShell, MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs,
+    PackageCacheCommand, PackageCommand, PersonaCommand, RunsCommand, ServeCommand, SkillCommand,
+    SkillKeyCommand, SkillTrustCommand, SkillsCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -626,6 +626,7 @@ async fn async_main() {
                 process::exit(1);
             }
         }
+        Command::Completions(args) => print_completions(args.shell),
         Command::Orchestrator(args) => {
             if let Err(error) = commands::orchestrator::handle(args).await {
                 eprintln!("error: {error}");
@@ -919,6 +920,12 @@ async fn async_main() {
             commands::check::connector_matrix::run_docs(&args.output, &args.sources, args.check);
         }
     }
+}
+
+fn print_completions(shell: CompletionShell) {
+    let mut command = Cli::command();
+    let shell = clap_complete::Shell::from(shell);
+    clap_complete::generate(shell, &mut command, "harn", &mut std::io::stdout());
 }
 
 fn normalize_serve_args(mut raw_args: Vec<String>) -> Vec<String> {

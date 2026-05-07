@@ -1,5 +1,7 @@
 use clap::{ArgAction, Args};
 
+use super::util::{llm_model_completion_parser, llm_provider_completion_parser};
+
 #[derive(Debug, Args)]
 pub(crate) struct ModelInfoArgs {
     /// Verify provider-local readiness for the resolved model when supported.
@@ -12,6 +14,10 @@ pub(crate) struct ModelInfoArgs {
     #[arg(long = "keep-alive", value_name = "VALUE")]
     pub keep_alive: Option<String>,
     /// Model alias or provider-native model id.
+    #[arg(
+        value_parser = llm_model_completion_parser(),
+        hide_possible_values = true
+    )]
     pub model: String,
 }
 
@@ -25,9 +31,17 @@ pub(crate) struct ProviderCatalogArgs {
 #[derive(Debug, Args)]
 pub(crate) struct ProviderReadyArgs {
     /// Provider id from Harn provider config, for example mlx or local.
+    #[arg(
+        value_parser = llm_provider_completion_parser(),
+        hide_possible_values = true
+    )]
     pub provider: String,
     /// Model alias or provider-native model id to require in /models.
-    #[arg(long)]
+    #[arg(
+        long,
+        value_parser = llm_model_completion_parser(),
+        hide_possible_values = true
+    )]
     pub model: Option<String>,
     /// Override the configured provider base URL for this probe.
     #[arg(long = "base-url")]
