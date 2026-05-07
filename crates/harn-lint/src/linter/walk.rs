@@ -270,11 +270,13 @@ impl<'a> Linter<'a> {
             }
 
             Node::Identifier(name) => {
+                self.check_renamed_stdlib_symbol(name, snode.span);
                 self.references.insert(name.clone());
                 self.function_references.insert(name.clone());
             }
 
             Node::FunctionCall { name, args, .. } => {
+                self.check_renamed_stdlib_symbol(name, snode.span);
                 self.references.insert(name.clone());
                 self.function_references.insert(name.clone());
                 self.function_calls.push((name.clone(), snode.span));
@@ -1081,6 +1083,7 @@ impl<'a> Linter<'a> {
             }
             Node::SelectiveImport { names, is_pub, .. } => {
                 for name in names {
+                    self.check_renamed_stdlib_symbol(name, snode.span);
                     self.known_functions.insert(name.clone());
                 }
                 self.imports.push(ImportInfo {

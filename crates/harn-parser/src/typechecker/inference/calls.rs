@@ -872,12 +872,16 @@ impl TypeChecker {
                     .chain(scope.all_fn_names())
                     .chain(imported.iter().cloned())
                     .collect();
-                let suggestion = crate::diagnostic::find_closest_match(
-                    name,
-                    candidates.iter().map(|s| s.as_str()),
-                    2,
-                )
-                .map(|c| c.to_string());
+                let suggestion = crate::diagnostic::renamed_stdlib_symbol(name)
+                    .map(str::to_string)
+                    .or_else(|| {
+                        crate::diagnostic::find_closest_match(
+                            name,
+                            candidates.iter().map(|s| s.as_str()),
+                            2,
+                        )
+                        .map(|c| c.to_string())
+                    });
                 // Fold the suggestion into the message so callers that
                 // only surface `diag.message` (like `harn run` / the
                 // conformance runner) still see the "did you mean"

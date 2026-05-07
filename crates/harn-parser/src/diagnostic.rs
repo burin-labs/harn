@@ -92,6 +92,14 @@ pub fn find_closest_match<'a>(
         .filter(|c| edit_distance(name, c) <= max_dist && *c != name)
 }
 
+/// Return the replacement for stdlib symbols that were directly renamed.
+pub fn renamed_stdlib_symbol(name: &str) -> Option<&'static str> {
+    match name {
+        "retry_with_backoff" => Some("retry_predicate_with_backoff"),
+        _ => None,
+    }
+}
+
 /// Render a Rust-style diagnostic message.
 ///
 /// Example output:

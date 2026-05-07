@@ -6,14 +6,15 @@
 use std::collections::{HashMap, HashSet};
 
 use harn_lexer::{FixEdit, Span};
-use harn_parser::diagnostic::find_closest_match;
+use harn_parser::diagnostic::{find_closest_match, renamed_stdlib_symbol};
 use harn_parser::{BindingPattern, Node, SNode, TypeExpr, TypedParam};
 
 use crate::complexity::cyclomatic_complexity;
 use crate::decls::{Declaration, FnDeclaration, ImportInfo, ParamDeclaration, TypeDeclaration};
 use crate::diagnostic::{LintDiagnostic, LintSeverity, DEFAULT_COMPLEXITY_THRESHOLD};
 use crate::fixes::{
-    append_sink_fix, is_pure_expression, remove_method_call_wrapper_fix, simple_ident_rename_fix,
+    append_sink_fix, is_pure_expression, remove_method_call_wrapper_fix,
+    replace_identifier_text_fix, simple_ident_rename_fix,
 };
 use crate::harndoc::check_legacy_doc_comments;
 use crate::naming::{is_pascal_case, is_snake_case, to_pascal_case, to_snake_case};
@@ -180,6 +181,20 @@ impl<'a> Linter<'a> {
 
     pub(super) fn is_approval_record_builtin(name: &str) -> bool {
         name == "request_approval"
+    }
+
+    pub(super) fn check_renamed_stdlib_symbol(&mut self, name: &str, span: Span) {
+        let Some(replacement) = renamed_stdlib_symbol(name) else {
+            return;
+        };
+        self.diagnostics.push(LintDiagnostic {
+            rule: "renamed-stdlib-symbol",
+            message: format!("`{name}` was renamed to `{replacement}`"),
+            span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(format!("replace `{name}` with `{replacement}`")),
+            fix: replace_identifier_text_fix(self.source, span, name, replacement),
+        });
     }
 
     /// Score the body of a function/tool and emit a

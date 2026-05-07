@@ -44,11 +44,11 @@ pub fn retry_until(max_attempts, predicate) {
   return Err("exhausted")
 }
 
-// retry_with_backoff(max_attempts, base_ms, predicate) -> Result
+// retry_predicate_with_backoff(max_attempts, base_ms, predicate) -> Result
 // Calls predicate() with exponential backoff (base_ms * 2^attempt).
 // Returns Ok(value) on first truthy result, or Err("exhausted").
-/** retry_with_backoff. */
-pub fn retry_with_backoff(max_attempts, base_ms, predicate) {
+/** retry_predicate_with_backoff. */
+pub fn retry_predicate_with_backoff(max_attempts, base_ms, predicate) {
   var attempt = 0
   while attempt < max_attempts {
     let value = predicate()
