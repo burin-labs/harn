@@ -160,13 +160,7 @@ fn __turn_policy_for_kind(kind, opts) {
 }
 
 fn __summary_defaults(opts) {
-  var defaults = {profile: "completer", loop_until_done: false, done_sentinel: nil, done_judge: nil, max_nudges: 0}
-  if !__has_key(opts, "tools") || opts?.tools == nil {
-    defaults = defaults + {tool_choice: "none"}
-  } else if !__has_key(opts, "tool_choice") {
-    defaults = defaults + {tool_choice: "none"}
-  }
-  return defaults
+  return {profile: "completer", loop_until_done: false, done_sentinel: nil, done_judge: nil, max_nudges: 0}
 }
 
 fn __verify_defaults() {
