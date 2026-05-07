@@ -153,6 +153,7 @@ agent_loop(task, sys, {
   llm_caller: with_retry(default_llm_caller(), {max_attempts: 4}),
 })
 ```
+
 ## Unreleased
 
 ### Added
@@ -161,7 +162,6 @@ agent_loop(task, sys, {
   non-interactive setup flow that detects provider credentials, local Ollama,
   free disk space, and local GPU availability, then writes starter
   `providers.toml`, `harn.toml`, and `.env` files.
-## Unreleased
 
 ### Changed
 

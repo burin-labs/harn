@@ -1,0 +1,16 @@
+[package]
+name = "harn-vm-perf"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+harn-vm = { path = "../../crates/harn-vm", features = ["vm-bench-internals"] }
+
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "bench_vmenv_clone"
+path = "bench_vmenv_clone.rs"
+harness = false

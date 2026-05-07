@@ -28,6 +28,16 @@ To compare against the checked-in local baseline:
 full suite passes. The comparison column uses the baseline table's
 `mean_avg_ms` value.
 
+The Criterion VM clone-on-call probe is separate from the fixture runner:
+
+```bash
+cargo bench -p harn-vm-perf --bench bench_vmenv_clone
+```
+
+It measures the internal non-module closure call environment path at 0, 5, 25,
+and 100 captured names. Criterion reports time per call; the benchmark also
+prints allocation operations per call for each capture count.
+
 This suite is intentionally not part of `make all`; local CPU load, thermal
 state, and target cache state are too noisy for a default correctness gate. For
 before/after VM optimization work, run the suite several times on the same
