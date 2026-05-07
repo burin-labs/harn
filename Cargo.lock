@@ -1841,6 +1841,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-llm-perf"
+version = "0.0.0"
+dependencies = [
+ "criterion",
+ "harn-vm",
+]
+
+[[package]]
 name = "harn-lsp"
 version = "0.7.61"
 dependencies = [

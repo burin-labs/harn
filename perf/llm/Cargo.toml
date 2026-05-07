@@ -1,0 +1,16 @@
+[package]
+name = "harn-llm-perf"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+harn-vm = { path = "../../crates/harn-vm", features = ["llm-bench-internals"] }
+
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "bench_llm_options_roundtrip"
+path = "bench_llm_options_roundtrip.rs"
+harness = false

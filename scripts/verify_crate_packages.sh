@@ -56,7 +56,11 @@ import sys
 metadata = json.loads(pathlib.Path(sys.argv[1]).read_text())
 members = set(metadata["workspace_members"])
 for package in sorted(metadata["packages"], key=lambda p: p["name"]):
-    if package["id"] in members and package["name"].startswith("harn-"):
+    if (
+        package["id"] in members
+        and package["name"].startswith("harn-")
+        and package.get("publish") != []
+    ):
         print(f'{package["name"]}\t{package["manifest_path"]}')
 PY
 )
@@ -162,7 +166,7 @@ import pathlib
 metadata = json.loads(pathlib.Path(sys.argv[1]).read_text())
 members = set(metadata["workspace_members"])
 for package in sorted(metadata["packages"], key=lambda p: p["name"]):
-    if package["id"] in members:
+    if package["id"] in members and package.get("publish") != []:
         print(package["name"])
 PY
 )
