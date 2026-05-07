@@ -134,6 +134,14 @@ pub(crate) fn env_lock() -> &'static std::sync::Mutex<()> {
 
 pub const LLM_CALLS_DISABLED_ENV: &str = "HARN_LLM_CALLS_DISABLED";
 
+pub fn estimate_text_tokens(text: &str) -> i64 {
+    cost::estimate_text_tokens(text)
+}
+
+pub fn llm_pricing_per_1k(provider: &str, model: &str) -> Option<(f64, f64)> {
+    cost::pricing_per_1k_for(provider, model)
+}
+
 pub(crate) fn llm_calls_disabled() -> bool {
     std::env::var(LLM_CALLS_DISABLED_ENV)
         .ok()

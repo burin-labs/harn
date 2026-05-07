@@ -10,6 +10,9 @@ pub(crate) struct RunArgs {
     /// combine with `--trace`.
     #[arg(long)]
     pub profile: bool,
+    /// Print static LLM token/cost estimates and do not execute the script.
+    #[arg(long = "explain-cost")]
+    pub explain_cost: bool,
     /// Write the profile rollup as JSON to the given path. Implies `--profile`.
     #[arg(long = "profile-json", value_name = "PATH")]
     pub profile_json: Option<String>,

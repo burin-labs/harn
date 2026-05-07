@@ -17,6 +17,8 @@ use crate::skill_loader::{
     SkillLoaderInputs,
 };
 
+mod explain_cost;
+
 pub(crate) enum RunFileMcpServeMode {
     Stdio,
     Http {
@@ -601,6 +603,19 @@ pub(crate) async fn run_file(
     .await;
 }
 
+pub(crate) fn run_explain_cost_file_with_skill_dirs(path: &str) {
+    let outcome = execute_explain_cost(path);
+    if !outcome.stderr.is_empty() {
+        io::stderr().write_all(outcome.stderr.as_bytes()).ok();
+    }
+    if !outcome.stdout.is_empty() {
+        io::stdout().write_all(outcome.stdout.as_bytes()).ok();
+    }
+    if outcome.exit_code != 0 {
+        process::exit(outcome.exit_code);
+    }
+}
+
 pub(crate) async fn run_file_with_skill_dirs(
     path: &str,
     trace: bool,
@@ -642,6 +657,38 @@ pub(crate) async fn run_file_with_skill_dirs(
     }
     if exit_code != 0 {
         process::exit(exit_code);
+    }
+}
+
+pub fn execute_explain_cost(path: &str) -> RunOutcome {
+    let stdout = String::new();
+    let mut stderr = String::new();
+
+    let (source, program) = parse_source_file(path);
+
+    let mut had_type_error = false;
+    let type_diagnostics = typecheck_with_imports(&program, Path::new(path), &source);
+    for diag in &type_diagnostics {
+        let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
+        if matches!(diag.severity, DiagnosticSeverity::Error) {
+            had_type_error = true;
+        }
+        stderr.push_str(&rendered);
+    }
+    if had_type_error {
+        return RunOutcome {
+            stdout,
+            stderr,
+            exit_code: 1,
+        };
+    }
+
+    let extensions = package::load_runtime_extensions(Path::new(path));
+    package::install_runtime_extensions(&extensions);
+    RunOutcome {
+        stdout: explain_cost::render_explain_cost(path, &program),
+        stderr,
+        exit_code: 0,
     }
 }
 
@@ -1523,8 +1570,8 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
 #[cfg(test)]
 mod tests {
     use super::{
-        execute_run, parse_cli_llm_mock_value, serialize_cli_llm_mock, split_eval_header,
-        CliLlmMockMode, RunProfileOptions, StdoutPassthroughGuard,
+        execute_explain_cost, execute_run, parse_cli_llm_mock_value, serialize_cli_llm_mock,
+        split_eval_header, CliLlmMockMode, RunProfileOptions, StdoutPassthroughGuard,
     };
     use std::collections::HashSet;
 
@@ -1588,6 +1635,31 @@ mod tests {
             assert!(harn_vm::set_stdout_passthrough(true));
         }
         assert!(!harn_vm::set_stdout_passthrough(original));
+    }
+
+    #[test]
+    fn execute_explain_cost_does_not_execute_script() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let script = temp.path().join("main.harn");
+        std::fs::write(
+            &script,
+            r#"
+pipeline main() {
+  write_file("executed.txt", "bad")
+  llm_call("hello", nil, {provider: "mock", model: "mock"})
+}
+"#,
+        )
+        .expect("write script");
+
+        let outcome = execute_explain_cost(&script.to_string_lossy());
+
+        assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+        assert!(outcome.stdout.contains("LLM cost estimate"));
+        assert!(
+            !temp.path().join("executed.txt").exists(),
+            "--explain-cost must not execute pipeline side effects"
+        );
     }
 
     #[cfg(feature = "hostlib")]

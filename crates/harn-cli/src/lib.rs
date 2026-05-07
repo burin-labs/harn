@@ -112,24 +112,26 @@ async fn async_main() {
             },
         },
         Command::Run(args) => {
-            match (args.eval.as_deref(), args.file.as_deref()) {
-                (Some(code), None) => {
-                    provider_bootstrap::maybe_seed_ollama_for_inline(
-                        code,
-                        args.yes,
-                        args.llm_mock.is_some(),
-                    )
-                    .await;
+            if !args.explain_cost {
+                match (args.eval.as_deref(), args.file.as_deref()) {
+                    (Some(code), None) => {
+                        provider_bootstrap::maybe_seed_ollama_for_inline(
+                            code,
+                            args.yes,
+                            args.llm_mock.is_some(),
+                        )
+                        .await;
+                    }
+                    (None, Some(file)) => {
+                        provider_bootstrap::maybe_seed_ollama_for_run_file(
+                            Path::new(file),
+                            args.yes,
+                            args.llm_mock.is_some(),
+                        )
+                        .await;
+                    }
+                    _ => {}
                 }
-                (None, Some(file)) => {
-                    provider_bootstrap::maybe_seed_ollama_for_run_file(
-                        Path::new(file),
-                        args.yes,
-                        args.llm_mock.is_some(),
-                    )
-                    .await;
-                }
-                _ => {}
             }
             let denied =
                 commands::run::build_denied_builtins(args.deny.as_deref(), args.allow.as_deref());
@@ -162,31 +164,39 @@ async fn async_main() {
                         command_error(&format!("failed to write temp file for -e: {e}"))
                     });
                     let tmp_str = tmp_path.to_string_lossy().into_owned();
-                    commands::run::run_file_with_skill_dirs(
-                        &tmp_str,
-                        args.trace,
-                        denied,
-                        args.argv.clone(),
-                        args.skill_dir.clone(),
-                        llm_mock_mode.clone(),
-                        attestation.clone(),
-                        profile_options.clone(),
-                    )
-                    .await;
+                    if args.explain_cost {
+                        commands::run::run_explain_cost_file_with_skill_dirs(&tmp_str);
+                    } else {
+                        commands::run::run_file_with_skill_dirs(
+                            &tmp_str,
+                            args.trace,
+                            denied,
+                            args.argv.clone(),
+                            args.skill_dir.clone(),
+                            llm_mock_mode.clone(),
+                            attestation.clone(),
+                            profile_options.clone(),
+                        )
+                        .await;
+                    }
                     drop(tmp);
                 }
                 (None, Some(file)) => {
-                    commands::run::run_file_with_skill_dirs(
-                        file,
-                        args.trace,
-                        denied,
-                        args.argv.clone(),
-                        args.skill_dir.clone(),
-                        llm_mock_mode,
-                        attestation,
-                        profile_options,
-                    )
-                    .await
+                    if args.explain_cost {
+                        commands::run::run_explain_cost_file_with_skill_dirs(file);
+                    } else {
+                        commands::run::run_file_with_skill_dirs(
+                            file,
+                            args.trace,
+                            denied,
+                            args.argv.clone(),
+                            args.skill_dir.clone(),
+                            llm_mock_mode,
+                            attestation,
+                            profile_options,
+                        )
+                        .await
+                    }
                 }
                 (Some(_), Some(_)) => command_error(
                     "`harn run` accepts either `-e <code>` or `<file.harn>`, not both",
