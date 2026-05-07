@@ -259,9 +259,6 @@ fn __enforce_required_successful_tools(result, opts) {
   if len(missing) == 0 {
     return result
   }
-  if result?.status != "done" {
-    return result + {missing_required_tools: missing}
-  }
   return result
     + {
     status: "failed",
@@ -311,6 +308,12 @@ fn __required_tools_missing_list(opts, successful_tools_seen) {
     }
   }
   return missing
+}
+
+fn __required_tools_feedback(missing) {
+  return "Required tool(s) have not succeeded yet: "
+    + join(missing, ", ")
+    + ". Continue working and call the missing required tool(s) before finalizing."
 }
 
 fn __build_loop_state(args) {
@@ -720,11 +723,21 @@ fn __agent_loop_run(message, session, initial_opts) {
             should_continue = true
           }
         }
+        let missing_now = __required_tools_missing_list(opts, successful_tools_seen)
+        if !should_continue && len(missing_now) > 0 {
+          agent_session_inject_feedback(
+            session.session_id,
+            "required_tools",
+            __required_tools_feedback(missing_now),
+          )
+          should_continue = true
+        }
         if !should_continue {
           stop_reason = outcome.stop_reason
           break
         }
       }
+      let missing_required_for_loop = __required_tools_missing_list(opts, successful_tools_seen)
       let loop_state = __snapshot_loop_state(
         {
           iteration: iteration,
@@ -738,7 +751,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           turn_native_fallback_used: fallback_outcome.triggered && fallback_outcome.accepted,
           session_successful: successful_tools_seen,
           session_rejected: rejected_tools_seen,
-          missing_required_tools: __required_tools_missing_list(opts, successful_tools_seen),
+          missing_required_tools: missing_required_for_loop,
           completion_proposed: outcome.kind == "break",
           verdict: verdict_record,
         },

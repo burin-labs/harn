@@ -28,6 +28,14 @@ condensed series summaries instead of full per-patch history.
   effort vs. disabled) only when the caller hasn't set one, using
   `provider_capabilities` introspection.
 
+### Fixed
+
+- **Required tool completion gate.** `agent_loop` now treats unsatisfied
+  `require_successful_tools` as an active completion gate: if the model tries
+  to finish early, Harn injects feedback and continues while budget remains,
+  and any terminal missing-required-tools state consistently returns
+  `status = "failed"` / `stop_reason = "missing_required_tools"`.
+
 ## v0.7.60
 
 ### Fixed

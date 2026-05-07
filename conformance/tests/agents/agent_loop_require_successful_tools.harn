@@ -50,4 +50,24 @@ pipeline main() {
   )
   println(satisfied.status)
   println(len(satisfied.missing_required_tools ?? []))
+  llm_mock_clear()
+  llm_mock({text: "Finished before using the required tool."})
+  llm_mock({tool_calls: [{id: "lookup_3", name: "lookup", arguments: {query: "x"}}]})
+  llm_mock({text: "Finished after using the required tool."})
+  let gated = agent_loop(
+    "Use one tool.",
+    nil,
+    {
+      provider: "mock",
+      tools: tools(),
+      tool_format: "native",
+      loop_until_done: true,
+      max_iterations: 3,
+      max_nudges: 2,
+      require_successful_tools: ["lookup"],
+    },
+  )
+  println(gated.status)
+  println(gated.llm.iterations)
+  println(len(gated.missing_required_tools ?? []))
 }
