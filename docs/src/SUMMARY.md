@@ -33,6 +33,7 @@
   - [Prompt optimization](./llm/optimize.md)
   - [Composable callers and middleware](./stdlib/llm-handlers.md)
   - [Tools, Tool Vault, and MCP](./llm/tools.md)
+  - [LLM ensemble helpers](./llm/ensemble.md)
   - [Streaming and transcripts](./llm/streaming.md)
   - [LLM providers](./llm/providers.md)
   - [Provider capability matrix](./provider-matrix.md)

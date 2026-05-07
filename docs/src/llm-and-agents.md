@@ -12,6 +12,7 @@ is the map; the detailed references now live in focused pages.
 | [LLM reranking](./llm/rerank.md) | Pairwise candidate ranking and token-logprob self-certainty |
 | [`agent_loop`](./llm/agent_loop.md) | Loop-until-done agents, profiles, daemon loops, skills, and delegated workers |
 | [Tools](./llm/tools.md) | Typed tools, Tool Vault progressive disclosure, and MCP server tools |
+| [LLM ensemble helpers](./llm/ensemble.md) | Deterministic search helpers such as `tree_of_thoughts(...)` |
 | [Streaming](./llm/streaming.md) | `llm_stream`, `llm_stream_call`, partial deltas, transcripts, workflow sessions, and token usage summaries |
 | [Providers](./llm/providers.md) | Provider setup, API details, local servers, enterprise cloud providers, and capability overrides |
 

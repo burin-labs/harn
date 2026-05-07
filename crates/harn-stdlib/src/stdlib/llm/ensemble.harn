@@ -974,3 +974,257 @@ pub fn debate(opts) -> DebateResult {
     short_circuit_event_id: short_circuit_event_id,
   }
 }
+
+fn __tot_is_callable(value) {
+  let kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __tot_is_number(value) {
+  let kind = type_of(value)
+  return kind == "int" || kind == "float"
+}
+
+fn __tot_require_callable(opts, name) {
+  let value = opts[name]
+  require __tot_is_callable(value), "tree_of_thoughts: opts." + name + " must be callable"
+  return value
+}
+
+fn __tot_require_positive_int(value, label) {
+  require __tot_is_number(value), "tree_of_thoughts: " + label + " must be numeric"
+  require floor(value) == value, "tree_of_thoughts: " + label + " must be an integer"
+  require value >= 1, "tree_of_thoughts: " + label + " must be at least 1"
+  return to_int(value)
+}
+
+fn __tot_require_non_negative_int(value, label) {
+  require __tot_is_number(value), "tree_of_thoughts: " + label + " must be numeric"
+  require floor(value) == value, "tree_of_thoughts: " + label + " must be an integer"
+  require value >= 0, "tree_of_thoughts: " + label + " must be non-negative"
+  return to_int(value)
+}
+
+fn __tot_score(evaluate, state) {
+  let score = evaluate(state)
+  require __tot_is_number(score), "tree_of_thoughts: evaluate(state) must return a number"
+  return score
+}
+
+fn __tot_terminal(is_terminal, state) {
+  let terminal = is_terminal(state)
+  require type_of(terminal) == "bool", "tree_of_thoughts: is_terminal(state) must return a bool"
+  return terminal
+}
+
+fn __tot_stop(stop, node) {
+  if stop == nil {
+    return false
+  }
+  let should_stop = stop(node)
+  require type_of(should_stop) == "bool", "tree_of_thoughts: stop(node) must return a bool"
+  return should_stop
+}
+
+fn __tot_node(id, parent_id, state, path, depth, score, terminal) {
+  return {
+    id: id,
+    parent_id: parent_id,
+    state: state,
+    path: path,
+    depth: depth,
+    score: score,
+    terminal: terminal,
+  }
+}
+
+fn __tot_better_terminal(best_terminal, candidate) {
+  return candidate.terminal && (best_terminal == nil || candidate.score > best_terminal.score)
+}
+
+fn __tot_better_seen(best_seen, candidate) {
+  return best_seen == nil || candidate.score > best_seen.score
+}
+
+fn __tot_update_best(best, node) {
+  var best_terminal = best.terminal
+  var best_seen = best.seen
+  if __tot_better_terminal(best_terminal, node) {
+    best_terminal = node
+  }
+  if __tot_better_seen(best_seen, node) {
+    best_seen = node
+  }
+  return {terminal: best_terminal, seen: best_seen}
+}
+
+fn __tot_top(nodes, limit) {
+  return nodes.sort_by({ node -> 0 - node.score }).take(limit)
+}
+
+fn __tot_children(parent, expand, evaluate, is_terminal, k, next_id) {
+  let expanded = expand(parent.state, k)
+  require type_of(expanded) == "list", "tree_of_thoughts: expand(state, k) must return a list"
+  var children = []
+  var idx = 0
+  let limit = if len(expanded) < k {
+    len(expanded)
+  } else {
+    k
+  }
+  while idx < limit {
+    let state = expanded[idx]
+    let node = __tot_node(
+      next_id + idx,
+      parent.id,
+      state,
+      parent.path.push(state),
+      parent.depth + 1,
+      __tot_score(evaluate, state),
+      __tot_terminal(is_terminal, state),
+    )
+    children = children.push(node)
+    idx = idx + 1
+  }
+  return children
+}
+
+fn __tot_finalize(search, k, max_depth, beam_width, nodes, best, stop_reason) {
+  let best_node = best.terminal ?? best.seen
+  let reason = if stop_reason != nil {
+    stop_reason
+  } else {
+    if best.terminal != nil {
+      "terminal"
+    } else {
+      "exhausted"
+    }
+  }
+  return {
+    ok: best.terminal != nil,
+    best_path: best_node?.path ?? [],
+    best_score: best_node?.score,
+    best_node: best_node,
+    stop_reason: reason,
+    tree: {
+      root_id: 0,
+      best_id: best_node?.id,
+      nodes: nodes,
+      search: search,
+      k: k,
+      max_depth: max_depth,
+      beam_width: beam_width,
+    },
+  }
+}
+
+fn __tot_search_frontier(
+  search,
+  root,
+  expand,
+  evaluate,
+  is_terminal,
+  stop,
+  k,
+  max_depth,
+  beam_width,
+) {
+  var nodes = [root]
+  var frontier = [root]
+  var next_id = 1
+  var best = __tot_update_best({terminal: nil, seen: nil}, root)
+  var stop_reason = nil
+  while len(frontier) > 0 && stop_reason == nil {
+    let current = if search == "dfs" {
+      frontier.last()
+    } else {
+      frontier[0]
+    }
+    frontier = if search == "dfs" {
+      frontier.pop()
+    } else {
+      frontier.slice(1)
+    }
+    if __tot_stop(stop, current) {
+      stop_reason = "stop"
+    } else if !current.terminal && current.depth < max_depth {
+      let children = __tot_children(current, expand, evaluate, is_terminal, k, next_id)
+      next_id = next_id + len(children)
+      for child in children {
+        nodes = nodes.push(child)
+        best = __tot_update_best(best, child)
+      }
+      if search == "bfs" {
+        for child in children {
+          frontier = frontier.push(child)
+        }
+      }
+      if search == "dfs" {
+        frontier = frontier + children.reverse()
+      }
+    }
+  }
+  return __tot_finalize(search, k, max_depth, beam_width, nodes, best, stop_reason)
+}
+
+fn __tot_search_beam(root, expand, evaluate, is_terminal, stop, k, max_depth, beam_width) {
+  var nodes = [root]
+  var beam = [root]
+  var next_id = 1
+  var best = __tot_update_best({terminal: nil, seen: nil}, root)
+  var stop_reason = nil
+  var depth = 0
+  while len(beam) > 0 && depth < max_depth && stop_reason == nil {
+    var candidates = []
+    for current in beam {
+      if stop_reason == nil {
+        if __tot_stop(stop, current) {
+          stop_reason = "stop"
+        } else if !current.terminal && current.depth < max_depth {
+          let children = __tot_children(current, expand, evaluate, is_terminal, k, next_id)
+          next_id = next_id + len(children)
+          for child in children {
+            nodes = nodes.push(child)
+            candidates = candidates.push(child)
+            best = __tot_update_best(best, child)
+          }
+        }
+      }
+    }
+    beam = __tot_top(candidates, beam_width)
+    depth = depth + 1
+  }
+  return __tot_finalize("beam", k, max_depth, beam_width, nodes, best, stop_reason)
+}
+
+/** tree_of_thoughts searches explicitly expanded reasoning states with BFS, DFS, or beam search. */
+pub fn tree_of_thoughts(opts) {
+  require type_of(opts) == "dict", "tree_of_thoughts: opts must be a dict"
+  require opts.has("initial_state"), "tree_of_thoughts: opts.initial_state is required"
+  let expand = __tot_require_callable(opts, "expand")
+  let evaluate = __tot_require_callable(opts, "evaluate")
+  let is_terminal = __tot_require_callable(opts, "is_terminal")
+  let stop = opts?.stop
+  if stop != nil {
+    require __tot_is_callable(stop), "tree_of_thoughts: opts.stop must be callable"
+  }
+  let search = opts?.search ?? "bfs"
+  require search == "bfs" || search == "dfs" || search == "beam", "tree_of_thoughts: opts.search must be \"bfs\", \"dfs\", or \"beam\""
+  let k = __tot_require_positive_int(opts?.k ?? 1, "opts.k")
+  let max_depth = __tot_require_non_negative_int(opts?.max_depth ?? 8, "opts.max_depth")
+  let beam_width = __tot_require_positive_int(opts?.beam_width ?? k, "opts.beam_width")
+  let initial_state = opts.initial_state
+  let root = __tot_node(
+    0,
+    nil,
+    initial_state,
+    [initial_state],
+    0,
+    __tot_score(evaluate, initial_state),
+    __tot_terminal(is_terminal, initial_state),
+  )
+  if search == "beam" {
+    return __tot_search_beam(root, expand, evaluate, is_terminal, stop, k, max_depth, beam_width)
+  }
+  return __tot_search_frontier(search, root, expand, evaluate, is_terminal, stop, k, max_depth, beam_width)
+}
