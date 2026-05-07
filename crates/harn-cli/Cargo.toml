@@ -21,6 +21,7 @@ default-run = "harn"
 # resulting portal-dist/ tree even though it is gitignored.
 include = [
     "src/**/*",
+    "data/**/*",
     "build.rs",
     "Cargo.toml",
     "portal-dist/**/*",

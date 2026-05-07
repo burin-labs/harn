@@ -12,6 +12,8 @@ pub(crate) enum ModelsCommand {
     List(ModelsListArgs),
     /// Pull a model via Ollama.
     Install(ModelsInstallArgs),
+    /// Recommend a starter model for the current machine and credentials.
+    Recommend(ModelRecommendArgs),
 }
 
 #[derive(Debug, Args)]
@@ -37,4 +39,11 @@ pub(crate) struct ModelsInstallArgs {
     /// Optional Ollama keep-alive hint (e.g. `5m`, `1h`).
     #[arg(long = "keep-alive", value_name = "VALUE")]
     pub keep_alive: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelRecommendArgs {
+    /// Emit the recommendation and hardware snapshot as JSON.
+    #[arg(long)]
+    pub json: bool,
 }

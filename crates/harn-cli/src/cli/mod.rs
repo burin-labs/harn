@@ -84,7 +84,9 @@ pub(crate) use merge_captain::{
     MergeCaptainMockCommand, MergeCaptainMockInitArgs, MergeCaptainMockServeArgs,
     MergeCaptainMockStatusArgs, MergeCaptainMockStepArgs, MergeCaptainRunArgs,
 };
-pub(crate) use models::{ModelsArgs, ModelsCommand, ModelsInstallArgs, ModelsListArgs};
+pub(crate) use models::{
+    ModelRecommendArgs, ModelsArgs, ModelsCommand, ModelsInstallArgs, ModelsListArgs,
+};
 pub(crate) use orchestrator::{
     OrchestratorArgs, OrchestratorCommand, OrchestratorDeployArgs, OrchestratorDeployProvider,
     OrchestratorDlqArgs, OrchestratorFireArgs, OrchestratorInspectArgs, OrchestratorLocalArgs,

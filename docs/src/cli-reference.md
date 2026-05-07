@@ -504,7 +504,8 @@ explicit.
 ## harn doctor
 
 Inspect the local environment and report the current Harn setup,
-including the resolved secret-provider chain and keyring health.
+including the hardware snapshot, resolved secret-provider chain, and
+keyring health.
 
 ```bash
 harn doctor
@@ -545,6 +546,20 @@ harn model-info --warm --keep-alive 30m llama3.2
 Ollama readiness failures use stable `readiness.status` values, including
 `daemon_down`, `bad_status`, `invalid_response`, `model_missing`, and
 `warmup_failed`. `--verify` and `--warm` exit non-zero when readiness fails.
+
+## harn models recommend
+
+Recommend a starter model from the local hardware snapshot and configured cloud
+credentials. The command prefers an Ollama model when no cloud provider key is
+set, and emits the selected model plus the one-line rationale.
+
+```bash
+harn models recommend
+harn models recommend --json
+```
+
+The JSON output includes the hardware snapshot used for the lookup: available
+RAM, GPU/MPS acceleration, and free disk space.
 
 ## harn connect
 

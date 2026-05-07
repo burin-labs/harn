@@ -3,11 +3,11 @@ use std::time::Duration as StdDuration;
 
 use super::{
     CheckOutputFormat, Cli, Command, CompletionShell, ConnectCommand, ConnectorCommand,
-    CrystallizeCommand, FlowArchivistCommand, FlowCommand, McpCommand, OrchestratorCommand,
-    OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
-    OrchestratorTenantCommand, PackageCacheCommand, PackageCommand, PersonaCommand,
-    ProjectTemplate, RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
-    TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+    CrystallizeCommand, FlowArchivistCommand, FlowCommand, McpCommand, ModelsCommand,
+    OrchestratorCommand, OrchestratorDeployProvider, OrchestratorLogFormat,
+    OrchestratorQueueCommand, OrchestratorTenantCommand, PackageCacheCommand, PackageCommand,
+    PersonaCommand, ProjectTemplate, RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
+    SkillsCommand, TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
 };
 use clap::{CommandFactory, Parser};
 
@@ -1886,6 +1886,19 @@ fn test_completion_scripts_include_subcommands() {
 
     assert!(script.contains("completions"));
     assert!(script.contains("provider-ready"));
+}
+
+#[test]
+fn test_parses_models_recommend_args() {
+    let cli = Cli::parse_from(["harn", "models", "recommend", "--json"]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Recommend(recommend) = args.command else {
+        panic!("expected models recommend command");
+    };
+    assert!(recommend.json);
 }
 
 #[test]

@@ -1,0 +1,170 @@
+# Lookup table keyed by available-RAM bucket, local acceleration, and cloud credential presence.
+# The `$cloud_default` sentinel is resolved to the best configured cloud provider's default model.
+
+[[recommendations]]
+ram_bucket = "lt8"
+gpu = "none"
+has_provider_key = false
+provider = "ollama"
+model_id = "ollama/qwen2.5:3b-instruct"
+
+[[recommendations]]
+ram_bucket = "lt8"
+gpu = "mps"
+has_provider_key = false
+provider = "ollama"
+model_id = "ollama/qwen2.5:3b-instruct"
+
+[[recommendations]]
+ram_bucket = "lt8"
+gpu = "cuda"
+has_provider_key = false
+provider = "ollama"
+model_id = "ollama/qwen2.5:3b-instruct"
+
+[[recommendations]]
+ram_bucket = "8_16"
+gpu = "none"
+has_provider_key = false
+provider = "ollama"
+model_id = "ollama/qwen2.5:7b-instruct"
+
+[[recommendations]]
+ram_bucket = "8_16"
+gpu = "mps"
+has_provider_key = false
+provider = "ollama"
+model_id = "ollama/qwen2.5:7b-instruct"
+
+[[recommendations]]
+ram_bucket = "8_16"
+gpu = "cuda"
+has_provider_key = false
+provider = "ollama"
+model_id = "ollama/qwen2.5:7b-instruct"
+
+[[recommendations]]
+ram_bucket = "16_32"
+gpu = "none"
+has_provider_key = false
+provider = "ollama"
+model_id = "ollama/qwen2.5:7b-instruct"
+
+[[recommendations]]
+ram_bucket = "16_32"
+gpu = "mps"
+has_provider_key = false
+provider = "ollama"
+model_id = "ollama/qwen2.5:14b-instruct"
+
+[[recommendations]]
+ram_bucket = "16_32"
+gpu = "cuda"
+has_provider_key = false
+provider = "ollama"
+model_id = "ollama/qwen2.5:14b-instruct"
+
+[[recommendations]]
+ram_bucket = "32_plus"
+gpu = "none"
+has_provider_key = false
+provider = "ollama"
+model_id = "ollama/qwen2.5:14b-instruct"
+
+[[recommendations]]
+ram_bucket = "32_plus"
+gpu = "mps"
+has_provider_key = false
+provider = "ollama"
+model_id = "ollama/qwen2.5:32b-instruct"
+
+[[recommendations]]
+ram_bucket = "32_plus"
+gpu = "cuda"
+has_provider_key = false
+provider = "ollama"
+model_id = "ollama/qwen2.5:32b-instruct"
+
+[[recommendations]]
+ram_bucket = "lt8"
+gpu = "none"
+has_provider_key = true
+provider = "cloud"
+model_id = "$cloud_default"
+
+[[recommendations]]
+ram_bucket = "lt8"
+gpu = "mps"
+has_provider_key = true
+provider = "cloud"
+model_id = "$cloud_default"
+
+[[recommendations]]
+ram_bucket = "lt8"
+gpu = "cuda"
+has_provider_key = true
+provider = "cloud"
+model_id = "$cloud_default"
+
+[[recommendations]]
+ram_bucket = "8_16"
+gpu = "none"
+has_provider_key = true
+provider = "cloud"
+model_id = "$cloud_default"
+
+[[recommendations]]
+ram_bucket = "8_16"
+gpu = "mps"
+has_provider_key = true
+provider = "cloud"
+model_id = "$cloud_default"
+
+[[recommendations]]
+ram_bucket = "8_16"
+gpu = "cuda"
+has_provider_key = true
+provider = "cloud"
+model_id = "$cloud_default"
+
+[[recommendations]]
+ram_bucket = "16_32"
+gpu = "none"
+has_provider_key = true
+provider = "cloud"
+model_id = "$cloud_default"
+
+[[recommendations]]
+ram_bucket = "16_32"
+gpu = "mps"
+has_provider_key = true
+provider = "cloud"
+model_id = "$cloud_default"
+
+[[recommendations]]
+ram_bucket = "16_32"
+gpu = "cuda"
+has_provider_key = true
+provider = "cloud"
+model_id = "$cloud_default"
+
+[[recommendations]]
+ram_bucket = "32_plus"
+gpu = "none"
+has_provider_key = true
+provider = "cloud"
+model_id = "$cloud_default"
+
+[[recommendations]]
+ram_bucket = "32_plus"
+gpu = "mps"
+has_provider_key = true
+provider = "cloud"
+model_id = "$cloud_default"
+
+[[recommendations]]
+ram_bucket = "32_plus"
+gpu = "cuda"
+has_provider_key = true
+provider = "cloud"
+model_id = "$cloud_default"
