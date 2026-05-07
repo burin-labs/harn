@@ -501,6 +501,26 @@ harn new package my-lib
 the default quick-start flow and `new` when you want the template choice to be
 explicit.
 
+## harn quickstart
+
+Inspect local provider readiness and write starter LLM configuration.
+
+```bash
+harn quickstart
+harn quickstart --non-interactive
+harn quickstart --non-interactive --provider ollama --model llama3.2
+```
+
+Quickstart reports existing provider credentials, Ollama reachability, free disk
+space, and GPU detection. It creates or updates:
+
+- `~/.config/harn/providers.toml` or `HARN_PROVIDERS_CONFIG` when set
+- `harn.toml` in the current directory
+- `.env` in the current directory
+
+Run `source .env` before invoking Harn if you want the shell to use the selected
+provider/model defaults.
+
 ## harn doctor
 
 Inspect the local environment and report the current Harn setup,

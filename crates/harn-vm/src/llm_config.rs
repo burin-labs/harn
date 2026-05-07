@@ -1629,6 +1629,13 @@ fn default_config() -> ProvidersConfig {
 }
 
 #[cfg(test)]
+fn merge_global_config(overlay: ProvidersConfig) -> ProvidersConfig {
+    let mut config = default_config();
+    config.merge_from(&overlay);
+    config
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1758,6 +1765,29 @@ mod tests {
         assert!(names.contains(&"bedrock".to_string()));
         assert!(names.contains(&"azure_openai".to_string()));
         assert!(names.contains(&"vertex".to_string()));
+    }
+
+    #[test]
+    fn global_provider_file_is_an_overlay_on_builtin_defaults() {
+        let mut overlay = ProvidersConfig {
+            default_provider: Some("ollama".to_string()),
+            ..Default::default()
+        };
+        overlay.aliases.insert(
+            "quickstart".to_string(),
+            AliasDef {
+                id: "llama3.2".to_string(),
+                provider: "ollama".to_string(),
+                tool_format: None,
+            },
+        );
+
+        let merged = merge_global_config(overlay);
+
+        assert_eq!(merged.default_provider.as_deref(), Some("ollama"));
+        assert!(merged.providers.contains_key("anthropic"));
+        assert!(merged.providers.contains_key("ollama"));
+        assert_eq!(merged.aliases["quickstart"].id, "llama3.2");
     }
 
     #[test]

@@ -153,6 +153,14 @@ agent_loop(task, sys, {
   llm_caller: with_retry(default_llm_caller(), {max_attempts: 4}),
 })
 ```
+## Unreleased
+
+### Added
+
+- **`harn quickstart` setup wizard (#1331).** Added an interactive and
+  non-interactive setup flow that detects provider credentials, local Ollama,
+  free disk space, and local GPU availability, then writes starter
+  `providers.toml`, `harn.toml`, and `.env` files.
 
 ## v0.7.61
 

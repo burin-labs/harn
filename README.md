@@ -77,6 +77,8 @@ harn orchestrator deploy --provider fly --manifest ./harn.toml --build
 ```bash
 harn new my-project --template agent
 cd my-project
+harn quickstart --non-interactive
+source .env
 harn doctor --no-network
 harn run main.harn
 harn test tests/

@@ -32,6 +32,7 @@ mod persona;
 mod playground;
 mod portal;
 mod provider;
+mod quickstart;
 mod run;
 mod runs;
 mod serve;
@@ -109,6 +110,7 @@ pub(crate) use persona::{
 pub(crate) use playground::PlaygroundArgs;
 pub(crate) use portal::PortalArgs;
 pub(crate) use provider::{ModelInfoArgs, ProviderCatalogArgs, ProviderReadyArgs};
+pub(crate) use quickstart::QuickstartArgs;
 pub(crate) use run::RunArgs;
 pub(crate) use runs::{EvalArgs, ReplayArgs, RunsArgs, RunsCommand};
 pub(crate) use serve::{
@@ -209,6 +211,8 @@ SCRIPTING
     /// permissions on `~/.harn`, and project manifest health. Reports
     /// each check as ok/warn/fail with a suggested fix.
     Doctor(DoctorArgs),
+    /// Configure a starter Harn project and LLM provider settings.
+    Quickstart(QuickstartArgs),
     /// Register outbound connector resources with a provider.
     Connect(Box<ConnectArgs>),
     /// Validate pure-Harn connector packages against the connector contract.

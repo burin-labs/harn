@@ -23,6 +23,7 @@ pub mod persona_scaffold;
 pub mod playground;
 pub(crate) mod portal;
 pub(crate) mod protocol_conformance;
+pub(crate) mod quickstart;
 pub(crate) mod repl;
 pub mod run;
 pub(crate) mod serve;

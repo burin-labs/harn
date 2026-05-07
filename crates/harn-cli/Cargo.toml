@@ -65,6 +65,7 @@ jsonschema = { version = "0.46.3", default-features = false }
 jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
 clap = { version = "4", features = ["derive", "env", "string"] }
 clap_complete = "4"
+rpassword = "7"
 tower = { version = "0.5", features = ["util"] }
 time = { version = "0.3", features = ["formatting", "parsing"] }
 tempfile = "3"

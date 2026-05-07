@@ -1902,6 +1902,26 @@ fn test_parses_models_recommend_args() {
 }
 
 #[test]
+fn test_parses_quickstart_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "quickstart",
+        "--non-interactive",
+        "--provider",
+        "ollama",
+        "--model",
+        "qwen2.5-coder:latest",
+    ]);
+
+    let Command::Quickstart(args) = cli.command.unwrap() else {
+        panic!("expected quickstart command");
+    };
+    assert!(args.non_interactive);
+    assert_eq!(args.provider.as_deref(), Some("ollama"));
+    assert_eq!(args.model.as_deref(), Some("qwen2.5-coder:latest"));
+}
+
+#[test]
 fn test_parses_check_provider_matrix_args() {
     let cli = Cli::parse_from([
         "harn",

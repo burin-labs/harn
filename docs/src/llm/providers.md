@@ -7,6 +7,10 @@ HuggingFace, Bedrock, Azure OpenAI, Vertex AI, and local OpenAI-compatible
 servers. Set the appropriate environment variable to authenticate or point
 Harn at an endpoint:
 
+Run `harn quickstart` to detect existing credentials, local Ollama, free disk
+space, and GPU availability, then write starter `providers.toml`, `harn.toml`,
+and `.env` files.
+
 For model-specific feature support, see the generated
 [provider capability matrix](../provider-matrix.md).
 
@@ -193,8 +197,10 @@ Load order is:
 3. installed package `[llm]` tables from `.harn/packages/*/harn.toml`
 4. the root project's `[llm]` table
 
-That gives packages a stable, declarative way to ship provider adapters
-and model aliases without editing Rust-side registration code.
+The provider files in steps 2-4 are overlays, so a starter file can set
+`default_provider` or aliases without copying every built-in provider
+definition. That gives packages a stable, declarative way to ship provider
+adapters and model aliases without editing Rust-side registration code.
 
 ## Provider API details
 
