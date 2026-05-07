@@ -22,7 +22,14 @@ load `docs/llm/harn-triggers-quickref.md`.
   (pipeline mode — `compile_top_level_declarations` runs first, then
   the pipeline body) or be a bare script with top-level statements.
 - Run: `harn run script.harn`.
-- Inline: `harn run -e 'println("hi")'`.
+- Inline: `harn run -e 'println("hi")'`. The snippet is wrapped in
+  `pipeline main(task) { ... }`; leading `import "..."` /
+  `import { x } from "..."` / `pub import { x } from "..."` lines are
+  hoisted out of the wrapper. The temp file lives in the current
+  directory so relative imports (`import "./lib"`) and `harn.toml`
+  discovery resolve against your project, e.g.
+  `harn run -e $'import "./lib"\nprintln(answer())'`. Imports must come
+  first — interleaved imports are not lifted.
 - Shebang: a `#!/usr/bin/env harn` line at byte offset 0 of a `.harn`
   file is skipped by the lexer, so executables on PATH can `chmod +x`
   scripts and run them directly.

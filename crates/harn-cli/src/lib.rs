@@ -133,18 +133,8 @@ async fn async_main() {
 
             match (args.eval.as_deref(), args.file.as_deref()) {
                 (Some(code), None) => {
-                    let wrapped = format!("pipeline main(task) {{\n{code}\n}}");
-                    // Unique filename avoids collisions between concurrent
-                    // `harn run -e` invocations; Drop guards cleanup on
-                    // panic. The `.harn` suffix keeps tree-sitter and
-                    // pipeline dispatch matching on extension.
-                    let tmp = tempfile::Builder::new()
-                        .prefix("harn-eval-")
-                        .suffix(".harn")
-                        .tempfile()
-                        .unwrap_or_else(|e| {
-                            command_error(&format!("failed to create temp file for -e: {e}"))
-                        });
+                    let (wrapped, tmp) = commands::run::prepare_eval_temp_file(code)
+                        .unwrap_or_else(|e| command_error(&e));
                     let tmp_path: PathBuf = tmp.path().to_path_buf();
                     fs::write(&tmp_path, &wrapped).unwrap_or_else(|e| {
                         command_error(&format!("failed to write temp file for -e: {e}"))
