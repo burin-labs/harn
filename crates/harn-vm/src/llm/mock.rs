@@ -52,6 +52,7 @@ pub struct LlmMock {
     pub model: String,
     pub provider: Option<String>,
     pub blocks: Option<Vec<serde_json::Value>>,
+    pub logprobs: Vec<serde_json::Value>,
     /// When `Some`, this mock synthesizes an error instead of an
     /// `LlmResult`. `text`/`tool_calls` are ignored for error mocks.
     pub error: Option<MockError>,
@@ -234,6 +235,7 @@ fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
         thinking_summary: mock.thinking_summary.clone(),
         stop_reason: mock.stop_reason.clone(),
         blocks,
+        logprobs: mock.logprobs.clone(),
     }
 }
 
@@ -442,6 +444,7 @@ pub(crate) fn record_cli_llm_result(result: &LlmResult) {
             model: result.model.clone(),
             provider: Some(result.provider.clone()),
             blocks: Some(result.blocks.clone()),
+            logprobs: result.logprobs.clone(),
             error: None,
         });
     });
@@ -507,6 +510,7 @@ pub(crate) fn save_fixture(hash: &str, result: &LlmResult) {
         "thinking_summary": result.thinking_summary,
         "stop_reason": result.stop_reason,
         "blocks": result.blocks,
+        "logprobs": result.logprobs,
     });
     let _ = std::fs::write(
         &path,
@@ -538,6 +542,7 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
         thinking_summary: json["thinking_summary"].as_str().map(|s| s.to_string()),
         stop_reason: json["stop_reason"].as_str().map(|s| s.to_string()),
         blocks: json["blocks"].as_array().cloned().unwrap_or_default(),
+        logprobs: json["logprobs"].as_array().cloned().unwrap_or_default(),
     })
 }
 
@@ -668,6 +673,7 @@ pub(crate) fn mock_llm_response(
                     "arguments": mock_args,
                     "visibility": "internal",
                 })],
+                logprobs: Vec::new(),
             };
             if cache {
                 apply_mock_prompt_cache(&mut result, &cache_key);
@@ -714,6 +720,7 @@ pub(crate) fn mock_llm_response(
             "text": response,
             "visibility": "public",
         })],
+        logprobs: Vec::new(),
     };
     if cache {
         apply_mock_prompt_cache(&mut result, &cache_key);

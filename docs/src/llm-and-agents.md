@@ -9,6 +9,7 @@ is the map; the detailed references now live in focused pages.
 | Topic | Use it for |
 |---|---|
 | [`llm_call`](./llm/llm_call.md) | Single model requests, structured JSON output, completions, budgets, and mock responses |
+| [LLM reranking](./llm/rerank.md) | Pairwise candidate ranking and token-logprob self-certainty |
 | [`agent_loop`](./llm/agent_loop.md) | Loop-until-done agents, profiles, daemon loops, skills, and delegated workers |
 | [Tools](./llm/tools.md) | Typed tools, Tool Vault progressive disclosure, and MCP server tools |
 | [Streaming](./llm/streaming.md) | `llm_stream`, `llm_stream_call`, partial deltas, transcripts, workflow sessions, and token usage summaries |

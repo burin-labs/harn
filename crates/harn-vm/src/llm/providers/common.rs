@@ -63,6 +63,7 @@ pub(super) fn empty_result(provider: &str, model: &str) -> LlmResult {
         thinking_summary: None,
         stop_reason: None,
         blocks: Vec::new(),
+        logprobs: Vec::new(),
     }
 }
 

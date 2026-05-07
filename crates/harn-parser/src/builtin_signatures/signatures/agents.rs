@@ -10,6 +10,10 @@ use super::{
 /// for return values that mirror the input shape.
 const TY_LIST_OR_DICT: Ty = Ty::Union(&[TY_LIST, TY_DICT]);
 
+/// `string | dict` — low-level LLM helpers accept raw text or an
+/// `llm_call` result dictionary.
+const TY_STRING_OR_DICT: Ty = Ty::Union(&[TY_STRING, TY_DICT]);
+
 /// `list | dict | nil` — transcript stats/event helpers intentionally
 /// tolerate nil/non-transcript inputs and produce empty results.
 const TY_LIST_OR_DICT_OR_NIL: Ty = Ty::Union(&[TY_LIST, TY_DICT, TY_NIL]);
@@ -32,6 +36,17 @@ const TY_FLOAT_OR_NIL: Ty = Ty::Union(&[TY_FLOAT, TY_NIL]);
 const TY_BOOL_OR_INT_OR_NIL: Ty = Ty::Union(&[TY_BOOL, TY_INT, TY_NIL]);
 
 pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
+    BuiltinSignature {
+        name: "__llm_self_certainty",
+        params: &[
+            Param::new("text_or_result", TY_STRING_OR_DICT),
+            Param::optional("options", TY_DICT),
+        ],
+        returns: TY_FLOAT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
     BuiltinSignature {
         name: "add_assistant",
         params: &[

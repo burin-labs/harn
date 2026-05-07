@@ -172,6 +172,12 @@ impl OpenAiCompatibleProvider {
         if let Some(top_p) = opts.top_p {
             body["top_p"] = serde_json::json!(top_p);
         }
+        if opts.logprobs {
+            body["logprobs"] = serde_json::json!(true);
+            if let Some(top_logprobs) = opts.top_logprobs.filter(|value| *value > 0) {
+                body["top_logprobs"] = serde_json::json!(top_logprobs);
+            }
+        }
         if let Some(ref stop) = opts.stop {
             body["stop"] = serde_json::json!(stop);
         }
@@ -581,6 +587,8 @@ mod tests {
             temperature: Some(0.0),
             top_p: None,
             top_k: None,
+            logprobs: false,
+            top_logprobs: None,
             stop: None,
             seed: None,
             frequency_penalty: None,

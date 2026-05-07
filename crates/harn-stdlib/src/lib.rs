@@ -134,6 +134,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/llm/ensemble.harn"),
     },
     StdlibSource {
+        module: "llm/rerank",
+        source: include_str!("stdlib/llm/rerank.harn"),
+    },
+    StdlibSource {
         module: "agent/options",
         source: include_str!("stdlib/agent/options.harn"),
     },
@@ -463,6 +467,10 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
         source: include_str!("stdlib/llm/prompts/structured_envelope_repair.harn.prompt"),
     },
     StdlibPromptAsset {
+        path: "llm/prompts/pairwise_rerank_user.harn.prompt",
+        source: include_str!("stdlib/llm/prompts/pairwise_rerank_user.harn.prompt"),
+    },
+    StdlibPromptAsset {
         path: "workflow/prompts/stage.harn.prompt",
         source: include_str!("stdlib/workflow/prompts/stage.harn.prompt"),
     },
@@ -708,6 +716,7 @@ mod tests {
             "waitpoint",
             "llm/handlers",
             "llm/ensemble",
+            "llm/rerank",
             "personas/prelude",
             "agent/host_tools",
             "llm/optimize",

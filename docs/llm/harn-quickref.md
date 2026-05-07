@@ -832,6 +832,7 @@ println(response.text)           // raw provider text (may include tags)
 println(response.canonical_text) // canonical tagged reconstruction
 println(response.input_tokens)
 println(response.output_tokens)
+println(response.logprobs)       // present when requested and returned
 ```
 
 ### `llm_call` options
@@ -842,6 +843,8 @@ println(response.output_tokens)
 | `model` | string | (inferred) | `local:gemma-4-e4b-it` strips the `local:` transport prefix and routes through Ollama. |
 | `max_tokens` | int | 4096 | |
 | `temperature` | float | provider default | |
+| `logprobs` | bool | false | Request token log probabilities when the selected provider route supports them. |
+| `top_logprobs` | int | nil | Request top alternative token log probabilities where supported. |
 | `tools` | list | nil | Registered tool schemas. |
 | `thinking` | bool \| dict | nil | Typed provider reasoning. `true` / `{mode: "enabled"}` automatically sends Anthropic's `interleaved-thinking-2025-05-14` beta header on supported Claude Opus models. `thinking: false` on Qwen3 routes auto-prepends `/no_think` to the system message (capability-driven; no per-template knowledge needed in scripts). |
 | `interleaved_thinking` | bool | false | Force the Anthropic interleaved-thinking beta header for the call/loop. |
@@ -877,6 +880,29 @@ Provider auto-resolution precedence:
 | `gemini-*` | `gemini` | unchanged |
 | `<model>:<tag>` | `ollama` | unchanged |
 | anything else | `HARN_DEFAULT_PROVIDER` / configured default | unchanged |
+
+### Reranking and self-certainty
+
+```harn
+import { pairwise_rerank, self_certainty } from "std/llm/rerank"
+
+let ranked = pairwise_rerank(candidates, {
+  task: "Pick the most relevant search result.",
+  criteria: "Prefer primary sources with direct evidence.",
+  provider: "mock",
+})
+
+let confidence = self_certainty(
+  "ignored",
+  {logprobs: [{token: "answer", logprob: -0.1}]},
+)
+```
+
+`pairwise_rerank` returns `{ranked, scores, comparisons}` using `O(n log n)`
+pairwise judge calls, or a deterministic `compare(left, right, ctx)` callback
+when supplied. `self_certainty` scores supplied/result `logprobs`, or makes an
+extra repeat-exactly model call with `logprobs: true`; live support depends on
+the provider returning OpenAI-compatible or legacy completion logprob records.
 
 ### Tool executor declarations
 

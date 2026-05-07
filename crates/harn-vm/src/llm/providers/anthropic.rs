@@ -386,6 +386,8 @@ mod tests {
             temperature: None,
             top_p: None,
             top_k: None,
+            logprobs: false,
+            top_logprobs: None,
             stop: None,
             seed: None,
             frequency_penalty: None,

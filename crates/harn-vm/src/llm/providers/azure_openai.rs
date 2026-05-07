@@ -231,6 +231,8 @@ mod tests {
             temperature: Some(0.0),
             top_p: None,
             top_k: None,
+            logprobs: false,
+            top_logprobs: None,
             stop: None,
             seed: None,
             frequency_penalty: None,

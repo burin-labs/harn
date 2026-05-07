@@ -181,6 +181,7 @@ fn parse_response(
         thinking_summary: None,
         stop_reason,
         blocks,
+        logprobs: Vec::new(),
     })
 }
 
@@ -209,6 +210,8 @@ mod tests {
             temperature: None,
             top_p: None,
             top_k: None,
+            logprobs: false,
+            top_logprobs: None,
             stop: None,
             seed: None,
             frequency_penalty: None,
@@ -255,6 +258,8 @@ mod tests {
             temperature: None,
             top_p: None,
             top_k: None,
+            logprobs: false,
+            top_logprobs: None,
             stop: None,
             seed: None,
             frequency_penalty: None,
@@ -307,6 +312,8 @@ mod tests {
             temperature: None,
             top_p: None,
             top_k: None,
+            logprobs: false,
+            top_logprobs: None,
             stop: None,
             seed: None,
             frequency_penalty: None,
