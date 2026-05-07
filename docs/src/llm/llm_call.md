@@ -409,10 +409,12 @@ let result = try {
 ```
 
 Harn estimates prompt tokens before the provider request leaves the process,
-projects cost with the provider/model pricing table, and throws a terminal
-`budget_exceeded` dict when a limit would be exceeded. In a `try { ... }`
-expression that surfaces as `Result.Err({kind: "terminal", reason:
-"budget_exceeded", projected_cost_usd: ...})`.
+using `tiktoken-rs` for known OpenAI models, labeled tiktoken approximations
+for Claude/Gemini families, and a heuristic fallback for unknown model IDs.
+It then projects cost with the provider/model pricing table and throws a
+terminal `budget_exceeded` dict when a limit would be exceeded. In a
+`try { ... }` expression that surfaces as `Result.Err({kind: "terminal",
+reason: "budget_exceeded", projected_cost_usd: ...})`.
 
 `agent_loop` accepts the same envelope. `max_*` limits apply to each model turn;
 `total_budget_usd` is an aggregate loop budget and exits gracefully with
@@ -424,6 +426,12 @@ expression that surfaces as `Result.Err({kind: "terminal", reason:
 | `llm_session_cost()` | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
 | `llm_budget(max_cost)` | Set session budget in USD. LLM calls throw if exceeded |
 | `llm_budget_remaining()` | Remaining budget (nil if no budget set) |
+| `tiktoken_count_tokens(text, model)` | Count text with the selected tiktoken encoder for known OpenAI/Claude/Gemini model families |
+
+Import `std/llm/budget` for reusable helpers such as
+`estimate_text_tokens_detail(text, model)`, which includes the encoder label
+(`cl100k_base`, `o200k_base`, etc.) and whether the count is exact or an
+approximation.
 
 ## Testing with mock LLM responses
 

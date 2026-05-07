@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
 thread_local! {
     static LLM_BUDGET: RefCell<Option<f64>> = const { RefCell::new(None) };
@@ -143,24 +143,25 @@ pub(crate) fn parse_budget_envelope(
     Ok((!envelope.is_empty()).then_some(envelope))
 }
 
-fn estimate_json_tokens(value: &serde_json::Value) -> i64 {
+fn estimate_json_tokens(value: &serde_json::Value, model: &str) -> i64 {
     match value {
         serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => 1,
-        serde_json::Value::String(s) => estimate_text_tokens(s),
-        serde_json::Value::Array(items) => items.iter().map(estimate_json_tokens).sum(),
+        serde_json::Value::String(s) => estimate_text_tokens_for_model(s, model),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .map(|item| estimate_json_tokens(item, model))
+            .sum(),
         serde_json::Value::Object(map) => map
             .iter()
-            .map(|(key, value)| estimate_text_tokens(key) + estimate_json_tokens(value))
+            .map(|(key, value)| {
+                estimate_text_tokens_for_model(key, model) + estimate_json_tokens(value, model)
+            })
             .sum(),
     }
 }
 
-pub(crate) fn estimate_text_tokens(text: &str) -> i64 {
-    if text.is_empty() {
-        0
-    } else {
-        ((text.len() as f64) / 4.0).ceil() as i64
-    }
+fn estimate_text_tokens_for_model(text: &str, model: &str) -> i64 {
+    super::token_count::estimate_text_tokens(text, Some(model)).tokens
 }
 
 pub(crate) fn project_llm_call_cost(
@@ -170,16 +171,25 @@ pub(crate) fn project_llm_call_cost(
     let system_tokens = opts
         .system
         .as_deref()
-        .map(estimate_text_tokens)
+        .map(|system| estimate_text_tokens_for_model(system, &opts.model))
         .unwrap_or(0);
-    let message_tokens: i64 = opts.messages.iter().map(estimate_json_tokens).sum();
+    let message_tokens: i64 = opts
+        .messages
+        .iter()
+        .map(|message| estimate_json_tokens(message, &opts.model))
+        .sum();
     let tool_tokens: i64 = opts
         .native_tools
         .as_ref()
         .map(|tools| {
             tools
                 .iter()
-                .map(|tool| estimate_text_tokens(&serde_json::to_string(tool).unwrap_or_default()))
+                .map(|tool| {
+                    estimate_text_tokens_for_model(
+                        &serde_json::to_string(tool).unwrap_or_default(),
+                        &opts.model,
+                    )
+                })
                 .sum()
         })
         .unwrap_or(0);
@@ -560,6 +570,66 @@ pub(crate) fn register_cost_builtins(vm: &mut Vm) {
             None => Ok(VmValue::Nil),
         }
     });
+
+    vm.register_builtin_with_metadata(
+        VmBuiltinMetadata::sync_static("tiktoken_count_tokens")
+            .signature_static("tiktoken_count_tokens(text, model)")
+            .arity(VmBuiltinArity::Exact(2))
+            .category_static("llm.budget")
+            .doc_static("Count text tokens with the tiktoken encoder selected for a model."),
+        |args, _out| {
+            let text = args.first().map(|arg| arg.display()).unwrap_or_default();
+            let model = args.get(1).map(|arg| arg.display()).unwrap_or_default();
+            if model.trim().is_empty() {
+                return Err(VmError::Runtime(
+                    "tiktoken_count_tokens: model is required".to_string(),
+                ));
+            }
+            let estimate = super::token_count::tiktoken_count_text(&text, &model)
+                .map_err(|error| VmError::Runtime(format!("tiktoken_count_tokens: {error}")))?;
+            Ok(VmValue::Int(estimate.tokens))
+        },
+    );
+
+    vm.register_builtin_with_metadata(
+        VmBuiltinMetadata::sync_static("tiktoken_tokenizer_info")
+            .signature_static("tiktoken_tokenizer_info(model)")
+            .arity(VmBuiltinArity::Exact(1))
+            .category_static("llm.budget")
+            .doc_static("Return the tiktoken encoder metadata used for a model token count."),
+        |args, _out| {
+            let model = args.first().map(|arg| arg.display()).unwrap_or_default();
+            Ok(tokenizer_info_to_vm_value(
+                &model,
+                super::token_count::tokenizer_info_for_model(&model),
+            ))
+        },
+    );
+}
+
+fn tokenizer_info_to_vm_value(model: &str, info: super::token_count::TokenizerInfo) -> VmValue {
+    let mut result = BTreeMap::new();
+    result.insert("model".to_string(), VmValue::String(Rc::from(model)));
+    result.insert(
+        "model_family".to_string(),
+        VmValue::String(Rc::from(info.model_family)),
+    );
+    result.insert(
+        "source".to_string(),
+        VmValue::String(Rc::from(info.source.as_str())),
+    );
+    result.insert("exact".to_string(), VmValue::Bool(info.exact));
+    result.insert(
+        "known_model_family".to_string(),
+        VmValue::Bool(info.known_model_family),
+    );
+    result.insert(
+        "encoder".to_string(),
+        info.encoder
+            .map(|encoder| VmValue::String(Rc::from(encoder)))
+            .unwrap_or(VmValue::Nil),
+    );
+    VmValue::Dict(Rc::new(result))
 }
 
 #[cfg(test)]

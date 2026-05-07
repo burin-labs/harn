@@ -521,6 +521,25 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         where_clauses: &[],
     },
     BuiltinSignature {
+        name: "tiktoken_count_tokens",
+        params: &[
+            Param::new("text", TY_STRING),
+            Param::new("model", TY_STRING),
+        ],
+        returns: TY_INT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "tiktoken_tokenizer_info",
+        params: &[Param::new("model", TY_STRING)],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "llm_call",
         params: &[
             Param::new("prompt", TY_STRING),

@@ -322,6 +322,9 @@ defaults, safe, prompts, catalog).
 - Adaptive context assembly with deduplication and microcompaction via
   `select_artifacts_adaptive(...)`, plus `estimate_tokens(...)` and
   `microcompact(...)` utility builtins.
+- Model-aware token counting via `tiktoken_count_tokens(...)` and
+  `std/llm/budget`, with exact tiktoken counts for known OpenAI models and
+  labeled approximations for Claude/Gemini model families.
 - Host-aware static preflight: `harn check` can load host-specific capability
   schemas and alternate bundle roots from `harn.toml` or CLI flags so host
   adapters and bundled template layouts validate cleanly.

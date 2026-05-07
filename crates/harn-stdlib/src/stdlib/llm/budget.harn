@@ -1,53 +1,39 @@
 /**
  * @harn-entrypoint-category llm.stdlib
  *
- * std/llm/budget — token / context heuristics for sizing prompts and
- * recommending max_output_tokens. Intentionally heuristic; designed to
- * degrade gracefully when no model-specific tokenizer is exposed.
+ * std/llm/budget — model-aware token / context helpers for sizing prompts and
+ * recommending max_output_tokens. Uses Rust tiktoken builtins for known model
+ * families and a deterministic heuristic fallback for local/unknown models.
  *
- * Note: the spec calls for a one-shot warn agent_emit_event when the
- * model's context window is unknown. We skip the event-emit here because
- * no agent session is guaranteed at the call sites. Callers that want the
- * signal should observe `budget_summary().assumptions`.
+ * Note: the spec calls for a one-shot warn agent_emit_event when the model's
+ * context window is unknown. We skip the event emit here because no agent
+ * session is guaranteed at these call sites. Callers that want the signal
+ * should observe `budget_summary().assumptions`.
  */
-fn __count_char(text, ch) {
-  if text == nil || text == "" {
+fn __llm_budget_heuristic_tokens(text) {
+  if text == "" {
     return 0
   }
-  return len(split(text, ch)) - 1
+  let divisor = if regex_match("[\\p{Han}\\p{Hiragana}\\p{Katakana}\\p{Hangul}]", text) {
+    1.0
+  } else {
+    if contains(text, "```") || contains(text, "=>") || contains(text, "->")
+      || contains(text, "{")
+      || contains(text, "}")
+      || contains(text, ";") {
+      3.5
+    } else {
+      4.0
+    }
+  }
+  return to_int(ceil(len(text) * 1.0 / divisor))
 }
 
-fn __cjk_char_count(text) {
-  if text == nil || text == "" {
-    return 0
+fn __llm_budget_model(model) {
+  if model == nil {
+    return ""
   }
-  let stripped = regex_replace_all("[\\x{4E00}-\\x{9FFF}]", "", text)
-  return len(text) - len(stripped)
-}
-
-fn __looks_code_like(text) {
-  if text == nil || text == "" {
-    return false
-  }
-  if contains(text, "```") {
-    return true
-  }
-  let braces = __count_char(text, "{") + __count_char(text, "}")
-    + __count_char(text, "(")
-    + __count_char(text, ")")
-  return braces >= 8
-}
-
-fn __looks_cjk_heavy(text) {
-  if text == nil || text == "" {
-    return false
-  }
-  let total = len(text)
-  if total == 0 {
-    return false
-  }
-  let cjk = __cjk_char_count(text)
-  return cjk * 100 >= total * 15
+  return to_string(model)
 }
 
 fn __ceil_int(x) {
@@ -58,36 +44,36 @@ fn __ceil_int(x) {
   return to_int(f) + 1
 }
 
-/**
- * Heuristic token estimator for a single string. Returns int. The
- * `model` arg is reserved for forward-compat with a future Rust
- * tokenizer builtin and is not currently used.
- *
- * Note: this function intentionally avoids the name `estimate_tokens`
- * to prevent a parser-level collision with the existing
- * `estimate_text_tokens(messages: list)` workflow builtin.
- */
-pub fn estimate_text_tokens(text, _model) {
-  if text == nil {
-    return 0
+/** token_count_encoder returns the encoder metadata used for a model token count. */
+pub fn token_count_encoder(model) {
+  return tiktoken_tokenizer_info(__llm_budget_model(model))
+}
+
+/** estimate_text_tokens returns a model-aware text-token estimate. */
+pub fn estimate_text_tokens(text, model = nil) {
+  let normalized = to_string(text)
+  let model_id = __llm_budget_model(model)
+  let info = tiktoken_tokenizer_info(model_id)
+  if info.known_model_family {
+    return tiktoken_count_tokens(normalized, model_id)
   }
-  let s = to_string(text)
-  if s == "" {
-    return 0
+  return __llm_budget_heuristic_tokens(normalized)
+}
+
+/** estimate_text_tokens_detail returns token count plus the encoder or heuristic source. */
+pub fn estimate_text_tokens_detail(text, model = nil) {
+  let normalized = to_string(text)
+  let model_id = __llm_budget_model(model)
+  let info = tiktoken_tokenizer_info(model_id)
+  if info.known_model_family {
+    return info + {tokens: tiktoken_count_tokens(normalized, model_id)}
   }
-  let length = len(s)
-  if __looks_cjk_heavy(s) {
-    return __ceil_int(length * 1.0)
-  }
-  if __looks_code_like(s) {
-    return __ceil_int(length / 3.5)
-  }
-  return __ceil_int(length / 4.0)
+  return info + {tokens: __llm_budget_heuristic_tokens(normalized)}
 }
 
 /**
- * Look up the context window for a model. Falls back to 8192 if the
- * catalog has no entry. Returns int.
+ * Look up the context window for a model. Falls back to 8192 if the catalog
+ * has no entry. Returns int.
  */
 pub fn context_window_for(model) {
   let info = try {
@@ -163,9 +149,9 @@ fn __task_clamp(kind, capped, used, summary_ratio) {
 
 /**
  * Recommend max_output_tokens for a given prompt/system/model/task_kind.
- * Required: opts.prompt, opts.model. Optional: opts.system,
- * opts.headroom (default 0.10), opts.task_kind (default "chat"),
- * opts.summary_ratio (default 0.30).
+ * Required: opts.prompt, opts.model. Optional: opts.system, opts.headroom
+ * (default 0.10), opts.task_kind (default "chat"), opts.summary_ratio
+ * (default 0.30).
  */
 pub fn recommend_max_output_tokens(opts) {
   if type_of(opts) != "dict" {
@@ -220,7 +206,7 @@ pub fn budget_summary(opts) {
   let ctx = if type_of(catalog) == "dict" && catalog?.context_window != nil {
     to_int(catalog.context_window)
   } else {
-    assumptions = assumptions.push("context_window unknown — using 8192 fallback")
+    assumptions = assumptions.push("context_window unknown - using 8192 fallback")
     8192
   }
   let headroom = opts?.headroom ?? 0.1
@@ -251,8 +237,8 @@ pub fn budget_summary(opts) {
 }
 
 /**
- * Returns a bool: does the rendered text fit in the model's context
- * window after reserving `headroom` of the window?
+ * Returns a bool: does the rendered text fit in the model's context window
+ * after reserving `headroom` of the window?
  */
 pub fn fits_in_context(text, model, headroom = 0.1) {
   let ctx = context_window_for(model)
