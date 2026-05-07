@@ -6,7 +6,7 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.7.62
 
 ### Added
 
@@ -18,6 +18,35 @@ condensed series summaries instead of full per-patch history.
   `std/llm/handlers.with_cache` with sqlite and filesystem backends,
   content-addressed LLM keys, TTL, LRU eviction, and default bypass for calls
   that include tools.
+- **Ollama provider config seeding.** `harn-cli` now automatically seeds Ollama
+  provider configuration on the first LLM run, simplifying setup for new
+  environments.
+- **Prompt optimization helpers in `std/llm`.** New `judge`, `refine`, and
+  `optimize` helpers support iterative prompt improvement flows with
+  conformance coverage and docs.
+- **Adaptive debate stopping for LLM ensembles.** `std/llm/ensemble` now
+  supports fixed-round and adaptive stopping policies for multi-call ensemble
+  workflows.
+- **LLM reranking helpers.** Added `std/llm/rerank` and VM/provider plumbing for
+  pairwise reranking workflows, including prompt assets, mocks, conformance
+  coverage, and docs.
+- **Shell completion generation.** Added `harn` shell completion generation
+  support (bash, zsh, fish) to streamline CLI usage in interactive shells.
+- **Chat project template.** New `harn init` chat project template provides a
+  pre-configured starter for building chat-based agent applications.
+- **Imports in `harn run -e`.** The `-e` flag now supports module imports,
+  enabling more complex inline script composition via `harn run -e`.
+- **Stream `harn run` stdout.** `harn run` now streams stdout to the terminal
+  during execution, providing real-time feedback for long-running agent runs.
+- **LLM options roundtrip benchmark.** Added a benchmark package for measuring
+  LLM options serialization and package-verification coverage for the new perf
+  crate.
+
+### Fixed
+
+- **Summary preset `tool_choice` default.** Fixed the default `tool_choice`
+  behavior for summary presets in the agent stdlib, ensuring correct tool
+  selection in audit summaries.
 
 ## v0.7.61
 
