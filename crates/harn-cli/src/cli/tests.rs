@@ -93,6 +93,16 @@ fn test_parses_run_llm_mock_flags() {
 }
 
 #[test]
+fn test_parses_run_yes_flag() {
+    let cli = Cli::parse_from(["harn", "run", "--yes", "main.harn"]);
+
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.yes);
+}
+
+#[test]
 fn test_parses_run_attestation_flags() {
     let cli = Cli::parse_from([
         "harn",
@@ -1360,6 +1370,7 @@ fn test_parses_playground_args() {
         "hi",
         "--llm",
         "ollama:qwen2.5-coder:latest",
+        "--yes",
         "--watch",
     ]);
 
@@ -1372,7 +1383,19 @@ fn test_parses_playground_args() {
     assert_eq!(args.llm.as_deref(), Some("ollama:qwen2.5-coder:latest"));
     assert_eq!(args.llm_mock, None);
     assert_eq!(args.llm_mock_record, None);
+    assert!(args.yes);
     assert!(args.watch);
+}
+
+#[test]
+fn test_parses_try_alias_as_playground() {
+    let cli = Cli::parse_from(["harn", "try", "--yes", "--task", "hi"]);
+
+    let Command::Playground(args) = cli.command.unwrap() else {
+        panic!("expected playground command");
+    };
+    assert_eq!(args.task.as_deref(), Some("hi"));
+    assert!(args.yes);
 }
 
 #[test]

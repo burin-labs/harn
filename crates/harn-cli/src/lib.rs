@@ -7,6 +7,7 @@ pub mod config;
 pub mod env_guard;
 pub mod format;
 pub mod package;
+mod provider_bootstrap;
 pub mod skill_loader;
 pub mod skill_provenance;
 pub mod test_runner;
@@ -65,6 +66,8 @@ pub fn run() {
 async fn async_main() {
     let raw_args = normalize_serve_args(env::args().collect());
     if raw_args.len() == 2 && raw_args[1].ends_with(".harn") {
+        provider_bootstrap::maybe_seed_ollama_for_run_file(Path::new(&raw_args[1]), false, false)
+            .await;
         commands::run::run_file(
             &raw_args[1],
             false,
@@ -109,6 +112,25 @@ async fn async_main() {
             },
         },
         Command::Run(args) => {
+            match (args.eval.as_deref(), args.file.as_deref()) {
+                (Some(code), None) => {
+                    provider_bootstrap::maybe_seed_ollama_for_inline(
+                        code,
+                        args.yes,
+                        args.llm_mock.is_some(),
+                    )
+                    .await;
+                }
+                (None, Some(file)) => {
+                    provider_bootstrap::maybe_seed_ollama_for_run_file(
+                        Path::new(file),
+                        args.yes,
+                        args.llm_mock.is_some(),
+                    )
+                    .await;
+                }
+                _ => {}
+            }
             let denied =
                 commands::run::build_denied_builtins(args.deny.as_deref(), args.allow.as_deref());
             let llm_mock_mode = if let Some(path) = args.llm_mock.as_ref() {
@@ -643,6 +665,14 @@ async fn async_main() {
             }
         }
         Command::Playground(args) => {
+            provider_bootstrap::maybe_seed_ollama_for_playground(
+                Path::new(&args.host),
+                Path::new(&args.script),
+                args.yes,
+                args.llm.is_some(),
+                args.llm_mock.is_some(),
+            )
+            .await;
             let llm_mock_mode = if let Some(path) = args.llm_mock.as_ref() {
                 commands::run::CliLlmMockMode::Replay {
                     fixture_path: PathBuf::from(path),

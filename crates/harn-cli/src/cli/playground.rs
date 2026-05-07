@@ -29,6 +29,9 @@ pub(crate) struct PlaygroundArgs {
         conflicts_with = "llm_mock"
     )]
     pub llm_mock_record: Option<String>,
+    /// Accept first-run provider setup prompts.
+    #[arg(long)]
+    pub yes: bool,
     /// Re-run when the script or host module changes.
     #[arg(long)]
     pub watch: bool,
