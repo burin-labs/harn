@@ -29,6 +29,7 @@ pub(crate) mod daemon;
 pub(crate) mod fake;
 pub(crate) mod helpers;
 pub(crate) mod mock;
+mod model_test;
 pub(crate) mod permissions;
 pub mod plan;
 pub mod readiness;
@@ -496,6 +497,7 @@ pub use self::mock::{
     clear_cli_llm_mock_mode, enable_cli_llm_mock_recording, install_cli_llm_mocks, set_replay_mode,
     take_cli_llm_recordings, LlmMock, LlmReplayMode, MockError,
 };
+pub use self::model_test::{run_model_smoke_test, ModelSmokeTestOptions, ModelSmokeTestResult};
 pub use self::trace::{
     agent_trace_summary, enable_tracing, peek_agent_trace, peek_trace, peek_trace_summary,
     take_agent_trace, take_trace, AgentTraceEvent, LlmTraceEntry,

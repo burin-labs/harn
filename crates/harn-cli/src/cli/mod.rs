@@ -87,6 +87,7 @@ pub(crate) use merge_captain::{
 };
 pub(crate) use models::{
     ModelRecommendArgs, ModelsArgs, ModelsCommand, ModelsInstallArgs, ModelsListArgs,
+    ModelsTestArgs,
 };
 pub(crate) use orchestrator::{
     OrchestratorArgs, OrchestratorCommand, OrchestratorDeployArgs, OrchestratorDeployProvider,
@@ -283,13 +284,12 @@ SCRIPTING
     MergeCaptain(MergeCaptainArgs),
     /// Print resolved metadata for a model alias or model id as JSON.
     ModelInfo(ModelInfoArgs),
+    /// List, install, recommend, and test configured LLM models.
+    Models(ModelsArgs),
     /// Print the provider/model catalog Harn loaded as JSON.
     ProviderCatalog(ProviderCatalogArgs),
     /// Probe a provider's /models endpoint and optionally verify a served model.
     ProviderReady(ProviderReadyArgs),
-    /// List or install LLM models. Convenience wrapper around the catalog
-    /// and (for `install`) Ollama.
-    Models(ModelsArgs),
     /// One-shot agent_loop with a prompt. Routes through the configured
     /// provider (or `HARN_LLM_PROVIDER=mock` for offline use).
     #[command(name = "try")]

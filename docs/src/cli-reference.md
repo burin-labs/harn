@@ -558,6 +558,21 @@ unparsable model listings, and missing models. It does not run local launcher
 scripts; host applications that auto-start local servers should report launch
 failures themselves and then call this probe again.
 
+## harn models test
+
+Round-trip a small prompt through one resolved model and report model id,
+provider, latency, first streamed delta timing, token usage, and estimated
+cost.
+
+```bash
+harn models test gpt-4o-mini --prompt "Reply with pong."
+harn models test qwen3:30b --provider ollama --json
+```
+
+`--provider` bypasses provider inference for the model selector. The command
+uses the configured provider client path, so it also respects provider
+credentials, base URL overrides, and `HARN_LLM_CALLS_DISABLED`.
+
 ## harn model-info
 
 Print resolved model metadata as JSON. For Ollama models, `--verify` probes
