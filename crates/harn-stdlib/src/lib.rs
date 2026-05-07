@@ -566,6 +566,14 @@ fn public_functions_from_source(source: &str) -> Vec<StdlibPublicFunction> {
             index = next;
             continue;
         }
+        if line.starts_with("pub fn ") {
+            let (signature_line, next) = collect_public_function_signature(&lines, index);
+            if let Some(function) = parse_public_function_line(&signature_line, doc.take()) {
+                out.push(function);
+                index = next;
+                continue;
+            }
+        }
         if let Some(function) = parse_public_function_line(line, doc.take()) {
             out.push(function);
         } else if !line.is_empty() && !line.starts_with("//") {
@@ -574,6 +582,30 @@ fn public_functions_from_source(source: &str) -> Vec<StdlibPublicFunction> {
         index += 1;
     }
     out
+}
+
+fn collect_public_function_signature(lines: &[&str], start: usize) -> (String, usize) {
+    let mut parts = Vec::new();
+    let mut index = start;
+    while index < lines.len() {
+        parts.push(lines[index].trim().to_string());
+        let candidate = parts.join(" ");
+        if public_function_signature_complete(&candidate) {
+            return (candidate, index + 1);
+        }
+        index += 1;
+    }
+    (parts.join(" "), index)
+}
+
+fn public_function_signature_complete(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("pub fn ") else {
+        return false;
+    };
+    let Some(name_end) = rest.find('(') else {
+        return false;
+    };
+    matching_paren_len(&rest[name_end + 1..]).is_some()
 }
 
 fn parse_harndoc(lines: &[&str], start: usize) -> (Option<String>, usize) {
@@ -816,6 +848,28 @@ mod tests {
             !exports.contains("retry_with_backoff"),
             "std/async should not retain the old retry_with_backoff export"
         );
+    }
+
+    #[test]
+    fn git_stdlib_module_exports_local_wrappers() {
+        let exports = public_functions_for_module("git")
+            .into_iter()
+            .map(|function| function.name)
+            .collect::<BTreeSet<_>>();
+        for name in [
+            "git_run",
+            "git_status",
+            "git_current_branch",
+            "git_log",
+            "git_switch",
+            "git_pull_ff_only",
+            "git_find_tool",
+            "git_run_tool",
+            "git_tools",
+            "git_toolbox_tools",
+        ] {
+            assert!(exports.contains(name), "std/git should export {name}");
+        }
     }
 
     #[test]
