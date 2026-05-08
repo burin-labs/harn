@@ -8,5 +8,5 @@ homepage.workspace = true
 description = "Code formatter for the Harn programming language"
 
 [dependencies]
-harn-lexer = { path = "../harn-lexer", version = "0.7" }
-harn-parser = { path = "../harn-parser", version = "0.7" }
+harn-lexer = { path = "../harn-lexer", version = "0.8" }
+harn-parser = { path = "../harn-parser", version = "0.8" }

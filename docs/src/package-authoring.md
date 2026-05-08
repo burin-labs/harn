@@ -72,7 +72,7 @@ version = "0.1.0"
 description = "Reusable Harn helpers."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/acme/acme-tools"
-harn = ">=0.7,<0.8"
+harn = ">=0.8,<0.9"
 docs_url = "docs/api.md"
 
 [exports]

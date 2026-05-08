@@ -6,7 +6,7 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.8.0
 
 ### Added
 
@@ -27,10 +27,6 @@ condensed series summaries instead of full per-patch history.
   `tool_call_audit` AgentEvent for live ACP/A2A consumers. See
   [`docs/src/stdlib/tool-middleware.md`](docs/src/stdlib/tool-middleware.md)
   for the full reference.
-
-## v0.8.0
-
-### Added
 
 - **`llm_caller` seam on `agent_loop`.** New option accepts a closure
   with the canonical shape `fn(call) -> {ok, value | status, error?}`
