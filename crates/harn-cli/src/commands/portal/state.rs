@@ -11,6 +11,8 @@ use harn_vm::event_log::AnyEventLog;
 pub(super) struct PortalState {
     pub(super) run_dir: PathBuf,
     pub(super) workspace_root: PathBuf,
+    pub(super) persona_manifest: Option<PathBuf>,
+    pub(super) persona_state_dir: PathBuf,
     pub(super) event_log: Option<Arc<AnyEventLog>>,
     pub(super) launch_program: PathBuf,
     pub(super) launch_jobs: Arc<Mutex<HashMap<String, PortalLaunchJob>>>,

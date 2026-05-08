@@ -8,6 +8,8 @@ import type {
   PortalLaunchJobList,
   PortalLlmOptions,
   PortalMeta,
+  PersonaManifestSummary,
+  PersonaStatus,
   PortalLaunchTargetList,
   PortalListResponse,
   PortalRunDetail,
@@ -70,6 +72,18 @@ export function fetchRuns(params?: {
 
 export function fetchPortalMeta(): Promise<PortalMeta> {
   return fetchJson<PortalMeta>("/api/meta")
+}
+
+export function fetchPersonas(): Promise<PersonaManifestSummary[]> {
+  return fetchJson<PersonaManifestSummary[]>("/api/personas")
+}
+
+export function fetchPersonaStatus(name: string, at?: string): Promise<PersonaStatus> {
+  const search = new URLSearchParams({ name })
+  if (at) {
+    search.set("at", at)
+  }
+  return fetchJson<PersonaStatus>(`/api/persona/status?${search}`)
 }
 
 export function fetchHighlightKeywords(): Promise<PortalHighlightKeywords> {

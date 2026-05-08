@@ -624,8 +624,21 @@ fn print_status(status: &harn_vm::PersonaStatus, json: bool) {
         return;
     }
     println!("persona:        {}", status.name);
+    println!(
+        "template_ref:   {}",
+        status.template_ref.as_deref().unwrap_or("-")
+    );
     println!("state:          {}", status.state.as_str());
     println!("entry_workflow: {}", status.entry_workflow);
+    println!("role:           {}", status.role);
+    println!(
+        "assignment:     {}",
+        status
+            .current_assignment
+            .as_ref()
+            .map(|assignment| assignment.work_key.as_str())
+            .unwrap_or("-")
+    );
     println!(
         "last_run:       {}",
         status.last_run.as_deref().unwrap_or("-")
@@ -635,6 +648,21 @@ fn print_status(status: &harn_vm::PersonaStatus, json: bool) {
         status.next_scheduled_run.as_deref().unwrap_or("-")
     );
     println!("queued_events:  {}", status.queued_events);
+    if !status.handoff_inbox.is_empty() {
+        println!("handoffs:");
+        for handoff in &status.handoff_inbox {
+            println!(
+                "  - {} kind={} from={} task={}",
+                handoff
+                    .handoff_id
+                    .as_deref()
+                    .unwrap_or(handoff.work_key.as_str()),
+                handoff.handoff_kind.as_deref().unwrap_or("-"),
+                handoff.source_persona.as_deref().unwrap_or("-"),
+                handoff.task.as_deref().unwrap_or("-")
+            );
+        }
+    }
     println!(
         "active_lease:   {}",
         status
@@ -652,6 +680,14 @@ fn print_status(status: &harn_vm::PersonaStatus, json: bool) {
             .map(|value| format!("${value:.4}"))
             .unwrap_or_else(|| "-".to_string())
     );
+    if let Some(receipt) = status.value_receipts.last() {
+        println!(
+            "last_receipt:   {} paid=${:.4} avoided=${:.4}",
+            receipt.kind.as_str(),
+            receipt.paid_cost_usd,
+            receipt.avoided_cost_usd
+        );
+    }
     if let Some(error) = &status.last_error {
         println!("last_error:     {error}");
     }

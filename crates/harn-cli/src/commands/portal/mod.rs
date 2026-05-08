@@ -24,7 +24,14 @@ use tokio::sync::Mutex;
 use self::router::build_router;
 use self::state::PortalState;
 
-pub(crate) async fn run_portal(dir: &str, host: &str, port: u16, open_browser: bool) {
+pub(crate) async fn run_portal(
+    dir: &str,
+    manifest: Option<PathBuf>,
+    persona_state_dir: PathBuf,
+    host: &str,
+    port: u16,
+    open_browser: bool,
+) {
     let run_dir = PathBuf::from(dir);
     let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let event_log = harn_vm::event_log::install_default_for_base_dir(&workspace_root).ok();
@@ -40,6 +47,8 @@ pub(crate) async fn run_portal(dir: &str, host: &str, port: u16, open_browser: b
     let state = Arc::new(PortalState {
         run_dir: run_dir.clone(),
         workspace_root,
+        persona_manifest: manifest,
+        persona_state_dir,
         event_log,
         launch_program,
         launch_jobs: Arc::new(Mutex::new(HashMap::new())),

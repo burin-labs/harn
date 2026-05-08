@@ -19,6 +19,10 @@ use crate::event_log::{
     LogEvent as EventLogRecord, Topic,
 };
 use crate::llm::vm_value_to_json;
+use crate::personas::{
+    PersonaAssignmentStatus, PersonaBudgetStatus, PersonaHandoffInboxItem, PersonaQueuedWork,
+    PersonaStatus, PersonaValueReceipt,
+};
 use crate::triggers::{SignatureStatus, TriggerEvent};
 use crate::value::{VmError, VmValue};
 
@@ -594,6 +598,42 @@ pub struct RunHitlQuestionRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
+pub struct RunPersonaRuntimeRecord {
+    pub name: String,
+    pub role: String,
+    pub template_ref: Option<String>,
+    pub state: String,
+    pub entry_workflow: String,
+    pub current_assignment: Option<PersonaAssignmentStatus>,
+    pub queued_work: Vec<PersonaQueuedWork>,
+    pub handoff_inbox: Vec<PersonaHandoffInboxItem>,
+    pub budget: PersonaBudgetStatus,
+    pub value_receipts: Vec<PersonaValueReceipt>,
+    pub last_run: Option<String>,
+    pub last_error: Option<String>,
+}
+
+impl From<&PersonaStatus> for RunPersonaRuntimeRecord {
+    fn from(status: &PersonaStatus) -> Self {
+        Self {
+            name: status.name.clone(),
+            role: status.role.clone(),
+            template_ref: status.template_ref.clone(),
+            state: status.state.as_str().to_string(),
+            entry_workflow: status.entry_workflow.clone(),
+            current_assignment: status.current_assignment.clone(),
+            queued_work: status.queued_work.clone(),
+            handoff_inbox: status.handoff_inbox.clone(),
+            budget: status.budget.clone(),
+            value_receipts: status.value_receipts.clone(),
+            last_run: status.last_run.clone(),
+            last_error: status.last_error.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct RunRecord {
     #[serde(rename = "_type")]
     pub type_name: String,
@@ -623,6 +663,7 @@ pub struct RunRecord {
     pub trace_spans: Vec<RunTraceSpanRecord>,
     pub tool_recordings: Vec<ToolCallRecord>,
     pub hitl_questions: Vec<RunHitlQuestionRecord>,
+    pub persona_runtime: Vec<RunPersonaRuntimeRecord>,
     pub metadata: BTreeMap<String, serde_json::Value>,
     pub persisted_path: Option<String>,
 }

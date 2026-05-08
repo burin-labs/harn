@@ -178,7 +178,14 @@ status query replays those records and returns stable JSON with:
 - `last_run` and `next_scheduled_run`
 - active lease id, holder, work key, acquisition time, and expiry
 - budget limits, spend, token usage, exhaustion reason, and last receipt id
-- queued event count, disabled/dead-lettered event count, and last error
+- queued work details, typed handoff inbox summaries, value receipts,
+  disabled/dead-lettered event count, and last error
+
+Persisted run records can also carry `persona_runtime[]` snapshots so
+orchestration records, portal views, and replay oracle fixtures can compare
+persona state without scraping transcript prose. Replay oracle traces expose the
+same material as `persona_runtime_states[]`; use that bucket for lifecycle,
+budget, handoff, and receipt assertions that must remain deterministic.
 
 Leases are single-writer. A persona run acquires one active lease for the
 normalized work key and records a conflict instead of processing duplicate work
@@ -241,7 +248,9 @@ That means template packs should stay honest about missing platform scope:
 
 - schedule bindings can be fired and recorded, but deployment-specific
   long-running wake loops still belong to the orchestrator/host
-- handoffs validate now but are not typed persona-runtime dispatch yet
+- Harn core owns typed handoff artifacts and runtime inbox visibility; coding
+  heuristics such as PR triage strategy, repository conventions, and review
+  taste belong in a Burin-specific persona package
 - backend-specific systems such as Honeycomb and Splunk should be expressed
   through current tool wiring such as MCP rather than invented manifest fields
 

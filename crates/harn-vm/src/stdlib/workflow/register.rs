@@ -574,6 +574,7 @@ fn prepare_workflow_state(
         trace_spans: Vec::new(),
         tool_recordings: Vec::new(),
         hitl_questions: Vec::new(),
+        persona_runtime: Vec::new(),
         metadata: BTreeMap::new(),
         persisted_path: None,
     });
