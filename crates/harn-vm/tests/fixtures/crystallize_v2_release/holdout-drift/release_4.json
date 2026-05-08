@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "id": "trace_release_4_holdout_drift",
+  "workflow_id": "release_package_maintenance",
+  "metadata": {
+    "goal": "release package maintenance",
+    "success_criteria": "release manifest receipt matches the dry-run gate"
+  },
+  "replay_allowlist": [
+    {
+      "path": "/run_id",
+      "reason": "run ids are allocated per execution"
+    },
+    {
+      "path": "/effect_receipts/*/receipt_id",
+      "reason": "receipt ids are allocated per execution"
+    }
+  ],
+  "replay_run": {
+    "run_id": "run_release_4",
+    "effect_receipts": [
+      {
+        "receipt_id": "receipt_release_4",
+        "kind": "release_manifest",
+        "path": "release/manifest.json",
+        "sha256": "receipt-drift-release-flow",
+        "mode": "deterministic_substitute"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "id": "trace_release_4-checkout",
+      "kind": "tool_call",
+      "name": "git.checkout_branch",
+      "parameters": {
+        "repo_path": "/work/harn-4",
+        "branch_name": "release-0.8.4"
+      },
+      "side_effects": [
+        {
+          "kind": "git_ref",
+          "target": "release-branch",
+          "capability": "git.write"
+        }
+      ],
+      "capabilities": ["git.write"],
+      "deterministic": true
+    },
+    {
+      "id": "trace_release_4-manifest",
+      "kind": "file_mutation",
+      "name": "update_manifest_version",
+      "parameters": {
+        "version": "0.8.4",
+        "path": "harn.toml"
+      },
+      "inputs": {
+        "path": "harn.toml",
+        "version": "0.8.4"
+      },
+      "side_effects": [
+        {
+          "kind": "file_write",
+          "target": "harn.toml",
+          "capability": "fs.write"
+        }
+      ],
+      "capabilities": ["fs.write"],
+      "deterministic": true
+    },
+    {
+      "id": "trace_release_4-dry-run",
+      "kind": "tool_call",
+      "name": "cargo.package_dry_run",
+      "parameters": {
+        "release_target": "crates.io",
+        "version": "0.8.4"
+      },
+      "capabilities": ["cargo.package"],
+      "deterministic": true
+    }
+  ]
+}

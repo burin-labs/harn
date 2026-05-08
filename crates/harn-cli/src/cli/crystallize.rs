@@ -47,6 +47,13 @@ pub(crate) struct CrystallizeArgs {
     /// Minimum number of traces that must contain the repeated sequence.
     #[arg(long = "min-examples", default_value_t = 2)]
     pub min_examples: usize,
+    /// Additional trace directory to shadow-run against after mining. May be
+    /// passed more than once for future/holdout fixtures.
+    #[arg(long = "shadow-from", value_name = "TRACE_DIR")]
+    pub shadow_from: Vec<String>,
+    /// Minimum confidence required for promotion metadata to mark a candidate ready.
+    #[arg(long = "promotion-min-confidence", default_value_t = 0.80)]
+    pub promotion_min_confidence: f64,
     /// Override the generated workflow name.
     #[arg(long = "workflow-name", value_name = "NAME")]
     pub workflow_name: Option<String>,

@@ -18,7 +18,7 @@ use harn_vm::orchestration::{
     build_crystallization_bundle, crystallize_traces, ingest_release_fixture,
     load_crystallization_traces_from_dir, shadow_replay_bundle, validate_crystallization_bundle,
     write_crystallization_artifacts, write_crystallization_bundle, BundleOptions,
-    CrystallizeOptions,
+    CrystallizeOptions, PromotionStatus,
 };
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -109,6 +109,14 @@ fn plan_only_trace(idx: usize) -> Value {
     })
 }
 
+fn harn_vm_fixture_dir(relative: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("harn-vm/tests/fixtures")
+        .join(relative)
+}
+
 #[test]
 fn crystallize_version_bump_emits_validatable_bundle() {
     let temp = TempDir::new().unwrap();
@@ -137,6 +145,7 @@ fn crystallize_version_bump_emits_validatable_bundle() {
             author: None,
             approver: None,
             eval_pack_link: Some(eval_pack_path.to_string_lossy().into_owned()),
+            ..CrystallizeOptions::default()
         },
     )
     .expect("crystallize");
@@ -263,6 +272,129 @@ fn crystallize_plan_only_bundle_keeps_plan_only_kind() {
         "validation reported problems: {:#?}",
         validation.problems
     );
+}
+
+#[test]
+fn crystallize_v2_shadow_receipts_promote_only_after_holdout_passes() {
+    let fixture_root = harn_vm_fixture_dir("crystallize_v2_release");
+    let mine_dir = fixture_root.join("mine");
+    let holdout_dir = fixture_root.join("holdout-pass");
+    let temp = TempDir::new().unwrap();
+    let bundle_dir = temp.path().join("bundle");
+
+    let traces = load_crystallization_traces_from_dir(&mine_dir).expect("load mining fixtures");
+    let holdout_traces =
+        load_crystallization_traces_from_dir(&holdout_dir).expect("load holdout fixtures");
+    let mut bundle_traces = traces.clone();
+    bundle_traces.extend(holdout_traces.clone());
+
+    let artifacts = crystallize_traces(
+        traces,
+        CrystallizeOptions {
+            min_examples: 3,
+            shadow_traces: holdout_traces,
+            workflow_name: Some("release_package_maintenance".to_string()),
+            package_name: Some("release-workflows".to_string()),
+            approver: Some("release-lead@example.com".to_string()),
+            ..CrystallizeOptions::default()
+        },
+    )
+    .expect("crystallize");
+
+    let candidate = artifacts.report.candidates.first().expect("candidate");
+    assert!(candidate.shadow.pass);
+    assert_eq!(candidate.examples.len(), 3);
+    assert_eq!(candidate.shadow.compared_traces, 4);
+    assert_eq!(candidate.expected_receipts.len(), 1);
+    assert_eq!(
+        candidate.cluster_key.goal.as_deref(),
+        Some("release package maintenance")
+    );
+    assert!(candidate
+        .cluster_key
+        .tool_sequence
+        .contains(&"git.checkout_branch".to_string()));
+    assert!(candidate
+        .cluster_key
+        .touched_artifact_types
+        .contains(&"file:toml".to_string()));
+    assert_eq!(candidate.promotion.sample_count, 4);
+    assert_eq!(candidate.promotion.source_trace_hashes.len(), 4);
+    assert_eq!(candidate.promotion.shadow_success_count, 4);
+    assert_eq!(candidate.promotion.shadow_failure_count, 0);
+    assert_eq!(candidate.promotion.criteria.status, PromotionStatus::Ready);
+    assert!(candidate.shadow.traces.iter().any(|trace| trace.trace_id
+        == "trace_release_3_holdout"
+        && trace.compared_receipts == 1
+        && trace
+            .replay_oracle
+            .as_ref()
+            .is_some_and(|report| report.passed)));
+
+    let bundle = build_crystallization_bundle(artifacts, &bundle_traces, BundleOptions::default())
+        .expect("build bundle");
+    assert_eq!(bundle.manifest.fixtures.len(), 4);
+    assert_eq!(bundle.manifest.source_trace_hashes.len(), 4);
+    assert_eq!(bundle.manifest.promotion.sample_count, 4);
+    assert_eq!(
+        bundle.manifest.promotion.criteria.status,
+        PromotionStatus::Ready
+    );
+    write_crystallization_bundle(&bundle, &bundle_dir).expect("write bundle");
+
+    let validation = validate_crystallization_bundle(&bundle_dir).expect("validate");
+    assert!(
+        validation.problems.is_empty(),
+        "validation reported problems: {:#?}",
+        validation.problems
+    );
+    let (_, shadow) = shadow_replay_bundle(&bundle_dir).expect("shadow replay");
+    assert!(shadow.pass, "shadow replay failed: {:#?}", shadow.failures);
+    assert_eq!(shadow.compared_traces, 4);
+}
+
+#[test]
+fn crystallize_v2_shadow_receipt_drift_blocks_promotion() {
+    let fixture_root = harn_vm_fixture_dir("crystallize_v2_release");
+    let mine_dir = fixture_root.join("mine");
+    let drift_dir = fixture_root.join("holdout-drift");
+
+    let traces = load_crystallization_traces_from_dir(&mine_dir).expect("load mining fixtures");
+    let drift_traces =
+        load_crystallization_traces_from_dir(&drift_dir).expect("load drift fixtures");
+
+    let artifacts = crystallize_traces(
+        traces,
+        CrystallizeOptions {
+            min_examples: 3,
+            shadow_traces: drift_traces,
+            workflow_name: Some("release_package_maintenance".to_string()),
+            package_name: Some("release-workflows".to_string()),
+            approver: Some("release-lead@example.com".to_string()),
+            ..CrystallizeOptions::default()
+        },
+    )
+    .expect("crystallize");
+
+    assert!(artifacts.report.candidates.is_empty());
+    let rejected = artifacts
+        .report
+        .rejected_candidates
+        .first()
+        .expect("rejected candidate");
+    assert!(!rejected.shadow.pass);
+    assert_eq!(rejected.promotion.criteria.status, PromotionStatus::Blocked);
+    assert_eq!(rejected.promotion.shadow_failure_count, 1);
+    assert!(rejected
+        .promotion
+        .divergence_history
+        .iter()
+        .any(|entry| entry.trace_id == "trace_release_4_holdout_drift"
+            && entry.path.as_deref().unwrap_or("").contains("sha256")));
+    assert!(rejected
+        .rejection_reasons
+        .iter()
+        .any(|reason| reason.contains("trace_release_4_holdout_drift")));
 }
 
 #[test]

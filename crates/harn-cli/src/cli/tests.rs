@@ -434,6 +434,10 @@ fn test_parses_crystallize_args() {
         "harn.eval.toml",
         "--min-examples",
         "5",
+        "--shadow-from",
+        "fixtures/crystallize/holdout",
+        "--promotion-min-confidence",
+        "0.9",
         "--workflow-name",
         "version_bump",
     ]);
@@ -447,6 +451,11 @@ fn test_parses_crystallize_args() {
     assert_eq!(args.report.as_deref(), Some("reports/version_bump.json"));
     assert_eq!(args.eval_pack.as_deref(), Some("harn.eval.toml"));
     assert_eq!(args.min_examples, 5);
+    assert_eq!(
+        args.shadow_from,
+        vec!["fixtures/crystallize/holdout".to_string()]
+    );
+    assert_eq!(args.promotion_min_confidence, 0.9);
     assert_eq!(args.workflow_name.as_deref(), Some("version_bump"));
 }
 

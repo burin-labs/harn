@@ -31,11 +31,21 @@ fn run_mine(args: CrystallizeArgs) -> Result<(), String> {
     let trace_dir = PathBuf::from(from);
     let traces = harn_vm::orchestration::load_crystallization_traces_from_dir(&trace_dir)
         .map_err(|error| error.to_string())?;
-    let normalized = traces.clone();
+    let mut bundle_traces = traces.clone();
+    let mut shadow_traces = Vec::new();
+    for shadow_from in &args.shadow_from {
+        let mut loaded =
+            harn_vm::orchestration::load_crystallization_traces_from_dir(Path::new(shadow_from))
+                .map_err(|error| error.to_string())?;
+        bundle_traces.extend(loaded.clone());
+        shadow_traces.append(&mut loaded);
+    }
     let artifacts = harn_vm::orchestration::crystallize_traces(
         traces,
         harn_vm::orchestration::CrystallizeOptions {
             min_examples: args.min_examples,
+            shadow_traces,
+            promotion_min_confidence: args.promotion_min_confidence,
             workflow_name: args.workflow_name.clone(),
             package_name: args.package_name.clone(),
             author: args.author.clone(),
@@ -49,7 +59,7 @@ fn run_mine(args: CrystallizeArgs) -> Result<(), String> {
         Some(
             harn_vm::orchestration::build_crystallization_bundle(
                 artifacts.clone(),
-                &normalized,
+                &bundle_traces,
                 harn_vm::orchestration::BundleOptions {
                     external_key: args.bundle_external_key.clone(),
                     title: args.bundle_title.clone(),
@@ -200,6 +210,7 @@ fn run_ingest(args: CrystallizeIngestArgs) -> Result<(), String> {
             author: args.author.clone(),
             approver: args.approver.clone(),
             eval_pack_link: args.eval_pack.clone(),
+            ..harn_vm::orchestration::CrystallizeOptions::default()
         },
     )
     .map_err(|error| error.to_string())?;

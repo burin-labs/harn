@@ -68,7 +68,22 @@ costs, timestamps, source hashes, and optional Flow provenance references:
         {"kind": "file_write", "target": "harn.toml", "capability": "fs.write"}
       ]
     }
-  ]
+  ],
+  "replay_allowlist": [
+    {"path": "/run_id", "reason": "run ids are allocated per execution"},
+    {"path": "/effect_receipts/*/receipt_id", "reason": "receipt ids are allocated per execution"}
+  ],
+  "replay_run": {
+    "run_id": "run_release_001",
+    "effect_receipts": [
+      {
+        "receipt_id": "receipt_release_001",
+        "kind": "release_manifest",
+        "path": "release/manifest.json",
+        "sha256": "receipt-stable-release-flow"
+      }
+    ]
+  }
 }
 ```
 
@@ -81,6 +96,7 @@ Run the miner against at least five traces of the same repeated workflow:
 ```bash
 harn crystallize \
   --from fixtures/crystallize/version-bump \
+  --shadow-from fixtures/crystallize/version-bump-holdout \
   --out workflows/version_bump.harn \
   --report reports/version_bump.crystallize.json \
   --eval-pack evals/version_bump.toml \
@@ -92,6 +108,9 @@ harn crystallize \
 The generated workflow is a reviewable skeleton. It contains explicit
 parameters, capability comments, side-effect comments, approval boundaries, and
 TODO comments for fuzzy segments that still require a model or reviewer.
+`--shadow-from` may be passed more than once. These directories are not used for
+mining; they are future/holdout traces that must match before promotion
+metadata can report the candidate as ready.
 
 ```harn
 pipeline version_bump(repo_path, version, branch_name, release_target) {
@@ -109,15 +128,21 @@ The report includes:
 
 - normalized workflow-candidate IR with parameters, constants,
   preconditions, side effects, capabilities, required secrets, approval points,
-  expected outputs, deterministic segments, and fuzzy segments
+  expected outputs, expected receipts, deterministic segments, fuzzy segments,
+  and the recurrence cluster key (goal, tool sequence, touched artifact types,
+  and success criteria)
 - source trace hashes and example action ids for provenance
 - confidence and rejection reasons
-- shadow-mode pass/fail details for every source trace
+- shadow-mode pass/fail details for every source and holdout trace, including
+  replay-oracle receipt comparison reports when `replay_run` is present
 - model calls avoided, token savings, estimated cost savings, wall-clock
   savings, CPU/runtime cost, and remaining model-call requirements
 - promotion metadata: source trace hashes, author, approver, created_at,
   version, package name, capability set, required secrets, rollback target, and
   eval pack link
+- promotion criteria/history: sample count, confidence threshold, shadow pass
+  requirement, approval history, divergence history, and estimated time/token
+  savings
 
 Candidates with divergent side effects stay in `rejected_candidates` and do not
 produce a selected candidate.
@@ -132,8 +157,42 @@ the selected sequence against each source trace:
 - requested side effects
 - approval boundaries
 
+When traces carry `replay_run`, the shadow check also builds a
+`harn.orchestration.replay_trace.v1` comparison and calls the replay oracle from
+`harn orchestrator replay-oracle`. The original run is the first execution; the
+candidate's expected receipts are substituted into the second execution. Any
+meaningful receipt drift is recorded in `promotion.divergence_history` and
+blocks promotion.
+
 This gives Harn Cloud and local reviewers a deterministic pass/fail surface
 before promotion.
+
+## Checked-In V2 Fixture Harness
+
+The repository includes a fixture-driven release/package-maintenance steel
+thread:
+
+```bash
+harn crystallize \
+  --from crates/harn-vm/tests/fixtures/crystallize_v2_release/mine \
+  --shadow-from crates/harn-vm/tests/fixtures/crystallize_v2_release/holdout-pass \
+  --out /tmp/release_package_maintenance.harn \
+  --report /tmp/release_package_maintenance.report.json \
+  --bundle /tmp/release-package-maintenance \
+  --min-examples 3 \
+  --workflow-name release_package_maintenance \
+  --package-name release-workflows \
+  --approver release-lead@example.com
+
+harn crystallize validate /tmp/release-package-maintenance
+harn crystallize shadow /tmp/release-package-maintenance
+```
+
+The sibling
+`crates/harn-vm/tests/fixtures/crystallize_v2_release/holdout-drift` directory
+keeps the same action sequence but changes the receipt hash. Using it as
+`--shadow-from` leaves the candidate in `rejected_candidates` with a replay
+divergence path under `effect_receipts`.
 
 ## Eval Pack
 
@@ -215,7 +274,16 @@ needs to import a candidate directly:
     "rollback_target": "keep source traces and previous package version",
     "created_at": "2026-04-26T12:34:56Z",
     "workflow_version": "0.1.0",
-    "package_name": "release-workflows"
+    "package_name": "release-workflows",
+    "sample_count": 5,
+    "confidence": 0.94,
+    "shadow_success_count": 5,
+    "shadow_failure_count": 0,
+    "divergence_history": [],
+    "approval_history": [
+      {"actor": "lead@example.com", "decision": "approved_for_shadow_promotion"}
+    ],
+    "criteria": {"status": "ready", "min_examples": 5, "min_confidence": 0.8}
   },
   "redaction": {
     "applied": true,
