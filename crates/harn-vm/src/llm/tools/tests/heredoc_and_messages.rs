@@ -643,7 +643,7 @@ fn assistant_tool_message_includes_empty_content_for_openai_style() {
 }
 
 #[test]
-fn assistant_tool_message_uses_ollama_native_arguments() {
+fn assistant_tool_message_stringifies_ollama_arguments() {
     let message = build_assistant_tool_message(
         "",
         &[json!({
@@ -659,10 +659,12 @@ fn assistant_tool_message_uses_ollama_native_arguments() {
     assert_eq!(message["tool_calls"][0]["id"], "call_001");
     assert_eq!(message["tool_calls"][0]["type"], "function");
     assert_eq!(message["tool_calls"][0]["function"]["name"], "read");
-    assert_eq!(
-        message["tool_calls"][0]["function"]["arguments"]["path"],
-        "main.rs"
-    );
+    let arguments = message["tool_calls"][0]["function"]["arguments"]
+        .as_str()
+        .expect("ollama tool arguments should be a JSON string");
+    let parsed_arguments: serde_json::Value =
+        serde_json::from_str(arguments).expect("ollama tool arguments should parse as JSON");
+    assert_eq!(parsed_arguments["path"], "main.rs");
 }
 
 #[test]
