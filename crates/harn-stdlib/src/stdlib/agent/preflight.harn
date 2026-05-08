@@ -306,6 +306,10 @@ pub fn agent_build_turn_system(session, opts, iteration) {
   if active_skill_prompt != "" {
     parts = parts.push(active_skill_prompt)
   }
+  let skill_catalog_prompt = trim(opts?.skill_catalog_prompt ?? "")
+  if skill_catalog_prompt != "" {
+    parts = parts.push(skill_catalog_prompt)
+  }
   let loop_contract = __agent_loop_contract_prompt(opts)
   if loop_contract != "" {
     parts = parts.push(loop_contract)

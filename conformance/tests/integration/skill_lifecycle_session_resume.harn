@@ -19,7 +19,13 @@ pipeline test(task) {
   let r1 = agent_loop(
     "please handle this task carefully",
     nil,
-    {provider: "mock", max_iterations: 1, skills: sticky_skill, session_id: sid},
+    {
+      provider: "mock",
+      max_iterations: 1,
+      skills: sticky_skill,
+      session_id: sid,
+      skill_match: {strategy: "metadata"},
+    },
   )
   assert(r1?.status == "done", "first run completes")
   // Second invocation under the same session id: the matcher still
@@ -30,7 +36,13 @@ pipeline test(task) {
   let r2 = agent_loop(
     "continue",
     nil,
-    {provider: "mock", max_iterations: 1, skills: sticky_skill, session_id: sid},
+    {
+      provider: "mock",
+      max_iterations: 1,
+      skills: sticky_skill,
+      session_id: sid,
+      skill_match: {strategy: "metadata"},
+    },
   )
   assert(r2?.status == "done", "resume run completes")
   // The second run's system prompt still mentions the skill body.

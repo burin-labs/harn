@@ -1,0 +1,36 @@
+/**
+ * The default skill path is agentic catalog routing: expose a bounded
+ * catalog and `load_skill`, then activate/scoped-load a skill only after
+ * the model explicitly asks for it.
+ */
+pipeline test(task) {
+  skill alpha {
+    description "Alpha workflow"
+    when_to_use "Use alpha for alpha-shaped work"
+    prompt "Alpha instructions."
+  }
+  skill beta {
+    description "Beta workflow"
+    when_to_use "Use beta for beta-shaped work"
+    prompt "Beta instructions."
+  }
+  let registry = skill_define(alpha, "beta", skill_find(beta, "beta") ?? {})
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "load-alpha", name: "load_skill", arguments: {name: "alpha"}}]})
+  llm_mock({text: "Alpha loaded."})
+  let result = agent_loop(
+    "alpha please",
+    nil,
+    {provider: "mock", tool_format: "native", max_iterations: 2, skills: registry},
+  )
+  assert(result?.status == "done", "catalog-routed loop completes")
+  let calls = llm_mock_calls()
+  assert(len(calls) == 2, "load_skill creates a second model turn")
+  assert(contains(calls[0].system, "## Available skills"), "first turn shows skill catalog")
+  assert(!contains(calls[0].system, "## Active skills"), "catalog does not pre-activate skills")
+  assert(contains(json_stringify(calls[0].tools), "load_skill"), "load_skill is advertised")
+  assert(contains(calls[1].system, "## Active skills"), "loaded skill is active on the next turn")
+  assert(contains(calls[1].system, "Alpha instructions."), "loaded skill prompt is active")
+  assert(!contains(calls[1].system, "## Available skills"), "catalog drops once a skill is active")
+  log("skill_lifecycle_catalog_default tests passed")
+}
