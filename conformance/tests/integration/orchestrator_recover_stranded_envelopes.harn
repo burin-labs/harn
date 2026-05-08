@@ -1,26 +1,4 @@
-fn wait_for_listener_url(log_path) {
-  var attempts = 0
-  var url = nil
-  while attempts < 300 && !url {
-    if file_exists(log_path) {
-      let log = exec("cat", log_path).stdout
-      let matches = regex_captures("\\[harn\\] HTTP listener ready on (\\S+)", log)
-      if len(matches) > 0 {
-        url = matches[0].groups[0]
-      }
-    }
-    if !url {
-      sleep(50ms)
-      attempts = attempts + 1
-    }
-  }
-  return url
-}
-
-fn process_alive(pid) {
-  let probe = shell("kill -0 " + pid + " >/dev/null 2>&1")
-  return probe.success
-}
+import "../_common"
 
 fn wait_for_readyz(url, pid) {
   var attempts = 0
@@ -38,42 +16,6 @@ fn wait_for_readyz(url, pid) {
     attempts = attempts + 1
   }
   return false
-}
-
-fn wait_for_exit(pid) {
-  var attempts = 0
-  while attempts < 200 {
-    if !process_alive(pid) {
-      return true
-    }
-    sleep(50ms)
-    attempts = attempts + 1
-  }
-  return false
-}
-
-fn first_group(pattern, text) {
-  let matches = regex_captures(pattern, text)
-  if len(matches) == 0 {
-    return nil
-  }
-  return matches[0].groups[0]
-}
-
-fn resolve_harn_bin(repo_root) {
-  let env_target_dir = env("CARGO_TARGET_DIR")
-  if env_target_dir {
-    return path_join(env_target_dir, "debug/harn")
-  }
-  let cargo_config = path_join(repo_root, ".cargo/config.toml")
-  if file_exists(cargo_config) {
-    let config = exec("cat", cargo_config).stdout
-    let configured = first_group("target-dir = \\\"([^\\\"]+)\\\"", config)
-    if configured {
-      return path_join(configured, "debug/harn")
-    }
-  }
-  return path_join(repo_root, "target/debug/harn")
 }
 
 pipeline test(task) {

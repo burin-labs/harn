@@ -7,6 +7,7 @@ fn first_group(pattern, text) {
   return matches[0].groups[0]
 }
 
+/** Resolve the built Harn CLI for conformance fixtures that spawn subprocesses. */
 pub fn resolve_harn_bin(repo_root) {
   let env_target_dir = env("CARGO_TARGET_DIR")
   if env_target_dir {
@@ -21,4 +22,66 @@ pub fn resolve_harn_bin(repo_root) {
     }
   }
   return path_join(repo_root, "target/debug/harn")
+}
+
+/** Return whether a subprocess still exists according to the platform shell. */
+pub fn process_alive(pid) {
+  let probe = shell("kill -0 " + pid + " >/dev/null 2>&1")
+  return probe.success
+}
+
+/** Poll a subprocess log for a regex match and return the first capture group. */
+pub fn wait_for_log_match(log_path, pattern) {
+  var attempts = 0
+  while attempts < 300 {
+    if file_exists(log_path) {
+      let log = exec("cat", log_path).stdout
+      let matches = regex_captures(pattern, log)
+      if len(matches) > 0 {
+        return matches[0].groups[0]
+      }
+    }
+    sleep(50ms)
+    attempts = attempts + 1
+  }
+  return nil
+}
+
+/** Poll a subprocess log until it contains the expected text. */
+pub fn wait_for_log_contains(log_path, needle) {
+  var attempts = 0
+  while attempts < 300 {
+    if file_exists(log_path) {
+      let log = exec("cat", log_path).stdout
+      if contains(log, needle) {
+        return true
+      }
+    }
+    sleep(50ms)
+    attempts = attempts + 1
+  }
+  return false
+}
+
+/** Wait for the orchestrator HTTP listener readiness line and return its URL. */
+pub fn wait_for_listener_url(log_path) {
+  return wait_for_log_match(log_path, "\\[harn\\] HTTP listener ready on (\\S+)")
+}
+
+/** Wait for the A2A server readiness line and return its advertised URL. */
+pub fn wait_for_a2a_server_url(log_path) {
+  return wait_for_log_match(log_path, "Harn A2A server listening on (\\S+)")
+}
+
+/** Wait for a subprocess to exit after the test has requested shutdown. */
+pub fn wait_for_exit(pid) {
+  var attempts = 0
+  while attempts < 200 {
+    if !process_alive(pid) {
+      return true
+    }
+    sleep(50ms)
+    attempts = attempts + 1
+  }
+  return false
 }

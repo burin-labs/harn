@@ -1,37 +1,5 @@
 import "../_common"
 
-fn wait_for_listener_url(log_path) {
-  var attempts = 0
-  var url = nil
-  while attempts < 200 && !url {
-    if file_exists(log_path) {
-      let log = exec("cat", log_path).stdout
-      let matches = regex_captures("\\[harn\\] HTTP listener ready on (\\S+)", log)
-      if len(matches) > 0 {
-        url = matches[0].groups[0]
-      }
-    }
-    if !url {
-      sleep(50ms)
-      attempts = attempts + 1
-    }
-  }
-  return url
-}
-
-fn wait_for_exit(pid) {
-  var attempts = 0
-  while attempts < 100 {
-    let probe = shell("kill -0 " + pid + " >/dev/null 2>&1")
-    if !probe.success {
-      return true
-    }
-    sleep(50ms)
-    attempts = attempts + 1
-  }
-  return false
-}
-
 pipeline test(task) {
   let root = path_join(temp_dir(), "harn-orchestrator-auth-" + uuid())
   mkdir(root)

@@ -23,7 +23,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::rc::Rc;
 use std::sync::{Arc, Once};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, UNIX_EPOCH};
 use tempfile::TempDir;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
@@ -41,10 +41,11 @@ fn parses_retry_after_delta_seconds() {
 
 #[test]
 fn parses_retry_after_http_date() {
-    let header = httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(2));
-    let parsed = parse_retry_after_value(&header).expect("http-date should parse");
-    assert!(parsed <= Duration::from_secs(2));
-    assert!(parsed <= Duration::from_secs(60));
+    let now = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let header = httpdate::fmt_http_date(now + Duration::from_secs(2));
+    let parsed =
+        super::client::parse_retry_after_value_at(&header, now).expect("http-date should parse");
+    assert_eq!(parsed, Duration::from_secs(2));
 }
 
 #[test]

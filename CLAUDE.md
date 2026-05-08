@@ -106,7 +106,7 @@ at `.claude/skills/harn-scripting/SKILL.md`.
 - Do not add `std::thread::sleep`, `tokio::time::sleep`, `Instant::now()` polling loops,
   `SystemTime::now()`, or short `recv_timeout` calls to test files. These patterns are banned
   by `make lint-test-patterns`. Use `tokio::time::pause()`/`advance()`, `EventLog::subscribe()`,
-  or `OrchestratorHarness` instead. See `docs/dev/testing.md` for approved patterns and the
+  or `OrchestratorHarness` instead. See `docs/src/dev/testing.md` for approved patterns and the
   opt-out procedure.
 
 ## Generated Files And Sync Rules

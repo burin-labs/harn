@@ -763,6 +763,7 @@ mod tests {
     use super::*;
     use std::fs;
 
+    use crate::env_guard::ScopedEnvVar;
     use crate::tests::common::{cwd_lock::lock_cwd, env_lock::lock_env};
 
     fn write_skill(path: &Path, body: &str) {
@@ -770,12 +771,16 @@ mod tests {
         fs::write(path, body).unwrap();
     }
 
+    fn set_home(path: &Path) -> ScopedEnvVar {
+        ScopedEnvVar::set("HOME", path.to_str().unwrap())
+    }
+
     #[test]
     fn keygen_sign_and_verify_roundtrip() {
         let _cwd = lock_cwd();
         let _env = lock_env().blocking_lock();
         let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("HOME", tmp.path());
+        let _home = set_home(tmp.path());
 
         let skill = tmp.path().join("skill").join("SKILL.md");
         write_skill(&skill, "---\nname: deploy\n---\nship it\n");
@@ -804,7 +809,7 @@ mod tests {
         let _cwd = lock_cwd();
         let _env = lock_env().blocking_lock();
         let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("HOME", tmp.path());
+        let _home = set_home(tmp.path());
 
         let skill = tmp.path().join("skill").join("SKILL.md");
         write_skill(&skill, "---\nname: deploy\n---\nship it\n");
@@ -825,7 +830,7 @@ mod tests {
         let _cwd = lock_cwd();
         let _env = lock_env().blocking_lock();
         let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("HOME", tmp.path());
+        let _home = set_home(tmp.path());
 
         let skill = tmp.path().join("skill").join("SKILL.md");
         write_skill(&skill, "---\nname: deploy\n---\nship it\n");
@@ -851,7 +856,7 @@ mod tests {
         let _cwd = lock_cwd();
         let _env = lock_env().blocking_lock();
         let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("HOME", tmp.path());
+        let _home = set_home(tmp.path());
 
         let skill = tmp.path().join("skill").join("SKILL.md");
         write_skill(&skill, "---\nname: deploy\n---\nship it\n");
@@ -871,7 +876,7 @@ mod tests {
         let _cwd = lock_cwd();
         let _env = lock_env().blocking_lock();
         let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("HOME", tmp.path());
+        let _home = set_home(tmp.path());
 
         let skill = tmp.path().join("skill").join("SKILL.md");
         write_skill(&skill, "---\nname: deploy\n---\nship it\n");
@@ -909,7 +914,7 @@ mod tests {
         let _cwd = lock_cwd();
         let _env = lock_env().blocking_lock();
         let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("HOME", tmp.path());
+        let _home = set_home(tmp.path());
 
         let skill = tmp.path().join("skill").join("SKILL.md");
         write_skill(&skill, "---\nname: deploy\n---\nship it\n");
