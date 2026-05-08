@@ -1,0 +1,74 @@
+fn tools() {
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "read",
+    "Read a file",
+    {
+      handler: { args -> "read:" + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  registry = tool_define(
+    registry,
+    "poll",
+    "Poll a status endpoint",
+    {
+      handler: { args -> "status:" + args.key },
+      parameters: {key: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  return registry
+}
+
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "r1", name: "read", arguments: {path: "src/lib.rs"}}]})
+  llm_mock({tool_calls: [{id: "r2", name: "read", arguments: {path: "src/lib.rs"}}]})
+  llm_mock({tool_calls: [{id: "r3", name: "read", arguments: {path: "src/lib.rs"}}]})
+  llm_mock({text: "Done. ##DONE##"})
+  let stalled = agent_loop(
+    "Inspect the file",
+    nil,
+    {
+      provider: "mock",
+      tools: tools(),
+      tool_format: "native",
+      loop_until_done: true,
+      max_iterations: 4,
+      stall_diagnostics: true,
+    },
+  )
+  let warning_events = transcript_events_by_kind(stalled.transcript, "agent_loop_stall_warning")
+  println(stalled.status)
+  println(stalled.repeated_tool_calls)
+  println(stalled.suspected_loop)
+  println(len(stalled.stall_warnings))
+  println(len(warning_events))
+  println(warning_events[0].metadata.tool_name)
+  println(warning_events[0].metadata.repeat_count)
+  println(stalled.stall_warnings[0].arguments_digest == warning_events[0].metadata.arguments_digest)
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "p1", name: "poll", arguments: {key: "job-1"}}]})
+  llm_mock({tool_calls: [{id: "p2", name: "poll", arguments: {key: "job-1"}}]})
+  llm_mock({tool_calls: [{id: "p3", name: "poll", arguments: {key: "job-1"}}]})
+  llm_mock({text: "Done. ##DONE##"})
+  let polling = agent_loop(
+    "Wait for the job",
+    nil,
+    {
+      provider: "mock",
+      tools: tools(),
+      tool_format: "native",
+      loop_until_done: true,
+      max_iterations: 4,
+      stall_diagnostics: {threshold: 3, exempt_tools: ["poll"]},
+    },
+  )
+  println(polling.status)
+  println(polling.repeated_tool_calls)
+  println(polling.suspected_loop)
+  println(len(polling.stall_warnings))
+}

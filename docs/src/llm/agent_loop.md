@@ -78,6 +78,9 @@ top-level keys before `v0.8`).
 | `task_ledger` | dict | Final task-ledger state (deliverables, nudges, etc.) |
 | `trace` | dict | Structured span/event summary for observability |
 | `transcript` | dict | Transcript of the full conversation state |
+| `repeated_tool_calls` | int | Present when `stall_diagnostics` is enabled. Counts adjacent repeated tool calls with identical name and arguments after the first call in each streak |
+| `stall_warnings` | list | Present when `stall_diagnostics` is enabled. Diagnostic warning records emitted when a repeat streak reaches the configured threshold |
+| `suspected_loop` | bool | Present when `stall_diagnostics` is enabled. `true` when at least one stall warning fired |
 
 Nested `llm` fields:
 
@@ -147,9 +150,7 @@ Same as `llm_call`, plus additional options:
 | `native_tool_fallback` | string | `"allow"` | Native-tool-stage policy when the provider emits text-mode `<tool_call>` content instead of native tool calls. `"allow"` preserves the current recovery path, `"allow_once"` accepts the first fallback turn then rejects later repeats with corrective feedback, and `"reject"` fails closed on the first text fallback |
 | `stop_after_successful_tools` | `list<string>` | nil | Stop after a tool-calling turn whose successful results include one of these tool names. Useful for workflow-owned verify loops such as `["edit", "scaffold"]` |
 | `require_successful_tools` | `list<string\|list<string>>` | nil | Mark a cleanly completed loop `status = "failed"` unless every required tool succeeds at least once. A nested list is an OR group, e.g. `["run_command", ["read_command_output", "read_command_output_tail"]]`. Keeps action stages honest when attempted effects were rejected, errored, or skipped |
-| `loop_detect_warn` | int | `2` | Consecutive identical tool calls before appending a redirection hint |
-| `loop_detect_block` | int | `3` | Consecutive identical tool calls before replacing the result with a hard redirect |
-| `loop_detect_skip` | int | `4` | Consecutive identical tool calls before skipping execution entirely |
+| `stall_diagnostics` | bool/dict | nil | Detect adjacent repeated tool calls with the same name and identical arguments. `true` enables conservative defaults (`threshold: 3`, one feedback nudge, argument digests only). Dict options: `enabled`, `threshold`, `inject_feedback`, `max_feedback`, `exempt_tools`/`allow_repeated_tools`, and `include_arguments` |
 | `skills` | skill_registry or list | nil | Skill registry exposed to the match-and-activate lifecycle phase. See [Skills lifecycle](#skills-lifecycle) |
 | `skill_match` | dict | `{strategy: "metadata", top_n: 1, sticky: true}` | Match configuration — `strategy` (`"metadata"` \| `"host"` \| `"embedding"`), `top_n`, `sticky` |
 | `working_files` | list\|string | `[]` | Paths that feed `paths:` glob auto-trigger in the metadata matcher and ride along as a hint to host-delegated matchers |
@@ -376,12 +377,12 @@ let result = agent_loop(prompt, system, opts)
 
 Preset roles, defaults summarized:
 
-| Preset | `profile` | `tool_format` | `loop_until_done` | `max_nudges` | Default `iteration_budget` | `done_sentinel` / `done_judge` |
-|---|---|---|---|---:|---|---|
-| `audit` | `verifier` | `native` | true | 1 | adaptive `{initial: 4, max: 12, extend_by: 2}` | both `nil` (natural completion) |
-| `repair` | `tool_using` | `native` | true | 2 | adaptive `{initial: 4, max: 16, extend_by: 2}` | both `nil` |
-| `summary` | `completer` | unset | false | 0 | fixed `{initial: 1, max: 1}` | both `nil`, `tool_choice: "none"` |
-| `verify` | `verifier` | unset | false | 0 | adaptive `{initial: 1, max: 5, extend_by: 1}` | `done_judge: true` |
+| Preset | `profile` | `tool_format` | `loop_until_done` | `max_nudges` | Default `iteration_budget` | `stall_diagnostics` | `done_sentinel` / `done_judge` |
+|---|---|---|---|---:|---|---|---|
+| `audit` | `verifier` | `native` | true | 1 | adaptive `{initial: 4, max: 12, extend_by: 2}` | enabled, threshold 3 | both `nil` (natural completion) |
+| `repair` | `tool_using` | `native` | true | 2 | adaptive `{initial: 4, max: 16, extend_by: 2}` | enabled, threshold 3 | both `nil` |
+| `summary` | `completer` | unset | false | 0 | fixed `{initial: 1, max: 1}` | unset | both `nil`, `tool_choice: "none"` |
+| `verify` | `verifier` | unset | false | 0 | adaptive `{initial: 1, max: 5, extend_by: 1}` | unset | `done_judge: true` |
 
 Each preset also installs a provider-aware `thinking` choice when the caller
 hasn't already set one:

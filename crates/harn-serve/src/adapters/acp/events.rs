@@ -786,6 +786,12 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::AgentLoopStallWarning {
+                session_id,
+                warning,
+            } => {
+                self.emit_agent_event_ext("agent_loop_stall_warning", session_id, warning.clone());
+            }
             AgentEvent::ToolCallAudit {
                 session_id,
                 tool_call_id,
