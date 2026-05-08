@@ -38,6 +38,12 @@ impl crate::vm::Vm {
             ))),
             "merge" => {
                 if let Some(VmValue::Dict(other)) = args.first() {
+                    if map.is_empty() {
+                        return Ok(VmValue::Dict(Rc::clone(other)));
+                    }
+                    if other.is_empty() {
+                        return Ok(VmValue::Dict(Rc::clone(map)));
+                    }
                     let mut result = (**map).clone();
                     result.extend(other.iter().map(|(k, v)| (k.clone(), v.clone())));
                     Ok(VmValue::Dict(Rc::new(result)))

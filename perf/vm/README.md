@@ -38,6 +38,15 @@ It measures the internal non-module closure call environment path at 0, 5, 25,
 and 100 captured names. Criterion reports time per call; the benchmark also
 prints allocation operations per call for each capture count.
 
+The fixture suite also has an allocation-counting Criterion harness:
+
+```bash
+cargo bench -p harn-vm-perf --bench bench_vm_fixtures
+```
+
+It runs the checked-in `.harn` fixtures in-process and prints allocation
+operations and allocated bytes per fixture run.
+
 This suite is intentionally not part of `make all`; local CPU load, thermal
 state, and target cache state are too noisy for a default correctness gate. For
 before/after VM optimization work, run the suite several times on the same

@@ -44,7 +44,7 @@ impl Vm {
         // without leaking caller-local data into the callee.
         for scope in &caller_env.scopes {
             for (name, (val, mutable)) in &scope.vars {
-                if matches!(val, VmValue::Closure(_)) && call_env.get(name).is_none() {
+                if matches!(val, VmValue::Closure(_)) && !call_env.contains(name) {
                     let _ = call_env.define(name, val.clone(), *mutable);
                 }
             }

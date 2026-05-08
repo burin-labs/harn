@@ -534,8 +534,17 @@ match x { "a" -> { log("first") } "b" -> { log("second") } "c" -> { log("third")
 
 #[test]
 fn test_subscript() {
-    let out = run_output("pipeline t(task) { let arr = [10, 20, 30]\nlog(arr[1]) }");
-    assert_eq!(out, "[harn] 20");
+    let out = run_output(
+        r#"pipeline t(task) {
+let arr = [10, 20, 30]
+let dict = {name: "harn"}
+log(arr[1])
+log(dict["name"])
+log("abc"[1])
+log("éx"[-1])
+}"#,
+    );
+    assert_eq!(out, "[harn] 20\n[harn] harn\n[harn] b\n[harn] x");
 }
 
 #[test]
@@ -615,6 +624,50 @@ log(total)
                 target: PropertyCacheTarget::PairSecond,
                 ..
             }
+        )),
+        "{entries:?}"
+    );
+}
+
+#[test]
+fn test_inline_cache_warms_dict_and_struct_property_sites() {
+    let (chunk, out, _) = run_harn_with_chunk(
+        r#"pipeline t(task) {
+struct Point {
+  x: int
+  y: int
+}
+let record = {hot: 7}
+let point = Point {x: 2, y: 3}
+var i = 0
+var total = 0
+while i < 3 {
+  total = total + record.hot + point.y
+  i = i + 1
+}
+log(total)
+}"#,
+    );
+
+    assert_eq!(out.trim_end(), "[harn] 30");
+    let entries = chunk.inline_cache_entries();
+    assert!(
+        entries.iter().any(|entry| matches!(
+            entry,
+            InlineCacheEntry::Property {
+                target: PropertyCacheTarget::DictField(name),
+                ..
+            } if name.as_ref() == "hot"
+        )),
+        "{entries:?}"
+    );
+    assert!(
+        entries.iter().any(|entry| matches!(
+            entry,
+            InlineCacheEntry::Property {
+                target: PropertyCacheTarget::StructField { field_name, index },
+                ..
+            } if field_name.as_ref() == "y" && *index == 1
         )),
         "{entries:?}"
     );

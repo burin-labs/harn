@@ -283,36 +283,28 @@ impl Vm {
     }
 
     pub(crate) fn sync_current_frame_locals_to_env(&mut self) {
-        let Some(frame) = self.frames.last_mut() else {
+        let frames = &mut self.frames;
+        let env = &mut self.env;
+        let Some(frame) = frames.last_mut() else {
             return;
         };
         let local_scope_base = frame.local_scope_base;
         let local_scope_depth = frame.local_scope_depth;
-        let entries = frame
+        for (slot, info) in frame
             .local_slots
             .iter_mut()
             .zip(frame.chunk.local_slots.iter())
-            .filter_map(|(slot, info)| {
-                if slot.initialized && !slot.synced && info.scope_depth <= local_scope_depth {
-                    slot.synced = true;
-                    Some((
-                        local_scope_base + info.scope_depth,
-                        info.name.clone(),
-                        slot.value.clone(),
-                        info.mutable,
-                    ))
-                } else {
-                    None
+        {
+            if slot.initialized && !slot.synced && info.scope_depth <= local_scope_depth {
+                slot.synced = true;
+                let scope_idx = local_scope_base + info.scope_depth;
+                while env.scopes.len() <= scope_idx {
+                    env.push_scope();
                 }
-            })
-            .collect::<Vec<_>>();
-        for (scope_idx, name, value, mutable) in entries {
-            while self.env.scopes.len() <= scope_idx {
-                self.env.push_scope();
+                env.scopes[scope_idx]
+                    .vars
+                    .insert(info.name.clone(), (slot.value.clone(), info.mutable));
             }
-            self.env.scopes[scope_idx]
-                .vars
-                .insert(name, (value, mutable));
         }
     }
 
@@ -333,7 +325,7 @@ impl Vm {
             .zip(frame.chunk.local_slots.iter())
             .filter(|(slot, info)| slot.initialized && info.scope_depth <= frame.local_scope_depth)
         {
-            if matches!(slot.value, VmValue::Closure(_)) && call_env.get(&info.name).is_none() {
+            if matches!(slot.value, VmValue::Closure(_)) && !call_env.contains(&info.name) {
                 let _ = call_env.define(&info.name, slot.value.clone(), info.mutable);
             }
         }
@@ -610,6 +602,13 @@ impl Vm {
     pub(crate) fn const_string(c: &Constant) -> Result<String, VmError> {
         match c {
             Constant::String(s) => Ok(s.clone()),
+            _ => Err(VmError::TypeError("expected string constant".into())),
+        }
+    }
+
+    pub(crate) fn const_str(c: &Constant) -> Result<&str, VmError> {
+        match c {
+            Constant::String(s) => Ok(s.as_str()),
             _ => Err(VmError::TypeError("expected string constant".into())),
         }
     }

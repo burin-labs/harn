@@ -126,6 +126,7 @@ pub(crate) async fn emit_agent_event(event: &AgentEvent) {
         return;
     }
     let payload = serde_json::to_value(event).unwrap_or(serde_json::Value::Null);
+    let arg = crate::stdlib::json_to_vm_value(&payload);
     for closure in subscribers {
         let VmValue::Closure(closure) = closure else {
             continue;
@@ -133,10 +134,9 @@ pub(crate) async fn emit_agent_event(event: &AgentEvent) {
         let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
             continue;
         };
-        let arg = crate::stdlib::json_to_vm_value(&payload);
         // Log but don't propagate: one broken subscriber must not tear
         // down the agent loop.
-        if let Err(err) = vm.call_closure_pub(&closure, &[arg]).await {
+        if let Err(err) = vm.call_closure_pub(&closure, &[arg.clone()]).await {
             crate::events::log_warn(
                 "agent.subscriber",
                 &format!(

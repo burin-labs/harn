@@ -1,0 +1,56 @@
+fn bench_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read",
+    "Read a synthetic path",
+    {
+      handler: { args -> "read " + args.path + ":" + to_string(args.line) },
+      parameters: {path: {type: "string"}, line: {type: "integer"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "summarize",
+    "Summarize a synthetic blob",
+    {
+      handler: { args -> args.title + ":" + to_string(len(args.body)) },
+      parameters: {title: {type: "string"}, body: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+pipeline default(task) {
+  let tools = bench_tools()
+  let calls = [
+    {id: "read-001", name: "read", arguments: {path: "src/a.harn", line: 1}},
+    {id: "read-002", name: "read", arguments: {path: "src/b.harn", line: 21}},
+    {id: "read-003", name: "read", arguments: {path: "src/c.harn", line: 55}},
+    {id: "summary-001", name: "summarize", arguments: {title: "alpha", body: "abcdefghij"}},
+    {id: "summary-002", name: "summarize", arguments: {title: "beta", body: "klmnopqrst"}},
+    {id: "read-004", name: "read", arguments: {path: "src/d.harn", line: 89}},
+  ]
+  var iteration = 0
+  var total = 0
+  while iteration < 500 {
+    let results = agent_dispatch_tool_batch(
+      calls,
+      tools,
+      {session_id: "bench-agent-tool-dispatch", tool_retries: 0, tool_backoff_ms: 1},
+    )
+    for result in results {
+      if result.ok {
+        total = total + len(result.rendered_result)
+      }
+    }
+    iteration = iteration + 1
+  }
+  if total < 0 {
+    log("unreachable")
+  }
+}

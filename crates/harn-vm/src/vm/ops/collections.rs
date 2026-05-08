@@ -5,6 +5,53 @@ use crate::chunk::{InlineCacheEntry, PropertyCacheTarget};
 use crate::value::{VmError, VmValue};
 
 impl super::super::Vm {
+    fn char_to_value(ch: char) -> VmValue {
+        let mut buffer = [0; 4];
+        VmValue::String(Rc::from(ch.encode_utf8(&mut buffer)))
+    }
+
+    fn index_from_end(index: i64) -> Option<usize> {
+        index
+            .checked_neg()?
+            .checked_sub(1)
+            .and_then(|offset| usize::try_from(offset).ok())
+    }
+
+    fn string_index(s: &str, index: i64) -> VmValue {
+        if s.is_ascii() {
+            let pos = if index < 0 {
+                Self::index_from_end(index)
+                    .and_then(|offset| offset.checked_add(1))
+                    .and_then(|distance| s.len().checked_sub(distance))
+            } else {
+                usize::try_from(index).ok()
+            };
+            return pos
+                .and_then(|pos| s.as_bytes().get(pos))
+                .map(|byte| Self::char_to_value(*byte as char))
+                .unwrap_or(VmValue::Nil);
+        }
+
+        if index < 0 {
+            let Some(index) = Self::index_from_end(index) else {
+                return VmValue::Nil;
+            };
+            return s
+                .chars()
+                .rev()
+                .nth(index)
+                .map(Self::char_to_value)
+                .unwrap_or(VmValue::Nil);
+        }
+        s.chars()
+            .nth(match usize::try_from(index) {
+                Ok(index) => index,
+                Err(_) => return VmValue::Nil,
+            })
+            .map(Self::char_to_value)
+            .unwrap_or(VmValue::Nil)
+    }
+
     fn try_cached_property(
         cache: &InlineCacheEntry,
         name_idx: u16,
@@ -22,6 +69,29 @@ impl super::super::Vm {
         }
 
         match (target, obj) {
+            (PropertyCacheTarget::DictField(name), VmValue::Dict(map)) => {
+                Some(map.get(name.as_ref()).cloned().unwrap_or(VmValue::Nil))
+            }
+            (
+                PropertyCacheTarget::StructField { field_name, index },
+                VmValue::StructInstance { layout, fields },
+            ) => {
+                if layout
+                    .field_names()
+                    .get(*index)
+                    .is_some_and(|candidate| candidate.as_str() == field_name.as_ref())
+                {
+                    Some(
+                        fields
+                            .get(*index)
+                            .and_then(Option::as_ref)
+                            .cloned()
+                            .unwrap_or(VmValue::Nil),
+                    )
+                } else {
+                    None
+                }
+            }
             (PropertyCacheTarget::ListCount, VmValue::List(items)) => {
                 Some(VmValue::Int(items.len() as i64))
             }
@@ -43,7 +113,7 @@ impl super::super::Vm {
             (PropertyCacheTarget::PairFirst, VmValue::Pair(p)) => Some(p.0.clone()),
             (PropertyCacheTarget::PairSecond, VmValue::Pair(p)) => Some(p.1.clone()),
             (PropertyCacheTarget::EnumVariant, VmValue::EnumVariant { variant, .. }) => {
-                Some(VmValue::String(Rc::from(variant.as_ref())))
+                Some(VmValue::String(Rc::clone(variant)))
             }
             (PropertyCacheTarget::EnumFields, VmValue::EnumVariant { fields, .. }) => {
                 Some(VmValue::List(fields.clone()))
@@ -54,6 +124,15 @@ impl super::super::Vm {
 
     fn property_cache_target(obj: &VmValue, name: &str) -> Option<PropertyCacheTarget> {
         match obj {
+            VmValue::Dict(_) => Some(PropertyCacheTarget::DictField(Rc::from(name))),
+            VmValue::StructInstance { layout, .. } => {
+                layout
+                    .field_index(name)
+                    .map(|index| PropertyCacheTarget::StructField {
+                        field_name: Rc::from(name),
+                        index,
+                    })
+            }
             VmValue::List(_) => match name {
                 "count" => Some(PropertyCacheTarget::ListCount),
                 "empty" => Some(PropertyCacheTarget::ListEmpty),
@@ -99,7 +178,7 @@ impl super::super::Vm {
             VmValue::EnumVariant {
                 variant, fields, ..
             } => match name {
-                "variant" => VmValue::String(Rc::from(variant.as_ref())),
+                "variant" => VmValue::String(Rc::clone(variant)),
                 "fields" => VmValue::List(fields.clone()),
                 _ => VmValue::Nil,
             },
@@ -150,10 +229,10 @@ impl super::super::Vm {
             .stack
             .split_off(self.stack.len().saturating_sub(count * 2));
         let mut map = BTreeMap::new();
-        for pair in pairs.chunks(2) {
-            if pair.len() == 2 {
-                let key = pair[0].display();
-                map.insert(key, pair[1].clone());
+        let mut pairs = pairs.into_iter();
+        while let Some(key) = pairs.next() {
+            if let Some(value) = pairs.next() {
+                map.insert(key.display(), value);
             }
         }
         self.stack.push(VmValue::Dict(Rc::new(map)));
@@ -179,6 +258,9 @@ impl super::super::Vm {
                     items.get(*i as usize).cloned().unwrap_or(VmValue::Nil)
                 }
             }
+            (VmValue::Dict(map), VmValue::String(key)) => {
+                map.get(key.as_ref()).cloned().unwrap_or(VmValue::Nil)
+            }
             (VmValue::Dict(map), _) => map.get(&idx.display()).cloned().unwrap_or(VmValue::Nil),
             (VmValue::Range(r), VmValue::Int(i)) => {
                 let len = r.len();
@@ -192,25 +274,7 @@ impl super::super::Vm {
                     }
                 }
             }
-            (VmValue::String(s), VmValue::Int(i)) => {
-                if *i < 0 {
-                    let count = s.chars().count() as i64;
-                    let pos = count + *i;
-                    if pos < 0 {
-                        VmValue::Nil
-                    } else {
-                        s.chars()
-                            .nth(pos as usize)
-                            .map(|c| VmValue::String(Rc::from(c.to_string())))
-                            .unwrap_or(VmValue::Nil)
-                    }
-                } else {
-                    s.chars()
-                        .nth(*i as usize)
-                        .map(|c| VmValue::String(Rc::from(c.to_string())))
-                        .unwrap_or(VmValue::Nil)
-                }
-            }
+            (VmValue::String(s), VmValue::Int(i)) => Self::string_index(s, *i),
             _ => {
                 return Err(VmError::TypeError(format!(
                     "cannot index into {} with {}",
@@ -352,15 +416,16 @@ impl super::super::Vm {
         } else if let Some(result) = Self::try_cached_property(&cache_entry, name_idx, &obj) {
             self.stack.push(result);
         } else {
-            let name = {
+            let (result, target) = {
                 let frame = self.frames.last().unwrap();
-                Self::const_string(&frame.chunk.constants[name_idx as usize])?
+                let name = Self::const_str(&frame.chunk.constants[name_idx as usize])?;
+                (
+                    Self::resolve_property(&obj, name, optional)?,
+                    Self::property_cache_target(&obj, name),
+                )
             };
-            let result = Self::resolve_property(&obj, &name, optional)?;
 
-            if let (Some(slot), Some(target)) =
-                (cache_slot, Self::property_cache_target(&obj, &name))
-            {
+            if let (Some(slot), Some(target)) = (cache_slot, target) {
                 let frame = self.frames.last().unwrap();
                 frame
                     .chunk
