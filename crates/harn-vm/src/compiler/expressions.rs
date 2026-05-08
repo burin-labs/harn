@@ -97,11 +97,13 @@ impl Compiler {
         let right_type = self.infer_expr_type(right);
         self.compile_node(left)?;
         self.compile_node(right)?;
-        if let Some(typed_op) =
-            self.specialized_binary_op(op, left_type.as_ref(), right_type.as_ref())
-        {
-            self.chunk.emit(typed_op, self.line);
-            return Ok(());
+        if self.options.optimizations_enabled() {
+            if let Some(typed_op) =
+                self.specialized_binary_op(op, left_type.as_ref(), right_type.as_ref())
+            {
+                self.chunk.emit(typed_op, self.line);
+                return Ok(());
+            }
         }
         self.emit_generic_binary_op(op)?;
         Ok(())

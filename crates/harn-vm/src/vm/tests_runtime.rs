@@ -3,7 +3,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
 
-use crate::compiler::Compiler;
+use crate::compiler::{Compiler, CompilerOptions};
 use crate::stdlib::register_vm_stdlib;
 use crate::{Chunk, InlineCacheEntry, MethodCacheTarget, PropertyCacheTarget, VmError, VmValue};
 use harn_lexer::Lexer;
@@ -12,6 +12,10 @@ use harn_parser::Parser;
 use super::*;
 
 fn run_harn(source: &str) -> (String, VmValue) {
+    run_harn_with_options(source, CompilerOptions::optimized())
+}
+
+fn run_harn_with_options(source: &str, options: CompilerOptions) -> (String, VmValue) {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -24,12 +28,44 @@ fn run_harn(source: &str) -> (String, VmValue) {
                 let tokens = lexer.tokenize().unwrap();
                 let mut parser = Parser::new(tokens);
                 let program = parser.parse().unwrap();
-                let chunk = Compiler::new().compile(&program).unwrap();
+                let chunk = Compiler::with_options(options).compile(&program).unwrap();
 
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
                 let result = vm.execute(&chunk).await.unwrap();
                 (vm.output().to_string(), result)
+            })
+            .await
+    })
+}
+
+fn run_harn_result_display_with_options(
+    source: &str,
+    options: CompilerOptions,
+) -> Result<(String, String), String> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let mut lexer = Lexer::new(source);
+                let tokens = lexer.tokenize().map_err(|error| error.to_string())?;
+                let mut parser = Parser::new(tokens);
+                let program = parser.parse().map_err(|error| error.to_string())?;
+                let chunk = Compiler::with_options(options)
+                    .compile(&program)
+                    .map_err(|error| error.to_string())?;
+
+                let mut vm = Vm::new();
+                register_vm_stdlib(&mut vm);
+                let result = vm
+                    .execute(&chunk)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                Ok((vm.output().to_string(), result.display()))
             })
             .await
     })
@@ -61,6 +97,48 @@ fn run_harn_with_chunk(source: &str) -> (Chunk, String, VmValue) {
 
 fn run_output(source: &str) -> String {
     run_harn(source).0.trim_end().to_string()
+}
+
+#[test]
+fn optimizer_differential_success_programs_match() {
+    let programs = [
+        r#"pipeline test(task) {
+  println(2 + 3 * 4)
+  println("ha" * 2)
+  println(([1] + [2, 3])[2])
+  println(({a: 1} + {b: 2}).b)
+  println((true && false) || !false)
+}"#,
+        r#"pipeline test(task) {
+  fn add(a: int, b: int = 4) {
+    return a + b
+  }
+  let base = 3
+  println(add(base))
+  println(add(1 + 1, 2 + 2))
+}"#,
+    ];
+
+    for source in programs {
+        let optimized =
+            run_harn_result_display_with_options(source, CompilerOptions::optimized()).unwrap();
+        let unoptimized =
+            run_harn_result_display_with_options(source, CompilerOptions::without_optimizations())
+                .unwrap();
+        assert_eq!(optimized, unoptimized, "{source}");
+    }
+}
+
+#[test]
+fn optimizer_differential_errors_match() {
+    let source = "pipeline test(task) { println(1 / 0) }";
+    let optimized =
+        run_harn_result_display_with_options(source, CompilerOptions::optimized()).unwrap_err();
+    let unoptimized =
+        run_harn_result_display_with_options(source, CompilerOptions::without_optimizations())
+            .unwrap_err();
+
+    assert_eq!(optimized, unoptimized);
 }
 
 fn run_harn_at(path: &Path, source: &str) -> Result<(String, VmValue), VmError> {
@@ -678,7 +756,9 @@ fn test_disassembly() {
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);
     let program = parser.parse().unwrap();
-    let chunk = Compiler::new().compile(&program).unwrap();
+    let chunk = Compiler::with_options(CompilerOptions::without_optimizations())
+        .compile(&program)
+        .unwrap();
     let disasm = chunk.disassemble("test");
     assert!(disasm.contains("CONSTANT"));
     assert!(disasm.contains("ADD"));

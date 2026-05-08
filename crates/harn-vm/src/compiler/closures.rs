@@ -20,7 +20,7 @@ impl Compiler {
         body: &[SNode],
         is_stream: bool,
     ) -> Result<(), CompileError> {
-        let mut fn_compiler = Compiler::for_nested_body();
+        let mut fn_compiler = self.nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
@@ -66,7 +66,7 @@ impl Compiler {
         body: &[SNode],
     ) -> Result<(), CompileError> {
         // Compile the body as a closure, then call `tool_define(registry, name, description, config)`.
-        let mut fn_compiler = Compiler::for_nested_body();
+        let mut fn_compiler = self.nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
@@ -344,7 +344,7 @@ impl Compiler {
         params: &[TypedParam],
         body: &[SNode],
     ) -> Result<(), CompileError> {
-        let mut fn_compiler = Compiler::for_nested_body();
+        let mut fn_compiler = self.nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();

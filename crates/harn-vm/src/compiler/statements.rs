@@ -21,8 +21,13 @@ impl Compiler {
                     self.infer_binary_result_type(op, left_type.as_ref(), right_type.as_ref());
                 self.emit_get_binding(name);
                 self.compile_node(value)?;
-                if let Some(typed_op) =
-                    self.specialized_binary_op(op, left_type.as_ref(), right_type.as_ref())
+                if let Some(typed_op) = self
+                    .options
+                    .optimizations_enabled()
+                    .then(|| {
+                        self.specialized_binary_op(op, left_type.as_ref(), right_type.as_ref())
+                    })
+                    .flatten()
                 {
                     self.chunk.emit(typed_op, self.line);
                 } else {

@@ -4,16 +4,33 @@ use harn_lexer::Lexer;
 use harn_parser::Parser;
 
 fn compile_source(source: &str) -> Chunk {
+    compile_source_with_options(source, CompilerOptions::optimized())
+}
+
+fn compile_source_with_options(source: &str, options: CompilerOptions) -> Chunk {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);
     let program = parser.parse().unwrap();
-    Compiler::new().compile(&program).unwrap()
+    Compiler::with_options(options).compile(&program).unwrap()
+}
+
+fn disasm_opcodes(disasm: &str) -> Vec<&str> {
+    disasm
+        .lines()
+        .filter_map(|line| {
+            line.split_once("] ")
+                .and_then(|(_, rest)| rest.split_whitespace().next())
+        })
+        .collect()
 }
 
 #[test]
 fn test_compile_arithmetic() {
-    let chunk = compile_source("pipeline test(task) { let x = 2 + 3 }");
+    let chunk = compile_source_with_options(
+        "pipeline test(task) { let x = 2 + 3 }",
+        CompilerOptions::without_optimizations(),
+    );
     assert!(!chunk.code.is_empty());
     assert!(chunk.constants.contains(&Constant::Int(2)));
     assert!(chunk.constants.contains(&Constant::Int(3)));
@@ -57,8 +74,12 @@ fn test_compile_typed_float_ops() {
 fn test_compile_typed_equality_ops() {
     let chunk = compile_source(
         r#"pipeline test(task) {
-  log(true == false)
-  log("a" != "b")
+  let a = true
+  let b = false
+  let left = "a"
+  let right = "b"
+  log(a == b)
+  log(left != right)
 }"#,
     );
     let disasm = chunk.disassemble("test");
@@ -70,15 +91,87 @@ fn test_compile_typed_equality_ops() {
 fn test_compile_generic_ops_for_overloaded_or_mixed_cases() {
     let chunk = compile_source(
         r#"pipeline test(task) {
-  log("a" + "b")
-  log(1 + 2.0)
-  log([1] + [2])
+  let left = "a"
+  let right = "b"
+  let one = 1
+  let two = 2.0
+  let xs = [1]
+  let ys = [2]
+  log(left + right)
+  log(one + two)
+  log(xs + ys)
 }"#,
     );
     let disasm = chunk.disassemble("test");
     assert!(disasm.contains("ADD"));
     assert!(!disasm.contains("ADD_INT"));
     assert!(!disasm.contains("ADD_FLOAT"));
+}
+
+#[test]
+fn test_optimizer_folds_scalar_constants() {
+    let chunk = compile_source("pipeline test(task) { log(2 + 3 * 4) }");
+    let disasm = chunk.disassemble("test");
+    let opcodes = disasm_opcodes(&disasm);
+
+    assert!(chunk.constants.contains(&Constant::Int(14)));
+    assert!(!opcodes.contains(&"ADD_INT"));
+    assert!(!opcodes.contains(&"MUL_INT"));
+    assert!(!opcodes.contains(&"ADD"));
+    assert!(!opcodes.contains(&"MUL"));
+}
+
+#[test]
+fn test_optimizer_escape_hatch_preserves_unoptimized_bytecode() {
+    let chunk = compile_source_with_options(
+        "pipeline test(task) { log(2 + 3 * 4) }",
+        CompilerOptions::without_optimizations(),
+    );
+    let disasm = chunk.disassemble("test");
+    let opcodes = disasm_opcodes(&disasm);
+
+    assert!(chunk.constants.contains(&Constant::Int(2)));
+    assert!(chunk.constants.contains(&Constant::Int(3)));
+    assert!(chunk.constants.contains(&Constant::Int(4)));
+    assert!(opcodes.contains(&"MUL"));
+    assert!(opcodes.contains(&"ADD"));
+}
+
+#[test]
+fn test_optimizer_folds_literal_collections_and_strings() {
+    let chunk = compile_source(
+        r#"pipeline test(task) {
+  log("ha" * 2)
+  log([1] + [2, 3])
+  log({a: 1} + {b: 2})
+}"#,
+    );
+    let disasm = chunk.disassemble("test");
+    let opcodes = disasm_opcodes(&disasm);
+
+    assert!(chunk
+        .constants
+        .contains(&Constant::String("haha".to_string())));
+    assert!(!opcodes.contains(&"ADD"));
+    assert!(!opcodes.contains(&"MUL"));
+}
+
+#[test]
+fn test_optimizer_keeps_runtime_erroring_arithmetic_unfolded() {
+    let chunk = compile_source("pipeline test(task) { log(1 / 0) }");
+    let disasm = chunk.disassemble("test");
+    let opcodes = disasm_opcodes(&disasm);
+
+    assert!(opcodes.contains(&"DIV_INT"));
+}
+
+#[test]
+fn test_optimizer_keeps_large_allocations_unfolded() {
+    let chunk = compile_source(r#"pipeline test(task) { log("x" * 1000000) }"#);
+    let disasm = chunk.disassemble("test");
+    let opcodes = disasm_opcodes(&disasm);
+
+    assert!(opcodes.contains(&"MUL"));
 }
 
 #[test]
@@ -167,7 +260,10 @@ fn test_compile_dict() {
 
 #[test]
 fn test_disassemble() {
-    let chunk = compile_source("pipeline test(task) { log(2 + 3) }");
+    let chunk = compile_source_with_options(
+        "pipeline test(task) { log(2 + 3) }",
+        CompilerOptions::without_optimizations(),
+    );
     let disasm = chunk.disassemble("test");
     assert!(disasm.contains("CONSTANT"));
     assert!(disasm.contains("ADD"));

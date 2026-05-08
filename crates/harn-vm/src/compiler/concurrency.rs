@@ -51,7 +51,7 @@ impl Compiler {
             }
         };
         self.compile_node(expr)?;
-        let mut fn_compiler = Compiler::for_nested_body();
+        let mut fn_compiler = self.nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
@@ -89,7 +89,7 @@ impl Compiler {
     }
 
     pub(super) fn compile_spawn_expr(&mut self, body: &[SNode]) -> Result<(), CompileError> {
-        let mut fn_compiler = Compiler::for_nested_body();
+        let mut fn_compiler = self.nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();

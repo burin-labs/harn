@@ -17,6 +17,12 @@ impl ScopedEnvVar {
             Some(Self::set(key, value))
         }
     }
+
+    pub fn unset(key: &'static str) -> Self {
+        let previous = std::env::var(key).ok();
+        std::env::remove_var(key);
+        Self { key, previous }
+    }
 }
 
 impl Drop for ScopedEnvVar {

@@ -8,11 +8,16 @@ use crate::value::VmValue;
 
 use super::error::CompileError;
 use super::yield_scan::body_contains_yield;
-use super::{peel_node, Compiler, FinallyEntry};
+use super::{peel_node, Compiler, CompilerOptions, FinallyEntry};
 
 impl Compiler {
     pub fn new() -> Self {
+        Self::with_options(CompilerOptions::from_env())
+    }
+
+    pub fn with_options(options: CompilerOptions) -> Self {
         Self {
+            options,
             chunk: Chunk::new(),
             line: 1,
             column: 1,
@@ -34,10 +39,14 @@ impl Compiler {
     /// Compiler instance for a nested function-like body (fn, closure,
     /// tool, parallel arm, etc.). Differs from `new()` only in that
     /// `module_level` starts false — `try*` is allowed inside.
-    pub(super) fn for_nested_body() -> Self {
-        let mut c = Self::new();
+    pub(super) fn for_nested_body(options: CompilerOptions) -> Self {
+        let mut c = Self::with_options(options);
         c.module_level = false;
         c
+    }
+
+    pub(super) fn nested_body(&self) -> Self {
+        Self::for_nested_body(self.options)
     }
 
     pub(super) fn nominal_type_names(&self) -> Vec<String> {
@@ -1077,7 +1086,7 @@ impl Compiler {
         body: &[SNode],
         source_file: Option<String>,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut fn_compiler = Compiler::for_nested_body();
+        let mut fn_compiler = self.nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
