@@ -267,6 +267,7 @@ fn replay_fixture_round_trip_passes() {
         trace_spans: vec![],
         tool_recordings: vec![],
         hitl_questions: vec![],
+        persona_runtime: vec![],
         metadata: BTreeMap::new(),
         persisted_path: None,
     };

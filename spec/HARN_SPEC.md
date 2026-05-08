@@ -4617,7 +4617,8 @@ through the same canonical validator. Persona `triggers` install manifest
 trigger bindings whose handler kind is `persona`; explicit `[[triggers]]`
 entries may also use `handler = "persona://<name>"`.
 `harn persona status <name> --json` exposes stable runtime state including
-lifecycle state, active lease, last run, next scheduled run, budget status, and
+lifecycle state, current assignment, active lease, last run, next scheduled run,
+queued work, typed handoff inbox summaries, budget status, value receipts, and
 last error. `pause` queues later events, `resume` drains queued events under
 leases, and `disable` records later events as dead-lettered.
 

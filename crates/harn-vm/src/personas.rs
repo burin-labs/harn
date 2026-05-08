@@ -96,16 +96,72 @@ pub struct PersonaBudgetStatus {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PersonaStatus {
     pub name: String,
+    #[serde(default)]
+    pub template_ref: Option<String>,
     pub state: PersonaLifecycleState,
     pub entry_workflow: String,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub current_assignment: Option<PersonaAssignmentStatus>,
     pub last_run: Option<String>,
     pub next_scheduled_run: Option<String>,
     pub active_lease: Option<PersonaLease>,
     pub budget: PersonaBudgetStatus,
     pub last_error: Option<String>,
     pub queued_events: usize,
+    #[serde(default)]
+    pub queued_work: Vec<PersonaQueuedWork>,
+    #[serde(default)]
+    pub handoff_inbox: Vec<PersonaHandoffInboxItem>,
+    #[serde(default)]
+    pub value_receipts: Vec<PersonaValueReceipt>,
     pub disabled_events: usize,
     pub paused_event_policy: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PersonaAssignmentStatus {
+    pub work_key: String,
+    pub lease_id: String,
+    pub holder: String,
+    pub acquired_at: String,
+    pub expires_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PersonaQueuedWork {
+    pub work_key: String,
+    pub provider: String,
+    pub kind: String,
+    pub queued_at: String,
+    pub reason: String,
+    pub source_event_id: Option<String>,
+    #[serde(default)]
+    pub metadata: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PersonaHandoffInboxItem {
+    pub work_key: String,
+    pub handoff_id: Option<String>,
+    pub handoff_kind: Option<String>,
+    pub source_persona: Option<String>,
+    pub task: Option<String>,
+    pub queued_at: String,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PersonaValueReceipt {
+    pub kind: PersonaValueEventKind,
+    pub run_id: Option<Uuid>,
+    pub occurred_at: String,
+    pub paid_cost_usd: f64,
+    pub avoided_cost_usd: f64,
+    pub deterministic_steps: i64,
+    pub llm_steps: i64,
+    pub metadata: serde_json::Value,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -244,6 +300,8 @@ pub async fn persona_status(
     let mut budget_receipt = None;
     let mut budget_exhaustion_reason = None;
     let mut spent = Vec::<(i64, f64, u64)>::new();
+    let mut queued_work = BTreeMap::<String, PersonaQueuedWork>::new();
+    let mut value_receipts = Vec::<PersonaValueReceipt>::new();
 
     for (_, event) in events {
         match event.kind.as_str() {
@@ -312,6 +370,9 @@ pub async fn persona_status(
                 {
                     queued.insert(work_key.to_string());
                 }
+                if let Some(item) = queued_work_from_event(&event)? {
+                    queued_work.insert(item.work_key.clone(), item);
+                }
             }
             "persona.trigger.dead_lettered" => disabled_events += 1,
             "persona.budget.recorded" => {
@@ -349,6 +410,11 @@ pub async fn persona_status(
                     .and_then(serde_json::Value::as_str)
                     .map(ToString::to_string);
             }
+            kind if kind.starts_with("persona.value.") => {
+                if let Some(receipt) = value_receipt_from_event(&event)? {
+                    value_receipts.push(receipt);
+                }
+            }
             _ => {}
         }
     }
@@ -366,6 +432,12 @@ pub async fn persona_status(
     }
 
     queued.retain(|work_key| !completed.contains(work_key));
+    queued_work.retain(|work_key, _| !completed.contains(work_key));
+    let queued_work = queued_work.into_values().collect::<Vec<_>>();
+    let handoff_inbox = queued_work
+        .iter()
+        .filter_map(handoff_inbox_item)
+        .collect::<Vec<_>>();
 
     let mut budget = budget_status(&binding.budget, &spent, now_ms);
     if budget.reason.is_none() {
@@ -378,16 +450,24 @@ pub async fn persona_status(
         budget.last_receipt_id = budget_receipt;
     }
 
+    let current_assignment = active_lease.as_ref().map(assignment_status_from_lease);
+
     Ok(PersonaStatus {
         name: binding.name.clone(),
+        template_ref: binding.template_ref.clone(),
         state,
         entry_workflow: binding.entry_workflow.clone(),
+        role: binding.name.clone(),
+        current_assignment,
         last_run: last_run_ms.map(format_ms),
         next_scheduled_run: next_scheduled_run(binding, last_run_ms, now_ms),
         active_lease,
         budget,
         last_error,
         queued_events: queued.len(),
+        queued_work,
+        handoff_inbox,
+        value_receipts,
         disabled_events,
         paused_event_policy: "queue_then_drain_on_resume".to_string(),
     })
@@ -423,8 +503,7 @@ pub async fn resume_persona(
     )
     .await?;
     let queued = queued_events(log, &binding.name).await?;
-    for envelope in queued {
-        let cost = PersonaRunCost::default();
+    for (envelope, cost) in queued {
         let _ = run_for_envelope(log, binding, envelope, cost, now_ms).await?;
     }
     persona_status(log, binding, now_ms).await
@@ -532,6 +611,7 @@ async fn run_for_envelope(
                 json!({
                     "work_key": envelope.subject_key,
                     "envelope": envelope,
+                    "cost": cost,
                     "reason": "paused",
                 }),
                 now_ms,
@@ -981,9 +1061,9 @@ fn normalize_trigger_envelope(
 async fn queued_events(
     log: &Arc<AnyEventLog>,
     persona: &str,
-) -> Result<Vec<PersonaTriggerEnvelope>, String> {
+) -> Result<Vec<(PersonaTriggerEnvelope, PersonaRunCost)>, String> {
     let events = read_persona_events(log, persona).await?;
-    let mut queued = BTreeMap::<String, PersonaTriggerEnvelope>::new();
+    let mut queued = BTreeMap::<String, (PersonaTriggerEnvelope, PersonaRunCost)>::new();
     let mut completed = BTreeSet::<String>::new();
     for (_, event) in events {
         match event.kind.as_str() {
@@ -993,7 +1073,15 @@ async fn queued_events(
                 };
                 let envelope: PersonaTriggerEnvelope =
                     serde_json::from_value(envelope.clone()).map_err(|error| error.to_string())?;
-                queued.insert(envelope.subject_key.clone(), envelope);
+                let cost = event
+                    .payload
+                    .get("cost")
+                    .cloned()
+                    .map(serde_json::from_value::<PersonaRunCost>)
+                    .transpose()
+                    .map_err(|error| error.to_string())?
+                    .unwrap_or_default();
+                queued.insert(envelope.subject_key.clone(), (envelope, cost));
             }
             "persona.run.completed" => {
                 if let Some(work_key) = event
@@ -1009,6 +1097,76 @@ async fn queued_events(
     }
     queued.retain(|work_key, _| !completed.contains(work_key));
     Ok(queued.into_values().collect())
+}
+
+fn assignment_status_from_lease(lease: &PersonaLease) -> PersonaAssignmentStatus {
+    PersonaAssignmentStatus {
+        work_key: lease.work_key.clone(),
+        lease_id: lease.id.clone(),
+        holder: lease.holder.clone(),
+        acquired_at: format_ms(lease.acquired_at_ms),
+        expires_at: format_ms(lease.expires_at_ms),
+    }
+}
+
+fn queued_work_from_event(event: &LogEvent) -> Result<Option<PersonaQueuedWork>, String> {
+    let Some(envelope) = event.payload.get("envelope") else {
+        return Ok(None);
+    };
+    let envelope: PersonaTriggerEnvelope =
+        serde_json::from_value(envelope.clone()).map_err(|error| error.to_string())?;
+    Ok(Some(PersonaQueuedWork {
+        work_key: envelope.subject_key,
+        provider: envelope.provider,
+        kind: envelope.kind,
+        queued_at: format_ms(event.occurred_at_ms),
+        reason: event
+            .payload
+            .get("reason")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("queued")
+            .to_string(),
+        source_event_id: envelope.source_event_id,
+        metadata: envelope.metadata,
+    }))
+}
+
+fn handoff_inbox_item(work: &PersonaQueuedWork) -> Option<PersonaHandoffInboxItem> {
+    if work.provider != "handoff" && !work.metadata.contains_key("handoff_id") {
+        return None;
+    }
+    Some(PersonaHandoffInboxItem {
+        work_key: work.work_key.clone(),
+        handoff_id: work.metadata.get("handoff_id").cloned(),
+        handoff_kind: work
+            .metadata
+            .get("handoff_kind")
+            .or_else(|| work.metadata.get("kind"))
+            .cloned(),
+        source_persona: work.metadata.get("source_persona").cloned(),
+        task: work.metadata.get("task").cloned(),
+        queued_at: work.queued_at.clone(),
+        reason: work.reason.clone(),
+    })
+}
+
+fn value_receipt_from_event(event: &LogEvent) -> Result<Option<PersonaValueReceipt>, String> {
+    let Ok(value_event) = serde_json::from_value::<PersonaValueEvent>(event.payload.clone()) else {
+        return Ok(None);
+    };
+    Ok(Some(PersonaValueReceipt {
+        kind: value_event.kind,
+        run_id: value_event.run_id,
+        occurred_at: value_event
+            .occurred_at
+            .format(&Rfc3339)
+            .map_err(|error| error.to_string())?,
+        paid_cost_usd: value_event.paid_cost_usd,
+        avoided_cost_usd: value_event.avoided_cost_usd,
+        deterministic_steps: value_event.deterministic_steps,
+        llm_steps: value_event.llm_steps,
+        metadata: value_event.metadata,
+    }))
 }
 
 async fn work_completed(
@@ -1376,6 +1534,43 @@ mod tests {
         let status = resume_persona(&log, &binding, now + 1000).await.unwrap();
         assert_eq!(status.state, PersonaLifecycleState::Idle);
         assert_eq!(status.queued_events, 0);
+    }
+
+    #[tokio::test]
+    async fn resumed_queued_work_reuses_original_budget_cost() {
+        let log = log();
+        let mut binding = binding();
+        binding.budget.run_usd = Some(0.01);
+        let now = parse_rfc3339_ms("2026-04-24T12:00:00Z").unwrap();
+        pause_persona(&log, &binding, now).await.unwrap();
+        let queued = fire_trigger(
+            &log,
+            &binding,
+            "github",
+            "pull_request",
+            BTreeMap::from([
+                ("repository".to_string(), "burin-labs/harn".to_string()),
+                ("number".to_string(), "1379".to_string()),
+            ]),
+            PersonaRunCost {
+                cost_usd: 0.02,
+                tokens: 1,
+                ..Default::default()
+            },
+            now + 1,
+        )
+        .await
+        .unwrap();
+        assert_eq!(queued.status, "queued");
+
+        let status = resume_persona(&log, &binding, now + 2).await.unwrap();
+
+        assert_eq!(status.budget.reason.as_deref(), Some("run_usd"));
+        assert!(status
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("run_usd")));
+        assert_eq!(status.queued_events, 1);
     }
 
     #[tokio::test]

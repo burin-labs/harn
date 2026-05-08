@@ -60,6 +60,7 @@ pub struct ReplayTraceRun {
     pub protocol_interactions: Vec<JsonValue>,
     pub approval_interactions: Vec<JsonValue>,
     pub effect_receipts: Vec<JsonValue>,
+    pub persona_runtime_states: Vec<JsonValue>,
     pub agent_transcript_deltas: Vec<JsonValue>,
     pub final_artifacts: Vec<JsonValue>,
     pub policy_decisions: Vec<JsonValue>,
@@ -74,6 +75,7 @@ impl ReplayTraceRun {
             protocol_interactions: self.protocol_interactions.len(),
             approval_interactions: self.approval_interactions.len(),
             effect_receipts: self.effect_receipts.len(),
+            persona_runtime_states: self.persona_runtime_states.len(),
             agent_transcript_deltas: self.agent_transcript_deltas.len(),
             final_artifacts: self.final_artifacts.len(),
             policy_decisions: self.policy_decisions.len(),
@@ -90,6 +92,7 @@ pub struct ReplayTraceRunCounts {
     pub protocol_interactions: usize,
     pub approval_interactions: usize,
     pub effect_receipts: usize,
+    pub persona_runtime_states: usize,
     pub agent_transcript_deltas: usize,
     pub final_artifacts: usize,
     pub policy_decisions: usize,
@@ -242,6 +245,7 @@ fn trace_material_count(run: &ReplayTraceRun) -> usize {
         + counts.protocol_interactions
         + counts.approval_interactions
         + counts.effect_receipts
+        + counts.persona_runtime_states
         + counts.agent_transcript_deltas
         + counts.final_artifacts
         + counts.policy_decisions
@@ -515,6 +519,24 @@ mod tests {
         let report = run_replay_oracle_trace(&base_trace()).expect("oracle succeeds");
         assert!(report.passed, "{report:?}");
         assert_eq!(report.divergence, None);
+    }
+
+    #[test]
+    fn persona_runtime_states_are_first_class_replay_material() {
+        let mut trace = base_trace();
+        trace.first_run.persona_runtime_states = vec![json!({
+            "name": "merge_captain",
+            "state": "idle",
+            "queued_work": [],
+            "handoff_inbox": [],
+            "budget": {"spent_today_usd": 0.01},
+        })];
+        trace.second_run.persona_runtime_states = trace.first_run.persona_runtime_states.clone();
+
+        let report = run_replay_oracle_trace(&trace).expect("oracle succeeds");
+
+        assert!(report.passed, "{report:?}");
+        assert_eq!(report.first_run_counts.persona_runtime_states, 1);
     }
 
     #[test]

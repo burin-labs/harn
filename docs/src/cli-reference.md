@@ -745,6 +745,7 @@ Launch the local Harn observability portal for persisted runs.
 ```bash
 harn portal
 harn portal --dir runs/archive
+harn portal --manifest examples/personas/harn.toml --persona-state-dir .harn/personas
 harn portal --host 0.0.0.0 --port 4900
 harn portal --open false
 ```

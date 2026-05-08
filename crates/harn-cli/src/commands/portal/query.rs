@@ -33,6 +33,12 @@ pub(super) struct TrustGraphQuery {
     pub(super) grouped_by_trace: Option<bool>,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct PersonaStatusQuery {
+    pub(super) name: String,
+    pub(super) at: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub(super) struct ErrorResponse {
     pub(super) error: String,

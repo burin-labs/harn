@@ -95,6 +95,118 @@ export type PortalMeta = {
   run_dir: string
 }
 
+export type PersonaManifestSummary = {
+  name: string
+  version: string | null
+  description: string
+  entry_workflow: string
+  tools: string[]
+  capabilities: string[]
+  autonomy_tier: string
+  receipt_policy: string
+  triggers: string[]
+  schedules: string[]
+  model_policy: Record<string, unknown>
+  budget: Record<string, unknown>
+  handoffs: string[]
+  context_packs: string[]
+  evals: string[]
+  manifest_path: string
+}
+
+export type PersonaLifecycleState =
+  | "inactive"
+  | "starting"
+  | "idle"
+  | "running"
+  | "paused"
+  | "draining"
+  | "failed"
+  | "disabled"
+
+export type PersonaLease = {
+  id: string
+  holder: string
+  work_key: string
+  acquired_at_ms: number
+  expires_at_ms: number
+}
+
+export type PersonaAssignmentStatus = {
+  work_key: string
+  lease_id: string
+  holder: string
+  acquired_at: string
+  expires_at: string
+}
+
+export type PersonaBudgetStatus = {
+  daily_usd: number | null
+  hourly_usd: number | null
+  run_usd: number | null
+  max_tokens: number | null
+  spent_today_usd: number
+  spent_this_hour_usd: number
+  spent_last_run_usd: number
+  tokens_today: number
+  remaining_today_usd: number | null
+  remaining_hour_usd: number | null
+  exhausted: boolean
+  reason: string | null
+  last_receipt_id: string | null
+}
+
+export type PersonaQueuedWork = {
+  work_key: string
+  provider: string
+  kind: string
+  queued_at: string
+  reason: string
+  source_event_id: string | null
+  metadata: Record<string, string>
+}
+
+export type PersonaHandoffInboxItem = {
+  work_key: string
+  handoff_id: string | null
+  handoff_kind: string | null
+  source_persona: string | null
+  task: string | null
+  queued_at: string
+  reason: string
+}
+
+export type PersonaValueReceipt = {
+  kind: string
+  run_id: string | null
+  occurred_at: string
+  paid_cost_usd: number
+  avoided_cost_usd: number
+  deterministic_steps: number
+  llm_steps: number
+  metadata: unknown
+}
+
+export type PersonaStatus = {
+  name: string
+  template_ref: string | null
+  state: PersonaLifecycleState
+  entry_workflow: string
+  role: string
+  current_assignment: PersonaAssignmentStatus | null
+  last_run: string | null
+  next_scheduled_run: string | null
+  active_lease: PersonaLease | null
+  budget: PersonaBudgetStatus
+  last_error: string | null
+  queued_events: number
+  queued_work: PersonaQueuedWork[]
+  handoff_inbox: PersonaHandoffInboxItem[]
+  value_receipts: PersonaValueReceipt[]
+  disabled_events: number
+  paused_event_policy: string
+}
+
 export type PortalHighlightKeywords = {
   keyword: string[]
   literal: string[]

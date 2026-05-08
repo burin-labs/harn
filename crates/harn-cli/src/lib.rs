@@ -632,7 +632,15 @@ async fn async_main() {
             commands::run::run_watch(&args.file, denied).await;
         }
         Command::Portal(args) => {
-            commands::portal::run_portal(&args.dir, &args.host, args.port, args.open).await
+            commands::portal::run_portal(
+                &args.dir,
+                args.manifest,
+                args.persona_state_dir,
+                &args.host,
+                args.port,
+                args.open,
+            )
+            .await
         }
         Command::Trigger(args) => {
             if let Err(error) = commands::trigger::handle(args).await {

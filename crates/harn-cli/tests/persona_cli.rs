@@ -351,6 +351,8 @@ async fn persona_runtime_status_tick_and_budget_are_persisted() {
         .await
         .expect("initial status");
     assert_eq!(status.state.as_str(), "idle");
+    assert_eq!(status.role, "merge_captain");
+    assert!(status.template_ref.is_none());
     assert_eq!(status.queued_events, 0);
     assert_eq!(status.budget.daily_usd, Some(20.0));
 
@@ -387,6 +389,9 @@ async fn persona_runtime_status_tick_and_budget_are_persisted() {
     assert_eq!(status.last_run.as_deref(), Some("2026-04-24T12:30:00Z"));
     assert_eq!(status.budget.spent_today_usd, 0.25);
     assert_eq!(status.budget.tokens_today, 12);
+    assert_eq!(status.value_receipts.len(), 2);
+    assert_eq!(status.value_receipts[0].kind.as_str(), "run_started");
+    assert_eq!(status.value_receipts[1].kind.as_str(), "run_completed");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -395,9 +400,14 @@ async fn persona_pause_resume_disable_trigger_controls_are_durable() {
     let manifest = manifest_path(&temp);
     let state_dir = temp.path().join(".harn-personas-test");
 
-    let _ = persona::pause_payload(Some(&manifest), &state_dir, "merge_captain", None)
-        .await
-        .expect("pause");
+    let _ = persona::pause_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        Some("2026-04-24T12:00:00Z"),
+    )
+    .await
+    .expect("pause");
 
     let receipt = persona::trigger_payload(
         Some(&manifest),
@@ -409,7 +419,7 @@ async fn persona_pause_resume_disable_trigger_controls_are_durable() {
             "repository=burin-labs/harn".to_string(),
             "number=462".to_string(),
         ],
-        None,
+        Some("2026-04-24T12:00:01Z"),
         0.0,
         0,
     )
@@ -417,16 +427,73 @@ async fn persona_pause_resume_disable_trigger_controls_are_durable() {
     .expect("trigger while paused");
     assert_eq!(receipt.status, "queued");
     assert_eq!(receipt.work_key, "github:burin-labs/harn:pr:462");
+    let queued = persona::status_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        Some("2026-04-24T12:00:02Z"),
+    )
+    .await
+    .expect("queued status");
+    assert_eq!(queued.queued_events, 1);
+    assert_eq!(queued.queued_work[0].provider, "github");
+    assert!(queued.current_assignment.is_none());
 
-    let resumed = persona::resume_payload(Some(&manifest), &state_dir, "merge_captain", None)
-        .await
-        .expect("resume");
+    let handoff = persona::trigger_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        "handoff",
+        "review",
+        &[
+            "dedupe_key=handoff-1379".to_string(),
+            "handoff_id=handoff-1379".to_string(),
+            "handoff_kind=merge_receipt".to_string(),
+            "source_persona=review_captain".to_string(),
+            "task=Review durable persona receipt".to_string(),
+        ],
+        Some("2026-04-24T12:00:03Z"),
+        0.0,
+        0,
+    )
+    .await
+    .expect("handoff while paused");
+    assert_eq!(handoff.status, "queued");
+    let queued = persona::status_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        Some("2026-04-24T12:00:04Z"),
+    )
+    .await
+    .expect("queued handoff status");
+    assert_eq!(queued.queued_events, 2);
+    assert_eq!(queued.handoff_inbox.len(), 1);
+    assert_eq!(
+        queued.handoff_inbox[0].handoff_kind.as_deref(),
+        Some("merge_receipt")
+    );
+
+    let resumed = persona::resume_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        Some("2026-04-24T12:01:00Z"),
+    )
+    .await
+    .expect("resume");
     assert_eq!(resumed.state.as_str(), "idle");
     assert_eq!(resumed.queued_events, 0);
+    assert!(resumed.handoff_inbox.is_empty());
 
-    let _ = persona::disable_payload(Some(&manifest), &state_dir, "merge_captain", None)
-        .await
-        .expect("disable");
+    let _ = persona::disable_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        Some("2026-04-24T12:02:00Z"),
+    )
+    .await
+    .expect("disable");
 
     let receipt = persona::trigger_payload(
         Some(&manifest),
@@ -438,7 +505,7 @@ async fn persona_pause_resume_disable_trigger_controls_are_durable() {
             "channel=C123".to_string(),
             "ts=1713988800.000100".to_string(),
         ],
-        None,
+        Some("2026-04-24T12:02:01Z"),
         0.0,
         0,
     )
@@ -476,7 +543,7 @@ budget = { daily_usd = 0.01, run_usd = 0.01, max_tokens = 10 }
             "repository=burin-labs/harn".to_string(),
             "check_name=ci".to_string(),
         ],
-        None,
+        Some("2026-04-24T12:00:00Z"),
         0.02,
         1,
     )
@@ -488,11 +555,19 @@ budget = { daily_usd = 0.01, run_usd = 0.01, max_tokens = 10 }
         .as_deref()
         .is_some_and(|message| message.contains("run_usd")));
 
-    let status = persona::status_payload(Some(&manifest), &state_dir, "merge_captain", None)
-        .await
-        .expect("status after exhaustion");
+    let status = persona::status_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        Some("2026-04-24T12:00:01Z"),
+    )
+    .await
+    .expect("status after exhaustion");
     assert!(status
         .last_error
         .as_deref()
         .is_some_and(|message| message.contains("run_usd")));
+    assert!(status.budget.exhausted);
+    assert_eq!(status.budget.reason.as_deref(), Some("run_usd"));
+    assert!(status.budget.last_receipt_id.is_some());
 }

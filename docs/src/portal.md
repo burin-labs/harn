@@ -30,6 +30,8 @@ By default the portal:
 
 - serves from `http://127.0.0.1:4721`
 - watches `.harn-runs`
+- reads persona manifests from the nearest `harn.toml`
+- reads persona runtime state from `.harn/personas`
 - opens a browser automatically
 
 For a fresh source checkout, the simplest local setup is:
@@ -54,6 +56,7 @@ Useful flags:
 
 ```bash
 harn portal --dir runs/archive
+harn portal --manifest examples/personas/harn.toml --persona-state-dir .harn/personas
 harn portal --host 0.0.0.0 --port 4900
 harn portal --open false
 ```

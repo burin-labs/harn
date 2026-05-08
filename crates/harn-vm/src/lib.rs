@@ -129,10 +129,11 @@ pub use personas::{
     disable_persona, fire_schedule as fire_persona_schedule, fire_trigger as fire_persona_trigger,
     format_ms as format_persona_ms, now_ms as persona_now_ms, parse_rfc3339_ms as parse_persona_ms,
     pause_persona, persona_status, record_persona_spend, register_persona_value_sink,
-    resume_persona, PersonaBudgetPolicy, PersonaBudgetStatus, PersonaLease, PersonaLifecycleState,
+    resume_persona, PersonaAssignmentStatus, PersonaBudgetPolicy, PersonaBudgetStatus,
+    PersonaHandoffInboxItem, PersonaLease, PersonaLifecycleState, PersonaQueuedWork,
     PersonaRunCost, PersonaRunReceipt, PersonaRuntimeBinding, PersonaStatus,
-    PersonaTriggerEnvelope, PersonaValueEvent, PersonaValueEventKind, PersonaValueSink,
-    PersonaValueSinkRegistration, PERSONA_RUNTIME_TOPIC,
+    PersonaTriggerEnvelope, PersonaValueEvent, PersonaValueEventKind, PersonaValueReceipt,
+    PersonaValueSink, PersonaValueSinkRegistration, PERSONA_RUNTIME_TOPIC,
 };
 pub use provenance::{
     build_signed_receipt, load_or_generate_agent_signing_key, verify_receipt, ProvenanceReceipt,

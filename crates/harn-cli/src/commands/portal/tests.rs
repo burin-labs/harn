@@ -9,6 +9,8 @@ use harn_vm::event_log::{EventLog, LogEvent, Topic};
 use tokio::sync::Mutex;
 use tower::util::ServiceExt;
 
+use crate::commands::persona;
+
 use super::dto::{PortalLaunchRequest, PortalRunDiff, PortalRunSummary};
 use super::launch::{
     build_launch_env, materialize_launch_target, scan_launch_targets, validate_launch_request,
@@ -27,6 +29,8 @@ fn test_portal_state(run_dir: &Path) -> Arc<PortalState> {
     Arc::new(PortalState {
         run_dir: run_dir.to_path_buf(),
         workspace_root: run_dir.to_path_buf(),
+        persona_manifest: None,
+        persona_state_dir: run_dir.join(".harn/personas"),
         event_log: None,
         launch_program: PathBuf::from("harn"),
         launch_jobs: Arc::new(Mutex::new(HashMap::new())),
@@ -40,7 +44,25 @@ fn test_portal_state_with_event_log(
     Arc::new(PortalState {
         run_dir: run_dir.to_path_buf(),
         workspace_root: run_dir.to_path_buf(),
+        persona_manifest: None,
+        persona_state_dir: run_dir.join(".harn/personas"),
         event_log: Some(event_log),
+        launch_program: PathBuf::from("harn"),
+        launch_jobs: Arc::new(Mutex::new(HashMap::new())),
+    })
+}
+
+fn test_portal_state_with_personas(
+    run_dir: &Path,
+    manifest: PathBuf,
+    persona_state_dir: PathBuf,
+) -> Arc<PortalState> {
+    Arc::new(PortalState {
+        run_dir: run_dir.to_path_buf(),
+        workspace_root: run_dir.to_path_buf(),
+        persona_manifest: Some(manifest),
+        persona_state_dir,
+        event_log: None,
         launch_program: PathBuf::from("harn"),
         launch_jobs: Arc::new(Mutex::new(HashMap::new())),
     })
@@ -306,6 +328,62 @@ async fn api_runs_returns_json() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn api_personas_exposes_runtime_status() {
+    let temp = tempfile::tempdir().unwrap();
+    let manifest = temp.path().join("harn.toml");
+    fs::write(
+        &manifest,
+        r#"
+[[personas]]
+name = "merge_captain"
+description = "Owns merge readiness."
+entry_workflow = "workflows/merge.harn#run"
+tools = ["github"]
+capabilities = ["git.get_diff"]
+autonomy_tier = "act_with_approval"
+receipt_policy = "required"
+triggers = ["github.pr_opened"]
+budget = { daily_usd = 1.0, run_usd = 1.0 }
+"#,
+    )
+    .unwrap();
+    let state_dir = temp.path().join(".harn/personas");
+    persona::pause_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        Some("2026-04-24T12:00:00Z"),
+    )
+    .await
+    .unwrap();
+
+    let app = build_router(test_portal_state_with_personas(
+        temp.path(),
+        manifest,
+        state_dir,
+    ));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/persona/status?name=merge_captain&at=2026-04-24T12:00:01Z")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["name"], "merge_captain");
+    assert_eq!(payload["state"], "paused");
+    assert_eq!(payload["role"], "merge_captain");
+    assert_eq!(payload["budget"]["daily_usd"], 1.0);
 }
 
 #[tokio::test]

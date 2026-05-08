@@ -3,5 +3,6 @@ pub(super) mod costs;
 pub(super) mod dlq;
 pub(super) mod launch;
 pub(super) mod meta;
+pub(super) mod personas;
 pub(super) mod runs;
 pub(super) mod trust;
