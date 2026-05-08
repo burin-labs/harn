@@ -27,9 +27,7 @@ pub(crate) fn build_assistant_tool_message(
         serde_json::json!({"role": "assistant", "content": content})
     } else if is_ollama {
         // Ollama's chat API uses the OpenAI-style `function` envelope but
-        // keeps `arguments` as a JSON object. Replaying OpenAI's
-        // string-encoded arguments trips Ollama's template parser on the
-        // next turn.
+        // its request schema expects `function.arguments` to be a string.
         let calls: Vec<serde_json::Value> = tool_calls
             .iter()
             .enumerate()
@@ -40,7 +38,7 @@ pub(crate) fn build_assistant_tool_message(
                     "function": {
                         "index": idx,
                         "name": tc["name"],
-                        "arguments": tc["arguments"],
+                        "arguments": serde_json::to_string(&tc["arguments"]).unwrap_or_default(),
                     }
                 })
             })
