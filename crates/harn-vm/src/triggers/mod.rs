@@ -4,6 +4,7 @@ pub mod flow_control;
 pub mod inbox;
 pub mod registry;
 pub mod scheduler;
+pub mod streaming;
 pub mod test_util;
 pub mod topics;
 pub mod webhook_intake;
@@ -51,6 +52,13 @@ pub use scheduler::{
     ready_stats_by_key as scheduler_ready_stats_by_key, FairnessKey, ReadyKeyStats, SchedulableJob,
     SchedulerKeyStat, SchedulerPolicy, SchedulerSnapshot, SchedulerState, SchedulerStrategy,
     DEFAULT_STARVATION_AGE_MS,
+};
+pub use streaming::{
+    stream_fixture_event, stream_window_summary, StreamBackpressureConfig, StreamFlowConfig,
+    StreamGateConfig, StreamGateOutcome, StreamGateRecord, StreamOverflowPolicy,
+    StreamStatusSnapshot, StreamThrottleConfig, StreamTriggerConfig, StreamTriggerRuntime,
+    StreamWindowConfig, StreamWindowEnvelope, StreamWindowMode, TRIGGER_STREAM_GATE_TOPIC,
+    TRIGGER_STREAM_STATUS_TOPIC, TRIGGER_STREAM_WINDOWS_TOPIC,
 };
 pub use test_util::{run_trigger_harness_fixture, TriggerHarnessResult, TRIGGER_TEST_FIXTURES};
 pub use topics::{

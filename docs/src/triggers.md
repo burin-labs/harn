@@ -17,6 +17,47 @@ multiple `[[triggers.sources]]` entries. `kind = "stream"` covers cataloged
 continuous sources such as Kafka, NATS JetStream, Pulsar, Postgres CDC, email,
 and WebSocket ingest, including tumbling, sliding, and session window metadata.
 
+## Streaming trigger admission
+
+Continuous sources should enter Harn through the connector-facing stream
+runtime rather than calling handlers directly. The runtime accepts normalized
+`TriggerEvent` values, applies the configured admission policy, emits
+deterministic window records, then hands the resulting window event to the
+regular dispatcher. That keeps policy, replay metadata, predicate gates,
+retries, action-graph updates, and DLQ moves on the same path as webhook and
+cron triggers.
+
+The initial runtime primitive supports:
+
+- fixed, tumbling, and sliding count windows
+- queue limits with explicit `drop_newest`, `drop_oldest`, or
+  `dead_letter_newest` overflow behavior
+- optional dedupe-key debounce and period-based throttle admission
+- deterministic gate-decision records keyed by a stable cache key and window
+  dedupe keys, so replay can reuse the prior LLM decision without a fresh model
+  call
+- window status records for pending count, lag/drop/dead-letter counters, and
+  gate pass/block counters
+
+Window events keep the first source event's provider and tenant context, use a
+`.window` event kind suffix, and attach serialized member events to
+`event.batch`. The runtime also adds `harn_stream_id`,
+`harn_stream_window_id`, and `harn_stream_source_event_ids` headers.
+
+Stream observability is written to these EventLog topics:
+
+- `trigger.stream.status` for admission, debounce, throttle, overflow, and gate
+  status records
+- `trigger.stream.windows` for emitted window envelopes
+- `trigger.stream.gates` for cached and newly evaluated gate decisions
+- `trigger.dlq` with `stream_dead_lettered` records when backpressure moves an
+  event to the dead-letter path
+
+Connector implementations should call `StreamConnector::push_inbound(...)` or
+`push_inbound_with_gate(...)` after activation. Those helpers normalize the
+provider-native `RawInbound` through the connector schema first, then admit the
+event through the stream runtime; they do not bypass policy or replay logging.
+
 ## LLM predicates
 
 Trigger predicates let a binding decide whether an event should dispatch before

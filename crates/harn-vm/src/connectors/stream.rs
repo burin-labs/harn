@@ -11,8 +11,8 @@ use crate::connectors::{
     ProviderPayloadSchema, RawInbound, TriggerBinding, TriggerKind,
 };
 use crate::triggers::{
-    redact_headers, HeaderRedactionPolicy, ProviderId, ProviderPayload, SignatureStatus, TraceId,
-    TriggerEvent, TriggerEventId,
+    redact_headers, HeaderRedactionPolicy, ProviderId, ProviderPayload, SignatureStatus,
+    StreamGateOutcome, StreamTriggerRuntime, TraceId, TriggerEvent, TriggerEventId,
 };
 
 pub struct StreamConnector {
@@ -95,6 +95,36 @@ impl StreamConnector {
                     "stream connector must be initialized before use".to_string(),
                 )
             })
+    }
+
+    /// Normalize provider-native input and admit it through the streaming
+    /// trigger runtime before dispatcher execution.
+    pub async fn push_inbound(
+        &self,
+        runtime: &mut StreamTriggerRuntime,
+        raw: RawInbound,
+    ) -> Result<Vec<crate::triggers::DispatchOutcome>, ConnectorError> {
+        let event = self.normalize_inbound(raw).await?;
+        runtime
+            .push_event(event)
+            .await
+            .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))
+    }
+
+    /// Test and replay hook for deterministic stream gates. Production LLM
+    /// gates should persist their decision through the runtime cache before
+    /// dispatch, then replay by cache key.
+    pub async fn push_inbound_with_gate(
+        &self,
+        runtime: &mut StreamTriggerRuntime,
+        raw: RawInbound,
+        gate: impl Fn(&crate::triggers::StreamWindowEnvelope) -> StreamGateOutcome,
+    ) -> Result<Vec<crate::triggers::DispatchOutcome>, ConnectorError> {
+        let event = self.normalize_inbound(raw).await?;
+        runtime
+            .push_event_with_gate(event, gate)
+            .await
+            .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))
     }
 }
 
@@ -410,6 +440,84 @@ mod tests {
         };
         assert_eq!(payload.stream.as_deref(), None);
         assert_eq!(payload.key.as_deref(), Some("acct-1"));
+        reset_active_event_log();
+    }
+
+    #[tokio::test]
+    async fn stream_connector_pushes_inbound_through_stream_runtime() {
+        install_memory_for_current_thread(128);
+        let event_log = crate::event_log::active_event_log().expect("event log");
+        let inbox = Arc::new(
+            InboxIndex::new(
+                event_log.clone(),
+                Arc::new(crate::connectors::MetricsRegistry::default()),
+            )
+            .await
+            .expect("inbox"),
+        );
+        let mut connector = StreamConnector::new(ProviderId::from("kafka"), "StreamEventPayload");
+        connector
+            .init(ConnectorCtx {
+                event_log: event_log.clone(),
+                secrets: Arc::new(EmptySecretProvider),
+                inbox,
+                metrics: Arc::new(crate::connectors::MetricsRegistry::default()),
+                rate_limiter: Arc::new(RateLimiterFactory::default()),
+            })
+            .await
+            .expect("init");
+        connector
+            .activate(&[TriggerBinding {
+                provider: ProviderId::from("kafka"),
+                kind: TriggerKind::from("stream"),
+                binding_id: "chat".to_string(),
+                dedupe_key: None,
+                dedupe_retention_days: 7,
+                config: json!({
+                    "match": {"events": ["chat.message"]},
+                    "stream": {"topic": "chat"}
+                }),
+            }])
+            .await
+            .expect("activate");
+
+        let mut vm = crate::vm::Vm::new();
+        crate::stdlib::register_vm_stdlib(&mut vm);
+        let dispatcher = crate::triggers::Dispatcher::with_event_log(vm, event_log.clone());
+        let mut runtime = crate::triggers::StreamTriggerRuntime::new(
+            crate::triggers::StreamTriggerConfig {
+                stream_id: "chat".to_string(),
+                window: crate::triggers::StreamWindowConfig::fixed(2),
+                backpressure: crate::triggers::StreamBackpressureConfig::default(),
+                flow: crate::triggers::StreamFlowConfig::default(),
+                gate: None,
+            },
+            event_log.clone(),
+            dispatcher,
+        )
+        .expect("runtime");
+
+        let mut headers = BTreeMap::new();
+        headers.insert("content-type".to_string(), "application/json".to_string());
+        let mut raw = RawInbound::new(
+            "",
+            headers,
+            serde_json::to_vec(&json!({
+                "event": "chat.message",
+                "stream": "chat",
+                "offset": 1,
+                "text": "hello"
+            }))
+            .unwrap(),
+        );
+        raw.metadata = json!({"binding_id": "chat"});
+
+        let outcomes = connector
+            .push_inbound(&mut runtime, raw)
+            .await
+            .expect("push through runtime");
+        assert!(outcomes.is_empty());
+        assert_eq!(runtime.snapshot().pending_events, 1);
         reset_active_event_log();
     }
 }
