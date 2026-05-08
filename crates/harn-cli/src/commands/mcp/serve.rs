@@ -40,7 +40,7 @@ use crate::commands::orchestrator::listener::ListenerAuth;
 use crate::package::CollectedTriggerHandler;
 
 use super::oauth_resource::{OAuthChallengeError, OAuthResourceServer, OAuthTokenError};
-use super::prompts::FilePromptCatalog;
+use harn_serve::FilePromptCatalog;
 
 const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 const MCP_SESSION_HEADER: &str = "mcp-session-id";
@@ -603,6 +603,11 @@ impl McpOrchestratorService {
         if !session.initialized && method != "ping" {
             return harn_vm::jsonrpc::error_response(id, -32002, "server not initialized");
         }
+        if let Some(response) =
+            mcp_protocol::unsupported_client_bound_method_response(id.clone(), method)
+        {
+            return response;
+        }
 
         match method {
             "initialized" => JsonValue::Null,
@@ -626,7 +631,7 @@ impl McpOrchestratorService {
             "prompts/list" => self.handle_prompts_list(id, &params),
             "prompts/get" => self.handle_prompts_get(id, &params),
             mcp_protocol::METHOD_COMPLETION_COMPLETE => {
-                self.handle_completion_complete(id, &params)
+                self.handle_completion_complete(id, &params).await
             }
             _ if mcp_protocol::unsupported_latest_spec_method(method).is_some() => {
                 mcp_protocol::unsupported_latest_spec_method_response(id, method)
@@ -758,15 +763,13 @@ impl McpOrchestratorService {
         harn_vm::jsonrpc::response(id, json!({}))
     }
 
-    fn handle_completion_complete(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
+    async fn handle_completion_complete(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
         let Some(ref_type) = params.pointer("/ref/type").and_then(JsonValue::as_str) else {
             return harn_vm::jsonrpc::error_response(id, -32602, "completion ref.type is required");
         };
         match ref_type {
             "ref/prompt" => self.handle_prompt_completion(id, params),
-            "ref/resource" => {
-                harn_vm::jsonrpc::error_response(id, -32602, "Unknown resource template")
-            }
+            "ref/resource" => self.handle_resource_completion(id, params).await,
             other => harn_vm::jsonrpc::error_response(
                 id,
                 -32602,
@@ -804,6 +807,70 @@ impl McpOrchestratorService {
             Ok(completion) => harn_vm::jsonrpc::response(id, json!({ "completion": completion })),
             Err(error) => harn_vm::jsonrpc::error_response(id, -32602, &error),
         }
+    }
+
+    async fn handle_resource_completion(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
+        let uri_template = params
+            .pointer("/ref/uri")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default();
+        let Some(argument_name) = params
+            .pointer("/argument/name")
+            .and_then(JsonValue::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            return harn_vm::jsonrpc::error_response(
+                id,
+                -32602,
+                "completion argument.name is required",
+            );
+        };
+        let value = params
+            .pointer("/argument/value")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default();
+
+        let candidates = match (uri_template, argument_name) {
+            ("harn://topic/{name}", "name") => match self.resource_template_topic_names().await {
+                Ok(candidates) => candidates,
+                Err(error) => return harn_vm::jsonrpc::error_response(id, -32603, &error),
+            },
+            ("harn://event/{event_id}", "event_id") => {
+                match self.resource_template_event_ids().await {
+                    Ok(candidates) => candidates,
+                    Err(error) => return harn_vm::jsonrpc::error_response(id, -32603, &error),
+                }
+            }
+            ("harn://dlq/{entry_id}", "entry_id") => {
+                match self.resource_template_dlq_entry_ids().await {
+                    Ok(candidates) => candidates,
+                    Err(error) => return harn_vm::jsonrpc::error_response(id, -32603, &error),
+                }
+            }
+            ("harn://topic/{name}", other)
+            | ("harn://event/{event_id}", other)
+            | ("harn://dlq/{entry_id}", other) => {
+                return harn_vm::jsonrpc::error_response(
+                    id,
+                    -32602,
+                    &format!("Unknown resource template argument: {other}"),
+                );
+            }
+            (other, _) => {
+                return harn_vm::jsonrpc::error_response(
+                    id,
+                    -32602,
+                    &format!("Unknown resource template: {other}"),
+                );
+            }
+        };
+
+        harn_vm::jsonrpc::response(
+            id,
+            json!({
+                "completion": mcp_protocol::completion_payload(candidates, value),
+            }),
+        )
     }
 
     fn handle_tools_list(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
@@ -1006,7 +1073,29 @@ impl McpOrchestratorService {
             "resources/templates/list",
             "resourceTemplates",
             params,
-            Vec::new(),
+            vec![
+                json!({
+                    "uriTemplate": "harn://topic/{name}",
+                    "name": "topic",
+                    "title": "EventLog Topic",
+                    "description": "Read a Harn EventLog topic by name.",
+                    "mimeType": "application/json",
+                }),
+                json!({
+                    "uriTemplate": "harn://event/{event_id}",
+                    "name": "trigger-event",
+                    "title": "Trigger Event",
+                    "description": "Read a recorded trigger event plus related replay and trace artifacts.",
+                    "mimeType": "application/json",
+                }),
+                json!({
+                    "uriTemplate": "harn://dlq/{entry_id}",
+                    "name": "dead-letter-entry",
+                    "title": "Dead-Letter Entry",
+                    "description": "Read one pending dead-letter queue entry.",
+                    "mimeType": "application/json",
+                }),
+            ],
         )
     }
 
@@ -1728,6 +1817,53 @@ impl McpOrchestratorService {
         }
 
         Ok(resources)
+    }
+
+    async fn resource_template_topic_names(&self) -> Result<Vec<String>, String> {
+        let mut names = BTreeSet::from([
+            "trigger.inbox".to_string(),
+            TRIGGER_OUTBOX_TOPIC.to_string(),
+        ]);
+        let ctx = load_local_runtime(&self.local_args()).await?;
+        for topic in ctx
+            .event_log
+            .topics()
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            if is_agent_transcript_topic(topic.as_str()) {
+                names.insert(topic.as_str().to_string());
+            }
+        }
+        Ok(names.into_iter().collect())
+    }
+
+    async fn resource_template_event_ids(&self) -> Result<Vec<String>, String> {
+        let ctx = load_local_runtime(&self.local_args()).await?;
+        let recorded = read_topic(&ctx.event_log, TRIGGER_EVENTS_TOPIC).await?;
+        let mut ids = recorded
+            .into_iter()
+            .filter_map(|(_, event)| {
+                serde_json::from_value::<RecordedTriggerEvent>(event.payload)
+                    .ok()
+                    .map(|record| record.event.id.0)
+            })
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids.dedup();
+        Ok(ids)
+    }
+
+    async fn resource_template_dlq_entry_ids(&self) -> Result<Vec<String>, String> {
+        let mut ctx = load_local_runtime(&self.local_args()).await?;
+        let mut ids = trigger_inspect_dlq(&mut ctx)
+            .await?
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids.dedup();
+        Ok(ids)
     }
 
     async fn read_resource(&self, uri: &str) -> Result<(String, &'static str), String> {
@@ -4079,7 +4215,7 @@ pub fn on_fail(event: TriggerEvent) -> any {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn empty_prompt_and_resource_template_lists_roundtrip() {
+    async fn resource_template_and_empty_prompt_lists_roundtrip() {
         let _guard = lock_harn_state();
         let temp = TempDir::new().unwrap();
         write_fixture(&temp);
@@ -4092,7 +4228,36 @@ pub fn on_fail(event: TriggerEvent) -> any {
                 harn_vm::jsonrpc::request(10, "resources/templates/list", json!({})),
             )
             .await;
-        assert_eq!(templates["result"]["resourceTemplates"], json!([]));
+        assert_eq!(
+            templates["result"]["resourceTemplates"][0]["uriTemplate"],
+            json!("harn://topic/{name}")
+        );
+        assert_eq!(
+            templates["result"]["resourceTemplates"][1]["uriTemplate"],
+            json!("harn://event/{event_id}")
+        );
+        assert_eq!(
+            templates["result"]["resourceTemplates"][2]["uriTemplate"],
+            json!("harn://dlq/{entry_id}")
+        );
+
+        let topic_completion = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(
+                    9,
+                    mcp_protocol::METHOD_COMPLETION_COMPLETE,
+                    json!({
+                        "ref": {"type": "ref/resource", "uri": "harn://topic/{name}"},
+                        "argument": {"name": "name", "value": "trigger."}
+                    }),
+                ),
+            )
+            .await;
+        assert_eq!(
+            topic_completion["result"]["completion"]["values"],
+            json!(["trigger.inbox", "trigger.outbox"])
+        );
 
         let prompts = service
             .handle_request(
@@ -4409,7 +4574,14 @@ version = "0.1.0"
                 harn_vm::jsonrpc::request(46, "resources/templates/list", json!({})),
             )
             .await;
-        assert_eq!(templates["result"]["resourceTemplates"], json!([]));
+        assert_eq!(
+            templates["result"]["resourceTemplates"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(templates["result"]["nextCursor"].is_string());
 
         let invalid = service
             .handle_request(

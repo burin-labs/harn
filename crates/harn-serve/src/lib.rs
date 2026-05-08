@@ -6,6 +6,8 @@ mod auth;
 mod core;
 mod error;
 mod exports;
+mod mcp_context;
+mod mcp_prompts;
 #[cfg(test)]
 mod protocol_fixture_tests;
 mod replay;
@@ -30,5 +32,6 @@ pub use core::{
 };
 pub use error::DispatchError;
 pub use exports::{ExportCatalog, ExportedCallableKind, ExportedFunction, ExportedParam};
+pub use mcp_prompts::FilePromptCatalog;
 pub use replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
 pub use tls::{HstsConfig, HttpTlsConfig};

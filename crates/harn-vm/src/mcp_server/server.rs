@@ -164,6 +164,12 @@ impl McpServer {
         let id = msg.get("id").cloned()?;
         let params = msg.get("params").cloned().unwrap_or(serde_json::json!({}));
 
+        if let Some(response) =
+            crate::mcp_protocol::unsupported_client_bound_method_response(id.clone(), method)
+        {
+            return Some(response);
+        }
+
         Some(match method {
             "initialize" => self.handle_initialize(&id),
             "ping" => crate::jsonrpc::response(id.clone(), serde_json::json!({})),

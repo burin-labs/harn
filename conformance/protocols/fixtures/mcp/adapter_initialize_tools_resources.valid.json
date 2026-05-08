@@ -99,6 +99,13 @@
             "name": "Server Card",
             "description": "MCP Server Card advertising this server's identity and capabilities",
             "mimeType": "application/json"
+          },
+          {
+            "uri": "harn://package/source",
+            "name": "Harn Source",
+            "title": "Harn Source",
+            "description": "Source for server.harn",
+            "mimeType": "text/x-harn"
           }
         ]
       }
@@ -123,6 +130,27 @@
           }
         ]
       }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "method": "resources/templates/list",
+      "params": {}
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "result": {
+        "resourceTemplates": [
+          {
+            "uriTemplate": "harn://package/{artifact}",
+            "name": "package-artifact",
+            "title": "Package Artifact",
+            "description": "Read package artifacts exposed by this Harn MCP server.",
+            "mimeType": "application/octet-stream"
+          }
+        ]
+      }
     }
   ],
   "matrix": {
@@ -132,7 +160,7 @@
     "source": {
       "kind": "adapter_generated",
       "generator": "cargo test -p harn-serve adapters::mcp::tests::adapter_protocol_fixture_matches_checked_in_matrix",
-      "description": "Generated from McpServer initialize, tools/list, resources/list, and resources/read adapter code."
+      "description": "Generated from McpServer initialize, tools/list, resources/list, resources/read, and resources/templates/list adapter code."
     }
   }
 }

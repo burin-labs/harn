@@ -6,10 +6,8 @@ use base64::Engine;
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
 
-use crate::package::Manifest;
-
 #[derive(Clone, Debug, Default)]
-pub(crate) struct FilePromptCatalog {
+pub struct FilePromptCatalog {
     prompts: Vec<FilePrompt>,
 }
 
@@ -37,6 +35,14 @@ struct PromptImage {
     path: Option<PathBuf>,
     data: Option<String>,
     mime_type: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FilePromptSource {
+    pub name: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub body: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -91,7 +97,7 @@ fn default_required() -> bool {
 }
 
 impl FilePromptCatalog {
-    pub(crate) fn discover(project_root: &Path, manifest_source: &str) -> Self {
+    pub fn discover(project_root: &Path, manifest_source: &str) -> Self {
         let mut candidates = Vec::new();
         collect_prompt_files(project_root, project_root, None, &mut candidates);
 
@@ -107,7 +113,7 @@ impl FilePromptCatalog {
         }
     }
 
-    pub(crate) fn list(&self) -> Vec<JsonValue> {
+    pub fn list(&self) -> Vec<JsonValue> {
         self.prompts
             .iter()
             .map(|prompt| {
@@ -139,7 +145,30 @@ impl FilePromptCatalog {
             .collect()
     }
 
-    pub(crate) fn get(&self, name: &str, arguments: &JsonValue) -> Result<JsonValue, String> {
+    pub fn is_empty(&self) -> bool {
+        self.prompts.is_empty()
+    }
+
+    pub fn names(&self) -> Vec<String> {
+        self.prompts
+            .iter()
+            .map(|prompt| prompt.name.clone())
+            .collect()
+    }
+
+    pub fn sources(&self) -> Vec<FilePromptSource> {
+        self.prompts
+            .iter()
+            .map(|prompt| FilePromptSource {
+                name: prompt.name.clone(),
+                title: prompt.title.clone(),
+                description: prompt.description.clone(),
+                body: prompt.body.clone(),
+            })
+            .collect()
+    }
+
+    pub fn get(&self, name: &str, arguments: &JsonValue) -> Result<JsonValue, String> {
         let prompt = self
             .prompts
             .iter()
@@ -148,7 +177,7 @@ impl FilePromptCatalog {
         prompt.render(arguments)
     }
 
-    pub(crate) fn complete(
+    pub fn complete(
         &self,
         name: &str,
         argument_name: &str,
@@ -482,7 +511,13 @@ fn is_identifier(value: &str) -> bool {
 }
 
 fn dependency_aliases(manifest_source: &str) -> Vec<String> {
-    let Ok(manifest) = toml::from_str::<Manifest>(manifest_source) else {
+    #[derive(Deserialize)]
+    struct PromptDependencyManifest {
+        #[serde(default)]
+        dependencies: BTreeMap<String, toml::Value>,
+    }
+
+    let Ok(manifest) = toml::from_str::<PromptDependencyManifest>(manifest_source) else {
         return Vec::new();
     };
     let mut aliases = manifest.dependencies.keys().cloned().collect::<Vec<_>>();

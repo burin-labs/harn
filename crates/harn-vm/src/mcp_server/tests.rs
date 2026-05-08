@@ -484,14 +484,7 @@ async fn server_completion_complete_returns_prompt_and_resource_suggestions() {
 }
 
 #[tokio::test]
-async fn server_no_longer_auto_rejects_elicitation_create() {
-    // Before #875 the unsupported gap list rejected `elicitation/create`
-    // with a -32601 + an mcp.unsupportedFeature `data` payload. Now we
-    // implement bidirectional elicitation, so it's removed from that
-    // list. The server itself doesn't expect inbound elicitation
-    // requests (clients send the *response* not a fresh request), so
-    // the dispatcher's plain "Method not found" still fires — but the
-    // unsupported-feature data payload should be gone.
+async fn server_rejects_client_bound_sampling_and_elicitation_requests() {
     let server = McpServer::new(
         "test".to_string(),
         Vec::new(),
@@ -500,19 +493,28 @@ async fn server_no_longer_auto_rejects_elicitation_create() {
         Vec::new(),
     );
     let mut vm = crate::Vm::new();
-    let response = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(7, "elicitation/create", serde_json::json!({})),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-    assert!(response.get("result").is_none());
-    assert_eq!(response["error"]["code"], serde_json::json!(-32601));
-    assert!(
-        response["error"].get("data").is_none(),
-        "expected no `data` payload now that elicitation is removed from the gap list, got {response:?}"
-    );
+    for (method, feature) in [
+        (
+            crate::mcp_protocol::METHOD_SAMPLING_CREATE_MESSAGE,
+            "sampling",
+        ),
+        (
+            crate::mcp_protocol::METHOD_ELICITATION_CREATE,
+            "elicitation",
+        ),
+    ] {
+        let response = server
+            .handle_json_rpc(
+                crate::jsonrpc::request(7, method, serde_json::json!({})),
+                &mut vm,
+            )
+            .await
+            .expect("response");
+        assert!(response.get("result").is_none());
+        assert_eq!(response["error"]["code"], serde_json::json!(-32601));
+        assert_eq!(response["error"]["data"]["feature"], feature);
+        assert_eq!(response["error"]["data"]["role"], "client");
+    }
 }
 
 #[tokio::test]

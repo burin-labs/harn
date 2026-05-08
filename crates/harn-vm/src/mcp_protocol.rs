@@ -8,6 +8,8 @@ pub const METHOD_TASKS_RESULT: &str = "tasks/result";
 pub const METHOD_TASKS_LIST: &str = "tasks/list";
 pub const METHOD_TASKS_CANCEL: &str = "tasks/cancel";
 pub const METHOD_COMPLETION_COMPLETE: &str = "completion/complete";
+pub const METHOD_SAMPLING_CREATE_MESSAGE: &str = "sampling/createMessage";
+pub const METHOD_ELICITATION_CREATE: &str = "elicitation/create";
 pub const METHOD_TASK_STATUS_NOTIFICATION: &str = "notifications/tasks/status";
 pub const METHOD_ROOTS_LIST: &str = "roots/list";
 pub const METHOD_ROOTS_LIST_CHANGED_NOTIFICATION: &str = "notifications/roots/list_changed";
@@ -112,6 +114,37 @@ pub fn unsupported_latest_spec_method_response(
             unsupported_method_data(entry),
         )
     })
+}
+
+pub fn unsupported_client_bound_method_response(
+    id: impl Into<JsonValue>,
+    method: &str,
+) -> Option<JsonValue> {
+    let (feature, reason) = match method {
+        METHOD_SAMPLING_CREATE_MESSAGE => (
+            "sampling",
+            "MCP sampling requests are server-to-client requests. Harn does not accept client-initiated sampling on MCP server endpoints.",
+        ),
+        METHOD_ELICITATION_CREATE => (
+            "elicitation",
+            "MCP elicitation requests are server-to-client requests. Harn MCP servers initiate elicitation from tool, resource, or prompt handlers instead of accepting it from clients.",
+        ),
+        _ => return None,
+    };
+    Some(crate::jsonrpc::error_response_with_data(
+        id,
+        -32601,
+        &format!("Unsupported MCP client-bound method: {method}"),
+        json!({
+            "type": "mcp.unsupportedFeature",
+            "protocolVersion": PROTOCOL_VERSION,
+            "method": method,
+            "feature": feature,
+            "role": "client",
+            "status": "unsupported",
+            "reason": reason,
+        }),
+    ))
 }
 
 pub fn unsupported_task_augmentation_response(id: impl Into<JsonValue>, method: &str) -> JsonValue {
