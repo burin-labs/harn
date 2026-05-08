@@ -7,6 +7,7 @@ pub(crate) mod contracts;
 pub(crate) mod crystallize;
 pub(crate) mod doctor;
 pub(crate) mod dump_highlight_keywords;
+pub(crate) mod dump_protocol_artifacts;
 pub(crate) mod dump_trigger_quickref;
 pub(crate) mod explain;
 pub mod flow;

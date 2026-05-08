@@ -114,6 +114,24 @@ pub enum ToolCallStatus {
     Failed,
 }
 
+impl ToolCallStatus {
+    pub const ALL: [Self; 4] = [
+        Self::Pending,
+        Self::InProgress,
+        Self::Completed,
+        Self::Failed,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
 /// Wire-level classification of a `ToolCallUpdate` failure. Pairs with the
 /// human-readable `error` string so clients can render each failure type
 /// distinctly (e.g. surface a "permission denied" badge, or a different
@@ -158,6 +176,20 @@ pub enum ToolCallErrorCategory {
 }
 
 impl ToolCallErrorCategory {
+    pub const ALL: [Self; 11] = [
+        Self::SchemaValidation,
+        Self::ToolError,
+        Self::McpServerError,
+        Self::HostBridgeError,
+        Self::PermissionDenied,
+        Self::RejectedLoop,
+        Self::ParseAborted,
+        Self::Timeout,
+        Self::Network,
+        Self::Cancelled,
+        Self::Unknown,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::SchemaValidation => "schema_validation",

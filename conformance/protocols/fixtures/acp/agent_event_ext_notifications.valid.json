@@ -43,6 +43,18 @@
       "jsonrpc": "2.0",
       "method": "_harn/agentEvent",
       "params": {
+        "checkpoint": {
+          "stage": "verify",
+          "type": "stage_gate"
+        },
+        "kind": "typed_checkpoint",
+        "sessionId": "session-1"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
         "content": "missed required tool call; reissuing",
         "feedbackKind": "protocol_violation",
         "kind": "feedback_injected",
@@ -77,6 +89,34 @@
         "elapsedMs": 12000,
         "kind": "daemon_watchdog_tripped",
         "sessionId": "session-1"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "action": "extend",
+        "iteration": 6,
+        "kind": "loop_control_decision",
+        "newLimit": 10,
+        "oldLimit": 8,
+        "reason": "verification still running",
+        "sessionId": "session-1",
+        "status": "working"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "audit": {
+          "consent": "not_required",
+          "summary": "Read project context"
+        },
+        "kind": "tool_call_audit",
+        "sessionId": "session-1",
+        "toolCallId": "tool-1",
+        "toolName": "read_file"
       }
     }
   ],

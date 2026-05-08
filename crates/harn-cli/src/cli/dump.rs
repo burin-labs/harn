@@ -37,3 +37,14 @@ pub(crate) struct DumpConnectorMatrixArgs {
     #[arg(long)]
     pub check: bool,
 }
+
+#[derive(Debug, Args)]
+pub(crate) struct DumpProtocolArtifactsArgs {
+    /// Directory for generated protocol schemas and bindings.
+    #[arg(long, default_value = "spec/protocol-artifacts")]
+    pub output_dir: String,
+    /// Verify checked-in artifacts match the generator output; exit non-zero
+    /// if stale.
+    #[arg(long)]
+    pub check: bool,
+}

@@ -70,6 +70,7 @@
 - [MCP, ACP, and A2A integration](./mcp-and-acp.md)
 - [Outbound workflow server](./harn-serve.md)
 - [Bridge protocol](./bridge-protocol.md)
+- [Generated protocol artifacts](./protocol-artifacts.md)
 - [Host tools over the bridge](./bridge/host-tools.md)
 - [ACP over WebSocket](./acp/websocket.md)
 - [Harn ACP/MCP extensions v1](./spec/harn-extensions/v1.md)

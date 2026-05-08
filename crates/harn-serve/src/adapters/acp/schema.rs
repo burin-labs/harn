@@ -1,8 +1,22 @@
 //! ACP capability metadata and prompt content normalization.
-pub(super) const ACP_SCHEMA_COMPATIBILITY: &str =
+pub const ACP_SCHEMA_COMPATIBILITY: &str =
     "agentclientprotocol/agent-client-protocol schema v0.12.2";
 
-pub(super) const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
+pub const ACP_SESSION_UPDATE_VARIANTS: &[&str] = &[
+    "user_message_chunk",
+    "agent_message_chunk",
+    "agent_thought_chunk",
+    "tool_call",
+    "tool_call_update",
+    "plan",
+    "available_commands_update",
+    "current_mode_update",
+    "config_option_update",
+    "session_info_update",
+];
+
+pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
+    "available_commands_update",
     "fs_watch",
     "handoff",
     "hitl_request",
@@ -25,24 +39,27 @@ pub(super) const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
 /// extensibility spec). Callers should never hardcode the literal —
 /// reference this constant so a future rename ripples through the
 /// adapter, fixtures, tests, and capability advertisement together.
-pub(super) const HARN_AGENT_EVENT_METHOD: &str = "_harn/agentEvent";
+pub const HARN_AGENT_EVENT_METHOD: &str = "_harn/agentEvent";
 
 /// Pipeline-loop milestone kinds the adapter currently emits via
 /// `_harn/agentEvent`. The list is stable wire vocabulary — adding a
 /// new kind is additive and SHOULD be treated by clients as
 /// "unknown kind, ignore." Keep it sorted for diff-friendliness and
 /// keep it in lockstep with the match arm in `events.rs`.
-pub(super) const HARN_AGENT_EVENT_KINDS: &[&str] = &[
+pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "budget_exhausted",
     "daemon_watchdog_tripped",
     "feedback_injected",
     "judge_decision",
+    "loop_control_decision",
     "loop_stuck",
+    "tool_call_audit",
+    "typed_checkpoint",
     "turn_end",
     "turn_start",
 ];
 
-pub(super) const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
+pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "audit",
     "durationMs",
     "error",
@@ -53,7 +70,7 @@ pub(super) const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "rawInputPartial",
 ];
 
-pub(super) const HARN_CONTENT_EXTENSION_FIELDS: &[&str] = &["visible_delta", "visible_text"];
+pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] = &["visible_delta", "visible_text"];
 pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
     serde_json::json!({
         "harn": {
@@ -69,9 +86,7 @@ pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
             // version-check before subscribing.
             "extensionMethods": {
                 HARN_AGENT_EVENT_METHOD: {
-                    "description": "Pipeline-loop milestones (turn boundaries, \
-                                    feedback injections, budget exhaustion, \
-                                    loop-stuck, daemon watchdog) that have no \
+                    "description": "Pipeline-loop milestones that have no \
                                     canonical ACP session/update mapping.",
                     "kinds": HARN_AGENT_EVENT_KINDS,
                     "schema": "https://harnlang.com/spec/harn-extensions/agent-event/v1",
