@@ -64,6 +64,13 @@ SYSTEM_TIME_ALLOWLIST=(
 # cannot be resolved by a static text search.
 RECV_TIMEOUT_MILLIS_ALLOWLIST=()
 
+# Conformance tests that exercise real subprocesses should share the bounded
+# polling helpers from `conformance/tests/_common.harn` instead of copying
+# ad hoc loops into each fixture.
+CONFORMANCE_HELPER_ALLOWLIST=(
+  "conformance/tests/_common.harn"
+)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -114,7 +121,8 @@ is_e2e_subprocess_path() {
 
 # Collect test file paths into a temp file so we can reuse the list.
 TEST_FILES_TMP="$(mktemp)"
-trap 'rm -f "$TEST_FILES_TMP"' EXIT
+HARN_TEST_FILES_TMP="$(mktemp)"
+trap 'rm -f "$TEST_FILES_TMP" "$HARN_TEST_FILES_TMP"' EXIT
 
 {
   # crates/**/tests/**/*.rs — any depth under a tests/ directory
@@ -122,6 +130,8 @@ trap 'rm -f "$TEST_FILES_TMP"' EXIT
   # crates/**/src/**/tests.rs and tests_*.rs — inline test modules
   find crates -type f \( -name "tests.rs" -o -name "tests_*.rs" \) -path "*/src/*"
 } | sort -u > "$TEST_FILES_TMP"
+
+find conformance/tests -type f -name "*.harn" | sort -u > "$HARN_TEST_FILES_TMP"
 
 # check_pattern PATTERN ALLOWLIST_VAR SUGGESTION
 #   Greps PATTERN across test files, skipping allowlisted files.
@@ -213,12 +223,42 @@ while IFS= read -r file; do
   done < <(grep -n "spawn_orchestrator(" "$file" 2>/dev/null || true)
 done < "$TEST_FILES_TMP"
 
+echo "--- copied conformance subprocess wait helpers ---"
+check_harn_helper_pattern() {
+  local pattern="$1"
+  local suggestion="$2"
+
+  while IFS= read -r file; do
+    in_allowlist "$file" CONFORMANCE_HELPER_ALLOWLIST && continue
+    while IFS= read -r hit; do
+      [[ -z "$hit" ]] && continue
+      echo "  $hit"
+      echo "    hint: $suggestion"
+      violations=$((violations + 1))
+    done < <(grep -n -- "$pattern" "$file" 2>/dev/null || true)
+  done < "$HARN_TEST_FILES_TMP"
+}
+
+check_harn_helper_pattern \
+  "^fn wait_for_listener_url\|^fn wait_for_a2a_server_url\|^fn wait_for_log_line\|^fn wait_for_exit" \
+  "Import the shared helper from conformance/tests/_common.harn so retry ceilings stay consistent."
+
+echo "--- random fixed-port conformance server allocation ---"
+while IFS= read -r file; do
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    echo "  $hit"
+    echo "    hint: Bind test servers to port 0 and read the selected port from the readiness log."
+    violations=$((violations + 1))
+  done < <(grep -n "random_int(20000, 45000)" "$file" 2>/dev/null || true)
+done < "$HARN_TEST_FILES_TMP"
+
 # ---------------------------------------------------------------------------
 echo
 if (( violations > 0 )); then
   echo "FAIL: $violations wall-clock pattern violation(s) found in test files."
   echo
-  echo "Forbidden patterns cause flaky tests. See docs/dev/testing.md for"
+  echo "Forbidden patterns cause flaky tests. See docs/src/dev/testing.md for"
   echo "approved alternatives and how to opt out with reviewer justification."
   exit 1
 else

@@ -4,6 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
 const test = require("node:test");
+const { pathToFileURL } = require("node:url");
 
 class LspClient {
   constructor(server) {
@@ -120,11 +121,26 @@ function repoRoot() {
 }
 
 function fileUri(filePath) {
-  return `file://${filePath}`;
+  return pathToFileURL(filePath).toString();
 }
 
 function buildLspBinary(root) {
-  const env = { ...process.env, HARN_LLM_CALLS_DISABLED: "1" };
+  if (process.env.HARN_LSP_BIN) {
+    assert.ok(
+      fs.existsSync(process.env.HARN_LSP_BIN),
+      `HARN_LSP_BIN does not exist: ${process.env.HARN_LSP_BIN}`
+    );
+    return { binary: process.env.HARN_LSP_BIN, targetDir: undefined };
+  }
+
+  const targetDir = process.env.CARGO_TARGET_DIR
+    ? process.env.CARGO_TARGET_DIR
+    : fs.mkdtempSync(path.join(os.tmpdir(), "harn-lsp-target-"));
+  const env = {
+    ...process.env,
+    CARGO_TARGET_DIR: targetDir,
+    HARN_LLM_CALLS_DISABLED: "1",
+  };
   const build = spawnSync(
     "cargo",
     ["build", "--quiet", "-p", "harn-lsp", "--bin", "harn-lsp"],
@@ -140,11 +156,8 @@ function buildLspBinary(root) {
     `cargo build failed\nstdout:\n${build.stdout}\nstderr:\n${build.stderr}`
   );
 
-  const targetDir = process.env.CARGO_TARGET_DIR
-    ? process.env.CARGO_TARGET_DIR
-    : path.join(root, "target");
   const exe = process.platform === "win32" ? "harn-lsp.exe" : "harn-lsp";
-  return path.join(targetDir, "debug", exe);
+  return { binary: path.join(targetDir, "debug", exe), targetDir };
 }
 
 function positionOf(source, needle) {
@@ -160,7 +173,7 @@ function positionOf(source, needle) {
 
 test("VS Code-facing LSP surface supports on-type formatting, folding, and call hierarchy", async (t) => {
   const root = repoRoot();
-  const lspBinary = buildLspBinary(root);
+  const { binary: lspBinary, targetDir } = buildLspBinary(root);
   const server = spawn(lspBinary, [], {
     cwd: root,
     env: { ...process.env, HARN_LLM_CALLS_DISABLED: "1" },
@@ -169,6 +182,9 @@ test("VS Code-facing LSP surface supports on-type formatting, folding, and call 
   const client = new LspClient(server);
   t.after(async () => {
     await client.stop();
+    if (targetDir && !process.env.CARGO_TARGET_DIR) {
+      fs.rmSync(targetDir, { recursive: true, force: true });
+    }
   });
 
   const initialize = await client.request("initialize", {

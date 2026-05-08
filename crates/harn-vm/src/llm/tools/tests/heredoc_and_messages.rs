@@ -689,10 +689,8 @@ fn read_file_offset_and_limit() {
     use super::super::handle_tool_locally;
     use std::io::Write;
 
-    // Create a temp file with numbered lines.
-    let dir = std::env::temp_dir().join("harn_test_read_file_offset");
-    let _ = std::fs::create_dir_all(&dir);
-    let path = dir.join("test_offset.txt");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test_offset.txt");
     {
         let mut f = std::fs::File::create(&path).unwrap();
         for i in 1..=20 {
@@ -724,8 +722,4 @@ fn read_file_offset_and_limit() {
     let result =
         handle_tool_locally("read_file", &json!({"path": path_str, "offset": 100})).unwrap();
     assert!(!result.contains("line"), "no content past end");
-
-    // Clean up.
-    let _ = std::fs::remove_file(&path);
-    let _ = std::fs::remove_dir(&dir);
 }

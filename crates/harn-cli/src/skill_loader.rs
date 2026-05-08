@@ -381,6 +381,7 @@ mod tests {
     use super::*;
     use std::fs;
 
+    use crate::env_guard::ScopedEnvVar;
     use crate::skill_provenance;
     use crate::tests::common::{cwd_lock::lock_cwd, env_lock::lock_env};
 
@@ -392,6 +393,10 @@ mod tests {
             format!("---\nname: {name}\nshort: {name} short card\n---\n{body}"),
         )
         .unwrap();
+    }
+
+    fn set_home(path: &Path) -> ScopedEnvVar {
+        ScopedEnvVar::set("HOME", path.to_str().unwrap())
     }
 
     #[test]
@@ -452,7 +457,7 @@ mod tests {
         let _cwd = lock_cwd();
         let _env = lock_env().blocking_lock();
         let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("HOME", tmp.path());
+        let _home = set_home(tmp.path());
 
         let skill_dir = tmp.path().join("deploy");
         fs::create_dir_all(&skill_dir).unwrap();
@@ -511,7 +516,7 @@ mod tests {
         let _cwd = lock_cwd();
         let _env = lock_env().blocking_lock();
         let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("HOME", tmp.path());
+        let _home = set_home(tmp.path());
 
         let skill_dir = tmp.path().join("deploy");
         fs::create_dir_all(&skill_dir).unwrap();

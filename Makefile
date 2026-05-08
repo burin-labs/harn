@@ -258,7 +258,7 @@ check-docs-snippets:
 	@./scripts/check_docs_snippets.sh
 
 # Lint test files for wall-clock polling patterns that cause flaky tests.
-# See docs/dev/testing.md for approved alternatives and the opt-out mechanism.
+# See docs/src/dev/testing.md for approved alternatives and the opt-out mechanism.
 lint-test-patterns:
 	@./scripts/lint_test_patterns.sh
 

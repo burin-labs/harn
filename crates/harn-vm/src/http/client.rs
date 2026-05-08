@@ -859,7 +859,7 @@ fn should_retry_transport(
         && (error.is_timeout() || error.is_connect())
 }
 
-pub(super) fn parse_retry_after_value(value: &str) -> Option<Duration> {
+pub(super) fn parse_retry_after_value_at(value: &str, now: SystemTime) -> Option<Duration> {
     let value = value.trim();
     if value.is_empty() {
         return None;
@@ -875,13 +875,17 @@ pub(super) fn parse_retry_after_value(value: &str) -> Option<Duration> {
 
     if let Ok(target) = httpdate::parse_http_date(value) {
         let millis = target
-            .duration_since(SystemTime::now())
+            .duration_since(now)
             .map(|delta| delta.as_millis() as u64)
             .unwrap_or(0);
         return Some(Duration::from_millis(millis.min(MAX_RETRY_DELAY_MS)));
     }
 
     None
+}
+
+pub(super) fn parse_retry_after_value(value: &str) -> Option<Duration> {
+    parse_retry_after_value_at(value, SystemTime::now())
 }
 
 fn parse_retry_after_header(value: &reqwest::header::HeaderValue) -> Option<Duration> {

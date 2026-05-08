@@ -98,7 +98,8 @@ It exposes a synchronous control channel so the test drives process state
 
 The following patterns are banned in test files by `make lint-test-patterns`.
 The script searches files under `crates/**/tests/**/*.rs`,
-`crates/**/src/**/tests.rs`, and `crates/**/src/**/tests_*.rs`.
+`crates/**/src/**/tests.rs`, `crates/**/src/**/tests_*.rs`, and
+`conformance/tests/**/*.harn`.
 
 | Pattern | Why it is banned | Approved alternative |
 |---|---|---|
@@ -107,6 +108,8 @@ The script searches files under `crates/**/tests/**/*.rs`,
 | `while … Instant::now()` | Wall-clock polling loop; flaky under load | `EventLog::subscribe()` + `timeout` |
 | `SystemTime::now()` in tests | Real wall-clock timestamp; non-reproducible | `MockClock` or injected timestamp |
 | `recv_timeout(Duration::from_millis(…))` | Busy-wait with a short literal timeout | `tokio::time::timeout` with event channel |
+| copied conformance subprocess wait helpers | Drifts retry ceilings and diagnostics between fixtures | import `conformance/tests/_common.harn` |
+| `random_int(20000, 45000)` for server ports | Races with other tests and local services | bind port `0` and read the readiness log |
 
 ## Opting out
 

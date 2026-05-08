@@ -28,12 +28,9 @@ export XDG_CONFIG_HOME="$CONFIG_ROOT"
 CLI_BIN="$GRAMMAR_DIR/node_modules/.bin/tree-sitter"
 
 if [[ ! -x "$CLI_BIN" ]]; then
-  echo "bootstrapping tree-sitter-harn npm dependencies" >&2
-  if [[ -f "$GRAMMAR_DIR/package-lock.json" ]]; then
-    (cd "$GRAMMAR_DIR" && npm ci)
-  else
-    (cd "$GRAMMAR_DIR" && npm install)
-  fi
+  echo "missing tree-sitter CLI at $CLI_BIN" >&2
+  echo "run \`cd tree-sitter-harn && npm ci\` before grammar build/test commands" >&2
+  exit 1
 fi
 
 exec "$CLI_BIN" "$@"
