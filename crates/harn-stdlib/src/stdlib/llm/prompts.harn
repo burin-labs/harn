@@ -50,6 +50,68 @@ fn __output_contract_block(contract) {
   return join(lines, "\n")
 }
 
+fn __prompt_part_list(value) {
+  if value == nil {
+    return []
+  }
+  if type_of(value) == "list" {
+    return value
+  }
+  return [value]
+}
+
+fn __normalize_system_prompt_part(part) {
+  if type_of(part) == "dict" {
+    return part
+  }
+  return {content: to_string(part)}
+}
+
+/** system_prompt_part. */
+pub fn system_prompt_part(content, options = nil) {
+  let opts = if type_of(options) == "dict" {
+    options
+  } else {
+    {}
+  }
+  return opts + {content: to_string(content)}
+}
+
+/** system_preamble. */
+pub fn system_preamble(content, options = nil) {
+  let opts = if type_of(options) == "dict" {
+    options
+  } else {
+    {}
+  }
+  return system_prompt_part(content, opts + {position: "before"})
+}
+
+/** system_appendix. */
+pub fn system_appendix(content, options = nil) {
+  let opts = if type_of(options) == "dict" {
+    options
+  } else {
+    {}
+  }
+  return system_prompt_part(content, opts + {position: "after"})
+}
+
+/** with_system_prompt_parts. */
+pub fn with_system_prompt_parts(options, parts) {
+  let opts = if type_of(options) == "dict" {
+    options
+  } else {
+    {}
+  }
+  let existing = __prompt_part_list(opts?.system_prompt_parts)
+  var normalized = []
+  for part in __prompt_part_list(parts) {
+    normalized = normalized.push(__normalize_system_prompt_part(part))
+  }
+  return opts + {system_prompt_parts: existing + normalized}
+}
+
 /**
  * Build a structured system prompt from typed parts. Deterministic for
  * caching. Required: opts.persona (string). Optional: opts.tools

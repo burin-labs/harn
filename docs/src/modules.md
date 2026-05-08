@@ -79,7 +79,8 @@ code or inside any pipeline.
 
 `import "std/..."` is only needed for the Harn-written helper modules
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
-`std/path`, `std/cache`, `std/llm/handlers`, `std/llm/budget`, `std/vision`,
+`std/path`, `std/cache`, `std/llm/handlers`, `std/llm/budget`,
+`std/llm/prompts`, `std/vision`,
 `std/context`, `std/agent_state`, `std/agents`, `std/runtime`, `std/command`,
 `std/git`, `std/review`,
 `std/experiments`,
@@ -107,6 +108,7 @@ import "std/experiments"
 import "std/git"
 import "std/json"
 import "std/llm/budget"
+import "std/llm/prompts"
 import "std/math"
 import "std/monitors"
 import "std/path"
@@ -178,6 +180,29 @@ Model-aware token budget helpers:
 | `estimate_text_tokens(text, model?)` | Count text tokens with tiktoken for known OpenAI models, labeled tiktoken approximations for Claude/Gemini families, or a heuristic fallback |
 | `estimate_text_tokens_detail(text, model?)` | Return `{tokens, encoder, source, exact, model_family, known_model_family}` for budget/debug UI |
 | `token_count_encoder(model)` | Return encoder metadata for a model without counting text |
+
+### std/llm/prompts
+
+Prompt helpers for deterministic system prompt composition:
+
+| Function | Description |
+|---|---|
+| `system_prompt_part(content, options?)` | Build a labeled, enableable system prompt fragment for `system_prompt_parts` |
+| `system_preamble(content, options?)` | Build a fragment positioned before the call/session system prompt |
+| `system_appendix(content, options?)` | Build a fragment positioned after the call/session system prompt |
+| `with_system_prompt_parts(options, parts)` | Return `options` with one or more normalized `system_prompt_parts` appended |
+| `system_prelude(opts)` | Build a structured system prompt from persona, constraints, tools, output contract, examples, and tone |
+| `tool_use_prelude(tools, format)` | Render a deterministic tool-use prelude for non-`agent_loop` callers |
+
+`llm_call` and `agent_loop` also accept raw option keys
+`system_preamble`, `system_context`, `system_prompt_parts`,
+`system_appendix`, `system_prefix`, and `system_suffix`. For persistent
+agent sessions, Harn records the composed session-level system prompt once in
+transcript metadata, emits one leading fingerprint event, and sends the
+synthesized provider system field on each model request without adding repeated
+`system` messages to the replayable message list. A later continuation that
+omits all system prompt fields reuses the stored session prompt for the provider
+request without writing another transcript event.
 
 ### std/experiments
 

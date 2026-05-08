@@ -205,7 +205,13 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         }
     };
 
+    let session_system_prompt =
+        super::helpers::compose_system_prompt(system.clone(), Some(&opts_map))?;
     let resolved = crate::agent_sessions::open_or_create(Some(session_id));
+    if let Some(system_prompt) = session_system_prompt.as_deref() {
+        crate::agent_sessions::record_system_prompt(&resolved, system_prompt)
+            .map_err(VmError::Runtime)?;
+    }
 
     let user_msg = serde_json::json!({"role": "user", "content": message});
     let _ = crate::agent_sessions::inject_message(&resolved, json_to_vm(&user_msg));

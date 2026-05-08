@@ -13,7 +13,10 @@ pub(crate) use messages::{
     json_messages_to_vm, vm_add_role_message, vm_message_value, vm_messages_to_json,
 };
 pub(crate) use opt_get::{opt_bool, opt_float, opt_int, opt_str};
-pub(crate) use options::{expects_structured_output, extract_json, extract_llm_options};
+pub(crate) use options::{
+    compose_system_prompt, expects_structured_output, extract_json, extract_llm_options,
+    system_prompt_event_metadata, system_prompt_metadata,
+};
 pub use provider::no_credentials_message;
 #[cfg(test)]
 pub(crate) use provider::reset_provider_key_cache;
@@ -21,11 +24,13 @@ pub use provider::resolve_api_key;
 pub(crate) use provider::{
     provider_key_available, vm_resolve_model, vm_resolve_provider, ResolvedProvider,
 };
+#[cfg(test)]
+pub(crate) use transcript::transcript_to_vm_with_events;
 pub(crate) use transcript::{
     is_transcript_value, new_transcript_with, new_transcript_with_events,
     normalize_transcript_asset, transcript_asset_list, transcript_event,
     transcript_event_from_message, transcript_events_from_messages, transcript_id,
-    transcript_message_list, transcript_summary_text, transcript_to_vm_with_events,
+    transcript_message_list, transcript_summary_text, transcript_to_vm_with_event_prefix,
 };
 
 pub(super) const TRANSCRIPT_TYPE: &str = "transcript";

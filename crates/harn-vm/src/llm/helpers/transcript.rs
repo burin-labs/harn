@@ -74,8 +74,31 @@ pub(crate) fn new_transcript_with_events(
     assets: Vec<VmValue>,
     state: Option<&str>,
 ) -> VmValue {
+    new_transcript_with_event_prefix(
+        id,
+        messages,
+        summary,
+        metadata,
+        Vec::new(),
+        extra_events,
+        assets,
+        state,
+    )
+}
+
+pub(crate) fn new_transcript_with_event_prefix(
+    id: Option<String>,
+    messages: Vec<VmValue>,
+    summary: Option<String>,
+    metadata: Option<VmValue>,
+    prefix_events: Vec<VmValue>,
+    extra_events: Vec<VmValue>,
+    assets: Vec<VmValue>,
+    state: Option<&str>,
+) -> VmValue {
     let mut transcript = BTreeMap::new();
-    let mut events = transcript_events_from_messages(&messages);
+    let mut events = prefix_events;
+    events.extend(transcript_events_from_messages(&messages));
     events.extend(extra_events);
     transcript.insert(
         "_type".to_string(),
@@ -137,6 +160,7 @@ pub(crate) fn transcript_events_from_messages(messages: &[VmValue]) -> Vec<VmVal
     messages.iter().map(transcript_event_from_message).collect()
 }
 
+#[cfg(test)]
 pub(crate) fn transcript_to_vm_with_events(
     id: Option<String>,
     summary: Option<String>,
@@ -152,6 +176,29 @@ pub(crate) fn transcript_to_vm_with_events(
         json_messages_to_vm(messages),
         summary,
         metadata_vm,
+        extra_events,
+        assets,
+        state,
+    )
+}
+
+pub(crate) fn transcript_to_vm_with_event_prefix(
+    id: Option<String>,
+    summary: Option<String>,
+    metadata: Option<serde_json::Value>,
+    messages: &[serde_json::Value],
+    prefix_events: Vec<VmValue>,
+    extra_events: Vec<VmValue>,
+    assets: Vec<VmValue>,
+    state: Option<&str>,
+) -> VmValue {
+    let metadata_vm = metadata.as_ref().map(crate::stdlib::json_to_vm_value);
+    new_transcript_with_event_prefix(
+        id,
+        json_messages_to_vm(messages),
+        summary,
+        metadata_vm,
+        prefix_events,
         extra_events,
         assets,
         state,

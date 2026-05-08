@@ -48,6 +48,10 @@ pub struct SessionState {
     /// this session. A transcript is only replayable under the same
     /// contract that produced its prompt/history.
     pub tool_format: Option<String>,
+    /// Stable session-level system prompt material. This is transcript
+    /// metadata, not a replay message: providers receive it through
+    /// their system/developer instruction channel on each call.
+    pub system_prompt: Option<String>,
 }
 
 impl SessionState {
@@ -65,6 +69,7 @@ impl SessionState {
             branched_at_event_index: None,
             active_skills: Vec::new(),
             tool_format: None,
+            system_prompt: None,
         }
     }
 }
@@ -304,6 +309,7 @@ pub fn reset_transcript(id: &str) -> bool {
         };
         state.transcript = empty_transcript(id);
         state.tool_format = None;
+        state.system_prompt = None;
         state.last_accessed = Instant::now();
         true
     })
@@ -316,13 +322,18 @@ pub fn reset_transcript(id: &str) -> bool {
 /// operation itself can't make `src` look stale and kick it out of
 /// the LRU just to make room for the new fork.
 pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
-    let (src_transcript, src_tool_format, dst) = SESSIONS.with(|s| {
+    let (src_transcript, src_tool_format, src_system_prompt, dst) = SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let src = map.get_mut(src_id)?;
         src.last_accessed = Instant::now();
         let dst = dst_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let forked_transcript = clone_transcript_with_id(&src.transcript, &dst);
-        Some((forked_transcript, src.tool_format.clone(), dst))
+        Some((
+            forked_transcript,
+            src.tool_format.clone(),
+            src.system_prompt.clone(),
+            dst,
+        ))
     })?;
     // Ensure cap is respected when inserting the fork.
     open_or_create(Some(dst.clone()));
@@ -331,6 +342,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
         if let Some(state) = map.get_mut(&dst) {
             state.transcript = src_transcript;
             state.tool_format = src_tool_format;
+            state.system_prompt = src_system_prompt;
             state.last_accessed = Instant::now();
         }
         update_lineage(&mut map, src_id, &dst, None);
@@ -745,6 +757,55 @@ pub fn tool_format(id: &str) -> Option<String> {
     })
 }
 
+pub fn record_system_prompt(id: &str, system_prompt: &str) -> Result<(), String> {
+    let system_prompt = system_prompt.trim();
+    if system_prompt.is_empty() {
+        return Ok(());
+    }
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!("agent session '{id}' does not exist"));
+        };
+        let changed = state.system_prompt.as_deref() != Some(system_prompt);
+        state.system_prompt = Some(system_prompt.to_string());
+        let dict = state
+            .transcript
+            .as_dict()
+            .cloned()
+            .unwrap_or_else(BTreeMap::new);
+        let mut next = dict;
+        apply_system_prompt_metadata(&mut next, system_prompt);
+        if changed {
+            let mut events: Vec<VmValue> = match next.get("events") {
+                Some(VmValue::List(list)) => list.iter().cloned().collect(),
+                _ => Vec::new(),
+            };
+            events.push(crate::llm::helpers::transcript_event(
+                "system_prompt",
+                "system",
+                "internal",
+                "",
+                Some(crate::llm::helpers::system_prompt_event_metadata(
+                    system_prompt,
+                )),
+            ));
+            next.insert("events".to_string(), VmValue::List(Rc::new(events)));
+        }
+        state.transcript = VmValue::Dict(Rc::new(next));
+        state.last_accessed = Instant::now();
+        Ok(())
+    })
+}
+
+pub fn system_prompt(id: &str) -> Option<String> {
+    SESSIONS.with(|s| {
+        s.borrow()
+            .get(id)
+            .and_then(|state| state.system_prompt.clone())
+    })
+}
+
 fn empty_transcript(id: &str) -> VmValue {
     use crate::llm::helpers::new_transcript_with;
     new_transcript_with(Some(id.to_string()), Vec::new(), None, None)
@@ -785,6 +846,20 @@ fn clone_transcript_with_parent(transcript: &VmValue, parent_id: &str) -> VmValu
     VmValue::Dict(Rc::new(next))
 }
 
+fn apply_system_prompt_metadata(next: &mut BTreeMap<String, VmValue>, system_prompt: &str) {
+    let mut metadata = match next.get("metadata") {
+        Some(VmValue::Dict(metadata)) => metadata.as_ref().clone(),
+        _ => BTreeMap::new(),
+    };
+    metadata.insert(
+        "system_prompt".to_string(),
+        crate::stdlib::json_to_vm_value(&crate::llm::helpers::system_prompt_metadata(
+            system_prompt,
+        )),
+    );
+    next.insert("metadata".to_string(), VmValue::Dict(Rc::new(metadata)));
+}
+
 fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -> VmValue {
     let Some(dict) = transcript.as_dict() else {
         return transcript;
@@ -801,6 +876,14 @@ fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -
         );
         metadata.insert("tool_mode_locked".to_string(), VmValue::Bool(true));
     }
+    if let Some(system_prompt) = state.system_prompt.as_ref() {
+        metadata.insert(
+            "system_prompt".to_string(),
+            crate::stdlib::json_to_vm_value(&crate::llm::helpers::system_prompt_metadata(
+                system_prompt,
+            )),
+        );
+    }
     if !metadata.is_empty() {
         next.insert("metadata".to_string(), VmValue::Dict(Rc::new(metadata)));
     }
@@ -808,7 +891,8 @@ fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -
 }
 
 fn session_snapshot(state: &SessionState) -> VmValue {
-    let Some(dict) = state.transcript.as_dict() else {
+    let transcript = transcript_with_session_metadata(state.transcript.clone(), state);
+    let Some(dict) = transcript.as_dict() else {
         return state.transcript.clone();
     };
     let mut next = dict.clone();
@@ -922,6 +1006,58 @@ mod tests {
                 _ => 0,
             }
         })
+    }
+
+    fn event_count_by_kind(id: &str, expected_kind: &str) -> usize {
+        snapshot(id)
+            .and_then(|snapshot| snapshot.as_dict().cloned())
+            .and_then(|dict| dict.get("events").cloned())
+            .and_then(|events| match events {
+                VmValue::List(events) => Some(
+                    events
+                        .iter()
+                        .filter(|event| {
+                            event
+                                .as_dict()
+                                .and_then(|dict| dict.get("kind"))
+                                .map(VmValue::display)
+                                .as_deref()
+                                == Some(expected_kind)
+                        })
+                        .count(),
+                ),
+                _ => None,
+            })
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn records_system_prompt_as_metadata_event_without_message() {
+        reset_session_store();
+        let id = open_or_create(Some("system-prompt-session".into()));
+        record_system_prompt(&id, "Follow the workflow.").unwrap();
+        record_system_prompt(&id, "Follow the workflow.").unwrap();
+        inject_message(&id, make_msg("user", "hello")).unwrap();
+
+        let snapshot = snapshot(&id).expect("session snapshot");
+        let metadata = snapshot
+            .as_dict()
+            .and_then(|dict| dict.get("metadata"))
+            .and_then(VmValue::as_dict)
+            .expect("metadata");
+        let system_prompt = metadata
+            .get("system_prompt")
+            .and_then(VmValue::as_dict)
+            .expect("system prompt metadata");
+        assert_eq!(
+            system_prompt
+                .get("content")
+                .map(VmValue::display)
+                .as_deref(),
+            Some("Follow the workflow.")
+        );
+        assert_eq!(message_count(&id), 1);
+        assert_eq!(event_count_by_kind(&id, "system_prompt"), 1);
     }
 
     #[test]

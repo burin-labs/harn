@@ -12,7 +12,8 @@ use super::agent_observe::{
     observed_llm_call, LlmRetryConfig, DEFAULT_LLM_CALL_BACKOFF_MS, DEFAULT_LLM_CALL_RETRIES,
 };
 use super::helpers::{
-    extract_llm_options, opt_bool, opt_int, opt_str, transcript_event, transcript_to_vm_with_events,
+    extract_llm_options, opt_bool, opt_int, opt_str, system_prompt_event_metadata,
+    system_prompt_metadata, transcript_event, transcript_to_vm_with_event_prefix,
 };
 use super::tools::build_assistant_response_message;
 
@@ -50,6 +51,27 @@ pub(crate) fn agent_feedback_message(kind: &str, content: &str) -> VmValue {
     VmValue::Dict(Rc::new(msg))
 }
 
+fn system_prompt_transcript_metadata(system: Option<&String>) -> Option<serde_json::Value> {
+    system
+        .filter(|system| !system.trim().is_empty())
+        .map(|system| serde_json::json!({ "system_prompt": system_prompt_metadata(system) }))
+}
+
+fn system_prompt_transcript_events(system: Option<&String>) -> Vec<VmValue> {
+    system
+        .filter(|system| !system.trim().is_empty())
+        .map(|system| {
+            vec![transcript_event(
+                "system_prompt",
+                "system",
+                "internal",
+                "",
+                Some(system_prompt_event_metadata(system)),
+            )]
+        })
+        .unwrap_or_default()
+}
+
 pub(crate) fn agent_loop_result_from_llm(
     result: &super::api::LlmResult,
     opts: super::api::LlmCallOptions,
@@ -62,7 +84,10 @@ pub(crate) fn agent_loop_result_from_llm(
         result.thinking.as_deref(),
         &opts.provider,
     ));
-    let mut events = vec![transcript_event(
+    let transcript_metadata = system_prompt_transcript_metadata(opts.system.as_ref());
+    let prefix_events = system_prompt_transcript_events(opts.system.as_ref());
+    let mut events = Vec::new();
+    events.push(transcript_event(
         "provider_payload",
         "assistant",
         "internal",
@@ -83,7 +108,7 @@ pub(crate) fn agent_loop_result_from_llm(
             "routing_decision": opts.routing_decision.as_ref(),
             "structural_experiment": opts.applied_structural_experiment.as_ref(),
         })),
-    )];
+    ));
     if let Some(thinking) = result.thinking.clone() {
         if !thinking.is_empty() {
             events.push(transcript_event(
@@ -124,11 +149,12 @@ pub(crate) fn agent_loop_result_from_llm(
             "rejected": [],
             "mode": "",
         },
-        "transcript": super::helpers::vm_value_to_json(&transcript_to_vm_with_events(
+        "transcript": super::helpers::vm_value_to_json(&transcript_to_vm_with_event_prefix(
             None,
             opts.transcript_summary,
-            None,
+            transcript_metadata,
             &transcript_messages,
+            prefix_events,
             events,
             Vec::new(),
             Some("active"),
@@ -153,7 +179,10 @@ pub(crate) fn build_llm_call_result(
         result.thinking.as_deref(),
         &opts.provider,
     ));
-    let mut extra_events = vec![transcript_event(
+    let transcript_metadata = system_prompt_transcript_metadata(opts.system.as_ref());
+    let prefix_events = system_prompt_transcript_events(opts.system.as_ref());
+    let mut extra_events = Vec::new();
+    extra_events.push(transcript_event(
         "provider_payload",
         "assistant",
         "internal",
@@ -166,7 +195,7 @@ pub(crate) fn build_llm_call_result(
             "thinking_summary": result.thinking_summary,
             "structural_experiment": opts.applied_structural_experiment.as_ref(),
         })),
-    )];
+    ));
     if let Some(thinking) = result.thinking.clone() {
         if !thinking.is_empty() {
             extra_events.push(transcript_event(
@@ -189,11 +218,12 @@ pub(crate) fn build_llm_call_result(
             ));
         }
     }
-    let transcript = transcript_to_vm_with_events(
+    let transcript = transcript_to_vm_with_event_prefix(
         None,
         opts.transcript_summary.clone(),
-        None,
+        transcript_metadata,
         &transcript_messages,
+        prefix_events,
         extra_events,
         Vec::new(),
         Some("active"),
