@@ -12,6 +12,7 @@ mod queue;
 mod recover;
 mod reload;
 mod replay;
+mod replay_oracle;
 mod resume;
 pub(crate) mod role;
 mod serve;
@@ -33,6 +34,9 @@ pub(crate) async fn handle(args: OrchestratorArgs) -> OrchestratorResult<()> {
         OrchestratorCommand::Stats(stats_args) => stats::run(stats_args).await,
         OrchestratorCommand::Fire(fire_args) => fire::run(fire_args).await,
         OrchestratorCommand::Replay(replay_args) => replay::run(replay_args).await,
+        OrchestratorCommand::ReplayOracle(replay_oracle_args) => {
+            replay_oracle::run(replay_oracle_args).await
+        }
         OrchestratorCommand::Resume(resume_args) => resume::run(resume_args).await,
         OrchestratorCommand::Dlq(dlq_args) => dlq::run(dlq_args).await,
         OrchestratorCommand::Queue(queue_args) => queue::run(queue_args).await,

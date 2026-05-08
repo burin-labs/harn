@@ -95,9 +95,10 @@ pub(crate) use orchestrator::{
     OrchestratorLogFormat, OrchestratorQueueArgs, OrchestratorQueueCommand,
     OrchestratorQueueDrainArgs, OrchestratorQueueLsArgs, OrchestratorQueuePurgeArgs,
     OrchestratorRecoverArgs, OrchestratorReloadArgs, OrchestratorReplayArgs,
-    OrchestratorResumeArgs, OrchestratorServeArgs, OrchestratorStatsArgs, OrchestratorTenantArgs,
-    OrchestratorTenantCommand, OrchestratorTenantCreateArgs, OrchestratorTenantDeleteArgs,
-    OrchestratorTenantLsArgs, OrchestratorTenantSuspendArgs,
+    OrchestratorReplayOracleArgs, OrchestratorResumeArgs, OrchestratorServeArgs,
+    OrchestratorStatsArgs, OrchestratorTenantArgs, OrchestratorTenantCommand,
+    OrchestratorTenantCreateArgs, OrchestratorTenantDeleteArgs, OrchestratorTenantLsArgs,
+    OrchestratorTenantSuspendArgs,
 };
 pub(crate) use package::{
     AddArgs, InstallArgs, PackageArgs, PackageCacheCommand, PackageCommand, PublishArgs,

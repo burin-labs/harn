@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast conformance protocol-conformance bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets sync-language-spec check-language-spec lint-test-patterns check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression
+.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast conformance protocol-conformance replay-oracle bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets sync-language-spec check-language-spec lint-test-patterns check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance protocol-conformance check-highlight check-language-spec check-trigger-quickref check-provider-matrix check-connector-matrix check-trigger-examples check-docs-snippets lint-test-patterns check-receipt-structs portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance protocol-conformance replay-oracle check-highlight check-language-spec check-trigger-quickref check-provider-matrix check-connector-matrix check-trigger-examples check-docs-snippets lint-test-patterns check-receipt-structs portal-check
 
 check: all
 
@@ -71,6 +71,9 @@ conformance:
 
 protocol-conformance:
 	HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- test protocols
+
+replay-oracle:
+	HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- orchestrator replay-oracle
 
 bench-vm:
 	./scripts/bench_vm.sh

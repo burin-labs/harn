@@ -161,6 +161,34 @@ Recovery reuses the normal `trigger_replay(...)` path, so replayed
 envelopes still flow through the dispatcher's retry policy and DLQ
 handling instead of using a special bypass path.
 
+## Replay Oracle
+
+Use `replay-oracle` to validate checked-in end-to-end replay determinism
+fixtures:
+
+```bash
+harn orchestrator replay-oracle
+```
+
+The oracle reads `conformance/replay-oracle/fixtures` by default. Each fixture
+contains two observed runs for the same logical orchestration trace and compares
+canonicalized EventLog entries, trigger firings, LLM cache material,
+MCP/ACP/A2A interactions, HITL approvals, effect receipts, agent transcript
+deltas, final artifacts, and policy decisions. Fixtures must name
+nondeterministic fields explicitly in `allowlist`; timestamps, generated ids,
+latency, and provider token accounting are not ignored unless the fixture says
+why.
+
+To run one fixture or subtree:
+
+```bash
+harn orchestrator replay-oracle conformance/replay-oracle/fixtures/approval_tool_call.valid.json
+```
+
+On meaningful drift the command exits non-zero and prints the first divergent
+canonical path with left/right values. `make replay-oracle` runs the default
+fixture set and is included in `make all`.
+
 ## HTTP Listener
 
 The orchestrator listener assembles routes from `[[triggers]]` entries

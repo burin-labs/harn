@@ -1,0 +1,114 @@
+{
+  "schema_version": "harn.orchestration.replay_trace.v1",
+  "name": "failed_tool_retry_dead_letter_path",
+  "description": "A tool failure retries once, records deterministic failure receipts, and lands in the trigger DLQ with stable policy decisions.",
+  "expect": "match",
+  "protocol_fixture_refs": [
+    "conformance/protocols/fixtures/mcp/tools_resources_prompts.valid.json"
+  ],
+  "allowlist": [
+    {"path": "/run_id", "reason": "run ids are allocated per execution"},
+    {"path": "/event_log_entries/*/event_id", "reason": "EventLog offsets are backend-local"},
+    {"path": "/event_log_entries/*/occurred_at_ms", "reason": "append timestamps are wall-clock observations"},
+    {"path": "/event_log_entries/*/payload/event_id", "reason": "TriggerEvent ids are generated per intake"},
+    {"path": "/trigger_firings/*/event_id", "reason": "TriggerEvent ids are generated per intake"},
+    {"path": "/trigger_firings/*/trace_id", "reason": "trace ids are generated per execution"},
+    {"path": "/protocol_interactions/*/latency_ms", "reason": "tool adapter latency is wall-clock data"},
+    {"path": "/effect_receipts/*/receipt_id", "reason": "receipt ids are generated per side-effect record"},
+    {"path": "/effect_receipts/*/started_at_ms", "reason": "tool start time is wall-clock data"},
+    {"path": "/effect_receipts/*/completed_at_ms", "reason": "tool completion time is wall-clock data"},
+    {"path": "/policy_decisions/*/decision_id", "reason": "policy decision ids are generated per evaluation"}
+  ],
+  "first_run": {
+    "run_id": "run_live_retry_dlq",
+    "event_log_entries": [
+      {
+        "event_id": 91,
+        "topic": "trigger.attempts",
+        "kind": "dispatch_failed",
+        "occurred_at_ms": 1770000000900,
+        "payload": {"event_id": "trigger_evt_live_retry", "binding_id": "retry-dlq", "attempt": 1, "error_class": "permission_denied"}
+      },
+      {
+        "event_id": 92,
+        "topic": "trigger.attempts",
+        "kind": "dispatch_failed",
+        "occurred_at_ms": 1770000001000,
+        "payload": {"event_id": "trigger_evt_live_retry", "binding_id": "retry-dlq", "attempt": 2, "error_class": "permission_denied"}
+      },
+      {
+        "event_id": 93,
+        "topic": "trigger.dlq",
+        "kind": "dlq_entry",
+        "occurred_at_ms": 1770000001100,
+        "payload": {"event_id": "trigger_evt_live_retry", "binding_id": "retry-dlq", "attempts": 2, "final_error_class": "permission_denied"}
+      }
+    ],
+    "trigger_firings": [
+      {"binding_id": "retry-dlq", "event_id": "trigger_evt_live_retry", "trace_id": "trace_live_retry", "handler_kind": "mcp", "decision": "dlq"}
+    ],
+    "protocol_interactions": [
+      {
+        "protocol": "mcp",
+        "boundary": "tools/call",
+        "fixture_ref": "conformance/protocols/fixtures/mcp/tools_resources_prompts.valid.json",
+        "request": {"method": "tools/call", "tool": "dangerous_delete", "arguments_sha256": "a36e5a9f4af3eebf2ed893807628d7f5b62f9ccad39171cc88d85f5e32274f52"},
+        "response": {"isError": true, "error": "permission_denied"},
+        "latency_ms": 63
+      }
+    ],
+    "effect_receipts": [
+      {"receipt_id": "receipt_live_retry_1", "kind": "tool_error", "tool": "dangerous_delete", "attempt": 1, "started_at_ms": 1770000000910, "completed_at_ms": 1770000000920, "error_class": "permission_denied"},
+      {"receipt_id": "receipt_live_retry_2", "kind": "tool_error", "tool": "dangerous_delete", "attempt": 2, "started_at_ms": 1770000001010, "completed_at_ms": 1770000001020, "error_class": "permission_denied"}
+    ],
+    "policy_decisions": [
+      {"decision_id": "policy_live_retry", "capability": "mcp.tools.call", "decision": "deny", "reason": "forbidden destructive tool"}
+    ]
+  },
+  "second_run": {
+    "run_id": "run_replay_retry_dlq",
+    "event_log_entries": [
+      {
+        "event_id": 101,
+        "topic": "trigger.attempts",
+        "kind": "dispatch_failed",
+        "occurred_at_ms": 1770001000900,
+        "payload": {"event_id": "trigger_evt_replay_retry", "binding_id": "retry-dlq", "attempt": 1, "error_class": "permission_denied"}
+      },
+      {
+        "event_id": 102,
+        "topic": "trigger.attempts",
+        "kind": "dispatch_failed",
+        "occurred_at_ms": 1770001001000,
+        "payload": {"event_id": "trigger_evt_replay_retry", "binding_id": "retry-dlq", "attempt": 2, "error_class": "permission_denied"}
+      },
+      {
+        "event_id": 103,
+        "topic": "trigger.dlq",
+        "kind": "dlq_entry",
+        "occurred_at_ms": 1770001001100,
+        "payload": {"event_id": "trigger_evt_replay_retry", "binding_id": "retry-dlq", "attempts": 2, "final_error_class": "permission_denied"}
+      }
+    ],
+    "trigger_firings": [
+      {"binding_id": "retry-dlq", "event_id": "trigger_evt_replay_retry", "trace_id": "trace_replay_retry", "handler_kind": "mcp", "decision": "dlq"}
+    ],
+    "protocol_interactions": [
+      {
+        "protocol": "mcp",
+        "boundary": "tools/call",
+        "fixture_ref": "conformance/protocols/fixtures/mcp/tools_resources_prompts.valid.json",
+        "request": {"method": "tools/call", "tool": "dangerous_delete", "arguments_sha256": "a36e5a9f4af3eebf2ed893807628d7f5b62f9ccad39171cc88d85f5e32274f52"},
+        "response": {"isError": true, "error": "permission_denied"},
+        "latency_ms": 8
+      }
+    ],
+    "effect_receipts": [
+      {"receipt_id": "receipt_replay_retry_1", "kind": "tool_error", "tool": "dangerous_delete", "attempt": 1, "started_at_ms": 1770001000910, "completed_at_ms": 1770001000920, "error_class": "permission_denied"},
+      {"receipt_id": "receipt_replay_retry_2", "kind": "tool_error", "tool": "dangerous_delete", "attempt": 2, "started_at_ms": 1770001001010, "completed_at_ms": 1770001001020, "error_class": "permission_denied"}
+    ],
+    "policy_decisions": [
+      {"decision_id": "policy_replay_retry", "capability": "mcp.tools.call", "decision": "deny", "reason": "forbidden destructive tool"}
+    ]
+  }
+}

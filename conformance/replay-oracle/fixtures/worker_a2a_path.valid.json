@@ -1,0 +1,103 @@
+{
+  "schema_version": "harn.orchestration.replay_trace.v1",
+  "name": "handler_delegated_worker_a2a_path",
+  "description": "Handler delegates to a worker and crosses an A2A adapter boundary while preserving transcript deltas and final artifact semantics.",
+  "expect": "match",
+  "protocol_fixture_refs": [
+    "conformance/protocols/fixtures/a2a/task_and_stream.valid.json"
+  ],
+  "allowlist": [
+    {"path": "/run_id", "reason": "run ids are allocated per execution"},
+    {"path": "/event_log_entries/*/event_id", "reason": "EventLog offsets are backend-local"},
+    {"path": "/event_log_entries/*/occurred_at_ms", "reason": "append timestamps are wall-clock observations"},
+    {"path": "/event_log_entries/*/payload/event_id", "reason": "TriggerEvent ids are generated per intake"},
+    {"path": "/trigger_firings/*/event_id", "reason": "TriggerEvent ids are generated per intake"},
+    {"path": "/trigger_firings/*/trace_id", "reason": "trace ids are generated per execution"},
+    {"path": "/protocol_interactions/*/latency_ms", "reason": "remote protocol latency is wall-clock data"},
+    {"path": "/agent_transcript_deltas/*/delta_id", "reason": "transcript delta ids are generated per append"},
+    {"path": "/final_artifacts/*/artifact_id", "reason": "artifact ids are generated per run"},
+    {"path": "/effect_receipts/*/receipt_id", "reason": "receipt ids are generated per side-effect record"}
+  ],
+  "first_run": {
+    "run_id": "run_live_worker_a2a",
+    "event_log_entries": [
+      {
+        "event_id": 71,
+        "topic": "worker.queue.triage",
+        "kind": "worker_enqueued",
+        "occurred_at_ms": 1770000000700,
+        "payload": {"event_id": "trigger_evt_live_worker", "queue": "triage", "task": "summarize incident"}
+      },
+      {
+        "event_id": 72,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770000000800,
+        "payload": {"event_id": "trigger_evt_live_worker", "binding_id": "worker-a2a", "result": {"worker_status": "completed"}}
+      }
+    ],
+    "trigger_firings": [
+      {"binding_id": "worker-a2a", "event_id": "trigger_evt_live_worker", "trace_id": "trace_live_worker", "handler_kind": "worker", "decision": "enqueued"}
+    ],
+    "protocol_interactions": [
+      {
+        "protocol": "a2a",
+        "boundary": "message/send",
+        "fixture_ref": "conformance/protocols/fixtures/a2a/task_and_stream.valid.json",
+        "request": {"method": "message/send", "task": "summarize incident", "agent": "triage-worker"},
+        "response": {"task_id": "task-deterministic", "state": "completed"},
+        "latency_ms": 55
+      }
+    ],
+    "effect_receipts": [
+      {"receipt_id": "receipt_live_worker_network", "kind": "network_substitute", "target": "a2a://triage-worker", "response_sha256": "bc5120d4928578c106a17f0503c7c50e114961ab35feb2c11cc790bf09d82d5f"}
+    ],
+    "agent_transcript_deltas": [
+      {"delta_id": "delta_live_worker_1", "agent": "triage-worker", "role": "assistant", "content_sha256": "6f1da4f4e6dbf0752c4713084ed4c35800e7dc7555d79a3176d86f2a08809d33"}
+    ],
+    "final_artifacts": [
+      {"artifact_id": "artifact_live_worker", "kind": "summary", "path": "artifacts/incident-summary.md", "sha256": "e9d71f5ee7c92d6dc9e92ffdad17b8bd49418f98fe23f6f61f9ce311ade0c7b7"}
+    ]
+  },
+  "second_run": {
+    "run_id": "run_replay_worker_a2a",
+    "event_log_entries": [
+      {
+        "event_id": 81,
+        "topic": "worker.queue.triage",
+        "kind": "worker_enqueued",
+        "occurred_at_ms": 1770001000700,
+        "payload": {"event_id": "trigger_evt_replay_worker", "queue": "triage", "task": "summarize incident"}
+      },
+      {
+        "event_id": 82,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770001000800,
+        "payload": {"event_id": "trigger_evt_replay_worker", "binding_id": "worker-a2a", "result": {"worker_status": "completed"}}
+      }
+    ],
+    "trigger_firings": [
+      {"binding_id": "worker-a2a", "event_id": "trigger_evt_replay_worker", "trace_id": "trace_replay_worker", "handler_kind": "worker", "decision": "enqueued"}
+    ],
+    "protocol_interactions": [
+      {
+        "protocol": "a2a",
+        "boundary": "message/send",
+        "fixture_ref": "conformance/protocols/fixtures/a2a/task_and_stream.valid.json",
+        "request": {"method": "message/send", "task": "summarize incident", "agent": "triage-worker"},
+        "response": {"task_id": "task-deterministic", "state": "completed"},
+        "latency_ms": 9
+      }
+    ],
+    "effect_receipts": [
+      {"receipt_id": "receipt_replay_worker_network", "kind": "network_substitute", "target": "a2a://triage-worker", "response_sha256": "bc5120d4928578c106a17f0503c7c50e114961ab35feb2c11cc790bf09d82d5f"}
+    ],
+    "agent_transcript_deltas": [
+      {"delta_id": "delta_replay_worker_1", "agent": "triage-worker", "role": "assistant", "content_sha256": "6f1da4f4e6dbf0752c4713084ed4c35800e7dc7555d79a3176d86f2a08809d33"}
+    ],
+    "final_artifacts": [
+      {"artifact_id": "artifact_replay_worker", "kind": "summary", "path": "artifacts/incident-summary.md", "sha256": "e9d71f5ee7c92d6dc9e92ffdad17b8bd49418f98fe23f6f61f9ce311ade0c7b7"}
+    ]
+  }
+}
