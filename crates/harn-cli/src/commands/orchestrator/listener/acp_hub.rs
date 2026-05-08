@@ -21,7 +21,7 @@ const ACP_TOPIC_PREFIX: &str = "acp.session";
 const ACP_PING_INTERVAL: Duration = Duration::from_secs(30);
 const ACP_PONG_TIMEOUT: Duration = Duration::from_secs(10);
 pub(super) const ACP_RETAINED_SESSION_SECS_ENV: &str = "HARN_ACP_WS_RETAIN_SECS";
-const ACP_DEFAULT_RETAINED_SESSION_SECS: u64 = 5 * 60;
+pub(super) const ACP_DEFAULT_RETAINED_SESSION_SECS: u64 = 5 * 60;
 const ACP_REPLAY_BUFFER_LIMIT: usize = 4096;
 
 #[derive(Clone)]

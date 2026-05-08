@@ -88,22 +88,7 @@ pub(crate) fn ensure_git_available() -> Result<(), PackageError> {
 }
 
 pub(crate) fn cache_root() -> Result<PathBuf, PackageError> {
-    if let Ok(value) = std::env::var(HARN_CACHE_DIR_ENV) {
-        if !value.trim().is_empty() {
-            return Ok(PathBuf::from(value));
-        }
-    }
-
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| "HOME is not set and HARN_CACHE_DIR was not provided".to_string())?;
-    if cfg!(target_os = "macos") {
-        return Ok(home.join("Library/Caches/harn"));
-    }
-    if let Some(xdg) = std::env::var_os("XDG_CACHE_HOME") {
-        return Ok(PathBuf::from(xdg).join("harn"));
-    }
-    Ok(home.join(".cache/harn"))
+    PackageWorkspace::from_current_dir()?.cache_root()
 }
 
 pub(crate) fn sha256_hex(bytes: impl AsRef<[u8]>) -> String {
@@ -121,21 +106,35 @@ pub(crate) fn hex_bytes(bytes: impl AsRef<[u8]>) -> String {
     out
 }
 
-pub(crate) fn git_cache_dir(source: &str, commit: &str) -> Result<PathBuf, PackageError> {
-    Ok(cache_root()?
+pub(crate) fn git_cache_dir_in(
+    workspace: &PackageWorkspace,
+    source: &str,
+    commit: &str,
+) -> Result<PathBuf, PackageError> {
+    Ok(workspace
+        .cache_root()?
         .join("git")
         .join(sha256_hex(source))
         .join(commit))
 }
 
-pub(crate) fn git_cache_lock_path(source: &str, commit: &str) -> Result<PathBuf, PackageError> {
-    Ok(cache_root()?
+pub(crate) fn git_cache_lock_path_in(
+    workspace: &PackageWorkspace,
+    source: &str,
+    commit: &str,
+) -> Result<PathBuf, PackageError> {
+    Ok(workspace
+        .cache_root()?
         .join("locks")
         .join(format!("{}-{commit}.lock", sha256_hex(source))))
 }
 
-pub(crate) fn acquire_git_cache_lock(source: &str, commit: &str) -> Result<File, PackageError> {
-    let path = git_cache_lock_path(source, commit)?;
+pub(crate) fn acquire_git_cache_lock_in(
+    workspace: &PackageWorkspace,
+    source: &str,
+    commit: &str,
+) -> Result<File, PackageError> {
+    let path = git_cache_lock_path_in(workspace, source, commit)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
@@ -548,33 +547,7 @@ pub(crate) fn read_registry_source(source: &str) -> Result<String, PackageError>
 pub(crate) fn resolve_configured_registry_source(
     explicit: Option<&str>,
 ) -> Result<String, PackageError> {
-    if let Some(explicit) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
-        return Ok(explicit.to_string());
-    }
-    if let Ok(value) = std::env::var(HARN_PACKAGE_REGISTRY_ENV) {
-        let value = value.trim();
-        if !value.is_empty() {
-            return Ok(value.to_string());
-        }
-    }
-
-    let cwd = std::env::current_dir().map_err(|error| format!("failed to read cwd: {error}"))?;
-    if let Some((manifest, manifest_dir)) = find_nearest_manifest(&cwd) {
-        if let Some(raw) = manifest
-            .registry
-            .url
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            if Url::parse(raw).is_ok() || PathBuf::from(raw).is_absolute() {
-                return Ok(raw.to_string());
-            }
-            return Ok(manifest_dir.join(raw).display().to_string());
-        }
-    }
-
-    Ok(DEFAULT_PACKAGE_REGISTRY_URL.to_string())
+    PackageWorkspace::from_current_dir()?.resolve_registry_source(explicit)
 }
 
 pub(crate) fn is_valid_registry_segment(segment: &str) -> bool {
@@ -711,10 +684,11 @@ pub(crate) fn validate_package_registry_index(
     Ok(())
 }
 
-pub(crate) fn load_package_registry(
+pub(crate) fn load_package_registry_in(
+    workspace: &PackageWorkspace,
     explicit: Option<&str>,
 ) -> Result<(String, PackageRegistryIndex), PackageError> {
-    let source = resolve_configured_registry_source(explicit)?;
+    let source = workspace.resolve_registry_source(explicit)?;
     let content = read_registry_source(&source)?;
     let index = parse_package_registry_index(&source, &content)?;
     Ok((source, index))
@@ -778,7 +752,15 @@ pub(crate) fn search_package_registry_impl(
     query: Option<&str>,
     registry: Option<&str>,
 ) -> Result<Vec<RegistryPackage>, PackageError> {
-    let (_, index) = load_package_registry(registry)?;
+    search_package_registry_in(&PackageWorkspace::from_current_dir()?, query, registry)
+}
+
+pub(crate) fn search_package_registry_in(
+    workspace: &PackageWorkspace,
+    query: Option<&str>,
+    registry: Option<&str>,
+) -> Result<Vec<RegistryPackage>, PackageError> {
+    let (_, index) = load_package_registry_in(workspace, registry)?;
     Ok(index
         .packages
         .into_iter()
@@ -790,17 +772,26 @@ pub(crate) fn package_registry_info_impl(
     spec: &str,
     registry: Option<&str>,
 ) -> Result<RegistryPackageInfo, PackageError> {
+    package_registry_info_in(&PackageWorkspace::from_current_dir()?, spec, registry)
+}
+
+pub(crate) fn package_registry_info_in(
+    workspace: &PackageWorkspace,
+    spec: &str,
+    registry: Option<&str>,
+) -> Result<RegistryPackageInfo, PackageError> {
     let Some((name, version)) = parse_registry_package_spec(spec) else {
         return Err(format!(
             "invalid registry package name '{spec}'; use names like @burin/notion-sdk or acme-lib"
         )
         .into());
     };
-    let (_, index) = load_package_registry(registry)?;
+    let (_, index) = load_package_registry_in(workspace, registry)?;
     find_registry_package_version(&index, name, version)
 }
 
-pub(crate) fn registry_dependency_from_spec(
+pub(crate) fn registry_dependency_from_spec_in(
+    workspace: &PackageWorkspace,
     spec: &str,
     alias: Option<&str>,
     registry: Option<&str>,
@@ -811,7 +802,7 @@ pub(crate) fn registry_dependency_from_spec(
         )
         .into());
     };
-    let info = package_registry_info_impl(&format!("{name}@{version}"), registry)?;
+    let info = package_registry_info_in(workspace, &format!("{name}@{version}"), registry)?;
     let selected = info
         .selected_version
         .ok_or_else(|| format!("package registry does not contain {name}@{version}"))?;
@@ -1141,7 +1132,8 @@ pub(crate) fn unique_temp_dir(base: &Path, label: &str) -> Result<PathBuf, Packa
     .into())
 }
 
-pub(crate) fn ensure_git_cache_populated(
+pub(crate) fn ensure_git_cache_populated_in(
+    workspace: &PackageWorkspace,
     url: &str,
     source: &str,
     commit: &str,
@@ -1149,8 +1141,8 @@ pub(crate) fn ensure_git_cache_populated(
     refetch: bool,
     offline: bool,
 ) -> Result<String, PackageError> {
-    let cache_dir = git_cache_dir(source, commit)?;
-    let _lock = acquire_git_cache_lock(source, commit)?;
+    let cache_dir = git_cache_dir_in(workspace, source, commit)?;
+    let _lock = acquire_git_cache_lock_in(workspace, source, commit)?;
     if refetch && cache_dir.exists() {
         fs::remove_dir_all(&cache_dir)
             .map_err(|error| format!("failed to remove {}: {error}", cache_dir.display()))?;
@@ -1221,12 +1213,18 @@ pub(crate) struct PackageCacheEntry {
     metadata: Option<PackageCacheMetadata>,
 }
 
-pub(crate) fn git_cache_root() -> Result<PathBuf, PackageError> {
-    Ok(cache_root()?.join("git"))
+pub(crate) fn git_cache_root_in(workspace: &PackageWorkspace) -> Result<PathBuf, PackageError> {
+    Ok(workspace.cache_root()?.join("git"))
 }
 
 pub(crate) fn discover_git_cache_entries() -> Result<Vec<PackageCacheEntry>, PackageError> {
-    let root = git_cache_root()?;
+    discover_git_cache_entries_in(&PackageWorkspace::from_current_dir()?)
+}
+
+pub(crate) fn discover_git_cache_entries_in(
+    workspace: &PackageWorkspace,
+) -> Result<Vec<PackageCacheEntry>, PackageError> {
+    let root = git_cache_root_in(workspace)?;
     let mut entries = Vec::new();
     let source_dirs = match fs::read_dir(&root) {
         Ok(source_dirs) => source_dirs,
@@ -1279,7 +1277,10 @@ pub(crate) fn discover_git_cache_entries() -> Result<Vec<PackageCacheEntry>, Pac
     Ok(entries)
 }
 
-pub(crate) fn locked_git_cache_paths(lock: &LockFile) -> Result<HashSet<PathBuf>, PackageError> {
+pub(crate) fn locked_git_cache_paths_in(
+    workspace: &PackageWorkspace,
+    lock: &LockFile,
+) -> Result<HashSet<PathBuf>, PackageError> {
     let mut keep = HashSet::new();
     for entry in &lock.packages {
         validate_package_alias(&entry.name)?;
@@ -1290,12 +1291,15 @@ pub(crate) fn locked_git_cache_paths(lock: &LockFile) -> Result<HashSet<PathBuf>
             .commit
             .as_deref()
             .ok_or_else(|| format!("missing locked commit for {}", entry.name))?;
-        keep.insert(git_cache_dir(&entry.source, commit)?);
+        keep.insert(git_cache_dir_in(workspace, &entry.source, commit)?);
     }
     Ok(keep)
 }
 
-pub(crate) fn verify_lock_entry_cache(entry: &LockEntry) -> Result<bool, PackageError> {
+pub(crate) fn verify_lock_entry_cache_in(
+    workspace: &PackageWorkspace,
+    entry: &LockEntry,
+) -> Result<bool, PackageError> {
     validate_package_alias(&entry.name)?;
     if !entry.source.starts_with("git+") {
         if entry.source.starts_with("path+") {
@@ -1319,7 +1323,7 @@ pub(crate) fn verify_lock_entry_cache(entry: &LockEntry) -> Result<bool, Package
         .content_hash
         .as_deref()
         .ok_or_else(|| format!("missing content hash for {}", entry.name))?;
-    let cache_dir = git_cache_dir(&entry.source, commit)?;
+    let cache_dir = git_cache_dir_in(workspace, &entry.source, commit)?;
     if !cache_dir.is_dir() {
         return Err(format!(
             "package cache entry for {} is missing: {}",
@@ -1392,13 +1396,20 @@ pub(crate) fn verify_materialized_lock_entry(
 }
 
 pub(crate) fn verify_package_cache_impl(materialized: bool) -> Result<usize, PackageError> {
-    let ctx = load_current_manifest_context()?;
+    verify_package_cache_in(&PackageWorkspace::from_current_dir()?, materialized)
+}
+
+pub(crate) fn verify_package_cache_in(
+    workspace: &PackageWorkspace,
+    materialized: bool,
+) -> Result<usize, PackageError> {
+    let ctx = workspace.load_manifest_context()?;
     let lock = LockFile::load(&ctx.lock_path())?
         .ok_or_else(|| format!("{} is missing", ctx.lock_path().display()))?;
     validate_lock_matches_manifest(&ctx, &lock)?;
     let mut verified = 0usize;
     for entry in &lock.packages {
-        if verify_lock_entry_cache(entry)? {
+        if verify_lock_entry_cache_in(workspace, entry)? {
             verified += 1;
         }
         if materialized && verify_materialized_lock_entry(&ctx, entry)? {
@@ -1409,12 +1420,19 @@ pub(crate) fn verify_package_cache_impl(materialized: bool) -> Result<usize, Pac
 }
 
 pub(crate) fn clean_package_cache_impl(all: bool) -> Result<usize, PackageError> {
-    let entries = discover_git_cache_entries()?;
+    clean_package_cache_in(&PackageWorkspace::from_current_dir()?, all)
+}
+
+pub(crate) fn clean_package_cache_in(
+    workspace: &PackageWorkspace,
+    all: bool,
+) -> Result<usize, PackageError> {
+    let entries = discover_git_cache_entries_in(workspace)?;
     if entries.is_empty() {
         return Ok(0);
     }
     if all {
-        let root = cache_root()?;
+        let root = workspace.cache_root()?;
         for child in ["git", "locks"] {
             let path = root.join(child);
             if path.exists() {
@@ -1425,7 +1443,7 @@ pub(crate) fn clean_package_cache_impl(all: bool) -> Result<usize, PackageError>
         return Ok(entries.len());
     }
 
-    let ctx = load_current_manifest_context()?;
+    let ctx = workspace.load_manifest_context()?;
     let lock = LockFile::load(&ctx.lock_path())?.ok_or_else(|| {
         format!(
             "{} is missing; pass --all to clean every cache entry",
@@ -1433,7 +1451,7 @@ pub(crate) fn clean_package_cache_impl(all: bool) -> Result<usize, PackageError>
         )
     })?;
     validate_lock_matches_manifest(&ctx, &lock)?;
-    let keep = locked_git_cache_paths(&lock)?;
+    let keep = locked_git_cache_paths_in(workspace, &lock)?;
     let mut removed = 0usize;
     for entry in entries {
         if keep.contains(&entry.path) {
@@ -1673,7 +1691,7 @@ mod tests {
         let (_repo_tmp, repo, _branch) = create_git_package_repo();
         let project_tmp = tempfile::tempdir().unwrap();
         let root = project_tmp.path();
-        let cache_dir = root.join(".cache");
+        let workspace = TestWorkspace::new(root);
         fs::create_dir_all(root.join(".git")).unwrap();
         let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
         fs::write(
@@ -1691,20 +1709,23 @@ mod tests {
         )
         .unwrap();
 
-        with_test_env(root, &cache_dir, || {
-            install_packages_impl(false, None, false).unwrap();
-            let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
-            let entry = lock.find("acme-lib").unwrap();
-            let cache_dir = git_cache_dir(&entry.source, entry.commit.as_deref().unwrap()).unwrap();
-            fs::write(
-                cache_dir.join("lib.harn"),
-                "pub fn value() { return \"pwned\" }\n",
-            )
-            .unwrap();
+        install_packages_in(workspace.env(), false, None, false).unwrap();
+        let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+        let entry = lock.find("acme-lib").unwrap();
+        let cache_dir = git_cache_dir_in(
+            workspace.env(),
+            &entry.source,
+            entry.commit.as_deref().unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            cache_dir.join("lib.harn"),
+            "pub fn value() { return \"pwned\" }\n",
+        )
+        .unwrap();
 
-            let error = verify_package_cache_impl(false).unwrap_err();
-            assert!(error.to_string().contains("content hash mismatch"));
-        });
+        let error = verify_package_cache_in(workspace.env(), false).unwrap_err();
+        assert!(error.to_string().contains("content hash mismatch"));
     }
 
     #[test]
@@ -1712,7 +1733,7 @@ mod tests {
         let (_repo_tmp, repo, _branch) = create_git_package_repo();
         let project_tmp = tempfile::tempdir().unwrap();
         let root = project_tmp.path();
-        let cache_dir = root.join(".cache");
+        let workspace = TestWorkspace::new(root);
         fs::create_dir_all(root.join(".git")).unwrap();
         let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
         fs::write(
@@ -1730,14 +1751,19 @@ mod tests {
         )
         .unwrap();
 
-        with_test_env(root, &cache_dir, || {
-            install_packages_impl(false, None, false).unwrap();
-            assert_eq!(discover_git_cache_entries().unwrap().len(), 1);
+        install_packages_in(workspace.env(), false, None, false).unwrap();
+        assert_eq!(
+            discover_git_cache_entries_in(workspace.env())
+                .unwrap()
+                .len(),
+            1
+        );
 
-            let removed = clean_package_cache_impl(true).unwrap();
-            assert_eq!(removed, 1);
-            assert!(discover_git_cache_entries().unwrap().is_empty());
-        });
+        let removed = clean_package_cache_in(workspace.env(), true).unwrap();
+        assert_eq!(removed, 1);
+        assert!(discover_git_cache_entries_in(workspace.env())
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -1745,7 +1771,7 @@ mod tests {
         let (_repo_tmp, repo, _branch) = create_git_package_repo();
         let project_tmp = tempfile::tempdir().unwrap();
         let root = project_tmp.path();
-        let cache_dir = root.join(".cache");
+        let workspace = TestWorkspace::new(root);
         let registry_path = root.join("index.toml");
         let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
         write_package_registry_index(&registry_path, "@burin/acme-lib", &git, "acme-lib");
@@ -1760,27 +1786,34 @@ mod tests {
         )
         .unwrap();
 
-        with_test_env(root, &cache_dir, || {
-            let matches = search_package_registry_impl(Some("acme"), Some("index.toml")).unwrap();
-            assert_eq!(matches.len(), 1);
-            assert_eq!(matches[0].name, "@burin/acme-lib");
-            assert_eq!(
-                matches[0].harn.as_deref(),
-                Some(crate::package::current_harn_range_example().as_str())
-            );
-            assert_eq!(matches[0].connector_contract.as_deref(), Some("v1"));
-            assert_eq!(matches[0].exports, vec!["lib"]);
+        let matches = search_package_registry_in(
+            workspace.env(),
+            Some("acme"),
+            Some(registry_path.to_string_lossy().as_ref()),
+        )
+        .unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].name, "@burin/acme-lib");
+        assert_eq!(
+            matches[0].harn.as_deref(),
+            Some(crate::package::current_harn_range_example().as_str())
+        );
+        assert_eq!(matches[0].connector_contract.as_deref(), Some("v1"));
+        assert_eq!(matches[0].exports, vec!["lib"]);
 
-            let info =
-                package_registry_info_impl("@burin/acme-lib@1.0.0", Some("index.toml")).unwrap();
-            assert_eq!(info.package.license.as_deref(), Some("MIT OR Apache-2.0"));
-            assert_eq!(
-                info.selected_version
-                    .as_ref()
-                    .map(|version| version.git.as_str()),
-                Some(git.as_str())
-            );
-        });
+        let info = package_registry_info_in(
+            workspace.env(),
+            "@burin/acme-lib@1.0.0",
+            Some(registry_path.to_string_lossy().as_ref()),
+        )
+        .unwrap();
+        assert_eq!(info.package.license.as_deref(), Some("MIT OR Apache-2.0"));
+        assert_eq!(
+            info.selected_version
+                .as_ref()
+                .map(|version| version.git.as_str()),
+            Some(git.as_str())
+        );
     }
 
     #[test]
@@ -1788,8 +1821,9 @@ mod tests {
         let (_repo_tmp, repo, _branch) = create_git_package_repo();
         let project_tmp = tempfile::tempdir().unwrap();
         let root = project_tmp.path();
-        let cache_dir = root.join(".cache");
         let registry_path = root.join("index.toml");
+        let workspace =
+            TestWorkspace::new(root).with_registry_source(registry_path.display().to_string());
         let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
         write_package_registry_index(&registry_path, "@burin/acme-lib", &git, "acme-lib");
         fs::create_dir_all(root.join(".git")).unwrap();
@@ -1803,26 +1837,34 @@ mod tests {
         )
         .unwrap();
 
-        with_test_env(root, &cache_dir, || {
-            std::env::set_var(HARN_PACKAGE_REGISTRY_ENV, "index.toml");
-            add_package("@burin/acme-lib@1.0.0", None, None, None, None, None, None);
+        add_package_to(
+            workspace.env(),
+            "@burin/acme-lib@1.0.0",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
-            let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
-            assert!(
-                manifest.contains(&format!(
-                    "acme-lib = {{ git = \"{git}\", rev = \"v1.0.0\" }}"
-                )),
-                "registry install should write the same dependency line as a direct git add: {manifest}"
-            );
-            let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
-            let entry = lock.find("acme-lib").unwrap();
-            assert_eq!(entry.source, format!("git+{git}"));
-            assert!(root
-                .join(PKG_DIR)
-                .join("acme-lib")
-                .join("lib.harn")
-                .is_file());
-        });
+        let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
+        assert!(
+            manifest.contains(&format!(
+                "acme-lib = {{ git = \"{git}\", rev = \"v1.0.0\" }}"
+            )),
+            "registry install should write the same dependency line as a direct git add: {manifest}"
+        );
+        let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+        let entry = lock.find("acme-lib").unwrap();
+        assert_eq!(entry.source, format!("git+{git}"));
+        assert!(root
+            .join(PKG_DIR)
+            .join("acme-lib")
+            .join("lib.harn")
+            .is_file());
     }
 
     #[test]

@@ -7,12 +7,9 @@ use axum::http::{header, StatusCode};
 use futures::{SinkExt, StreamExt};
 use serde_json::{json, Value as JsonValue};
 
-use super::acp_hub::{ACP_PATH, ACP_RETAINED_SESSION_SECS_ENV};
-use super::core::{DEFAULT_MAX_BODY_BYTES, REQUEST_ENTERED_FILE_ENV, REQUEST_RELEASE_FILE_ENV};
-use super::routes::{
-    wait_for_test_release_file, API_KEYS_ENV, HMAC_SECRET_ENV, INGEST_GLOBAL_CAPACITY_ENV,
-    INGEST_PER_SOURCE_CAPACITY_ENV, INGEST_REFILL_PER_SEC_ENV, PENDING_TOPIC,
-};
+use super::acp_hub::ACP_PATH;
+use super::core::DEFAULT_MAX_BODY_BYTES;
+use super::routes::{wait_for_test_release_file, PENDING_TOPIC};
 use harn_vm::event_log::{
     install_default_for_base_dir, reset_active_event_log, AnyEventLog, EventLog, Topic,
 };
@@ -297,24 +294,33 @@ async fn send_acp_response(
 }
 
 async fn start_acp_test_listener() -> (ListenerRuntime, Arc<AnyEventLog>, TempDir) {
+    start_acp_test_listener_with_env(ListenerRuntimeEnv::for_test()).await
+}
+
+async fn start_acp_test_listener_with_env(
+    runtime_env: ListenerRuntimeEnv,
+) -> (ListenerRuntime, Arc<AnyEventLog>, TempDir) {
     let dir = tempdir().expect("tempdir");
     let log = install_default_for_base_dir(dir.path()).expect("install event log");
-    let listener = ListenerRuntime::start(ListenerConfig {
-        bind: "127.0.0.1:0".parse().expect("bind addr"),
-        tls: None,
-        event_log: log.clone(),
-        secrets: Arc::new(harn_vm::secrets::EnvSecretProvider::new(
-            "harn/listener-test",
-        )),
-        allowed_origins: OriginAllowList::wildcard(),
-        max_body_bytes: DEFAULT_MAX_BODY_BYTES,
-        metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
-        admin_reload: None,
-        mcp_router: None,
-        routes: Vec::new(),
-        tenant_store: None,
-        session_store: None,
-    })
+    let listener = ListenerRuntime::start_with_env(
+        ListenerConfig {
+            bind: "127.0.0.1:0".parse().expect("bind addr"),
+            tls: None,
+            event_log: log.clone(),
+            secrets: Arc::new(harn_vm::secrets::EnvSecretProvider::new(
+                "harn/listener-test",
+            )),
+            allowed_origins: OriginAllowList::wildcard(),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
+            admin_reload: None,
+            mcp_router: None,
+            routes: Vec::new(),
+            tenant_store: None,
+            session_store: None,
+        },
+        runtime_env,
+    )
     .await
     .expect("start listener");
     (listener, log, dir)
@@ -378,8 +384,6 @@ async fn readyz_tracks_listener_readiness_gate() {
 #[tokio::test(flavor = "current_thread")]
 async fn listener_auth_accepts_durable_session_bearer() {
     let _guard = lock_harn_state();
-    std::env::remove_var(API_KEYS_ENV);
-    std::env::remove_var(HMAC_SECRET_ENV);
     let session_id = "harn_sess_listener_abcdefghijklmnopqrstuvwxyz0123456789";
     let log = Arc::new(AnyEventLog::Memory(
         harn_vm::event_log::MemoryEventLog::new(32),
@@ -402,8 +406,12 @@ async fn listener_auth_accepts_durable_session_bearer() {
         .await
         .expect("create durable session");
 
-    let auth =
-        ListenerAuth::from_env(true, Some(session_store.clone())).expect("session auth config");
+    let auth = ListenerAuth::from_config(
+        true,
+        Some(session_store.clone()),
+        ListenerAuthConfig::default(),
+    )
+    .expect("session auth config");
     assert!(auth.has_credentials());
     let mut headers = BTreeMap::new();
     headers.insert("authorization".to_string(), format!("Bearer {session_id}"));
@@ -417,18 +425,17 @@ async fn listener_auth_accepts_durable_session_bearer() {
         .expect("get touched session")
         .expect("session remains active");
     assert!(touched.last_seen_at > created_at);
-    std::env::remove_var(API_KEYS_ENV);
-    std::env::remove_var(HMAC_SECRET_ENV);
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_websocket_requires_configured_bearer_auth() {
     let _guard = lock_harn_state();
     reset_active_event_log();
-    std::env::set_var(API_KEYS_ENV, "ws-test-key");
-    std::env::remove_var(HMAC_SECRET_ENV);
 
-    let (listener, _log, _dir) = start_acp_test_listener().await;
+    let (listener, _log, _dir) = start_acp_test_listener_with_env(
+        ListenerRuntimeEnv::for_test().with_api_key("ws-test-key"),
+    )
+    .await;
 
     let unauthorized =
         tokio_tungstenite::connect_async(format!("ws://{}{}", listener.local_addr(), ACP_PATH))
@@ -466,7 +473,6 @@ async fn acp_websocket_requires_configured_bearer_auth() {
         .shutdown(Duration::from_secs(5))
         .await
         .expect("shutdown listener");
-    std::env::remove_var(API_KEYS_ENV);
     reset_active_event_log();
 }
 
@@ -474,10 +480,11 @@ async fn acp_websocket_requires_configured_bearer_auth() {
 async fn acp_websocket_parallel_clients_get_distinct_sessions_and_can_load_active_session() {
     let _guard = lock_harn_state();
     reset_active_event_log();
-    std::env::set_var(API_KEYS_ENV, "ws-test-key");
-    std::env::remove_var(HMAC_SECRET_ENV);
 
-    let (listener, _log, _dir) = start_acp_test_listener().await;
+    let (listener, _log, _dir) = start_acp_test_listener_with_env(
+        ListenerRuntimeEnv::for_test().with_api_key("ws-test-key"),
+    )
+    .await;
 
     let (first, second) = tokio::join!(
         new_acp_session(listener.local_addr()),
@@ -521,7 +528,6 @@ async fn acp_websocket_parallel_clients_get_distinct_sessions_and_can_load_activ
         .shutdown(Duration::from_secs(5))
         .await
         .expect("shutdown listener");
-    std::env::remove_var(API_KEYS_ENV);
     reset_active_event_log();
 }
 
@@ -529,10 +535,11 @@ async fn acp_websocket_parallel_clients_get_distinct_sessions_and_can_load_activ
 async fn acp_websocket_rejects_duplicate_attach_to_live_session() {
     let _guard = lock_harn_state();
     reset_active_event_log();
-    std::env::set_var(API_KEYS_ENV, "ws-test-key");
-    std::env::remove_var(HMAC_SECRET_ENV);
 
-    let (listener, _log, _dir) = start_acp_test_listener().await;
+    let (listener, _log, _dir) = start_acp_test_listener_with_env(
+        ListenerRuntimeEnv::for_test().with_api_key("ws-test-key"),
+    )
+    .await;
     let (mut first_socket, _) =
         tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
             .await
@@ -560,7 +567,6 @@ async fn acp_websocket_rejects_duplicate_attach_to_live_session() {
         .shutdown(Duration::from_secs(5))
         .await
         .expect("shutdown listener");
-    std::env::remove_var(API_KEYS_ENV);
     reset_active_event_log();
 }
 
@@ -568,10 +574,11 @@ async fn acp_websocket_rejects_duplicate_attach_to_live_session() {
 async fn acp_websocket_reconnect_replays_pending_host_request_and_completes_prompt() {
     let _guard = lock_harn_state();
     reset_active_event_log();
-    std::env::set_var(API_KEYS_ENV, "ws-test-key");
-    std::env::remove_var(HMAC_SECRET_ENV);
 
-    let (listener, _log, _dir) = start_acp_test_listener().await;
+    let (listener, _log, _dir) = start_acp_test_listener_with_env(
+        ListenerRuntimeEnv::for_test().with_api_key("ws-test-key"),
+    )
+    .await;
     let (mut socket, _) =
         tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
             .await
@@ -651,7 +658,6 @@ async fn acp_websocket_reconnect_replays_pending_host_request_and_completes_prom
         .shutdown(Duration::from_secs(5))
         .await
         .expect("shutdown listener");
-    std::env::remove_var(API_KEYS_ENV);
     reset_active_event_log();
 }
 
@@ -659,11 +665,13 @@ async fn acp_websocket_reconnect_replays_pending_host_request_and_completes_prom
 async fn acp_websocket_replays_serialized_events_after_worker_expiry() {
     let _guard = lock_harn_state();
     reset_active_event_log();
-    std::env::set_var(API_KEYS_ENV, "ws-test-key");
-    std::env::remove_var(HMAC_SECRET_ENV);
-    std::env::set_var(ACP_RETAINED_SESSION_SECS_ENV, "0");
 
-    let (listener, _log, _dir) = start_acp_test_listener().await;
+    let (listener, _log, _dir) = start_acp_test_listener_with_env(
+        ListenerRuntimeEnv::for_test()
+            .with_api_key("ws-test-key")
+            .with_acp_retained_session_duration(Duration::ZERO),
+    )
+    .await;
     let (mut socket, _) =
         tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
             .await
@@ -719,8 +727,6 @@ async fn acp_websocket_replays_serialized_events_after_worker_expiry() {
         .shutdown(Duration::from_secs(5))
         .await
         .expect("shutdown listener");
-    std::env::remove_var(API_KEYS_ENV);
-    std::env::remove_var(ACP_RETAINED_SESSION_SECS_ENV);
     reset_active_event_log();
 }
 
@@ -739,24 +745,28 @@ async fn reload_swaps_routes_without_losing_inflight_request() {
 
     let request_entered_path = dir.path().join("request-entered");
     let request_release_path = dir.path().join("request-release");
-    std::env::set_var(REQUEST_ENTERED_FILE_ENV, &request_entered_path);
-    std::env::set_var(REQUEST_RELEASE_FILE_ENV, &request_release_path);
-    let listener = ListenerRuntime::start(ListenerConfig {
-        bind: "127.0.0.1:0".parse().expect("bind addr"),
-        tls: None,
-        event_log: log.clone(),
-        secrets: Arc::new(harn_vm::secrets::EnvSecretProvider::new(
-            "harn/listener-test",
-        )),
-        allowed_origins: OriginAllowList::wildcard(),
-        max_body_bytes: DEFAULT_MAX_BODY_BYTES,
-        metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
-        admin_reload: None,
-        mcp_router: None,
-        routes: vec![route("/a2a/v1", 1)],
-        tenant_store: None,
-        session_store: None,
-    })
+    let listener = ListenerRuntime::start_with_env(
+        ListenerConfig {
+            bind: "127.0.0.1:0".parse().expect("bind addr"),
+            tls: None,
+            event_log: log.clone(),
+            secrets: Arc::new(harn_vm::secrets::EnvSecretProvider::new(
+                "harn/listener-test",
+            )),
+            allowed_origins: OriginAllowList::wildcard(),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
+            admin_reload: None,
+            mcp_router: None,
+            routes: vec![route("/a2a/v1", 1)],
+            tenant_store: None,
+            session_store: None,
+        },
+        ListenerRuntimeEnv::for_test().with_request_gate(TestRequestGate {
+            entered_file: Some(request_entered_path.clone()),
+            release_file: Some(request_release_path.clone()),
+        }),
+    )
     .await
     .expect("start listener");
 
@@ -846,8 +856,6 @@ async fn reload_swaps_routes_without_losing_inflight_request() {
         .shutdown(Duration::from_secs(5))
         .await
         .expect("shutdown listener");
-    std::env::remove_var(REQUEST_ENTERED_FILE_ENV);
-    std::env::remove_var(REQUEST_RELEASE_FILE_ENV);
     reset_active_event_log();
     harn_vm::clear_trigger_registry();
 }
@@ -858,23 +866,26 @@ async fn webhook_first_delivery_is_appended() {
     reset_active_event_log();
     let dir = tempdir().expect("tempdir");
     let log = install_default_for_base_dir(dir.path()).expect("install event log");
-    let listener = ListenerRuntime::start(ListenerConfig {
-        bind: "127.0.0.1:0".parse().expect("bind addr"),
-        tls: None,
-        event_log: log.clone(),
-        secrets: Arc::new(StaticSecretProvider {
-            secret_id: SecretId::new("github", "test-signing-secret"),
-            secret: "topsecret".to_string(),
-        }),
-        allowed_origins: OriginAllowList::wildcard(),
-        max_body_bytes: DEFAULT_MAX_BODY_BYTES,
-        metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
-        admin_reload: None,
-        mcp_router: None,
-        routes: vec![webhook_route("/hooks/github")],
-        tenant_store: None,
-        session_store: None,
-    })
+    let listener = ListenerRuntime::start_with_env(
+        ListenerConfig {
+            bind: "127.0.0.1:0".parse().expect("bind addr"),
+            tls: None,
+            event_log: log.clone(),
+            secrets: Arc::new(StaticSecretProvider {
+                secret_id: SecretId::new("github", "test-signing-secret"),
+                secret: "topsecret".to_string(),
+            }),
+            allowed_origins: OriginAllowList::wildcard(),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
+            admin_reload: None,
+            mcp_router: None,
+            routes: vec![webhook_route("/hooks/github")],
+            tenant_store: None,
+            session_store: None,
+        },
+        ListenerRuntimeEnv::for_test(),
+    )
     .await
     .expect("start listener");
 
@@ -920,30 +931,34 @@ async fn webhook_first_delivery_is_appended() {
 async fn webhook_ingest_saturation_returns_retry_after() {
     let _guard = lock_harn_state();
     reset_active_event_log();
-    std::env::set_var(INGEST_PER_SOURCE_CAPACITY_ENV, "1");
-    std::env::set_var(INGEST_GLOBAL_CAPACITY_ENV, "100");
-    std::env::set_var(INGEST_REFILL_PER_SEC_ENV, "1");
 
     let dir = tempdir().expect("tempdir");
     let log = install_default_for_base_dir(dir.path()).expect("install event log");
     let metrics = Arc::new(harn_vm::MetricsRegistry::default());
-    let listener = ListenerRuntime::start(ListenerConfig {
-        bind: "127.0.0.1:0".parse().expect("bind addr"),
-        tls: None,
-        event_log: log.clone(),
-        secrets: Arc::new(StaticSecretProvider {
-            secret_id: SecretId::new("github", "test-signing-secret"),
-            secret: "topsecret".to_string(),
+    let listener = ListenerRuntime::start_with_env(
+        ListenerConfig {
+            bind: "127.0.0.1:0".parse().expect("bind addr"),
+            tls: None,
+            event_log: log.clone(),
+            secrets: Arc::new(StaticSecretProvider {
+                secret_id: SecretId::new("github", "test-signing-secret"),
+                secret: "topsecret".to_string(),
+            }),
+            allowed_origins: OriginAllowList::wildcard(),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            metrics_registry: metrics.clone(),
+            admin_reload: None,
+            mcp_router: None,
+            routes: vec![webhook_route("/hooks/github")],
+            tenant_store: None,
+            session_store: None,
+        },
+        ListenerRuntimeEnv::for_test().with_ingest_backpressure(IngestBackpressureConfig {
+            global_capacity: 100,
+            per_source_capacity: 1,
+            refill_per_sec: 1,
         }),
-        allowed_origins: OriginAllowList::wildcard(),
-        max_body_bytes: DEFAULT_MAX_BODY_BYTES,
-        metrics_registry: metrics.clone(),
-        admin_reload: None,
-        mcp_router: None,
-        routes: vec![webhook_route("/hooks/github")],
-        tenant_store: None,
-        session_store: None,
-    })
+    )
     .await
     .expect("start listener");
 
@@ -993,9 +1008,6 @@ async fn webhook_ingest_saturation_returns_retry_after() {
         .shutdown(Duration::from_secs(5))
         .await
         .expect("shutdown listener");
-    std::env::remove_var(INGEST_PER_SOURCE_CAPACITY_ENV);
-    std::env::remove_var(INGEST_GLOBAL_CAPACITY_ENV);
-    std::env::remove_var(INGEST_REFILL_PER_SEC_ENV);
     reset_active_event_log();
 }
 
@@ -1005,23 +1017,26 @@ async fn webhook_duplicate_delivery_is_dropped() {
     reset_active_event_log();
     let dir = tempdir().expect("tempdir");
     let log = install_default_for_base_dir(dir.path()).expect("install event log");
-    let listener = ListenerRuntime::start(ListenerConfig {
-        bind: "127.0.0.1:0".parse().expect("bind addr"),
-        tls: None,
-        event_log: log.clone(),
-        secrets: Arc::new(StaticSecretProvider {
-            secret_id: SecretId::new("github", "test-signing-secret"),
-            secret: "topsecret".to_string(),
-        }),
-        allowed_origins: OriginAllowList::wildcard(),
-        max_body_bytes: DEFAULT_MAX_BODY_BYTES,
-        metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
-        admin_reload: None,
-        mcp_router: None,
-        routes: vec![webhook_route("/hooks/github")],
-        tenant_store: None,
-        session_store: None,
-    })
+    let listener = ListenerRuntime::start_with_env(
+        ListenerConfig {
+            bind: "127.0.0.1:0".parse().expect("bind addr"),
+            tls: None,
+            event_log: log.clone(),
+            secrets: Arc::new(StaticSecretProvider {
+                secret_id: SecretId::new("github", "test-signing-secret"),
+                secret: "topsecret".to_string(),
+            }),
+            allowed_origins: OriginAllowList::wildcard(),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
+            admin_reload: None,
+            mcp_router: None,
+            routes: vec![webhook_route("/hooks/github")],
+            tenant_store: None,
+            session_store: None,
+        },
+        ListenerRuntimeEnv::for_test(),
+    )
     .await
     .expect("start listener");
 
@@ -1078,23 +1093,26 @@ async fn webhook_dedupe_claim_uses_route_retention_days() {
     let log = install_default_for_base_dir(dir.path()).expect("install event log");
     let mut route = webhook_route("/hooks/github");
     route.dedupe_retention_days = 3;
-    let listener = ListenerRuntime::start(ListenerConfig {
-        bind: "127.0.0.1:0".parse().expect("bind addr"),
-        tls: None,
-        event_log: log.clone(),
-        secrets: Arc::new(StaticSecretProvider {
-            secret_id: SecretId::new("github", "test-signing-secret"),
-            secret: "topsecret".to_string(),
-        }),
-        allowed_origins: OriginAllowList::wildcard(),
-        max_body_bytes: DEFAULT_MAX_BODY_BYTES,
-        metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
-        admin_reload: None,
-        mcp_router: None,
-        routes: vec![route],
-        tenant_store: None,
-        session_store: None,
-    })
+    let listener = ListenerRuntime::start_with_env(
+        ListenerConfig {
+            bind: "127.0.0.1:0".parse().expect("bind addr"),
+            tls: None,
+            event_log: log.clone(),
+            secrets: Arc::new(StaticSecretProvider {
+                secret_id: SecretId::new("github", "test-signing-secret"),
+                secret: "topsecret".to_string(),
+            }),
+            allowed_origins: OriginAllowList::wildcard(),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
+            admin_reload: None,
+            mcp_router: None,
+            routes: vec![route],
+            tenant_store: None,
+            session_store: None,
+        },
+        ListenerRuntimeEnv::for_test(),
+    )
     .await
     .expect("start listener");
 
