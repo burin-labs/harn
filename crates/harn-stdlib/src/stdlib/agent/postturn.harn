@@ -76,12 +76,22 @@ fn __interpret_verdict(verdict) {
   }
   if type_of(verdict) == "dict" {
     let stop = verdict?.stop ?? false
+    let base_llm_options = if type_of(verdict?.llm_options) == "dict" {
+      verdict.llm_options
+    } else {
+      {}
+    }
+    let llm_options = if verdict?.prefill != nil && verdict?.prefill != "" {
+      base_llm_options + {prefill: verdict?.prefill}
+    } else {
+      verdict?.llm_options
+    }
     return {
       kind: "rich",
       stop: stop,
       message: verdict?.message,
       next_options: verdict?.next_options,
-      llm_options: verdict?.llm_options,
+      llm_options: llm_options,
     }
   }
   return {kind: "none"}
@@ -123,6 +133,35 @@ fn __native_tool_text_completion(opts, has_tool_calls, text) {
     return false
   }
   return trim(text) != ""
+}
+
+fn __post_turn_verdict_result(session, opts, verdict) {
+  if verdict.kind == "stop" {
+    return {kind: "break", stop_reason: "post_turn_stop", needs_verify: opts?.verify_completion != nil}
+  }
+  if verdict.kind == "inject" {
+    agent_session_inject_feedback(session.session_id, "post_turn", verdict.message)
+    return {kind: "continue"}
+  }
+  if verdict.kind != "rich" {
+    return nil
+  }
+  if verdict.message != nil {
+    agent_session_inject_feedback(session.session_id, "post_turn", verdict.message)
+  }
+  if verdict.stop {
+    return {
+      kind: "break",
+      stop_reason: "post_turn_stop",
+      needs_verify: opts?.verify_completion != nil,
+      next_options: verdict?.next_options,
+      llm_options: verdict?.llm_options,
+    }
+  }
+  if verdict.message != nil || verdict?.next_options != nil || verdict?.llm_options != nil {
+    return {kind: "continue", next_options: verdict?.next_options, llm_options: verdict?.llm_options}
+  }
+  return nil
 }
 
 /** agent_extract_tool_calls. */
@@ -173,28 +212,12 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
     visible_text: text,
   }
   let verdict = __post_turn_callback_verdict(opts, payload)
-  if verdict.kind == "stop" {
-    return {kind: "break", stop_reason: "post_turn_stop", needs_verify: opts?.verify_completion != nil}
+  let verdict_result = __post_turn_verdict_result(session, opts, verdict)
+  if verdict_result != nil {
+    return verdict_result
   }
-  if verdict.kind == "inject" {
-    agent_session_inject_feedback(session.session_id, "post_turn", verdict.message)
-    return {kind: "continue"}
-  }
-  if verdict.kind == "rich" && verdict.message != nil {
-    agent_session_inject_feedback(session.session_id, "post_turn", verdict.message)
-  }
-  if verdict.kind == "rich" && verdict.stop {
-    return {
-      kind: "break",
-      stop_reason: "post_turn_stop",
-      needs_verify: opts?.verify_completion != nil,
-      next_options: verdict?.next_options,
-      llm_options: verdict?.llm_options,
-    }
-  }
-  if verdict.kind == "rich"
-    && (verdict.message != nil || verdict?.next_options != nil || verdict?.llm_options != nil) {
-    return {kind: "continue", next_options: verdict?.next_options, llm_options: verdict?.llm_options}
+  if !has_tool_calls && trim(text) != "" && opts?.done_judge != nil {
+    return {kind: "break", stop_reason: "natural", needs_verify: true}
   }
   if __native_tool_text_completion(opts, has_tool_calls, text) {
     return {

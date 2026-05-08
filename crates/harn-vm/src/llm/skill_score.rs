@@ -4,7 +4,7 @@
 //! live in `std/agent/skills.harn`. This module only turns a task context
 //! plus a skill registry into ranked score records.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use crate::bridge::HostBridge;
@@ -52,6 +52,13 @@ struct SkillCandidate {
     score: f64,
     trigger: String,
 }
+
+const SKILL_SCORE_STOP_WORDS: &[&str] = &[
+    "able", "about", "add", "after", "all", "and", "any", "are", "ask", "can", "code", "create",
+    "does", "file", "for", "from", "has", "have", "how", "into", "its", "make", "more", "need",
+    "not", "one", "only", "other", "read", "run", "task", "test", "that", "the", "then", "this",
+    "tool", "use", "user", "when", "with", "work", "write", "you", "your",
+];
 
 pub(crate) async fn score_skill_registry(
     context: &VmValue,
@@ -181,7 +188,7 @@ fn score_metadata(skills: &[VmValue], task: &str, working_files: &[String]) -> V
         let mut triggers = Vec::new();
         let keyword_hits =
             count_term_hits(&tokens, &description) + count_term_hits(&tokens, &when_to_use);
-        if keyword_hits > 0 {
+        if keyword_hits >= 2 {
             let bm25 = (keyword_hits as f64) / (keyword_hits as f64 + 1.5);
             score += bm25;
             triggers.push(format!("{keyword_hits} keyword hit(s)"));
@@ -215,19 +222,27 @@ fn score_metadata(skills: &[VmValue], task: &str, working_files: &[String]) -> V
 
 fn tokenize_lower(text: &str) -> Vec<String> {
     text.split(|c: char| !c.is_alphanumeric())
-        .filter(|token| token.len() > 2)
         .map(str::to_lowercase)
+        .filter(|token| token.len() > 2 && !is_skill_score_stop_word(token))
         .collect()
+}
+
+fn tokenize_lower_set(text: &str) -> BTreeSet<String> {
+    tokenize_lower(text).into_iter().collect()
+}
+
+fn is_skill_score_stop_word(token: &str) -> bool {
+    SKILL_SCORE_STOP_WORDS.contains(&token)
 }
 
 fn count_term_hits(terms: &[String], haystack: &str) -> usize {
     if terms.is_empty() || haystack.is_empty() {
         return 0;
     }
-    let lower = haystack.to_lowercase();
+    let haystack_terms = tokenize_lower_set(haystack);
     terms
         .iter()
-        .filter(|term| lower.contains(term.as_str()))
+        .filter(|term| haystack_terms.contains(term.as_str()))
         .count()
 }
 
@@ -412,6 +427,42 @@ mod tests {
             &[],
         );
         assert_eq!(ranked[0].id, "deploy");
+    }
+
+    #[test]
+    fn metadata_ignores_stop_words_and_substrings() {
+        let ranked = score_metadata(
+            &[skill(&[
+                ("name", VmValue::String(Rc::from("disk-cleanup"))),
+                (
+                    "description",
+                    VmValue::String(Rc::from("Clean disk space by deleting caches")),
+                ),
+                (
+                    "when_to_use",
+                    VmValue::String(Rc::from("Use when the user asks to reclaim disk space")),
+                ),
+            ])],
+            "hey wassup? can you help with this?",
+            &[],
+        );
+        assert!(ranked.is_empty());
+    }
+
+    #[test]
+    fn metadata_requires_exact_keyword_tokens() {
+        let ranked = score_metadata(
+            &[skill(&[
+                ("name", VmValue::String(Rc::from("disk-cleanup"))),
+                (
+                    "description",
+                    VmValue::String(Rc::from("Clean disk space by deleting caches")),
+                ),
+            ])],
+            "please discuss clean architecture",
+            &[],
+        );
+        assert!(ranked.is_empty());
     }
 
     #[test]
