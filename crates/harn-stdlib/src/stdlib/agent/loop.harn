@@ -35,15 +35,59 @@ fn __default_invoke_llm(message, turn_system, llm_opts) {
     return {ok: true, value: unwrap(result)}
   }
   let err = unwrap_err(result)
+  let normalized = __llm_provider_error(err, llm_opts)
   let reason = if type_of(err) == "dict" {
     err?.reason ?? ""
   } else {
     ""
   }
   if reason == "budget_exceeded" {
-    return {ok: false, status: "budget_exhausted"}
+    return {ok: false, status: "budget_exhausted", stop_reason: "budget_exhausted", error: normalized}
   }
-  throw err
+  return {ok: false, status: "provider_error", stop_reason: "provider_error", error: normalized}
+}
+
+fn __messages_include_tool_result(messages) {
+  if type_of(messages) != "list" {
+    return false
+  }
+  for msg in messages {
+    let role = to_string(msg?.role ?? "")
+    if role == "tool" || role == "tool_result" {
+      return true
+    }
+  }
+  return false
+}
+
+fn __llm_error_field(err, key, fallback) {
+  if type_of(err) == "dict" {
+    let value = err[key]
+    if value != nil {
+      return to_string(value)
+    }
+  }
+  return fallback
+}
+
+fn __llm_provider_error(err, llm_opts) {
+  let message = __llm_error_field(err, "message", to_string(err))
+  let category = __llm_error_field(err, "category", error_category(err))
+  let reason = __llm_error_field(err, "reason", "")
+  let kind = __llm_error_field(err, "kind", "")
+  let provider = __llm_error_field(err, "provider", to_string(llm_opts?.provider ?? ""))
+  let model = __llm_error_field(err, "model", to_string(llm_opts?.model ?? ""))
+  return {
+    category: category,
+    reason: reason,
+    kind: kind,
+    provider: provider,
+    model: model,
+    message: message,
+    phase: "llm_call",
+    tool_format: to_string(llm_opts?.tool_format ?? ""),
+    after_tool_result: __messages_include_tool_result(llm_opts?.messages),
+  }
 }
 
 fn __validate_caller_result(r) {
@@ -1025,6 +1069,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     opts = agent_mcp_bootstrap_if_needed(session, opts)
     var stop_reason = nil
     var final_status = ""
+    var terminal_error = nil
     var verify_attempts = 0
     var consecutive_text_only = 0
     var fallback_index = 0
@@ -1073,6 +1118,8 @@ fn __agent_loop_run(message, session, initial_opts) {
       let call = __invoke_llm(message, turn_system, llm_opts)
       if !call.ok {
         final_status = call.status
+        stop_reason = call?.stop_reason ?? call.status
+        terminal_error = call?.error
         break
       }
       let llm_result = call.value
@@ -1228,7 +1275,12 @@ fn __agent_loop_run(message, session, initial_opts) {
     }
     let result = agent_session_finalize(
       session.session_id,
-      {final_status: final_status, stop_reason: stop_reason ?? "", iterations: iteration},
+      {
+        final_status: final_status,
+        stop_reason: stop_reason ?? "",
+        iterations: iteration,
+        error: terminal_error,
+      },
     )
     session_finalized = true
     let result_with_stalls = __apply_stall_result(result, stall_enabled_seen, stall_state)

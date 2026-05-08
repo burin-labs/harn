@@ -176,6 +176,12 @@ fn opt_int(map: &BTreeMap<String, VmValue>, key: &str) -> Option<i64> {
     })
 }
 
+fn opt_json(map: &BTreeMap<String, VmValue>, key: &str) -> Option<serde_json::Value> {
+    map.get(key)
+        .filter(|value| !matches!(value, VmValue::Nil))
+        .map(vm_to_json)
+}
+
 fn now_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
@@ -362,6 +368,7 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
     let status_dict = opts_dict(args.get(1));
     let final_status = opt_str(&status_dict, "final_status").unwrap_or_default();
     let stop_reason = opt_str(&status_dict, "stop_reason").unwrap_or_default();
+    let terminal_error = opt_json(&status_dict, "error");
 
     let session = AGENT_HOST_SESSIONS
         .with(|sessions| sessions.borrow_mut().remove(&session_id))
@@ -381,16 +388,6 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
     // the active map so hooks observe a fully-quiesced session.
     super::agent_runtime::fire_session_end_hooks(&session_id);
 
-    let snapshot = crate::agent_sessions::snapshot(&session_id);
-    let transcript_json = snapshot
-        .as_ref()
-        .map(vm_to_json)
-        .unwrap_or(serde_json::Value::Null);
-    let visible_text = snapshot
-        .as_ref()
-        .and_then(last_assistant_text)
-        .unwrap_or_default();
-
     let iterations = opt_int(&status_dict, "iterations").unwrap_or(0);
     let tool_mode = opt_str(&status_dict, "tool_mode").unwrap_or(session.tool_mode);
     let acp_stop_reason = canonical_acp_stop_reason(
@@ -406,12 +403,38 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
     if let Some(bridge) = super::agent_runtime::current_host_bridge() {
         bridge.set_prompt_stop_reason(acp_stop_reason);
     }
+    if let Some(error) = terminal_error.as_ref() {
+        let transcript_event = super::helpers::transcript_event(
+            "agent_loop_terminal_error",
+            "assistant",
+            "internal",
+            "Agent loop ended with a provider/tool-protocol failure",
+            Some(serde_json::json!({
+                "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
+                "final_status": final_status,
+                "stop_reason": stop_reason,
+                "error": error,
+            })),
+        );
+        let _ = crate::agent_sessions::append_event(&session_id, transcript_event);
+    }
+    let snapshot = crate::agent_sessions::snapshot(&session_id);
+    let transcript_json = snapshot
+        .as_ref()
+        .map(vm_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let visible_text = snapshot
+        .as_ref()
+        .and_then(last_assistant_text)
+        .unwrap_or_default();
+
     let trace_summary = super::trace::agent_trace_summary();
     let result = serde_json::json!({
         "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
         "final_status": final_status,
         "stop_reason": stop_reason,
         "acp_stop_reason": acp_stop_reason,
+        "error": terminal_error,
         "text": visible_text,
         "visible_text": visible_text,
         "private_reasoning": serde_json::Value::Null,

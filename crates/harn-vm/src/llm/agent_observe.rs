@@ -870,6 +870,9 @@ pub(crate) async fn observed_llm_call(
                 return Ok(result);
             }
             Err(error) => {
+                let category = crate::value::error_to_category(&error);
+                let message = error.to_string();
+                let classified = super::api::classify_llm_error(category.clone(), &message);
                 let retryable = is_retryable_llm_error(&error);
                 let can_retry = retryable && attempt < retry_config.retries;
                 let status = if can_retry {
@@ -881,10 +884,35 @@ pub(crate) async fn observed_llm_call(
                 };
                 annotate_current_span(&[
                     ("status", serde_json::json!(status)),
-                    ("error", serde_json::json!(error.to_string())),
+                    ("error", serde_json::json!(message.clone())),
                     ("retryable", serde_json::json!(retryable)),
                     ("attempt", serde_json::json!(attempt)),
                 ]);
+                append_llm_observability_entry(
+                    "provider_call_error",
+                    serde_json::Map::from_iter([
+                        (
+                            "iteration".to_string(),
+                            serde_json::json!(iteration.unwrap_or(0)),
+                        ),
+                        ("call_id".to_string(), serde_json::json!(call_id.clone())),
+                        ("attempt".to_string(), serde_json::json!(attempt)),
+                        ("status".to_string(), serde_json::json!(status)),
+                        ("provider".to_string(), serde_json::json!(opts.provider)),
+                        ("model".to_string(), serde_json::json!(opts.model)),
+                        ("category".to_string(), serde_json::json!(category.as_str())),
+                        (
+                            "kind".to_string(),
+                            serde_json::json!(classified.kind.as_str()),
+                        ),
+                        (
+                            "reason".to_string(),
+                            serde_json::json!(classified.reason.as_str()),
+                        ),
+                        ("message".to_string(), serde_json::json!(message.clone())),
+                        ("retryable".to_string(), serde_json::json!(retryable)),
+                    ]),
+                );
                 if let Some(b) = bridge {
                     b.send_call_end(
                         &call_id,

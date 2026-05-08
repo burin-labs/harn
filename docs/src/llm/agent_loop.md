@@ -67,7 +67,8 @@ top-level keys before `v0.8`).
 
 | Field | Type | Description |
 |---|---|---|
-| `status` | string | Terminal state: `"done"` (natural completion), `"stuck"` (exceeded `max_nudges` consecutive text-only turns), `"budget_exhausted"` (hit `max_iterations` without any explicit break), `"idle"` (daemon yielded with no remaining wake source), `"watchdog"` (daemon idle-wait tripped the `idle_watchdog_attempts` limit), or `"failed"` (`require_successful_tools` not satisfied). |
+| `status` | string | Terminal state: `"done"` (natural completion), `"stuck"` (exceeded `max_nudges` consecutive text-only turns), `"budget_exhausted"` (hit `max_iterations` without any explicit break), `"provider_error"` (provider/tool-protocol request failed and was captured in `error`), `"idle"` (daemon yielded with no remaining wake source), `"watchdog"` (daemon idle-wait tripped the `idle_watchdog_attempts` limit), or `"failed"` (`require_successful_tools` not satisfied). |
+| `error` | dict or nil | Structured terminal failure for provider/tool-protocol failures: `{category, reason, kind, provider, model, message, phase, tool_format, after_tool_result}`. `after_tool_result` is true when the rejected model request included prior tool observations. |
 | `text` | string | Accumulated text output from all iterations |
 | `visible_text` | string | Human-visible accumulated output |
 | `llm` | dict | LLM execution metrics — see below |

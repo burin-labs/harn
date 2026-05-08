@@ -1,0 +1,58 @@
+fn lookup_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "lookup",
+    "Return evidence",
+    {
+      handler: { args -> "evidence for " + args.query },
+      parameters: {query: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+pipeline main() {
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]})
+  llm_mock(
+    {
+      error: {
+        category: "generic",
+        message: "ollama HTTP 400 [invalid_request]: Value looks like object, but can't find closing '}' symbol",
+      },
+    },
+  )
+  let transcript_dir = path_join(temp_dir(), "harn-agent-loop-provider-error-" + uuid())
+  let result = agent_loop(
+    "Inspect evidence and finish.",
+    nil,
+    {
+      provider: "mock",
+      model: "qwen-local",
+      tools: lookup_tools(),
+      tool_format: "native",
+      loop_until_done: true,
+      max_iterations: 4,
+      llm_transcript_dir: transcript_dir,
+    },
+  )
+  println(result.status)
+  println(result.stop_reason)
+  println(result.error.category)
+  println(result.error.reason)
+  println(result.error.provider)
+  println(result.error.model)
+  println(result.error.phase)
+  println(result.error.tool_format)
+  println(result.error.after_tool_result)
+  println(result.llm.iterations)
+  println(result.tools.successful[0])
+  println(contains(json_stringify(result.transcript), "agent_loop_terminal_error"))
+  let sidecar = read_file(path_join(transcript_dir, "llm_transcript.jsonl"))
+  println(contains(sidecar, "\"type\":\"provider_call_error\""))
+  println(contains(sidecar, "\"category\":\"generic\""))
+  println(contains(sidecar, "\"reason\":\"invalid_request\""))
+}
