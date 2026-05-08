@@ -171,7 +171,6 @@ use crate::value::{VmChannelHandle, VmError, VmStream, VmStreamCancel, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
 
 use self::api::{vm_build_llm_result, vm_call_completion_full};
-use self::helpers::{opt_int, opt_str};
 use self::stream::vm_stream_llm;
 use self::trace::emit_agent_event;
 use self::trace::trace_llm_call;
@@ -1058,13 +1057,28 @@ fn agent_primitive_tools_arg(
     }
 }
 
-fn agent_primitive_options_arg(
-    args: &[VmValue],
-    index: usize,
+fn agent_primitive_tools_value_arg(
+    value: Option<VmValue>,
+    label: &str,
+) -> Result<Option<VmValue>, VmError> {
+    match value {
+        Some(VmValue::Nil) | None => Ok(crate::stdlib::tools::current_tool_registry()),
+        Some(value @ VmValue::Dict(_)) => Ok(Some(value)),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{label}: tools must be a tool registry dict or nil; got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn agent_primitive_options_value_arg(
+    value: Option<VmValue>,
     label: &str,
 ) -> Result<std::collections::BTreeMap<String, VmValue>, VmError> {
-    match args.get(index) {
-        Some(VmValue::Dict(options)) => Ok(options.as_ref().clone()),
+    match value {
+        Some(VmValue::Dict(options)) => {
+            Ok(Rc::try_unwrap(options).unwrap_or_else(|options| options.as_ref().clone()))
+        }
         Some(VmValue::Nil) | None => Ok(std::collections::BTreeMap::new()),
         Some(other) => Err(VmError::Runtime(format!(
             "{label}: options must be a dict or nil; got {}",
@@ -1073,17 +1087,21 @@ fn agent_primitive_options_arg(
     }
 }
 
-fn agent_primitive_call_json(args: &[VmValue]) -> Result<serde_json::Value, VmError> {
-    match args.first() {
-        Some(VmValue::Dict(_)) => Ok(helpers::vm_value_to_json(args.first().unwrap())),
-        Some(other) => Err(VmError::Runtime(format!(
-            "__host_agent_dispatch_tool_call(call, tools?, options?): call must be a dict; got {}",
-            other.type_name()
-        ))),
-        None => Err(VmError::Runtime(
-            "__host_agent_dispatch_tool_call(call, tools?, options?): missing call".to_string(),
-        )),
+fn agent_primitive_option_str(
+    options: &std::collections::BTreeMap<String, VmValue>,
+    key: &str,
+) -> Option<String> {
+    match options.get(key)? {
+        VmValue::Nil => None,
+        value => Some(value.display()),
     }
+}
+
+fn agent_primitive_option_int(
+    options: &std::collections::BTreeMap<String, VmValue>,
+    key: &str,
+) -> Option<i64> {
+    options.get(key)?.as_int()
 }
 
 /// Append a `PermissionGrant` / `PermissionDeny` / `PermissionEscalation`
@@ -1127,18 +1145,6 @@ fn agent_primitive_denied_tool(
         "error_category": category.as_str(),
         "executor": null,
     })
-}
-
-fn agent_primitive_tool_name(call: &serde_json::Value) -> Result<String, VmError> {
-    call.get("name")
-        .and_then(|value| value.as_str())
-        .filter(|name| !name.trim().is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| {
-            VmError::Runtime(
-                "__host_agent_dispatch_tool_call: call.name must be a non-empty string".to_string(),
-            )
-        })
 }
 
 fn agent_primitive_call_name(call: &VmValue) -> Option<String> {
@@ -1185,8 +1191,11 @@ async fn host_agent_parse_tool_calls_impl(args: Vec<VmValue>) -> Result<VmValue,
 }
 
 async fn host_agent_dispatch_tool_batch_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let calls = match args.first() {
-        Some(VmValue::List(calls)) => calls.as_ref().clone(),
+    let mut args = args.into_iter();
+    let calls = match args.next() {
+        Some(VmValue::List(calls)) => {
+            Rc::try_unwrap(calls).unwrap_or_else(|calls| calls.as_ref().clone())
+        }
         Some(other) => {
             return Err(VmError::Runtime(format!(
                 "__host_agent_dispatch_tool_batch(calls, tools?, options?): calls must be a list; got {}",
@@ -1200,12 +1209,9 @@ async fn host_agent_dispatch_tool_batch_impl(args: Vec<VmValue>) -> Result<VmVal
             ))
         }
     };
-    let tools = args.get(1).cloned().unwrap_or(VmValue::Nil);
-    let options = VmValue::Dict(Rc::new(agent_primitive_options_arg(
-        &args,
-        2,
-        "__host_agent_dispatch_tool_batch",
-    )?));
+    let tools = agent_primitive_tools_value_arg(args.next(), "__host_agent_dispatch_tool_batch")?;
+    let options =
+        agent_primitive_options_value_arg(args.next(), "__host_agent_dispatch_tool_batch")?;
     let ro_prefix_len = calls
         .iter()
         .position(|call| !agent_primitive_call_is_read_only(call))
@@ -1213,9 +1219,10 @@ async fn host_agent_dispatch_tool_batch_impl(args: Vec<VmValue>) -> Result<VmVal
 
     let mut results: Vec<Option<VmValue>> = vec![None; calls.len()];
     if ro_prefix_len >= 2 {
-        let futures = calls[..ro_prefix_len].iter().cloned().map(|call| {
-            host_agent_dispatch_tool_call_impl(vec![call, tools.clone(), options.clone()])
-        });
+        let futures = calls[..ro_prefix_len]
+            .iter()
+            .cloned()
+            .map(|call| host_agent_dispatch_tool_call(call, tools.as_ref(), &options));
         for (index, result) in futures::future::join_all(futures)
             .await
             .into_iter()
@@ -1229,9 +1236,7 @@ async fn host_agent_dispatch_tool_batch_impl(args: Vec<VmValue>) -> Result<VmVal
         if results[index].is_some() {
             continue;
         }
-        results[index] = Some(
-            host_agent_dispatch_tool_call_impl(vec![call, tools.clone(), options.clone()]).await?,
-        );
+        results[index] = Some(host_agent_dispatch_tool_call(call, tools.as_ref(), &options).await?);
     }
 
     Ok(VmValue::List(Rc::new(
@@ -1243,26 +1248,60 @@ async fn host_agent_dispatch_tool_batch_impl(args: Vec<VmValue>) -> Result<VmVal
 }
 
 async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let call = agent_primitive_call_json(&args)?;
-    let tools = agent_primitive_tools_arg(&args, 1, "__host_agent_dispatch_tool_call")?;
-    let options = agent_primitive_options_arg(&args, 2, "__host_agent_dispatch_tool_call")?;
-    let options_ref = Some(options.clone());
-    let tool_name = agent_primitive_tool_name(&call)?;
-    let tool_id = call
-        .get("id")
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .to_string();
-    let mut tool_args = tools::normalize_tool_args(&tool_name, &call["arguments"]);
-    let session_id = opt_str(&options_ref, "session_id")
+    let mut args = args.into_iter();
+    let call = args.next().ok_or_else(|| {
+        VmError::Runtime(
+            "__host_agent_dispatch_tool_call(call, tools?, options?): missing call".to_string(),
+        )
+    })?;
+    let tools = agent_primitive_tools_value_arg(args.next(), "__host_agent_dispatch_tool_call")?;
+    let options =
+        agent_primitive_options_value_arg(args.next(), "__host_agent_dispatch_tool_call")?;
+    host_agent_dispatch_tool_call(call, tools.as_ref(), &options).await
+}
+
+async fn host_agent_dispatch_tool_call(
+    call: VmValue,
+    tools: Option<&VmValue>,
+    options: &std::collections::BTreeMap<String, VmValue>,
+) -> Result<VmValue, VmError> {
+    let call = match call {
+        VmValue::Dict(call) => call,
+        other => {
+            return Err(VmError::Runtime(format!(
+            "__host_agent_dispatch_tool_call(call, tools?, options?): call must be a dict; got {}",
+            other.type_name()
+        )))
+        }
+    };
+    let tool_name = match call.get("name") {
+        Some(VmValue::String(name)) if !name.trim().is_empty() => name.to_string(),
+        _ => {
+            return Err(VmError::Runtime(
+                "__host_agent_dispatch_tool_call: call.name must be a non-empty string".to_string(),
+            ))
+        }
+    };
+    let tool_id = match call.get("id") {
+        Some(VmValue::String(id)) => id.to_string(),
+        _ => String::new(),
+    };
+    let raw_args = call
+        .get("arguments")
+        .map(helpers::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let mut tool_args = tools::normalize_tool_args(&tool_name, &raw_args);
+    let session_id = agent_primitive_option_str(options, "session_id")
         .or_else(current_agent_session_id)
         .unwrap_or_else(|| format!("agent_primitive_session_{}", uuid::Uuid::now_v7()));
-    let tool_retries = opt_int(&options_ref, "tool_retries").unwrap_or(0).max(0) as usize;
-    let tool_backoff_ms = opt_int(&options_ref, "tool_backoff_ms")
+    let tool_retries = agent_primitive_option_int(options, "tool_retries")
+        .unwrap_or(0)
+        .max(0) as usize;
+    let tool_backoff_ms = agent_primitive_option_int(options, "tool_backoff_ms")
         .unwrap_or(1000)
         .max(1) as u64;
     let bridge = current_host_bridge();
-    let _policy_guard = agent_session_host::install_session_policy_guard(&options)?;
+    let _policy_guard = agent_session_host::install_session_policy_guard(options)?;
 
     if let Err(error) =
         crate::orchestration::enforce_current_policy_for_tool(&tool_name).and_then(|_| {
@@ -1508,7 +1547,7 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
         }
     }
 
-    let tool_schemas = tools::collect_tool_schemas(tools.as_ref(), None);
+    let tool_schemas = tools::collect_tool_schemas(tools, None);
     if let Err(message) = tools::validate_tool_args(&tool_name, &tool_args, &tool_schemas) {
         return Ok(json_to_vm_value(&agent_primitive_denied_tool(
             &tool_name,
@@ -1524,7 +1563,7 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
     let session_mcp = {
         use std::collections::BTreeMap;
         let mut clients: BTreeMap<String, crate::mcp::VmMcpClientHandle> = BTreeMap::new();
-        if let Some(server_name) = agent_tools::mcp_server_for_tool(tools.as_ref(), &tool_name) {
+        if let Some(server_name) = agent_tools::mcp_server_for_tool(tools, &tool_name) {
             if let Some(handle) = agent_runtime::session_mcp_client(&session_id, &server_name) {
                 clients.insert(server_name, handle);
             }
@@ -1539,7 +1578,7 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
     let outcome = agent_tools::dispatch_tool_execution_with_mcp(
         &tool_name,
         &tool_args,
-        tools.as_ref(),
+        tools,
         mcp_clients_ref,
         bridge.as_ref(),
         tool_retries,

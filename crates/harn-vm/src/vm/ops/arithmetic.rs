@@ -143,29 +143,57 @@ impl super::super::Vm {
     }
 
     fn add(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
-        match (&a, &b) {
-            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x.wrapping_add(*y))),
+        match (a, b) {
+            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x.wrapping_add(y))),
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x + y)),
-            (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 + y)),
-            (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x + *y as f64)),
+            (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(x as f64 + y)),
+            (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x + y as f64)),
             (VmValue::String(x), VmValue::String(y)) => {
+                if x.is_empty() {
+                    return Ok(VmValue::String(y));
+                }
+                if y.is_empty() {
+                    return Ok(VmValue::String(x));
+                }
                 let mut s = String::with_capacity(x.len() + y.len());
-                s.push_str(x);
-                s.push_str(y);
+                s.push_str(&x);
+                s.push_str(&y);
                 Ok(VmValue::String(Rc::from(s)))
             }
             (VmValue::List(x), VmValue::List(y)) => {
-                let mut result = Vec::with_capacity(x.len() + y.len());
-                result.extend(x.iter().cloned());
-                result.extend(y.iter().cloned());
+                if x.is_empty() {
+                    return Ok(VmValue::List(y));
+                }
+                if y.is_empty() {
+                    return Ok(VmValue::List(x));
+                }
+                let y_len = y.len();
+                let mut result = Rc::try_unwrap(x).unwrap_or_else(|items| items.as_ref().clone());
+                result.reserve(y_len);
+                match Rc::try_unwrap(y) {
+                    Ok(items) => result.extend(items),
+                    Err(items) => result.extend(items.iter().cloned()),
+                }
                 Ok(VmValue::List(Rc::new(result)))
             }
             (VmValue::Dict(x), VmValue::Dict(y)) => {
-                let mut result = (**x).clone();
-                result.extend(y.iter().map(|(k, v)| (k.clone(), v.clone())));
+                if x.is_empty() {
+                    return Ok(VmValue::Dict(y));
+                }
+                if y.is_empty() {
+                    return Ok(VmValue::Dict(x));
+                }
+                let mut result =
+                    Rc::try_unwrap(x).unwrap_or_else(|entries| entries.as_ref().clone());
+                match Rc::try_unwrap(y) {
+                    Ok(entries) => result.extend(entries),
+                    Err(entries) => {
+                        result.extend(entries.iter().map(|(k, v)| (k.clone(), v.clone())))
+                    }
+                }
                 Ok(VmValue::Dict(Rc::new(result)))
             }
-            _ => Err(VmError::TypeError(format!(
+            (a, b) => Err(VmError::TypeError(format!(
                 "Cannot add {} and {}",
                 a.type_name(),
                 b.type_name()

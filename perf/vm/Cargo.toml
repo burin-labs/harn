@@ -9,8 +9,14 @@ harn-vm = { path = "../../crates/harn-vm", features = ["vm-bench-internals"] }
 
 [dev-dependencies]
 criterion = "0.8"
+tokio = { version = "1", features = ["rt", "time"] }
 
 [[bench]]
 name = "bench_vmenv_clone"
 path = "bench_vmenv_clone.rs"
+harness = false
+
+[[bench]]
+name = "bench_vm_fixtures"
+path = "bench_vm_fixtures.rs"
 harness = false

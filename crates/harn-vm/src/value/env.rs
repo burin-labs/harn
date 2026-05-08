@@ -95,6 +95,13 @@ impl VmEnv {
         None
     }
 
+    pub(crate) fn contains(&self, name: &str) -> bool {
+        self.scopes
+            .iter()
+            .rev()
+            .any(|scope| scope.vars.contains_key(name))
+    }
+
     pub fn define(&mut self, name: &str, value: VmValue, mutable: bool) -> Result<(), VmError> {
         if let Some(scope) = self.scopes.last_mut() {
             if let Some((_, existing_mutable)) = scope.vars.get(name) {

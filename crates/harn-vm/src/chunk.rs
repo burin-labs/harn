@@ -382,10 +382,10 @@ pub enum Constant {
 /// Monomorphic inline-cache state for bytecode instructions that repeatedly
 /// resolve the same property or builtin method. Cache guards are intentionally
 /// conservative: each entry is tied to the instruction's name constant index
-/// and a single receiver variant. Harn collection values are immutable or
-/// copy-on-write at the VM level, so list/string/pair/range/set/dict receiver
-/// kind caches do not need invalidation; dynamic dict fields and struct fields
-/// are left on the generic path until they have stable layout metadata.
+/// and a single receiver shape. Harn collection values are immutable or
+/// copy-on-write at the VM level, so receiver-kind caches do not need
+/// invalidation. Struct field caches guard on the field name at the cached
+/// slot before reading the indexed field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum InlineCacheEntry {
     Empty,
@@ -400,8 +400,10 @@ pub(crate) enum InlineCacheEntry {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PropertyCacheTarget {
+    DictField(Rc<str>),
+    StructField { field_name: Rc<str>, index: usize },
     ListCount,
     ListEmpty,
     ListFirst,
