@@ -15,11 +15,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use sha2::{Digest, Sha256};
 
-use super::{new_id, now_rfc3339, RunRecord};
+use super::{
+    new_id, now_rfc3339, run_replay_oracle_trace, ReplayAllowlistRule, ReplayExpectation,
+    ReplayFixture, ReplayOracleReport, ReplayOracleTrace, ReplayTraceRun, RunRecord,
+};
 use crate::value::VmError;
 
 const TRACE_SCHEMA_VERSION: u32 = 1;
 const DEFAULT_MIN_EXAMPLES: usize = 2;
+const DEFAULT_PROMOTION_MIN_CONFIDENCE: f64 = 0.80;
 
 /// Stable schema marker for `candidate.json` inside a crystallization
 /// bundle. Cloud importers and other downstream consumers should refuse
@@ -52,6 +56,8 @@ pub struct CrystallizationTrace {
     pub finished_at: Option<String>,
     pub flow: Option<CrystallizationFlowRef>,
     pub actions: Vec<CrystallizationAction>,
+    pub replay_run: Option<ReplayTraceRun>,
+    pub replay_allowlist: Vec<ReplayAllowlistRule>,
     pub usage: CrystallizationUsage,
     pub metadata: BTreeMap<String, JsonValue>,
 }
@@ -188,6 +194,55 @@ pub struct PromotionMetadata {
     pub secrets_required: Vec<String>,
     pub rollback_target: Option<String>,
     pub eval_pack_link: Option<String>,
+    pub sample_count: usize,
+    pub confidence: f64,
+    pub shadow_success_count: usize,
+    pub shadow_failure_count: usize,
+    pub divergence_history: Vec<PromotionDivergenceRecord>,
+    pub approval_history: Vec<PromotionApprovalRecord>,
+    pub criteria: PromotionCriteria,
+    pub estimated_time_token_savings: SavingsEstimate,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct PromotionCriteria {
+    pub min_examples: usize,
+    pub min_confidence: f64,
+    pub requires_shadow_pass: bool,
+    pub requires_no_rejections: bool,
+    pub requires_human_approval: bool,
+    pub approval_reason: Option<String>,
+    pub status: PromotionStatus,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PromotionStatus {
+    #[default]
+    Blocked,
+    NeedsApproval,
+    Ready,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct PromotionDivergenceRecord {
+    pub trace_id: String,
+    pub path: Option<String>,
+    pub message: String,
+    pub left: Option<JsonValue>,
+    pub right: Option<JsonValue>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct PromotionApprovalRecord {
+    pub actor: String,
+    pub decision: String,
+    pub recorded_at: String,
+    pub reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -202,15 +257,18 @@ pub struct SavingsEstimate {
     pub remaining_model_calls: i64,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ShadowTraceResult {
     pub trace_id: String,
+    pub source_hash: String,
     pub pass: bool,
     pub details: Vec<String>,
+    pub compared_receipts: usize,
+    pub replay_oracle: Option<ReplayOracleReport>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ShadowRunReport {
     pub pass: bool,
@@ -219,12 +277,22 @@ pub struct ShadowRunReport {
     pub traces: Vec<ShadowTraceResult>,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct WorkflowClusterKey {
+    pub goal: Option<String>,
+    pub tool_sequence: Vec<String>,
+    pub touched_artifact_types: Vec<String>,
+    pub success_criteria: Vec<String>,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct WorkflowCandidate {
     pub id: String,
     pub name: String,
     pub confidence: f64,
+    pub cluster_key: WorkflowClusterKey,
     pub sequence_signature: Vec<String>,
     pub parameters: Vec<WorkflowCandidateParameter>,
     pub steps: Vec<WorkflowCandidateStep>,
@@ -234,6 +302,7 @@ pub struct WorkflowCandidate {
     pub approval_points: Vec<CrystallizationApproval>,
     pub side_effects: Vec<CrystallizationSideEffect>,
     pub expected_outputs: Vec<JsonValue>,
+    pub expected_receipts: Vec<JsonValue>,
     pub warnings: Vec<String>,
     pub rejection_reasons: Vec<String>,
     pub promotion: PromotionMetadata,
@@ -253,6 +322,7 @@ pub struct CrystallizationReport {
     pub version: u32,
     pub generated_at: String,
     pub source_trace_count: usize,
+    pub excluded_trace_count: usize,
     pub selected_candidate_id: Option<String>,
     pub candidates: Vec<WorkflowCandidate>,
     pub rejected_candidates: Vec<WorkflowCandidate>,
@@ -316,6 +386,8 @@ pub struct CrystallizationInputFormat {
 #[derive(Clone, Debug, Default)]
 pub struct CrystallizeOptions {
     pub min_examples: usize,
+    pub shadow_traces: Vec<CrystallizationTrace>,
+    pub promotion_min_confidence: f64,
     pub workflow_name: Option<String>,
     pub package_name: Option<String>,
     pub author: Option<String>,
@@ -342,16 +414,36 @@ pub fn crystallize_traces(
         )));
     }
 
-    let normalized = traces.into_iter().map(normalize_trace).collect::<Vec<_>>();
+    let normalized_all = traces.into_iter().map(normalize_trace).collect::<Vec<_>>();
+    let (normalized, excluded_mining) = partition_mineable_traces(normalized_all);
+    if normalized.len() < min_examples {
+        return Err(VmError::Runtime(format!(
+            "crystallize requires at least {min_examples} eligible traces, got {} (excluded {})",
+            normalized.len(),
+            excluded_mining.len()
+        )));
+    }
+    let (shadow_traces, excluded_shadow) = partition_mineable_traces(
+        options
+            .shadow_traces
+            .iter()
+            .cloned()
+            .map(normalize_trace)
+            .collect(),
+    );
+    let mut shadow_pool = normalized.clone();
+    shadow_pool.extend(shadow_traces);
+
     let mut candidates = mine_candidates(&normalized, min_examples, &options);
     let mut rejected_candidates = Vec::new();
     for candidate in &mut candidates {
-        candidate.shadow = shadow_candidate(candidate, &normalized);
+        candidate.shadow = shadow_candidate(candidate, &shadow_pool);
         if !candidate.shadow.pass {
             candidate
                 .rejection_reasons
                 .extend(candidate.shadow.failures.clone());
         }
+        refresh_promotion_metadata(candidate, min_examples, &options);
     }
 
     let mut accepted = Vec::new();
@@ -380,6 +472,7 @@ pub fn crystallize_traces(
         version: 1,
         generated_at: now_rfc3339(),
         source_trace_count: normalized.len(),
+        excluded_trace_count: excluded_mining.len() + excluded_shadow.len(),
         selected_candidate_id: selected.map(|candidate| candidate.id.clone()),
         candidates: accepted,
         rejected_candidates,
@@ -447,6 +540,7 @@ pub fn synthesize_candidate_from_trace(
             .rejection_reasons
             .extend(candidate.shadow.failures.clone());
     }
+    refresh_promotion_metadata(&mut candidate, 1, &options);
     let (accepted, rejected) = if candidate.is_safe_to_propose() {
         (vec![candidate], Vec::new())
     } else {
@@ -464,6 +558,7 @@ pub fn synthesize_candidate_from_trace(
         version: 1,
         generated_at: now_rfc3339(),
         source_trace_count: 1,
+        excluded_trace_count: 0,
         selected_candidate_id: selected_id,
         candidates: accepted,
         rejected_candidates: rejected,
@@ -617,6 +712,7 @@ fn build_single_trace_candidate(
         .iter()
         .filter_map(|step| step.expected_output.clone())
         .collect::<Vec<_>>();
+    let expected_receipts = expected_receipts_for_examples(std::slice::from_ref(trace), &[(0, 0)]);
 
     let savings = estimate_savings(std::slice::from_ref(trace), &[(0, 0)], &steps);
     let confidence = confidence_for(&[(0, 0)], 1, &steps, true);
@@ -633,6 +729,7 @@ fn build_single_trace_candidate(
         id: stable_candidate_id(&sequence, &example_refs),
         name,
         confidence,
+        cluster_key: cluster_key_for_candidate(std::slice::from_ref(trace), &[(0, 0)], &steps),
         sequence_signature: sequence,
         parameters,
         steps,
@@ -642,6 +739,7 @@ fn build_single_trace_candidate(
         approval_points,
         side_effects,
         expected_outputs,
+        expected_receipts,
         warnings,
         rejection_reasons: Vec::new(),
         promotion: PromotionMetadata {
@@ -658,6 +756,7 @@ fn build_single_trace_candidate(
             secrets_required: required_secrets,
             rollback_target: Some("keep source trace and previous package version".to_string()),
             eval_pack_link: options.eval_pack_link.clone(),
+            ..PromotionMetadata::default()
         },
         savings,
         shadow: ShadowRunReport::default(),
@@ -922,6 +1021,8 @@ fn trace_from_run_record(run: RunRecord) -> CrystallizationTrace {
         started_at: Some(run.started_at.clone()),
         finished_at: run.finished_at.clone(),
         actions,
+        replay_run: run.replay_fixture.as_ref().map(replay_run_from_fixture),
+        replay_allowlist: default_trace_replay_allowlist(),
         usage: run
             .usage
             .map(|usage| CrystallizationUsage {
@@ -935,6 +1036,40 @@ fn trace_from_run_record(run: RunRecord) -> CrystallizationTrace {
         metadata: run.metadata.clone(),
         ..CrystallizationTrace::default()
     }
+}
+
+fn replay_run_from_fixture(fixture: &ReplayFixture) -> ReplayTraceRun {
+    ReplayTraceRun {
+        run_id: fixture.source_run_id.clone(),
+        final_artifacts: fixture
+            .stage_assertions
+            .iter()
+            .map(|assertion| {
+                json!({
+                    "node_id": assertion.node_id.clone(),
+                    "expected_status": assertion.expected_status.clone(),
+                    "expected_outcome": assertion.expected_outcome.clone(),
+                    "expected_branch": assertion.expected_branch.clone(),
+                    "required_artifact_kinds": assertion.required_artifact_kinds.clone(),
+                    "visible_text_contains": assertion.visible_text_contains.clone(),
+                })
+            })
+            .collect(),
+        policy_decisions: vec![json!({
+            "workflow_id": fixture.workflow_id.clone(),
+            "expected_status": fixture.expected_status.clone(),
+            "eval_kind": fixture.eval_kind.clone(),
+        })],
+        ..ReplayTraceRun::default()
+    }
+}
+
+fn default_trace_replay_allowlist() -> Vec<ReplayAllowlistRule> {
+    vec![ReplayAllowlistRule {
+        path: "/run_id".to_string(),
+        reason: "run ids are allocated per execution".to_string(),
+        replacement: None,
+    }]
 }
 
 fn normalize_trace(mut trace: CrystallizationTrace) -> CrystallizationTrace {
@@ -977,6 +1112,90 @@ fn normalize_trace(mut trace: CrystallizationTrace) -> CrystallizationTrace {
         }
     }
     trace
+}
+
+fn partition_mineable_traces(
+    traces: Vec<CrystallizationTrace>,
+) -> (Vec<CrystallizationTrace>, Vec<CrystallizationTrace>) {
+    traces
+        .into_iter()
+        .partition(|trace| trace_is_mineable(trace).is_ok())
+}
+
+fn trace_is_mineable(trace: &CrystallizationTrace) -> Result<(), String> {
+    if metadata_has_unresolved_policy_violation(&trace.metadata) {
+        return Err("trace has unresolved policy violations".to_string());
+    }
+    for action in &trace.actions {
+        if metadata_has_unresolved_policy_violation(&action.metadata) {
+            return Err(format!(
+                "action {} has unresolved policy violations",
+                action.id
+            ));
+        }
+        if action_has_nondeterministic_side_effect(action) {
+            return Err(format!(
+                "action {} has nondeterministic side effects",
+                action.id
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn metadata_has_unresolved_policy_violation(metadata: &BTreeMap<String, JsonValue>) -> bool {
+    for (key, value) in metadata {
+        let lower = key.to_ascii_lowercase();
+        if lower.contains("unresolved_policy_violation")
+            || lower == "policy_violation_unresolved"
+            || lower == "policy_violation"
+        {
+            if value.as_bool() == Some(true) {
+                return true;
+            }
+            if value
+                .as_str()
+                .is_some_and(|text| text.eq_ignore_ascii_case("unresolved"))
+            {
+                return true;
+            }
+            if value.as_array().is_some_and(|items| !items.is_empty()) {
+                return true;
+            }
+        }
+        if lower == "policy_status"
+            && value
+                .as_str()
+                .is_some_and(|text| text.eq_ignore_ascii_case("unresolved"))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn action_has_nondeterministic_side_effect(action: &CrystallizationAction) -> bool {
+    if action.side_effects.is_empty() {
+        return false;
+    }
+    if action
+        .metadata
+        .get("nondeterministic_side_effect")
+        .and_then(JsonValue::as_bool)
+        == Some(true)
+    {
+        return true;
+    }
+    if action.deterministic == Some(false) && action.fuzzy.unwrap_or(false) {
+        return true;
+    }
+    action.side_effects.iter().any(|effect| {
+        effect
+            .metadata
+            .get("nondeterministic")
+            .and_then(JsonValue::as_bool)
+            == Some(true)
+    })
 }
 
 fn mine_candidates(
@@ -1128,6 +1347,7 @@ fn mine_candidates(
         .iter()
         .filter_map(|step| step.expected_output.clone())
         .collect::<Vec<_>>();
+    let expected_receipts = expected_receipts_for_examples(traces, &examples);
     let savings = estimate_savings(traces, &examples, &steps);
     let confidence = confidence_for(
         &examples,
@@ -1148,6 +1368,7 @@ fn mine_candidates(
         id: stable_candidate_id(&sequence, &example_refs),
         name,
         confidence,
+        cluster_key: cluster_key_for_candidate(traces, &examples, &steps),
         sequence_signature: sequence,
         parameters,
         steps,
@@ -1157,6 +1378,7 @@ fn mine_candidates(
         approval_points,
         side_effects,
         expected_outputs,
+        expected_receipts,
         warnings,
         rejection_reasons,
         promotion: PromotionMetadata {
@@ -1173,6 +1395,7 @@ fn mine_candidates(
             secrets_required: required_secrets,
             rollback_target: Some("keep source traces and previous package version".to_string()),
             eval_pack_link: options.eval_pack_link.clone(),
+            ..PromotionMetadata::default()
         },
         savings,
         shadow: ShadowRunReport::default(),
@@ -1367,69 +1590,404 @@ fn stable_expected_output(actions: &[&CrystallizationAction]) -> Option<JsonValu
     }
 }
 
+fn expected_receipts_for_examples(
+    traces: &[CrystallizationTrace],
+    examples: &[(usize, usize)],
+) -> Vec<JsonValue> {
+    examples
+        .iter()
+        .find_map(|(trace_index, _)| {
+            traces
+                .get(*trace_index)
+                .and_then(|trace| trace.replay_run.as_ref())
+                .map(|run| run.effect_receipts.clone())
+                .filter(|receipts| !receipts.is_empty())
+        })
+        .unwrap_or_default()
+}
+
+fn cluster_key_for_candidate(
+    traces: &[CrystallizationTrace],
+    examples: &[(usize, usize)],
+    steps: &[WorkflowCandidateStep],
+) -> WorkflowClusterKey {
+    let goal = examples.iter().find_map(|(trace_index, _)| {
+        traces.get(*trace_index).and_then(|trace| {
+            trace
+                .metadata
+                .get("goal")
+                .and_then(JsonValue::as_str)
+                .map(str::to_string)
+                .or_else(|| trace.workflow_id.clone())
+        })
+    });
+    let tool_sequence = steps
+        .iter()
+        .filter(|step| step.kind == "tool_call" || step.kind == "file_mutation")
+        .map(|step| step.name.clone())
+        .collect::<Vec<_>>();
+    let touched_artifact_types = sorted_strings(
+        steps
+            .iter()
+            .flat_map(|step| step.side_effects.iter().map(artifact_type_for_side_effect)),
+    );
+    let success_criteria = sorted_strings(examples.iter().filter_map(|(trace_index, _)| {
+        traces
+            .get(*trace_index)
+            .and_then(|trace| trace.metadata.get("success_criteria"))
+            .and_then(JsonValue::as_str)
+            .map(str::to_string)
+    }));
+
+    WorkflowClusterKey {
+        goal,
+        tool_sequence,
+        touched_artifact_types,
+        success_criteria,
+    }
+}
+
+fn artifact_type_for_side_effect(effect: &CrystallizationSideEffect) -> String {
+    if let Some(kind) = effect
+        .metadata
+        .get("artifact_type")
+        .and_then(JsonValue::as_str)
+        .filter(|kind| !kind.trim().is_empty())
+    {
+        return kind.to_string();
+    }
+    let lower_kind = effect.kind.to_ascii_lowercase();
+    if lower_kind.contains("git") {
+        "git".to_string()
+    } else if lower_kind.contains("file") {
+        Path::new(&effect.target)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| format!("file:{ext}"))
+            .unwrap_or_else(|| "file".to_string())
+    } else if lower_kind.contains("receipt") {
+        "receipt".to_string()
+    } else if lower_kind.contains("publish") {
+        "package_publish".to_string()
+    } else if !lower_kind.is_empty() {
+        lower_kind
+    } else {
+        "unknown".to_string()
+    }
+}
+
+fn refresh_promotion_metadata(
+    candidate: &mut WorkflowCandidate,
+    min_examples: usize,
+    options: &CrystallizeOptions,
+) {
+    let min_confidence = if options.promotion_min_confidence > 0.0 {
+        options.promotion_min_confidence
+    } else {
+        DEFAULT_PROMOTION_MIN_CONFIDENCE
+    };
+    let shadow_success_count = candidate
+        .shadow
+        .traces
+        .iter()
+        .filter(|trace| trace.pass)
+        .count();
+    let shadow_failure_count = candidate
+        .shadow
+        .traces
+        .len()
+        .saturating_sub(shadow_success_count);
+    let sample_count = candidate
+        .shadow
+        .compared_traces
+        .max(candidate.examples.len());
+    let divergence_history = candidate
+        .shadow
+        .traces
+        .iter()
+        .filter(|trace| !trace.pass)
+        .flat_map(divergence_records_for_shadow_trace)
+        .collect::<Vec<_>>();
+    let source_trace_hashes = sorted_strings(
+        candidate
+            .promotion
+            .source_trace_hashes
+            .iter()
+            .cloned()
+            .chain(
+                candidate
+                    .shadow
+                    .traces
+                    .iter()
+                    .map(|trace| trace.source_hash.clone()),
+            ),
+    );
+    let approval_history = options
+        .approver
+        .as_ref()
+        .filter(|approver| !approver.trim().is_empty())
+        .map(|approver| {
+            vec![PromotionApprovalRecord {
+                actor: approver.clone(),
+                decision: "approved_for_shadow_promotion".to_string(),
+                recorded_at: now_rfc3339(),
+                reason: Some("approver supplied in crystallization options".to_string()),
+            }]
+        })
+        .unwrap_or_default();
+    let mut criteria = PromotionCriteria {
+        min_examples,
+        min_confidence,
+        requires_shadow_pass: true,
+        requires_no_rejections: true,
+        requires_human_approval: true,
+        approval_reason: Some(
+            "workflow candidates start in shadow mode and require explicit human approval before promotion".to_string(),
+        ),
+        ..PromotionCriteria::default()
+    };
+    if sample_count < min_examples {
+        criteria.reasons.push(format!(
+            "sample count {} is below required minimum {min_examples}",
+            sample_count
+        ));
+    }
+    if candidate.confidence < min_confidence {
+        criteria.reasons.push(format!(
+            "confidence {:.2} is below required minimum {:.2}",
+            candidate.confidence, min_confidence
+        ));
+    }
+    if !candidate.shadow.pass {
+        criteria
+            .reasons
+            .push("shadow comparison did not pass".to_string());
+    }
+    if !candidate.rejection_reasons.is_empty() {
+        criteria
+            .reasons
+            .push("candidate has rejection reasons".to_string());
+    }
+    if approval_history.is_empty() {
+        criteria
+            .reasons
+            .push("human approval has not been recorded".to_string());
+    }
+    criteria.status = if !candidate.rejection_reasons.is_empty()
+        || !candidate.shadow.pass
+        || sample_count < min_examples
+        || candidate.confidence < min_confidence
+    {
+        PromotionStatus::Blocked
+    } else if approval_history.is_empty() {
+        PromotionStatus::NeedsApproval
+    } else {
+        PromotionStatus::Ready
+    };
+
+    candidate.promotion.sample_count = sample_count;
+    candidate.promotion.source_trace_hashes = source_trace_hashes;
+    candidate.promotion.confidence = candidate.confidence;
+    candidate.promotion.shadow_success_count = shadow_success_count;
+    candidate.promotion.shadow_failure_count = shadow_failure_count;
+    candidate.promotion.divergence_history = divergence_history;
+    candidate.promotion.approval_history = approval_history;
+    candidate.promotion.criteria = criteria;
+    candidate.promotion.estimated_time_token_savings = candidate.savings.clone();
+}
+
+fn divergence_records_for_shadow_trace(
+    trace: &ShadowTraceResult,
+) -> Vec<PromotionDivergenceRecord> {
+    if let Some(report) = &trace.replay_oracle {
+        if let Some(divergence) = &report.divergence {
+            return vec![PromotionDivergenceRecord {
+                trace_id: trace.trace_id.clone(),
+                path: Some(divergence.path.clone()),
+                message: divergence.message.clone(),
+                left: Some(divergence.left.clone()),
+                right: Some(divergence.right.clone()),
+            }];
+        }
+    }
+    trace
+        .details
+        .iter()
+        .map(|detail| PromotionDivergenceRecord {
+            trace_id: trace.trace_id.clone(),
+            path: None,
+            message: detail.clone(),
+            left: None,
+            right: None,
+        })
+        .collect()
+}
+
 fn shadow_candidate(
     candidate: &WorkflowCandidate,
     traces: &[CrystallizationTrace],
 ) -> ShadowRunReport {
     let mut failures = Vec::new();
     let mut results = Vec::new();
+    let mut compared_trace_ids = BTreeSet::new();
     for example in &candidate.examples {
         let Some(trace) = traces.iter().find(|trace| trace.id == example.trace_id) else {
             failures.push(format!("missing source trace {}", example.trace_id));
             continue;
         };
-        let mut details = Vec::new();
-        let end = example.start_index + candidate.steps.len();
-        if end > trace.actions.len() {
-            details.push("candidate sequence extends past trace action list".to_string());
-        } else {
-            let signatures = trace.actions[example.start_index..end]
-                .iter()
-                .map(action_signature)
-                .collect::<Vec<_>>();
-            if signatures != candidate.sequence_signature {
-                details.push("action sequence signature changed".to_string());
-            }
-            for (offset, step) in candidate.steps.iter().enumerate() {
-                let action = &trace.actions[example.start_index + offset];
-                if sorted_side_effects(action.side_effects.clone()) != step.side_effects {
-                    details.push(format!(
-                        "step {} side effects differ for action {}",
-                        step.index, action.id
-                    ));
-                }
-                if action.approval.as_ref().map(|approval| approval.required)
-                    != step.approval.as_ref().map(|approval| approval.required)
-                {
-                    details.push(format!("step {} approval boundary differs", step.index));
-                }
-                if step.segment == SegmentKind::Deterministic {
-                    if let Some(expected) = &step.expected_output {
-                        let actual = action.observed_output.as_ref().or(action.output.as_ref());
-                        if actual != Some(expected) {
-                            details
-                                .push(format!("step {} deterministic output differs", step.index));
-                        }
-                    }
-                }
-            }
-        }
-        let pass = details.is_empty();
-        if !pass {
+        compared_trace_ids.insert(trace.id.clone());
+        let result = shadow_trace_result(candidate, trace, example.start_index);
+        if !result.pass {
             failures.push(format!("trace {} failed shadow comparison", trace.id));
         }
-        results.push(ShadowTraceResult {
-            trace_id: trace.id.clone(),
-            pass,
-            details,
-        });
+        results.push(result);
     }
+
+    for trace in traces {
+        if compared_trace_ids.contains(&trace.id) {
+            continue;
+        }
+        if let Some(start_index) = find_sequence_start(trace, &candidate.sequence_signature) {
+            compared_trace_ids.insert(trace.id.clone());
+            let result = shadow_trace_result(candidate, trace, start_index);
+            if !result.pass {
+                failures.push(format!("trace {} failed shadow comparison", trace.id));
+            }
+            results.push(result);
+        }
+    }
+
     ShadowRunReport {
         pass: failures.is_empty(),
         compared_traces: results.len(),
         failures,
         traces: results,
     }
+}
+
+fn find_sequence_start(trace: &CrystallizationTrace, sequence: &[String]) -> Option<usize> {
+    if sequence.is_empty() || trace.actions.len() < sequence.len() {
+        return None;
+    }
+    trace
+        .actions
+        .windows(sequence.len())
+        .position(|window| window.iter().map(action_signature).collect::<Vec<_>>() == sequence)
+}
+
+fn shadow_trace_result(
+    candidate: &WorkflowCandidate,
+    trace: &CrystallizationTrace,
+    start_index: usize,
+) -> ShadowTraceResult {
+    let mut details = Vec::new();
+    let end = start_index + candidate.steps.len();
+    if end > trace.actions.len() {
+        details.push("candidate sequence extends past trace action list".to_string());
+    } else {
+        let signatures = trace.actions[start_index..end]
+            .iter()
+            .map(action_signature)
+            .collect::<Vec<_>>();
+        if signatures != candidate.sequence_signature {
+            details.push("action sequence signature changed".to_string());
+        }
+        for (offset, step) in candidate.steps.iter().enumerate() {
+            let action = &trace.actions[start_index + offset];
+            if sorted_side_effects(action.side_effects.clone()) != step.side_effects {
+                details.push(format!(
+                    "step {} side effects differ for action {}",
+                    step.index, action.id
+                ));
+            }
+            if action.approval.as_ref().map(|approval| approval.required)
+                != step.approval.as_ref().map(|approval| approval.required)
+            {
+                details.push(format!("step {} approval boundary differs", step.index));
+            }
+            if step.segment == SegmentKind::Deterministic {
+                if let Some(expected) = &step.expected_output {
+                    let actual = action.observed_output.as_ref().or(action.output.as_ref());
+                    if actual != Some(expected) {
+                        details.push(format!("step {} deterministic output differs", step.index));
+                    }
+                }
+            }
+        }
+    }
+
+    let (replay_oracle, compared_receipts) = replay_oracle_for_shadow(candidate, trace);
+    if let Some(report) = &replay_oracle {
+        if !report.passed {
+            if let Some(divergence) = &report.divergence {
+                details.push(format!(
+                    "receipt replay diverged at {}: {}",
+                    divergence.path, divergence.message
+                ));
+            } else {
+                details.push("receipt replay oracle did not pass".to_string());
+            }
+        }
+    }
+
+    ShadowTraceResult {
+        trace_id: trace.id.clone(),
+        source_hash: trace.source_hash.clone().unwrap_or_default(),
+        pass: details.is_empty(),
+        details,
+        compared_receipts,
+        replay_oracle,
+    }
+}
+
+fn replay_oracle_for_shadow(
+    candidate: &WorkflowCandidate,
+    trace: &CrystallizationTrace,
+) -> (Option<ReplayOracleReport>, usize) {
+    let Some(first_run) = trace.replay_run.as_ref() else {
+        return (None, 0);
+    };
+    if first_run.effect_receipts.is_empty() && candidate.expected_receipts.is_empty() {
+        return (None, 0);
+    }
+    let mut second_run = first_run.clone();
+    second_run.run_id = format!("shadow_{}_{}", candidate.id, trace.id);
+    second_run.effect_receipts = candidate.expected_receipts.clone();
+    let compared_receipts = first_run
+        .effect_receipts
+        .len()
+        .max(second_run.effect_receipts.len());
+    let oracle_trace = ReplayOracleTrace {
+        name: format!("{}_shadow_receipts_{}", candidate.name, trace.id),
+        description: Some(
+            "crystallization shadow receipt comparison using the replay oracle".to_string(),
+        ),
+        expect: ReplayExpectation::Match,
+        allowlist: trace.replay_allowlist.clone(),
+        first_run: first_run.clone(),
+        second_run,
+        ..ReplayOracleTrace::default()
+    };
+    let oracle_name = oracle_trace.name.clone();
+    let second_run_counts = oracle_trace.second_run.counts();
+    let report = match run_replay_oracle_trace(&oracle_trace) {
+        Ok(report) => report,
+        Err(error) => ReplayOracleReport {
+            name: oracle_name,
+            expectation: ReplayExpectation::Match,
+            passed: false,
+            first_run_counts: first_run.counts(),
+            second_run_counts,
+            protocol_fixture_refs: Vec::new(),
+            divergence: Some(super::ReplayDivergence {
+                path: "/".to_string(),
+                left: JsonValue::Null,
+                right: JsonValue::Null,
+                message: error.to_string(),
+            }),
+        },
+    };
+    (Some(report), compared_receipts)
 }
 
 fn estimate_savings(
@@ -1862,7 +2420,7 @@ pub struct BundleFixtureRef {
     pub redacted: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct BundlePromotion {
     pub owner: Option<String>,
@@ -1875,6 +2433,14 @@ pub struct BundlePromotion {
     pub created_at: String,
     pub workflow_version: String,
     pub package_name: String,
+    pub sample_count: usize,
+    pub confidence: f64,
+    pub shadow_success_count: usize,
+    pub shadow_failure_count: usize,
+    pub divergence_history: Vec<PromotionDivergenceRecord>,
+    pub approval_history: Vec<PromotionApprovalRecord>,
+    pub criteria: PromotionCriteria,
+    pub estimated_time_token_savings: SavingsEstimate,
 }
 
 impl Default for BundlePromotion {
@@ -1888,6 +2454,14 @@ impl Default for BundlePromotion {
             created_at: String::new(),
             workflow_version: String::new(),
             package_name: String::new(),
+            sample_count: 0,
+            confidence: 0.0,
+            shadow_success_count: 0,
+            shadow_failure_count: 0,
+            divergence_history: Vec::new(),
+            approval_history: Vec::new(),
+            criteria: PromotionCriteria::default(),
+            estimated_time_token_savings: SavingsEstimate::default(),
         }
     }
 }
@@ -2084,8 +2658,27 @@ pub fn build_crystallization_bundle(
     let mut fixture_refs = Vec::new();
     let mut fixture_payloads = Vec::new();
     if let Some(candidate) = selected {
+        let mut fixture_trace_ids = BTreeSet::new();
         for example in &candidate.examples {
-            let trace = traces.iter().find(|trace| trace.id == example.trace_id);
+            fixture_trace_ids.insert(example.trace_id.clone());
+        }
+        for trace in traces {
+            if find_sequence_start(trace, &candidate.sequence_signature).is_some() {
+                fixture_trace_ids.insert(trace.id.clone());
+            }
+        }
+        for trace_id in fixture_trace_ids {
+            let trace = traces.iter().find(|trace| trace.id == trace_id);
+            let source_hash = trace
+                .and_then(|trace| trace.source_hash.clone())
+                .or_else(|| {
+                    candidate
+                        .examples
+                        .iter()
+                        .find(|example| example.trace_id == trace_id)
+                        .map(|example| example.source_hash.clone())
+                })
+                .unwrap_or_default();
             let fixture_relative = trace.map(|trace| {
                 format!(
                     "{BUNDLE_FIXTURES_DIR}/{}.json",
@@ -2093,8 +2686,8 @@ pub fn build_crystallization_bundle(
                 )
             });
             source_traces.push(BundleSourceTrace {
-                trace_id: example.trace_id.clone(),
-                source_hash: example.source_hash.clone(),
+                trace_id: trace_id.clone(),
+                source_hash: source_hash.clone(),
                 source_url: trace.and_then(|trace| trace.source.clone()),
                 source_receipt_id: trace
                     .and_then(|trace| trace.metadata.get("source_receipt_id"))
@@ -2107,7 +2700,7 @@ pub fn build_crystallization_bundle(
                 fixture_refs.push(BundleFixtureRef {
                     path: fixture_path,
                     trace_id: trace.id.clone(),
-                    source_hash: trace.source_hash.clone().unwrap_or_default(),
+                    source_hash,
                     redacted: true,
                 });
                 fixture_payloads.push(redacted);
@@ -2128,6 +2721,30 @@ pub fn build_crystallization_bundle(
         created_at: now_rfc3339(),
         workflow_version,
         package_name: package_name.clone(),
+        sample_count: selected
+            .map(|candidate| candidate.promotion.sample_count)
+            .unwrap_or_default(),
+        confidence: selected
+            .map(|candidate| candidate.promotion.confidence)
+            .unwrap_or_default(),
+        shadow_success_count: selected
+            .map(|candidate| candidate.promotion.shadow_success_count)
+            .unwrap_or_default(),
+        shadow_failure_count: selected
+            .map(|candidate| candidate.promotion.shadow_failure_count)
+            .unwrap_or_default(),
+        divergence_history: selected
+            .map(|candidate| candidate.promotion.divergence_history.clone())
+            .unwrap_or_default(),
+        approval_history: selected
+            .map(|candidate| candidate.promotion.approval_history.clone())
+            .unwrap_or_default(),
+        criteria: selected
+            .map(|candidate| candidate.promotion.criteria.clone())
+            .unwrap_or_default(),
+        estimated_time_token_savings: selected
+            .map(|candidate| candidate.promotion.estimated_time_token_savings.clone())
+            .unwrap_or_default(),
     };
 
     let redaction = BundleRedactionSummary {
@@ -2603,6 +3220,26 @@ fn redact_trace_for_bundle(trace: &mut CrystallizationTrace) {
     for (_, value) in trace.metadata.iter_mut() {
         redact_bundle_value(value);
     }
+    if let Some(run) = trace.replay_run.as_mut() {
+        redact_replay_run_for_bundle(run);
+    }
+}
+
+fn redact_replay_run_for_bundle(run: &mut ReplayTraceRun) {
+    for value in run
+        .event_log_entries
+        .iter_mut()
+        .chain(run.trigger_firings.iter_mut())
+        .chain(run.llm_interactions.iter_mut())
+        .chain(run.protocol_interactions.iter_mut())
+        .chain(run.approval_interactions.iter_mut())
+        .chain(run.effect_receipts.iter_mut())
+        .chain(run.agent_transcript_deltas.iter_mut())
+        .chain(run.final_artifacts.iter_mut())
+        .chain(run.policy_decisions.iter_mut())
+    {
+        redact_bundle_value(value);
+    }
 }
 
 fn redact_bundle_value(value: &mut JsonValue) {
@@ -2811,6 +3448,29 @@ mod tests {
             .any(|step| step.segment == SegmentKind::Fuzzy));
         assert!(candidate.savings.remaining_model_calls > 0);
         assert!(artifacts.harn_code.contains("TODO: fuzzy segment"));
+    }
+
+    #[test]
+    fn excludes_unresolved_policy_violations_from_mining() {
+        let mut traces = version_traces(2);
+        let mut excluded = version_trace("trace_policy_blocked", "0.7.99", "release-branch", false);
+        excluded
+            .metadata
+            .insert("unresolved_policy_violation".to_string(), json!(true));
+        traces.push(excluded);
+
+        let artifacts = crystallize_traces(
+            traces,
+            CrystallizeOptions {
+                min_examples: 2,
+                ..CrystallizeOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(artifacts.report.source_trace_count, 2);
+        assert_eq!(artifacts.report.excluded_trace_count, 1);
+        assert!(artifacts.report.selected_candidate_id.is_some());
     }
 
     fn plan_only_trace(id: &str, suffix: &str) -> CrystallizationTrace {

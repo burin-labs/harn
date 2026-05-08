@@ -280,6 +280,8 @@ pub fn release_fixture_to_trace(fixture: &ReleaseFixture) -> CrystallizationTrac
         finished_at: actions.last().and_then(|action| action.timestamp.clone()),
         flow: None,
         actions,
+        replay_run: None,
+        replay_allowlist: Vec::new(),
         usage: Default::default(),
         metadata,
     }

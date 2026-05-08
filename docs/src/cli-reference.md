@@ -973,6 +973,7 @@ Mine repeated traces into a reviewable deterministic workflow candidate.
 ```bash
 harn crystallize \
   --from fixtures/crystallize/version-bump \
+  --shadow-from fixtures/crystallize/version-bump-holdout \
   --out workflows/version_bump.harn \
   --report reports/version_bump.crystallize.json \
   --eval-pack evals/version_bump.toml \
@@ -984,7 +985,9 @@ The input directory may contain crystallization trace JSON files or persisted
 Harn workflow run records. The report preserves source trace hashes,
 parameters, side effects, approval points, capability and secret requirements,
 shadow-mode pass/fail details, promotion metadata, and cost/token savings.
-Candidates with divergent side effects are rejected instead of promoted.
+Pass `--shadow-from <TRACE_DIR>` to add future/holdout traces to the shadow
+comparison without using them for mining. Candidates with divergent side
+effects or replay-oracle receipt drift are rejected instead of promoted.
 
 Pass `--bundle <DIR>` to also emit a portable
 `harn.crystallization.candidate.bundle` directory (`candidate.json`,
@@ -1026,6 +1029,21 @@ harn crystallize shadow bundles/version-bump
 
 See [Workflow crystallization](./workflow-crystallization.md) for the trace
 schema, bundle layout, and review loop.
+
+The checked-in release/package-maintenance harness can be run with:
+
+```bash
+harn crystallize \
+  --from crates/harn-vm/tests/fixtures/crystallize_v2_release/mine \
+  --shadow-from crates/harn-vm/tests/fixtures/crystallize_v2_release/holdout-pass \
+  --out /tmp/release_package_maintenance.harn \
+  --report /tmp/release_package_maintenance.report.json \
+  --bundle /tmp/release-package-maintenance \
+  --min-examples 3 \
+  --workflow-name release_package_maintenance \
+  --package-name release-workflows \
+  --approver release-lead@example.com
+```
 
 ## harn trigger cancel
 
