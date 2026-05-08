@@ -1299,6 +1299,56 @@ async fn unmatched_hook_pattern_does_not_fire() {
     assert!(matches!(result, PreToolAction::Allow));
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn lifecycle_hook_patterns_match_payload_shapes() {
+    clear_runtime_hooks();
+
+    let mut vm = crate::Vm::new();
+    crate::register_vm_stdlib(&mut vm);
+    let exports = vm
+        .load_module_exports_from_source(
+            "orchestration/tests/noop_hook.harn",
+            "pub fn noop(event) { return nil }\n",
+        )
+        .await
+        .expect("compile noop hook");
+    let closure = exports.get("noop").expect("noop export").clone();
+
+    for pattern in [
+        "trigger.script_*",
+        "trigger.provider == 'cron'",
+        "trigger.kind =~ '^schedule'",
+        "trigger.provider != 'webhook'",
+        "script.path",
+        "trigger.kind =~ '['",
+    ] {
+        register_vm_hook(
+            HookEvent::PreAgentTurn,
+            pattern,
+            format!("test::{pattern}"),
+            Rc::clone(&closure),
+        );
+    }
+
+    let payload = serde_json::json!({
+        "target": "trigger.script_001",
+        "trigger": {
+            "provider": "cron",
+            "kind": "schedule.tick",
+        },
+        "script": {
+            "path": "scripts/bench_001.harn",
+        },
+    });
+
+    assert_eq!(
+        matching_vm_lifecycle_hooks(HookEvent::PreAgentTurn, &payload).len(),
+        5,
+        "valid glob, equality, regex, inequality, and truthy-path patterns should match"
+    );
+    clear_runtime_hooks();
+}
+
 #[test]
 fn glob_match_patterns() {
     assert!(glob_match("*", "anything"));

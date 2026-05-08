@@ -131,16 +131,58 @@ impl std::fmt::Debug for ToolHook {
 #[derive(Clone)]
 enum PatternMatcher {
     ToolNameGlob(String),
-    EventExpression(String),
+    EventExpression {
+        source: String,
+        expression: EventPatternExpression,
+    },
+}
+
+#[derive(Clone)]
+enum EventPatternExpression {
+    MatchAll,
+    NeverMatch,
+    Regex { path: String, regex: Regex },
+    Equals { path: String, value: String },
+    NotEquals { path: String, value: String },
+    PathTruthy(String),
+    ToolNameGlob(String),
 }
 
 impl std::fmt::Debug for PatternMatcher {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ToolNameGlob(pattern) => f.debug_tuple("ToolNameGlob").field(pattern).finish(),
-            Self::EventExpression(pattern) => {
-                f.debug_tuple("EventExpression").field(pattern).finish()
-            }
+            Self::EventExpression { source, expression } => f
+                .debug_struct("EventExpression")
+                .field("source", source)
+                .field("expression", expression)
+                .finish(),
+        }
+    }
+}
+
+impl std::fmt::Debug for EventPatternExpression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MatchAll => f.write_str("MatchAll"),
+            Self::NeverMatch => f.write_str("NeverMatch"),
+            Self::Regex { path, regex } => f
+                .debug_struct("Regex")
+                .field("path", path)
+                .field("regex", &regex.as_str())
+                .finish(),
+            Self::Equals { path, value } => f
+                .debug_struct("Equals")
+                .field("path", path)
+                .field("value", value)
+                .finish(),
+            Self::NotEquals { path, value } => f
+                .debug_struct("NotEquals")
+                .field("path", path)
+                .field("value", value)
+                .finish(),
+            Self::PathTruthy(path) => f.debug_tuple("PathTruthy").field(path).finish(),
+            Self::ToolNameGlob(pattern) => f.debug_tuple("ToolNameGlob").field(pattern).finish(),
         }
     }
 }
@@ -227,7 +269,7 @@ pub fn register_vm_hook(
     RUNTIME_HOOKS.with(|hooks| {
         hooks.borrow_mut().push(RuntimeHook {
             event,
-            matcher: PatternMatcher::EventExpression(pattern.into()),
+            matcher: compile_event_pattern(pattern.into()),
             handler: RuntimeHookHandler::Vm {
                 handler_name: handler_name.into(),
                 closure,
@@ -298,8 +340,45 @@ fn strip_quoted(value: &str) -> &str {
         .unwrap_or(value.trim())
 }
 
-fn expression_matches(pattern: &str, payload: &serde_json::Value) -> bool {
-    let pattern = pattern.trim();
+fn compile_event_pattern(pattern: String) -> PatternMatcher {
+    let trimmed = pattern.trim();
+    let expression = if trimmed.is_empty() || trimmed == "*" {
+        EventPatternExpression::MatchAll
+    } else if let Some((lhs, rhs)) = trimmed.split_once("=~") {
+        match Regex::new(strip_quoted(rhs)) {
+            Ok(regex) => EventPatternExpression::Regex {
+                path: lhs.trim().to_string(),
+                regex,
+            },
+            Err(_) => EventPatternExpression::NeverMatch,
+        }
+    } else if let Some((lhs, rhs)) = trimmed.split_once("==") {
+        EventPatternExpression::Equals {
+            path: lhs.trim().to_string(),
+            value: strip_quoted(rhs).to_string(),
+        }
+    } else if let Some((lhs, rhs)) = trimmed.split_once("!=") {
+        EventPatternExpression::NotEquals {
+            path: lhs.trim().to_string(),
+            value: strip_quoted(rhs).to_string(),
+        }
+    } else if trimmed.contains('.') {
+        EventPatternExpression::PathTruthy(trimmed.to_string())
+    } else {
+        EventPatternExpression::ToolNameGlob(trimmed.to_string())
+    };
+    PatternMatcher::EventExpression {
+        source: pattern,
+        expression,
+    }
+}
+
+fn expression_matches(
+    source: &str,
+    expression: &EventPatternExpression,
+    payload: &serde_json::Value,
+) -> bool {
+    let pattern = source.trim();
     if pattern.is_empty() || pattern == "*" {
         return true;
     }
@@ -308,26 +387,27 @@ fn expression_matches(pattern: &str, payload: &serde_json::Value) -> bool {
             return true;
         }
     }
-    if let Some((lhs, rhs)) = pattern.split_once("=~") {
-        let value = value_to_pattern_string(value_at_path(payload, lhs.trim()));
-        let regex = strip_quoted(rhs);
-        return Regex::new(regex).is_ok_and(|compiled| compiled.is_match(&value));
+    match expression {
+        EventPatternExpression::MatchAll => true,
+        EventPatternExpression::NeverMatch => false,
+        EventPatternExpression::Regex { path, regex } => {
+            let value = value_to_pattern_string(value_at_path(payload, path));
+            regex.is_match(&value)
+        }
+        EventPatternExpression::Equals { path, value } => {
+            value_to_pattern_string(value_at_path(payload, path)) == *value
+        }
+        EventPatternExpression::NotEquals { path, value } => {
+            value_to_pattern_string(value_at_path(payload, path)) != *value
+        }
+        EventPatternExpression::PathTruthy(path) => {
+            value_at_path(payload, path).is_some_and(value_truthy)
+        }
+        EventPatternExpression::ToolNameGlob(pattern) => glob_match(
+            pattern,
+            &value_to_pattern_string(value_at_path(payload, "tool.name")),
+        ),
     }
-    if let Some((lhs, rhs)) = pattern.split_once("==") {
-        let value = value_to_pattern_string(value_at_path(payload, lhs.trim()));
-        return value == strip_quoted(rhs);
-    }
-    if let Some((lhs, rhs)) = pattern.split_once("!=") {
-        let value = value_to_pattern_string(value_at_path(payload, lhs.trim()));
-        return value != strip_quoted(rhs);
-    }
-    if pattern.contains('.') {
-        return value_at_path(payload, pattern).is_some_and(value_truthy);
-    }
-    glob_match(
-        pattern,
-        &value_to_pattern_string(value_at_path(payload, "tool.name")),
-    )
 }
 
 fn hook_matches(hook: &RuntimeHook, tool_name: Option<&str>, payload: &serde_json::Value) -> bool {
@@ -335,8 +415,21 @@ fn hook_matches(hook: &RuntimeHook, tool_name: Option<&str>, payload: &serde_jso
         PatternMatcher::ToolNameGlob(pattern) => {
             tool_name.is_some_and(|candidate| glob_match(pattern, candidate))
         }
-        PatternMatcher::EventExpression(pattern) => expression_matches(pattern, payload),
+        PatternMatcher::EventExpression { source, expression } => {
+            expression_matches(source, expression, payload)
+        }
     }
+}
+
+fn runtime_hooks_for_event(event: HookEvent) -> Vec<RuntimeHook> {
+    RUNTIME_HOOKS.with(|hooks| {
+        hooks
+            .borrow()
+            .iter()
+            .filter(|hook| hook.event == event)
+            .cloned()
+            .collect()
+    })
 }
 
 async fn invoke_vm_hook(
@@ -350,6 +443,22 @@ async fn invoke_vm_hook(
     };
     let arg = crate::stdlib::json_to_vm_value(payload);
     vm.call_closure_pub(closure, &[arg]).await
+}
+
+async fn invoke_vm_lifecycle_hooks(
+    closures: Vec<Rc<VmClosure>>,
+    payload: &serde_json::Value,
+) -> Result<(), VmError> {
+    let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
+        return Err(VmError::Runtime(
+            "runtime hook requires an async builtin VM context".to_string(),
+        ));
+    };
+    let arg = crate::stdlib::json_to_vm_value(payload);
+    for closure in closures {
+        let _ = vm.call_closure_pub(&closure, &[arg.clone()]).await?;
+    }
+    Ok(())
 }
 
 fn parse_pre_tool_result(value: VmValue) -> Result<PreToolAction, VmError> {
@@ -393,26 +502,34 @@ pub async fn run_pre_tool_hooks(
     tool_name: &str,
     args: &serde_json::Value,
 ) -> Result<PreToolAction, VmError> {
-    let hooks = RUNTIME_HOOKS.with(|hooks| hooks.borrow().clone());
+    let hooks = runtime_hooks_for_event(HookEvent::PreToolUse);
     let mut current_args = args.clone();
-    for hook in hooks
-        .iter()
-        .filter(|hook| hook.event == HookEvent::PreToolUse)
-    {
-        let payload = serde_json::json!({
-            "event": HookEvent::PreToolUse.as_str(),
-            "tool": {
-                "name": tool_name,
-                "args": current_args.clone(),
-            },
-        });
-        if !hook_matches(hook, Some(tool_name), &payload) {
+    for hook in &hooks {
+        let payload = if matches!(hook.matcher, PatternMatcher::EventExpression { .. }) {
+            Some(serde_json::json!({
+                "event": HookEvent::PreToolUse.as_str(),
+                "tool": {
+                    "name": tool_name,
+                    "args": current_args.clone(),
+                },
+            }))
+        } else {
+            None
+        };
+        if !hook_matches(
+            hook,
+            Some(tool_name),
+            payload.as_ref().unwrap_or(&serde_json::Value::Null),
+        ) {
             continue;
         }
         let action = match &hook.handler {
             RuntimeHookHandler::NativePreTool(pre) => pre(tool_name, &current_args),
             RuntimeHookHandler::Vm { closure, .. } => {
-                parse_pre_tool_result(invoke_vm_hook(closure, &payload).await?)?
+                let payload = payload.as_ref().ok_or_else(|| {
+                    VmError::Runtime("VM PreToolUse hook requires an event payload".to_string())
+                })?;
+                parse_pre_tool_result(invoke_vm_hook(closure, payload).await?)?
             }
             RuntimeHookHandler::NativePostTool(_) => continue,
         };
@@ -437,29 +554,37 @@ pub async fn run_post_tool_hooks(
     args: &serde_json::Value,
     result: &str,
 ) -> Result<String, VmError> {
-    let hooks = RUNTIME_HOOKS.with(|hooks| hooks.borrow().clone());
+    let hooks = runtime_hooks_for_event(HookEvent::PostToolUse);
     let mut current = result.to_string();
-    for hook in hooks
-        .iter()
-        .filter(|hook| hook.event == HookEvent::PostToolUse)
-    {
-        let payload = serde_json::json!({
-            "event": HookEvent::PostToolUse.as_str(),
-            "tool": {
-                "name": tool_name,
-                "args": args,
-            },
-            "result": {
-                "text": current.clone(),
-            },
-        });
-        if !hook_matches(hook, Some(tool_name), &payload) {
+    for hook in &hooks {
+        let payload = if matches!(hook.matcher, PatternMatcher::EventExpression { .. }) {
+            Some(serde_json::json!({
+                "event": HookEvent::PostToolUse.as_str(),
+                "tool": {
+                    "name": tool_name,
+                    "args": args,
+                },
+                "result": {
+                    "text": current.clone(),
+                },
+            }))
+        } else {
+            None
+        };
+        if !hook_matches(
+            hook,
+            Some(tool_name),
+            payload.as_ref().unwrap_or(&serde_json::Value::Null),
+        ) {
             continue;
         }
         let action = match &hook.handler {
             RuntimeHookHandler::NativePostTool(post) => post(tool_name, &current),
             RuntimeHookHandler::Vm { closure, .. } => {
-                parse_post_tool_result(invoke_vm_hook(closure, &payload).await?)?
+                let payload = payload.as_ref().ok_or_else(|| {
+                    VmError::Runtime("VM PostToolUse hook requires an event payload".to_string())
+                })?;
+                parse_post_tool_result(invoke_vm_hook(closure, payload).await?)?
             }
             RuntimeHookHandler::NativePreTool(_) => continue,
         };
@@ -477,32 +602,39 @@ pub async fn run_lifecycle_hooks(
     event: HookEvent,
     payload: &serde_json::Value,
 ) -> Result<(), VmError> {
-    let hooks = RUNTIME_HOOKS.with(|hooks| hooks.borrow().clone());
-    for hook in hooks.iter().filter(|hook| hook.event == event) {
-        if !hook_matches(hook, None, payload) {
-            continue;
-        }
-        if let RuntimeHookHandler::Vm { closure, .. } = &hook.handler {
-            let _ = invoke_vm_hook(closure, payload).await?;
-        }
+    let closures = matching_vm_lifecycle_closures(event, payload);
+    if closures.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    invoke_vm_lifecycle_hooks(closures, payload).await
 }
 
 pub fn matching_vm_lifecycle_hooks(
     event: HookEvent,
     payload: &serde_json::Value,
 ) -> Vec<VmLifecycleHookInvocation> {
-    let hooks = RUNTIME_HOOKS.with(|hooks| hooks.borrow().clone());
-    hooks
-        .iter()
-        .filter(|hook| hook.event == event)
-        .filter(|hook| hook_matches(hook, None, payload))
-        .filter_map(|hook| match &hook.handler {
-            RuntimeHookHandler::Vm { closure, .. } => Some(VmLifecycleHookInvocation {
-                closure: closure.clone(),
-            }),
-            RuntimeHookHandler::NativePreTool(_) | RuntimeHookHandler::NativePostTool(_) => None,
-        })
+    matching_vm_lifecycle_closures(event, payload)
+        .into_iter()
+        .map(|closure| VmLifecycleHookInvocation { closure })
         .collect()
+}
+
+fn matching_vm_lifecycle_closures(
+    event: HookEvent,
+    payload: &serde_json::Value,
+) -> Vec<Rc<VmClosure>> {
+    RUNTIME_HOOKS.with(|hooks| {
+        hooks
+            .borrow()
+            .iter()
+            .filter(|hook| hook.event == event)
+            .filter(|hook| hook_matches(hook, None, payload))
+            .filter_map(|hook| match &hook.handler {
+                RuntimeHookHandler::Vm { closure, .. } => Some(Rc::clone(closure)),
+                RuntimeHookHandler::NativePreTool(_) | RuntimeHookHandler::NativePostTool(_) => {
+                    None
+                }
+            })
+            .collect()
+    })
 }
