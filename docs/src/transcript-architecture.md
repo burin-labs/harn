@@ -52,6 +52,11 @@ Rules:
 - Put prompt-relevant turn content in `messages`.
 - Put replay/audit/lifecycle facts in `events`.
 - Put large media, file blobs, provider payload dumps, and durable attachments in `assets`.
+- Store session-level system prompt material in `metadata.system_prompt` plus
+  one leading internal `system_prompt` event that carries only the prompt
+  fingerprint. Do not duplicate it into `messages`; provider adapters synthesize
+  the correct system/developer instruction field for each request, including
+  continuations that omit all new system prompt fields.
 - Message blocks should reference assets by `asset_id` instead of embedding base64 when persistence matters.
 - Compaction should summarize archived text while retaining asset descriptors and recent multimodal turns.
 

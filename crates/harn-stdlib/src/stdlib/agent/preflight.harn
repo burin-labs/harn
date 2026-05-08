@@ -267,11 +267,36 @@ fn __agent_decorate_turn_message(message, opts, session, iteration, index, times
   return decorated
 }
 
+fn __agent_system_prompt_option_present(value) {
+  if value == nil || !value || value == "" {
+    return false
+  }
+  if type_of(value) == "list" {
+    return len(value) > 0
+  }
+  return true
+}
+
+fn __agent_has_system_prompt_options(opts) {
+  return __agent_system_prompt_option_present(opts?.system)
+    || __agent_system_prompt_option_present(opts?.system_preamble)
+    || __agent_system_prompt_option_present(opts?.system_prefix)
+    || __agent_system_prompt_option_present(opts?.system_context)
+    || __agent_system_prompt_option_present(opts?.system_prompt_parts)
+    || __agent_system_prompt_option_present(opts?.system_appendix)
+    || __agent_system_prompt_option_present(opts?.system_suffix)
+}
+
 /** agent_build_turn_system. */
 pub fn agent_build_turn_system(session, opts, iteration) {
   var parts = []
   if opts?.system != nil && opts.system != "" {
     parts = parts.push(opts.system)
+  } else if !__agent_has_system_prompt_options(opts) {
+    let stored_system = agent_session_system_prompt(session.session_id)
+    if stored_system != nil && stored_system != "" {
+      parts = parts.push(stored_system)
+    }
   }
   let mcp_advisory = __agent_mcp_initialize_advisory_prompt(opts)
   if mcp_advisory != "" {

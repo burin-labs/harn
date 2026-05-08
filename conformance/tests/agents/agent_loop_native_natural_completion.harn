@@ -49,6 +49,7 @@ pipeline main() {
     {provider: "mock", tools: tool_registry(), tool_format: "native", max_iterations: 1},
   )
   let empty_calls = llm_mock_calls()
-  println(!contains(empty_calls[0].system, "Native tool protocol"))
-  println(!contains(empty_calls[0].system, "<user_response>"))
+  let empty_system = empty_calls[0].system ?? ""
+  println(!contains(empty_system, "Native tool protocol"))
+  println(!contains(empty_system, "<user_response>"))
 }

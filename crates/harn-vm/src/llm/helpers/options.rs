@@ -621,6 +621,231 @@ fn apply_active_step_defaults(options: &mut Option<BTreeMap<String, VmValue>>) {
     }
 }
 
+#[derive(Clone, Copy)]
+enum SystemPromptPosition {
+    Before,
+    After,
+}
+
+fn system_prompt_error(message: impl Into<String>) -> VmError {
+    VmError::Thrown(VmValue::String(std::rc::Rc::from(message.into())))
+}
+
+fn push_system_prompt_part(parts: &mut Vec<String>, part: String) {
+    let trimmed = part.trim();
+    if !trimmed.is_empty() {
+        parts.push(trimmed.to_string());
+    }
+}
+
+fn system_prompt_position(
+    value: Option<&VmValue>,
+    source: &str,
+    fallback: SystemPromptPosition,
+) -> Result<SystemPromptPosition, VmError> {
+    let Some(value) = value else {
+        return Ok(fallback);
+    };
+    match value {
+        VmValue::Nil => Ok(fallback),
+        VmValue::String(raw) => match raw.as_ref() {
+            "before" | "prepend" | "prefix" | "start" => Ok(SystemPromptPosition::Before),
+            "after" | "append" | "suffix" | "end" => Ok(SystemPromptPosition::After),
+            other => Err(system_prompt_error(format!(
+                "{source}.position: expected \"before\" or \"after\", got \"{other}\""
+            ))),
+        },
+        other => Err(system_prompt_error(format!(
+            "{source}.position: expected a string, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn enabled_system_prompt_part(part: &BTreeMap<String, VmValue>) -> bool {
+    !matches!(
+        part.get("enabled"),
+        Some(VmValue::Bool(false) | VmValue::Nil)
+    )
+}
+
+fn system_prompt_part_content(part: &BTreeMap<String, VmValue>) -> Option<String> {
+    part.get("content")
+        .or_else(|| part.get("text"))
+        .or_else(|| part.get("prompt"))
+        .map(VmValue::display)
+}
+
+fn render_system_prompt_part(content: String, part: &BTreeMap<String, VmValue>) -> String {
+    let title = part
+        .get("label")
+        .or_else(|| part.get("title"))
+        .or_else(|| part.get("name"))
+        .map(VmValue::display)
+        .unwrap_or_default();
+    let title = title.trim();
+    let content = content.trim();
+    if title.is_empty() {
+        content.to_string()
+    } else {
+        format!("## {title}\n{content}")
+    }
+}
+
+fn append_system_prompt_parts(
+    before: &mut Vec<String>,
+    after: &mut Vec<String>,
+    value: Option<&VmValue>,
+    source: &str,
+    forced_position: SystemPromptPosition,
+) -> Result<(), VmError> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    match value {
+        VmValue::Nil | VmValue::Bool(false) => Ok(()),
+        VmValue::String(text) => {
+            match forced_position {
+                SystemPromptPosition::Before => push_system_prompt_part(before, text.to_string()),
+                SystemPromptPosition::After => push_system_prompt_part(after, text.to_string()),
+            }
+            Ok(())
+        }
+        VmValue::List(items) => {
+            for (index, item) in items.iter().enumerate() {
+                append_system_prompt_parts(
+                    before,
+                    after,
+                    Some(item),
+                    &format!("{source}[{index}]"),
+                    forced_position,
+                )?;
+            }
+            Ok(())
+        }
+        VmValue::Dict(part) => {
+            if !enabled_system_prompt_part(part) {
+                return Ok(());
+            }
+            let position = system_prompt_position(part.get("position"), source, forced_position)?;
+            if let Some(parts) = part.get("parts") {
+                return append_system_prompt_parts(before, after, Some(parts), source, position);
+            }
+            let content = system_prompt_part_content(part).ok_or_else(|| {
+                system_prompt_error(format!(
+                    "{source}: system prompt part must include `content`, `text`, `prompt`, or `parts`"
+                ))
+            })?;
+            let rendered = render_system_prompt_part(content, part);
+            match position {
+                SystemPromptPosition::Before => push_system_prompt_part(before, rendered),
+                SystemPromptPosition::After => push_system_prompt_part(after, rendered),
+            }
+            Ok(())
+        }
+        other => Err(system_prompt_error(format!(
+            "{source}: expected a string, dict, list, nil, or false; got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn system_prompt_fingerprint(system: &str) -> String {
+    use sha2::Digest as _;
+
+    let digest = sha2::Sha256::digest(system.as_bytes());
+    format!("sha256:{}", hex::encode(digest))
+}
+
+pub(crate) fn system_prompt_metadata(system: &str) -> serde_json::Value {
+    let fingerprint = system_prompt_fingerprint(system);
+    serde_json::json!({
+        "content": system,
+        "hash": fingerprint.clone(),
+        "sha256": fingerprint,
+        "bytes": system.len(),
+    })
+}
+
+pub(crate) fn system_prompt_event_metadata(system: &str) -> serde_json::Value {
+    let fingerprint = system_prompt_fingerprint(system);
+    serde_json::json!({
+        "hash": fingerprint.clone(),
+        "sha256": fingerprint,
+        "bytes": system.len(),
+    })
+}
+
+pub(crate) fn compose_system_prompt(
+    system: Option<String>,
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> Result<Option<String>, VmError> {
+    let mut before = Vec::new();
+    let mut after = Vec::new();
+    if let Some(options) = options {
+        append_system_prompt_parts(
+            &mut before,
+            &mut after,
+            options.get("system_preamble"),
+            "system_preamble",
+            SystemPromptPosition::Before,
+        )?;
+        append_system_prompt_parts(
+            &mut before,
+            &mut after,
+            options.get("system_prefix"),
+            "system_prefix",
+            SystemPromptPosition::Before,
+        )?;
+        append_system_prompt_parts(
+            &mut before,
+            &mut after,
+            options.get("system_context"),
+            "system_context",
+            SystemPromptPosition::Before,
+        )?;
+        append_system_prompt_parts(
+            &mut before,
+            &mut after,
+            options.get("system_prompt_parts"),
+            "system_prompt_parts",
+            SystemPromptPosition::Before,
+        )?;
+        append_system_prompt_parts(
+            &mut before,
+            &mut after,
+            options.get("system_appendix"),
+            "system_appendix",
+            SystemPromptPosition::After,
+        )?;
+        append_system_prompt_parts(
+            &mut before,
+            &mut after,
+            options.get("system_suffix"),
+            "system_suffix",
+            SystemPromptPosition::After,
+        )?;
+    }
+    let primary_system = system
+        .filter(|system| !system.trim().is_empty())
+        .or_else(|| {
+            options
+                .and_then(|options| options.get("system"))
+                .filter(|value| !matches!(value, VmValue::Nil | VmValue::Bool(false)))
+                .map(VmValue::display)
+                .filter(|system| !system.trim().is_empty())
+        });
+    if let Some(system) = primary_system {
+        push_system_prompt_part(&mut before, system);
+    }
+    before.extend(after);
+    if before.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(before.join("\n\n")))
+    }
+}
+
 /// Extract all LLM call options from the standard (prompt, system, options) args.
 pub(crate) fn extract_llm_options(
     args: &[VmValue],
@@ -647,6 +872,7 @@ pub(crate) fn extract_llm_options(
     let mut options = options;
     apply_active_step_defaults(&mut options);
 
+    let system = compose_system_prompt(system, options.as_ref())?;
     let route_policy = parse_route_policy_option(options.as_ref())?;
     let mut provider = vm_resolve_provider(&options);
     let mut model = vm_resolve_model(&options, &provider);

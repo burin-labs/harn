@@ -52,6 +52,13 @@ const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     .arity(VmBuiltinArity::Exact(1))
     .doc("Return the claimed tool format for an agent session."),
     SyncBuiltin::new(
+        "agent_session_system_prompt",
+        agent_session_system_prompt_builtin,
+    )
+    .signature("agent_session_system_prompt(id)")
+    .arity(VmBuiltinArity::Exact(1))
+    .doc("Return the session-level system prompt recorded for an agent session."),
+    SyncBuiltin::new(
         "agent_session_claim_tool_format",
         agent_session_claim_tool_format_builtin,
     )
@@ -215,6 +222,21 @@ fn agent_session_tool_format_builtin(
         )));
     }
     Ok(agent_sessions::tool_format(&id)
+        .map(|value| VmValue::String(Rc::from(value)))
+        .unwrap_or(VmValue::Nil))
+}
+
+fn agent_session_system_prompt_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_system_prompt", "id")?;
+    if !agent_sessions::exists(&id) {
+        return Err(err(format!(
+            "agent_session_system_prompt: unknown session id '{id}'"
+        )));
+    }
+    Ok(agent_sessions::system_prompt(&id)
         .map(|value| VmValue::String(Rc::from(value)))
         .unwrap_or(VmValue::Nil))
 }

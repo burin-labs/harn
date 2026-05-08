@@ -422,6 +422,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         where_clauses: &[],
     },
     BuiltinSignature {
+        name: "agent_session_system_prompt",
+        params: &[Param::new("id", TY_STRING)],
+        returns: TY_STRING_OR_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "agent_session_tool_format",
         params: &[Param::new("id", TY_STRING)],
         returns: TY_STRING_OR_NIL,

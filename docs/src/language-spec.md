@@ -377,6 +377,9 @@ Imports starting with `std/` load embedded stdlib modules:
   pg_mock_pool, pg_mock_calls)
 - `import "std/llm/handlers"` — LLM call-handler middleware
   (with_circuit_breaker)
+- `import "std/llm/prompts"` — deterministic prompt builders and system
+  prompt fragment helpers (system_prompt_part, system_preamble,
+  system_appendix, with_system_prompt_parts, system_prelude)
 - `import "std/personas/prelude"` — reusable persona orchestration helpers
   (verify_then_act, bounded_loop, cheap_classify_then_escalate,
   parallel_sweep_with_circuit_breaker, with_audit_receipt,
@@ -3261,6 +3264,27 @@ let r = llm_call(prompt, nil, {
   route_policy: "cheapest_over_quality(mid)",
   fallback_chain: ["local", "ollama", "openai"],
 })
+```
+
+System prompt fragments can be supplied without hand-concatenating the
+positional `system` string. `system_preamble`, `system_context`,
+`system_prompt_parts`, `system_appendix`, `system_prefix`, and
+`system_suffix` are normalized into the provider's system/developer
+instruction channel for `llm_call` and `agent_loop`. In persistent
+`agent_loop` sessions, the composed session-level system prompt is recorded
+once in transcript metadata and as one leading internal `system_prompt`
+fingerprint event; it is not injected into the replayable message list. A later
+continuation that omits all system prompt fields reuses the stored session
+prompt for the provider request without writing another transcript event.
+
+```harn
+import { system_preamble, with_system_prompt_parts } from "std/llm/prompts"
+
+let opts = with_system_prompt_parts(
+  {provider: "anthropic", session_id: "review-42"},
+  [system_preamble("Follow the repository's validation gate before final output.")]
+)
+let r = agent_loop("Review this change", "You are a code review agent.", opts)
 ```
 
 For call sites that want routing policy to be visibly scoped around the work,
