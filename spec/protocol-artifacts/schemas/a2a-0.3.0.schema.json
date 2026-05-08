@@ -1,0 +1,425 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/conformance/protocols/a2a-0.3.0.schema.json",
+  "title": "Harn A2A 0.3.0 adapter profile",
+  "description": "Pinned Harn adapter profile derived from the A2A v0.3.0 specification and a2aproject/A2A JSON schema for the JSON-RPC/card/task surface Harn serves.",
+  "x-harn-provenance": {
+    "protocol": "a2a",
+    "upstream_version": "0.3.0",
+    "upstream_source_url": "https://raw.githubusercontent.com/a2aproject/A2A/v0.3.0/specification/json/a2a.json",
+    "upstream_spec_url": "https://a2a-protocol.org/v0.3.0/specification",
+    "retrieved_at": "2026-05-08",
+    "refresh_command": "curl -fsSL https://raw.githubusercontent.com/a2aproject/A2A/v0.3.0/specification/json/a2a.json",
+    "profile_note": "The upstream JSON schema is definitions-only; this profile supplies a root over Harn-served agent cards, JSON-RPC messages, task events, push config payloads, and security metadata."
+  },
+  "anyOf": [
+    { "$ref": "#/$defs/AgentCard" },
+    { "$ref": "#/$defs/JsonRpcRequest" },
+    { "$ref": "#/$defs/JsonRpcResultResponse" },
+    { "$ref": "#/$defs/JsonRpcErrorResponse" },
+    { "$ref": "#/$defs/StreamEventResponse" }
+  ],
+  "$defs": {
+    "AgentCard": {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "name",
+        "description",
+        "url",
+        "preferredTransport",
+        "version",
+        "capabilities",
+        "defaultInputModes",
+        "defaultOutputModes",
+        "skills"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "protocolVersion": { "const": "0.3.0" },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "format": "uri" },
+        "preferredTransport": { "const": "JSONRPC" },
+        "additionalInterfaces": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/AgentInterface" }
+        },
+        "version": { "type": "string", "minLength": 1 },
+        "provider": { "type": "object" },
+        "capabilities": { "$ref": "#/$defs/AgentCapabilities" },
+        "skills": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AgentSkill" }
+        },
+        "securitySchemes": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/SecurityScheme" }
+        },
+        "security": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "defaultInputModes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "defaultOutputModes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "not": {
+        "anyOf": [
+          { "required": ["supportedInterfaces"] },
+          { "required": ["interfaces"] }
+        ]
+      }
+    },
+    "AgentInterface": {
+      "type": "object",
+      "required": ["url", "transport"],
+      "additionalProperties": true,
+      "properties": {
+        "url": { "type": "string", "format": "uri" },
+        "transport": {
+          "enum": ["JSONRPC", "GRPC", "HTTP+JSON"]
+        }
+      }
+    },
+    "AgentCapabilities": {
+      "type": "object",
+      "additionalProperties": true,
+      "not": { "required": ["extendedAgentCard"] },
+      "properties": {
+        "streaming": { "type": "boolean" },
+        "pushNotifications": { "type": "boolean" },
+        "stateTransitionHistory": { "type": "boolean" }
+      }
+    },
+    "AgentSkill": {
+      "type": "object",
+      "required": ["id", "name", "description"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "inputModes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "outputModes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "JsonRpcRequest": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "method"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "method": {
+          "enum": [
+            "message/send",
+            "message/stream",
+            "tasks/get",
+            "tasks/cancel",
+            "tasks/resubscribe",
+            "tasks/pushNotificationConfig/set",
+            "tasks/pushNotificationConfig/get",
+            "tasks/pushNotificationConfig/list",
+            "tasks/pushNotificationConfig/delete",
+            "agent/getAuthenticatedExtendedCard",
+            "SendMessage",
+            "SendStreamingMessage",
+            "GetTask",
+            "ListTasks",
+            "CancelTask",
+            "SubscribeToTask",
+            "GetExtendedAgentCard",
+            "a2a.SendMessage",
+            "a2a.SendStreamingMessage",
+            "a2a.GetTask",
+            "a2a.ListTasks",
+            "a2a.CancelTask",
+            "a2a.ResubscribeTask",
+            "tasks/send",
+            "tasks/send_and_wait",
+            "tasks/sendSubscribe",
+            "tasks/get",
+            "tasks/list",
+            "tasks/cancel",
+            "tasks/resubscribe"
+          ]
+        },
+        "params": { "type": "object" }
+      }
+    },
+    "JsonRpcResultResponse": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "result"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "result": {
+          "oneOf": [
+            { "$ref": "#/$defs/Task" },
+            { "$ref": "#/$defs/TaskList" },
+            { "$ref": "#/$defs/TaskEvent" },
+            { "$ref": "#/$defs/Message" },
+            { "$ref": "#/$defs/AgentCard" },
+            { "$ref": "#/$defs/TaskPushNotificationConfig" },
+            {
+              "type": "array",
+              "items": { "$ref": "#/$defs/TaskPushNotificationConfig" }
+            },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "StreamEventResponse": {
+      "type": "object",
+      "required": ["jsonrpc", "result"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": {},
+        "result": { "$ref": "#/$defs/TaskEvent" }
+      }
+    },
+    "JsonRpcErrorResponse": {
+      "type": "object",
+      "required": ["jsonrpc", "error"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": {},
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "additionalProperties": true,
+          "properties": {
+            "code": { "type": "integer" },
+            "message": { "type": "string" }
+          }
+        }
+      }
+    },
+    "RequestId": {
+      "type": ["string", "integer", "null"]
+    },
+    "TaskList": {
+      "type": "object",
+      "required": ["tasks"],
+      "additionalProperties": true,
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Task" }
+        }
+      }
+    },
+    "Task": {
+      "type": "object",
+      "required": ["id", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "contextId": { "type": ["string", "null"] },
+        "status": { "$ref": "#/$defs/TaskStatus" },
+        "history": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Message" }
+        },
+        "artifacts": { "type": "array" },
+        "metadata": { "type": "object" }
+      }
+    },
+    "TaskPushNotificationConfig": {
+      "type": "object",
+      "required": ["taskId"],
+      "additionalProperties": true,
+      "properties": {
+        "taskId": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "pushNotificationConfig": { "type": "object" },
+        "url": { "type": "string", "format": "uri" },
+        "authentication": { "type": "object" },
+        "token": { "type": "string" }
+      }
+    },
+    "TaskStatus": {
+      "type": "object",
+      "required": ["state"],
+      "additionalProperties": true,
+      "properties": {
+        "state": {
+          "enum": [
+            "submitted",
+            "working",
+            "completed",
+            "failed",
+            "canceled",
+            "cancelled",
+            "input-required",
+            "rejected",
+            "auth-required"
+          ]
+        },
+        "message": { "$ref": "#/$defs/Message" },
+        "timestamp": { "type": "string" }
+      }
+    },
+    "Message": {
+      "type": "object",
+      "required": ["id", "role", "parts"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "role": { "enum": ["user", "agent"] },
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/Part" }
+        }
+      }
+    },
+    "Part": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["text"],
+          "not": { "required": ["type"] },
+          "additionalProperties": true,
+          "properties": {
+            "text": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "text"],
+          "additionalProperties": true,
+          "properties": {
+            "type": { "const": "text" },
+            "text": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "file"],
+          "additionalProperties": true,
+          "properties": {
+            "type": { "const": "file" },
+            "file": { "$ref": "#/$defs/FileContent" },
+            "metadata": { "type": "object" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "data"],
+          "additionalProperties": true,
+          "properties": {
+            "type": { "const": "data" },
+            "data": {},
+            "metadata": { "type": "object" },
+            "mediaType": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "FileContent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["bytes"],
+          "not": { "required": ["uri"] },
+          "additionalProperties": true,
+          "properties": {
+            "bytes": { "type": "string", "minLength": 1 },
+            "mimeType": { "type": "string" },
+            "name": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["uri"],
+          "not": { "required": ["bytes"] },
+          "additionalProperties": true,
+          "properties": {
+            "uri": { "type": "string", "minLength": 1 },
+            "mimeType": { "type": "string" },
+            "name": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "SecurityScheme": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": true,
+      "properties": {
+        "type": {
+          "enum": ["apiKey", "http", "oauth2", "openIdConnect", "mutualTLS"]
+        },
+        "description": { "type": "string" },
+        "name": { "type": "string" },
+        "in": { "enum": ["query", "header", "cookie"] },
+        "scheme": { "type": "string" },
+        "bearerFormat": { "type": "string" },
+        "flows": { "type": "object" },
+        "openIdConnectUrl": { "type": "string" }
+      }
+    },
+    "TaskEvent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["statusUpdate"],
+          "additionalProperties": true,
+          "properties": {
+            "statusUpdate": {
+              "type": "object",
+              "required": ["taskId", "status"],
+              "additionalProperties": true,
+              "properties": {
+                "taskId": { "type": "string", "minLength": 1 },
+                "contextId": { "type": ["string", "null"] },
+                "status": { "$ref": "#/$defs/TaskStatus" }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "taskId", "status"],
+          "additionalProperties": true,
+          "properties": {
+            "type": { "const": "status" },
+            "taskId": { "type": "string", "minLength": 1 },
+            "status": { "$ref": "#/$defs/TaskStatus" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "taskId", "message"],
+          "additionalProperties": true,
+          "properties": {
+            "type": { "enum": ["message", "worker_update"] },
+            "taskId": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    }
+  }
+}

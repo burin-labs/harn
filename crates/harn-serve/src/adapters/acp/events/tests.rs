@@ -8,22 +8,10 @@ use harn_vm::tool_annotations::ToolKind;
 use tokio::sync::mpsc;
 
 use super::super::schema::{
-    HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
+    ACP_SESSION_UPDATE_VARIANTS, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
+    HARN_SESSION_UPDATE_EXTENSIONS,
 };
 use super::{AcpAgentEventSink, AcpOutput};
-
-const ACP_V0_12_2_SESSION_UPDATES: &[&str] = &[
-    "user_message_chunk",
-    "agent_message_chunk",
-    "agent_thought_chunk",
-    "tool_call",
-    "tool_call_update",
-    "plan",
-    "available_commands_update",
-    "current_mode_update",
-    "config_option_update",
-    "session_info_update",
-];
 
 async fn collect_notifications(events: Vec<AgentEvent>) -> Vec<serde_json::Value> {
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -211,7 +199,7 @@ async fn standard_session_update_fixtures_match_acp_schema_v0_12_2_discriminator
             .as_str()
             .expect("sessionUpdate");
         assert!(
-            ACP_V0_12_2_SESSION_UPDATES.contains(&session_update),
+            ACP_SESSION_UPDATE_VARIANTS.contains(&session_update),
             "{session_update} is not a standard ACP v0.12.2 SessionUpdate"
         );
         if session_update == "plan" {
@@ -252,6 +240,13 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             next_step: Some("run the verifier".to_string()),
             judge_duration_ms: 42,
         },
+        AgentEvent::TypedCheckpoint {
+            session_id: "session-1".to_string(),
+            checkpoint: serde_json::json!({
+                "type": "stage_gate",
+                "stage": "verify"
+            }),
+        },
         AgentEvent::FeedbackInjected {
             session_id: "session-1".to_string(),
             kind: "protocol_violation".to_string(),
@@ -271,6 +266,24 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             session_id: "session-1".to_string(),
             attempts: 5,
             elapsed_ms: 12_000,
+        },
+        AgentEvent::LoopControlDecision {
+            session_id: "session-1".to_string(),
+            iteration: 6,
+            action: "extend".to_string(),
+            old_limit: 8,
+            new_limit: 10,
+            reason: "verification still running".to_string(),
+            status: "working".to_string(),
+        },
+        AgentEvent::ToolCallAudit {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-1".to_string(),
+            tool_name: "read_file".to_string(),
+            audit: serde_json::json!({
+                "summary": "Read project context",
+                "consent": "not_required"
+            }),
         },
     ]
 }

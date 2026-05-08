@@ -1,0 +1,241 @@
+{
+  "a2a": {
+    "methods": [
+      "message/send",
+      "message/stream",
+      "tasks/get",
+      "tasks/cancel",
+      "tasks/resubscribe",
+      "tasks/pushNotificationConfig/set",
+      "tasks/pushNotificationConfig/get",
+      "tasks/pushNotificationConfig/list",
+      "tasks/pushNotificationConfig/delete",
+      "agent/getAuthenticatedExtendedCard"
+    ],
+    "protocolVersion": "0.3.0",
+    "taskEventTypes": [
+      "status",
+      "message",
+      "worker_update"
+    ],
+    "taskStates": [
+      "submitted",
+      "working",
+      "completed",
+      "failed",
+      "canceled",
+      "cancelled",
+      "input-required",
+      "rejected",
+      "auth-required"
+    ]
+  },
+  "acp": {
+    "agentMethods": [
+      "initialize",
+      "session/new",
+      "session/prompt",
+      "session/stop"
+    ],
+    "agentNotifications": [
+      "session/message",
+      "session/update",
+      "terminal/output"
+    ],
+    "clientMethods": [
+      "fs/read_text_file",
+      "fs/write_text_file",
+      "terminal/create",
+      "terminal/kill",
+      "session/request_permission"
+    ],
+    "contentBlockTypes": [
+      "text",
+      "resource_link",
+      "resource",
+      "image",
+      "audio"
+    ],
+    "contentExtensionFields": [
+      "visible_delta",
+      "visible_text"
+    ],
+    "harnAgentEventKinds": [
+      "budget_exhausted",
+      "daemon_watchdog_tripped",
+      "feedback_injected",
+      "judge_decision",
+      "loop_control_decision",
+      "loop_stuck",
+      "tool_call_audit",
+      "typed_checkpoint",
+      "turn_end",
+      "turn_start"
+    ],
+    "harnAgentEventMethod": "_harn/agentEvent",
+    "harnSessionUpdateExtensions": [
+      "available_commands_update",
+      "fs_watch",
+      "handoff",
+      "hitl_request",
+      "hitl_resolved",
+      "log",
+      "progress",
+      "skill_activated",
+      "skill_deactivated",
+      "skill_scope_tools",
+      "tool_search_query",
+      "tool_search_result",
+      "transcript_compacted",
+      "worker_update"
+    ],
+    "schemaCompatibility": "agentclientprotocol/agent-client-protocol schema v0.12.2",
+    "sessionUpdateVariants": [
+      "user_message_chunk",
+      "agent_message_chunk",
+      "agent_thought_chunk",
+      "tool_call",
+      "tool_call_update",
+      "plan",
+      "available_commands_update",
+      "current_mode_update",
+      "config_option_update",
+      "session_info_update",
+      "fs_watch",
+      "handoff",
+      "hitl_request",
+      "hitl_resolved",
+      "log",
+      "progress",
+      "skill_activated",
+      "skill_deactivated",
+      "skill_scope_tools",
+      "tool_search_query",
+      "tool_search_result",
+      "transcript_compacted",
+      "worker_update"
+    ],
+    "toolCallErrorCategories": [
+      "schema_validation",
+      "tool_error",
+      "mcp_server_error",
+      "host_bridge_error",
+      "permission_denied",
+      "rejected_loop",
+      "parse_aborted",
+      "timeout",
+      "network",
+      "cancelled",
+      "unknown"
+    ],
+    "toolCallStatuses": [
+      "pending",
+      "in_progress",
+      "completed",
+      "failed"
+    ],
+    "toolExecutorSimpleValues": [
+      "harn_builtin",
+      "host_bridge",
+      "provider_native"
+    ],
+    "toolKinds": [
+      "read",
+      "edit",
+      "delete",
+      "move",
+      "search",
+      "execute",
+      "think",
+      "fetch",
+      "other"
+    ],
+    "toolLifecycleExtensionFields": [
+      "audit",
+      "durationMs",
+      "error",
+      "errorCategory",
+      "executionDurationMs",
+      "executor",
+      "parsing",
+      "rawInputPartial"
+    ]
+  },
+  "artifactVersion": "0.8.0",
+  "checkCommand": "make check-protocol-artifacts",
+  "generatedBy": "harn dump-protocol-artifacts",
+  "mcp": {
+    "loggingLevels": [
+      "debug",
+      "info",
+      "notice",
+      "warning",
+      "error",
+      "critical",
+      "alert",
+      "emergency"
+    ],
+    "methods": [
+      "initialize",
+      "tools/list",
+      "tools/call",
+      "resources/list",
+      "resources/read",
+      "resources/templates/list",
+      "prompts/list",
+      "prompts/get",
+      "completion/complete",
+      "logging/setLevel",
+      "sampling/createMessage",
+      "elicitation/create",
+      "notifications/initialized",
+      "notifications/message"
+    ],
+    "protocolVersion": "2025-11-25"
+  },
+  "schemaVersion": 1,
+  "schemas": [
+    {
+      "artifact": "schemas/acp-session-update.schema.json",
+      "protocol": "acp",
+      "provenance": {
+        "profile_note": "The profile roots the ACP request, response, session/update notification, and Harn extension notification shapes this adapter emits or accepts.",
+        "protocol": "acp",
+        "refresh_command": "curl -fsSL https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/v0.12.2/schema/schema.json",
+        "retrieved_at": "2026-05-08",
+        "upstream_source_url": "https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/v0.12.2/schema/schema.json",
+        "upstream_spec_url": "https://agentclientprotocol.com/protocol/schema",
+        "upstream_version": "v0.12.2"
+      },
+      "source": "conformance/protocols/schemas/acp-session-update.schema.json"
+    },
+    {
+      "artifact": "schemas/a2a-0.3.0.schema.json",
+      "protocol": "a2a",
+      "provenance": {
+        "profile_note": "The upstream JSON schema is definitions-only; this profile supplies a root over Harn-served agent cards, JSON-RPC messages, task events, push config payloads, and security metadata.",
+        "protocol": "a2a",
+        "refresh_command": "curl -fsSL https://raw.githubusercontent.com/a2aproject/A2A/v0.3.0/specification/json/a2a.json",
+        "retrieved_at": "2026-05-08",
+        "upstream_source_url": "https://raw.githubusercontent.com/a2aproject/A2A/v0.3.0/specification/json/a2a.json",
+        "upstream_spec_url": "https://a2a-protocol.org/v0.3.0/specification",
+        "upstream_version": "0.3.0"
+      },
+      "source": "conformance/protocols/schemas/a2a-0.3.0.schema.json"
+    },
+    {
+      "artifact": "schemas/mcp-2025-11-25.schema.json",
+      "protocol": "mcp",
+      "provenance": {
+        "profile_note": "The upstream schema is definitions-only; this profile supplies a root over the Harn-supported MCP request, response, notification, and protected-resource metadata shapes.",
+        "protocol": "mcp",
+        "refresh_command": "curl -fsSL https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/main/schema/2025-11-25/schema.json",
+        "retrieved_at": "2026-05-08",
+        "upstream_source_url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/main/schema/2025-11-25/schema.json",
+        "upstream_spec_url": "https://modelcontextprotocol.io/specification/2025-11-25",
+        "upstream_version": "2025-11-25"
+      },
+      "source": "conformance/protocols/schemas/mcp-2025-11-25.schema.json"
+    }
+  ]
+}

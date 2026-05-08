@@ -46,6 +46,7 @@ for compatibility with existing Burin Code and other host renderers, and
 are advertised during `initialize` under
 `agentCapabilities._meta.harn.sessionUpdateExtensions`:
 
+- `available_commands_update`
 - `fs_watch`
 - `handoff`
 - `hitl_request`

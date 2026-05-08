@@ -68,7 +68,8 @@ pub(crate) use crystallize::{
 };
 pub(crate) use doctor::DoctorArgs;
 pub(crate) use dump::{
-    DumpConnectorMatrixArgs, DumpHighlightKeywordsArgs, DumpTriggerQuickrefArgs,
+    DumpConnectorMatrixArgs, DumpHighlightKeywordsArgs, DumpProtocolArtifactsArgs,
+    DumpTriggerQuickrefArgs,
 };
 pub(crate) use explain::ExplainArgs;
 pub(crate) use flow::{
@@ -322,6 +323,13 @@ SCRIPTING
     /// `make gen-connector-matrix` target.
     #[command(hide = true, name = "dump-connector-matrix")]
     DumpConnectorMatrix(DumpConnectorMatrixArgs),
+    /// Regenerate Harn protocol schemas and TypeScript/Swift bindings.
+    ///
+    /// Dev-only. Hidden from `--help` — invoke via
+    /// `cargo run -p harn-cli -- dump-protocol-artifacts` or the
+    /// `make gen-protocol-artifacts` target.
+    #[command(hide = true, name = "dump-protocol-artifacts")]
+    DumpProtocolArtifacts(DumpProtocolArtifactsArgs),
 }
 
 #[cfg(test)]

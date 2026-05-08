@@ -26,11 +26,13 @@ mod transport;
 
 use auth::acp_auth_request_for_method;
 use bridge::{AcpBridge, AcpOutput};
-use schema::{acp_agent_capabilities, normalize_acp_prompt, retarget_prompt_text};
 #[cfg(test)]
-use schema::{
-    configured_llm_route_for_capabilities, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
-    HARN_AGENT_EVENT_METHOD, HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+use schema::configured_llm_route_for_capabilities;
+use schema::{acp_agent_capabilities, normalize_acp_prompt, retarget_prompt_text};
+pub use schema::{
+    ACP_SCHEMA_COMPATIBILITY, ACP_SESSION_UPDATE_VARIANTS, HARN_AGENT_EVENT_KINDS,
+    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_SESSION_UPDATE_EXTENSIONS,
+    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use sessions::{
     mark_cancelled_session, preempt_session_cancel, prepare_session_prompt, Session,

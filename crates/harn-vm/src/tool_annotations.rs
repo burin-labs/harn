@@ -50,6 +50,18 @@ pub enum ToolKind {
 }
 
 impl ToolKind {
+    pub const ALL: [Self; 9] = [
+        Self::Read,
+        Self::Edit,
+        Self::Delete,
+        Self::Move,
+        Self::Search,
+        Self::Execute,
+        Self::Think,
+        Self::Fetch,
+        Self::Other,
+    ];
+
     /// Read-only tools can dispatch concurrently without risking
     /// conflicting state mutations. `Other` is excluded by design —
     /// unannotated tools must not auto-approve as read-only.
@@ -90,6 +102,14 @@ pub enum SideEffectLevel {
 }
 
 impl SideEffectLevel {
+    pub const ALL: [Self; 5] = [
+        Self::None,
+        Self::ReadOnly,
+        Self::WorkspaceWrite,
+        Self::ProcessExec,
+        Self::Network,
+    ];
+
     /// Numeric rank used by the policy intersector and side-effect
     /// ceiling check. Higher rank ⇒ more invasive.
     pub fn rank(&self) -> usize {
