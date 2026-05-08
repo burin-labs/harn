@@ -19,9 +19,46 @@ struct ProtocolFixture {
     name: String,
     protocol: String,
     schema: String,
+    matrix: FixtureMatrix,
     #[serde(default)]
     expect: FixtureExpectation,
     documents: Vec<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FixtureMatrix {
+    version: String,
+    family: String,
+    case: String,
+    source: FixtureSource,
+}
+
+#[derive(Debug, Deserialize)]
+struct FixtureSource {
+    kind: FixtureSourceKind,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    generator: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum FixtureSourceKind {
+    OfficialExample,
+    AdapterGenerated,
+    HandAuthored,
+}
+
+struct SchemaProvenance {
+    protocol: String,
+    upstream_version: String,
+    upstream_source_url: String,
+    upstream_spec_url: String,
+    retrieved_at: String,
+    refresh_command: String,
 }
 
 #[derive(Debug, Default)]
@@ -134,7 +171,12 @@ fn resolve_fixture_files(root: &Path, selection: Option<&str>) -> Result<Vec<Pat
             if raw.is_absolute() || raw.starts_with(root) {
                 raw
             } else {
-                root.join(raw)
+                let candidate = root.join(&raw);
+                if candidate.exists() {
+                    candidate
+                } else {
+                    fixture_root.join(raw)
+                }
             }
         }
         None => fixture_root,
@@ -200,7 +242,57 @@ fn read_fixture(path: &Path) -> Result<ProtocolFixture, String> {
     if fixture.documents.is_empty() {
         return Err("fixture must contain at least one document".to_string());
     }
+    validate_fixture_metadata(&fixture)?;
     Ok(fixture)
+}
+
+fn validate_fixture_metadata(fixture: &ProtocolFixture) -> Result<(), String> {
+    ensure_nonempty("name", &fixture.name)?;
+    ensure_nonempty("protocol", &fixture.protocol)?;
+    ensure_nonempty("schema", &fixture.schema)?;
+    ensure_nonempty("matrix.version", &fixture.matrix.version)?;
+    ensure_nonempty("matrix.family", &fixture.matrix.family)?;
+    ensure_nonempty("matrix.case", &fixture.matrix.case)?;
+    match fixture.protocol.as_str() {
+        "mcp" | "acp" | "a2a" => {}
+        other => {
+            return Err(format!(
+                "protocol must be one of mcp/acp/a2a, got {other:?}"
+            ))
+        }
+    }
+    match fixture.matrix.source.kind {
+        FixtureSourceKind::OfficialExample => {
+            let url = fixture.matrix.source.url.as_deref().unwrap_or_default();
+            ensure_nonempty("matrix.source.url", url)?;
+        }
+        FixtureSourceKind::AdapterGenerated => {
+            let generator = fixture
+                .matrix
+                .source
+                .generator
+                .as_deref()
+                .unwrap_or_default();
+            ensure_nonempty("matrix.source.generator", generator)?;
+        }
+        FixtureSourceKind::HandAuthored => {
+            let description = fixture
+                .matrix
+                .source
+                .description
+                .as_deref()
+                .unwrap_or_default();
+            ensure_nonempty("matrix.source.description", description)?;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_nonempty(field: &str, value: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err(format!("{field} must be a non-empty string"));
+    }
+    Ok(())
 }
 
 fn matches_filter(filter: Option<&str>, fixture: &ProtocolFixture, relative_path: &str) -> bool {
@@ -211,11 +303,17 @@ fn matches_filter(filter: Option<&str>, fixture: &ProtocolFixture, relative_path
         return Regex::new(pattern).is_ok_and(|regex| {
             regex.is_match(&fixture.name)
                 || regex.is_match(&fixture.protocol)
+                || regex.is_match(&fixture.matrix.version)
+                || regex.is_match(&fixture.matrix.family)
+                || regex.is_match(&fixture.matrix.case)
                 || regex.is_match(relative_path)
         });
     }
     fixture.name.contains(filter)
         || fixture.protocol.contains(filter)
+        || fixture.matrix.version.contains(filter)
+        || fixture.matrix.family.contains(filter)
+        || fixture.matrix.case.contains(filter)
         || relative_path.contains(filter)
 }
 
@@ -225,6 +323,7 @@ fn run_fixture(root: &Path, fixture_path: &Path, fixture: &ProtocolFixture) -> R
         .map_err(|error| format!("failed to read schema {}: {error}", schema_path.display()))?;
     let schema: Value = serde_json::from_str(&schema_text)
         .map_err(|error| format!("invalid schema JSON {}: {error}", schema_path.display()))?;
+    validate_schema_provenance(&schema, fixture, &schema_path)?;
     jsonschema::draft202012::meta::validate(&schema).map_err(|error| {
         format!(
             "schema {} is not valid JSON Schema 2020-12: {error}",
@@ -261,6 +360,63 @@ fn run_fixture(root: &Path, fixture_path: &Path, fixture: &ProtocolFixture) -> R
     Ok(())
 }
 
+fn validate_schema_provenance(
+    schema: &Value,
+    fixture: &ProtocolFixture,
+    schema_path: &Path,
+) -> Result<(), String> {
+    let provenance = schema_provenance(schema).ok_or_else(|| {
+        format!(
+            "schema {} must define x-harn-provenance with upstream source, version, date, and refresh command",
+            schema_path.display()
+        )
+    })?;
+    if provenance.protocol != fixture.protocol {
+        return Err(format!(
+            "schema {} declares protocol {:?} but fixture {:?} uses {:?}",
+            schema_path.display(),
+            provenance.protocol,
+            fixture.name,
+            fixture.protocol
+        ));
+    }
+    if provenance.upstream_version != fixture.matrix.version {
+        return Err(format!(
+            "schema {} declares upstream version {:?} but fixture {:?} is matrix version {:?}",
+            schema_path.display(),
+            provenance.upstream_version,
+            fixture.name,
+            fixture.matrix.version
+        ));
+    }
+    ensure_nonempty(
+        "x-harn-provenance.upstream_source_url",
+        &provenance.upstream_source_url,
+    )?;
+    ensure_nonempty(
+        "x-harn-provenance.upstream_spec_url",
+        &provenance.upstream_spec_url,
+    )?;
+    ensure_nonempty("x-harn-provenance.retrieved_at", &provenance.retrieved_at)?;
+    ensure_nonempty(
+        "x-harn-provenance.refresh_command",
+        &provenance.refresh_command,
+    )?;
+    Ok(())
+}
+
+fn schema_provenance(schema: &Value) -> Option<SchemaProvenance> {
+    let object = schema.get("x-harn-provenance")?.as_object()?;
+    Some(SchemaProvenance {
+        protocol: object.get("protocol")?.as_str()?.to_string(),
+        upstream_version: object.get("upstream_version")?.as_str()?.to_string(),
+        upstream_source_url: object.get("upstream_source_url")?.as_str()?.to_string(),
+        upstream_spec_url: object.get("upstream_spec_url")?.as_str()?.to_string(),
+        retrieved_at: object.get("retrieved_at")?.as_str()?.to_string(),
+        refresh_command: object.get("refresh_command")?.as_str()?.to_string(),
+    })
+}
+
 fn resolve_schema_path(root: &Path, fixture_path: &Path, schema: &str) -> Result<PathBuf, String> {
     let raw = PathBuf::from(schema);
     let path = if raw.is_absolute() || raw.starts_with(root) {
@@ -275,7 +431,10 @@ fn resolve_schema_path(root: &Path, fixture_path: &Path, schema: &str) -> Result
 
 #[cfg(test)]
 mod tests {
-    use super::{run_protocol_conformance_inner, FixtureExpectation, ProtocolFixture};
+    use super::{
+        run_protocol_conformance_inner, validate_fixture_metadata, FixtureExpectation,
+        ProtocolFixture,
+    };
 
     #[test]
     fn expectation_defaults_to_valid() {
@@ -284,11 +443,41 @@ mod tests {
               "name": "sample",
               "protocol": "mcp",
               "schema": "schemas/mcp-2025-11-25.schema.json",
+              "matrix": {
+                "version": "2025-11-25",
+                "family": "initialize",
+                "case": "success",
+                "source": {
+                  "kind": "hand_authored",
+                  "description": "unit-test fixture metadata"
+                }
+              },
               "documents": [{}]
             }"#,
         )
         .unwrap();
         assert_eq!(fixture.expect, FixtureExpectation::Valid);
+    }
+
+    #[test]
+    fn adapter_generated_fixtures_must_name_generator() {
+        let fixture: ProtocolFixture = serde_json::from_str(
+            r#"{
+              "name": "sample",
+              "protocol": "mcp",
+              "schema": "schemas/mcp-2025-11-25.schema.json",
+              "matrix": {
+                "version": "2025-11-25",
+                "family": "initialize",
+                "case": "success",
+                "source": {"kind": "adapter_generated"}
+              },
+              "documents": [{}]
+            }"#,
+        )
+        .unwrap();
+        let error = validate_fixture_metadata(&fixture).expect_err("missing generator should fail");
+        assert!(error.contains("matrix.source.generator"));
     }
 
     #[test]
@@ -298,6 +487,6 @@ mod tests {
             .join("conformance/protocols");
         let report = run_protocol_conformance_inner(&root, None, None, false);
         assert_eq!(report.failed, 0, "{:#?}", report.errors);
-        assert!(report.passed >= 6);
+        assert!(report.passed >= 25);
     }
 }

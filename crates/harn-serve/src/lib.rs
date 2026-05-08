@@ -6,6 +6,8 @@ mod auth;
 mod core;
 mod error;
 mod exports;
+#[cfg(test)]
+mod protocol_fixture_tests;
 mod replay;
 pub mod tls;
 

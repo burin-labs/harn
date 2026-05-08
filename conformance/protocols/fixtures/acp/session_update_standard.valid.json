@@ -112,5 +112,15 @@
         }
       }
     }
-  ]
+  ],
+  "matrix": {
+    "version": "v0.12.2",
+    "family": "session_update",
+    "case": "success",
+    "source": {
+      "kind": "official_example",
+      "url": "https://agentclientprotocol.com/protocol/schema",
+      "description": "Canonical ACP session/update discriminators represented in the upstream v0.12.2 schema."
+    }
+  }
 }

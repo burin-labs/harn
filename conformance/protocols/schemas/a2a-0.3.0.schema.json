@@ -2,7 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/conformance/protocols/a2a-0.3.0.schema.json",
   "title": "Harn A2A 0.3.0 adapter profile",
-  "description": "Pinned profile derived from the A2A v0.3.0 specification and a2aproject/A2A specification/a2a.proto for the JSON-RPC/card/task surface Harn serves.",
+  "description": "Pinned Harn adapter profile derived from the A2A v0.3.0 specification and a2aproject/A2A JSON schema for the JSON-RPC/card/task surface Harn serves.",
+  "x-harn-provenance": {
+    "protocol": "a2a",
+    "upstream_version": "0.3.0",
+    "upstream_source_url": "https://raw.githubusercontent.com/a2aproject/A2A/v0.3.0/specification/json/a2a.json",
+    "upstream_spec_url": "https://a2a-protocol.org/v0.3.0/specification",
+    "retrieved_at": "2026-05-08",
+    "refresh_command": "curl -fsSL https://raw.githubusercontent.com/a2aproject/A2A/v0.3.0/specification/json/a2a.json",
+    "profile_note": "The upstream JSON schema is definitions-only; this profile supplies a root over Harn-served agent cards, JSON-RPC messages, task events, push config payloads, and security metadata."
+  },
   "anyOf": [
     { "$ref": "#/$defs/AgentCard" },
     { "$ref": "#/$defs/JsonRpcRequest" },
@@ -44,8 +53,14 @@
           "type": "array",
           "items": { "$ref": "#/$defs/AgentSkill" }
         },
-        "securitySchemes": { "type": "object" },
-        "security": { "type": "array" },
+        "securitySchemes": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/SecurityScheme" }
+        },
+        "security": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
         "defaultInputModes": {
           "type": "array",
           "items": { "type": "string" }
@@ -257,9 +272,9 @@
             "failed",
             "canceled",
             "cancelled",
-            "input_required",
+            "input-required",
             "rejected",
-            "auth_required"
+            "auth-required"
           ]
         },
         "message": { "$ref": "#/$defs/Message" },
@@ -348,6 +363,23 @@
           }
         }
       ]
+    },
+    "SecurityScheme": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": true,
+      "properties": {
+        "type": {
+          "enum": ["apiKey", "http", "oauth2", "openIdConnect", "mutualTLS"]
+        },
+        "description": { "type": "string" },
+        "name": { "type": "string" },
+        "in": { "enum": ["query", "header", "cookie"] },
+        "scheme": { "type": "string" },
+        "bearerFormat": { "type": "string" },
+        "flows": { "type": "object" },
+        "openIdConnectUrl": { "type": "string" }
+      }
     },
     "TaskEvent": {
       "oneOf": [

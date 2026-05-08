@@ -1,0 +1,71 @@
+{
+  "name": "a2a.adapter.agent_card.discovery",
+  "protocol": "a2a",
+  "schema": "schemas/a2a-0.3.0.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "protocolVersion": "0.3.0",
+      "name": "server",
+      "description": "Harn peer agent",
+      "url": "http://localhost:8080",
+      "preferredTransport": "JSONRPC",
+      "additionalInterfaces": [
+        {
+          "url": "http://localhost:8080",
+          "transport": "JSONRPC"
+        },
+        {
+          "url": "http://localhost:8080/v1",
+          "transport": "HTTP+JSON"
+        }
+      ],
+      "version": "0.8.0",
+      "provider": {
+        "organization": "Harn",
+        "url": "https://harn.dev"
+      },
+      "securitySchemes": {},
+      "security": [],
+      "supportsAuthenticatedExtendedCard": false,
+      "defaultInputModes": ["application/json", "text/plain", "application/octet-stream"],
+      "defaultOutputModes": ["application/json", "text/plain", "application/octet-stream"],
+      "capabilities": {
+        "streaming": true,
+        "pushNotifications": true
+      },
+      "skills": [
+        {
+          "id": "triage",
+          "name": "triage",
+          "description": "Invoke exported Harn function 'triage'.",
+          "tags": ["harn", "function"],
+          "examples": [],
+          "inputModes": ["application/json", "text/plain", "application/octet-stream"],
+          "outputModes": ["application/json", "text/plain", "application/octet-stream"],
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "task": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "task"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "matrix": {
+    "version": "0.3.0",
+    "family": "agent_card",
+    "case": "adapter_discovery_success",
+    "source": {
+      "kind": "adapter_generated",
+      "generator": "cargo test -p harn-serve adapters::a2a::tests::adapter_agent_card_protocol_fixture_matches_checked_in_matrix",
+      "description": "Generated from A2aServer::agent_card for a typed exported Harn function."
+    }
+  }
+}

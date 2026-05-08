@@ -1,0 +1,28 @@
+{
+  "name": "acp.jsonrpc.error_response",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 9,
+      "error": {
+        "code": -32602,
+        "message": "Unknown session: session-missing",
+        "data": {
+          "method": "session/set_mode"
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "v0.12.2",
+    "family": "jsonrpc",
+    "case": "error_response_success",
+    "source": {
+      "kind": "hand_authored",
+      "description": "JSON-RPC error envelope shape used by ACP request handlers."
+    }
+  }
+}

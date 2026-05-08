@@ -16,15 +16,23 @@
           "transport": "JSONRPC"
         }
       ],
-      "version": "0.7.48",
+      "version": "0.8.0",
       "provider": {
         "organization": "Harn",
         "url": "https://harn.dev"
       },
       "securitySchemes": {},
       "security": [],
-      "defaultInputModes": ["application/json", "text/plain", "application/octet-stream"],
-      "defaultOutputModes": ["application/json", "text/plain", "application/octet-stream"],
+      "defaultInputModes": [
+        "application/json",
+        "text/plain",
+        "application/octet-stream"
+      ],
+      "defaultOutputModes": [
+        "application/json",
+        "text/plain",
+        "application/octet-stream"
+      ],
       "capabilities": {
         "streaming": true,
         "pushNotifications": true
@@ -34,14 +42,35 @@
           "id": "review",
           "name": "review",
           "description": "Invoke exported Harn function 'review'.",
-          "tags": ["harn", "function"],
-          "inputModes": ["application/json", "text/plain", "application/octet-stream"],
-          "outputModes": ["application/json", "text/plain", "application/octet-stream"],
+          "tags": [
+            "harn",
+            "function"
+          ],
+          "inputModes": [
+            "application/json",
+            "text/plain",
+            "application/octet-stream"
+          ],
+          "outputModes": [
+            "application/json",
+            "text/plain",
+            "application/octet-stream"
+          ],
           "inputSchema": {
             "type": "object"
           }
         }
       ]
     }
-  ]
+  ],
+  "matrix": {
+    "version": "0.3.0",
+    "family": "agent_card",
+    "case": "success",
+    "source": {
+      "kind": "official_example",
+      "url": "https://a2a-protocol.org/v0.3.0/specification/#55-agentcard-object-structure",
+      "description": "A2A 0.3.0 AgentCard discovery shape with Harn-served skills."
+    }
+  }
 }

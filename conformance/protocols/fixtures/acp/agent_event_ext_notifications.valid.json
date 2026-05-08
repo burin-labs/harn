@@ -1,0 +1,93 @@
+{
+  "name": "acp.adapter.agent_event_ext_notifications",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "iteration": 0,
+        "kind": "turn_start",
+        "sessionId": "session-1"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "iteration": 0,
+        "kind": "turn_end",
+        "sessionId": "session-1",
+        "turnInfo": {
+          "tool_calls": 2,
+          "tool_names": ["read_file", "grep"]
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "iteration": 0,
+        "judgeDurationMs": 42,
+        "kind": "judge_decision",
+        "nextStep": "run the verifier",
+        "reasoning": "needs one more concrete action",
+        "sessionId": "session-1",
+        "verdict": "continue"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "content": "missed required tool call; reissuing",
+        "feedbackKind": "protocol_violation",
+        "kind": "feedback_injected",
+        "sessionId": "session-1"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "kind": "budget_exhausted",
+        "maxIterations": 8,
+        "sessionId": "session-1"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "kind": "loop_stuck",
+        "lastIteration": 4,
+        "maxNudges": 3,
+        "sessionId": "session-1",
+        "tailExcerpt": "still thinking..."
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "attempts": 5,
+        "elapsedMs": 12000,
+        "kind": "daemon_watchdog_tripped",
+        "sessionId": "session-1"
+      }
+    }
+  ],
+  "matrix": {
+    "version": "v0.12.2",
+    "family": "agent_event_extension",
+    "case": "adapter_ext_notification_success",
+    "source": {
+      "kind": "adapter_generated",
+      "generator": "cargo test -p harn-serve adapters::acp::events::tests::protocol_conformance_agent_event_fixture_is_adapter_generated",
+      "description": "Generated from AcpAgentEventSink Harn ExtNotification translation."
+    }
+  }
+}
