@@ -95,6 +95,7 @@ opt-in.
 | `@invariant("fs.writes", "src/**")` | Every reachable filesystem-writing call (`write_file`, `apply_edit`, `delete_file`, …, plus `mcp_call`/`host_tool_call` whose tool name pattern-matches a writing verb) must target a literal path proven to stay within at least one declared glob. |
 | `@invariant("budget.remaining", target: "remaining")` | Assignments to the named budget variable may only preserve it, decrement it, or refresh it from `llm_budget_remaining()`. |
 | `@invariant("approval.reachability")` | Every reachable side-effecting call must be preceded by `request_approval(...)` or enclosed by a `dual_control(...)` approval scope on every path from the handler entry. |
+| `@invariant("capability.policy", allow: "fs.write,llm.model", ...)` | Every reachable effect must be declared in a canonical capability allow-list, and selected capabilities can require workspace globs, approval gates, budget evidence, autonomy policy, execution policy, command policy, egress policy, or tool approval policy. |
 
 These map onto the three concrete demands from the closed epic
 without committing the language to a general effect system. They are
@@ -114,6 +115,12 @@ The analysis is intentionally **conservative and decidable**:
   prove" (when the path expression is more complex). There is no
   symbolic reasoning over string concatenation, format strings, or
   runtime inputs.
+- **Capability lattice is explicit.** `capability.policy` normalizes
+  user-facing aliases onto `fs.write`, `process.exec`,
+  `network.access`, `mcp.connector`, `llm.model`, `worker.dispatch`,
+  `human.approval`, and `autonomy.policy`. Bridge calls can carry more
+  than one effect; for example, an MCP edit tool is both connector
+  access and workspace mutation.
 - **Flow-sensitive over the CFG, path-insensitive within nodes.** The
   `approval.reachability` checker walks every CFG path with a small
   state `(explicit_approval, scoped_approval_depth)`. It reports a

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
 use harn_lexer::Span;
-use harn_parser::{Attribute, AttributeArg, BindingPattern, Node, SNode};
+use harn_parser::{Attribute, AttributeArg, BindingPattern, HitlArg, HitlKind, Node, SNode};
 
 pub type NodeId = usize;
 
@@ -106,6 +106,8 @@ pub enum NodeSemantics {
     Assignment(AssignmentSemantics),
     ApprovalScopeEnter,
     ApprovalScopeExit,
+    PolicyScopeEnter(PolicyScopeKind),
+    PolicyScopeExit(PolicyScopeKind),
     Return,
     Throw,
 }
@@ -143,8 +145,10 @@ pub enum CallClassification {
     Other,
     ApprovalGate,
     BudgetRead,
-    FsWrite { path: Option<String> },
-    SideEffect,
+    PolicyGate(PolicyScopeKind),
+    PolicyPush(PolicyScopeKind),
+    PolicyPop(PolicyScopeKind),
+    Capabilities(Vec<CapabilityEffect>),
 }
 
 #[derive(Debug, Clone)]
@@ -175,6 +179,119 @@ impl LiteralValue {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Capability {
+    WorkspaceMutation,
+    CommandExecution,
+    NetworkAccess,
+    ConnectorAccess,
+    ModelCall,
+    WorkerDispatch,
+    HumanApproval,
+    AutonomyPolicy,
+}
+
+impl Capability {
+    fn canonical(self) -> &'static str {
+        match self {
+            Self::WorkspaceMutation => "fs.write",
+            Self::CommandExecution => "process.exec",
+            Self::NetworkAccess => "network.access",
+            Self::ConnectorAccess => "mcp.connector",
+            Self::ModelCall => "llm.model",
+            Self::WorkerDispatch => "worker.dispatch",
+            Self::HumanApproval => "human.approval",
+            Self::AutonomyPolicy => "autonomy.policy",
+        }
+    }
+
+    fn from_policy_name(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "fs.write" | "fs.writes" | "workspace.write" | "workspace.mutate"
+            | "workspace.mutation" | "filesystem.write" | "filesystem.mutate" => {
+                Some(Self::WorkspaceMutation)
+            }
+            "process.exec" | "command.exec" | "command" | "exec" | "shell" => {
+                Some(Self::CommandExecution)
+            }
+            "network.access" | "network" | "http" | "sse" | "websocket" => {
+                Some(Self::NetworkAccess)
+            }
+            "mcp.connector" | "connector" | "connectors" | "mcp" | "host.tool" | "host_tool" => {
+                Some(Self::ConnectorAccess)
+            }
+            "llm.model" | "model" | "llm" | "model.call" => Some(Self::ModelCall),
+            "worker.dispatch" | "worker" | "delegated.worker" | "a2a" => Some(Self::WorkerDispatch),
+            "human.approval" | "approval" | "hitl" => Some(Self::HumanApproval),
+            "autonomy.policy" | "autonomy" => Some(Self::AutonomyPolicy),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityEffect {
+    pub capability: Capability,
+    pub operation: String,
+    pub path: Option<String>,
+}
+
+impl CapabilityEffect {
+    fn new(capability: Capability, operation: impl Into<String>, path: Option<String>) -> Self {
+        Self {
+            capability,
+            operation: operation.into(),
+            path,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PolicyScopeKind {
+    Execution,
+    ToolApproval,
+    Command,
+    Egress,
+    Autonomy,
+    DynamicPermissions,
+}
+
+impl PolicyScopeKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Execution => "execution policy",
+            Self::ToolApproval => "approval policy",
+            Self::Command => "command policy",
+            Self::Egress => "egress policy",
+            Self::Autonomy => "autonomy policy",
+            Self::DynamicPermissions => "dynamic permissions",
+        }
+    }
+}
+
+impl CallSemantics {
+    fn capability_effects(&self) -> &[CapabilityEffect] {
+        match &self.classification {
+            CallClassification::Capabilities(effects) => effects,
+            _ => &[],
+        }
+    }
+
+    fn has_budget_option(&self) -> bool {
+        self.literal_args.iter().any(literal_has_budget_policy)
+    }
+}
+
+fn literal_has_budget_policy(value: &LiteralValue) -> bool {
+    match value {
+        LiteralValue::Dict(entries) => entries.iter().any(|(key, value)| {
+            key == "budget" || key == "token_budget" || literal_has_budget_policy(value)
+        }),
+        LiteralValue::List(items) => items.iter().any(literal_has_budget_policy),
+        _ => false,
+    }
+}
+
 pub trait Invariant {
     fn name(&self) -> &'static str;
     fn check(&self, ir: &HandlerIr) -> Vec<InvariantDiagnostic>;
@@ -193,6 +310,84 @@ pub struct BudgetRemainingNonIncreasing {
 #[derive(Debug, Clone, Default)]
 pub struct ApprovalReachability;
 
+#[derive(Debug, Clone)]
+pub struct CapabilityPolicyInvariant {
+    allowed: BTreeSet<Capability>,
+    workspace_globs: Vec<String>,
+    require_approval: BTreeSet<Capability>,
+    require_budget: BTreeSet<Capability>,
+    require_autonomy: BTreeSet<Capability>,
+    require_execution_policy: BTreeSet<Capability>,
+    require_command_policy: BTreeSet<Capability>,
+    require_egress_policy: BTreeSet<Capability>,
+    require_approval_policy: BTreeSet<Capability>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct CapabilityPolicyState {
+    explicit_approval: bool,
+    scoped_approval_depth: u8,
+    execution_policy_depth: u8,
+    approval_policy_depth: u8,
+    command_policy_depth: u8,
+    egress_policy_depth: u8,
+    autonomy_policy_depth: u8,
+    dynamic_permissions_depth: u8,
+    egress_policy_seen: bool,
+    budget_seen: bool,
+}
+
+impl CapabilityPolicyState {
+    fn initial() -> Self {
+        Self {
+            explicit_approval: false,
+            scoped_approval_depth: 0,
+            execution_policy_depth: 0,
+            approval_policy_depth: 0,
+            command_policy_depth: 0,
+            egress_policy_depth: 0,
+            autonomy_policy_depth: 0,
+            dynamic_permissions_depth: 0,
+            egress_policy_seen: false,
+            budget_seen: false,
+        }
+    }
+
+    fn is_approved(self) -> bool {
+        self.explicit_approval || self.scoped_approval_depth > 0
+    }
+
+    fn has_execution_policy(self) -> bool {
+        self.execution_policy_depth > 0 || self.dynamic_permissions_depth > 0
+    }
+
+    fn has_command_policy(self) -> bool {
+        self.command_policy_depth > 0 || self.has_execution_policy()
+    }
+
+    fn has_egress_policy(self) -> bool {
+        self.egress_policy_depth > 0 || self.egress_policy_seen || self.has_execution_policy()
+    }
+
+    fn has_autonomy_policy(self) -> bool {
+        self.autonomy_policy_depth > 0
+    }
+
+    fn has_approval_policy(self) -> bool {
+        self.approval_policy_depth > 0
+    }
+}
+
+struct CapabilityCheckContext<'a, 'b> {
+    ir: &'a HandlerIr,
+    node: &'a IrNode,
+    call: &'a CallSemantics,
+    effect: &'a CapabilityEffect,
+    path: &'a [PathStep],
+    reported: &'b mut BTreeSet<(NodeId, Capability, &'static str)>,
+    diagnostics: &'b mut Vec<InvariantDiagnostic>,
+}
+
 impl Invariant for FsWritesSubsetPathGlob {
     fn name(&self) -> &'static str {
         "fs.writes"
@@ -205,11 +400,15 @@ impl Invariant for FsWritesSubsetPathGlob {
             let NodeSemantics::Call(call) = &node.semantics else {
                 continue;
             };
-            let CallClassification::FsWrite { path } = &call.classification else {
+            let Some(effect) = call
+                .capability_effects()
+                .iter()
+                .find(|effect| effect.capability == Capability::WorkspaceMutation)
+            else {
                 continue;
             };
 
-            let message = match path.as_deref() {
+            let message = match effect.path.as_deref() {
                 Some(path) if self.globs.iter().any(|glob| glob_match(glob, path)) => continue,
                 Some(path) => format!(
                     "write path `{path}` is outside the allowed glob(s): {}",
@@ -323,26 +522,31 @@ impl Invariant for ApprovalReachability {
             let node = ir.node(node_id);
             let mut next_state = state;
             match &node.semantics {
-                NodeSemantics::Call(call) => match call.classification {
+                NodeSemantics::Call(call) => match &call.classification {
                     CallClassification::ApprovalGate => {
                         next_state.explicit_approval = true;
                     }
-                    CallClassification::FsWrite { .. } | CallClassification::SideEffect
-                        if !state.is_approved() && reported.insert(node_id) =>
-                    {
-                        diagnostics.push(InvariantDiagnostic {
-                            invariant: self.name().to_string(),
-                            handler: ir.name.clone(),
-                            message: format!(
-                                "side-effecting call `{}` is reachable before any approval gate",
-                                call.display_name
-                            ),
-                            span: node.span,
-                            help: Some(
-                                "call `request_approval(...)` earlier on every path, or move the side effect into a `dual_control(...)` closure".to_string(),
-                            ),
-                            path: path.clone(),
-                        });
+                    CallClassification::Capabilities(effects) => {
+                        for effect in effects {
+                            if state.is_approved() || !reported.insert((node_id, effect.capability))
+                            {
+                                continue;
+                            }
+                            diagnostics.push(InvariantDiagnostic {
+                                invariant: self.name().to_string(),
+                                handler: ir.name.clone(),
+                                message: format!(
+                                    "side-effecting call `{}` for capability `{}` is reachable before any approval gate",
+                                    call.display_name,
+                                    effect.capability.canonical()
+                                ),
+                                span: node.span,
+                                help: Some(
+                                    "call `request_approval(...)` earlier on every path, or move the side effect into a `dual_control(...)` closure".to_string(),
+                                ),
+                                path: path.clone(),
+                            });
+                        }
                     }
                     _ => {}
                 },
@@ -369,6 +573,320 @@ impl Invariant for ApprovalReachability {
         }
 
         diagnostics
+    }
+}
+
+impl Invariant for CapabilityPolicyInvariant {
+    fn name(&self) -> &'static str {
+        "capability.policy"
+    }
+
+    fn check(&self, ir: &HandlerIr) -> Vec<InvariantDiagnostic> {
+        let mut diagnostics = Vec::new();
+        let mut queue = VecDeque::new();
+        let mut visited = HashSet::new();
+        let mut reported = BTreeSet::new();
+
+        queue.push_back((
+            ir.entry,
+            CapabilityPolicyState::initial(),
+            vec![PathStep {
+                span: ir.node(ir.entry).span,
+                label: ir.node(ir.entry).label.clone(),
+            }],
+        ));
+
+        while let Some((node_id, state, path)) = queue.pop_front() {
+            if !visited.insert((node_id, state)) {
+                continue;
+            }
+
+            let node = ir.node(node_id);
+            let mut next_state = state;
+            match &node.semantics {
+                NodeSemantics::Call(call) => match &call.classification {
+                    CallClassification::ApprovalGate => next_state.explicit_approval = true,
+                    CallClassification::BudgetRead => next_state.budget_seen = true,
+                    CallClassification::PolicyGate(PolicyScopeKind::Egress) => {
+                        next_state.egress_policy_seen = true;
+                    }
+                    CallClassification::PolicyGate(_) => {}
+                    CallClassification::PolicyPush(kind) => {
+                        increment_policy_depth(&mut next_state, *kind);
+                    }
+                    CallClassification::PolicyPop(kind) => {
+                        decrement_policy_depth(&mut next_state, *kind);
+                    }
+                    CallClassification::Capabilities(effects) => {
+                        for effect in effects {
+                            let mut context = CapabilityCheckContext {
+                                ir,
+                                node,
+                                call,
+                                effect,
+                                path: &path,
+                                reported: &mut reported,
+                                diagnostics: &mut diagnostics,
+                            };
+                            self.check_effect(state, &mut context);
+                        }
+                    }
+                    CallClassification::Other => {}
+                },
+                NodeSemantics::ApprovalScopeEnter => {
+                    next_state.scoped_approval_depth =
+                        next_state.scoped_approval_depth.saturating_add(1);
+                }
+                NodeSemantics::ApprovalScopeExit => {
+                    next_state.scoped_approval_depth =
+                        next_state.scoped_approval_depth.saturating_sub(1);
+                }
+                NodeSemantics::PolicyScopeEnter(kind) => {
+                    increment_policy_depth(&mut next_state, *kind);
+                }
+                NodeSemantics::PolicyScopeExit(kind) => {
+                    decrement_policy_depth(&mut next_state, *kind);
+                }
+                _ => {}
+            }
+
+            for succ in ir.successors(node_id) {
+                let succ_node = ir.node(succ);
+                let mut next_path = path.clone();
+                next_path.push(PathStep {
+                    span: succ_node.span,
+                    label: succ_node.label.clone(),
+                });
+                queue.push_back((succ, next_state, next_path));
+            }
+        }
+
+        diagnostics
+    }
+}
+
+impl CapabilityPolicyInvariant {
+    fn check_effect(
+        &self,
+        state: CapabilityPolicyState,
+        context: &mut CapabilityCheckContext<'_, '_>,
+    ) {
+        let capability = context.effect.capability;
+        if !self.allowed.contains(&capability)
+            && context
+                .reported
+                .insert((context.node.id, capability, "allow"))
+        {
+            context.diagnostics.push(InvariantDiagnostic {
+                invariant: self.name().to_string(),
+                handler: context.ir.name.clone(),
+                message: format!(
+                    "handler `{}` can reach capability `{}` via `{}` but that capability is not declared in `@invariant(\"capability.policy\", allow: ...)`",
+                    context.ir.name,
+                    capability.canonical(),
+                    context.effect.operation
+                ),
+                span: context.node.span,
+                help: Some(format!(
+                    "add `{}` to the invariant's `allow:` list or remove the reachable call",
+                    capability.canonical()
+                )),
+                path: context.path.to_vec(),
+            });
+            return;
+        }
+
+        if capability == Capability::WorkspaceMutation {
+            self.check_workspace_path(context);
+        }
+        self.check_required_gate(state, context);
+    }
+
+    fn check_workspace_path(&self, context: &mut CapabilityCheckContext<'_, '_>) {
+        if self.workspace_globs.is_empty() {
+            return;
+        }
+        let message = match context.effect.path.as_deref() {
+            Some(path)
+                if self
+                    .workspace_globs
+                    .iter()
+                    .any(|glob| glob_match(glob, path)) =>
+            {
+                return;
+            }
+            Some(path) => format!(
+                "handler `{}` can reach capability `{}` via `{}` with path `{path}` outside the allowed workspace glob(s): {}",
+                context.ir.name,
+                context.effect.capability.canonical(),
+                context.call.display_name,
+                self.workspace_globs.join(", ")
+            ),
+            None => format!(
+                "handler `{}` can reach capability `{}` via `{}` but the target path is not a literal proven inside the allowed workspace glob(s): {}",
+                context.ir.name,
+                context.effect.capability.canonical(),
+                context.call.display_name,
+                self.workspace_globs.join(", ")
+            ),
+        };
+        if context
+            .reported
+            .insert((context.node.id, context.effect.capability, "workspace"))
+        {
+            context.diagnostics.push(InvariantDiagnostic {
+                invariant: self.name().to_string(),
+                handler: context.ir.name.clone(),
+                message,
+                span: context.node.span,
+                help: Some(
+                    "use a literal path inside the declared workspace glob or narrow the policy"
+                        .to_string(),
+                ),
+                path: context.path.to_vec(),
+            });
+        }
+    }
+
+    fn check_required_gate(
+        &self,
+        state: CapabilityPolicyState,
+        context: &mut CapabilityCheckContext<'_, '_>,
+    ) {
+        let capability = context.effect.capability;
+        if self.require_approval.contains(&capability) && !state.is_approved() {
+            self.push_missing_gate(
+                context,
+                "approval",
+                "human approval gate",
+                "call `request_approval(...)` earlier on every path or wrap the action in `dual_control(...)`",
+            );
+        }
+        if self.require_budget.contains(&capability)
+            && !state.budget_seen
+            && !context.call.has_budget_option()
+        {
+            self.push_missing_gate(
+                context,
+                "budget",
+                "budget policy",
+                "thread a `llm_budget_remaining()` check before the call or pass a literal `budget:` option",
+            );
+        }
+        if self.require_autonomy.contains(&capability) && !state.has_autonomy_policy() {
+            self.push_missing_gate(
+                context,
+                "autonomy",
+                "autonomy policy",
+                "wrap the reachable call in `with_autonomy_policy(...)`",
+            );
+        }
+        if self.require_execution_policy.contains(&capability) && !state.has_execution_policy() {
+            self.push_missing_gate(
+                context,
+                "execution",
+                "execution policy",
+                "wrap the reachable call in `with_execution_policy(...)` or `with_dynamic_permissions(...)`",
+            );
+        }
+        if self.require_command_policy.contains(&capability) && !state.has_command_policy() {
+            self.push_missing_gate(
+                context,
+                "command",
+                "command policy",
+                "wrap the reachable command in `with_command_policy(...)` or install `command_policy_push(...)` before it",
+            );
+        }
+        if self.require_egress_policy.contains(&capability) && !state.has_egress_policy() {
+            self.push_missing_gate(
+                context,
+                "egress",
+                "egress policy",
+                "install `egress_policy(...)` before the reachable network or connector call",
+            );
+        }
+        if self.require_approval_policy.contains(&capability) && !state.has_approval_policy() {
+            self.push_missing_gate(
+                context,
+                "approval_policy",
+                "tool approval policy",
+                "wrap the reachable tool call in `with_approval_policy(...)`",
+            );
+        }
+    }
+
+    fn push_missing_gate(
+        &self,
+        context: &mut CapabilityCheckContext<'_, '_>,
+        gate_key: &'static str,
+        gate_label: &'static str,
+        help: &str,
+    ) {
+        if !context
+            .reported
+            .insert((context.node.id, context.effect.capability, gate_key))
+        {
+            return;
+        }
+        context.diagnostics.push(InvariantDiagnostic {
+            invariant: self.name().to_string(),
+            handler: context.ir.name.clone(),
+            message: format!(
+                "handler `{}` can reach capability `{}` via `{}` without the required {gate_label}",
+                context.ir.name,
+                context.effect.capability.canonical(),
+                context.call.display_name
+            ),
+            span: context.node.span,
+            help: Some(help.to_string()),
+            path: context.path.to_vec(),
+        });
+    }
+}
+
+fn increment_policy_depth(state: &mut CapabilityPolicyState, kind: PolicyScopeKind) {
+    match kind {
+        PolicyScopeKind::Execution => {
+            state.execution_policy_depth = state.execution_policy_depth.saturating_add(1);
+        }
+        PolicyScopeKind::ToolApproval => {
+            state.approval_policy_depth = state.approval_policy_depth.saturating_add(1);
+        }
+        PolicyScopeKind::Command => {
+            state.command_policy_depth = state.command_policy_depth.saturating_add(1);
+        }
+        PolicyScopeKind::Egress => {
+            state.egress_policy_depth = state.egress_policy_depth.saturating_add(1);
+        }
+        PolicyScopeKind::Autonomy => {
+            state.autonomy_policy_depth = state.autonomy_policy_depth.saturating_add(1);
+        }
+        PolicyScopeKind::DynamicPermissions => {
+            state.dynamic_permissions_depth = state.dynamic_permissions_depth.saturating_add(1);
+        }
+    }
+}
+
+fn decrement_policy_depth(state: &mut CapabilityPolicyState, kind: PolicyScopeKind) {
+    match kind {
+        PolicyScopeKind::Execution => {
+            state.execution_policy_depth = state.execution_policy_depth.saturating_sub(1);
+        }
+        PolicyScopeKind::ToolApproval => {
+            state.approval_policy_depth = state.approval_policy_depth.saturating_sub(1);
+        }
+        PolicyScopeKind::Command => {
+            state.command_policy_depth = state.command_policy_depth.saturating_sub(1);
+        }
+        PolicyScopeKind::Egress => {
+            state.egress_policy_depth = state.egress_policy_depth.saturating_sub(1);
+        }
+        PolicyScopeKind::Autonomy => {
+            state.autonomy_policy_depth = state.autonomy_policy_depth.saturating_sub(1);
+        }
+        PolicyScopeKind::DynamicPermissions => {
+            state.dynamic_permissions_depth = state.dynamic_permissions_depth.saturating_sub(1);
+        }
     }
 }
 
@@ -542,7 +1060,7 @@ fn parse_invariant_spec(attribute: &Attribute) -> Result<InvariantSpec, Box<Inva
             message: format!("unknown invariant `{raw_name}`"),
             span: attribute.span,
             help: Some(
-                "known invariants are `fs.writes`, `budget.remaining`, and `approval.reachability`"
+                "known invariants are `fs.writes`, `budget.remaining`, `approval.reachability`, and `capability.policy`"
                     .to_string(),
             ),
             path: Vec::new(),
@@ -583,6 +1101,9 @@ fn normalize_invariant_name(name: &str) -> Option<String> {
         "approval.reachability" | "approval_reachability" | "approval" => {
             Some("approval.reachability".to_string())
         }
+        "capability.policy" | "capability_policy" | "capabilities" | "policy.capabilities" => {
+            Some("capability.policy".to_string())
+        }
         _ => None,
     }
 }
@@ -621,6 +1142,7 @@ fn instantiate_invariant(
             Ok(Box::new(BudgetRemainingNonIncreasing { target }))
         }
         "approval.reachability" => Ok(Box::new(ApprovalReachability)),
+        "capability.policy" => instantiate_capability_policy_invariant(spec),
         other => Err(ConfigDiagnosticBuilder::new(
             other,
             spec.span,
@@ -628,6 +1150,112 @@ fn instantiate_invariant(
             None,
         )),
     }
+}
+
+fn instantiate_capability_policy_invariant(
+    spec: &InvariantSpec,
+) -> Result<Box<dyn Invariant>, ConfigDiagnosticBuilder> {
+    let allow_raw = spec
+        .params
+        .get("allow")
+        .or_else(|| spec.params.get("capabilities"))
+        .or_else(|| spec.params.get("allow_capabilities"))
+        .or_else(|| spec.positionals.first())
+        .ok_or_else(|| {
+            ConfigDiagnosticBuilder::new(
+                "capability.policy",
+                spec.span,
+                "`capability.policy` requires an `allow:` capability list".to_string(),
+                Some(
+                    "for example: `@invariant(\"capability.policy\", allow: \"fs.write,llm.model\")`"
+                        .to_string(),
+                ),
+            )
+        })?;
+    let allowed = parse_capability_set(allow_raw).map_err(|message| {
+        ConfigDiagnosticBuilder::new("capability.policy", spec.span, message, capability_help())
+    })?;
+    if allowed.is_empty() {
+        return Err(ConfigDiagnosticBuilder::new(
+            "capability.policy",
+            spec.span,
+            "`capability.policy` allow list must contain at least one capability".to_string(),
+            capability_help(),
+        ));
+    }
+
+    let workspace_globs = collect_named_values(
+        spec,
+        &[
+            "workspace",
+            "workspace_glob",
+            "path_glob",
+            "glob",
+            "allow_workspace",
+        ],
+    );
+
+    Ok(Box::new(CapabilityPolicyInvariant {
+        allowed,
+        workspace_globs,
+        require_approval: parse_optional_capability_set(spec, &["require_approval"])?,
+        require_budget: parse_optional_capability_set(spec, &["require_budget", "budget"])?,
+        require_autonomy: parse_optional_capability_set(spec, &["require_autonomy"])?,
+        require_execution_policy: parse_optional_capability_set(
+            spec,
+            &["require_execution_policy", "require_sandbox"],
+        )?,
+        require_command_policy: parse_optional_capability_set(spec, &["require_command_policy"])?,
+        require_egress_policy: parse_optional_capability_set(spec, &["require_egress_policy"])?,
+        require_approval_policy: parse_optional_capability_set(spec, &["require_approval_policy"])?,
+    }))
+}
+
+fn parse_optional_capability_set(
+    spec: &InvariantSpec,
+    keys: &[&str],
+) -> Result<BTreeSet<Capability>, ConfigDiagnosticBuilder> {
+    let Some(raw) = keys.iter().find_map(|key| spec.params.get(*key)) else {
+        return Ok(BTreeSet::new());
+    };
+    parse_capability_set(raw).map_err(|message| {
+        ConfigDiagnosticBuilder::new("capability.policy", spec.span, message, capability_help())
+    })
+}
+
+fn collect_named_values(spec: &InvariantSpec, keys: &[&str]) -> Vec<String> {
+    keys.iter()
+        .filter_map(|key| spec.params.get(*key).cloned())
+        .flat_map(|value| split_config_list(&value))
+        .collect()
+}
+
+fn parse_capability_set(raw: &str) -> Result<BTreeSet<Capability>, String> {
+    let mut capabilities = BTreeSet::new();
+    for item in split_config_list(raw) {
+        let Some(capability) = Capability::from_policy_name(&item) else {
+            return Err(format!(
+                "unknown capability `{item}` in `capability.policy`"
+            ));
+        };
+        capabilities.insert(capability);
+    }
+    Ok(capabilities)
+}
+
+fn split_config_list(raw: &str) -> Vec<String> {
+    raw.split(|ch: char| ch == ',' || ch == ';' || ch.is_whitespace())
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn capability_help() -> Option<String> {
+    Some(
+        "known capabilities are `fs.write`, `process.exec`, `network.access`, `mcp.connector`, `llm.model`, `worker.dispatch`, `human.approval`, and `autonomy.policy`"
+            .to_string(),
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -1035,6 +1663,7 @@ impl<'a> HandlerIrBuilder<'a> {
             Node::FunctionCall { name, args, .. } => {
                 self.build_function_call(node, name, args, incoming)
             }
+            Node::HitlExpr { kind, args } => self.build_hitl_expr(node, *kind, args, incoming),
             Node::MethodCall { object, args, .. }
             | Node::OptionalMethodCall { object, args, .. } => {
                 let mut exits = self.build_expr(object, incoming);
@@ -1164,6 +1793,10 @@ impl<'a> HandlerIrBuilder<'a> {
             return vec![exit];
         }
 
+        if let Some(scope) = scoped_policy_call(name) {
+            return self.build_policy_scope_call(node, args, incoming, scope);
+        }
+
         let mut exits = incoming;
         for arg in args {
             exits = self.build_expr(arg, exits);
@@ -1177,6 +1810,137 @@ impl<'a> HandlerIrBuilder<'a> {
         self.connect_all(&exits, call_id);
         vec![call_id]
     }
+
+    fn build_policy_scope_call(
+        &mut self,
+        node: &SNode,
+        args: &[SNode],
+        incoming: Vec<NodeId>,
+        scope: PolicyScopeKind,
+    ) -> Vec<NodeId> {
+        let closure_index = 1;
+        let mut exits = incoming;
+        for (index, arg) in args.iter().enumerate() {
+            if index == closure_index && matches!(arg.node, Node::Closure { .. }) {
+                continue;
+            }
+            exits = self.build_expr(arg, exits);
+        }
+        let enter = self.push_node(
+            node.span,
+            format!("enter {}", scope.label()),
+            NodeSemantics::PolicyScopeEnter(scope),
+        );
+        self.connect_all(&exits, enter);
+        let closure_exits = match args.get(closure_index) {
+            Some(SNode {
+                node: Node::Closure { body, .. },
+                ..
+            }) => self.build_block(body, vec![enter]),
+            _ => vec![enter],
+        };
+        let exit = self.push_node(
+            node.span,
+            format!("exit {}", scope.label()),
+            NodeSemantics::PolicyScopeExit(scope),
+        );
+        self.connect_all(&closure_exits, exit);
+        vec![exit]
+    }
+
+    fn build_hitl_expr(
+        &mut self,
+        node: &SNode,
+        kind: HitlKind,
+        args: &[HitlArg],
+        incoming: Vec<NodeId>,
+    ) -> Vec<NodeId> {
+        match kind {
+            HitlKind::RequestApproval => {
+                let mut exits = incoming;
+                for arg in args {
+                    exits = self.build_expr(&arg.value, exits);
+                }
+                let call = CallSemantics {
+                    name: kind.as_keyword().to_string(),
+                    display_name: kind.as_keyword().to_string(),
+                    classification: CallClassification::ApprovalGate,
+                    literal_args: args
+                        .iter()
+                        .map(|arg| literal_value(&arg.value))
+                        .collect::<Vec<_>>(),
+                };
+                let call_id = self.push_node(
+                    node.span,
+                    format!("call {}", kind.as_keyword()),
+                    NodeSemantics::Call(call),
+                );
+                self.connect_all(&exits, call_id);
+                vec![call_id]
+            }
+            HitlKind::DualControl => self.build_hitl_dual_control(node, args, incoming),
+            HitlKind::AskUser | HitlKind::EscalateTo => {
+                let mut exits = incoming;
+                for arg in args {
+                    exits = self.build_expr(&arg.value, exits);
+                }
+                exits
+            }
+        }
+    }
+
+    fn build_hitl_dual_control(
+        &mut self,
+        node: &SNode,
+        args: &[HitlArg],
+        incoming: Vec<NodeId>,
+    ) -> Vec<NodeId> {
+        let closure_index = args
+            .iter()
+            .position(|arg| arg.name.as_deref() == Some("action"))
+            .or(Some(2));
+        let mut exits = incoming;
+        for (index, arg) in args.iter().enumerate() {
+            if Some(index) == closure_index && matches!(arg.value.node, Node::Closure { .. }) {
+                continue;
+            }
+            exits = self.build_expr(&arg.value, exits);
+        }
+        let enter = self.push_node(
+            node.span,
+            "dual_control approval gate".to_string(),
+            NodeSemantics::ApprovalScopeEnter,
+        );
+        self.connect_all(&exits, enter);
+        let closure_exits = closure_index
+            .and_then(|index| args.get(index))
+            .and_then(|arg| match &arg.value {
+                SNode {
+                    node: Node::Closure { body, .. },
+                    ..
+                } => Some(self.build_block(body, vec![enter])),
+                _ => None,
+            })
+            .unwrap_or_else(|| vec![enter]);
+        let exit = self.push_node(
+            node.span,
+            "end dual_control".to_string(),
+            NodeSemantics::ApprovalScopeExit,
+        );
+        self.connect_all(&closure_exits, exit);
+        vec![exit]
+    }
+}
+
+fn scoped_policy_call(name: &str) -> Option<PolicyScopeKind> {
+    match name {
+        "with_execution_policy" => Some(PolicyScopeKind::Execution),
+        "with_approval_policy" => Some(PolicyScopeKind::ToolApproval),
+        "with_command_policy" => Some(PolicyScopeKind::Command),
+        "with_autonomy_policy" => Some(PolicyScopeKind::Autonomy),
+        "with_dynamic_permissions" => Some(PolicyScopeKind::DynamicPermissions),
+        _ => None,
+    }
 }
 
 fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
@@ -1184,56 +1948,40 @@ fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
     let mut display_name = name.to_string();
     let classification = match name {
         "request_approval" => CallClassification::ApprovalGate,
-        "llm_budget_remaining" => CallClassification::BudgetRead,
-        "write_file" | "append_file" | "delete_file" | "mkdir" | "apply_edit" => {
+        "llm_budget_remaining" | "agent_budget" | "llm_budget" => CallClassification::BudgetRead,
+        "egress_policy" => CallClassification::PolicyGate(PolicyScopeKind::Egress),
+        "command_policy_push" => CallClassification::PolicyPush(PolicyScopeKind::Command),
+        "command_policy_pop" => CallClassification::PolicyPop(PolicyScopeKind::Command),
+        "write_file" | "write_file_bytes" | "append_file" | "delete_file" | "mkdir"
+        | "apply_edit" | "move_file" => {
             let path = literal_args
                 .first()
                 .and_then(LiteralValue::as_str)
                 .map(str::to_string);
-            CallClassification::FsWrite { path }
+            capability_classification(vec![CapabilityEffect::new(
+                Capability::WorkspaceMutation,
+                name,
+                path,
+            )])
         }
         "copy_file" => {
             let path = literal_args
                 .get(1)
                 .and_then(LiteralValue::as_str)
                 .map(str::to_string);
-            CallClassification::FsWrite { path }
+            capability_classification(vec![CapabilityEffect::new(
+                Capability::WorkspaceMutation,
+                name,
+                path,
+            )])
         }
-        "exec"
-        | "exec_at"
-        | "egress_policy"
-        | "shell"
-        | "shell_at"
-        | "http_post"
-        | "http_put"
-        | "http_patch"
-        | "http_delete"
-        | "http_request"
-        | "http_session"
-        | "http_session_request"
-        | "http_session_close"
-        | "sse_connect"
-        | "sse_receive"
-        | "sse_close"
-        | "sse_mock"
-        | "sse_server_response"
-        | "sse_server_send"
-        | "sse_server_heartbeat"
-        | "sse_server_flush"
-        | "sse_server_close"
-        | "sse_server_cancel"
-        | "sse_server_mock_receive"
-        | "sse_server_mock_disconnect"
-        | "websocket_accept"
-        | "websocket_connect"
-        | "websocket_send"
-        | "websocket_receive"
-        | "websocket_close"
-        | "websocket_mock"
-        | "websocket_route"
-        | "websocket_server"
-        | "websocket_server_close"
-        | "transport_mock_clear" => CallClassification::SideEffect,
+        "exec" | "exec_at" | "shell" | "shell_at" => {
+            capability_classification(vec![CapabilityEffect::new(
+                Capability::CommandExecution,
+                name,
+                None,
+            )])
+        }
         "mcp_call" => {
             let tool_name = literal_args
                 .get(1)
@@ -1243,7 +1991,11 @@ fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
                 display_name = tool_name.clone();
                 classify_tool_call(&tool_name, literal_args.get(2))
             } else {
-                CallClassification::Other
+                capability_classification(vec![CapabilityEffect::new(
+                    Capability::ConnectorAccess,
+                    name,
+                    None,
+                )])
             }
         }
         "host_tool_call" => {
@@ -1255,9 +2007,34 @@ fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
                 display_name = tool_name.clone();
                 classify_tool_call(&tool_name, literal_args.get(1))
             } else {
-                CallClassification::Other
+                capability_classification(vec![CapabilityEffect::new(
+                    Capability::ConnectorAccess,
+                    name,
+                    None,
+                )])
             }
         }
+        "host_call" => classify_host_call(literal_args.first()),
+        _ if is_model_call(name) => capability_classification(vec![CapabilityEffect::new(
+            Capability::ModelCall,
+            name,
+            None,
+        )]),
+        _ if is_worker_dispatch(name) => capability_classification(vec![CapabilityEffect::new(
+            Capability::WorkerDispatch,
+            name,
+            None,
+        )]),
+        _ if is_network_call(name) => capability_classification(vec![CapabilityEffect::new(
+            Capability::NetworkAccess,
+            name,
+            None,
+        )]),
+        _ if name.starts_with("mcp_") => capability_classification(vec![CapabilityEffect::new(
+            Capability::ConnectorAccess,
+            name,
+            None,
+        )]),
         _ => CallClassification::Other,
     };
 
@@ -1272,6 +2049,11 @@ fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
 fn classify_tool_call(tool_name: &str, args: Option<&LiteralValue>) -> CallClassification {
     let normalized = tool_name.to_ascii_lowercase();
     let path = args.and_then(extract_path_from_tool_args);
+    let mut effects = vec![CapabilityEffect::new(
+        Capability::ConnectorAccess,
+        tool_name,
+        None,
+    )];
     if matches!(
         normalized.as_str(),
         "write_file"
@@ -1293,7 +2075,11 @@ fn classify_tool_call(tool_name: &str, args: Option<&LiteralValue>) -> CallClass
         || normalized.contains("rename")
         || normalized.contains("patch")
     {
-        return CallClassification::FsWrite { path };
+        effects.push(CapabilityEffect::new(
+            Capability::WorkspaceMutation,
+            tool_name,
+            path,
+        ));
     }
     if normalized.contains("exec")
         || normalized.contains("shell")
@@ -1302,9 +2088,127 @@ fn classify_tool_call(tool_name: &str, args: Option<&LiteralValue>) -> CallClass
         || normalized.contains("create_pr")
         || normalized.contains("deploy")
     {
-        return CallClassification::SideEffect;
+        effects.push(CapabilityEffect::new(
+            Capability::CommandExecution,
+            tool_name,
+            None,
+        ));
     }
-    CallClassification::Other
+    capability_classification(effects)
+}
+
+fn classify_host_call(name: Option<&LiteralValue>) -> CallClassification {
+    let Some(operation) = name.and_then(LiteralValue::as_str) else {
+        return capability_classification(vec![CapabilityEffect::new(
+            Capability::ConnectorAccess,
+            "host_call",
+            None,
+        )]);
+    };
+    if operation == "process.exec" || operation.starts_with("process.") {
+        return capability_classification(vec![CapabilityEffect::new(
+            Capability::CommandExecution,
+            operation,
+            None,
+        )]);
+    }
+    if operation.starts_with("workspace.")
+        && (operation.contains("write")
+            || operation.contains("edit")
+            || operation.contains("delete")
+            || operation.contains("move")
+            || operation.contains("patch"))
+    {
+        return capability_classification(vec![CapabilityEffect::new(
+            Capability::WorkspaceMutation,
+            operation,
+            None,
+        )]);
+    }
+    capability_classification(vec![CapabilityEffect::new(
+        Capability::ConnectorAccess,
+        operation,
+        None,
+    )])
+}
+
+fn capability_classification(effects: Vec<CapabilityEffect>) -> CallClassification {
+    if effects.is_empty() {
+        CallClassification::Other
+    } else {
+        CallClassification::Capabilities(effects)
+    }
+}
+
+fn is_model_call(name: &str) -> bool {
+    matches!(
+        name,
+        "llm_call"
+            | "llm_call_safe"
+            | "llm_stream_call"
+            | "llm_call_structured"
+            | "llm_call_structured_safe"
+            | "llm_call_structured_result"
+            | "llm_completion"
+            | "agent_llm_turn"
+            | "agent_turn"
+            | "agent_loop"
+    )
+}
+
+fn is_worker_dispatch(name: &str) -> bool {
+    matches!(
+        name,
+        "spawn_agent"
+            | "send_input"
+            | "resume_agent"
+            | "wait_agent"
+            | "close_agent"
+            | "worker_trigger"
+            | "__host_sub_agent_run"
+            | "__host_worker_spawn"
+            | "__host_worker_send_input"
+            | "__host_worker_resume"
+            | "__host_worker_trigger"
+            | "__host_worker_wait"
+            | "__host_worker_close"
+    )
+}
+
+fn is_network_call(name: &str) -> bool {
+    matches!(
+        name,
+        "http_get"
+            | "http_post"
+            | "http_put"
+            | "http_patch"
+            | "http_delete"
+            | "http_request"
+            | "http_download"
+            | "http_session"
+            | "http_session_request"
+            | "http_session_close"
+            | "http_stream_open"
+            | "http_stream_read"
+            | "http_stream_close"
+            | "sse_connect"
+            | "sse_receive"
+            | "sse_close"
+            | "sse_server_response"
+            | "sse_server_send"
+            | "sse_server_heartbeat"
+            | "sse_server_flush"
+            | "sse_server_close"
+            | "sse_server_cancel"
+            | "websocket_accept"
+            | "websocket_connect"
+            | "websocket_send"
+            | "websocket_receive"
+            | "websocket_close"
+            | "websocket_route"
+            | "websocket_server"
+            | "websocket_server_close"
+    )
 }
 
 fn extract_path_from_tool_args(value: &LiteralValue) -> Option<String> {
@@ -1622,6 +2526,228 @@ fn handler(cost) {
 
         assert!(
             diagnostics_by_invariant(&report, "budget.remaining").is_empty(),
+            "unexpected diagnostics: {:?}",
+            report.diagnostics
+        );
+    }
+
+    #[test]
+    fn capability_policy_rejects_undeclared_connector_access() {
+        let report = analyze(
+            r#"
+@invariant("capability.policy", allow: "fs.write")
+fn handler(client) {
+  mcp_call(client, "github.search", {})
+}
+"#,
+        );
+
+        let diags = diagnostics_by_invariant(&report, "capability.policy");
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("mcp.connector"));
+        assert!(diags[0].message.contains("not declared"));
+        assert_eq!(diags[0].handler, "handler");
+        assert!(diags[0]
+            .path
+            .iter()
+            .any(|step| step.label.contains("github.search")));
+    }
+
+    #[test]
+    fn capability_policy_rejects_workspace_mutation_outside_allowed_glob() {
+        let report = analyze(
+            r#"
+@invariant("capability.policy", allow: "fs.write", workspace: "src/**")
+fn handler() {
+  write_file("/tmp/out.txt", "unsafe")
+}
+"#,
+        );
+
+        let diags = diagnostics_by_invariant(&report, "capability.policy");
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0]
+            .message
+            .contains("outside the allowed workspace glob"));
+    }
+
+    #[test]
+    fn capability_policy_accepts_approved_workspace_mutation_and_budgeted_llm() {
+        let report = analyze(
+            r#"
+@invariant("capability.policy",
+  allow: "fs.write,llm.model",
+  workspace: "src/**",
+  require_approval: "fs.write",
+  require_budget: "llm.model")
+fn handler() {
+  request_approval("edit", {capabilities_requested: ["fs.write"]})
+  write_file("src/main.rs", "safe")
+  llm_call("summarize", nil, {budget: {max_output_tokens: 64}})
+}
+"#,
+        );
+
+        assert!(
+            diagnostics_by_invariant(&report, "capability.policy").is_empty(),
+            "unexpected diagnostics: {:?}",
+            report.diagnostics
+        );
+    }
+
+    #[test]
+    fn capability_policy_requires_command_policy_for_exec() {
+        let report = analyze(
+            r#"
+@invariant("capability.policy",
+  allow: "process.exec",
+  require_command_policy: "process.exec")
+fn handler() {
+  exec("rm -rf /tmp/harn")
+}
+"#,
+        );
+
+        let diags = diagnostics_by_invariant(&report, "capability.policy");
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("process.exec"));
+        assert!(diags[0].message.contains("command policy"));
+
+        let report = analyze(
+            r#"
+@invariant("capability.policy",
+  allow: "process.exec",
+  require_command_policy: "process.exec")
+fn handler() {
+  with_command_policy({deny: ["rm"]}, { ->
+    exec("echo ok")
+  })
+}
+"#,
+        );
+
+        assert!(
+            diagnostics_by_invariant(&report, "capability.policy").is_empty(),
+            "unexpected diagnostics: {:?}",
+            report.diagnostics
+        );
+    }
+
+    #[test]
+    fn capability_policy_tracks_command_policy_push_and_pop() {
+        let report = analyze(
+            r#"
+@invariant("capability.policy",
+  allow: "process.exec",
+  require_command_policy: "process.exec")
+fn handler() {
+  command_policy_push({deny: ["rm"]})
+  exec("echo ok")
+  command_policy_pop()
+}
+"#,
+        );
+
+        assert!(
+            diagnostics_by_invariant(&report, "capability.policy").is_empty(),
+            "unexpected diagnostics: {:?}",
+            report.diagnostics
+        );
+
+        let report = analyze(
+            r#"
+@invariant("capability.policy",
+  allow: "process.exec",
+  require_command_policy: "process.exec")
+fn handler() {
+  command_policy_push({deny: ["rm"]})
+  command_policy_pop()
+  exec("echo unsafe")
+}
+"#,
+        );
+
+        let diags = diagnostics_by_invariant(&report, "capability.policy");
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("command policy"));
+    }
+
+    #[test]
+    fn capability_policy_requires_egress_policy_for_network_and_connector_access() {
+        let report = analyze(
+            r#"
+@invariant("capability.policy",
+  allow: "network.access,mcp.connector",
+  require_egress_policy: "network.access,mcp.connector")
+fn handler(client) {
+  http_request("https://example.com")
+  mcp_call(client, "github.search", {})
+}
+"#,
+        );
+
+        let diags = diagnostics_by_invariant(&report, "capability.policy");
+        assert_eq!(diags.len(), 2);
+        assert!(diags
+            .iter()
+            .any(|diag| diag.message.contains("network.access")));
+        assert!(diags
+            .iter()
+            .any(|diag| diag.message.contains("mcp.connector")));
+
+        let report = analyze(
+            r#"
+@invariant("capability.policy",
+  allow: "network.access,mcp.connector",
+  require_egress_policy: "network.access,mcp.connector")
+fn handler(client) {
+  egress_policy({default: "deny", allow: ["example.com"]})
+  http_request("https://example.com")
+  mcp_call(client, "github.search", {})
+}
+"#,
+        );
+
+        assert!(
+            diagnostics_by_invariant(&report, "capability.policy").is_empty(),
+            "unexpected diagnostics: {:?}",
+            report.diagnostics
+        );
+    }
+
+    #[test]
+    fn capability_policy_requires_autonomy_policy_for_worker_dispatch() {
+        let report = analyze(
+            r#"
+@invariant("capability.policy",
+  allow: "worker.dispatch",
+  require_autonomy: "worker.dispatch")
+fn handler() {
+  spawn_agent({task: "summarize"})
+}
+"#,
+        );
+
+        let diags = diagnostics_by_invariant(&report, "capability.policy");
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("worker.dispatch"));
+        assert!(diags[0].message.contains("autonomy policy"));
+
+        let report = analyze(
+            r#"
+@invariant("capability.policy",
+  allow: "worker.dispatch",
+  require_autonomy: "worker.dispatch")
+fn handler() {
+  with_autonomy_policy({autonomy_tier: "act_with_approval"}, { ->
+    spawn_agent({task: "summarize"})
+  })
+}
+"#,
+        );
+
+        assert!(
+            diagnostics_by_invariant(&report, "capability.policy").is_empty(),
             "unexpected diagnostics: {:?}",
             report.diagnostics
         );

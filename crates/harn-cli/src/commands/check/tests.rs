@@ -31,6 +31,20 @@ fn unique_temp_dir(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{prefix}-{nanos}"))
 }
 
+fn load_replay_oracle_fixture(name: &str) -> Option<serde_json::Value> {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixtures_dir = workspace_root.join("conformance/replay-oracle/fixtures");
+    let path = fixtures_dir.join(name);
+    let source = match std::fs::read_to_string(&path) {
+        Ok(source) => source,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound && !fixtures_dir.exists() => {
+            return None;
+        }
+        Err(err) => panic!("failed to read {}: {err}", path.display()),
+    };
+    Some(serde_json::from_str(&source).expect("replay oracle fixture parses"))
+}
+
 #[test]
 fn preflight_reports_template_syntax_error() {
     let dir = unique_temp_dir("harn-check-tpl");
@@ -403,11 +417,9 @@ pipeline main() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Acceptance for issue #771 (the burin-code repro): when the missing
-/// prompt file exists elsewhere under the same project root, the
-/// diagnostic must include a "did you mean ...?" suggestion pointing at
-/// the misfiled location — that's the one-keystroke fix the issue is
-/// asking for.
+/// Acceptance for issue #771: when the missing prompt file exists elsewhere
+/// under the same project root, the diagnostic must include a
+/// "did you mean ...?" suggestion pointing at the misfiled location.
 #[test]
 fn preflight_suggests_misfiled_render_prompt_target() {
     let dir = unique_temp_dir("harn-check-render-suggest");
@@ -818,6 +830,92 @@ fn handler() {
     assert!(
         !outcome.has_error,
         "invariants should only run behind --invariants"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn check_file_inner_enforces_capability_policy_invariants_when_requested() {
+    let dir = unique_temp_dir("harn-check-capability-policy");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r#"
+@invariant("capability.policy", allow: "fs.write")
+fn _handler(client) {
+  mcp_call(client, "github.search", {})
+}
+"#,
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let outcome = check_file_inner(
+        &file,
+        &CheckConfig::default(),
+        &cross_file_imports,
+        &module_graph,
+        true,
+    );
+
+    assert!(
+        outcome.has_error,
+        "expected undeclared connector capability to fail check"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn capability_policy_approval_matches_replay_oracle_fixture() {
+    let Some(fixture) = load_replay_oracle_fixture("approval_tool_call.valid.json") else {
+        return;
+    };
+    let decisions = fixture["first_run"]["policy_decisions"]
+        .as_array()
+        .expect("fixture has policy decisions");
+    assert!(
+        decisions.iter().any(|decision| {
+            decision["capability"] == "fs.write" && decision["approval_required"] == true
+        }),
+        "fixture should record fs.write as approval-gated"
+    );
+
+    let dir = unique_temp_dir("harn-check-capability-replay");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r#"
+@invariant("capability.policy",
+  allow: "fs.write",
+  workspace: "notes/**",
+  require_approval: "fs.write",
+)
+fn _handler() {
+  let _approval = request_approval("write_file", {capabilities_requested: ["fs.write"]})
+  write_file("notes/triage.md", "approved")
+}
+"#,
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let outcome = check_file_inner(
+        &file,
+        &CheckConfig::default(),
+        &cross_file_imports,
+        &module_graph,
+        true,
+    );
+
+    assert!(
+        !outcome.has_error,
+        "static capability policy should accept the approved replay path"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
