@@ -525,6 +525,7 @@ async fn async_main() {
                             args.timeout,
                             args.verbose,
                             args.timing,
+                            args.differential_optimizations,
                         )
                         .await;
                     } else if args.selection.is_some() {

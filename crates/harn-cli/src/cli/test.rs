@@ -53,6 +53,9 @@ pub(crate) struct TestArgs {
     /// Record then replay each selected pipeline and assert deterministic output.
     #[arg(long)]
     pub determinism: bool,
+    /// Run conformance fixtures once with optimizer passes enabled and once disabled.
+    #[arg(long = "differential-optimizations")]
+    pub differential_optimizations: bool,
     /// Run eval packs declared by the nearest package manifest.
     #[arg(long)]
     pub evals: bool,

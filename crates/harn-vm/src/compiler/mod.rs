@@ -7,6 +7,7 @@ mod error;
 mod error_handling;
 mod expressions;
 mod hitl;
+mod optimizer;
 mod patterns;
 mod pipe;
 mod state;
@@ -19,6 +20,47 @@ mod yield_scan;
 pub use error::CompileError;
 
 use crate::chunk::{Chunk, Constant, Op};
+
+/// Environment variable that disables optional compiler optimizations.
+///
+/// The VM still emits structurally required bytecode, such as parameter
+/// slots, but skips semantic-preserving optimizer passes. This gives tests
+/// and benchmarks a stable optimized-vs-unoptimized comparison switch.
+pub const HARN_DISABLE_OPTIMIZATIONS_ENV: &str = "HARN_DISABLE_OPTIMIZATIONS";
+
+/// Controls semantic-preserving compiler optimizations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CompilerOptions {
+    optimize: bool,
+}
+
+impl CompilerOptions {
+    pub fn optimized() -> Self {
+        Self { optimize: true }
+    }
+
+    pub fn without_optimizations() -> Self {
+        Self { optimize: false }
+    }
+
+    pub fn from_env() -> Self {
+        if std::env::var_os(HARN_DISABLE_OPTIMIZATIONS_ENV).is_some() {
+            Self::without_optimizations()
+        } else {
+            Self::optimized()
+        }
+    }
+
+    pub fn optimizations_enabled(self) -> bool {
+        self.optimize
+    }
+}
+
+impl Default for CompilerOptions {
+    fn default() -> Self {
+        Self::optimized()
+    }
+}
 
 /// Look through an `AttributedDecl` wrapper to the inner declaration.
 /// `compile_named` / `compile` use this so attributed declarations like
@@ -62,6 +104,7 @@ struct LocalBinding {
 
 /// Compiles an AST into bytecode.
 pub struct Compiler {
+    options: CompilerOptions,
     chunk: Chunk,
     line: u32,
     column: u32,
@@ -119,6 +162,13 @@ impl Compiler {
         self.line = snode.span.line as u32;
         self.column = snode.span.column as u32;
         self.chunk.set_column(self.column);
+        if self.options.optimizations_enabled() {
+            if let Some(folded) = optimizer::fold_constant_expr(snode) {
+                if folded.node != snode.node {
+                    return self.compile_node(&folded);
+                }
+            }
+        }
         match &snode.node {
             Node::IntLiteral(n) => {
                 let idx = self.chunk.add_constant(Constant::Int(*n));

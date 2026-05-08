@@ -95,7 +95,7 @@ impl Compiler {
                 let key_idx = self.chunk.add_constant(Constant::String(name.clone()));
                 self.chunk.emit_u16(Op::Constant, key_idx, self.line);
 
-                let mut fn_compiler = Compiler::for_nested_body();
+                let mut fn_compiler = self.nested_body();
                 fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.interface_methods = self.interface_methods.clone();
                 fn_compiler.type_aliases = self.type_aliases.clone();
@@ -141,7 +141,7 @@ impl Compiler {
         fields: &[StructField],
     ) -> Result<(), CompileError> {
         // Emit a constructor: StructName({field: val, ...}) -> StructInstance.
-        let mut fn_compiler = Compiler::for_nested_body();
+        let mut fn_compiler = self.nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();

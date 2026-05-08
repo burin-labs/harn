@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::process;
+use std::process::{self, Stdio};
 
 use regex::Regex;
 use serde_json::Value;
@@ -161,6 +161,99 @@ fn conformance_llm_mock_mode(harn_file: &Path) -> CliLlmMockMode {
     }
 }
 
+enum ConformanceExecution {
+    Completed(Result<String, String>),
+    TimedOut,
+}
+
+struct ConformanceRun {
+    execution: ConformanceExecution,
+    duration_ms: u64,
+}
+
+async fn execute_conformance_source(
+    source: &str,
+    harn_file: &Path,
+    timeout_ms: u64,
+    llm_mock_mode: &CliLlmMockMode,
+) -> Result<ConformanceRun, String> {
+    harn_vm::reset_thread_local_state();
+    install_cli_llm_mock_mode(llm_mock_mode)
+        .map_err(|error| format!("llm mock setup error: {error}"))?;
+
+    let start = std::time::Instant::now();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(timeout_ms),
+        execute(source, Some(harn_file)),
+    )
+    .await;
+    let duration_ms = start.elapsed().as_millis() as u64;
+    harn_vm::llm::clear_cli_llm_mock_mode();
+
+    let execution = match result {
+        Ok(result) => ConformanceExecution::Completed(result),
+        Err(_) => ConformanceExecution::TimedOut,
+    };
+    Ok(ConformanceRun {
+        execution,
+        duration_ms,
+    })
+}
+
+async fn verify_unoptimized_conformance_subprocess(
+    harn_file: &Path,
+    timeout_ms: u64,
+) -> Result<u64, String> {
+    let exe = std::env::current_exe()
+        .map_err(|error| format!("failed to resolve current harn executable: {error}"))?;
+    let start = std::time::Instant::now();
+    let mut command = tokio::process::Command::new(exe);
+    command
+        .arg("test")
+        .arg("conformance")
+        .arg(harn_file)
+        .arg("--timeout")
+        .arg(timeout_ms.to_string())
+        .env(harn_vm::HARN_DISABLE_OPTIMIZATIONS_ENV, "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    let wait_timeout = std::time::Duration::from_millis(timeout_ms.saturating_add(2_000));
+    let output = match tokio::time::timeout(wait_timeout, command.output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => {
+            return Err(format!("unoptimized subprocess launch failed: {error}"));
+        }
+        Err(_) => {
+            return Err(format!(
+                "unoptimized subprocess timed out after {}ms",
+                wait_timeout.as_millis()
+            ));
+        }
+    };
+    let duration_ms = start.elapsed().as_millis() as u64;
+    if output.status.success() {
+        return Ok(duration_ms);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut message = format!(
+        "unoptimized subprocess exited with status {}",
+        output.status
+    );
+    if !stdout.trim().is_empty() {
+        message.push_str("\nstdout:\n");
+        message.push_str(stdout.trim_end());
+    }
+    if !stderr.trim().is_empty() {
+        message.push_str("\nstderr:\n");
+        message.push_str(stderr.trim_end());
+    }
+    Err(message)
+}
+
 fn canonicalize_or_err(path: &Path) -> Result<PathBuf, String> {
     path.canonicalize()
         .map_err(|error| format!("Failed to canonicalize {}: {error}", path.display()))
@@ -267,9 +360,15 @@ pub(crate) async fn run_conformance_tests(
     timeout_ms: u64,
     verbose: bool,
     timing: bool,
+    differential_optimizations: bool,
 ) {
     let show_timing = verbose || timing;
     let _disable_llm_calls = ScopedEnvVar::set(harn_vm::llm::LLM_CALLS_DISABLED_ENV, "1");
+    let _force_optimized_parent = if differential_optimizations {
+        Some(ScopedEnvVar::unset(harn_vm::HARN_DISABLE_OPTIMIZATIONS_ENV))
+    } else {
+        None
+    };
     let dir_path = PathBuf::from(dir);
     if !dir_path.exists() {
         eprintln!("Directory not found: {dir}");
@@ -356,30 +455,40 @@ pub(crate) async fn run_conformance_tests(
                 }
             };
 
-            harn_vm::reset_thread_local_state();
             let llm_mock_mode = conformance_llm_mock_mode(harn_file);
-            if let Err(error) = install_cli_llm_mock_mode(&llm_mock_mode) {
-                println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                let msg = format!("{rel_path}: llm mock setup error: {error}");
-                errors.push(msg.clone());
-                junit_results.push((rel_path, false, msg, 0));
-                failed += 1;
-                continue;
-            }
+            let run =
+                match execute_conformance_source(&source, harn_file, timeout_ms, &llm_mock_mode)
+                    .await
+                {
+                    Ok(run) => run,
+                    Err(error) => {
+                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                        let msg = format!("{rel_path}: {error}");
+                        errors.push(msg.clone());
+                        junit_results.push((rel_path, false, msg, 0));
+                        failed += 1;
+                        continue;
+                    }
+                };
+            let duration_ms = run.duration_ms;
 
-            let start = std::time::Instant::now();
-            let result = tokio::time::timeout(
-                std::time::Duration::from_millis(timeout_ms),
-                execute(&source, Some(harn_file.as_path())),
-            )
-            .await;
-            let duration_ms = start.elapsed().as_millis() as u64;
-            harn_vm::llm::clear_cli_llm_mock_mode();
-
-            match result {
-                Ok(Ok(output)) => {
+            match run.execution {
+                ConformanceExecution::Completed(Ok(output)) => {
                     let actual = normalize_actual_output(output.trim_end());
                     if actual == expected {
+                        if differential_optimizations {
+                            if let Err(error) =
+                                verify_unoptimized_conformance_subprocess(harn_file, timeout_ms)
+                                    .await
+                            {
+                                println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                                let msg = format!("{rel_path}: {error}");
+                                errors.push(msg.clone());
+                                junit_results.push((rel_path, false, msg, duration_ms));
+                                failed += 1;
+                                continue;
+                            }
+                        }
                         if show_timing {
                             println!("  \x1b[32mPASS\x1b[0m  {rel_path} ({duration_ms} ms)");
                         } else {
@@ -408,7 +517,7 @@ pub(crate) async fn run_conformance_tests(
                         failed += 1;
                     }
                 }
-                Ok(Err(e)) => {
+                ConformanceExecution::Completed(Err(e)) => {
                     if verbose {
                         println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
                     } else {
@@ -419,7 +528,7 @@ pub(crate) async fn run_conformance_tests(
                     junit_results.push((rel_path, false, msg, duration_ms));
                     failed += 1;
                 }
-                Err(_) => {
+                ConformanceExecution::TimedOut => {
                     println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
                     let msg = format!("{rel_path}: timed out after {timeout_ms}ms");
                     errors.push(msg.clone());
@@ -451,28 +560,39 @@ pub(crate) async fn run_conformance_tests(
                 }
             };
 
-            harn_vm::reset_thread_local_state();
             let llm_mock_mode = conformance_llm_mock_mode(harn_file);
-            if let Err(error) = install_cli_llm_mock_mode(&llm_mock_mode) {
-                println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                let msg = format!("{rel_path}: llm mock setup error: {error}");
-                errors.push(msg.clone());
-                junit_results.push((rel_path, false, msg, 0));
-                failed += 1;
-                continue;
-            }
+            let run =
+                match execute_conformance_source(&source, harn_file, timeout_ms, &llm_mock_mode)
+                    .await
+                {
+                    Ok(run) => run,
+                    Err(error) => {
+                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                        let msg = format!("{rel_path}: {error}");
+                        errors.push(msg.clone());
+                        junit_results.push((rel_path, false, msg, 0));
+                        failed += 1;
+                        continue;
+                    }
+                };
+            let duration_ms = run.duration_ms;
 
-            let start = std::time::Instant::now();
-            let result = tokio::time::timeout(
-                std::time::Duration::from_millis(timeout_ms),
-                execute(&source, Some(harn_file.as_path())),
-            )
-            .await;
-            let duration_ms = start.elapsed().as_millis() as u64;
-            harn_vm::llm::clear_cli_llm_mock_mode();
-
-            match result {
-                Ok(Err(ref err)) if error_matches(err, &expected_error) => {
+            match run.execution {
+                ConformanceExecution::Completed(Err(ref err))
+                    if error_matches(err, &expected_error) =>
+                {
+                    if differential_optimizations {
+                        if let Err(error) =
+                            verify_unoptimized_conformance_subprocess(harn_file, timeout_ms).await
+                        {
+                            println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                            let msg = format!("{rel_path}: {error}");
+                            errors.push(msg.clone());
+                            junit_results.push((rel_path, false, msg, duration_ms));
+                            failed += 1;
+                            continue;
+                        }
+                    }
                     if verbose {
                         println!("  \x1b[32mPASS\x1b[0m  {rel_path} ({duration_ms} ms)");
                     } else {
@@ -481,7 +601,7 @@ pub(crate) async fn run_conformance_tests(
                     junit_results.push((rel_path, true, String::new(), duration_ms));
                     passed += 1;
                 }
-                Ok(Err(err)) => {
+                ConformanceExecution::Completed(Err(err)) => {
                     if verbose {
                         println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
                     } else {
@@ -494,7 +614,7 @@ pub(crate) async fn run_conformance_tests(
                     junit_results.push((rel_path, false, msg, duration_ms));
                     failed += 1;
                 }
-                Ok(Ok(_)) => {
+                ConformanceExecution::Completed(Ok(_)) => {
                     println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
                     let msg = format!(
                         "{rel_path}: expected error containing '{expected_error}', but succeeded"
@@ -503,7 +623,7 @@ pub(crate) async fn run_conformance_tests(
                     junit_results.push((rel_path, false, msg, duration_ms));
                     failed += 1;
                 }
-                Err(_) => {
+                ConformanceExecution::TimedOut => {
                     println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
                     let msg = format!("{rel_path}: timed out after {timeout_ms}ms");
                     errors.push(msg.clone());

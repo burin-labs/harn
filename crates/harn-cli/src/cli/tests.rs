@@ -19,6 +19,7 @@ fn test_parses_conformance_target_selection() {
         "conformance",
         "tests/worktree_runtime.harn",
         "--verbose",
+        "--differential-optimizations",
     ]);
 
     let Command::Test(args) = cli.command.unwrap() else {
@@ -30,6 +31,7 @@ fn test_parses_conformance_target_selection() {
         Some("tests/worktree_runtime.harn")
     );
     assert!(args.verbose);
+    assert!(args.differential_optimizations);
 }
 
 #[test]
