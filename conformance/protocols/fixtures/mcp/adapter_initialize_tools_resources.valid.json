@@ -1,0 +1,138 @@
+{
+  "name": "mcp.adapter.initialize_tools_resources",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+        "protocolVersion": "2025-11-25",
+        "capabilities": {},
+        "clientInfo": {
+          "name": "fixture-client",
+          "version": "1"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "protocolVersion": "2025-11-25",
+        "capabilities": {
+          "tools": {},
+          "resources": {},
+          "logging": {},
+          "completions": {}
+        },
+        "serverInfo": {
+          "name": "server",
+          "version": "0.8.0",
+          "card": {
+            "name": "fixture-card",
+            "version": "1"
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized",
+      "params": {}
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "tools/list",
+      "params": {}
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "tools": [
+          {
+            "name": "greet",
+            "title": "greet",
+            "description": "Invoke exported Harn function 'greet'.",
+            "annotations": {
+              "title": "greet",
+              "readOnlyHint": false,
+              "destructiveHint": true,
+              "idempotentHint": false,
+              "openWorldHint": true
+            },
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ]
+            },
+            "outputSchema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "method": "resources/list",
+      "params": {}
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "resources": [
+          {
+            "uri": "well-known://mcp-card",
+            "name": "Server Card",
+            "description": "MCP Server Card advertising this server's identity and capabilities",
+            "mimeType": "application/json"
+          }
+        ]
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "method": "resources/read",
+      "params": {
+        "uri": "well-known://mcp-card"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "result": {
+        "contents": [
+          {
+            "uri": "well-known://mcp-card",
+            "text": "{\"name\":\"fixture-card\",\"version\":\"1\"}",
+            "mimeType": "application/json"
+          }
+        ]
+      }
+    }
+  ],
+  "matrix": {
+    "version": "2025-11-25",
+    "family": "adapter",
+    "case": "initialize_tools_resources_success",
+    "source": {
+      "kind": "adapter_generated",
+      "generator": "cargo test -p harn-serve adapters::mcp::tests::adapter_protocol_fixture_matches_checked_in_matrix",
+      "description": "Generated from McpServer initialize, tools/list, resources/list, and resources/read adapter code."
+    }
+  }
+}

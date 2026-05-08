@@ -16,13 +16,26 @@
           "transport": "JSONRPC"
         }
       ],
-      "version": "0.7.48",
-      "defaultInputModes": ["application/json"],
-      "defaultOutputModes": ["application/json"],
+      "version": "0.8.0",
+      "defaultInputModes": [
+        "application/json"
+      ],
+      "defaultOutputModes": [
+        "application/json"
+      ],
       "capabilities": {
         "streaming": true
       },
       "skills": []
     }
-  ]
+  ],
+  "matrix": {
+    "version": "0.3.0",
+    "family": "agent_card",
+    "case": "negative",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Protocol matrix fixture maintained from the pinned Harn adapter profile and upstream protocol semantics."
+    }
+  }
 }

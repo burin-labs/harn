@@ -1,0 +1,78 @@
+{
+  "name": "mcp.sampling_elicitation.boundaries",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": "sample-1",
+      "method": "sampling/createMessage",
+      "params": {
+        "messages": [
+          {
+            "role": "user",
+            "content": {
+              "type": "text",
+              "text": "Summarize this patch."
+            }
+          }
+        ],
+        "systemPrompt": "Stay concise.",
+        "maxTokens": 128,
+        "metadata": {
+          "server": "fixture"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "sample-1",
+      "result": {
+        "role": "assistant",
+        "content": {
+          "type": "text",
+          "text": "Patch summarized."
+        },
+        "model": "local-fixture",
+        "stopReason": "endTurn"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "elicit-1",
+      "method": "elicitation/create",
+      "params": {
+        "message": "Approve writing files?",
+        "requestedSchema": {
+          "type": "object",
+          "properties": {
+            "approved": {
+              "type": "boolean"
+            }
+          },
+          "required": ["approved"]
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "elicit-1",
+      "result": {
+        "action": "accept",
+        "content": {
+          "approved": true
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "2025-11-25",
+    "family": "sampling_elicitation",
+    "case": "success",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Client-bound MCP sampling and elicitation envelopes used at Harn's host-approval boundary."
+    }
+  }
+}

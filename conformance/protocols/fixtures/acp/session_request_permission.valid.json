@@ -1,0 +1,45 @@
+{
+  "name": "acp.session_request_permission.round_trip",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 77,
+      "method": "session/request_permission",
+      "params": {
+        "sessionId": "session-1",
+        "toolCallId": "tool-1",
+        "toolName": "edit",
+        "options": [
+          {
+            "id": "approve",
+            "label": "Approve"
+          },
+          {
+            "id": "deny",
+            "label": "Deny"
+          }
+        ]
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 77,
+      "result": {
+        "outcome": "approved"
+      }
+    }
+  ],
+  "matrix": {
+    "version": "v0.12.2",
+    "family": "session_request_permission",
+    "case": "success",
+    "source": {
+      "kind": "adapter_generated",
+      "generator": "cargo test -p harn-serve adapters::acp::tests::acp_bridge_routes_session_request_permission_response",
+      "description": "Permission request and response shape from AcpBridge::call_client."
+    }
+  }
+}

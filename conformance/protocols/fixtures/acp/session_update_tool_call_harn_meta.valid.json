@@ -57,5 +57,14 @@
         }
       }
     }
-  ]
+  ],
+  "matrix": {
+    "version": "v0.12.2",
+    "family": "session_update",
+    "case": "success",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Protocol matrix fixture maintained from the pinned Harn adapter profile and upstream protocol semantics."
+    }
+  }
 }

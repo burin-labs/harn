@@ -1,0 +1,25 @@
+{
+  "name": "a2a.jsonrpc.unknown_method",
+  "protocol": "a2a",
+  "schema": "schemas/a2a-0.3.0.schema.json",
+  "expect": "invalid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": "unknown-1",
+      "method": "tasks/teleport",
+      "params": {
+        "id": "task-1"
+      }
+    }
+  ],
+  "matrix": {
+    "version": "0.3.0",
+    "family": "jsonrpc",
+    "case": "unknown_method_negative",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Negative A2A request fixture proving unadvertised JSON-RPC methods are outside the pinned Harn profile."
+    }
+  }
+}

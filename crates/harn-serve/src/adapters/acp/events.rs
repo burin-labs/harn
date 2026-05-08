@@ -663,8 +663,8 @@ impl AgentEventSink for AcpAgentEventSink {
             // and inventing a new one would crash strict client decoders;
             // a `_`-prefixed JSON-RPC method is the spec-blessed path
             // for genuinely new events. Clients that don't know the method
-            // SHOULD ignore it (per the spec); burin-code subscribes via
-            // the `extensionMethods` advertisement in `agentCapabilities._meta.harn`.
+            // SHOULD ignore it (per the spec); clients that do know it
+            // discover the contract through `agentCapabilities._meta.harn`.
             AgentEvent::TurnStart {
                 session_id,
                 iteration,
@@ -1032,6 +1032,15 @@ mod tests {
         }
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn protocol_conformance_standard_session_update_fixture_is_adapter_generated() {
+        let actual = collect_notifications(standard_fixture_events()).await;
+        crate::protocol_fixture_tests::assert_fixture_documents_match(
+            "conformance/protocols/fixtures/acp/session_update_adapter_standard.valid.json",
+            actual,
+        );
+    }
+
     fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
         vec![
             AgentEvent::TurnStart {
@@ -1081,7 +1090,7 @@ mod tests {
     /// channel via `_harn/agentEvent`. The fixture pins the wire shape
     /// per kind so any drift in field names (e.g. snake_case vs.
     /// camelCase) or payload structure trips a build-time failure
-    /// rather than silently breaking burin-code's decoder. Every kind
+    /// rather than silently breaking downstream client decoders. Every kind
     /// in the fixture must also appear in `HARN_AGENT_EVENT_KINDS` so
     /// the capability advertisement stays honest.
     #[tokio::test(flavor = "current_thread")]
@@ -1113,6 +1122,15 @@ mod tests {
                  cannot subscribe to undocumented kinds"
             );
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn protocol_conformance_agent_event_fixture_is_adapter_generated() {
+        let actual = collect_notifications(agent_event_ext_fixture_events()).await;
+        crate::protocol_fixture_tests::assert_fixture_documents_match(
+            "conformance/protocols/fixtures/acp/agent_event_ext_notifications.valid.json",
+            actual,
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

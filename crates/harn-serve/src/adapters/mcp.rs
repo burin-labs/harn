@@ -1338,6 +1338,73 @@ pub fn greet(name: string) -> string {
     }
 
     #[tokio::test]
+    async fn adapter_protocol_fixture_matches_checked_in_matrix() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r#"
+pub fn greet(name: string) -> string {
+  return name
+}
+"#,
+        )
+        .expect("write script");
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let server = McpServer::new(
+            McpServerConfig::new(core)
+                .with_server_card(json!({"name": "fixture-card", "version": "1"})),
+        );
+        let session = SharedSession::new();
+
+        let initialize = harn_vm::jsonrpc::request(
+            1,
+            "initialize",
+            json!({
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "fixture-client", "version": "1"}
+            }),
+        );
+        let tools_list = harn_vm::jsonrpc::request(2, "tools/list", json!({}));
+        let resources_list = harn_vm::jsonrpc::request(3, "resources/list", json!({}));
+        let resources_read =
+            harn_vm::jsonrpc::request(4, "resources/read", json!({"uri": "well-known://mcp-card"}));
+
+        let actual = vec![
+            initialize.clone(),
+            mcp_response(&server, initialize, session.clone()).await,
+            harn_vm::jsonrpc::notification("notifications/initialized", json!({})),
+            tools_list.clone(),
+            mcp_response(&server, tools_list, session.clone()).await,
+            resources_list.clone(),
+            mcp_response(&server, resources_list, session.clone()).await,
+            resources_read.clone(),
+            mcp_response(&server, resources_read, session).await,
+        ];
+        crate::protocol_fixture_tests::assert_fixture_documents_match(
+            "conformance/protocols/fixtures/mcp/adapter_initialize_tools_resources.valid.json",
+            actual,
+        );
+    }
+
+    async fn mcp_response(
+        server: &McpServer,
+        request: JsonValue,
+        session: SharedSession,
+    ) -> JsonValue {
+        match server
+            .process_message(request, session, AuthRequest::default())
+            .await
+        {
+            ImmediateResult::Response(response) => response,
+            ImmediateResult::Accepted | ImmediateResult::Stream(_) => {
+                panic!("expected MCP JSON-RPC response")
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn latest_spec_gap_methods_return_explicit_json_rpc_errors() {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("server.harn");

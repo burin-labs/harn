@@ -1,17 +1,125 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/conformance/protocols/acp-session-update.schema.json",
-  "title": "Harn ACP session/update profile",
-  "description": "Pinned profile derived from agentclientprotocol/agent-client-protocol schema v0.12.2 plus Harn-advertised session/update extensions.",
-  "type": "object",
-  "required": ["jsonrpc", "method", "params"],
-  "additionalProperties": true,
-  "properties": {
-    "jsonrpc": { "const": "2.0" },
-    "method": { "const": "session/update" },
-    "params": { "$ref": "#/$defs/SessionUpdateParams" }
+  "title": "Harn ACP v0.12.2 adapter profile",
+  "description": "Pinned Harn adapter profile derived from agentclientprotocol/agent-client-protocol schema v0.12.2 plus Harn-advertised ACP extensions.",
+  "x-harn-provenance": {
+    "protocol": "acp",
+    "upstream_version": "v0.12.2",
+    "upstream_source_url": "https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/v0.12.2/schema/schema.json",
+    "upstream_spec_url": "https://agentclientprotocol.com/protocol/schema",
+    "retrieved_at": "2026-05-08",
+    "refresh_command": "curl -fsSL https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/v0.12.2/schema/schema.json",
+    "profile_note": "The profile roots the ACP request, response, session/update notification, and Harn extension notification shapes this adapter emits or accepts."
   },
+  "oneOf": [
+    { "$ref": "#/$defs/SessionUpdateNotification" },
+    { "$ref": "#/$defs/SessionRequestPermissionRequest" },
+    { "$ref": "#/$defs/HarnAgentEventNotification" },
+    { "$ref": "#/$defs/JsonRpcResultResponse" },
+    { "$ref": "#/$defs/JsonRpcErrorResponse" }
+  ],
   "$defs": {
+    "SessionUpdateNotification": {
+      "type": "object",
+      "required": ["jsonrpc", "method", "params"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "method": { "const": "session/update" },
+        "params": { "$ref": "#/$defs/SessionUpdateParams" }
+      }
+    },
+    "JsonRpcRequestBase": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "method"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "type": ["string", "integer"] },
+        "params": { "type": "object" }
+      }
+    },
+    "SessionRequestPermissionRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/JsonRpcRequestBase" },
+        {
+          "type": "object",
+          "required": ["params"],
+          "properties": {
+            "method": { "const": "session/request_permission" },
+            "params": {
+              "type": "object",
+              "required": ["sessionId"],
+              "additionalProperties": true,
+              "properties": {
+                "sessionId": { "type": "string", "minLength": 1 },
+                "toolCallId": { "type": "string", "minLength": 1 },
+                "toolName": { "type": "string", "minLength": 1 },
+                "options": { "type": "array" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "HarnAgentEventNotification": {
+      "type": "object",
+      "required": ["jsonrpc", "method", "params"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "method": { "const": "_harn/agentEvent" },
+        "params": {
+          "type": "object",
+          "required": ["sessionId", "kind"],
+          "additionalProperties": true,
+          "properties": {
+            "sessionId": { "type": "string", "minLength": 1 },
+            "kind": {
+              "enum": [
+                "budget_exhausted",
+                "daemon_watchdog_tripped",
+                "feedback_injected",
+                "judge_decision",
+                "loop_stuck",
+                "turn_end",
+                "turn_start"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "JsonRpcResultResponse": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "result"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "type": ["string", "integer"] },
+        "result": { "type": "object" }
+      }
+    },
+    "JsonRpcErrorResponse": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "error"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "type": ["string", "integer", "null"] },
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "additionalProperties": true,
+          "properties": {
+            "code": { "type": "integer" },
+            "message": { "type": "string" },
+            "data": {}
+          }
+        }
+      }
+    },
     "SessionUpdateParams": {
       "type": "object",
       "required": ["sessionId", "update"],
@@ -40,7 +148,8 @@
         { "$ref": "#/$defs/TranscriptCompacted" },
         { "$ref": "#/$defs/Handoff" },
         { "$ref": "#/$defs/FsWatch" },
-        { "$ref": "#/$defs/WorkerUpdate" }
+        { "$ref": "#/$defs/WorkerUpdate" },
+        { "$ref": "#/$defs/HarnExtensionUpdate" }
       ]
     },
     "ContentBlock": {
@@ -118,6 +227,17 @@
       "additionalProperties": true,
       "properties": {
         "harn": { "$ref": "#/$defs/HarnToolLifecycleMeta" }
+      }
+    },
+    "HarnExtensionMeta": {
+      "type": "object",
+      "required": ["harn"],
+      "additionalProperties": true,
+      "properties": {
+        "harn": {
+          "type": "object",
+          "additionalProperties": true
+        }
       }
     },
     "HarnToolLifecycleMeta": {
@@ -302,6 +422,32 @@
         "event": { "type": "string", "minLength": 1 },
         "status": { "type": "string", "minLength": 1 },
         "terminal": { "type": "boolean" }
+      }
+    },
+    "HarnExtensionUpdate": {
+      "type": "object",
+      "required": ["sessionUpdate", "_meta"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": {
+          "enum": [
+            "available_commands_update",
+            "fs_watch",
+            "handoff",
+            "hitl_request",
+            "hitl_resolved",
+            "log",
+            "progress",
+            "skill_activated",
+            "skill_deactivated",
+            "skill_scope_tools",
+            "tool_search_query",
+            "tool_search_result",
+            "transcript_compacted",
+            "worker_update"
+          ]
+        },
+        "_meta": { "$ref": "#/$defs/HarnExtensionMeta" }
       }
     }
   }

@@ -2757,7 +2757,7 @@ mod tests {
                 assert!(
                     agent_event_method.is_object(),
                     "agent capabilities must advertise the {HARN_AGENT_EVENT_METHOD} \
-                     ExtNotification method so burin-code can subscribe — got: {agent_event_method}"
+                     ExtNotification method for clients that support it; got: {agent_event_method}"
                 );
                 assert_eq!(
                     agent_event_method["kinds"],
@@ -3050,6 +3050,10 @@ mod tests {
                 "sessionId": "session-1",
                 "toolCallId": "tool-1",
                 "toolName": "edit",
+                "options": [
+                    {"id": "approve", "label": "Approve"},
+                    {"id": "deny", "label": "Deny"}
+                ]
             }),
         );
         tokio::pin!(call);
@@ -3061,14 +3065,18 @@ mod tests {
         assert_eq!(outgoing["id"], 77);
         assert_eq!(outgoing["method"], "session/request_permission");
 
+        let response = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 77,
+            "result": {"outcome": "approved"},
+        });
+        crate::protocol_fixture_tests::assert_fixture_documents_match(
+            "conformance/protocols/fixtures/acp/session_request_permission.valid.json",
+            vec![outgoing, response.clone()],
+        );
+
         let mut server = server;
-        server
-            .handle_incoming_message(serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": 77,
-                "result": {"outcome": "approved"},
-            }))
-            .await;
+        server.handle_incoming_message(response).await;
         let result = call.await.expect("permission response");
         assert_eq!(result["outcome"], "approved");
     }

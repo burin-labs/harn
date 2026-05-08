@@ -1,0 +1,67 @@
+{
+  "name": "mcp.completion_logging.boundaries",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": "complete-1",
+      "method": "completion/complete",
+      "params": {
+        "ref": {
+          "type": "ref/prompt",
+          "name": "review"
+        },
+        "argument": {
+          "name": "diff",
+          "value": "src/"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "complete-1",
+      "result": {
+        "completion": {
+          "values": ["src/lib.rs", "src/main.rs"],
+          "total": 2,
+          "hasMore": false
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "log-1",
+      "method": "logging/setLevel",
+      "params": {
+        "level": "info"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "log-1",
+      "result": {}
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "notifications/message",
+      "params": {
+        "level": "notice",
+        "logger": "harn",
+        "data": {
+          "message": "tool finished"
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "2025-11-25",
+    "family": "completion_logging",
+    "case": "success",
+    "source": {
+      "kind": "hand_authored",
+      "description": "MCP completion and logging utility shapes from the 2025-11-25 schema semantics."
+    }
+  }
+}

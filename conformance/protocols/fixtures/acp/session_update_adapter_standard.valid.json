@@ -1,0 +1,108 @@
+{
+  "name": "acp.adapter.session_update.standard",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "content": {
+            "_meta": {
+              "harn": {
+                "visible_delta": "hello",
+                "visible_text": "hello"
+              }
+            },
+            "text": "hello",
+            "type": "text"
+          },
+          "sessionUpdate": "agent_message_chunk"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "content": {
+            "text": "thinking",
+            "type": "text"
+          },
+          "sessionUpdate": "agent_thought_chunk"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "kind": "read",
+          "rawInput": {
+            "path": "README.md"
+          },
+          "sessionUpdate": "tool_call",
+          "status": "pending",
+          "title": "read",
+          "toolCallId": "tool-1"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "_meta": {
+            "harn": {
+              "durationMs": 7,
+              "executionDurationMs": 5,
+              "executor": "harn_builtin"
+            }
+          },
+          "rawOutput": {
+            "ok": true
+          },
+          "sessionUpdate": "tool_call_update",
+          "status": "completed",
+          "title": "read",
+          "toolCallId": "tool-1"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "entries": [
+            {
+              "content": "edit",
+              "status": "pending"
+            }
+          ],
+          "sessionUpdate": "plan"
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "v0.12.2",
+    "family": "session_update",
+    "case": "adapter_standard_success",
+    "source": {
+      "kind": "adapter_generated",
+      "generator": "cargo test -p harn-serve adapters::acp::events::tests::protocol_conformance_standard_session_update_fixture_is_adapter_generated",
+      "description": "Generated from AcpAgentEventSink standard AgentEvent translation."
+    }
+  }
+}

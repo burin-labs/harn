@@ -1,0 +1,23 @@
+{
+  "name": "mcp.jsonrpc.unknown_method",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "expect": "invalid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": "unknown-1",
+      "method": "tools/delete_everything",
+      "params": {}
+    }
+  ],
+  "matrix": {
+    "version": "2025-11-25",
+    "family": "jsonrpc",
+    "case": "unknown_method_negative",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Negative MCP request fixture proving unadvertised methods are outside the pinned Harn profile."
+    }
+  }
+}

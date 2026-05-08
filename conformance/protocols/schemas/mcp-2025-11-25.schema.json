@@ -2,16 +2,34 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/conformance/protocols/mcp-2025-11-25.schema.json",
   "title": "Harn MCP 2025-11-25 adapter profile",
-  "description": "Pinned profile derived from modelcontextprotocol/modelcontextprotocol schema/2025-11-25/schema.json for initialize, tools, resources, and prompts.",
+  "description": "Pinned Harn adapter profile derived from modelcontextprotocol/modelcontextprotocol schema/2025-11-25/schema.json for the MCP 2025-11-25 wire surface Harn emits or accepts.",
+  "x-harn-provenance": {
+    "protocol": "mcp",
+    "upstream_version": "2025-11-25",
+    "upstream_source_url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/main/schema/2025-11-25/schema.json",
+    "upstream_spec_url": "https://modelcontextprotocol.io/specification/2025-11-25",
+    "retrieved_at": "2026-05-08",
+    "refresh_command": "curl -fsSL https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/main/schema/2025-11-25/schema.json",
+    "profile_note": "The upstream schema is definitions-only; this profile supplies a root over the Harn-supported MCP request, response, notification, and protected-resource metadata shapes."
+  },
   "oneOf": [
     { "$ref": "#/$defs/InitializeRequest" },
     { "$ref": "#/$defs/ListToolsRequest" },
+    { "$ref": "#/$defs/CallToolRequest" },
     { "$ref": "#/$defs/ListResourcesRequest" },
+    { "$ref": "#/$defs/ReadResourceRequest" },
     { "$ref": "#/$defs/ListResourceTemplatesRequest" },
     { "$ref": "#/$defs/ListPromptsRequest" },
+    { "$ref": "#/$defs/GetPromptRequest" },
+    { "$ref": "#/$defs/CompleteRequest" },
+    { "$ref": "#/$defs/LoggingSetLevelRequest" },
+    { "$ref": "#/$defs/SamplingCreateMessageRequest" },
+    { "$ref": "#/$defs/ElicitationCreateRequest" },
     { "$ref": "#/$defs/JsonRpcResultResponse" },
     { "$ref": "#/$defs/JsonRpcErrorResponse" },
-    { "$ref": "#/$defs/InitializedNotification" }
+    { "$ref": "#/$defs/InitializedNotification" },
+    { "$ref": "#/$defs/LoggingMessageNotification" },
+    { "$ref": "#/$defs/ProtectedResourceMetadata" }
   ],
   "$defs": {
     "RequestId": {
@@ -60,6 +78,29 @@
         }
       ]
     },
+    "CallToolRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/JsonRpcRequestBase" },
+        {
+          "type": "object",
+          "required": ["params"],
+          "properties": {
+            "method": { "const": "tools/call" },
+            "params": {
+              "type": "object",
+              "required": ["name"],
+              "additionalProperties": true,
+              "not": { "required": ["task"] },
+              "properties": {
+                "name": { "type": "string", "minLength": 1 },
+                "arguments": { "type": "object" },
+                "_meta": { "type": "object" }
+              }
+            }
+          }
+        }
+      ]
+    },
     "ListResourcesRequest": {
       "allOf": [
         { "$ref": "#/$defs/JsonRpcRequestBase" },
@@ -67,6 +108,26 @@
           "type": "object",
           "properties": {
             "method": { "const": "resources/list" }
+          }
+        }
+      ]
+    },
+    "ReadResourceRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/JsonRpcRequestBase" },
+        {
+          "type": "object",
+          "required": ["params"],
+          "properties": {
+            "method": { "const": "resources/read" },
+            "params": {
+              "type": "object",
+              "required": ["uri"],
+              "additionalProperties": true,
+              "properties": {
+                "uri": { "type": "string", "minLength": 1 }
+              }
+            }
           }
         }
       ]
@@ -93,6 +154,131 @@
         }
       ]
     },
+    "GetPromptRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/JsonRpcRequestBase" },
+        {
+          "type": "object",
+          "required": ["params"],
+          "properties": {
+            "method": { "const": "prompts/get" },
+            "params": {
+              "type": "object",
+              "required": ["name"],
+              "additionalProperties": true,
+              "properties": {
+                "name": { "type": "string", "minLength": 1 },
+                "arguments": { "type": "object" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "CompleteRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/JsonRpcRequestBase" },
+        {
+          "type": "object",
+          "required": ["params"],
+          "properties": {
+            "method": { "const": "completion/complete" },
+            "params": {
+              "type": "object",
+              "required": ["ref", "argument"],
+              "additionalProperties": true,
+              "properties": {
+                "ref": { "type": "object" },
+                "argument": {
+                  "type": "object",
+                  "required": ["name", "value"],
+                  "additionalProperties": true,
+                  "properties": {
+                    "name": { "type": "string", "minLength": 1 },
+                    "value": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "LoggingSetLevelRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/JsonRpcRequestBase" },
+        {
+          "type": "object",
+          "required": ["params"],
+          "properties": {
+            "method": { "const": "logging/setLevel" },
+            "params": {
+              "type": "object",
+              "required": ["level"],
+              "additionalProperties": true,
+              "properties": {
+                "level": { "$ref": "#/$defs/LoggingLevel" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "SamplingCreateMessageRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/JsonRpcRequestBase" },
+        {
+          "type": "object",
+          "required": ["params"],
+          "properties": {
+            "method": { "const": "sampling/createMessage" },
+            "params": {
+              "type": "object",
+              "required": ["messages", "maxTokens"],
+              "additionalProperties": true,
+              "properties": {
+                "messages": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "$ref": "#/$defs/SamplingMessage" }
+                },
+                "maxTokens": { "type": "integer", "minimum": 1 },
+                "systemPrompt": { "type": "string" },
+                "metadata": { "type": "object" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ElicitationCreateRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/JsonRpcRequestBase" },
+        {
+          "type": "object",
+          "required": ["params"],
+          "properties": {
+            "method": { "const": "elicitation/create" },
+            "params": {
+              "type": "object",
+              "required": ["message", "requestedSchema"],
+              "additionalProperties": true,
+              "properties": {
+                "message": { "type": "string", "minLength": 1 },
+                "requestedSchema": {
+                  "type": "object",
+                  "required": ["type"],
+                  "properties": {
+                    "type": { "const": "object" }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
     "InitializedNotification": {
       "type": "object",
       "required": ["jsonrpc", "method"],
@@ -101,6 +287,25 @@
         "jsonrpc": { "const": "2.0" },
         "method": { "const": "notifications/initialized" },
         "params": { "type": "object" }
+      }
+    },
+    "LoggingMessageNotification": {
+      "type": "object",
+      "required": ["jsonrpc", "method", "params"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "method": { "const": "notifications/message" },
+        "params": {
+          "type": "object",
+          "required": ["level", "data"],
+          "additionalProperties": true,
+          "properties": {
+            "level": { "$ref": "#/$defs/LoggingLevel" },
+            "logger": { "type": "string" },
+            "data": {}
+          }
+        }
       }
     },
     "JsonRpcResultResponse": {
@@ -115,8 +320,15 @@
             { "$ref": "#/$defs/InitializeResult" },
             { "$ref": "#/$defs/ListToolsResult" },
             { "$ref": "#/$defs/ListResourcesResult" },
+            { "$ref": "#/$defs/ReadResourceResult" },
             { "$ref": "#/$defs/ListResourceTemplatesResult" },
-            { "$ref": "#/$defs/ListPromptsResult" }
+            { "$ref": "#/$defs/ListPromptsResult" },
+            { "$ref": "#/$defs/GetPromptResult" },
+            { "$ref": "#/$defs/CallToolResult" },
+            { "$ref": "#/$defs/CompleteResult" },
+            { "$ref": "#/$defs/SamplingCreateMessageResult" },
+            { "$ref": "#/$defs/ElicitationResult" },
+            { "$ref": "#/$defs/EmptyResult" }
           ]
         }
       }
@@ -165,7 +377,8 @@
         "tools": { "type": "object" },
         "resources": { "type": "object" },
         "prompts": { "type": "object" },
-        "logging": { "type": "object" }
+        "logging": { "type": "object" },
+        "completions": { "type": "object" }
       }
     },
     "ListToolsResult": {
@@ -217,6 +430,17 @@
         "nextCursor": { "type": "string" }
       }
     },
+    "ReadResourceResult": {
+      "type": "object",
+      "required": ["contents"],
+      "additionalProperties": true,
+      "properties": {
+        "contents": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ResourceContents" }
+        }
+      }
+    },
     "Resource": {
       "type": "object",
       "required": ["uri", "name"],
@@ -226,6 +450,17 @@
         "name": { "type": "string", "minLength": 1 },
         "title": { "type": "string" },
         "description": { "type": "string" },
+        "mimeType": { "type": "string" }
+      }
+    },
+    "ResourceContents": {
+      "type": "object",
+      "required": ["uri"],
+      "additionalProperties": true,
+      "properties": {
+        "uri": { "type": "string", "minLength": 1 },
+        "text": { "type": "string" },
+        "blob": { "type": "string" },
         "mimeType": { "type": "string" }
       }
     },
@@ -264,6 +499,136 @@
         "arguments": {
           "type": "array",
           "items": { "type": "object" }
+        }
+      }
+    },
+    "GetPromptResult": {
+      "type": "object",
+      "required": ["messages"],
+      "additionalProperties": true,
+      "properties": {
+        "description": { "type": "string" },
+        "messages": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PromptMessage" }
+        }
+      }
+    },
+    "PromptMessage": {
+      "type": "object",
+      "required": ["role", "content"],
+      "additionalProperties": true,
+      "properties": {
+        "role": { "enum": ["user", "assistant"] },
+        "content": { "$ref": "#/$defs/ContentBlock" }
+      }
+    },
+    "SamplingMessage": {
+      "type": "object",
+      "required": ["role", "content"],
+      "additionalProperties": true,
+      "properties": {
+        "role": { "enum": ["user", "assistant", "system"] },
+        "content": {
+          "oneOf": [
+            { "$ref": "#/$defs/ContentBlock" },
+            {
+              "type": "array",
+              "items": { "$ref": "#/$defs/ContentBlock" }
+            }
+          ]
+        }
+      }
+    },
+    "ContentBlock": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "enum": ["text", "image", "audio", "resource", "resource_link"] },
+        "text": { "type": "string" },
+        "data": { "type": "string" },
+        "mimeType": { "type": "string" }
+      }
+    },
+    "CallToolResult": {
+      "type": "object",
+      "required": ["content"],
+      "additionalProperties": true,
+      "properties": {
+        "content": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ContentBlock" }
+        },
+        "structuredContent": {},
+        "isError": { "type": "boolean" }
+      }
+    },
+    "CompleteResult": {
+      "type": "object",
+      "required": ["completion"],
+      "additionalProperties": true,
+      "properties": {
+        "completion": {
+          "type": "object",
+          "required": ["values"],
+          "additionalProperties": true,
+          "properties": {
+            "values": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "total": { "type": "integer", "minimum": 0 },
+            "hasMore": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "SamplingCreateMessageResult": {
+      "type": "object",
+      "required": ["role", "content", "model"],
+      "additionalProperties": true,
+      "properties": {
+        "role": { "const": "assistant" },
+        "content": { "$ref": "#/$defs/ContentBlock" },
+        "model": { "type": "string", "minLength": 1 },
+        "stopReason": { "type": "string" }
+      }
+    },
+    "ElicitationResult": {
+      "type": "object",
+      "required": ["action"],
+      "additionalProperties": true,
+      "properties": {
+        "action": { "enum": ["accept", "decline", "cancel"] },
+        "content": { "type": "object" }
+      }
+    },
+    "EmptyResult": {
+      "type": "object",
+      "maxProperties": 0
+    },
+    "LoggingLevel": {
+      "enum": ["debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"]
+    },
+    "ProtectedResourceMetadata": {
+      "type": "object",
+      "required": ["resource", "authorization_servers", "bearer_methods_supported"],
+      "additionalProperties": true,
+      "properties": {
+        "resource": { "type": "string", "minLength": 1 },
+        "authorization_servers": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "bearer_methods_supported": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "scopes_supported": {
+          "type": "array",
+          "items": { "type": "string" }
         }
       }
     }

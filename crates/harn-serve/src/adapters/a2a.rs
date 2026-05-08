@@ -4021,6 +4021,22 @@ pub fn triage(task: string) -> string {
     }
 
     #[tokio::test]
+    async fn adapter_agent_card_protocol_fixture_matches_checked_in_matrix() {
+        let (_dir, server) = test_server(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+        );
+        let actual = vec![server.agent_card("http://localhost:8080")];
+        crate::protocol_fixture_tests::assert_fixture_documents_match(
+            "conformance/protocols/fixtures/a2a/agent_card_adapter.valid.json",
+            actual,
+        );
+    }
+
+    #[tokio::test]
     async fn discovery_paths_serve_current_agent_card_shape() {
         let (_dir, server) = test_server(
             r#"
@@ -4112,9 +4128,8 @@ pub fn triage(task: string) -> string {
     async fn unknown_a2a_version_header_no_longer_rejects_request() {
         // Per A2A 0.3.0, version negotiation happens through AgentCard
         // discovery; the request header is non-canonical. A request that
-        // carries an unknown `a2a-version` value must still dispatch — we
-        // only log a soft-deprecation warning. The previous behavior
-        // returned JSON-RPC `-32009 VersionNotSupportedError`.
+        // carries an unknown `a2a-version` value must still dispatch; the
+        // adapter records only a soft-deprecation warning.
         let (_dir, server) = test_server(
             r#"
 pub fn triage(task: string) -> string {

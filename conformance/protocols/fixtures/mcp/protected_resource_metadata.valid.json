@@ -1,0 +1,30 @@
+{
+  "name": "mcp.auth.protected_resource_metadata",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "resource": "https://harn.example/mcp",
+      "authorization_servers": [
+        "https://auth.example"
+      ],
+      "bearer_methods_supported": [
+        "header"
+      ],
+      "scopes_supported": [
+        "mcp:tools",
+        "mcp:resources"
+      ]
+    }
+  ],
+  "matrix": {
+    "version": "2025-11-25",
+    "family": "auth",
+    "case": "protected_resource_metadata_success",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Protected Resource Metadata document emitted by Harn MCP OAuth resource-server support."
+    }
+  }
+}

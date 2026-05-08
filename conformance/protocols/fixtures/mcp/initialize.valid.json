@@ -30,7 +30,7 @@
         },
         "serverInfo": {
           "name": "harn",
-          "version": "0.7.48"
+          "version": "0.8.0"
         }
       }
     },
@@ -39,5 +39,15 @@
       "method": "notifications/initialized",
       "params": {}
     }
-  ]
+  ],
+  "matrix": {
+    "version": "2025-11-25",
+    "family": "initialize",
+    "case": "success",
+    "source": {
+      "kind": "official_example",
+      "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle",
+      "description": "Lifecycle initialize exchange following the MCP 2025-11-25 specification semantics."
+    }
+  }
 }

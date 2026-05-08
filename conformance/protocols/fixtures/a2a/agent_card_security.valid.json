@@ -1,0 +1,68 @@
+{
+  "name": "a2a.agent_card.security_schemes",
+  "protocol": "a2a",
+  "schema": "schemas/a2a-0.3.0.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "protocolVersion": "0.3.0",
+      "name": "secured-agent",
+      "description": "Harn peer agent with authenticated extended card support",
+      "url": "https://agent.example.com/a2a",
+      "preferredTransport": "JSONRPC",
+      "additionalInterfaces": [
+        {
+          "url": "https://agent.example.com/a2a",
+          "transport": "JSONRPC"
+        }
+      ],
+      "version": "0.8.0",
+      "provider": {
+        "organization": "Harn"
+      },
+      "securitySchemes": {
+        "apiKey": {
+          "type": "apiKey",
+          "name": "x-harn-api-key",
+          "in": "header"
+        },
+        "bearer": {
+          "type": "http",
+          "scheme": "bearer",
+          "bearerFormat": "JWT"
+        }
+      },
+      "security": [
+        {
+          "apiKey": []
+        },
+        {
+          "bearer": []
+        }
+      ],
+      "supportsAuthenticatedExtendedCard": true,
+      "defaultInputModes": ["application/json"],
+      "defaultOutputModes": ["application/json"],
+      "capabilities": {
+        "streaming": true,
+        "pushNotifications": true
+      },
+      "skills": [
+        {
+          "id": "review",
+          "name": "review",
+          "description": "Review a patch"
+        }
+      ]
+    }
+  ],
+  "matrix": {
+    "version": "0.3.0",
+    "family": "agent_card",
+    "case": "security_schemes_success",
+    "source": {
+      "kind": "hand_authored",
+      "description": "A2A AgentCard security scheme and requirement metadata consumed by Harn extended-card clients."
+    }
+  }
+}
