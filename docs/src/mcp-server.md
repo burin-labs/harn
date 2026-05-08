@@ -271,6 +271,17 @@ The server exposes these MCP resources:
 `harn://event/<event_id>` includes the recorded trigger event plus related
 outbox/attempt/DLQ/action-graph trace entries.
 
+`resources/templates/list` advertises the parameterized forms clients can use
+after discovering concrete examples:
+
+- `harn://topic/{name}`
+- `harn://event/{event_id}`
+- `harn://dlq/{entry_id}`
+
+`completion/complete` supports those resource template arguments. Topic
+completion includes static trigger topics and discovered agent transcript
+topics; event and DLQ completion use recorded trigger and pending DLQ ids.
+
 `harn://topic/*` resources expose recent EventLog entries for subscribable
 orchestrator topics. `resources/subscribe` starts a live EventLog watcher for
 the resource URI and the server sends `notifications/resources/updated` when a
@@ -313,8 +324,8 @@ messages when watched manifest, prompt, lockfile, or package metadata changes.
 
 `harn mcp serve` negotiates MCP protocol version `2025-11-25`. It is a
 control-plane server for Harn orchestration state, so it supports tools,
-resources, prompts, logging, cancellation, progress, and streamable HTTP
-sessions. It does not expose completions, roots, or MCP tasks. The
+resources, prompts, completions, logging, MCP tasks, cancellation, progress,
+and streamable HTTP sessions. It does not expose roots. The
 orchestrator-mode catalog does not currently issue
 `sampling/createMessage` against connected clients (Harn's outbound MCP
 clients accept inbound sampling — see the
@@ -327,21 +338,26 @@ clients accept inbound sampling — see the
 | `tools/list`, `tools/call` | Supported for the Harn tool catalog above |
 | `notifications/progress`, `notifications/cancelled` | Supported for cancellable work |
 | `resources/list`, `resources/read` | Supported for manifest, EventLog topic, event, and DLQ resources |
-| `resources/templates/list` | Supported; returns an empty list |
+| `resources/templates/list` | Supported for EventLog topic, trigger event, and DLQ URI patterns |
 | `resources/subscribe`, `resources/unsubscribe` | Supported for EventLog topic resources; updates emit `notifications/resources/updated` |
 | `prompts/list` | Supported for `.harn.prompt` files in the project and prompt-library packages |
 | `prompts/get` | Supported; renders prompt templates with supplied arguments |
-| `completion/complete` | Supported for prompt arguments with front-matter suggestions |
+| `completion/complete` | Supported for prompt arguments with front-matter suggestions and orchestrator resource template arguments |
 | `elicitation/create` | Supported on script-driven `harn run --serve mcp` surfaces via the `mcp_elicit(...)` builtin (see [Elicitation](#elicitation)). The orchestrator-mode tool catalog does not currently issue elicitations. |
 | `roots/list` | Explicitly unsupported |
 | `sampling/createMessage` | Server-initiated sampling against the connected client is not emitted by the orchestrator catalog. Harn-as-MCP-client *does* accept inbound `sampling/createMessage` (routed to `llm_call` via the host bridge) — see the [client matrix](mcp-and-acp.html#mcp-client-support-matrix). |
-| `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Explicitly unsupported |
-| `tools/call` with `params.task` | Rejected; task-augmented execution is not advertised |
+| `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Supported for task-augmented orchestrator tool calls |
+| `tools/call` with `params.task` | Supported for tools that advertise optional task execution; rejected with `-32602` for tools that advertise `execution.taskSupport="forbidden"` |
 
 Explicitly unsupported methods return a JSON-RPC error with code `-32601` and
 `error.data.type = "mcp.unsupportedFeature"`. Tool calls that request
-task-augmented execution return `-32602` because the request parameters ask for
-a capability Harn does not advertise.
+task-augmented execution for a non-taskable tool return `-32602` because the
+request conflicts with the tool's advertised execution metadata.
+
+`sampling/createMessage` and `elicitation/create` are client-bound MCP requests.
+When a client sends either method to a Harn MCP server endpoint, Harn returns an
+explicit `mcp.unsupportedFeature` JSON-RPC error instead of treating the request
+as an ordinary unknown method.
 
 ## Elicitation
 

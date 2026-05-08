@@ -45,8 +45,9 @@ use tokio::task::LocalSet;
 use uuid::Uuid;
 
 use crate::{
-    AdapterDescriptor, AuthRequest, CallArguments, CallRequest, CallResponse, DispatchCore,
-    DispatchError, ExportCatalog, HttpTlsConfig, TransportAdapter,
+    mcp_context::McpContextCatalog, AdapterDescriptor, AuthPolicy, AuthRequest,
+    AuthorizationDecision, CallArguments, CallRequest, CallResponse, DispatchCore, DispatchError,
+    ExportCatalog, HttpTlsConfig, TransportAdapter,
 };
 
 pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
@@ -104,6 +105,8 @@ pub struct McpServer {
     server_name: String,
     server_card: Option<JsonValue>,
     catalog: ExportCatalog,
+    context: McpContextCatalog,
+    auth_policy: AuthPolicy,
     executor: ExecutionRuntime,
 }
 
@@ -244,6 +247,8 @@ impl McpServer {
             .unwrap_or_else(|| derived_server_name(config.core.catalog()));
         let core = Arc::new(config.core);
         let catalog = core.catalog().clone();
+        let context = McpContextCatalog::discover(&catalog.script_path);
+        let auth_policy = core.auth_policy().clone();
         Self {
             descriptor: AdapterDescriptor {
                 id: "mcp".to_string(),
@@ -254,6 +259,8 @@ impl McpServer {
             server_name,
             server_card: config.server_card,
             catalog,
+            context,
+            auth_policy,
             executor: ExecutionRuntime::start(core.clone()),
         }
     }
@@ -401,6 +408,18 @@ impl McpServer {
             ));
         }
 
+        if let Err(response) = self
+            .authorize_protocol_method(id.clone(), method, &auth)
+            .await
+        {
+            return ImmediateResult::Response(response);
+        }
+        if let Some(response) =
+            mcp_protocol::unsupported_client_bound_method_response(id.clone(), method)
+        {
+            return ImmediateResult::Response(response);
+        }
+
         match method {
             "notifications/initialized" | "initialized" => ImmediateResult::Accepted,
             "ping" => ImmediateResult::Response(harn_vm::jsonrpc::response(id, json!({}))),
@@ -422,20 +441,16 @@ impl McpServer {
             "resources/read" => ImmediateResult::Response(self.handle_resources_read(id, &params)),
             "resources/templates/list" => ImmediateResult::Response(harn_vm::jsonrpc::response(
                 id,
-                paged_result("resourceTemplates", Vec::new(), &params),
+                self.resources_templates_list_result(&params),
             )),
             "prompts/list" => ImmediateResult::Response(harn_vm::jsonrpc::response(
                 id,
-                paged_result("prompts", Vec::new(), &params),
+                self.prompts_list_result(&params),
             )),
-            "prompts/get" => ImmediateResult::Response(harn_vm::jsonrpc::error_response(
-                id,
-                -32602,
-                "Unknown prompt",
-            )),
-            mcp_protocol::METHOD_COMPLETION_COMPLETE => ImmediateResult::Response(
-                harn_vm::jsonrpc::error_response(id, -32602, "Unknown completion reference"),
-            ),
+            "prompts/get" => ImmediateResult::Response(self.handle_prompts_get(id, &params)),
+            mcp_protocol::METHOD_COMPLETION_COMPLETE => {
+                ImmediateResult::Response(self.handle_completion_complete(id, &params))
+            }
             _ if mcp_protocol::unsupported_latest_spec_method(method).is_some() => {
                 ImmediateResult::Response(
                     mcp_protocol::unsupported_latest_spec_method_response(id, method)
@@ -489,14 +504,19 @@ impl McpServer {
         if !self.catalog.functions.is_empty() {
             capabilities.insert("tools".to_string(), json!({}));
         }
-        if self.server_card.is_some() {
+        if self.server_card.is_some() || self.context.has_resources() {
             capabilities.insert("resources".to_string(), json!({}));
         }
+        if self.context.has_prompts() {
+            capabilities.insert("prompts".to_string(), json!({}));
+        }
         capabilities.insert("logging".to_string(), json!({}));
-        capabilities.insert(
-            "completions".to_string(),
-            mcp_protocol::completions_capability(),
-        );
+        if self.context.has_resources() || self.context.has_prompts() {
+            capabilities.insert(
+                "completions".to_string(),
+                mcp_protocol::completions_capability(),
+            );
+        }
 
         let mut server_info = json!({
             "name": self.server_name,
@@ -522,6 +542,23 @@ impl McpServer {
         };
         let request_key = request_key(request_id);
         let _ = session.cancel_call(&request_key);
+    }
+
+    async fn authorize_protocol_method(
+        &self,
+        id: JsonValue,
+        method: &str,
+        auth: &AuthRequest,
+    ) -> Result<(), JsonValue> {
+        if self.auth_policy.methods.is_empty() || !requires_protocol_auth(method) {
+            return Ok(());
+        }
+        match self.auth_policy.authorize(auth).await {
+            AuthorizationDecision::Authorized(_) => Ok(()),
+            AuthorizationDecision::Rejected(message) => {
+                Err(harn_vm::jsonrpc::error_response(id, -32001, &message))
+            }
+        }
     }
 
     fn prepare_stream_job(
@@ -661,19 +698,16 @@ impl McpServer {
     }
 
     fn resources_list_result(&self, params: &JsonValue) -> JsonValue {
-        let resources = self
-            .server_card
-            .as_ref()
-            .map(|_| {
-                json!({
-                    "uri": "well-known://mcp-card",
-                    "name": "Server Card",
-                    "description": "MCP Server Card advertising this server's identity and capabilities",
-                    "mimeType": "application/json",
-                })
-            })
-            .into_iter()
-            .collect::<Vec<_>>();
+        let mut resources = Vec::new();
+        if self.server_card.is_some() {
+            resources.push(json!({
+                "uri": "well-known://mcp-card",
+                "name": "Server Card",
+                "description": "MCP Server Card advertising this server's identity and capabilities",
+                "mimeType": "application/json",
+            }));
+        }
+        resources.extend(self.context.resource_entries());
         paged_result("resources", resources, params)
     }
 
@@ -696,8 +730,123 @@ impl McpServer {
                 );
             }
         }
+        if let Some((text, mime_type)) = self.context.read_resource(uri) {
+            return harn_vm::jsonrpc::response(
+                id,
+                json!({
+                    "contents": [{
+                        "uri": uri,
+                        "text": text,
+                        "mimeType": mime_type,
+                    }]
+                }),
+            );
+        }
         harn_vm::jsonrpc::error_response(id, -32002, &format!("Resource not found: {uri}"))
     }
+
+    fn resources_templates_list_result(&self, params: &JsonValue) -> JsonValue {
+        paged_result(
+            "resourceTemplates",
+            self.context.resource_templates(),
+            params,
+        )
+    }
+
+    fn prompts_list_result(&self, params: &JsonValue) -> JsonValue {
+        paged_result("prompts", self.context.prompt_entries(), params)
+    }
+
+    fn handle_prompts_get(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
+        let name = params
+            .get("name")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default();
+        let arguments = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        match self.context.get_prompt(name, &arguments) {
+            Ok(value) => harn_vm::jsonrpc::response(id, value),
+            Err(error)
+                if error.starts_with("Unknown prompt")
+                    || error.starts_with("Missing required argument")
+                    || error.starts_with("prompt arguments") =>
+            {
+                harn_vm::jsonrpc::error_response(id, -32602, &error)
+            }
+            Err(error) => harn_vm::jsonrpc::error_response(id, -32603, &error),
+        }
+    }
+
+    fn handle_completion_complete(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
+        let Some(ref_type) = params.pointer("/ref/type").and_then(JsonValue::as_str) else {
+            return harn_vm::jsonrpc::error_response(id, -32602, "completion ref.type is required");
+        };
+        let Some(argument_name) = params
+            .pointer("/argument/name")
+            .and_then(JsonValue::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            return harn_vm::jsonrpc::error_response(
+                id,
+                -32602,
+                "completion argument.name is required",
+            );
+        };
+        let value = params
+            .pointer("/argument/value")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default();
+        match ref_type {
+            "ref/prompt" => {
+                let name = params
+                    .pointer("/ref/name")
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or_default();
+                match self.context.complete_prompt(name, argument_name, value) {
+                    Ok(completion) => {
+                        harn_vm::jsonrpc::response(id, json!({ "completion": completion }))
+                    }
+                    Err(error) => harn_vm::jsonrpc::error_response(id, -32602, &error),
+                }
+            }
+            "ref/resource" => {
+                let uri_template = params
+                    .pointer("/ref/uri")
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or_default();
+                match self
+                    .context
+                    .complete_resource_template(uri_template, argument_name, value)
+                {
+                    Ok(completion) => {
+                        harn_vm::jsonrpc::response(id, json!({ "completion": completion }))
+                    }
+                    Err(error) => harn_vm::jsonrpc::error_response(id, -32602, &error),
+                }
+            }
+            other => harn_vm::jsonrpc::error_response(
+                id,
+                -32602,
+                &format!("Unsupported completion ref.type: {other}"),
+            ),
+        }
+    }
+}
+
+fn requires_protocol_auth(method: &str) -> bool {
+    matches!(
+        method,
+        "tools/list"
+            | "tools/call"
+            | "resources/list"
+            | "resources/read"
+            | "resources/templates/list"
+            | "prompts/list"
+            | "prompts/get"
+            | mcp_protocol::METHOD_COMPLETION_COMPLETE
+    )
 }
 
 #[async_trait::async_trait(?Send)]

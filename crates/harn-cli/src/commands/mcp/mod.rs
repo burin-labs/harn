@@ -13,7 +13,6 @@ use crate::cli::{McpCommand, McpLoginArgs, McpServerRefArgs};
 use crate::package::{self, McpServerConfig};
 
 mod oauth_resource;
-mod prompts;
 pub(crate) mod serve;
 
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:9783/oauth/callback";

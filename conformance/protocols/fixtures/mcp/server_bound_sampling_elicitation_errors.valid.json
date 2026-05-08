@@ -1,0 +1,85 @@
+{
+  "name": "mcp.server_bound_sampling_elicitation.errors",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": "sample-server-bound",
+      "method": "sampling/createMessage",
+      "params": {
+        "messages": [
+          {
+            "role": "user",
+            "content": {
+              "type": "text",
+              "text": "Summarize this."
+            }
+          }
+        ],
+        "maxTokens": 64
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "sample-server-bound",
+      "error": {
+        "code": -32601,
+        "message": "Unsupported MCP client-bound method: sampling/createMessage",
+        "data": {
+          "type": "mcp.unsupportedFeature",
+          "protocolVersion": "2025-11-25",
+          "method": "sampling/createMessage",
+          "feature": "sampling",
+          "role": "client",
+          "status": "unsupported",
+          "reason": "MCP sampling requests are server-to-client requests. Harn does not accept client-initiated sampling on MCP server endpoints."
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "elicit-server-bound",
+      "method": "elicitation/create",
+      "params": {
+        "message": "Approve writing files?",
+        "requestedSchema": {
+          "type": "object",
+          "properties": {
+            "approved": {
+              "type": "boolean"
+            }
+          },
+          "required": ["approved"]
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "elicit-server-bound",
+      "error": {
+        "code": -32601,
+        "message": "Unsupported MCP client-bound method: elicitation/create",
+        "data": {
+          "type": "mcp.unsupportedFeature",
+          "protocolVersion": "2025-11-25",
+          "method": "elicitation/create",
+          "feature": "elicitation",
+          "role": "client",
+          "status": "unsupported",
+          "reason": "MCP elicitation requests are server-to-client requests. Harn MCP servers initiate elicitation from tool, resource, or prompt handlers instead of accepting it from clients."
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "2025-11-25",
+    "family": "sampling_elicitation",
+    "case": "server_bound_errors",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Client-bound MCP sampling and elicitation methods return explicit unsupported-feature errors when sent to Harn MCP server endpoints."
+    }
+  }
+}

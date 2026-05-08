@@ -1,0 +1,41 @@
+{
+  "name": "mcp.notion_style.permission_failure",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 20,
+      "method": "resources/read",
+      "params": {
+        "uri": "harn://connector/notion/page/private_page"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 20,
+      "error": {
+        "code": -32001,
+        "message": "unauthorized",
+        "data": {
+          "type": "mcp.permissionDenied",
+          "protocolVersion": "2025-11-25",
+          "uri": "harn://connector/notion/page/private_page",
+          "provider": "notion",
+          "status": "denied",
+          "reason": "The caller is not authorized to read this connector-backed resource."
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "2025-11-25",
+    "family": "notion_style_resources_prompts",
+    "case": "permission_failure",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Permission-denied shape for connector-backed Notion resources exposed through Harn MCP."
+    }
+  }
+}

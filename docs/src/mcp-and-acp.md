@@ -384,15 +384,15 @@ for registered resource URIs.
 | `logging/setLevel` | Accepted |
 | `tools/list`, `tools/call` | Supported |
 | `notifications/progress`, `notifications/cancelled` | Supported for long-running tool calls |
-| `resources/list`, `resources/read`, `resources/templates/list` | Supported for registered entries, cards, and orchestrator EventLog topic resources |
+| `resources/list`, `resources/read`, `resources/templates/list` | Supported for registered entries, cards, package context, prompt sources, and orchestrator EventLog resources |
 | `resources/subscribe`, `resources/unsubscribe` | Supported for registered resource URIs; orchestrator topic resources emit update notifications |
 | `prompts/list`, `prompts/get` | Supported for registered prompts |
-| `completion/complete` | Explicitly unsupported |
+| `completion/complete` | Supported for prompt arguments and resource template arguments |
 | `roots/list` | Explicitly unsupported; client-side roots are not served by Harn |
 | `sampling/createMessage` | Server-initiated sampling against the connected client is not currently emitted by the orchestrator-mode catalog; Harn declares the `sampling` capability when acting as a client (see the [client matrix](#mcp-client-support-matrix)). |
-| `elicitation/create` | Supported outbound from script-driven handlers via `mcp_elicit(...)`; inbound client requests to the server are still rejected as normal unknown methods |
-| `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Explicitly unsupported |
-| `tools/call` with `params.task` | Rejected with `-32602`; task-augmented execution is not advertised |
+| `elicitation/create` | Supported outbound from script-driven handlers via `mcp_elicit(...)`; inbound client requests to the server are rejected with an explicit unsupported-feature error |
+| `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Supported for task-augmented orchestrator tool calls |
+| `tools/call` with `params.task` | Supported for tools that advertise optional task execution; rejected with `-32602` for non-taskable tools |
 
 #### Publishing a Server Card
 

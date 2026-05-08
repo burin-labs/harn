@@ -1,0 +1,138 @@
+{
+  "name": "mcp.notion_style.resources_prompts",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 10,
+      "method": "resources/list",
+      "params": {}
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 10,
+      "result": {
+        "resources": [
+          {
+            "uri": "harn://connector/notion/page/page_123",
+            "name": "Launch Plan",
+            "title": "Launch Plan",
+            "description": "Notion page mirrored through a connector-backed Harn context resource.",
+            "mimeType": "application/json"
+          }
+        ]
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 11,
+      "method": "resources/read",
+      "params": {
+        "uri": "harn://connector/notion/page/page_123"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 11,
+      "result": {
+        "contents": [
+          {
+            "uri": "harn://connector/notion/page/page_123",
+            "mimeType": "application/json",
+            "text": "{\"provider\":\"notion\",\"kind\":\"page\",\"id\":\"page_123\",\"title\":\"Launch Plan\",\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Ship the first MCP resource slice.\"}]}"
+          }
+        ]
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 12,
+      "method": "resources/templates/list",
+      "params": {}
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 12,
+      "result": {
+        "resourceTemplates": [
+          {
+            "uriTemplate": "harn://connector/notion/database/{database_id}/page/{page_id}",
+            "name": "notion-database-page",
+            "title": "Notion Database Page",
+            "description": "Read a page-like record from a connector-backed Notion database.",
+            "mimeType": "application/json"
+          }
+        ]
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 13,
+      "method": "prompts/list",
+      "params": {}
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 13,
+      "result": {
+        "prompts": [
+          {
+            "name": "notion-research-brief",
+            "title": "Notion Research Brief",
+            "description": "Summarize connector-backed Notion context for an implementation pass.",
+            "arguments": [
+              {
+                "name": "page_uri",
+                "description": "Harn MCP resource URI for the source Notion page.",
+                "required": true
+              },
+              {
+                "name": "focus",
+                "description": "Research angle to emphasize.",
+                "required": false
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 14,
+      "method": "prompts/get",
+      "params": {
+        "name": "notion-research-brief",
+        "arguments": {
+          "page_uri": "harn://connector/notion/page/page_123",
+          "focus": "implementation risks"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 14,
+      "result": {
+        "messages": [
+          {
+            "role": "user",
+            "content": {
+              "type": "text",
+              "text": "Use harn://connector/notion/page/page_123 to brief implementation risks."
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "matrix": {
+    "version": "2025-11-25",
+    "family": "notion_style_resources_prompts",
+    "case": "success",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Notion-style page resources, database resource templates, and prompt discovery/get envelopes for Harn MCP context surfaces."
+    }
+  }
+}

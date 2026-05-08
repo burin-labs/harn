@@ -80,6 +80,12 @@ Behavior today:
   and PEM cert/key files for in-process HTTPS termination
 - progress notifications when the caller provides `_meta.progressToken`
 - cooperative cancel propagation from `notifications/cancelled`
+- Harn-native context discovery:
+  package source, nearest `harn.toml`, README, and `.harn.prompt` files appear
+  through `resources/list`, `resources/read`, `resources/templates/list`,
+  `prompts/list`, and `prompts/get`
+- `completion/complete` for file-backed prompt arguments and package/prompt
+  resource template arguments
 - HTTP auth hooks built on the shared `AuthPolicy` surface:
   API keys
   HMAC canonical-request signatures
