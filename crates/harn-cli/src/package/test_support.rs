@@ -149,6 +149,7 @@ pub(crate) fn write_package_registry_index(
     git: &str,
     package_name: &str,
 ) {
+    let harn_range = crate::package::current_harn_range_example();
     fs::write(
         path,
         format!(
@@ -160,7 +161,7 @@ name = "{registry_name}"
 description = "Acme package for registry tests"
 repository = "{git}"
 license = "MIT OR Apache-2.0"
-harn = ">=0.7,<0.8"
+harn = "{harn_range}"
 exports = ["lib"]
 connector_contract = "v1"
 docs_url = "https://docs.example.test/acme"
@@ -207,22 +208,25 @@ json_schema: {{
 pub(crate) fn write_publishable_package(root: &Path) {
     fs::create_dir_all(root.join("lib")).unwrap();
     fs::create_dir_all(root.join("docs")).unwrap();
+    let harn_range = crate::package::current_harn_range_example();
     fs::write(
         root.join(MANIFEST),
-        r#"[package]
+        format!(
+            r#"[package]
 name = "acme-lib"
 version = "0.1.0"
 description = "Acme helpers"
 license = "MIT"
 repository = "https://github.com/acme/acme-lib"
-harn = ">=0.7,<0.8"
+harn = "{harn_range}"
 docs_url = "docs/api.md"
 
 [exports]
 lib = "lib/main.harn"
 
 [dependencies]
-"#,
+"#
+        ),
     )
     .unwrap();
     fs::write(

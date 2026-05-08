@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use crate::cli::{NewArgs, ProjectTemplate};
+use crate::package::current_harn_range_example;
 
 pub(crate) fn resolve_new_args(
     args: &NewArgs,
@@ -107,6 +108,7 @@ fn write_if_new(path: &Path, content: &str) {
 }
 
 fn template_files(project_name: &str, template: ProjectTemplate) -> Vec<(&'static str, String)> {
+    let harn_range = current_harn_range_example();
     let manifest = format!(
         r#"[package]
 name = "{project_name}"
@@ -457,7 +459,7 @@ version = "0.1.0"
 description = "Reusable Harn package."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/OWNER/{project_name}"
-harn = ">=0.7,<0.8"
+harn = "{harn_range}"
 docs_url = "docs/api.md"
 
 [exports]
@@ -579,7 +581,7 @@ version = "0.1.0"
 description = "Pure-Harn connector package."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/OWNER/{project_name}"
-harn = ">=0.7,<0.8"
+harn = "{harn_range}"
 docs_url = "docs/api.md"
 
 [exports]
@@ -764,6 +766,7 @@ pub fn normalize_inbound(raw)
 mod tests {
     use super::{resolve_new_args, template_files};
     use crate::cli::{NewArgs, ProjectTemplate};
+    use crate::package::current_harn_range_example;
 
     #[test]
     fn basic_template_keeps_library_layout() {
@@ -802,11 +805,19 @@ mod tests {
         assert!(package
             .iter()
             .any(|(path, _)| *path == ".github/workflows/harn-package.yml"));
+        assert!(package.iter().any(|(path, content)| {
+            *path == "harn.toml"
+                && content.contains(&format!("harn = \"{}\"", current_harn_range_example()))
+        }));
 
         let connector = template_files("sample", ProjectTemplate::Connector);
         assert!(connector
             .iter()
             .any(|(path, _)| *path == "connectors/echo.harn"));
+        assert!(connector.iter().any(|(path, content)| {
+            *path == "harn.toml"
+                && content.contains(&format!("harn = \"{}\"", current_harn_range_example()))
+        }));
     }
 
     #[test]

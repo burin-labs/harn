@@ -1764,7 +1764,10 @@ mod tests {
             let matches = search_package_registry_impl(Some("acme"), Some("index.toml")).unwrap();
             assert_eq!(matches.len(), 1);
             assert_eq!(matches[0].name, "@burin/acme-lib");
-            assert_eq!(matches[0].harn.as_deref(), Some(">=0.7,<0.8"));
+            assert_eq!(
+                matches[0].harn.as_deref(),
+                Some(crate::package::current_harn_range_example().as_str())
+            );
             assert_eq!(matches[0].connector_contract.as_deref(), Some("v1"));
             assert_eq!(matches[0].exports, vec!["lib"]);
 

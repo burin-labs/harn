@@ -198,13 +198,18 @@ pub(crate) fn check_package_impl(
             &mut errors,
             "[package].harn",
             format!(
-                "unsupported Harn version range '{range}'; include the current 0.7 line, for example >=0.7,<0.8"
+                "unsupported Harn version range '{range}'; include the current {} line, for example {}",
+                current_harn_line_label(),
+                current_harn_range_example()
             ),
         ),
         None => push_error(
             &mut errors,
             "[package].harn",
-            "missing Harn compatibility metadata; add harn = \">=0.7,<0.8\"",
+            format!(
+                "missing Harn compatibility metadata; add harn = \"{}\"",
+                current_harn_range_example()
+            ),
         ),
     }
 
@@ -679,6 +684,22 @@ pub(crate) fn supports_current_harn(range: &str) -> bool {
     saw_constraint && lower_ok && upper_ok
 }
 
+pub(crate) fn current_harn_range_example() -> String {
+    let current = env!("CARGO_PKG_VERSION");
+    let Some((major, minor)) = parse_major_minor(current) else {
+        return ">=0.7,<0.8".to_string();
+    };
+    format!(">={major}.{minor},<{major}.{}", minor + 1)
+}
+
+pub(crate) fn current_harn_line_label() -> String {
+    let current = env!("CARGO_PKG_VERSION");
+    let Some((major, minor)) = parse_major_minor(current) else {
+        return "0.7".to_string();
+    };
+    format!("{major}.{minor}")
+}
+
 pub(crate) fn parse_major_minor(raw: &str) -> Option<(u64, u64)> {
     let raw = raw.trim().trim_start_matches('v');
     let mut parts = raw.split('.');
@@ -857,7 +878,7 @@ mod tests {
     description = "Acme helpers"
     license = "MIT"
     repository = "https://github.com/acme/acme-lib"
-    harn = ">=0.8,<0.9"
+    harn = ">=999.0,<999.1"
     docs_url = "docs/api.md"
 
     [exports]
