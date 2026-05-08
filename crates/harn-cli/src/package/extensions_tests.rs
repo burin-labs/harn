@@ -968,6 +968,52 @@ handler = "worker://echo-queue"
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn build_manifest_provider_catalog_keeps_dynamic_providers_scoped() {
+    let _provider_schema_guard = lock_manifest_provider_schemas().await;
+    harn_vm::reset_provider_catalog();
+
+    for provider in ["echo-a", "echo-b", "echo-c"] {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            &format!(
+                r#"
+[[providers]]
+id = "{provider}"
+connector = {{ harn = "./echo_connector.harn" }}
+"#
+            ),
+            None,
+        );
+        fs::write(
+            tmp.path().join("echo_connector.harn"),
+            test_harn_connector_source(provider),
+        )
+        .unwrap();
+
+        {
+            let catalog = build_manifest_provider_catalog(&load_runtime_extensions(&harn_file))
+                .await
+                .expect("manifest provider catalog builds");
+            assert_eq!(
+                catalog
+                    .metadata_for(provider)
+                    .expect("dynamic provider metadata")
+                    .schema_name,
+                "EchoEventPayload"
+            );
+        }
+
+        assert!(
+            harn_vm::provider_metadata(provider).is_none(),
+            "building a package provider catalog must not mutate the global catalog"
+        );
+    }
+
+    harn_vm::reset_provider_catalog();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn collect_manifest_triggers_rejects_duplicate_ids() {
     let tmp = tempfile::tempdir().unwrap();
     let harn_file = write_trigger_project(

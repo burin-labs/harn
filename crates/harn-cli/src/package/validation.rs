@@ -498,6 +498,7 @@ pub(crate) fn parse_duration_millis(raw: &str) -> Result<u64, PackageError> {
 
 pub(crate) fn validate_static_trigger_config(
     trigger: &ResolvedTriggerConfig,
+    provider_catalog: &harn_vm::ProviderCatalog,
 ) -> Result<(), PackageError> {
     if let Some(message) = &trigger.shape_error {
         return Err(trigger_error(trigger, message));
@@ -505,7 +506,7 @@ pub(crate) fn validate_static_trigger_config(
     if trigger.id.trim().is_empty() {
         return Err(trigger_error(trigger, "id cannot be empty"));
     }
-    let Some(provider_metadata) = harn_vm::provider_metadata(trigger.provider.as_str()) else {
+    let Some(provider_metadata) = provider_catalog.metadata_for(trigger.provider.as_str()) else {
         return Err(trigger_error(
             trigger,
             format!("provider '{}' is not registered", trigger.provider.as_str()),
@@ -907,10 +908,11 @@ pub(crate) fn validate_stream_window(
 
 pub(crate) fn validate_static_trigger_configs(
     triggers: &[ResolvedTriggerConfig],
+    provider_catalog: &harn_vm::ProviderCatalog,
 ) -> Result<(), PackageError> {
     let mut seen_ids = HashSet::new();
     for trigger in triggers {
-        validate_static_trigger_config(trigger)?;
+        validate_static_trigger_config(trigger, provider_catalog)?;
         if !seen_ids.insert(trigger.id.clone()) {
             return Err(trigger_error(
                 trigger,
@@ -1169,18 +1171,16 @@ pub(crate) async fn resolve_manifest_exports(
 }
 
 pub(crate) struct ManifestExtensionProviderSchema {
-    provider_id: &'static str,
-    schema_name: &'static str,
     metadata: harn_vm::ProviderMetadata,
 }
 
 impl harn_vm::ProviderSchema for ManifestExtensionProviderSchema {
-    fn provider_id(&self) -> &'static str {
-        self.provider_id
+    fn provider_id(&self) -> &str {
+        &self.metadata.provider
     }
 
-    fn harn_schema_name(&self) -> &'static str {
-        self.schema_name
+    fn harn_schema_name(&self) -> &str {
+        &self.metadata.schema_name
     }
 
     fn metadata(&self) -> harn_vm::ProviderMetadata {
@@ -1203,13 +1203,9 @@ impl harn_vm::ProviderSchema for ManifestExtensionProviderSchema {
     }
 }
 
-pub(crate) fn leak_static_string(value: String) -> &'static str {
-    Box::leak(value.into_boxed_str())
-}
-
-pub(crate) async fn install_manifest_provider_schemas(
+pub(crate) async fn build_manifest_provider_schemas(
     extensions: &RuntimeExtensions,
-) -> Result<(), PackageError> {
+) -> Result<Vec<Arc<dyn harn_vm::ProviderSchema>>, PackageError> {
     let mut schemas: Vec<Arc<dyn harn_vm::ProviderSchema>> = Vec::new();
     for provider in &extensions.provider_connectors {
         match &provider.connector {
@@ -1248,16 +1244,27 @@ pub(crate) async fn install_manifest_provider_schemas(
                     runtime: harn_vm::ProviderRuntimeMetadata::Placeholder,
                     ..harn_vm::ProviderMetadata::default()
                 };
-                let schema = ManifestExtensionProviderSchema {
-                    provider_id: leak_static_string(metadata.provider.clone()),
-                    schema_name: leak_static_string(metadata.schema_name.clone()),
-                    metadata,
-                };
+                let schema = ManifestExtensionProviderSchema { metadata };
                 schemas.push(Arc::new(schema));
             }
         }
     }
-    harn_vm::reset_provider_catalog_with(schemas).map_err(|error| error.to_string())?;
+    Ok(schemas)
+}
+
+pub(crate) async fn build_manifest_provider_catalog(
+    extensions: &RuntimeExtensions,
+) -> Result<harn_vm::ProviderCatalog, PackageError> {
+    let schemas = build_manifest_provider_schemas(extensions).await?;
+    harn_vm::ProviderCatalog::with_defaults_and(schemas)
+        .map_err(|error| PackageError::Validation(error.to_string()))
+}
+
+pub(crate) async fn install_manifest_provider_schemas(
+    extensions: &RuntimeExtensions,
+) -> Result<(), PackageError> {
+    let catalog = build_manifest_provider_catalog(extensions).await?;
+    harn_vm::install_provider_catalog(catalog);
     Ok(())
 }
 
