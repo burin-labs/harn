@@ -66,7 +66,7 @@ impl super::super::Vm {
                 .push(VmValue::BuiltinRef(Rc::from(name.as_str())));
         } else {
             let mut all_vars = self.visible_variables();
-            for (k, v) in &self.globals {
+            for (k, v) in self.globals.iter() {
                 all_vars.entry(k.clone()).or_insert_with(|| v.clone());
             }
             // Include builtin names so typos on builtin refs get suggestions.

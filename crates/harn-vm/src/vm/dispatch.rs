@@ -16,12 +16,12 @@ impl Vm {
         }
         if let Some(existing) = self.builtins_by_id.get(&id) {
             if existing.name.as_ref() != name {
-                self.builtins_by_id.remove(&id);
-                self.builtin_id_collisions.insert(id);
+                Rc::make_mut(&mut self.builtins_by_id).remove(&id);
+                Rc::make_mut(&mut self.builtin_id_collisions).insert(id);
                 return;
             }
         }
-        self.builtins_by_id.insert(
+        Rc::make_mut(&mut self.builtins_by_id).insert(
             id,
             VmBuiltinEntry {
                 name: Rc::from(name),
@@ -42,7 +42,7 @@ impl Vm {
                 .get(&id)
                 .is_some_and(|entry| entry.name.as_ref() == name)
             {
-                self.builtins_by_id.remove(&id);
+                Rc::make_mut(&mut self.builtins_by_id).remove(&id);
             }
         }
     }
@@ -52,8 +52,8 @@ impl Vm {
     where
         F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + 'static,
     {
-        self.builtins.insert(name.to_string(), Rc::new(f));
-        self.builtin_metadata
+        Rc::make_mut(&mut self.builtins).insert(name.to_string(), Rc::new(f));
+        Rc::make_mut(&mut self.builtin_metadata)
             .insert(name.to_string(), VmBuiltinMetadata::sync(name.to_string()));
         self.refresh_builtin_id(name);
     }
@@ -64,22 +64,22 @@ impl Vm {
         F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + 'static,
     {
         let name = metadata.name().to_string();
-        self.builtins.insert(name.clone(), Rc::new(f));
-        self.builtin_metadata
+        Rc::make_mut(&mut self.builtins).insert(name.clone(), Rc::new(f));
+        Rc::make_mut(&mut self.builtin_metadata)
             .insert(name.clone(), metadata.with_kind(VmBuiltinKind::Sync));
         self.refresh_builtin_id(&name);
     }
 
     /// Remove a sync builtin (so an async version can take precedence).
     pub fn unregister_builtin(&mut self, name: &str) {
-        self.builtins.remove(name);
+        Rc::make_mut(&mut self.builtins).remove(name);
         if self.async_builtins.contains_key(name) {
-            self.builtin_metadata.insert(
+            Rc::make_mut(&mut self.builtin_metadata).insert(
                 name.to_string(),
                 VmBuiltinMetadata::async_builtin(name.to_string()),
             );
         } else {
-            self.builtin_metadata.remove(name);
+            Rc::make_mut(&mut self.builtin_metadata).remove(name);
         }
         self.refresh_builtin_id(name);
     }
@@ -90,9 +90,9 @@ impl Vm {
         F: Fn(Vec<VmValue>) -> Fut + 'static,
         Fut: Future<Output = Result<VmValue, VmError>> + 'static,
     {
-        self.async_builtins
+        Rc::make_mut(&mut self.async_builtins)
             .insert(name.to_string(), Rc::new(move |args| Box::pin(f(args))));
-        self.builtin_metadata.insert(
+        Rc::make_mut(&mut self.builtin_metadata).insert(
             name.to_string(),
             VmBuiltinMetadata::async_builtin(name.to_string()),
         );
@@ -109,9 +109,9 @@ impl Vm {
         Fut: Future<Output = Result<VmValue, VmError>> + 'static,
     {
         let name = metadata.name().to_string();
-        self.async_builtins
+        Rc::make_mut(&mut self.async_builtins)
             .insert(name.clone(), Rc::new(move |args| Box::pin(f(args))));
-        self.builtin_metadata
+        Rc::make_mut(&mut self.builtin_metadata)
             .insert(name.clone(), metadata.with_kind(VmBuiltinKind::Async));
         self.refresh_builtin_id(&name);
     }

@@ -729,13 +729,24 @@ mod tests {
             .await
         });
 
-        tokio::time::sleep(StdDuration::from_millis(50)).await;
         let target = WorkflowTarget {
             workflow_id: workflow_id.to_string(),
             base_dir: base_dir.clone(),
         };
-        let mut state = load_state(&target).expect("load state");
-        let message = state.mailbox.pop_front().expect("queued update");
+        let mut state = None;
+        let mut message = None;
+        for _ in 0..100 {
+            if let Ok(mut loaded) = load_state(&target) {
+                if let Some(queued) = loaded.mailbox.pop_front() {
+                    state = Some(loaded);
+                    message = Some(queued);
+                    break;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+        let mut state = state.expect("load state with queued update");
+        let message = message.expect("queued update");
         assert_eq!(message.kind, "update");
         state.responses.insert(
             message.request_id.clone().expect("request id"),
@@ -747,6 +758,7 @@ mod tests {
             },
         );
         save_state(&target, &state).expect("save response");
+        tokio::time::advance(StdDuration::from_millis(UPDATE_POLL_INTERVAL_MS)).await;
 
         let result = task.await.expect("join").expect("update result");
         assert_eq!(result, serde_json::json!({"ok": true}));

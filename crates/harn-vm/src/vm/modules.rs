@@ -199,8 +199,7 @@ impl Vm {
         if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
             return Ok(loaded);
         }
-        self.source_cache
-            .insert(synthetic.clone(), source.to_string());
+        Rc::make_mut(&mut self.source_cache).insert(synthetic.clone(), source.to_string());
 
         let mut lexer = harn_lexer::Lexer::new(source);
         let tokens = lexer.tokenize().map_err(|e| {
@@ -219,7 +218,7 @@ impl Vm {
             .import_declarations(&program, None, Some(&synthetic))
             .await?;
         self.imported_paths.pop();
-        self.module_cache.insert(synthetic, loaded.clone());
+        Rc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
         Ok(loaded)
     }
 
@@ -232,8 +231,7 @@ impl Vm {
         if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
             return Ok(loaded);
         }
-        self.source_cache
-            .insert(synthetic.clone(), source.to_string());
+        Rc::make_mut(&mut self.source_cache).insert(synthetic.clone(), source.to_string());
 
         let artifact = stdlib_module_artifact(module, &synthetic, source)?;
         self.imported_paths.push(synthetic.clone());
@@ -241,7 +239,7 @@ impl Vm {
             .instantiate_stdlib_module(&synthetic, artifact.as_ref())
             .await?;
         self.imported_paths.pop();
-        self.module_cache.insert(synthetic, loaded.clone());
+        Rc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
         Ok(loaded)
     }
 
@@ -434,8 +432,8 @@ impl Vm {
                     file_path.display()
                 ))
             })?;
-            self.source_cache.insert(canonical.clone(), source.clone());
-            self.source_cache.insert(file_path.clone(), source.clone());
+            Rc::make_mut(&mut self.source_cache).insert(canonical.clone(), source.clone());
+            Rc::make_mut(&mut self.source_cache).insert(file_path.clone(), source.clone());
 
             let mut lexer = harn_lexer::Lexer::new(&source);
             let tokens = lexer
@@ -450,7 +448,7 @@ impl Vm {
                 .import_declarations(&program, Some(&file_path), Some(&file_path))
                 .await?;
             self.imported_paths.pop();
-            self.module_cache.insert(canonical.clone(), loaded.clone());
+            Rc::make_mut(&mut self.module_cache).insert(canonical.clone(), loaded.clone());
             self.export_loaded_module(&canonical, &loaded, selected_names)?;
 
             Ok(())

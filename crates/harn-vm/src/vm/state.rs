@@ -135,15 +135,15 @@ pub struct Vm {
     pub(crate) stack: Vec<VmValue>,
     pub(crate) env: VmEnv,
     pub(crate) output: String,
-    pub(crate) builtins: BTreeMap<String, VmBuiltinFn>,
-    pub(crate) async_builtins: BTreeMap<String, VmAsyncBuiltinFn>,
-    pub(crate) builtin_metadata: BTreeMap<String, VmBuiltinMetadata>,
+    pub(crate) builtins: Rc<BTreeMap<String, VmBuiltinFn>>,
+    pub(crate) async_builtins: Rc<BTreeMap<String, VmAsyncBuiltinFn>>,
+    pub(crate) builtin_metadata: Rc<BTreeMap<String, VmBuiltinMetadata>>,
     /// Numeric side index for builtins. Name-keyed maps remain authoritative;
     /// this index is the hot path for direct builtin bytecode and callback refs.
-    pub(crate) builtins_by_id: BTreeMap<BuiltinId, VmBuiltinEntry>,
+    pub(crate) builtins_by_id: Rc<BTreeMap<BuiltinId, VmBuiltinEntry>>,
     /// IDs with detected name collisions. Collided names safely fall back to
     /// the authoritative name-keyed lookup path.
-    pub(crate) builtin_id_collisions: HashSet<BuiltinId>,
+    pub(crate) builtin_id_collisions: Rc<HashSet<BuiltinId>>,
     /// Iterator state for for-in loops.
     pub(crate) iterators: Vec<IterState>,
     /// Call frame stack.
@@ -195,9 +195,9 @@ pub struct Vm {
     /// Modules currently being imported (cycle prevention).
     pub(crate) imported_paths: Vec<std::path::PathBuf>,
     /// Loaded module cache keyed by canonical or synthetic module path.
-    pub(crate) module_cache: BTreeMap<std::path::PathBuf, LoadedModule>,
+    pub(crate) module_cache: Rc<BTreeMap<std::path::PathBuf, LoadedModule>>,
     /// Source text keyed by canonical or synthetic module path for debugger retrieval.
-    pub(crate) source_cache: BTreeMap<std::path::PathBuf, String>,
+    pub(crate) source_cache: Rc<BTreeMap<std::path::PathBuf, String>>,
     /// Source file path for error reporting.
     pub(crate) source_file: Option<String>,
     /// Source text for error reporting.
@@ -205,7 +205,7 @@ pub struct Vm {
     /// Optional bridge for delegating unknown builtins in bridge mode.
     pub(crate) bridge: Option<Rc<crate::bridge::HostBridge>>,
     /// Builtins denied by sandbox mode (`--deny` / `--allow` flags).
-    pub(crate) denied_builtins: HashSet<String>,
+    pub(crate) denied_builtins: Rc<HashSet<String>>,
     /// Cancellation token for cooperative graceful shutdown (set by parent).
     pub(crate) cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Remaining instruction-boundary checks before a requested host
@@ -223,7 +223,7 @@ pub struct Vm {
     pub(crate) project_root: Option<std::path::PathBuf>,
     /// Global constants (e.g. `pi`, `e`). Checked as a fallback in `GetVar`
     /// after the environment, so user-defined variables can shadow them.
-    pub(crate) globals: BTreeMap<String, VmValue>,
+    pub(crate) globals: Rc<BTreeMap<String, VmValue>>,
     /// Optional debugger hook invoked when execution advances to a new source line.
     pub(crate) debug_hook: Option<Box<DebugHook>>,
 }
@@ -383,11 +383,11 @@ impl Vm {
             stack: Vec::with_capacity(256),
             env: VmEnv::new(),
             output: String::new(),
-            builtins: BTreeMap::new(),
-            async_builtins: BTreeMap::new(),
-            builtin_metadata: BTreeMap::new(),
-            builtins_by_id: BTreeMap::new(),
-            builtin_id_collisions: HashSet::new(),
+            builtins: Rc::new(BTreeMap::new()),
+            async_builtins: Rc::new(BTreeMap::new()),
+            builtin_metadata: Rc::new(BTreeMap::new()),
+            builtins_by_id: Rc::new(BTreeMap::new()),
+            builtin_id_collisions: Rc::new(HashSet::new()),
             iterators: Vec::new(),
             frames: Vec::new(),
             exception_handlers: Vec::new(),
@@ -408,18 +408,18 @@ impl Vm {
             last_line: 0,
             source_dir: None,
             imported_paths: Vec::new(),
-            module_cache: BTreeMap::new(),
-            source_cache: BTreeMap::new(),
+            module_cache: Rc::new(BTreeMap::new()),
+            source_cache: Rc::new(BTreeMap::new()),
             source_file: None,
             source_text: None,
             bridge: None,
-            denied_builtins: HashSet::new(),
+            denied_builtins: Rc::new(HashSet::new()),
             cancel_token: None,
             cancel_grace_instructions_remaining: None,
             error_stack_trace: Vec::new(),
             yield_sender: None,
             project_root: None,
-            globals: BTreeMap::new(),
+            globals: Rc::new(BTreeMap::new()),
             debug_hook: None,
         }
     }
@@ -432,14 +432,14 @@ impl Vm {
     /// Set builtins that are denied in sandbox mode.
     /// When called, the given builtin names will produce a permission error.
     pub fn set_denied_builtins(&mut self, denied: HashSet<String>) {
-        self.denied_builtins = denied;
+        self.denied_builtins = Rc::new(denied);
     }
 
     /// Set source info for error reporting (file path and source text).
     pub fn set_source_info(&mut self, file: &str, text: &str) {
         self.source_file = Some(file.to_string());
         self.source_text = Some(text.to_string());
-        self.source_cache
+        Rc::make_mut(&mut self.source_cache)
             .insert(std::path::PathBuf::from(file), text.to_string());
     }
 
@@ -476,11 +476,11 @@ impl Vm {
             stack: Vec::with_capacity(64),
             env: self.env.clone(),
             output: String::new(),
-            builtins: self.builtins.clone(),
-            async_builtins: self.async_builtins.clone(),
-            builtin_metadata: self.builtin_metadata.clone(),
-            builtins_by_id: self.builtins_by_id.clone(),
-            builtin_id_collisions: self.builtin_id_collisions.clone(),
+            builtins: Rc::clone(&self.builtins),
+            async_builtins: Rc::clone(&self.async_builtins),
+            builtin_metadata: Rc::clone(&self.builtin_metadata),
+            builtins_by_id: Rc::clone(&self.builtins_by_id),
+            builtin_id_collisions: Rc::clone(&self.builtin_id_collisions),
             iterators: Vec::new(),
             frames: Vec::new(),
             exception_handlers: Vec::new(),
@@ -501,18 +501,18 @@ impl Vm {
             last_line: 0,
             source_dir: self.source_dir.clone(),
             imported_paths: Vec::new(),
-            module_cache: self.module_cache.clone(),
-            source_cache: self.source_cache.clone(),
+            module_cache: Rc::clone(&self.module_cache),
+            source_cache: Rc::clone(&self.source_cache),
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
             bridge: self.bridge.clone(),
-            denied_builtins: self.denied_builtins.clone(),
+            denied_builtins: Rc::clone(&self.denied_builtins),
             cancel_token: self.cancel_token.clone(),
             cancel_grace_instructions_remaining: None,
             error_stack_trace: Vec::new(),
             yield_sender: None,
             project_root: self.project_root.clone(),
-            globals: self.globals.clone(),
+            globals: Rc::clone(&self.globals),
             debug_hook: None,
         }
     }
@@ -577,7 +577,7 @@ impl Vm {
     /// Set a global constant (e.g. `pi`, `e`).
     /// Stored separately from the environment so user-defined variables can shadow them.
     pub fn set_global(&mut self, name: &str, value: VmValue) {
-        self.globals.insert(name.to_string(), value);
+        Rc::make_mut(&mut self.globals).insert(name.to_string(), value);
     }
 
     /// Get the captured output.
