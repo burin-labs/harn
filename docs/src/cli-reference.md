@@ -381,6 +381,31 @@ harn check --preflight warning src/
 | `--preflight <severity>` | Override preflight diagnostic severity: `error` (default, fails the check), `warning` (reports but does not fail), or `off` (suppresses all preflight diagnostics). Overrides `[check].preflight_severity`. |
 | `--strict-types` | Flag unvalidated boundary-API values used in field access. |
 
+`--invariants` includes the capability-policy lattice:
+
+```harn,ignore
+@invariant("capability.policy",
+  allow: "fs.write,process.exec,mcp.connector,llm.model",
+  workspace: "src/**",
+  require_approval: "fs.write",
+  require_command_policy: "process.exec",
+  require_egress_policy: "mcp.connector",
+  require_budget: "llm.model",
+)
+fn release_worker(client) {
+  let _approval = request_approval("edit", {capabilities_requested: ["fs.write"]})
+  write_file("src/release.md", "ready")
+  with_command_policy({deny: ["rm"]}, { -> exec("git status") })
+  egress_policy({default: "deny", allow: ["api.github.com"]})
+  mcp_call(client, "github.search", {query: "harn"})
+  llm_call("summarize", nil, {budget: {max_output_tokens: 128}})
+}
+```
+
+Canonical capability names are `fs.write`, `process.exec`,
+`network.access`, `mcp.connector`, `llm.model`, `worker.dispatch`,
+`human.approval`, and `autonomy.policy`.
+
 ### harn.toml — `[check]` and `[workspace]` sections
 
 `harn check` walks upward from the target file (stopping at the first `.git`

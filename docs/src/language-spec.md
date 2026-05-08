@@ -2930,6 +2930,20 @@ then the selected invariant checks run against that IR.
 | `@invariant("fs.writes", "src/**")` | One or more allowed globs, passed positionally or as `path_glob:` / `glob:` / `allow:` | Every reachable file-system write must target a literal path proven to stay within one of the declared globs. |
 | `@invariant("budget.remaining", target: "remaining")` | Optional `target:` variable name, default `budget.remaining` | Assignments to the tracked budget value may only preserve it, decrement it, or refresh it from `llm_budget_remaining()`. |
 | `@invariant("approval.reachability")` | No extra args | Every reachable side-effecting call must be gated by a prior `request_approval(...)` or enclosed inside a `dual_control(...)` approval scope. |
+| `@invariant("capability.policy", allow: "fs.write,llm.model", ...)` | `allow:` capability list; optional `workspace:` globs; optional `require_approval:`, `require_budget:`, `require_autonomy:`, `require_execution_policy:`, `require_command_policy:`, `require_egress_policy:`, and `require_approval_policy:` capability lists | Every reachable capability effect must be declared, and selected capabilities must be guarded by the requested policy/gate on every path. |
+
+The capability-policy lattice recognizes these canonical capabilities:
+`fs.write`, `process.exec`, `network.access`, `mcp.connector`,
+`llm.model`, `worker.dispatch`, `human.approval`, and
+`autonomy.policy`. Common aliases such as `workspace.write`, `command`,
+`connector`, `llm`, and `worker` normalize to those names. The checker
+classifies direct builtins plus bridge calls such as `mcp_call(...)`,
+`host_tool_call(...)`, and `host_call("capability.operation", ...)`.
+Calls like `with_execution_policy(...)`, `with_command_policy(...)`,
+`with_approval_policy(...)`, `with_autonomy_policy(...)`,
+`with_dynamic_permissions(...)`, `egress_policy(...)`,
+`request_approval(...)`, `dual_control(...)`, and budget-bearing
+`llm_call(..., {budget: ...})` satisfy the corresponding gates.
 
 Invariant violations surface through `harn check --invariants`,
 `harn explain --invariant <name> <handler> <file>`, and the LSP. Each
