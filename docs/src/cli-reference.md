@@ -843,6 +843,9 @@ harn orchestrator fire <trigger-id> --payload event.json
 # Replay a historical event through the dispatcher.
 harn orchestrator replay <event-id>
 
+# Run replay determinism oracle fixtures.
+harn orchestrator replay-oracle
+
 # Inspect the dead-letter queue.
 harn orchestrator dlq list
 harn orchestrator dlq --replay <event-id>

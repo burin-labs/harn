@@ -50,6 +50,8 @@ pub(crate) enum OrchestratorCommand {
     Fire(OrchestratorFireArgs),
     /// Replay orchestrator events.
     Replay(OrchestratorReplayArgs),
+    /// Run canonical replay determinism oracle fixtures.
+    ReplayOracle(OrchestratorReplayOracleArgs),
     /// Resume a paused HITL escalation by accepting its request id.
     Resume(OrchestratorResumeArgs),
     /// Inspect the dead-letter queue.
@@ -373,6 +375,19 @@ pub(crate) struct OrchestratorReplayArgs {
     pub local: OrchestratorLocalArgs,
     /// Previously recorded event id to replay.
     pub event_id: String,
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorReplayOracleArgs {
+    /// Fixture file or directory to run. Defaults to the checked-in replay oracle fixtures.
+    #[arg(value_name = "PATH")]
+    pub selection: Option<PathBuf>,
+    /// Run only fixtures whose name, path, or protocol fixture refs contain this substring.
+    #[arg(long, value_name = "TEXT")]
+    pub filter: Option<String>,
     /// Emit JSON instead of human-readable output.
     #[arg(long)]
     pub json: bool,

@@ -51,6 +51,9 @@ pub use crystallize::*;
 mod release_fixture;
 pub use release_fixture::*;
 
+mod replay_oracle;
+pub use replay_oracle::*;
+
 mod policy;
 pub use policy::*;
 

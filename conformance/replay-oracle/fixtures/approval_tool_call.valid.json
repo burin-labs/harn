@@ -1,0 +1,97 @@
+{
+  "schema_version": "harn.orchestration.replay_trace.v1",
+  "name": "handler_permission_approved_tool_call",
+  "description": "Handler pauses for a HITL approval boundary, receives an ACP permission response, then records a deterministic file-effect receipt.",
+  "expect": "match",
+  "protocol_fixture_refs": [
+    "conformance/protocols/fixtures/acp/session_request_permission.valid.json"
+  ],
+  "allowlist": [
+    {"path": "/run_id", "reason": "run ids are allocated per execution"},
+    {"path": "/event_log_entries/*/event_id", "reason": "EventLog offsets are backend-local"},
+    {"path": "/event_log_entries/*/occurred_at_ms", "reason": "append timestamps are wall-clock observations"},
+    {"path": "/event_log_entries/*/payload/event_id", "reason": "TriggerEvent ids are generated per intake"},
+    {"path": "/approval_interactions/*/request_id", "reason": "approval request ids are generated per pause"},
+    {"path": "/approval_interactions/*/prompted_at_ms", "reason": "approval prompt time is wall-clock data"},
+    {"path": "/approval_interactions/*/responded_at_ms", "reason": "approval response time is wall-clock data"},
+    {"path": "/effect_receipts/*/receipt_id", "reason": "receipt ids are generated per side-effect record"},
+    {"path": "/policy_decisions/*/decision_id", "reason": "policy decision ids are generated per evaluation"},
+    {"path": "/protocol_interactions/*/latency_ms", "reason": "host adapter latency is wall-clock data"}
+  ],
+  "first_run": {
+    "run_id": "run_live_hitl_tool",
+    "event_log_entries": [
+      {
+        "event_id": 51,
+        "topic": "hitl.approvals",
+        "kind": "approval_requested",
+        "occurred_at_ms": 1770000000500,
+        "payload": {"event_id": "trigger_evt_live_hitl", "action": "write_file", "status": "waiting"}
+      },
+      {
+        "event_id": 52,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770000000600,
+        "payload": {"event_id": "trigger_evt_live_hitl", "binding_id": "approved-write", "result": {"status": "written"}}
+      }
+    ],
+    "protocol_interactions": [
+      {
+        "protocol": "acp",
+        "boundary": "session/request_permission",
+        "fixture_ref": "conformance/protocols/fixtures/acp/session_request_permission.valid.json",
+        "request": {"method": "session/request_permission", "action": "write_file", "resource": "notes/triage.md"},
+        "response": {"outcome": "approved", "reviewer": "operator"},
+        "latency_ms": 42
+      }
+    ],
+    "approval_interactions": [
+      {"request_id": "approval_live_01", "principal": "agent:triage", "action": "write_file", "prompted_at_ms": 1770000000510, "response": "approved", "responded_at_ms": 1770000000540, "reviewer": "operator"}
+    ],
+    "effect_receipts": [
+      {"receipt_id": "receipt_live_hitl", "kind": "file_write", "path": "notes/triage.md", "sha256": "1dc0c9e3cb7f5a12e47d5fd979c6df1ac11dc1a1cc7b9b61b76f338deafd0f25", "substitute": false}
+    ],
+    "policy_decisions": [
+      {"decision_id": "policy_live_hitl", "capability": "fs.write", "decision": "allow_after_approval", "approval_required": true}
+    ]
+  },
+  "second_run": {
+    "run_id": "run_replay_hitl_tool",
+    "event_log_entries": [
+      {
+        "event_id": 61,
+        "topic": "hitl.approvals",
+        "kind": "approval_requested",
+        "occurred_at_ms": 1770001000500,
+        "payload": {"event_id": "trigger_evt_replay_hitl", "action": "write_file", "status": "waiting"}
+      },
+      {
+        "event_id": 62,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770001000600,
+        "payload": {"event_id": "trigger_evt_replay_hitl", "binding_id": "approved-write", "result": {"status": "written"}}
+      }
+    ],
+    "protocol_interactions": [
+      {
+        "protocol": "acp",
+        "boundary": "session/request_permission",
+        "fixture_ref": "conformance/protocols/fixtures/acp/session_request_permission.valid.json",
+        "request": {"method": "session/request_permission", "action": "write_file", "resource": "notes/triage.md"},
+        "response": {"outcome": "approved", "reviewer": "operator"},
+        "latency_ms": 7
+      }
+    ],
+    "approval_interactions": [
+      {"request_id": "approval_replay_01", "principal": "agent:triage", "action": "write_file", "prompted_at_ms": 1770001000510, "response": "approved", "responded_at_ms": 1770001000540, "reviewer": "operator"}
+    ],
+    "effect_receipts": [
+      {"receipt_id": "receipt_replay_hitl", "kind": "file_write", "path": "notes/triage.md", "sha256": "1dc0c9e3cb7f5a12e47d5fd979c6df1ac11dc1a1cc7b9b61b76f338deafd0f25", "substitute": false}
+    ],
+    "policy_decisions": [
+      {"decision_id": "policy_replay_hitl", "capability": "fs.write", "decision": "allow_after_approval", "approval_required": true}
+    ]
+  }
+}

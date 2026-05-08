@@ -117,6 +117,11 @@ pub use mcp_server::{
 };
 pub use metadata::{register_metadata_builtins, register_scan_builtins};
 pub use orchestration::{
+    canonicalize_run, first_divergence, run_replay_oracle_trace, ReplayAllowlistRule,
+    ReplayDivergence, ReplayExpectation, ReplayOracleError, ReplayOracleReport, ReplayOracleTrace,
+    ReplayTraceRun, ReplayTraceRunCounts, REPLAY_TRACE_SCHEMA_VERSION,
+};
+pub use orchestration::{
     install_handoff_routes, snapshot_handoff_routes, HandoffRouteConfig,
     HandoffRouteDecisionRecord, HandoffRouteTargetConfig,
 };
