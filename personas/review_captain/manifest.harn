@@ -1,0 +1,106 @@
+// Review Captain entry pipeline.
+//
+// This package is the canonical Harn home for the review persona Burin
+// surfaces in its persona manager. The workflow remains deterministic by
+// default so local smoke runs do not require live GitHub credentials.
+import { runtime_pipeline_input } from "std/runtime"
+
+@persona(name: "review_captain", description: "Harn-native review quality captain.", tools: [github], autonomy: suggest, receipts: required, triggers: [github.review_requested, github.pull_request_synchronized])
+/** Static persona graph used by `harn persona inspect` to expose Review Captain's durable steps. */
+pub fn review_captain_persona(ctx) {
+  let input = resolve_review_input_step(ctx)
+  let diff = collect_review_context_step(input)
+  let verdict = classify_review_risk_step(diff)
+  let receipt = emit_review_receipt_step({input: input, verdict: verdict})
+  return summarize_review_step(receipt)
+}
+
+@step(name: "resolve_review_input", receipt: audit, error_boundary: fail)
+fn resolve_review_input_step(ctx) {
+  return ctx
+}
+
+@step(name: "collect_review_context", receipt: audit, error_boundary: fail)
+fn collect_review_context_step(ctx) {
+  return ctx
+}
+
+@step(name: "classify_review_risk", model: "gpt-5.4-mini", receipt: audit, error_boundary: escalate)
+fn classify_review_risk_step(ctx) {
+  return ctx
+}
+
+@step(name: "emit_review_receipt", receipt: audit, error_boundary: fail)
+fn emit_review_receipt_step(ctx) {
+  return ctx
+}
+
+@step(name: "summarize_review", receipt: audit, error_boundary: fail)
+fn summarize_review_step(ctx) {
+  return ctx
+}
+
+fn _default_review() {
+  return {
+    repo: "burin-labs/harn",
+    pr_number: 463,
+    changed_files: ["personas/review_captain/harn.toml", "personas/review_captain/manifest.harn"],
+    missing_tests: ["persona smoke run"],
+    risky_paths: ["personas/review_captain/harn.toml"],
+  }
+}
+
+fn _resolve_review() {
+  let attempt = try {
+    runtime_pipeline_input()
+  }
+  let provided = if is_ok(attempt) {
+    unwrap(attempt) ?? {}
+  } else {
+    {}
+  }
+  let review = provided.review_captain ?? provided
+  let defaults = _default_review()
+  return {
+    repo: review.repo ?? defaults.repo,
+    pr_number: review.pr_number ?? defaults.pr_number,
+    changed_files: review.changed_files ?? defaults.changed_files,
+    missing_tests: review.missing_tests ?? defaults.missing_tests,
+    risky_paths: review.risky_paths ?? defaults.risky_paths,
+  }
+}
+
+fn _review_verdict(review) {
+  if len(review.missing_tests) > 0 || len(review.risky_paths) > 0 {
+    return "needs_follow_up"
+  }
+  return "low_risk"
+}
+
+pipeline run(task) {
+  let review = _resolve_review()
+  let verdict = _review_verdict(review)
+  let result = {
+    persona: "review_captain",
+    execution_mode: "dry_run",
+    approval_required: false,
+    repo: review.repo,
+    pr_number: review.pr_number,
+    summary: "structured review receipt for PR #${review.pr_number}",
+    focus: ["regressions", "missing tests", "risky diffs"],
+    receipt: {
+      kind: "review_receipt",
+      verdict: verdict,
+      missing_tests: review.missing_tests,
+      risky_paths: review.risky_paths,
+      changed_files: review.changed_files,
+    },
+    handoff: if verdict == "needs_follow_up" {
+      "merge_captain"
+    } else {
+      nil
+    },
+  }
+  println(json_stringify(result))
+  return result
+}

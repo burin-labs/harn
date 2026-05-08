@@ -1,0 +1,17 @@
+{
+  "event": "pagerduty.incident_triggered",
+  "oncall_captain": {
+    "service": "orchestrator-api",
+    "hypothesis": "a deploy introduced a replay-loop regression",
+    "symptoms": [
+      "pagerduty page",
+      "error-rate spike",
+      "slack escalation"
+    ],
+    "observability_backends": [
+      "mcp:honeycomb",
+      "mcp:splunk"
+    ],
+    "human_owner": "primary-oncall"
+  }
+}
