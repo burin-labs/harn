@@ -1,0 +1,11 @@
+{
+  "_type": "eval_suite_manifest",
+  "id": "review_captain_smoke",
+  "name": "review_captain smoke",
+  "cases": [
+    {
+      "label": "review_captain_structured_receipt",
+      "run_path": "../runs/review_captain_smoke.run.json"
+    }
+  ]
+}

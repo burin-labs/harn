@@ -1,0 +1,30 @@
+[package]
+name = "harn-oncall-captain-persona"
+version = "0.1.0"
+
+[[personas]]
+name = "oncall_captain"
+version = "0.1.0"
+description = "Harn-native on-call captain. Builds approval-first incident verification plans, observability checklists, and outcome receipts."
+entry_workflow = "manifest.harn#run"
+tools = ["pagerduty", "slack", "mcp"]
+capabilities = [
+  "interaction.ask",
+  "project.lessons",
+  "runtime.approved_plan",
+  "runtime.dry_run",
+  "runtime.pipeline_input",
+  "runtime.record_run",
+]
+autonomy_tier = "act_with_approval"
+receipt_policy = "required"
+triggers = ["pagerduty.incident_triggered", "slack.oncall_message"]
+schedules = ["*/15 * * * *"]
+handoffs = []
+context_packs = ["oncall_runbook", "service_ownership", "release_policy"]
+evals = ["oncall_captain_smoke"]
+owner = "sre"
+budget = { daily_usd = 8.0, frontier_escalations = 1, max_tokens = 50000, max_runtime_seconds = 900 }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "high" }
+rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["oncall-captain-v1"] }
+package_source = { package = "harn-oncall-captain-persona", path = "personas/oncall_captain" }

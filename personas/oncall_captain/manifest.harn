@@ -1,0 +1,105 @@
+// Oncall Captain entry pipeline.
+//
+// This package is the canonical Harn home for the incident-response
+// persona Burin surfaces in its persona manager. The default run is a
+// deterministic plan generator and never touches live incident systems.
+import { runtime_pipeline_input } from "std/runtime"
+
+@persona(name: "oncall_captain", description: "Harn-native incident verification captain.", tools: [pagerduty, slack, mcp], autonomy: act_with_approval, receipts: required, triggers: [pagerduty.incident_triggered, slack.oncall_message])
+/** Static persona graph used by `harn persona inspect` to expose Oncall Captain's durable steps. */
+pub fn oncall_captain_persona(ctx) {
+  let input = resolve_incident_input_step(ctx)
+  let signals = collect_incident_signals_step(input)
+  let plan = build_verification_plan_step(signals)
+  let gated = require_human_approval_step(plan)
+  let receipt = emit_incident_receipt_step(gated)
+  return summarize_incident_step(receipt)
+}
+
+@step(name: "resolve_incident_input", receipt: audit, error_boundary: fail)
+fn resolve_incident_input_step(ctx) {
+  return ctx
+}
+
+@step(name: "collect_incident_signals", receipt: audit, error_boundary: continue, retry: {max_attempts: 2})
+fn collect_incident_signals_step(ctx) {
+  return ctx
+}
+
+@step(name: "build_verification_plan", model: "gpt-5.4-mini", receipt: audit, error_boundary: escalate)
+fn build_verification_plan_step(ctx) {
+  return ctx
+}
+
+@step(name: "require_human_approval", approval: required, receipt: audit, error_boundary: fail)
+fn require_human_approval_step(ctx) {
+  return ctx
+}
+
+@step(name: "emit_incident_receipt", receipt: audit, error_boundary: fail)
+fn emit_incident_receipt_step(ctx) {
+  return ctx
+}
+
+@step(name: "summarize_incident", receipt: audit, error_boundary: fail)
+fn summarize_incident_step(ctx) {
+  return ctx
+}
+
+fn _default_incident() {
+  return {
+    service: "orchestrator-api",
+    hypothesis: "a deploy introduced a replay-loop regression",
+    symptoms: ["pagerduty page", "error-rate spike", "slack escalation"],
+    observability_backends: ["mcp:honeycomb", "mcp:splunk"],
+    human_owner: "primary-oncall",
+  }
+}
+
+fn _resolve_incident() {
+  let attempt = try {
+    runtime_pipeline_input()
+  }
+  let provided = if is_ok(attempt) {
+    unwrap(attempt) ?? {}
+  } else {
+    {}
+  }
+  let incident = provided.oncall_captain ?? provided
+  let defaults = _default_incident()
+  return {
+    service: incident.service ?? defaults.service,
+    hypothesis: incident.hypothesis ?? defaults.hypothesis,
+    symptoms: incident.symptoms ?? defaults.symptoms,
+    observability_backends: incident.observability_backends ?? defaults.observability_backends,
+    human_owner: incident.human_owner ?? defaults.human_owner,
+  }
+}
+
+pipeline run(task) {
+  let incident = _resolve_incident()
+  let result = {
+    persona: "oncall_captain",
+    execution_mode: "dry_run",
+    approval_required: true,
+    service: incident.service,
+    summary: "verification plan for ${incident.service}",
+    plan: [
+      "Check the current deploy and the most recent rollback candidate.",
+      "Query observability backends through MCP before proposing side effects.",
+      "Record whether the hypothesis is confirmed, disproven, or unresolved.",
+    ],
+    status: "unresolved",
+    receipt: {
+      kind: "incident_receipt",
+      outcome: "unresolved",
+      hypothesis: incident.hypothesis,
+      symptoms: incident.symptoms,
+      backends: incident.observability_backends,
+      owner: incident.human_owner,
+    },
+    handoff: "review_captain",
+  }
+  println(json_stringify(result))
+  return result
+}
