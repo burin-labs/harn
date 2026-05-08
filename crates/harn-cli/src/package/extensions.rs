@@ -147,9 +147,9 @@ pub async fn collect_manifest_triggers(
     extensions: &RuntimeExtensions,
 ) -> Result<Vec<CollectedManifestTrigger>, PackageError> {
     let _provider_schema_guard = lock_manifest_provider_schemas().await;
-    install_manifest_provider_schemas(extensions).await?;
+    let provider_catalog = build_manifest_provider_catalog(extensions).await?;
     validate_orchestrator_budget(extensions.root_manifest.as_ref())?;
-    validate_static_trigger_configs(&extensions.triggers)?;
+    validate_static_trigger_configs(&extensions.triggers, &provider_catalog)?;
     let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
     let mut module_signatures: HashMap<PathBuf, BTreeMap<String, TriggerFunctionSignature>> =
         HashMap::new();
@@ -308,6 +308,7 @@ pub async fn collect_manifest_triggers(
         });
     }
 
+    harn_vm::install_provider_catalog(provider_catalog);
     Ok(collected)
 }
 

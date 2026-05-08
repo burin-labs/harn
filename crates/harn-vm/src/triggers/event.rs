@@ -1067,8 +1067,8 @@ impl ProviderMetadata {
 }
 
 pub trait ProviderSchema: Send + Sync {
-    fn provider_id(&self) -> &'static str;
-    fn harn_schema_name(&self) -> &'static str;
+    fn provider_id(&self) -> &str;
+    fn harn_schema_name(&self) -> &str;
     fn metadata(&self) -> ProviderMetadata {
         ProviderMetadata {
             provider: self.provider_id().to_string(),
@@ -1117,6 +1117,20 @@ impl ProviderCatalog {
                 .expect("default providers must register cleanly");
         }
         catalog
+    }
+
+    pub fn with_defaults_and(
+        schemas: Vec<Arc<dyn ProviderSchema>>,
+    ) -> Result<Self, ProviderCatalogError> {
+        let mut catalog = Self::with_defaults();
+        let builtin_providers: BTreeSet<String> = catalog.schema_names().into_keys().collect();
+        for schema in schemas {
+            if builtin_providers.contains(schema.provider_id()) {
+                continue;
+            }
+            catalog.register(schema)?;
+        }
+        Ok(catalog)
     }
 
     pub fn register(
@@ -1182,18 +1196,15 @@ pub fn reset_provider_catalog() {
 pub fn reset_provider_catalog_with(
     schemas: Vec<Arc<dyn ProviderSchema>>,
 ) -> Result<(), ProviderCatalogError> {
-    let mut catalog = ProviderCatalog::with_defaults();
-    let builtin_providers: BTreeSet<String> = catalog.schema_names().into_keys().collect();
-    for schema in schemas {
-        if builtin_providers.contains(schema.provider_id()) {
-            continue;
-        }
-        catalog.register(schema)?;
-    }
+    let catalog = ProviderCatalog::with_defaults_and(schemas)?;
+    install_provider_catalog(catalog);
+    Ok(())
+}
+
+pub fn install_provider_catalog(catalog: ProviderCatalog) {
     *provider_catalog()
         .write()
         .expect("provider catalog poisoned") = catalog;
-    Ok(())
 }
 
 pub fn registered_provider_schema_names() -> BTreeMap<String, String> {
@@ -1230,11 +1241,11 @@ struct BuiltinProviderSchema {
 }
 
 impl ProviderSchema for BuiltinProviderSchema {
-    fn provider_id(&self) -> &'static str {
+    fn provider_id(&self) -> &str {
         self.provider_id
     }
 
-    fn harn_schema_name(&self) -> &'static str {
+    fn harn_schema_name(&self) -> &str {
         self.harn_schema_name
     }
 
@@ -2365,6 +2376,55 @@ fn parse_rfc3339(text: &str) -> Option<OffsetDateTime> {
 mod tests {
     use super::*;
 
+    struct OwnedProviderSchema {
+        metadata: ProviderMetadata,
+    }
+
+    impl OwnedProviderSchema {
+        fn new(provider: &str, schema_name: &str) -> Self {
+            Self {
+                metadata: ProviderMetadata {
+                    provider: provider.to_string(),
+                    kinds: vec!["webhook".to_string()],
+                    schema_name: schema_name.to_string(),
+                    runtime: ProviderRuntimeMetadata::Placeholder,
+                    ..ProviderMetadata::default()
+                },
+            }
+        }
+    }
+
+    impl ProviderSchema for OwnedProviderSchema {
+        fn provider_id(&self) -> &str {
+            &self.metadata.provider
+        }
+
+        fn harn_schema_name(&self) -> &str {
+            &self.metadata.schema_name
+        }
+
+        fn metadata(&self) -> ProviderMetadata {
+            self.metadata.clone()
+        }
+
+        fn normalize(
+            &self,
+            _kind: &str,
+            _headers: &BTreeMap<String, String>,
+            raw: JsonValue,
+        ) -> Result<ProviderPayload, ProviderCatalogError> {
+            Ok(ProviderPayload::Extension(ExtensionProviderPayload {
+                provider: self.metadata.provider.clone(),
+                schema_name: self.metadata.schema_name.clone(),
+                raw,
+            }))
+        }
+    }
+
+    fn owned_provider_schema(provider: &str, schema_name: &str) -> Arc<dyn ProviderSchema> {
+        Arc::new(OwnedProviderSchema::new(provider, schema_name))
+    }
+
     fn sample_headers() -> BTreeMap<String, String> {
         BTreeMap::from([
             ("Authorization".to_string(), "Bearer secret".to_string()),
@@ -2431,6 +2491,38 @@ mod tests {
             error,
             ProviderCatalogError::DuplicateProvider("github".to_string())
         );
+    }
+
+    #[test]
+    fn provider_catalog_builds_independent_owned_dynamic_catalogs() {
+        let first = ProviderCatalog::with_defaults_and(vec![owned_provider_schema(
+            "runtime-a",
+            "RuntimeAPayload",
+        )])
+        .unwrap();
+        assert_eq!(
+            first
+                .metadata_for("runtime-a")
+                .expect("first dynamic provider")
+                .schema_name,
+            "RuntimeAPayload"
+        );
+        assert!(first.metadata_for("runtime-b").is_none());
+
+        let second = ProviderCatalog::with_defaults_and(vec![owned_provider_schema(
+            "runtime-b",
+            "RuntimeBPayload",
+        )])
+        .unwrap();
+        assert!(second.metadata_for("runtime-a").is_none());
+        assert_eq!(
+            second
+                .metadata_for("runtime-b")
+                .expect("second dynamic provider")
+                .schema_name,
+            "RuntimeBPayload"
+        );
+        assert!(first.metadata_for("runtime-a").is_some());
     }
 
     #[test]
