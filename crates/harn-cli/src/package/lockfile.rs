@@ -249,6 +249,7 @@ pub(crate) fn enqueue_manifest_dependencies(
 }
 
 pub(crate) fn build_lockfile(
+    workspace: &PackageWorkspace,
     ctx: &ManifestContext,
     existing: Option<&LockFile>,
     refresh_alias: Option<&str>,
@@ -306,7 +307,8 @@ pub(crate) fn build_lockfile(
                         .commit
                         .as_deref()
                         .ok_or_else(|| format!("missing locked commit for {alias}"))?;
-                    entry.content_hash = Some(ensure_git_cache_populated(
+                    entry.content_hash = Some(ensure_git_cache_populated_in(
+                        workspace,
                         url,
                         &entry.source,
                         commit,
@@ -326,7 +328,8 @@ pub(crate) fn build_lockfile(
                         .content_hash
                         .as_deref()
                         .ok_or_else(|| format!("missing content hash for {alias}"))?;
-                    ensure_git_cache_populated(
+                    ensure_git_cache_populated_in(
+                        workspace,
                         url,
                         &entry.source,
                         commit,
@@ -335,7 +338,7 @@ pub(crate) fn build_lockfile(
                         offline,
                     )?;
                     if inserted {
-                        let cache_dir = git_cache_dir(&entry.source, commit)?;
+                        let cache_dir = git_cache_dir_in(workspace, &entry.source, commit)?;
                         if let Some(manifest) = read_package_manifest_from_dir(&cache_dir)? {
                             enqueue_manifest_dependencies(
                                 &mut pending,
@@ -401,7 +404,8 @@ pub(crate) fn build_lockfile(
             let source = format!("git+{normalized_url}");
             let commit =
                 resolve_git_commit(&normalized_url, dependency.rev(), dependency.branch())?;
-            let content_hash = ensure_git_cache_populated(
+            let content_hash = ensure_git_cache_populated_in(
+                workspace,
                 &normalized_url,
                 &source,
                 &commit,
@@ -418,7 +422,7 @@ pub(crate) fn build_lockfile(
             };
             let inserted = replace_lock_entry(&mut lock, entry)?;
             if inserted {
-                let cache_dir = git_cache_dir(&source, &commit)?;
+                let cache_dir = git_cache_dir_in(workspace, &source, &commit)?;
                 if let Some(manifest) = read_package_manifest_from_dir(&cache_dir)? {
                     enqueue_manifest_dependencies(&mut pending, manifest, cache_dir, alias, true);
                 }
@@ -432,6 +436,7 @@ pub(crate) fn build_lockfile(
 }
 
 pub(crate) fn materialize_dependencies_from_lock(
+    workspace: &PackageWorkspace,
     ctx: &ManifestContext,
     lock: &LockFile,
     refetch: Option<&str>,
@@ -463,7 +468,8 @@ pub(crate) fn materialize_dependencies_from_lock(
         let source = entry.source.clone();
         let url = source.trim_start_matches("git+");
         let refetch_this = refetch == Some("all") || refetch == Some(alias.as_str());
-        ensure_git_cache_populated(
+        ensure_git_cache_populated_in(
+            workspace,
             url,
             &source,
             commit,
@@ -471,7 +477,7 @@ pub(crate) fn materialize_dependencies_from_lock(
             refetch_this,
             offline,
         )?;
-        let cache_dir = git_cache_dir(&source, commit)?;
+        let cache_dir = git_cache_dir_in(workspace, &source, commit)?;
         let dest_dir = packages_dir.join(alias);
         if !dest_dir.exists() || !materialized_hash_matches(&dest_dir, expected_hash) {
             remove_materialized_package(&packages_dir, alias)?;
@@ -521,7 +527,8 @@ pub fn ensure_dependencies_materialized(anchor: &Path) -> Result<(), PackageErro
         )
     })?;
     validate_lock_matches_manifest(&ctx, &lock)?;
-    materialize_dependencies_from_lock(&ctx, &lock, None, false)?;
+    let workspace = PackageWorkspace::from_current_dir()?;
+    materialize_dependencies_from_lock(&workspace, &ctx, &lock, None, false)?;
     Ok(())
 }
 
@@ -661,7 +668,21 @@ pub(crate) fn install_packages_impl(
     refetch: Option<&str>,
     offline: bool,
 ) -> Result<usize, PackageError> {
-    let ctx = load_current_manifest_context()?;
+    install_packages_in(
+        &PackageWorkspace::from_current_dir()?,
+        frozen,
+        refetch,
+        offline,
+    )
+}
+
+pub(crate) fn install_packages_in(
+    workspace: &PackageWorkspace,
+    frozen: bool,
+    refetch: Option<&str>,
+    offline: bool,
+) -> Result<usize, PackageError> {
+    let ctx = workspace.load_manifest_context()?;
     let existing = LockFile::load(&ctx.lock_path())?;
     if ctx.manifest.dependencies.is_empty() {
         if !frozen {
@@ -675,6 +696,7 @@ pub(crate) fn install_packages_impl(
     }
 
     let desired = build_lockfile(
+        workspace,
         &ctx,
         existing.as_ref(),
         None,
@@ -689,7 +711,7 @@ pub(crate) fn install_packages_impl(
     } else {
         desired.save(&ctx.lock_path())?;
     }
-    materialize_dependencies_from_lock(&ctx, &desired, refetch, offline)
+    materialize_dependencies_from_lock(workspace, &ctx, &desired, refetch, offline)
 }
 
 pub fn install_packages(frozen: bool, refetch: Option<&str>, offline: bool) {
@@ -705,9 +727,10 @@ pub fn install_packages(frozen: bool, refetch: Option<&str>, offline: bool) {
 
 pub fn lock_packages() {
     let result = (|| -> Result<usize, PackageError> {
-        let ctx = load_current_manifest_context()?;
+        let workspace = PackageWorkspace::from_current_dir()?;
+        let ctx = workspace.load_manifest_context()?;
         let existing = LockFile::load(&ctx.lock_path())?;
-        let lock = build_lockfile(&ctx, existing.as_ref(), None, true, true, false)?;
+        let lock = build_lockfile(&workspace, &ctx, existing.as_ref(), None, true, true, false)?;
         lock.save(&ctx.lock_path())?;
         Ok(lock.packages.len())
     })();
@@ -722,25 +745,36 @@ pub fn lock_packages() {
 }
 
 pub fn update_packages(alias: Option<&str>, all: bool) {
+    let result = PackageWorkspace::from_current_dir()
+        .and_then(|workspace| update_packages_in(&workspace, alias, all));
+    print_update_packages_result(result);
+}
+
+pub(crate) fn update_packages_in(
+    workspace: &PackageWorkspace,
+    alias: Option<&str>,
+    all: bool,
+) -> Result<usize, PackageError> {
     if !all && alias.is_none() {
-        eprintln!("error: specify a dependency alias or pass --all");
-        process::exit(1);
+        return Err("specify a dependency alias or pass --all"
+            .to_string()
+            .into());
     }
 
-    let result = (|| -> Result<usize, PackageError> {
-        let ctx = load_current_manifest_context()?;
-        if let Some(alias) = alias {
-            validate_package_alias(alias)?;
-            if !ctx.manifest.dependencies.contains_key(alias) {
-                return Err(format!("{alias} is not present in [dependencies]").into());
-            }
+    let ctx = workspace.load_manifest_context()?;
+    if let Some(alias) = alias {
+        validate_package_alias(alias)?;
+        if !ctx.manifest.dependencies.contains_key(alias) {
+            return Err(format!("{alias} is not present in [dependencies]").into());
         }
-        let existing = LockFile::load(&ctx.lock_path())?;
-        let lock = build_lockfile(&ctx, existing.as_ref(), alias, all, true, false)?;
-        lock.save(&ctx.lock_path())?;
-        materialize_dependencies_from_lock(&ctx, &lock, None, false)
-    })();
+    }
+    let existing = LockFile::load(&ctx.lock_path())?;
+    let lock = build_lockfile(workspace, &ctx, existing.as_ref(), alias, all, true, false)?;
+    lock.save(&ctx.lock_path())?;
+    materialize_dependencies_from_lock(workspace, &ctx, &lock, None, false)
+}
 
+fn print_update_packages_result(result: Result<usize, PackageError>) {
     match result {
         Ok(installed) => println!("Updated {installed} package(s)."),
         Err(error) => {
@@ -751,20 +785,29 @@ pub fn update_packages(alias: Option<&str>, all: bool) {
 }
 
 pub fn remove_package(alias: &str) {
-    let result = (|| -> Result<bool, PackageError> {
-        validate_package_alias(alias)?;
-        let ctx = load_current_manifest_context()?;
-        let removed = remove_dependency_from_manifest(&ctx.manifest_path(), alias)?;
-        if !removed {
-            return Ok(false);
-        }
-        let mut lock = LockFile::load(&ctx.lock_path())?.unwrap_or_default();
-        lock.remove(alias);
-        lock.save(&ctx.lock_path())?;
-        remove_materialized_package(&ctx.packages_dir(), alias)?;
-        Ok(true)
-    })();
+    let result = PackageWorkspace::from_current_dir()
+        .and_then(|workspace| remove_package_in(&workspace, alias));
+    print_remove_package_result(alias, result);
+}
 
+pub(crate) fn remove_package_in(
+    workspace: &PackageWorkspace,
+    alias: &str,
+) -> Result<bool, PackageError> {
+    validate_package_alias(alias)?;
+    let ctx = workspace.load_manifest_context()?;
+    let removed = remove_dependency_from_manifest(&ctx.manifest_path(), alias)?;
+    if !removed {
+        return Ok(false);
+    }
+    let mut lock = LockFile::load(&ctx.lock_path())?.unwrap_or_default();
+    lock.remove(alias);
+    lock.save(&ctx.lock_path())?;
+    remove_materialized_package(&ctx.packages_dir(), alias)?;
+    Ok(true)
+}
+
+fn print_remove_package_result(alias: &str, result: Result<bool, PackageError>) {
     match result {
         Ok(true) => println!("Removed {alias} from {MANIFEST} and {LOCK_FILE}."),
         Ok(false) => {
@@ -778,6 +821,20 @@ pub fn remove_package(alias: &str) {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct AddPackageRequest<'a> {
+    name_or_spec: &'a str,
+    alias: Option<&'a str>,
+    git_url: Option<&'a str>,
+    tag: Option<&'a str>,
+    rev: Option<&'a str>,
+    branch: Option<&'a str>,
+    local_path: Option<&'a str>,
+    registry: Option<&'a str>,
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn normalize_add_request(
     name_or_spec: &str,
     alias: Option<&str>,
@@ -788,6 +845,36 @@ pub(crate) fn normalize_add_request(
     local_path: Option<&str>,
     registry: Option<&str>,
 ) -> Result<(String, Dependency), PackageError> {
+    normalize_add_request_in(
+        &PackageWorkspace::from_current_dir()?,
+        AddPackageRequest {
+            name_or_spec,
+            alias,
+            git_url,
+            tag,
+            rev,
+            branch,
+            local_path,
+            registry,
+        },
+    )
+}
+
+pub(crate) fn normalize_add_request_in(
+    workspace: &PackageWorkspace,
+    request: AddPackageRequest<'_>,
+) -> Result<(String, Dependency), PackageError> {
+    let AddPackageRequest {
+        name_or_spec,
+        alias,
+        git_url,
+        tag,
+        rev,
+        branch,
+        local_path,
+        registry,
+    } = request;
+
     if local_path.is_some() && (rev.is_some() || tag.is_some() || branch.is_some()) {
         return Err("path dependencies do not accept --rev, --tag, or --branch"
             .to_string()
@@ -818,7 +905,7 @@ pub(crate) fn normalize_add_request(
             ));
         }
         if parse_registry_package_spec(name_or_spec).is_some() {
-            return registry_dependency_from_spec(name_or_spec, alias, registry);
+            return registry_dependency_from_spec_in(workspace, name_or_spec, alias, registry);
         }
     }
     if git_url.is_some() || local_path.is_some() {
@@ -926,11 +1013,9 @@ pub fn add_package_with_registry(
     local_path: Option<&str>,
     registry: Option<&str>,
 ) {
-    let result = (|| -> Result<(String, usize), PackageError> {
-        let manifest_path = std::env::current_dir()
-            .map_err(|error| format!("failed to read cwd: {error}"))?
-            .join(MANIFEST);
-        let (alias, dependency) = normalize_add_request(
+    let result = PackageWorkspace::from_current_dir().and_then(|workspace| {
+        add_package_to(
+            &workspace,
             name_or_spec,
             alias,
             git_url,
@@ -939,11 +1024,8 @@ pub fn add_package_with_registry(
             branch,
             local_path,
             registry,
-        )?;
-        upsert_dependency_in_manifest(&manifest_path, &alias, &dependency)?;
-        let installed = install_packages_impl(false, None, false)?;
-        Ok((alias, installed))
-    })();
+        )
+    });
 
     match result {
         Ok((alias, installed)) => {
@@ -955,6 +1037,37 @@ pub fn add_package_with_registry(
             process::exit(1);
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn add_package_to(
+    workspace: &PackageWorkspace,
+    name_or_spec: &str,
+    alias: Option<&str>,
+    git_url: Option<&str>,
+    tag: Option<&str>,
+    rev: Option<&str>,
+    branch: Option<&str>,
+    local_path: Option<&str>,
+    registry: Option<&str>,
+) -> Result<(String, usize), PackageError> {
+    let manifest_path = workspace.manifest_dir().join(MANIFEST);
+    let (alias, dependency) = normalize_add_request_in(
+        workspace,
+        AddPackageRequest {
+            name_or_spec,
+            alias,
+            git_url,
+            tag,
+            rev,
+            branch,
+            local_path,
+            registry,
+        },
+    )?;
+    upsert_dependency_in_manifest(&manifest_path, &alias, &dependency)?;
+    let installed = install_packages_in(workspace, false, None, false)?;
+    Ok((alias, installed))
 }
 
 #[cfg(test)]
@@ -986,7 +1099,7 @@ mod tests {
         let (_repo_tmp, repo, _branch) = create_git_package_repo();
         let project_tmp = tempfile::tempdir().unwrap();
         let root = project_tmp.path();
-        let cache_dir = root.join(".cache");
+        let workspace = TestWorkspace::new(root);
         fs::create_dir_all(root.join(".git")).unwrap();
         fs::write(
             root.join(MANIFEST),
@@ -998,33 +1111,42 @@ mod tests {
         )
         .unwrap();
 
-        with_test_env(root, &cache_dir, || {
-            let spec = format!("{}@v1.0.0", repo.display());
-            add_package(&spec, None, None, None, None, None, None);
+        let spec = format!("{}@v1.0.0", repo.display());
+        add_package_to(
+            workspace.env(),
+            &spec,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
-            let alias = "acme-lib";
-            let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
-            assert!(manifest.contains("acme-lib"));
-            assert!(manifest.contains("rev = \"v1.0.0\""));
+        let alias = "acme-lib";
+        let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
+        assert!(manifest.contains("acme-lib"));
+        assert!(manifest.contains("rev = \"v1.0.0\""));
 
-            let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
-            let entry = lock.find(alias).unwrap();
-            assert_eq!(lock.version, LOCK_FILE_VERSION);
-            assert!(entry.source.starts_with("git+file://"));
-            assert!(entry.commit.as_deref().is_some_and(is_full_git_sha));
-            assert!(entry
-                .content_hash
-                .as_deref()
-                .is_some_and(|hash| hash.starts_with("sha256:")));
-            assert!(root.join(PKG_DIR).join(alias).join("lib.harn").is_file());
+        let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+        let entry = lock.find(alias).unwrap();
+        assert_eq!(lock.version, LOCK_FILE_VERSION);
+        assert!(entry.source.starts_with("git+file://"));
+        assert!(entry.commit.as_deref().is_some_and(is_full_git_sha));
+        assert!(entry
+            .content_hash
+            .as_deref()
+            .is_some_and(|hash| hash.starts_with("sha256:")));
+        assert!(root.join(PKG_DIR).join(alias).join("lib.harn").is_file());
 
-            remove_package(alias);
-            let updated_manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
-            assert!(!updated_manifest.contains("acme-lib ="));
-            let updated_lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
-            assert!(updated_lock.find(alias).is_none());
-            assert!(!root.join(PKG_DIR).join(alias).exists());
-        });
+        remove_package_in(workspace.env(), alias).unwrap();
+        let updated_manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
+        assert!(!updated_manifest.contains("acme-lib ="));
+        let updated_lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+        assert!(updated_lock.find(alias).is_none());
+        assert!(!root.join(PKG_DIR).join(alias).exists());
     }
 
     #[test]
@@ -1032,7 +1154,7 @@ mod tests {
         let (_repo_tmp, repo, branch) = create_git_package_repo();
         let project_tmp = tempfile::tempdir().unwrap();
         let root = project_tmp.path();
-        let cache_dir = root.join(".cache");
+        let workspace = TestWorkspace::new(root);
         fs::create_dir_all(root.join(".git")).unwrap();
         let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
         fs::write(
@@ -1050,31 +1172,29 @@ mod tests {
         )
         .unwrap();
 
-        with_test_env(root, &cache_dir, || {
-            let installed = install_packages_impl(false, None, false).unwrap();
-            assert_eq!(installed, 1);
-            let first_lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
-            let first_commit = first_lock
-                .find("acme-lib")
-                .and_then(|entry| entry.commit.clone())
-                .unwrap();
-
-            fs::write(
-                repo.join("lib.harn"),
-                "pub fn value() -> string { return \"v2\" }\n",
-            )
+        let installed = install_packages_in(workspace.env(), false, None, false).unwrap();
+        assert_eq!(installed, 1);
+        let first_lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+        let first_commit = first_lock
+            .find("acme-lib")
+            .and_then(|entry| entry.commit.clone())
             .unwrap();
-            run_git(&repo, &["add", "."]);
-            run_git(&repo, &["commit", "-m", "update"]);
 
-            update_packages(Some("acme-lib"), false);
-            let second_lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
-            let second_commit = second_lock
-                .find("acme-lib")
-                .and_then(|entry| entry.commit.clone())
-                .unwrap();
-            assert_ne!(first_commit, second_commit);
-        });
+        fs::write(
+            repo.join("lib.harn"),
+            "pub fn value() -> string { return \"v2\" }\n",
+        )
+        .unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-m", "update"]);
+
+        update_packages_in(workspace.env(), Some("acme-lib"), false).unwrap();
+        let second_lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+        let second_commit = second_lock
+            .find("acme-lib")
+            .and_then(|entry| entry.commit.clone())
+            .unwrap();
+        assert_ne!(first_commit, second_commit);
     }
 
     #[test]
@@ -1099,7 +1219,7 @@ mod tests {
 
         let project_tmp = tempfile::tempdir().unwrap();
         let root = project_tmp.path();
-        let cache_dir = root.join(".cache");
+        let workspace = TestWorkspace::new(root);
         fs::create_dir_all(root.join(".git")).unwrap();
         fs::write(
             root.join(MANIFEST),
@@ -1111,77 +1231,77 @@ mod tests {
         )
         .unwrap();
 
-        with_test_env(root, &cache_dir, || {
-            add_package(
-                dependency_root.to_string_lossy().as_ref(),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            );
+        add_package_to(
+            workspace.env(),
+            dependency_root.to_string_lossy().as_ref(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
-            let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
-            assert!(
-                manifest.contains("openapi = { path = "),
-                "manifest should use package.name as alias: {manifest}"
-            );
-            let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
-            let entry = lock.find("openapi").expect("openapi lock entry");
-            assert!(entry.source.starts_with("path+file://"));
-            let materialized = root.join(PKG_DIR).join("openapi");
-            assert!(materialized.join("lib.harn").is_file());
+        let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
+        assert!(
+            manifest.contains("openapi = { path = "),
+            "manifest should use package.name as alias: {manifest}"
+        );
+        let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+        let entry = lock.find("openapi").expect("openapi lock entry");
+        assert!(entry.source.starts_with("path+file://"));
+        let materialized = root.join(PKG_DIR).join("openapi");
+        assert!(materialized.join("lib.harn").is_file());
 
-            #[cfg(unix)]
-            assert!(
-                fs::symlink_metadata(&materialized)
-                    .unwrap()
-                    .file_type()
-                    .is_symlink(),
-                "path dependencies should be live-linked on Unix"
-            );
-
-            #[cfg(windows)]
-            let materialized_is_link = fs::symlink_metadata(&materialized)
+        #[cfg(unix)]
+        assert!(
+            fs::symlink_metadata(&materialized)
                 .unwrap()
                 .file_type()
-                .is_symlink();
+                .is_symlink(),
+            "path dependencies should be live-linked on Unix"
+        );
 
-            fs::write(
-                dependency_root.join("lib.harn"),
-                "pub fn version() -> string { return \"v2\" }\n",
-            )
-            .unwrap();
-            #[cfg(unix)]
-            {
-                let live_source = fs::read_to_string(materialized.join("lib.harn")).unwrap();
+        #[cfg(windows)]
+        let materialized_is_link = fs::symlink_metadata(&materialized)
+            .unwrap()
+            .file_type()
+            .is_symlink();
+
+        fs::write(
+            dependency_root.join("lib.harn"),
+            "pub fn version() -> string { return \"v2\" }\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            let live_source = fs::read_to_string(materialized.join("lib.harn")).unwrap();
+            assert!(
+                live_source.contains("v2"),
+                "materialized path dependency should reflect sibling repo edits"
+            );
+        }
+        #[cfg(windows)]
+        {
+            let materialized_source = fs::read_to_string(materialized.join("lib.harn")).unwrap();
+            if materialized_is_link {
                 assert!(
-                    live_source.contains("v2"),
-                    "materialized path dependency should reflect sibling repo edits"
+                    materialized_source.contains("v2"),
+                    "Windows path dependency symlink should reflect sibling repo edits"
+                );
+            } else {
+                assert!(
+                    materialized_source.contains("v1"),
+                    "Windows path dependency copy fallback should keep the copied contents"
                 );
             }
-            #[cfg(windows)]
-            {
-                let materialized_source =
-                    fs::read_to_string(materialized.join("lib.harn")).unwrap();
-                if materialized_is_link {
-                    assert!(
-                        materialized_source.contains("v2"),
-                        "Windows path dependency symlink should reflect sibling repo edits"
-                    );
-                } else {
-                    assert!(
-                        materialized_source.contains("v1"),
-                        "Windows path dependency copy fallback should keep the copied contents"
-                    );
-                }
-            }
+        }
 
-            remove_package("openapi");
-            assert!(!materialized.exists());
-            assert!(dependency_root.join("lib.harn").exists());
-        });
+        remove_package_in(workspace.env(), "openapi").unwrap();
+        assert!(!materialized.exists());
+        assert!(dependency_root.join("lib.harn").exists());
     }
 
     #[test]
@@ -1189,7 +1309,7 @@ mod tests {
         let (_repo_tmp, repo, _branch) = create_git_package_repo();
         let project_tmp = tempfile::tempdir().unwrap();
         let root = project_tmp.path();
-        let cache_dir = root.join(".cache");
+        let workspace = TestWorkspace::new(root);
         fs::create_dir_all(root.join(".git")).unwrap();
         let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
         fs::write(
@@ -1207,10 +1327,8 @@ mod tests {
         )
         .unwrap();
 
-        with_test_env(root, &cache_dir, || {
-            let error = install_packages_impl(true, None, false).unwrap_err();
-            assert!(error.to_string().contains(LOCK_FILE));
-        });
+        let error = install_packages_in(workspace.env(), true, None, false).unwrap_err();
+        assert!(error.to_string().contains(LOCK_FILE));
     }
 
     #[test]
@@ -1218,7 +1336,7 @@ mod tests {
         let (_repo_tmp, repo, _branch) = create_git_package_repo();
         let project_tmp = tempfile::tempdir().unwrap();
         let root = project_tmp.path();
-        let cache_dir = root.join(".cache");
+        let workspace = TestWorkspace::new(root);
         fs::create_dir_all(root.join(".git")).unwrap();
         let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
         fs::write(
@@ -1236,20 +1354,18 @@ mod tests {
         )
         .unwrap();
 
-        with_test_env(root, &cache_dir, || {
-            let installed = install_packages_impl(false, None, false).unwrap();
-            assert_eq!(installed, 1);
-            fs::remove_dir_all(root.join(PKG_DIR)).unwrap();
-            fs::remove_dir_all(&repo).unwrap();
+        let installed = install_packages_in(workspace.env(), false, None, false).unwrap();
+        assert_eq!(installed, 1);
+        fs::remove_dir_all(root.join(PKG_DIR)).unwrap();
+        fs::remove_dir_all(&repo).unwrap();
 
-            let installed = install_packages_impl(true, None, true).unwrap();
-            assert_eq!(installed, 1);
-            assert!(root
-                .join(PKG_DIR)
-                .join("acme-lib")
-                .join("lib.harn")
-                .is_file());
-        });
+        let installed = install_packages_in(workspace.env(), true, None, true).unwrap();
+        assert_eq!(installed, 1);
+        assert!(root
+            .join(PKG_DIR)
+            .join("acme-lib")
+            .join("lib.harn")
+            .is_file());
     }
 
     #[test]
@@ -1257,7 +1373,8 @@ mod tests {
         let (_repo_tmp, repo, _branch) = create_git_package_repo();
         let project_tmp = tempfile::tempdir().unwrap();
         let root = project_tmp.path();
-        let cache_dir = root.join(".cache");
+        let workspace = TestWorkspace::new(root);
+        let cache_dir = workspace.cache_dir();
         fs::create_dir_all(root.join(".git")).unwrap();
         let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
         fs::write(
@@ -1275,12 +1392,10 @@ mod tests {
         )
         .unwrap();
 
-        with_test_env(root, &cache_dir, || {
-            install_packages_impl(false, None, false).unwrap();
-            fs::remove_dir_all(cache_dir.join("git")).unwrap();
-            let error = install_packages_impl(true, None, true).unwrap_err();
-            assert!(error.to_string().contains("offline mode"));
-        });
+        install_packages_in(workspace.env(), false, None, false).unwrap();
+        fs::remove_dir_all(cache_dir.join("git")).unwrap();
+        let error = install_packages_in(workspace.env(), true, None, true).unwrap_err();
+        assert!(error.to_string().contains("offline mode"));
     }
 
     #[test]
@@ -1347,7 +1462,7 @@ mod tests {
 
         let project_tmp = tempfile::tempdir().unwrap();
         let root = project_tmp.path();
-        let cache_dir = root.join(".cache");
+        let workspace = TestWorkspace::new(root);
         fs::create_dir_all(root.join(".git")).unwrap();
         let connector_git = normalize_git_url(connector_repo.to_string_lossy().as_ref()).unwrap();
         fs::write(
@@ -1365,36 +1480,34 @@ mod tests {
         )
         .unwrap();
 
-        with_test_env(root, &cache_dir, || {
-            let installed = install_packages_impl(false, None, false).unwrap();
-            assert_eq!(installed, 2);
+        let installed = install_packages_in(workspace.env(), false, None, false).unwrap();
+        assert_eq!(installed, 2);
 
-            let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
-            assert!(lock.find("notion-connector-harn").is_some());
-            assert!(lock.find("notion-sdk-harn").is_some());
-            assert!(root
-                .join(PKG_DIR)
-                .join("notion-connector-harn")
-                .join("lib.harn")
-                .is_file());
-            assert!(root
-                .join(PKG_DIR)
-                .join("notion-sdk-harn")
-                .join("lib.harn")
-                .is_file());
+        let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+        assert!(lock.find("notion-connector-harn").is_some());
+        assert!(lock.find("notion-sdk-harn").is_some());
+        assert!(root
+            .join(PKG_DIR)
+            .join("notion-connector-harn")
+            .join("lib.harn")
+            .is_file());
+        assert!(root
+            .join(PKG_DIR)
+            .join("notion-sdk-harn")
+            .join("lib.harn")
+            .is_file());
 
-            let mut vm = test_vm();
-            let exports = futures::executor::block_on(
-                vm.load_module_exports(
-                    &root
-                        .join(PKG_DIR)
-                        .join("notion-connector-harn")
-                        .join("lib.harn"),
-                ),
-            )
-            .expect("transitive import should load from the workspace package root");
-            assert!(exports.contains_key("connector_value"));
-        });
+        let mut vm = test_vm();
+        let exports = futures::executor::block_on(
+            vm.load_module_exports(
+                &root
+                    .join(PKG_DIR)
+                    .join("notion-connector-harn")
+                    .join("lib.harn"),
+            ),
+        )
+        .expect("transitive import should load from the workspace package root");
+        assert!(exports.contains_key("connector_value"));
     }
 
     #[test]
@@ -1412,7 +1525,7 @@ mod tests {
 
         let project_tmp = tempfile::tempdir().unwrap();
         let root = project_tmp.path();
-        let cache_dir = root.join(".cache");
+        let workspace = TestWorkspace::new(root);
         fs::create_dir_all(root.join(".git")).unwrap();
         let connector_git = normalize_git_url(connector_repo.to_string_lossy().as_ref()).unwrap();
         fs::write(
@@ -1430,12 +1543,10 @@ mod tests {
         )
         .unwrap();
 
-        with_test_env(root, &cache_dir, || {
-            let error = install_packages_impl(false, None, false).unwrap_err();
-            assert!(error
-                .to_string()
-                .contains("path dependencies are not supported inside git-installed packages"));
-        });
+        let error = install_packages_in(workspace.env(), false, None, false).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("path dependencies are not supported inside git-installed packages"));
     }
 
     #[test]
@@ -1513,6 +1624,7 @@ mod tests {
             manifest,
             dir: tmp.path().to_path_buf(),
         };
+        let workspace = TestWorkspace::new(tmp.path());
         let lock = LockFile {
             version: LOCK_FILE_VERSION,
             packages: vec![LockEntry {
@@ -1524,7 +1636,8 @@ mod tests {
             }],
         };
 
-        let error = materialize_dependencies_from_lock(&ctx, &lock, None, false).unwrap_err();
+        let error = materialize_dependencies_from_lock(workspace.env(), &ctx, &lock, None, false)
+            .unwrap_err();
         assert!(error.to_string().contains("invalid dependency alias"));
         assert!(
             victim.join("keep.txt").exists(),

@@ -1,6 +1,5 @@
 use super::*;
 use serde::{Deserialize, Serialize};
-use tokio::sync::MutexGuard;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TriggerTables {
@@ -12,6 +11,32 @@ pub(crate) fn test_vm() -> harn_vm::Vm {
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
     vm
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TestWorkspace {
+    env: PackageWorkspace,
+}
+
+impl TestWorkspace {
+    pub(crate) fn new(root: &Path) -> Self {
+        Self {
+            env: PackageWorkspace::for_test(root, root.join(".cache")),
+        }
+    }
+
+    pub(crate) fn with_registry_source(mut self, source: impl Into<String>) -> Self {
+        self.env = self.env.with_registry_source(source);
+        self
+    }
+
+    pub(crate) fn env(&self) -> &PackageWorkspace {
+        &self.env
+    }
+
+    pub(crate) fn cache_dir(&self) -> PathBuf {
+        self.env.cache_root().expect("test cache root")
+    }
 }
 
 pub(crate) fn write_trigger_project(
@@ -27,48 +52,6 @@ pub(crate) fn write_trigger_project(
     let harn_file = root.join("main.harn");
     fs::write(&harn_file, "pipeline main() {}\n").unwrap();
     harn_file
-}
-
-struct TestEnvGuard {
-    previous_cwd: PathBuf,
-    previous_cache: Option<std::ffi::OsString>,
-    previous_registry: Option<std::ffi::OsString>,
-    _cwd_lock: MutexGuard<'static, ()>,
-    _env_lock: MutexGuard<'static, ()>,
-}
-
-impl Drop for TestEnvGuard {
-    fn drop(&mut self) {
-        std::env::set_current_dir(&self.previous_cwd).unwrap();
-        if let Some(value) = self.previous_cache.clone() {
-            std::env::set_var(HARN_CACHE_DIR_ENV, value);
-        } else {
-            std::env::remove_var(HARN_CACHE_DIR_ENV);
-        }
-        if let Some(value) = self.previous_registry.clone() {
-            std::env::set_var(HARN_PACKAGE_REGISTRY_ENV, value);
-        } else {
-            std::env::remove_var(HARN_PACKAGE_REGISTRY_ENV);
-        }
-    }
-}
-
-pub(crate) fn with_test_env<T>(cwd: &Path, cache_dir: &Path, f: impl FnOnce() -> T) -> T {
-    let cwd_lock = crate::tests::common::cwd_lock::lock_cwd();
-    let env_lock = crate::tests::common::env_lock::lock_env().blocking_lock();
-    let guard = TestEnvGuard {
-        previous_cwd: std::env::current_dir().unwrap(),
-        previous_cache: std::env::var_os(HARN_CACHE_DIR_ENV),
-        previous_registry: std::env::var_os(HARN_PACKAGE_REGISTRY_ENV),
-        _cwd_lock: cwd_lock,
-        _env_lock: env_lock,
-    };
-    std::env::set_current_dir(cwd).unwrap();
-    std::env::set_var(HARN_CACHE_DIR_ENV, cache_dir);
-    std::env::remove_var(HARN_PACKAGE_REGISTRY_ENV);
-    let result = f();
-    drop(guard);
-    result
 }
 
 pub(crate) fn run_git(repo: &Path, args: &[&str]) -> String {

@@ -203,9 +203,9 @@ struct TenantRequestScope {
 }
 
 #[derive(Clone, Default)]
-pub(super) struct TestRequestGate {
-    pub(super) entered_file: Option<PathBuf>,
-    pub(super) release_file: Option<PathBuf>,
+pub(crate) struct TestRequestGate {
+    pub(crate) entered_file: Option<PathBuf>,
+    pub(crate) release_file: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -244,13 +244,14 @@ impl RouteRegistry {
         metrics_registry: Arc<harn_vm::MetricsRegistry>,
         auth: Arc<ListenerAuth>,
         pending_topic: Topic,
+        ingest_backpressure: IngestBackpressureConfig,
         request_gate: TestRequestGate,
         tenant_store: Option<Arc<harn_vm::TenantStore>>,
     ) -> Result<Self, OrchestratorError> {
         let registry = Self {
             routes_by_path: RwLock::new(BTreeMap::new()),
             metrics_by_trigger_id: Mutex::new(BTreeMap::new()),
-            ingest_backpressure: IngestBackpressure::from_env(),
+            ingest_backpressure: IngestBackpressure::new(ingest_backpressure),
             event_log,
             inbox,
             secrets,
@@ -355,10 +356,10 @@ struct IngestBackpressure {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct IngestBackpressureConfig {
-    global_capacity: u32,
-    per_source_capacity: u32,
-    refill_per_sec: u32,
+pub(crate) struct IngestBackpressureConfig {
+    pub(crate) global_capacity: u32,
+    pub(crate) per_source_capacity: u32,
+    pub(crate) refill_per_sec: u32,
 }
 
 #[derive(Debug)]
@@ -374,21 +375,6 @@ struct IngestBucket {
 }
 
 impl IngestBackpressure {
-    fn from_env() -> Self {
-        let config = IngestBackpressureConfig {
-            global_capacity: read_u32_env(
-                INGEST_GLOBAL_CAPACITY_ENV,
-                DEFAULT_INGEST_GLOBAL_CAPACITY,
-            ),
-            per_source_capacity: read_u32_env(
-                INGEST_PER_SOURCE_CAPACITY_ENV,
-                DEFAULT_INGEST_PER_SOURCE_CAPACITY,
-            ),
-            refill_per_sec: read_u32_env(INGEST_REFILL_PER_SEC_ENV, DEFAULT_INGEST_REFILL_PER_SEC),
-        };
-        Self::new(config)
-    }
-
     fn new(config: IngestBackpressureConfig) -> Self {
         let config = IngestBackpressureConfig {
             global_capacity: config.global_capacity.max(1),
@@ -448,6 +434,32 @@ impl IngestBackpressure {
                 state.global.retry_after(self.config.refill_per_sec),
                 source_retry_after,
             ))
+        }
+    }
+}
+
+impl Default for IngestBackpressureConfig {
+    fn default() -> Self {
+        Self {
+            global_capacity: DEFAULT_INGEST_GLOBAL_CAPACITY,
+            per_source_capacity: DEFAULT_INGEST_PER_SOURCE_CAPACITY,
+            refill_per_sec: DEFAULT_INGEST_REFILL_PER_SEC,
+        }
+    }
+}
+
+impl IngestBackpressureConfig {
+    pub(crate) fn from_env() -> Self {
+        Self {
+            global_capacity: read_u32_env(
+                INGEST_GLOBAL_CAPACITY_ENV,
+                DEFAULT_INGEST_GLOBAL_CAPACITY,
+            ),
+            per_source_capacity: read_u32_env(
+                INGEST_PER_SOURCE_CAPACITY_ENV,
+                DEFAULT_INGEST_PER_SOURCE_CAPACITY,
+            ),
+            refill_per_sec: read_u32_env(INGEST_REFILL_PER_SEC_ENV, DEFAULT_INGEST_REFILL_PER_SEC),
         }
     }
 }
@@ -985,18 +997,14 @@ fn parse_secret_id(raw: Option<&str>) -> Option<SecretId> {
     Some(SecretId::new(namespace, name).with_version(version))
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct ListenerAuth {
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ListenerAuthConfig {
     api_keys: Vec<String>,
     hmac_secret: Option<String>,
-    session_store: Option<Arc<harn_vm::SessionStore>>,
 }
 
-impl ListenerAuth {
-    pub(crate) fn from_env(
-        required: bool,
-        session_store: Option<Arc<harn_vm::SessionStore>>,
-    ) -> Result<Self, OrchestratorError> {
+impl ListenerAuthConfig {
+    pub(crate) fn from_env() -> Self {
         let api_keys = std::env::var(API_KEYS_ENV)
             .ok()
             .map(|value| {
@@ -1012,13 +1020,45 @@ impl ListenerAuth {
             .ok()
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
+        Self {
+            api_keys,
+            hmac_secret,
+        }
+    }
 
-        if required && api_keys.is_empty() && session_store.is_none() {
+    #[cfg(test)]
+    pub(crate) fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
+        self.api_keys.push(api_key.into());
+        self
+    }
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct ListenerAuth {
+    api_keys: Vec<String>,
+    hmac_secret: Option<String>,
+    session_store: Option<Arc<harn_vm::SessionStore>>,
+}
+
+impl ListenerAuth {
+    pub(crate) fn from_env(
+        required: bool,
+        session_store: Option<Arc<harn_vm::SessionStore>>,
+    ) -> Result<Self, OrchestratorError> {
+        Self::from_config(required, session_store, ListenerAuthConfig::from_env())
+    }
+
+    pub(crate) fn from_config(
+        required: bool,
+        session_store: Option<Arc<harn_vm::SessionStore>>,
+        config: ListenerAuthConfig,
+    ) -> Result<Self, OrchestratorError> {
+        if required && config.api_keys.is_empty() && session_store.is_none() {
             return Err(format!(
                 "{API_KEYS_ENV} must contain at least one API key or a session store must be configured when authenticated routes are configured"
             ).into());
         }
-        if required && hmac_secret.is_none() && session_store.is_none() {
+        if required && config.hmac_secret.is_none() && session_store.is_none() {
             return Err(format!(
                 "{HMAC_SECRET_ENV} must be set or a session store must be configured when authenticated routes are configured"
             )
@@ -1026,8 +1066,8 @@ impl ListenerAuth {
         }
 
         Ok(Self {
-            api_keys,
-            hmac_secret,
+            api_keys: config.api_keys,
+            hmac_secret: config.hmac_secret,
             session_store,
         })
     }

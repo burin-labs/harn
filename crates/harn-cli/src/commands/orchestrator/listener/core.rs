@@ -19,8 +19,8 @@ use super::acp_hub::{
 };
 use super::admin::{admin_reload_endpoint, AdminReloadHandle, AdminReloadState, ADMIN_RELOAD_PATH};
 use super::routes::{
-    ingest_trigger, test_file_from_env, ListenerAuth, RouteConfig, RouteRegistry, TestRequestGate,
-    TriggerMetricSnapshot, PENDING_TOPIC,
+    ingest_trigger, test_file_from_env, IngestBackpressureConfig, ListenerAuth, ListenerAuthConfig,
+    RouteConfig, RouteRegistry, TestRequestGate, TriggerMetricSnapshot, PENDING_TOPIC,
 };
 use crate::commands::orchestrator::errors::OrchestratorError;
 use crate::commands::orchestrator::origin_guard::{enforce_allowed_origin, OriginAllowList};
@@ -49,6 +49,67 @@ pub(crate) struct ListenerConfig {
 impl ListenerConfig {
     pub(crate) fn max_body_bytes_or_default(max_body_bytes: Option<usize>) -> usize {
         max_body_bytes.unwrap_or(DEFAULT_MAX_BODY_BYTES)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct ListenerRuntimeEnv {
+    auth: ListenerAuthConfig,
+    request_gate: TestRequestGate,
+    acp_retained_session_duration: Duration,
+    ingest_backpressure: IngestBackpressureConfig,
+}
+
+impl ListenerRuntimeEnv {
+    pub(crate) fn from_env() -> Self {
+        Self {
+            auth: ListenerAuthConfig::from_env(),
+            request_gate: TestRequestGate {
+                entered_file: test_file_from_env(REQUEST_ENTERED_FILE_ENV),
+                release_file: test_file_from_env(REQUEST_RELEASE_FILE_ENV),
+            },
+            acp_retained_session_duration: acp_retained_session_duration_from_env(),
+            ingest_backpressure: IngestBackpressureConfig::from_env(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self {
+            auth: ListenerAuthConfig::default(),
+            request_gate: TestRequestGate::default(),
+            acp_retained_session_duration: Duration::from_secs(
+                super::acp_hub::ACP_DEFAULT_RETAINED_SESSION_SECS,
+            ),
+            ingest_backpressure: IngestBackpressureConfig::default(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
+        self.auth = self.auth.with_api_key(api_key);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_request_gate(mut self, request_gate: TestRequestGate) -> Self {
+        self.request_gate = request_gate;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_acp_retained_session_duration(mut self, duration: Duration) -> Self {
+        self.acp_retained_session_duration = duration;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_ingest_backpressure(
+        mut self,
+        ingest_backpressure: IngestBackpressureConfig,
+    ) -> Self {
+        self.ingest_backpressure = ingest_backpressure;
+        self
     }
 }
 
@@ -81,6 +142,13 @@ impl ListenerReadiness {
 
 impl ListenerRuntime {
     pub(crate) async fn start(config: ListenerConfig) -> Result<Self, OrchestratorError> {
+        Self::start_with_env(config, ListenerRuntimeEnv::from_env()).await
+    }
+
+    pub(crate) async fn start_with_env(
+        config: ListenerConfig,
+        runtime_env: ListenerRuntimeEnv,
+    ) -> Result<Self, OrchestratorError> {
         let pending_topic =
             Topic::new(PENDING_TOPIC).map_err(|error| format!("invalid pending topic: {error}"))?;
         let inbox_metrics = Arc::new(harn_vm::MetricsRegistry::default());
@@ -93,14 +161,12 @@ impl ListenerRuntime {
             .routes
             .iter()
             .any(|route| route.auth_mode.requires_credentials());
-        let auth = Arc::new(ListenerAuth::from_env(
+        let auth = Arc::new(ListenerAuth::from_config(
             requires_auth,
             config.session_store.clone(),
+            runtime_env.auth.clone(),
         )?);
-        let request_gate = TestRequestGate {
-            entered_file: test_file_from_env(REQUEST_ENTERED_FILE_ENV),
-            release_file: test_file_from_env(REQUEST_RELEASE_FILE_ENV),
-        };
+        let request_gate = runtime_env.request_gate.clone();
         let origin_state = Arc::new(config.allowed_origins.clone());
         let admin_state = config.admin_reload.clone().map(|reload| {
             Arc::new(AdminReloadState {
@@ -111,7 +177,7 @@ impl ListenerRuntime {
         });
         let acp_hub = AcpWebSocketHub::new(
             config.event_log.clone(),
-            acp_retained_session_duration_from_env(),
+            runtime_env.acp_retained_session_duration,
         );
         let acp_hub_sweeper = acp_hub.clone();
         tokio::spawn(async move {
@@ -131,6 +197,7 @@ impl ListenerRuntime {
             config.metrics_registry.clone(),
             auth.clone(),
             pending_topic.clone(),
+            runtime_env.ingest_backpressure,
             request_gate,
             config.tenant_store.clone(),
         )?);
