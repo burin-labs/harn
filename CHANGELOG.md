@@ -6,6 +6,50 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## v0.8.1
+
+### Added
+
+- **Orchestrator replay determinism oracle.** A new conformance suite
+  under `conformance/replay-oracle/` validates that orchestrator execution is
+  deterministic across runs, covering tool calls, DLQ retries, LLM predicates,
+  local triggers, and A2A worker paths.
+- **Session system prompt composition.** Agents now support composing system
+  prompts from multiple parts, with updated stdlib signatures in
+  `harn-stdlib` and new helpers in the VM for session configuration and
+  transcript management.
+- **Compiler optimization pipeline.** The VM now includes an optimization pass
+  (e.g., constant folding) with a new `crates/harn-vm/src/compiler/optimizer.rs`
+  module and corresponding conformance tests.
+- **Protocol conformance matrix.** Expanded fixture coverage for A2A, ACP,
+  and MCP protocols, including agent card adapters, security constraints,
+  session updates, JSON-RPC error handling, and tool/resource boundaries,
+  alongside updated JSON schemas.
+- **Generated protocol artifacts for downstream bindings.** Added
+  `harn dump-protocol-artifacts`, Make targets for generation and drift checks,
+  and checked-in ACP/A2A/MCP schema copies plus TypeScript and Swift bindings
+  under `spec/protocol-artifacts/`.
+- **Split protocol adapters into focused modules.** A2A, ACP, and MCP adapters
+  in `harn-serve` are reorganized into dedicated submodules (auth, events,
+  schema, tasks, sessions, transport) with dedicated test suites, improving
+  maintainability without changing external behavior.
+
+### Fixed
+
+- **Package and listener test hermeticity.** Made package and listener tests
+  hermetic by tightening test support fixtures and lockfile/manifest/registry
+  handling in `harn-cli`.
+- **Tree-sitter parsing for A2A regex fixtures.** Fixed parsing issues in
+  A2A-related conformance test fixtures.
+- **Ollama tool argument replay.** Corrected replay behavior for Ollama tool
+  arguments in the LLM tool messages module.
+
+### Changed
+
+- **Removed manifest provider static leaks.** Cleaned up static state leaks in
+  manifest providers and trigger event handling, improving memory safety in
+  `harn-vm` and `harn-cli` package extensions.
+
 ## v0.8.0
 
 ### Added

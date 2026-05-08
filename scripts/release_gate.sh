@@ -300,6 +300,8 @@ cmd_prepare() {
   current="$(current_version)"
   next="$(next_version "$bump")"
   bump_version "$next"
+  python3 scripts/sync_protocol_fixture_runtime_versions.py --from "$current" --to "$next"
+  make gen-protocol-artifacts
   cargo check --workspace --all-targets >/dev/null
   echo "Version updated: $current -> $next"
   echo "Next steps:"
