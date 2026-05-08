@@ -1037,7 +1037,10 @@ async fn host_agent_emit_event(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let event = build_agent_event(&session_id, &event_type, &payload)?;
     if matches!(
         event_type.as_str(),
-        "tool_search_query" | "tool_search_result" | "typed_checkpoint"
+        "tool_search_query"
+            | "tool_search_result"
+            | "typed_checkpoint"
+            | "agent_loop_stall_warning"
     ) {
         let role = if event_type == "tool_search_result" {
             "tool"
@@ -1148,6 +1151,10 @@ fn build_agent_event(
             new_limit: get_usize("new_limit"),
             reason: get_string("reason"),
             status: get_string("status"),
+        }),
+        "agent_loop_stall_warning" => Ok(AgentEvent::AgentLoopStallWarning {
+            session_id: session_id.to_string(),
+            warning: payload.clone(),
         }),
         "tool_call_audit" => Ok(AgentEvent::ToolCallAudit {
             session_id: session_id.to_string(),

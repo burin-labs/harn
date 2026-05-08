@@ -186,6 +186,7 @@ fn __tool_using_defaults(kind) {
     done_judge: nil,
     native_tool_fallback: "allow_once",
     max_nudges: max_nudges,
+    stall_diagnostics: {enabled: true, threshold: 3, inject_feedback: true, max_feedback: 1},
   }
 }
 

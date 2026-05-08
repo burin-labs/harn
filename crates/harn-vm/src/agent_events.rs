@@ -556,6 +556,14 @@ pub enum AgentEvent {
         reason: String,
         status: String,
     },
+    /// Emitted when `agent_loop` detects adjacent repeated tool calls with
+    /// identical arguments. The warning payload avoids raw arguments by
+    /// default and carries digests so hosts can correlate repeats without
+    /// exposing potentially sensitive tool inputs.
+    AgentLoopStallWarning {
+        session_id: String,
+        warning: serde_json::Value,
+    },
     /// Emitted when a `tool_caller` middleware (see std/llm/tool_middleware)
     /// attaches structured audit metadata to a tool call — typically a
     /// user-facing `summary`, a `description`, an ACP-style `kind`, an MCP
@@ -604,6 +612,7 @@ impl AgentEvent {
             | Self::HitlRequested { session_id, .. }
             | Self::HitlResolved { session_id, .. }
             | Self::LoopControlDecision { session_id, .. }
+            | Self::AgentLoopStallWarning { session_id, .. }
             | Self::ToolCallAudit { session_id, .. } => session_id,
         }
     }
