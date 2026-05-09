@@ -196,6 +196,7 @@ async fn fetch_provider_max_context_uncached(
         "local"
             | "openai"
             | "mlx"
+            | "llamacpp"
             | "vllm"
             | "groq"
             | "together"

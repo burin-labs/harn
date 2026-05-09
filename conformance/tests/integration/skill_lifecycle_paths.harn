@@ -25,6 +25,7 @@ pipeline test(task) {
       provider: "mock",
       max_iterations: 1,
       skills: registry,
+      skill_match: {strategy: "metadata"},
       working_files: ["infra/terraform/cluster.tf", "README.md"],
     },
   )

@@ -31,7 +31,7 @@ pipeline test(task) {
   let result = agent_loop(
     "Please rotate the staging credentials for me",
     nil,
-    {provider: "mock", max_iterations: 1, skills: guarded},
+    {provider: "mock", max_iterations: 1, skills: guarded, skill_match: {strategy: "metadata"}},
   )
   let events = transcript_events(result?.transcript)
   var activated = 0

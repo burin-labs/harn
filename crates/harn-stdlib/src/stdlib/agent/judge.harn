@@ -75,13 +75,18 @@ fn __judge_invoke_structured(judge_cfg, opts, payload) {
     required: ["verdict"],
   }
   let base = opts?.llm_options ?? {}
-  let llm_opts = base
+  var llm_opts = base
     + {
     model: judge_cfg?.model ?? opts?.model,
     provider: judge_cfg?.provider ?? opts?.provider,
     output_schema: schema,
     session_id: payload.session_id,
     system: system,
+  }
+  for key in ["temperature", "max_tokens", "top_p", "tool_format", "reasoning_effort"] {
+    if judge_cfg[key] != nil {
+      llm_opts[key] = judge_cfg[key]
+    }
   }
   let started = monotonic_ms()
   let checkpoint = agent_typed_output_checkpoint("agent.completion_judge", user, schema, llm_opts)

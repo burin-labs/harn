@@ -41,7 +41,14 @@ pipeline test(task) {
   let result = agent_loop(
     "Investigate the auth flow",
     "You are a code explorer.",
-    {provider: "mock", tools: tools, tool_format: "native", max_iterations: 1, skills: explorer},
+    {
+      provider: "mock",
+      tools: tools,
+      tool_format: "native",
+      max_iterations: 1,
+      skills: explorer,
+      skill_match: {strategy: "metadata"},
+    },
   )
   assert(result?.status == "done", "agent loop completes")
   let calls = llm_mock_calls()
