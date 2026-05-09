@@ -1,4 +1,5 @@
 use super::*;
+use crate::orchestration::{WorkflowEdge, WorkflowNode};
 
 fn fixture_bundle() -> WorkflowBundle {
     serde_json::from_str(
@@ -108,6 +109,18 @@ fn fixture_bundle() -> WorkflowBundle {
     .unwrap()
 }
 
+fn graph_node_types(preview: &WorkflowBundlePreview) -> Vec<String> {
+    let mut types = preview
+        .graph
+        .nodes
+        .iter()
+        .map(|node| node.node_type.clone())
+        .collect::<Vec<_>>();
+    types.sort();
+    types.dedup();
+    types
+}
+
 #[test]
 fn validates_fixture_bundle_and_previews_graph() {
     let bundle = fixture_bundle();
@@ -122,6 +135,33 @@ fn validates_fixture_bundle_and_previews_graph() {
         preview.nodes[2].prompt_capsule.as_deref(),
         Some("query-logs")
     );
+    assert!(preview.mermaid.starts_with("flowchart TD"));
+    assert_eq!(preview.mermaid, preview.graph.mermaid);
+    let node_types = graph_node_types(&preview);
+    for expected in [
+        "action",
+        "catchup",
+        "connector_call",
+        "dlq",
+        "notification",
+        "terminal",
+        "trigger",
+        "wait",
+    ] {
+        assert!(
+            node_types.contains(&expected.to_string()),
+            "{node_types:#?}"
+        );
+    }
+    assert!(preview
+        .graph
+        .edges
+        .iter()
+        .any(|edge| { edge.from == "trigger/github-pr-updated" && edge.to == "policy/catchup" }));
+    assert!(preview.graph.editable_fields.iter().any(|field| {
+        field.id == "prompt_capsule.query-logs.prompt"
+            && field.json_pointer == "/prompt_capsules/query-logs/prompt"
+    }));
 }
 
 #[test]
@@ -149,6 +189,193 @@ fn rejects_unstable_or_unknown_bundle_references() {
         .errors
         .iter()
         .any(|diagnostic| diagnostic.path == "policy.catchup.mode"));
+}
+
+#[test]
+fn graph_export_covers_agent_approval_connector_and_terminal_nodes() {
+    let mut bundle = fixture_bundle();
+    bundle.workflow.nodes.insert(
+        "repair".to_string(),
+        WorkflowNode {
+            id: Some("repair".to_string()),
+            kind: "agent".to_string(),
+            task_label: Some("Repair PR".to_string()),
+            ..WorkflowNode::default()
+        },
+    );
+    bundle.workflow.nodes.insert(
+        "delegate".to_string(),
+        WorkflowNode {
+            id: Some("delegate".to_string()),
+            kind: "subagent".to_string(),
+            task_label: Some("Delegate log review".to_string()),
+            ..WorkflowNode::default()
+        },
+    );
+    bundle.workflow.nodes.insert(
+        "approve".to_string(),
+        WorkflowNode {
+            id: Some("approve".to_string()),
+            kind: "approval".to_string(),
+            task_label: Some("Approve deploy action".to_string()),
+            ..WorkflowNode::default()
+        },
+    );
+    bundle.workflow.nodes.insert(
+        "call_render".to_string(),
+        WorkflowNode {
+            id: Some("call_render".to_string()),
+            kind: "connector_call".to_string(),
+            task_label: Some("Query deployment provider".to_string()),
+            ..WorkflowNode::default()
+        },
+    );
+    bundle.workflow.edges.extend([
+        WorkflowEdge {
+            from: "notify".to_string(),
+            to: "repair".to_string(),
+            branch: Some("failed".to_string()),
+            label: None,
+        },
+        WorkflowEdge {
+            from: "repair".to_string(),
+            to: "delegate".to_string(),
+            branch: None,
+            label: None,
+        },
+        WorkflowEdge {
+            from: "delegate".to_string(),
+            to: "approve".to_string(),
+            branch: None,
+            label: None,
+        },
+        WorkflowEdge {
+            from: "approve".to_string(),
+            to: "call_render".to_string(),
+            branch: None,
+            label: None,
+        },
+    ]);
+
+    let preview = preview_workflow_bundle(&bundle);
+    assert!(preview.validation.valid, "{:#?}", preview.validation);
+    let node_types = graph_node_types(&preview);
+    for expected in [
+        "agent",
+        "subagent",
+        "approval",
+        "connector_call",
+        "terminal",
+    ] {
+        assert!(
+            node_types.contains(&expected.to_string()),
+            "{node_types:#?}"
+        );
+    }
+}
+
+#[test]
+fn graph_diagnostics_include_node_ids_for_gui_annotation() {
+    let mut bundle = fixture_bundle();
+    bundle.workflow.nodes.insert(
+        "orphan".to_string(),
+        WorkflowNode {
+            id: Some("orphan".to_string()),
+            kind: "action".to_string(),
+            task_label: Some("Unreachable node".to_string()),
+            ..WorkflowNode::default()
+        },
+    );
+    bundle.workflow.edges.push(WorkflowEdge {
+        from: "missing".to_string(),
+        to: "notify".to_string(),
+        branch: None,
+        label: None,
+    });
+
+    let preview = preview_workflow_bundle(&bundle);
+    assert!(!preview.validation.valid);
+    assert!(
+        preview.graph.diagnostics.iter().any(|diagnostic| {
+            diagnostic.node_id.as_deref() == Some("orphan")
+                && diagnostic.graph_node_id.as_deref() == Some("node/orphan")
+        }),
+        "{:#?}",
+        preview.graph.diagnostics
+    );
+    assert!(
+        preview.graph.diagnostics.iter().any(|diagnostic| {
+            diagnostic.node_id.as_deref() == Some("missing")
+                && diagnostic.graph_node_id.as_deref() == Some("node/missing")
+        }),
+        "{:#?}",
+        preview.graph.diagnostics
+    );
+}
+
+#[test]
+fn editable_field_pointers_round_trip_supported_surfaces() {
+    let bundle = fixture_bundle();
+    let preview = preview_workflow_bundle(&bundle);
+    let mut value = serde_json::to_value(&bundle).unwrap();
+    let edits = [
+        (
+            "trigger.github-pr-updated.events",
+            serde_json::json!(["pull_request.closed"]),
+        ),
+        (
+            "prompt_capsule.query-logs.prompt",
+            serde_json::json!("Check deployment logs and report only actionable failures."),
+        ),
+        (
+            "workflow.query_logs.model_policy",
+            serde_json::json!({"provider": "mock", "model": "cheap-local"}),
+        ),
+        (
+            "workflow.query_logs.tools",
+            serde_json::json!([{"name": "render.logs.query"}]),
+        ),
+        ("policy.retry.max_attempts", serde_json::json!(3)),
+        ("policy.catchup.mode", serde_json::json!("all")),
+        (
+            "connector.github.provider_id",
+            serde_json::json!("github-enterprise"),
+        ),
+    ];
+
+    for (field_id, replacement) in edits {
+        let pointer = preview
+            .graph
+            .editable_fields
+            .iter()
+            .find(|field| field.id == field_id)
+            .unwrap_or_else(|| panic!("missing editable field {field_id}"))
+            .json_pointer
+            .clone();
+        *value
+            .pointer_mut(&pointer)
+            .unwrap_or_else(|| panic!("missing JSON pointer {pointer}")) = replacement;
+    }
+
+    let edited: WorkflowBundle = serde_json::from_value(value).unwrap();
+    assert_eq!(
+        edited.triggers[0].events,
+        vec!["pull_request.closed".to_string()]
+    );
+    assert_eq!(edited.policy.retry.max_attempts, 3);
+    assert_eq!(edited.policy.catchup.mode, "all");
+    assert_eq!(edited.connectors[0].provider_id, "github-enterprise");
+    assert_eq!(
+        edited.workflow.nodes["query_logs"]
+            .model_policy
+            .provider
+            .as_deref(),
+        Some("mock")
+    );
+    assert_eq!(
+        edited.prompt_capsules["query-logs"].prompt,
+        "Check deployment logs and report only actionable failures."
+    );
 }
 
 #[test]

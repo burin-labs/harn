@@ -33,6 +33,8 @@ pub(crate) fn handle(args: WorkflowArgs) -> Result<i32, String> {
             let preview = harn_vm::orchestration::preview_workflow_bundle(&bundle);
             if args.json {
                 print_json(&preview)?;
+            } else if args.mermaid {
+                println!("{}", preview.mermaid);
             } else {
                 println!(
                     "workflow bundle {} graph {}",
