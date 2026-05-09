@@ -36,6 +36,7 @@ pub mod trigger;
 pub(crate) mod trust;
 pub(crate) mod try_cmd;
 pub(crate) mod viz;
+pub(crate) mod workflow;
 
 use std::path::{Path, PathBuf};
 

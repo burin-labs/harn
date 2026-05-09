@@ -6,6 +6,15 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Portable workflow bundle CLI.** Added the `harn workflow validate`,
+  `harn workflow preview`, and `harn workflow run` commands for JSON workflow
+  bundle validation, graph preview, and deterministic local run receipts,
+  alongside the v1 bundle contract docs and a GitHub PR monitor fixture.
+
 ## v0.8.2
 
 ### Added

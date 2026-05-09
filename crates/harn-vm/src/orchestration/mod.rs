@@ -63,6 +63,9 @@ pub use stage_options::*;
 mod workflow;
 pub use workflow::*;
 
+mod workflow_bundle;
+pub use workflow_bundle::*;
+
 mod records;
 pub use records::*;
 

@@ -47,6 +47,7 @@ mod util;
 mod verify;
 mod viz;
 mod watch;
+mod workflow;
 
 pub(crate) use bench::BenchArgs;
 pub(crate) use check::{CheckArgs, CheckOutputFormat};
@@ -143,6 +144,7 @@ pub(crate) use trust::{
 pub(crate) use verify::VerifyArgs;
 pub(crate) use viz::VizArgs;
 pub(crate) use watch::WatchArgs;
+pub(crate) use workflow::{WorkflowArgs, WorkflowCommand};
 
 use clap::{Parser, Subcommand};
 
@@ -232,6 +234,8 @@ SCRIPTING
     Trigger(TriggerArgs),
     /// Inspect Harn Flow atom, slice, and predicate audit state.
     Flow(FlowArgs),
+    /// Validate, preview, and run portable workflow bundles.
+    Workflow(WorkflowArgs),
     /// Import third-party eval traces into replayable Harn fixtures.
     Trace(TraceArgs),
     /// Mine repeated traces into a reviewable deterministic Harn workflow candidate.
