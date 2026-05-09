@@ -6,7 +6,7 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.8.2
 
 ### Added
 
@@ -15,6 +15,22 @@ condensed series summaries instead of full per-patch history.
   tool adapter, post-turn callback adapter, reply/LLM-call guardrails, and
   audit events for harnesses that need a model or fixture to substitute for the
   user during agent evals.
+
+### Changed
+
+- Add provider-aware agent reasoning policy (#1406).
+- Clean stale Harn dev target dirs (#1405).
+- Add simulated user helpers (#1404).
+- Harden agent completion and skill routing (#1403).
+- Capture agent_loop provider failures (#1399).
+- Add streaming-native trigger primitives (#1401).
+- Harden persona runtime status (#1400).
+- Add agent loop stall diagnostics (#1398).
+- Make MCP server context first-class (#1395).
+- Add compile-time capability policy invariants (#1393).
+- Add workflow crystallization v2 shadow receipts (#1394).
+- Add review and on-call persona packages (#1392).
+- Reduce VM hot-path allocations (#1391).
 
 ## v0.8.1
 
