@@ -4,7 +4,9 @@
 
 This directory is the checked-in Harn protocol contract for downstream hosts.
 It publishes JSON Schema profiles plus TypeScript and Swift bindings generated
-from Harn's adapter vocabulary.
+from Harn's adapter vocabulary. Hosts should consume or vendor these artifacts
+directly instead of maintaining hand-written mirrors of Harn wire enums,
+JSON-RPC envelopes, or extension fields.
 
 Regenerate with:
 

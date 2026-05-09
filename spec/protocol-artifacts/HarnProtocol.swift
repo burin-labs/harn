@@ -51,6 +51,27 @@ public enum HarnProtocolConstants {
     ]
 }
 
+public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
+    case initialize = "initialize"
+    case sessionNew = "session/new"
+    case sessionPrompt = "session/prompt"
+    case sessionStop = "session/stop"
+}
+
+public enum HarnACPClientMethod: String, Codable, Sendable, CaseIterable {
+    case fsReadTextFile = "fs/read_text_file"
+    case fsWriteTextFile = "fs/write_text_file"
+    case terminalCreate = "terminal/create"
+    case terminalKill = "terminal/kill"
+    case sessionRequestPermission = "session/request_permission"
+}
+
+public enum HarnACPAgentNotification: String, Codable, Sendable, CaseIterable {
+    case sessionMessage = "session/message"
+    case sessionUpdate = "session/update"
+    case terminalOutput = "terminal/output"
+}
+
 public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case userMessageChunk = "user_message_chunk"
     case agentMessageChunk = "agent_message_chunk"
@@ -75,6 +96,14 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case toolSearchResult = "tool_search_result"
     case transcriptCompacted = "transcript_compacted"
     case workerUpdate = "worker_update"
+}
+
+public enum HarnACPContentBlockType: String, Codable, Sendable, CaseIterable {
+    case text = "text"
+    case resourceLink = "resource_link"
+    case resource = "resource"
+    case image = "image"
+    case audio = "audio"
 }
 
 public enum HarnACPToolKind: String, Codable, Sendable, CaseIterable {
@@ -130,6 +159,40 @@ public enum HarnA2ATaskState: String, Codable, Sendable, CaseIterable {
     case authRequired = "auth-required"
 }
 
+public enum HarnA2ATaskEventType: String, Codable, Sendable, CaseIterable {
+    case status = "status"
+    case message = "message"
+    case workerUpdate = "worker_update"
+}
+
+public enum HarnMCPMethod: String, Codable, Sendable, CaseIterable {
+    case initialize = "initialize"
+    case toolsList = "tools/list"
+    case toolsCall = "tools/call"
+    case resourcesList = "resources/list"
+    case resourcesRead = "resources/read"
+    case resourcesTemplatesList = "resources/templates/list"
+    case promptsList = "prompts/list"
+    case promptsGet = "prompts/get"
+    case completionComplete = "completion/complete"
+    case loggingSetLevel = "logging/setLevel"
+    case samplingCreateMessage = "sampling/createMessage"
+    case elicitationCreate = "elicitation/create"
+    case notificationsInitialized = "notifications/initialized"
+    case notificationsMessage = "notifications/message"
+}
+
+public enum HarnMCPLoggingLevel: String, Codable, Sendable, CaseIterable {
+    case debug = "debug"
+    case info = "info"
+    case notice = "notice"
+    case warning = "warning"
+    case error = "error"
+    case critical = "critical"
+    case alert = "alert"
+    case emergency = "emergency"
+}
+
 public enum HarnACPValue: Codable, Sendable, Equatable {
     case null
     case bool(Bool)
@@ -138,6 +201,30 @@ public enum HarnACPValue: Codable, Sendable, Equatable {
     case string(String)
     case array([HarnACPValue])
     case object([String: HarnACPValue])
+
+    public init?(jsonEncodable value: Encodable) {
+        let encoder = JSONEncoder()
+        guard let data = try? encoder.encode(HarnAnyEncodable(value)),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let converted = HarnACPValue(jsonObject: object) else {
+            return nil
+        }
+        self = converted
+    }
+
+    public init?(jsonObject: Any) {
+        if let scalar = Self.jsonScalar(jsonObject) {
+            self = scalar
+        } else if let values = jsonObject as? [Any] {
+            guard let array = Self.jsonArray(values) else { return nil }
+            self = array
+        } else if let values = jsonObject as? [String: Any] {
+            guard let object = Self.jsonDictionary(values) else { return nil }
+            self = object
+        } else {
+            return nil
+        }
+    }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -172,14 +259,133 @@ public enum HarnACPValue: Codable, Sendable, Equatable {
         case .object(let value): try container.encode(value)
         }
     }
+
+    public var displayString: String {
+        switch self {
+        case .null: return "nil"
+        case .bool(let value): return value ? "true" : "false"
+        case .int(let value): return "\(value)"
+        case .double(let value): return "\(value)"
+        case .string(let value): return value
+        case .array(let value): return "[\(value.map(\.displayString).joined(separator: ", "))]"
+        case .object(let value):
+            let pairs = value.sorted(by: { $0.key < $1.key })
+                .map { "\($0.key): \($0.value.displayString)" }
+            return "{\(pairs.joined(separator: ", "))}"
+        }
+    }
+
+    public var stringValue: String? {
+        if case .string(let value) = self { return value }
+        return nil
+    }
+
+    public var intValue: Int? {
+        if case .int(let value) = self { return value }
+        if case .double(let value) = self, value.rounded() == value { return Int(value) }
+        return nil
+    }
+
+    public var boolValue: Bool? {
+        if case .bool(let value) = self { return value }
+        return nil
+    }
+
+    public var arrayValue: [HarnACPValue]? {
+        if case .array(let value) = self { return value }
+        return nil
+    }
+
+    public var objectValue: [String: HarnACPValue]? {
+        if case .object(let value) = self { return value }
+        return nil
+    }
+
+    public subscript(_ key: String) -> HarnACPValue? {
+        objectValue?[key]
+    }
+
+    private static func jsonScalar(_ jsonObject: Any) -> HarnACPValue? {
+        switch jsonObject {
+        case _ as NSNull: return .null
+        case let value as Bool: return .bool(value)
+        case let value as Int: return .int(value)
+        case let value as Int64: return jsonInt64(value)
+        case let value as UInt64: return jsonUInt64(value)
+        case let value as Double: return .double(value)
+        case let value as NSNumber: return jsonNumber(value)
+        case let value as String: return .string(value)
+        default: return nil
+        }
+    }
+
+    private static func jsonInt64(_ value: Int64) -> HarnACPValue? {
+        guard value <= Int64(Int.max), value >= Int64(Int.min) else { return nil }
+        return .int(Int(value))
+    }
+
+    private static func jsonUInt64(_ value: UInt64) -> HarnACPValue? {
+        value <= UInt64(Int.max) ? .int(Int(value)) : .double(Double(value))
+    }
+
+    private static func jsonNumber(_ value: NSNumber) -> HarnACPValue {
+        let objCType = String(cString: value.objCType)
+        if objCType == "c" {
+            return .bool(value.boolValue)
+        }
+        if objCType == "f" || objCType == "d" {
+            return .double(value.doubleValue)
+        }
+        return .int(value.intValue)
+    }
+
+    private static func jsonArray(_ values: [Any]) -> HarnACPValue? {
+        var items: [HarnACPValue] = []
+        items.reserveCapacity(values.count)
+        for value in values {
+            guard let item = HarnACPValue(jsonObject: value) else { return nil }
+            items.append(item)
+        }
+        return .array(items)
+    }
+
+    private static func jsonDictionary(_ values: [String: Any]) -> HarnACPValue? {
+        var fields: [String: HarnACPValue] = [:]
+        fields.reserveCapacity(values.count)
+        for (key, value) in values {
+            guard let item = HarnACPValue(jsonObject: value) else { return nil }
+            fields[key] = item
+        }
+        return .object(fields)
+    }
 }
 
 public typealias HarnACPObject = [String: HarnACPValue]
 
-public enum HarnJsonRpcId: Codable, Sendable, Equatable {
+private struct HarnAnyEncodable: Encodable {
+    let value: Encodable
+
+    init(_ value: Encodable) {
+        self.value = value
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try value.encode(to: encoder)
+    }
+}
+
+public enum HarnJsonRpcId: Codable, Sendable, Hashable, ExpressibleByIntegerLiteral, ExpressibleByStringLiteral {
     case null
     case int(Int)
     case string(String)
+
+    public init(integerLiteral value: Int) {
+        self = .int(value)
+    }
+
+    public init(stringLiteral value: String) {
+        self = .string(value)
+    }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -207,6 +413,16 @@ public enum HarnJsonRpcId: Codable, Sendable, Equatable {
         case .int(let value): try container.encode(value)
         case .string(let value): try container.encode(value)
         }
+    }
+
+    public var intValue: Int? {
+        if case .int(let value) = self { return value }
+        return nil
+    }
+
+    public var stringValue: String? {
+        if case .string(let value) = self { return value }
+        return nil
     }
 }
 
@@ -236,6 +452,12 @@ public struct HarnACPError: Codable, Sendable, Equatable {
     public var code: Int
     public var message: String
     public var data: HarnACPValue?
+
+    public init(code: Int, message: String, data: HarnACPValue? = nil) {
+        self.code = code
+        self.message = message
+        self.data = data
+    }
 }
 
 public struct HarnACPResponse: Codable, Sendable, Equatable {
@@ -243,6 +465,44 @@ public struct HarnACPResponse: Codable, Sendable, Equatable {
     public var id: HarnJsonRpcId
     public var result: HarnACPValue?
     public var error: HarnACPError?
+
+    public init(
+        jsonrpc: String = "2.0",
+        id: HarnJsonRpcId,
+        result: HarnACPValue? = nil,
+        error: HarnACPError? = nil
+    ) {
+        self.jsonrpc = jsonrpc
+        self.id = id
+        self.result = result
+        self.error = error
+    }
+
+    public static func success(id: HarnJsonRpcId, result: HarnACPValue) -> HarnACPResponse {
+        HarnACPResponse(id: id, result: result)
+    }
+
+    public static func success(id: Int, result: HarnACPValue) -> HarnACPResponse {
+        success(id: .int(id), result: result)
+    }
+
+    public static func error(
+        id: HarnJsonRpcId,
+        code: Int,
+        message: String,
+        data: HarnACPValue? = nil
+    ) -> HarnACPResponse {
+        HarnACPResponse(id: id, error: HarnACPError(code: code, message: message, data: data))
+    }
+
+    public static func error(
+        id: Int,
+        code: Int,
+        message: String,
+        data: HarnACPValue? = nil
+    ) -> HarnACPResponse {
+        error(id: .int(id), code: code, message: message, data: data)
+    }
 }
 
 public struct HarnACPNotification: Codable, Sendable, Equatable {
@@ -322,6 +582,16 @@ public enum HarnACPToolExecutor: Codable, Sendable, Equatable {
         case .unknown(let raw):
             var container = encoder.singleValueContainer()
             try container.encode(raw)
+        }
+    }
+
+    public var displayLabel: String {
+        switch self {
+        case .harnBuiltin: return "harn_builtin"
+        case .hostBridge: return "host_bridge"
+        case .providerNative: return "provider_native"
+        case .mcpServer(let name): return "mcp:\(name)"
+        case .unknown(let raw): return raw
         }
     }
 }
