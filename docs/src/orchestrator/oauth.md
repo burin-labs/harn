@@ -47,6 +47,42 @@ oauth = {
 }
 ```
 
+Hosts use the same metadata for generic setup and repair UI. Every connector
+package should declare a `setup` table on its `[[providers]]` entry:
+
+```toml
+[[providers]]
+id = "acme"
+connector = { harn = ".harn/packages/acme-connector/lib.harn" }
+capabilities = ["webhook", "oauth"]
+
+[providers.setup]
+auth_type = "oauth2"
+flow = "browser"
+required_scopes = ["mcp.read", "mcp.write"]
+setup_command = ["harn", "connect", "acme"]
+validation_command = ["harn", "connect", "status", "--connector", "acme", "--json"]
+
+[[providers.setup.health_checks]]
+id = "credentials"
+kind = "command"
+command = ["harn", "connect", "status", "--connector", "acme", "--json"]
+
+[providers.setup.recovery]
+missing_auth = "Run `harn connect acme`."
+expired_credentials = "Refresh or reconnect the OAuth token."
+revoked_credentials = "Revoke the stale local token, then reconnect."
+missing_scopes = "Reconnect with the scopes listed in required_scopes."
+inaccessible_resource = "Grant the connector access to the requested resource."
+transient_provider_outage = "Retry after the provider or credential backend recovers."
+```
+
+`harn connect setup-plan --connector <id> --json` emits a host-renderable plan.
+`harn connect status --connector <id> --json` reports one of `healthy`,
+`missing_install`, `missing_auth`, `expired_credentials`,
+`revoked_credentials`, `missing_scopes`, `inaccessible_resource`, or
+`transient_provider_outage`.
+
 When endpoints are not supplied, Harn discovers protected-resource metadata,
 then authorization-server metadata. If the server advertises dynamic client
 registration and no `--client-id` is supplied, Harn registers a loopback client

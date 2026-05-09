@@ -1,0 +1,41 @@
+/** Return the provider id declared by this connector fixture. */
+pub fn provider_id() {
+  return "render-logs"
+}
+
+/** Return the inbound kinds exercised by this connector fixture. */
+pub fn kinds() {
+  return ["webhook", "stream"]
+}
+
+/** Return the provider payload schema advertised to hosts. */
+pub fn payload_schema() {
+  return {harn_schema_name: "RenderLogPayload", json_schema: {type: "object", additionalProperties: true}}
+}
+
+/** Normalize one Render-style log delivery into a Harn trigger event. */
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json ?? json_parse(raw.body_text)
+  return {
+    type: "event",
+    event: {
+      kind: "log.line",
+      dedupe_key: raw.headers["x-render-delivery"] ?? body.id,
+      payload: {
+        provider: "render-logs",
+        event: "log.line",
+        service_id: body.service_id,
+        deploy_id: body.deploy_id,
+        stream: body.stream,
+        line: body.line,
+        timestamp: body.timestamp,
+      },
+      signature_status: {state: "unsigned"},
+    },
+  }
+}
+
+/** Reject outbound methods that this fixture does not implement. */
+pub fn call(method, _args) {
+  throw "method_not_found:" + method
+}

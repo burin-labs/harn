@@ -261,6 +261,7 @@ pub(crate) fn resolved_provider_connectors_from_manifest(
                 manifest_dir: manifest_dir.to_path_buf(),
                 connector,
                 oauth: provider.oauth.clone(),
+                setup: provider.setup.clone(),
             }
         })
         .collect()

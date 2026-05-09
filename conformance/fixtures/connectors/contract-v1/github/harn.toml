@@ -8,6 +8,26 @@ id = "github"
 connector = { harn = "./lib.harn" }
 capabilities = ["webhook", "rate_limit", "pagination", "graphql"]
 
+[providers.setup]
+auth_type = "github-app"
+flow = "browser"
+required_scopes = ["issues:read", "pull_requests:read", "contents:read", "metadata:read"]
+setup_command = ["harn", "connect", "github", "--app-slug", "<github-app-slug>"]
+validation_command = ["harn", "connect", "status", "--connector", "github", "--json"]
+
+[[providers.setup.health_checks]]
+id = "credentials"
+kind = "command"
+command = ["harn", "connect", "status", "--connector", "github", "--json"]
+
+[providers.setup.recovery]
+missing_auth = "Install the GitHub App and store its installation metadata with `harn connect github`."
+expired_credentials = "Regenerate the GitHub App installation token by rerunning connector setup."
+revoked_credentials = "Remove stale GitHub credentials with `harn connect --revoke github`, then reconnect the app."
+missing_scopes = "Reinstall or reconfigure the GitHub App with the permissions listed in required_scopes."
+inaccessible_resource = "Confirm the GitHub App installation can access the target organization or repository."
+transient_provider_outage = "Retry after GitHub or the local credential backend is reachable."
+
 [connector_contract]
 version = 1
 

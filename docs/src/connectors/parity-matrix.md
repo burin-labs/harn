@@ -14,4 +14,5 @@ Regenerate with `make gen-connector-matrix` and verify with `make check-connecto
 | `github` | [`harn-github-connector`](https://github.com/burin-labs/harn-github-connector) | yes | no | yes | yes | yes | no |
 | `linear` | [`harn-linear-connector`](https://github.com/burin-labs/harn-linear-connector) | yes | yes | yes | yes | yes | no |
 | `notion` | [`harn-notion-connector`](https://github.com/burin-labs/harn-notion-connector) | yes | no | yes | yes | no | no |
+| `render-logs` | [`harn-render-logs-connector`](https://github.com/burin-labs/harn-render-logs-connector) | yes | no | yes | no | no | yes |
 | `slack` | [`harn-slack-connector`](https://github.com/burin-labs/harn-slack-connector) | yes | no | yes | yes | no | no |
