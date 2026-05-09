@@ -44,6 +44,7 @@ impl std::fmt::Display for TriggerId {
 pub enum TriggerState {
     Registering,
     Active,
+    Paused,
     Draining,
     Terminated,
 }
@@ -53,6 +54,7 @@ impl TriggerState {
         match self {
             Self::Registering => "registering",
             Self::Active => "active",
+            Self::Paused => "paused",
             Self::Draining => "draining",
             Self::Terminated => "terminated",
         }
@@ -1068,6 +1070,53 @@ pub async fn drain(id: &str) -> Result<(), TriggerRegistryError> {
     append_lifecycle_events(event_log, events).await
 }
 
+pub async fn pause(id: &str) -> Result<(), TriggerRegistryError> {
+    let (event_log, events) = TRIGGER_REGISTRY.with(|slot| {
+        let registry = &mut *slot.borrow_mut();
+        let live = registry.live_bindings_any_source(id);
+        if live.is_empty() {
+            return Err(TriggerRegistryError::UnknownId(id.to_string()));
+        }
+
+        let mut lifecycle = Vec::new();
+        for binding in live {
+            match binding.state_snapshot() {
+                TriggerState::Registering | TriggerState::Active => {
+                    registry.transition_binding_state(
+                        &binding,
+                        TriggerState::Paused,
+                        &mut lifecycle,
+                    );
+                }
+                TriggerState::Paused | TriggerState::Draining | TriggerState::Terminated => {}
+            }
+        }
+        Ok((registry.event_log.clone(), lifecycle))
+    })?;
+
+    append_lifecycle_events(event_log, events).await
+}
+
+pub async fn resume(id: &str) -> Result<(), TriggerRegistryError> {
+    let (event_log, events) = TRIGGER_REGISTRY.with(|slot| {
+        let registry = &mut *slot.borrow_mut();
+        let live = registry.live_bindings_any_source(id);
+        if live.is_empty() {
+            return Err(TriggerRegistryError::UnknownId(id.to_string()));
+        }
+
+        let mut lifecycle = Vec::new();
+        for binding in live {
+            if binding.state_snapshot() == TriggerState::Paused {
+                registry.transition_binding_state(&binding, TriggerState::Active, &mut lifecycle);
+            }
+        }
+        Ok((registry.event_log.clone(), lifecycle))
+    })?;
+
+    append_lifecycle_events(event_log, events).await
+}
+
 fn pin_trigger_binding_inner(
     id: &str,
     version: u32,
@@ -1082,6 +1131,10 @@ fn pin_trigger_binding_inner(
             }
         })?;
         match binding.state_snapshot() {
+            TriggerState::Paused => Err(TriggerRegistryError::InvalidSpec(format!(
+                "trigger binding '{}' version {} is paused",
+                id, version
+            ))),
             TriggerState::Terminated if !allow_terminated => {
                 Err(TriggerRegistryError::InvalidSpec(format!(
                     "trigger binding '{}' version {} is terminated",
@@ -1314,7 +1367,7 @@ impl TriggerRegistry {
             }
             match record.transition.to_state {
                 TriggerState::Active => active_version = Some(record.transition.version),
-                TriggerState::Draining | TriggerState::Terminated => {
+                TriggerState::Paused | TriggerState::Draining | TriggerState::Terminated => {
                     if active_version == Some(record.transition.version) {
                         active_version = None;
                     }

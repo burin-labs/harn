@@ -664,6 +664,12 @@ async fn async_main() {
             }
             Err(error) => command_error(&error),
         },
+        Command::Supervisor(args) => {
+            if let Err(error) = commands::supervisor::handle(args).await {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        }
         Command::Trace(args) => {
             if let Err(error) = commands::trace::handle(args).await {
                 eprintln!("error: {error}");

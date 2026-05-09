@@ -38,6 +38,7 @@ mod runs;
 mod serve;
 mod skill;
 mod skills;
+mod supervisor;
 mod test;
 mod trace;
 mod trigger;
@@ -129,6 +130,12 @@ pub(crate) use skill::{
 pub(crate) use skills::{
     SkillsArgs, SkillsCommand, SkillsInspectArgs, SkillsInstallArgs, SkillsListArgs,
     SkillsMatchArgs, SkillsNewArgs,
+};
+pub(crate) use supervisor::{
+    SupervisorArgs, SupervisorCommand, SupervisorDlqCommand, SupervisorDlqListArgs,
+    SupervisorDlqReplayArgs, SupervisorFireArgs, SupervisorInspectArgs, SupervisorListArgs,
+    SupervisorPauseArgs, SupervisorRecoverArgs, SupervisorReplayArgs, SupervisorResumeArgs,
+    SupervisorStartArgs, SupervisorStopArgs,
 };
 pub(crate) use test::TestArgs;
 pub(crate) use trace::{TraceArgs, TraceCommand, TraceImportArgs};
@@ -236,6 +243,8 @@ SCRIPTING
     Flow(FlowArgs),
     /// Validate, preview, and run portable workflow bundles.
     Workflow(WorkflowArgs),
+    /// Control local durable workflow automations for trusted hosts.
+    Supervisor(SupervisorArgs),
     /// Import third-party eval traces into replayable Harn fixtures.
     Trace(TraceArgs),
     /// Mine repeated traces into a reviewable deterministic Harn workflow candidate.

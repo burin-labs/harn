@@ -30,6 +30,7 @@ pub mod run;
 pub(crate) mod serve;
 pub(crate) mod skill;
 pub(crate) mod skills;
+pub(crate) mod supervisor;
 pub(crate) mod test;
 pub(crate) mod trace;
 pub mod trigger;

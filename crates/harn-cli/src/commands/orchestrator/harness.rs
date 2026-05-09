@@ -23,6 +23,7 @@ use super::listener::{
 };
 use super::origin_guard::OriginAllowList;
 use super::role::OrchestratorRole;
+use super::supervisor_state::apply_supervisor_state;
 use super::tls::TlsFiles;
 use crate::package::{
     self, CollectedManifestTrigger, CollectedTriggerHandler, Manifest,
@@ -460,6 +461,7 @@ async fn orchestrator_lifecycle(
         .await
         .map_err(|error| format!("failed to collect manifest triggers: {error}"))?;
     package::install_collected_manifest_triggers(&collected_triggers).await?;
+    apply_supervisor_state(&state_dir).await?;
     eprintln!(
         "[harn] registered triggers ({}): {}",
         collected_triggers.len(),
@@ -1864,6 +1866,7 @@ async fn reload_manifest(
     let previous_manifest = ctx.live_manifest.clone();
     let previous_triggers = ctx.live_triggers.clone();
     package::install_collected_manifest_triggers(&collected_triggers).await?;
+    apply_supervisor_state(ctx.state_dir).await?;
     let binding_versions = live_manifest_binding_versions();
     let route_registry = next_connector_runtime
         .as_ref()
@@ -1917,6 +1920,7 @@ async fn rollback_manifest_reload(
     previous_triggers: &[CollectedManifestTrigger],
 ) -> Result<(), OrchestratorError> {
     package::install_collected_manifest_triggers(previous_triggers).await?;
+    apply_supervisor_state(ctx.state_dir).await?;
     let binding_versions = live_manifest_binding_versions();
     let route_configs = build_route_configs(previous_triggers, &binding_versions)?;
     let route_configs = attach_route_connectors(

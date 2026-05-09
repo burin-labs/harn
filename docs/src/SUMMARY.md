@@ -61,6 +61,7 @@
 - [Transcript architecture](./transcript-architecture.md)
 - [Workflow runtime](./workflow-runtime.md)
 - [Portable workflow bundles](./workflow-bundles.md)
+- [Local workflow supervisor](./workflow-supervisor.md)
 - [Team learning and context packs](./team-learning.md)
 - [Workflow crystallization](./workflow-crystallization.md)
 - [Flow predicate language](./flow-predicates.md)
