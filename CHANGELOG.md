@@ -6,7 +6,7 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.8.3
 
 ### Added
 
@@ -14,6 +14,31 @@ condensed series summaries instead of full per-patch history.
   `harn workflow preview`, and `harn workflow run` commands for JSON workflow
   bundle validation, graph preview, and deterministic local run receipts,
   alongside the v1 bundle contract docs and a GitHub PR monitor fixture.
+- **Agent runtime reliability profiles.** Added runtime context-window metadata
+  to provider/model catalogs, exposed it through `model_info` and CLI catalog
+  dumps, and taught Ollama calls plus stdlib token budgeting to prefer runtime
+  context windows when local serving capacity differs from model maximums.
+
+### Changed
+
+- **Agent option forwarding.** Consolidated stdlib agent option forwarding with
+  `pick_keys`, so worker and simulated-user helpers carry reasoning policy,
+  scale, task, and runtime options without repetitive per-field plumbing.
+- **Manual skill routing.** Added a manual skill-matching strategy for callers
+  that already select active skills, avoiding redundant catalog prompt/scoring
+  while still loading explicitly selected skills.
+- **Provider capability profiles.** Added Qwen3-Coder-specific provider rules
+  across OpenRouter, Hugging Face, and Together so agent defaults avoid known
+  broken thinking-mode behavior.
+
+### Fixed
+
+- **Reasoning disable semantics.** Made explicit `reasoning_effort: "none"`
+  disable thinking even when the provider does not support effort levels, and
+  reported disabled thinking consistently in agent observation metadata.
+- **Agent loop resilience.** Let completion judges fail open on provider errors
+  when configured, made transcript auto-compaction honor token thresholds, and
+  applied command-policy gating to host-bridged `process.exec` calls.
 
 ## v0.8.2
 
