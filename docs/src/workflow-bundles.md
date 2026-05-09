@@ -10,6 +10,7 @@ The canonical on-disk format is JSON. The current schema version is `1`.
 ```bash
 harn workflow validate --bundle docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json --json
 harn workflow preview --bundle docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json --json
+harn workflow preview --bundle docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json --mermaid
 harn workflow run --bundle docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json --json
 ```
 
@@ -57,11 +58,22 @@ before committing autonomous resources:
 - trigger declarations
 - connector requirements
 - environment requirements
-- node summaries with outgoing edges, trigger ids, and prompt capsule ids
-- canonical edges
+- normalized `graph.nodes` for triggers, actions, agents/subagents, waits,
+  approvals, connector calls, notifications, catchup/DLQ branches, and terminal
+  states
+- normalized `graph.edges` connecting connector bindings, trigger dispatch,
+  workflow control flow, catchup, DLQ, and terminal outcomes
+- node-scoped `graph.diagnostics` so hosts can annotate the exact workflow node
+  instead of showing opaque bundle errors
+- `graph.editable_fields` JSON pointers for trigger config, prompt capsules,
+  model/tool/approval/retry policy, catchup policy, and connector binding
+  surfaces
+- `graph.mermaid` plus the top-level `mermaid` string for a low-cost debug
+  rendering
 
-This is intentionally compact. Rich visual editing metadata is layered on top of
-the same bundle and graph contract.
+JSON is the product contract. `--mermaid` prints only the Mermaid view for
+quick debugging and docs snippets; hosts should use `--json` for editing and
+validation.
 
 ## Local run receipts
 

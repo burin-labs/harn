@@ -31,6 +31,9 @@ pub(crate) struct WorkflowPreviewArgs {
     /// Portable workflow bundle JSON path.
     #[arg(long)]
     pub bundle: String,
+    /// Emit Mermaid graph text for quick debugging.
+    #[arg(long)]
+    pub mermaid: bool,
     /// Emit JSON.
     #[arg(long)]
     pub json: bool,

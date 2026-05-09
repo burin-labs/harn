@@ -176,6 +176,8 @@ pub struct WorkflowBundlePreview {
     pub workflow_version: usize,
     pub graph_digest: String,
     pub validation: WorkflowBundleValidationReport,
+    pub graph: WorkflowBundleGraphExport,
+    pub mermaid: String,
     pub triggers: Vec<WorkflowBundleTrigger>,
     pub connectors: Vec<ConnectorRequirement>,
     pub environment: EnvironmentRequirements,
@@ -191,6 +193,57 @@ pub struct WorkflowBundlePreviewNode {
     pub prompt_capsule: Option<String>,
     pub trigger_ids: Vec<String>,
     pub outgoing: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct WorkflowBundleGraphExport {
+    pub schema_version: u32,
+    pub graph_id: String,
+    pub graph_digest: String,
+    pub nodes: Vec<WorkflowBundleGraphNode>,
+    pub edges: Vec<WorkflowBundleGraphEdge>,
+    pub diagnostics: Vec<WorkflowBundleGraphDiagnostic>,
+    pub editable_fields: Vec<WorkflowBundleEditableField>,
+    pub mermaid: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct WorkflowBundleGraphNode {
+    pub id: String,
+    pub node_type: String,
+    pub label: String,
+    pub workflow_node_id: Option<String>,
+    pub trigger_id: Option<String>,
+    pub connector_id: Option<String>,
+    pub editable_fields: Vec<WorkflowBundleEditableField>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkflowBundleGraphEdge {
+    pub from: String,
+    pub to: String,
+    pub label: Option<String>,
+    pub branch: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkflowBundleGraphDiagnostic {
+    pub severity: String,
+    pub path: String,
+    pub message: String,
+    pub node_id: Option<String>,
+    pub graph_node_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkflowBundleEditableField {
+    pub id: String,
+    pub label: String,
+    pub json_pointer: String,
+    pub value_type: String,
+    pub required: bool,
+    pub enum_values: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -293,10 +346,12 @@ pub fn validate_workflow_bundle(bundle: &WorkflowBundle) -> WorkflowBundleValida
 
     let graph_report = validate_workflow(&canonical, None);
     for error in graph_report.errors {
-        push_error(&mut report, "workflow", error, None);
+        let node_id = workflow_diagnostic_node_id(&error, &canonical);
+        push_error(&mut report, "workflow", error, node_id);
     }
     for warning in graph_report.warnings {
-        push_warning(&mut report, "workflow", warning, None);
+        let node_id = workflow_diagnostic_node_id(&warning, &canonical);
+        push_warning(&mut report, "workflow", warning, node_id);
     }
 
     if let Some(expected) = bundle.receipts.graph_digest.as_deref() {
@@ -331,6 +386,8 @@ pub fn validate_workflow_bundle(bundle: &WorkflowBundle) -> WorkflowBundleValida
 pub fn preview_workflow_bundle(bundle: &WorkflowBundle) -> WorkflowBundlePreview {
     let canonical = canonical_workflow_graph(&bundle.workflow);
     let validation = validate_workflow_bundle(bundle);
+    let graph = export_workflow_bundle_graph(bundle, &validation);
+    let mermaid = graph.mermaid.clone();
     let triggers_by_node = triggers_by_node(bundle);
     let capsules_by_node = capsules_by_node(bundle);
     let mut nodes = Vec::new();
@@ -362,11 +419,267 @@ pub fn preview_workflow_bundle(bundle: &WorkflowBundle) -> WorkflowBundlePreview
         workflow_version: canonical.version,
         graph_digest: validation.graph_digest.clone(),
         validation,
+        graph,
+        mermaid,
         triggers: bundle.triggers.clone(),
         connectors: bundle.connectors.clone(),
         environment: bundle.environment.clone(),
         nodes,
         edges: sorted_edges(&canonical),
+    }
+}
+
+pub fn export_workflow_bundle_graph(
+    bundle: &WorkflowBundle,
+    validation: &WorkflowBundleValidationReport,
+) -> WorkflowBundleGraphExport {
+    let canonical = canonical_workflow_graph(&bundle.workflow);
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    let mut editable_fields = Vec::new();
+    let capsules_by_node = capsules_by_node(bundle);
+    let catchup_enabled = bundle.policy.catchup.mode != "none";
+    let retry_can_dlq = bundle.policy.retry.max_attempts > 1;
+
+    for (index, connector) in bundle.connectors.iter().enumerate() {
+        let node_fields = connector_editable_fields(index, connector);
+        editable_fields.extend(node_fields.clone());
+        nodes.push(WorkflowBundleGraphNode {
+            id: connector_graph_id(&connector.id),
+            node_type: "connector_call".to_string(),
+            label: connector_label(connector),
+            workflow_node_id: None,
+            trigger_id: None,
+            connector_id: Some(connector.id.clone()),
+            editable_fields: node_fields,
+            metadata: BTreeMap::from([
+                (
+                    "provider_id".to_string(),
+                    serde_json::json!(connector.provider_id),
+                ),
+                ("scopes".to_string(), serde_json::json!(connector.scopes)),
+            ]),
+        });
+    }
+
+    let catchup_fields = catchup_editable_fields();
+    let retry_fields = retry_editable_fields();
+    if catchup_enabled {
+        let node_fields = catchup_fields.clone();
+        editable_fields.extend(node_fields.clone());
+        nodes.push(WorkflowBundleGraphNode {
+            id: catchup_graph_id(),
+            node_type: "catchup".to_string(),
+            label: "Catch up".to_string(),
+            workflow_node_id: None,
+            trigger_id: None,
+            connector_id: None,
+            editable_fields: node_fields,
+            metadata: BTreeMap::from([(
+                "mode".to_string(),
+                serde_json::json!(bundle.policy.catchup.mode),
+            )]),
+        });
+    } else {
+        editable_fields.extend(catchup_fields);
+    }
+    if retry_can_dlq {
+        let node_fields = retry_fields.clone();
+        editable_fields.extend(node_fields.clone());
+        nodes.push(WorkflowBundleGraphNode {
+            id: dlq_graph_id(),
+            node_type: "dlq".to_string(),
+            label: "Dead letter queue".to_string(),
+            workflow_node_id: None,
+            trigger_id: None,
+            connector_id: None,
+            editable_fields: node_fields,
+            metadata: BTreeMap::from([(
+                "max_attempts".to_string(),
+                serde_json::json!(bundle.policy.retry.max_attempts),
+            )]),
+        });
+    } else {
+        editable_fields.extend(retry_fields);
+    }
+
+    for (index, trigger) in bundle.triggers.iter().enumerate() {
+        let node_fields = trigger_editable_fields(index, trigger);
+        editable_fields.extend(node_fields.clone());
+        nodes.push(WorkflowBundleGraphNode {
+            id: trigger_graph_id(&trigger.id),
+            node_type: "trigger".to_string(),
+            label: trigger_label(trigger),
+            workflow_node_id: trigger.node_id.clone(),
+            trigger_id: Some(trigger.id.clone()),
+            connector_id: None,
+            editable_fields: node_fields,
+            metadata: BTreeMap::from([
+                ("kind".to_string(), serde_json::json!(trigger.kind)),
+                ("provider".to_string(), serde_json::json!(trigger.provider)),
+                ("events".to_string(), serde_json::json!(trigger.events)),
+            ]),
+        });
+        if let Some(provider) = trigger.provider.as_deref() {
+            if let Some(connector) = bundle
+                .connectors
+                .iter()
+                .find(|connector| connector.provider_id == provider || connector.id == provider)
+            {
+                edges.push(WorkflowBundleGraphEdge {
+                    from: connector_graph_id(&connector.id),
+                    to: trigger_graph_id(&trigger.id),
+                    label: Some("binds".to_string()),
+                    branch: None,
+                });
+            }
+        }
+        let target = trigger
+            .node_id
+            .clone()
+            .unwrap_or_else(|| canonical.entry.clone());
+        if catchup_enabled {
+            edges.push(WorkflowBundleGraphEdge {
+                from: trigger_graph_id(&trigger.id),
+                to: catchup_graph_id(),
+                label: Some(bundle.policy.catchup.mode.clone()),
+                branch: Some("catchup".to_string()),
+            });
+            edges.push(WorkflowBundleGraphEdge {
+                from: catchup_graph_id(),
+                to: workflow_graph_id(&target),
+                label: Some("dispatch".to_string()),
+                branch: None,
+            });
+        } else {
+            edges.push(WorkflowBundleGraphEdge {
+                from: trigger_graph_id(&trigger.id),
+                to: workflow_graph_id(&target),
+                label: Some("dispatch".to_string()),
+                branch: None,
+            });
+        }
+    }
+
+    for (node_id, node) in &canonical.nodes {
+        let capsule_id = capsules_by_node.get(node_id);
+        let node_fields = workflow_node_editable_fields(node_id, capsule_id);
+        editable_fields.extend(node_fields.clone());
+        nodes.push(WorkflowBundleGraphNode {
+            id: workflow_graph_id(node_id),
+            node_type: workflow_node_type(&node.kind),
+            label: workflow_node_label(node_id, node),
+            workflow_node_id: Some(node_id.clone()),
+            trigger_id: None,
+            connector_id: None,
+            editable_fields: node_fields,
+            metadata: BTreeMap::from([
+                ("kind".to_string(), serde_json::json!(node.kind)),
+                ("task_label".to_string(), serde_json::json!(node.task_label)),
+                (
+                    "prompt_capsule".to_string(),
+                    serde_json::json!(capsule_id.cloned()),
+                ),
+            ]),
+        });
+    }
+
+    for edge in sorted_edges(&canonical) {
+        edges.push(WorkflowBundleGraphEdge {
+            from: workflow_graph_id(&edge.from),
+            to: workflow_graph_id(&edge.to),
+            label: edge.label.clone(),
+            branch: edge.branch.clone(),
+        });
+    }
+
+    let outgoing: BTreeSet<&str> = canonical
+        .edges
+        .iter()
+        .map(|edge| edge.from.as_str())
+        .collect();
+    for node_id in canonical.nodes.keys() {
+        if !outgoing.contains(node_id.as_str()) {
+            edges.push(WorkflowBundleGraphEdge {
+                from: workflow_graph_id(node_id),
+                to: terminal_completed_graph_id(),
+                label: Some("completed".to_string()),
+                branch: Some("completed".to_string()),
+            });
+        }
+        if retry_can_dlq {
+            edges.push(WorkflowBundleGraphEdge {
+                from: workflow_graph_id(node_id),
+                to: dlq_graph_id(),
+                label: Some("retry exhausted".to_string()),
+                branch: Some("failed".to_string()),
+            });
+        }
+    }
+
+    nodes.push(WorkflowBundleGraphNode {
+        id: terminal_completed_graph_id(),
+        node_type: "terminal".to_string(),
+        label: "Completed".to_string(),
+        workflow_node_id: None,
+        trigger_id: None,
+        connector_id: None,
+        editable_fields: Vec::new(),
+        metadata: BTreeMap::from([("status".to_string(), serde_json::json!("completed"))]),
+    });
+    nodes.push(WorkflowBundleGraphNode {
+        id: terminal_failed_graph_id(),
+        node_type: "terminal".to_string(),
+        label: "Failed".to_string(),
+        workflow_node_id: None,
+        trigger_id: None,
+        connector_id: None,
+        editable_fields: Vec::new(),
+        metadata: BTreeMap::from([("status".to_string(), serde_json::json!("failed"))]),
+    });
+    if retry_can_dlq {
+        edges.push(WorkflowBundleGraphEdge {
+            from: dlq_graph_id(),
+            to: terminal_failed_graph_id(),
+            label: Some("failed".to_string()),
+            branch: Some("failed".to_string()),
+        });
+    }
+
+    nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    edges.sort_by(|left, right| {
+        (&left.from, &left.to, &left.branch, &left.label).cmp(&(
+            &right.from,
+            &right.to,
+            &right.branch,
+            &right.label,
+        ))
+    });
+    editable_fields.sort_by(|left, right| left.id.cmp(&right.id));
+
+    let diagnostics = validation
+        .errors
+        .iter()
+        .chain(validation.warnings.iter())
+        .map(|diagnostic| WorkflowBundleGraphDiagnostic {
+            severity: diagnostic.severity.clone(),
+            path: diagnostic.path.clone(),
+            message: diagnostic.message.clone(),
+            node_id: diagnostic.node_id.clone(),
+            graph_node_id: diagnostic.node_id.as_deref().map(workflow_graph_id),
+        })
+        .collect::<Vec<_>>();
+    let mermaid = render_workflow_bundle_mermaid(&nodes, &edges);
+
+    WorkflowBundleGraphExport {
+        schema_version: WORKFLOW_BUNDLE_SCHEMA_VERSION,
+        graph_id: canonical.id,
+        graph_digest: validation.graph_digest.clone(),
+        nodes,
+        edges,
+        diagnostics,
+        editable_fields,
+        mermaid,
     }
 }
 
@@ -807,6 +1120,420 @@ fn validate_environment(bundle: &WorkflowBundle, report: &mut WorkflowBundleVali
             None,
         );
     }
+}
+
+fn workflow_diagnostic_node_id(message: &str, graph: &WorkflowGraph) -> Option<String> {
+    for prefix in [
+        "node is unreachable: ",
+        "edge.from references unknown node: ",
+        "edge.to references unknown node: ",
+        "entry node does not exist: ",
+    ] {
+        if let Some(node_id) = message.strip_prefix(prefix) {
+            return Some(node_id.to_string());
+        }
+    }
+    if let Some(rest) = message.strip_prefix("node ") {
+        if let Some((node_id, _)) = rest.split_once(':') {
+            return Some(node_id.to_string());
+        }
+    }
+    graph
+        .nodes
+        .keys()
+        .find(|node_id| message.contains(&format!("node {node_id}:")))
+        .cloned()
+}
+
+fn workflow_graph_id(node_id: &str) -> String {
+    format!("node/{node_id}")
+}
+
+fn trigger_graph_id(trigger_id: &str) -> String {
+    format!("trigger/{trigger_id}")
+}
+
+fn connector_graph_id(connector_id: &str) -> String {
+    format!("connector/{connector_id}")
+}
+
+fn catchup_graph_id() -> String {
+    "policy/catchup".to_string()
+}
+
+fn dlq_graph_id() -> String {
+    "policy/dlq".to_string()
+}
+
+fn terminal_completed_graph_id() -> String {
+    "terminal/completed".to_string()
+}
+
+fn terminal_failed_graph_id() -> String {
+    "terminal/failed".to_string()
+}
+
+fn workflow_node_type(kind: &str) -> String {
+    match kind {
+        "action" => "action",
+        "stage" | "agent" => "agent",
+        "subagent" | "worker" => "subagent",
+        "wait" | "waitpoint" | "delay" => "wait",
+        "approval" | "hitl" => "approval",
+        "connector" | "connector_call" => "connector_call",
+        "notification" | "notify" => "notification",
+        "terminal" | "success" | "failure" => "terminal",
+        other if other.trim().is_empty() => "agent",
+        other => other,
+    }
+    .to_string()
+}
+
+fn workflow_node_label(node_id: &str, node: &super::WorkflowNode) -> String {
+    node.task_label
+        .clone()
+        .or_else(|| node.prompt.clone())
+        .map(|label| label.trim().to_string())
+        .filter(|label| !label.is_empty())
+        .unwrap_or_else(|| node_id.to_string())
+}
+
+fn trigger_label(trigger: &WorkflowBundleTrigger) -> String {
+    if !trigger.events.is_empty() {
+        format!("{}: {}", trigger.kind, trigger.events.join(", "))
+    } else if let Some(schedule) = trigger.schedule.as_deref() {
+        format!("cron: {schedule}")
+    } else if let Some(delay) = trigger.delay.as_deref() {
+        format!("delay: {delay}")
+    } else {
+        trigger.id.clone()
+    }
+}
+
+fn connector_label(connector: &ConnectorRequirement) -> String {
+    if connector.provider_id.is_empty() || connector.provider_id == connector.id {
+        connector.id.clone()
+    } else {
+        format!("{} ({})", connector.id, connector.provider_id)
+    }
+}
+
+fn editable_field(
+    id: impl Into<String>,
+    label: impl Into<String>,
+    json_pointer: impl Into<String>,
+    value_type: impl Into<String>,
+    required: bool,
+    enum_values: &[&str],
+) -> WorkflowBundleEditableField {
+    WorkflowBundleEditableField {
+        id: id.into(),
+        label: label.into(),
+        json_pointer: json_pointer.into(),
+        value_type: value_type.into(),
+        required,
+        enum_values: enum_values
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect(),
+    }
+}
+
+fn json_pointer_segment(value: &str) -> String {
+    value.replace('~', "~0").replace('/', "~1")
+}
+
+fn trigger_editable_fields(
+    index: usize,
+    trigger: &WorkflowBundleTrigger,
+) -> Vec<WorkflowBundleEditableField> {
+    let base = format!("/triggers/{index}");
+    let mut fields = vec![
+        editable_field(
+            format!("trigger.{}.kind", trigger.id),
+            "Trigger kind",
+            format!("{base}/kind"),
+            "enum",
+            true,
+            &["github", "cron", "delay", "manual", "webhook", "mcp"],
+        ),
+        editable_field(
+            format!("trigger.{}.node_id", trigger.id),
+            "Target node",
+            format!("{base}/node_id"),
+            "string",
+            false,
+            &[],
+        ),
+    ];
+    if trigger.provider.is_some() || trigger.kind == "github" {
+        fields.push(editable_field(
+            format!("trigger.{}.provider", trigger.id),
+            "Provider",
+            format!("{base}/provider"),
+            "string",
+            trigger.kind == "github",
+            &[],
+        ));
+    }
+    for (field, label, value_type) in [
+        ("events", "Events", "list"),
+        ("schedule", "Schedule", "string"),
+        ("delay", "Delay", "string"),
+        ("webhook_path", "Webhook path", "string"),
+        ("mcp_tool", "MCP tool", "string"),
+        ("resume_key", "Resume key", "string"),
+        ("metadata", "Metadata", "object"),
+    ] {
+        fields.push(editable_field(
+            format!("trigger.{}.{}", trigger.id, field),
+            label,
+            format!("{base}/{field}"),
+            value_type,
+            false,
+            &[],
+        ));
+    }
+    fields
+}
+
+fn workflow_node_editable_fields(
+    node_id: &str,
+    capsule_id: Option<&String>,
+) -> Vec<WorkflowBundleEditableField> {
+    let escaped_node = json_pointer_segment(node_id);
+    let mut fields = vec![
+        editable_field(
+            format!("workflow.{node_id}.task_label"),
+            "Task label",
+            format!("/workflow/nodes/{escaped_node}/task_label"),
+            "string",
+            false,
+            &[],
+        ),
+        editable_field(
+            format!("workflow.{node_id}.prompt"),
+            "Prompt",
+            format!("/workflow/nodes/{escaped_node}/prompt"),
+            "string",
+            false,
+            &[],
+        ),
+        editable_field(
+            format!("workflow.{node_id}.system"),
+            "System prompt",
+            format!("/workflow/nodes/{escaped_node}/system"),
+            "string",
+            false,
+            &[],
+        ),
+        editable_field(
+            format!("workflow.{node_id}.model_policy"),
+            "Model policy",
+            format!("/workflow/nodes/{escaped_node}/model_policy"),
+            "object",
+            false,
+            &[],
+        ),
+        editable_field(
+            format!("workflow.{node_id}.tools"),
+            "Tool policy",
+            format!("/workflow/nodes/{escaped_node}/tools"),
+            "any",
+            false,
+            &[],
+        ),
+        editable_field(
+            format!("workflow.{node_id}.capability_policy"),
+            "Capability policy",
+            format!("/workflow/nodes/{escaped_node}/capability_policy"),
+            "object",
+            false,
+            &[],
+        ),
+        editable_field(
+            format!("workflow.{node_id}.approval_policy"),
+            "Approval policy",
+            format!("/workflow/nodes/{escaped_node}/approval_policy"),
+            "object",
+            false,
+            &[],
+        ),
+        editable_field(
+            format!("workflow.{node_id}.retry_policy"),
+            "Retry policy",
+            format!("/workflow/nodes/{escaped_node}/retry_policy"),
+            "object",
+            false,
+            &[],
+        ),
+    ];
+    if let Some(capsule_id) = capsule_id {
+        let escaped_capsule = json_pointer_segment(capsule_id);
+        fields.extend([
+            editable_field(
+                format!("prompt_capsule.{capsule_id}.prompt"),
+                "Prompt capsule",
+                format!("/prompt_capsules/{escaped_capsule}/prompt"),
+                "string",
+                true,
+                &[],
+            ),
+            editable_field(
+                format!("prompt_capsule.{capsule_id}.system"),
+                "Prompt capsule system",
+                format!("/prompt_capsules/{escaped_capsule}/system"),
+                "string",
+                false,
+                &[],
+            ),
+            editable_field(
+                format!("prompt_capsule.{capsule_id}.context"),
+                "Prompt capsule context",
+                format!("/prompt_capsules/{escaped_capsule}/context"),
+                "object",
+                false,
+                &[],
+            ),
+            editable_field(
+                format!("prompt_capsule.{capsule_id}.trigger_id"),
+                "Prompt capsule trigger",
+                format!("/prompt_capsules/{escaped_capsule}/trigger_id"),
+                "string",
+                false,
+                &[],
+            ),
+        ]);
+    }
+    fields
+}
+
+fn connector_editable_fields(
+    index: usize,
+    connector: &ConnectorRequirement,
+) -> Vec<WorkflowBundleEditableField> {
+    let base = format!("/connectors/{index}");
+    [
+        ("id", "Connector id", "string", true),
+        ("provider_id", "Provider id", "string", true),
+        ("scopes", "Scopes", "list", false),
+        ("setup_required", "Setup required", "bool", false),
+        ("status_required", "Status required", "bool", false),
+    ]
+    .into_iter()
+    .map(|(field, label, value_type, required)| {
+        editable_field(
+            format!("connector.{}.{}", connector.id, field),
+            label,
+            format!("{base}/{field}"),
+            value_type,
+            required,
+            &[],
+        )
+    })
+    .collect()
+}
+
+fn retry_editable_fields() -> Vec<WorkflowBundleEditableField> {
+    vec![
+        editable_field(
+            "policy.retry.max_attempts",
+            "Retry attempts",
+            "/policy/retry/max_attempts",
+            "integer",
+            true,
+            &[],
+        ),
+        editable_field(
+            "policy.retry.backoff",
+            "Retry backoff",
+            "/policy/retry/backoff",
+            "string",
+            true,
+            &[],
+        ),
+    ]
+}
+
+fn catchup_editable_fields() -> Vec<WorkflowBundleEditableField> {
+    vec![
+        editable_field(
+            "policy.catchup.mode",
+            "Catchup mode",
+            "/policy/catchup/mode",
+            "enum",
+            true,
+            &["none", "latest", "all"],
+        ),
+        editable_field(
+            "policy.catchup.max_events",
+            "Catchup max events",
+            "/policy/catchup/max_events",
+            "integer",
+            false,
+            &[],
+        ),
+    ]
+}
+
+fn render_workflow_bundle_mermaid(
+    nodes: &[WorkflowBundleGraphNode],
+    edges: &[WorkflowBundleGraphEdge],
+) -> String {
+    let mut lines = vec!["flowchart TD".to_string()];
+    for node in nodes {
+        lines.push(format!(
+            "  {}[\"{}\"]",
+            mermaid_id(&node.id),
+            mermaid_label(&format!("{}: {}", node.node_type, node.label))
+        ));
+    }
+    for edge in edges {
+        let label = edge
+            .label
+            .as_deref()
+            .or(edge.branch.as_deref())
+            .map(mermaid_label);
+        match label {
+            Some(label) if !label.is_empty() => lines.push(format!(
+                "  {} -->|{}| {}",
+                mermaid_id(&edge.from),
+                label,
+                mermaid_id(&edge.to)
+            )),
+            _ => lines.push(format!(
+                "  {} --> {}",
+                mermaid_id(&edge.from),
+                mermaid_id(&edge.to)
+            )),
+        }
+    }
+    lines.join("\n")
+}
+
+fn mermaid_id(value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    let suffix = digest
+        .iter()
+        .take(4)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let mut out = format!("n_{suffix}_");
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    out
+}
+
+fn mermaid_label(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', " ")
 }
 
 fn triggers_by_node(bundle: &WorkflowBundle) -> BTreeMap<String, Vec<String>> {
