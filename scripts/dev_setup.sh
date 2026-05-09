@@ -20,10 +20,15 @@ write_build_config() {
   local rustc_wrapper="${1:-}"
   local target_dir="${2:-}"
   local config_path=".cargo/config.toml"
+  local drop_generated_target_dir=0
   local source_path="/dev/null"
   local tmp_path
 
-  if [[ -z "${rustc_wrapper}" && -z "${target_dir}" ]]; then
+  if [[ -z "${target_dir}" ]]; then
+    drop_generated_target_dir=1
+  fi
+
+  if [[ -z "${rustc_wrapper}" && -z "${target_dir}" && ! -f "${config_path}" ]]; then
     return 0
   fi
 
@@ -36,7 +41,21 @@ write_build_config() {
   awk \
     -v rustc_wrapper="${rustc_wrapper}" \
     -v target_dir="${target_dir}" \
+    -v drop_generated_target_dir="${drop_generated_target_dir}" \
     '
+    function extract_toml_string(line, value) {
+      value = line
+      sub(/^[^=]*=[[:space:]]*"/, "", value)
+      sub(/"[[:space:]]*(#.*)?$/, "", value)
+      return value
+    }
+
+    function is_generated_target_dir(value) {
+      return value ~ "^(/private)?/tmp/harn-devsetup-[^/]+$" || \
+        value ~ "^(/private)?/tmp/harn-target/[^/]+$" || \
+        value ~ "/T/+harn-target/[^/]+$"
+    }
+
     function print_missing_build_values() {
       if (rustc_wrapper != "" && !saw_rustc_wrapper) {
         print "rustc-wrapper = \"" rustc_wrapper "\""
@@ -81,6 +100,12 @@ write_build_config() {
         print "target-dir = \"" target_dir "\""
         saw_target_dir = 1
         next
+      }
+      if (in_build && drop_generated_target_dir && $0 ~ /^[[:space:]]*target-dir[[:space:]]*=/) {
+        if (is_generated_target_dir(extract_toml_string($0))) {
+          saw_target_dir = 1
+          next
+        }
       }
       print
     }
