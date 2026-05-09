@@ -25,6 +25,7 @@ For model-specific feature support, see the generated
 | Vertex AI | `VERTEX_AI_ACCESS_TOKEN` or `GOOGLE_APPLICATION_CREDENTIALS` | Gemini model ID |
 | Ollama | `OLLAMA_HOST` (optional) | `llama3.2` |
 | Local server | `LOCAL_LLM_BASE_URL` | `LOCAL_LLM_MODEL` or explicit `model` |
+| llama.cpp server | `LLAMACPP_BASE_URL` | explicit `model` from `/v1/models` |
 | MLX OpenAI-compatible server | `MLX_BASE_URL` | `MLX_MODEL_ID` or `mlx-qwen36-27b` |
 
 Ollama runs locally and doesn't require an API key. The default host is
@@ -42,6 +43,11 @@ For a generic OpenAI-compatible local server, set `LOCAL_LLM_BASE_URL` to
 something like `http://192.168.86.250:8000` and either pass
 `{provider: "local", model: "qwen2.5-coder-32b"}` or set
 `LOCAL_LLM_MODEL=qwen2.5-coder-32b`.
+
+For llama.cpp / `llama-server`, Harn has a separate `llamacpp` provider so Qwen
+thinking-template quirks can be modeled independently from other local
+OpenAI-compatible servers. Set `LLAMACPP_BASE_URL` when it is not listening on
+`http://127.0.0.1:8001`.
 
 For an Apple Silicon MLX OpenAI-compatible server, Harn uses
 `MLX_BASE_URL` with a default of `http://127.0.0.1:8002`. Run
@@ -148,6 +154,8 @@ Each `[[capabilities.provider.<name>]]` entry accepts these fields:
 | `max_tools` | int | Cap on tool count. `harn lint` will warn if a registry exceeds the smallest cap any active provider advertises. |
 | `prompt_caching` | bool | `cache_control` blocks honored. |
 | `thinking_modes` | list of strings | Supported script-facing thinking modes. Values are `enabled`, `adaptive`, or `effort`. |
+| `reasoning_effort_supported` | bool | Provider accepts a `reasoning_effort` request field for effort-capable models. |
+| `reasoning_none_supported` | bool | Provider accepts `reasoning_effort: "none"` as true reasoning-off instead of flooring at `minimal`. |
 | `interleaved_thinking_supported` | bool | `thinking: true` can request Anthropic's `interleaved-thinking-2025-05-14` beta header. |
 | `anthropic_beta_features` | list of strings | Anthropic beta feature names always requested for this provider/model route. |
 | `vision_supported` | bool | Image content accepted by the provider/model route. |
@@ -254,6 +262,14 @@ adapters and model aliases without editing Rust-side registration code.
 - Default host: `http://localhost:8000`
 - No authentication required
 - Same message format as OpenAI
+
+### llama.cpp OpenAI-compatible server
+
+- Endpoint: `<LLAMACPP_BASE_URL>/v1/chat/completions`
+- Default host: `http://127.0.0.1:8001`
+- No authentication required
+- Qwen3 capability rules enable `chat_template_kwargs` and `/no_think`
+  handling when the model ID matches Qwen
 
 ### MLX OpenAI-compatible server
 

@@ -5,8 +5,8 @@ tracked by `burin-code#144`.
 
 This version stays deliberately small:
 
-- one-screen Harn-native host in [host.harn](/Users/ksinder/.codex/worktrees/7fc6/harn/experiments/burin-mini/host.harn)
-- one orchestration script in [pipeline.harn](/Users/ksinder/.codex/worktrees/7fc6/harn/experiments/burin-mini/pipeline.harn)
+- one-screen Harn-native host in `host.harn`
+- one orchestration script in `pipeline.harn`
 - one tiny TypeScript auth demo workspace under `workspace/`
 - deterministic JSONL fixtures for the 3 canonical task shapes
 
@@ -83,7 +83,7 @@ Each live task directory now contains:
 
 - `report.json`: pipeline report emitted by `pipeline.harn`
 - `run_record.json`: persisted action-graph run record when the task executed writes
-- `semantic_eval.json`: separate semantic grading result from [evaluator.harn](/Users/ksinder/.codex/worktrees/e04d/harn/experiments/burin-mini/evaluator.harn)
+- `semantic_eval.json`: separate semantic grading result from `evaluator.harn`
 - `llm/` and `events/`: raw top-level transcripts plus sub-agent event logs used by the semantic grader
 - `workspace_after/`: final sandbox workspace snapshot
 
@@ -101,19 +101,49 @@ Treat the raw transcript files as chronology/debugging data instead:
 Set `BURIN_MINI_SEMANTIC_EVAL_MODE=heuristic` when you want a deterministic
 local harness grade without spending an evaluator model call.
 
+## Reasoning Matrix
+
+`run_reasoning_matrix.sh` runs the live suite across local and remote model
+backends while varying Harn's provider-aware reasoning policy:
+
+```bash
+BURIN_MINI_SEMANTIC_EVAL_MODE=heuristic \
+BURIN_MINI_MATRIX_POLICIES="off auto high" \
+./experiments/burin-mini/run_reasoning_matrix.sh
+```
+
+The runner sources `~/projects/burin-code/.env` by default when it exists, but
+never copies credentials into outputs. It probes local Ollama models, reuses an
+already-running llama.cpp OpenAI-compatible server at `LLAMACPP_BASE_URL`
+(`http://127.0.0.1:8001` by default), and filters Together candidates to
+serverless coding-adjacent models whose advertised input and output prices are
+no more than `$2/Mtok`. It ranks Qwen Coder routes before general reasoning
+models because the playground stresses tool-following coding-agent behavior.
+Override with:
+
+- `BURIN_MINI_MATRIX_OLLAMA_MODELS`
+- `BURIN_MINI_MATRIX_LLAMACPP_MODEL`
+- `BURIN_MINI_MATRIX_TOGETHER_MODELS`
+- `BURIN_MINI_MATRIX_INCLUDE_OLLAMA=0`
+- `BURIN_MINI_MATRIX_INCLUDE_LLAMACPP=0`
+- `BURIN_MINI_MATRIX_INCLUDE_TOGETHER=0`
+
+Current empirical tuning notes: local Qwen3.6 over llama.cpp is the preferred
+local serving route for this playground, and Harn's `auto` policy leaves
+small/medium local Qwen tasks in no-thinking mode. Ollama Qwen3.6 raw-generate
+requests were not stable enough in this harness during the May 2026 tuning pass.
+
 ## Notes
 
 - Reports are written to `experiments/burin-mini/evals/generated/<task-id>-latest.json`.
-- Semantic evaluator helpers live in
-  [lib/eval_common.harn](/Users/ksinder/.codex/worktrees/e04d/harn/experiments/burin-mini/lib/eval_common.harn),
-  and the grader entrypoint is
-  [evaluator.harn](/Users/ksinder/.codex/worktrees/e04d/harn/experiments/burin-mini/evaluator.harn).
+- Semantic evaluator helpers live in `lib/eval_common.harn`, and the grader
+  entrypoint is `evaluator.harn`.
 - The verify script for the rate-limit task lives at
-  [workspace/scripts/verify-rate-limit.sh](/Users/ksinder/.codex/worktrees/7fc6/harn/experiments/burin-mini/workspace/scripts/verify-rate-limit.sh).
+  `workspace/scripts/verify-rate-limit.sh`.
 - Repo integration:
   `cargo test -p harn-cli --test burin_mini_playground` exercises the paired
   playground host+pipeline flow, while `make lint-harn` checks the standalone
   host/lib modules and `make fmt-harn` checks formatting for the full
   experiment tree.
 - Baseline comparison against current `burin-code` pipelines is documented at a
-  qualitative level in [DECISION.md](/Users/ksinder/.codex/worktrees/7fc6/harn/experiments/burin-mini/DECISION.md).
+  qualitative level in `DECISION.md`.

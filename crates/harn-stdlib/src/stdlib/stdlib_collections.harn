@@ -19,6 +19,25 @@ pub fn filter_nil(d) {
   )
 }
 
+/** pick_keys. */
+pub fn pick_keys(d, selected_keys, options = nil) {
+  if type_of(d) != "dict" {
+    return {}
+  }
+  let opts = options ?? {}
+  let drop_nil = opts?.drop_nil ?? false
+  var out = {}
+  for key in selected_keys {
+    if contains(d.keys(), key) {
+      let value = d[key]
+      if !drop_nil || value != nil {
+        out[key] = value
+      }
+    }
+  }
+  return out
+}
+
 // Check if a store key is stale (older than max_age_seconds).
 // Uses store_get/store_set convention: timestamps stored as key + "_ts".
 /** store_stale. */

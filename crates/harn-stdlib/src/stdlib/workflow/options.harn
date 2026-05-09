@@ -1,3 +1,5 @@
+import { pick_keys } from "std/collections"
+
 fn __workflow_non_empty_string(value) {
   if type_of(value) != "string" {
     return nil
@@ -54,36 +56,28 @@ pub fn workflow_autonomy_policy(config = nil) {
   }
 }
 
-fn __workflow_add_model_option(options, model_policy, key) {
-  let value = model_policy[key]
-  if value == nil {
-    return options
-  }
-  return options + {[key]: value}
-}
-
 fn __workflow_llm_options(config, model_policy, tool_format) {
-  var options = {tool_format: tool_format}
+  let model_option_keys = ["provider", "model", "model_tier", "temperature", "max_tokens", "thinking", "reasoning_effort"]
+  var options = {tool_format: tool_format} + pick_keys(model_policy, model_option_keys, {drop_nil: true})
   if __workflow_non_empty_string(config?.session_id) != nil {
     options = options + {session_id: __workflow_non_empty_string(config?.session_id)}
   }
-  options = __workflow_add_model_option(options, model_policy, "provider")
-  options = __workflow_add_model_option(options, model_policy, "model")
-  options = __workflow_add_model_option(options, model_policy, "model_tier")
-  options = __workflow_add_model_option(options, model_policy, "temperature")
-  options = __workflow_add_model_option(options, model_policy, "max_tokens")
   return options
 }
 
-fn __workflow_add_loop_option(options, model_policy, key) {
-  let value = model_policy[key]
-  if value == nil {
-    return options
-  }
-  return options + {[key]: value}
-}
-
 fn __workflow_agent_loop_options(config, model_policy, tool_format) {
+  let loop_option_keys = [
+    "nudge",
+    "tool_examples",
+    "turn_policy",
+    "stop_after_successful_tools",
+    "require_successful_tools",
+    "reasoning_policy",
+    "thinking_policy",
+    "reasoning_scale",
+    "problem_scale",
+    "reasoning_task",
+  ]
   var options = {
     loop_until_done: true,
     max_iterations: model_policy?.max_iterations ?? 16,
@@ -107,12 +101,7 @@ fn __workflow_agent_loop_options(config, model_policy, tool_format) {
   if config?.done_sentinel != nil {
     options = options + {done_sentinel: config?.done_sentinel}
   }
-  options = __workflow_add_loop_option(options, model_policy, "nudge")
-  options = __workflow_add_loop_option(options, model_policy, "tool_examples")
-  options = __workflow_add_loop_option(options, model_policy, "turn_policy")
-  options = __workflow_add_loop_option(options, model_policy, "stop_after_successful_tools")
-  options = __workflow_add_loop_option(options, model_policy, "require_successful_tools")
-  return options
+  return options + pick_keys(model_policy, loop_option_keys, {drop_nil: true})
 }
 
 /** workflow_stage_agent_options. */

@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
+use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ReasoningEffort, ThinkingConfig};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::{VmError, VmValue};
 
@@ -21,6 +21,50 @@ impl LlmProviderChat for GeminiProvider {
         delta_tx: Option<DeltaSender>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
         Box::pin(self.chat_impl(request, delta_tx))
+    }
+}
+
+fn gemini_supports_thinking_config(model: &str) -> bool {
+    let model = model.to_ascii_lowercase();
+    model.contains("gemini-2.5")
+}
+
+fn gemini_max_thinking_budget(model: &str) -> i64 {
+    if model.to_ascii_lowercase().contains("flash") {
+        24_576
+    } else {
+        32_768
+    }
+}
+
+fn gemini_can_disable_thinking(model: &str) -> bool {
+    let model = model.to_ascii_lowercase();
+    model.contains("flash") || model.contains("robotics")
+}
+
+fn gemini_thinking_budget(model: &str, thinking: &ThinkingConfig) -> Option<i64> {
+    if !gemini_supports_thinking_config(model) {
+        return None;
+    }
+    match thinking {
+        ThinkingConfig::Disabled => gemini_can_disable_thinking(model).then_some(0),
+        ThinkingConfig::Enabled {
+            budget_tokens: Some(tokens),
+        } => Some((*tokens).into()),
+        ThinkingConfig::Enabled {
+            budget_tokens: None,
+        }
+        | ThinkingConfig::Adaptive => Some(-1),
+        ThinkingConfig::Effort { level } => Some(match level {
+            ReasoningEffort::None => {
+                return gemini_can_disable_thinking(model).then_some(0);
+            }
+            ReasoningEffort::Minimal => 1_024,
+            ReasoningEffort::Low => 1_024,
+            ReasoningEffort::Medium => 8_192,
+            ReasoningEffort::High => gemini_max_thinking_budget(model),
+            ReasoningEffort::XHigh => gemini_max_thinking_budget(model),
+        }),
     }
 }
 
@@ -66,6 +110,12 @@ impl GeminiProvider {
         }
         if let Some(stop) = &opts.stop {
             generation_config.insert("stopSequences".to_string(), serde_json::json!(stop));
+        }
+        if let Some(budget) = gemini_thinking_budget(&opts.model, &opts.thinking) {
+            generation_config.insert(
+                "thinkingConfig".to_string(),
+                serde_json::json!({ "thinkingBudget": budget }),
+            );
         }
         if !generation_config.is_empty() {
             body["generationConfig"] = serde_json::Value::Object(generation_config);
@@ -189,6 +239,45 @@ fn parse_response(
 mod tests {
     use super::*;
     use crate::llm::api::ThinkingConfig;
+
+    fn text_payload(model: &str, thinking: ThinkingConfig) -> LlmRequestPayload {
+        LlmRequestPayload {
+            provider: "gemini".to_string(),
+            model: model.to_string(),
+            api_key: String::new(),
+            fallback_chain: Vec::new(),
+            route_fallbacks: Vec::new(),
+            messages: vec![serde_json::json!({
+                "role": "user",
+                "content": "hello",
+            })],
+            system: None,
+            max_tokens: 64,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            logprobs: false,
+            top_logprobs: None,
+            stop: None,
+            seed: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            output_format: crate::llm::api::OutputFormat::Text,
+            response_format: None,
+            json_schema: None,
+            thinking,
+            anthropic_beta_features: Vec::new(),
+            vision: false,
+            native_tools: None,
+            tool_choice: None,
+            cache: false,
+            timeout: None,
+            stream: false,
+            provider_overrides: None,
+            prefill: None,
+            session_id: None,
+        }
+    }
 
     #[test]
     fn gemini_image_content_maps_to_inline_data() {
@@ -346,5 +435,57 @@ mod tests {
                 "file_uri": "https://generativelanguage.googleapis.com/v1beta/files/abc",
             })
         );
+    }
+
+    #[test]
+    fn gemini_thinking_config_maps_from_typed_thinking() {
+        let dynamic = GeminiProvider::build_request_body(&text_payload(
+            "gemini-2.5-flash",
+            ThinkingConfig::Adaptive,
+        ));
+        assert_eq!(
+            dynamic["generationConfig"]["thinkingConfig"],
+            serde_json::json!({"thinkingBudget": -1})
+        );
+
+        let flash_high = GeminiProvider::build_request_body(&text_payload(
+            "gemini-2.5-flash",
+            ThinkingConfig::Effort {
+                level: crate::llm::api::ReasoningEffort::High,
+            },
+        ));
+        assert_eq!(
+            flash_high["generationConfig"]["thinkingConfig"],
+            serde_json::json!({"thinkingBudget": 24576})
+        );
+
+        let minimal = GeminiProvider::build_request_body(&text_payload(
+            "gemini-2.5-flash",
+            ThinkingConfig::Effort {
+                level: crate::llm::api::ReasoningEffort::Minimal,
+            },
+        ));
+        assert_eq!(
+            minimal["generationConfig"]["thinkingConfig"],
+            serde_json::json!({"thinkingBudget": 1024})
+        );
+
+        let pro_disabled = GeminiProvider::build_request_body(&text_payload(
+            "gemini-2.5-pro",
+            ThinkingConfig::Disabled,
+        ));
+        assert!(pro_disabled["generationConfig"]
+            .as_object()
+            .is_some_and(|config| !config.contains_key("thinkingConfig")));
+
+        let legacy = GeminiProvider::build_request_body(&text_payload(
+            "gemini-1.5-pro",
+            ThinkingConfig::Enabled {
+                budget_tokens: Some(4096),
+            },
+        ));
+        assert!(legacy["generationConfig"]
+            .as_object()
+            .is_some_and(|config| !config.contains_key("thinkingConfig")));
     }
 }

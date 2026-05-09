@@ -1,0 +1,24 @@
+import { workflow_stage_agent_options } from "std/workflow/options"
+
+pipeline test(task) {
+  let prepared = workflow_stage_agent_options(
+    {
+      mode: "agent",
+      model_policy: {
+        provider: "ollama",
+        model: "qwen3.6:35b-a3b-coding-nvfp4",
+        tool_format: "native",
+        reasoning_policy: "auto",
+        reasoning_scale: "large",
+        reasoning_task: "agent",
+      },
+    },
+  )
+  assert_eq(prepared.run_agent_loop, true)
+  assert_eq(prepared.agent_loop_options.reasoning_policy, "auto")
+  assert_eq(prepared.agent_loop_options.reasoning_scale, "large")
+  assert_eq(prepared.agent_loop_options.reasoning_task, "agent")
+  assert_eq(prepared.llm_options.provider, "ollama")
+  assert_eq(prepared.llm_options.has("reasoning_policy"), false)
+  log("workflow_model_policy_reasoning passed")
+}

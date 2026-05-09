@@ -8,4 +8,8 @@ pipeline default() {
   println(cleaned.age)
   println(cleaned.valid)
   println(len(cleaned.keys()))
+  let picked = pick_keys({a: 1, b: nil, c: 3}, ["c", "missing", "b"], {drop_nil: true})
+  println(picked.c)
+  println(contains(picked.keys(), "missing"))
+  println(contains(picked.keys(), "b"))
 }

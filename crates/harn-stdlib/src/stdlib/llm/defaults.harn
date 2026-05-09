@@ -60,8 +60,9 @@ fn __has_key(d, key) {
  * <https://developers.openai.com/api/docs/guides/reasoning>; "off"
  * maps to "minimal" (safe floor across GPT-5 + GPT-5.5).
  * - OpenAI legacy GPT-4o/4.1: omit.
- * - Gemini 2.5 Flash max thinkingBudget = 24576; Pro max = 32768; "auto"
- * maps to -1 (dynamic per
+ * - Gemini 2.5 Flash max thinkingBudget = 24576; Pro max = 32768; Harn
+ * lowers typed `thinking` to native generationConfig.thinkingConfig.
+ * "auto" maps to adaptive/dynamic thinking per
  * <https://ai.google.dev/gemini-api/docs/thinking>).
  * - Ollama qwen3: host injects /no_think capability-side; don't
  * duplicate. All other Ollama: omit.
@@ -107,35 +108,35 @@ fn __thinking_patch(family, thinking) {
   }
   if family == "gemini_pro" {
     if thinking == "off" {
-      return {thinkingBudget: 0}
+      return {thinking: {mode: "disabled"}}
     }
     if thinking == "low" {
-      return {thinkingBudget: 1024}
+      return {thinking: {mode: "enabled", budget_tokens: 1024}}
     }
     if thinking == "high" {
-      return {thinkingBudget: 16384}
+      return {thinking: {mode: "enabled", budget_tokens: 16384}}
     }
     if thinking == "auto" {
-      return {thinkingBudget: -1}
+      return {thinking: {mode: "adaptive"}}
     }
     // medium.
-    return {thinkingBudget: 8192}
+    return {thinking: {mode: "enabled", budget_tokens: 8192}}
   }
   if family == "gemini_flash" {
     if thinking == "off" {
-      return {thinkingBudget: 0}
+      return {thinking: {mode: "disabled"}}
     }
     if thinking == "low" {
-      return {thinkingBudget: 1024}
+      return {thinking: {mode: "enabled", budget_tokens: 1024}}
     }
     if thinking == "high" {
       // Flash max budget 24576.
-      return {thinkingBudget: 24576}
+      return {thinking: {mode: "enabled", budget_tokens: 24576}}
     }
     if thinking == "auto" {
-      return {thinkingBudget: -1}
+      return {thinking: {mode: "adaptive"}}
     }
-    return {thinkingBudget: 8192}
+    return {thinking: {mode: "enabled", budget_tokens: 8192}}
   }
   // ollama_qwen3, ollama_generic, generic — no thinking knob to set here;
   // the host's capability-driven /no_think directive (Qwen3) handles "off".
@@ -159,7 +160,8 @@ fn __thinking_patch(family, thinking) {
 // Sonnet/Opus 1024/4096/8192; Haiku is capped lower (1024/2048/4096).
 // OpenAI GPT-5 family piggybacks on reasoning_effort; GPT-4o/4.1 use
 // temperature only (their max_tokens default flows from the catalog).
-// Gemini effort dial maps to thinkingBudget steps.
+// Gemini effort dial maps to typed thinking steps, which the native
+// provider lowers to generationConfig.thinkingConfig.
 // Ollama exposes num_predict (default 128 per Modelfile reference) so
 // we override it for "balanced" / "quality" to give meaningful output.
 @complexity(allow)
@@ -219,21 +221,21 @@ fn __effort_patch(family, effort) {
   }
   if family == "gemini_pro" {
     if kind == "fast" {
-      return {thinkingBudget: 0}
+      return {thinking: {mode: "disabled"}}
     }
     if kind == "quality" {
-      return {thinkingBudget: 16384}
+      return {thinking: {mode: "enabled", budget_tokens: 16384}}
     }
-    return {thinkingBudget: 4096}
+    return {thinking: {mode: "enabled", budget_tokens: 4096}}
   }
   if family == "gemini_flash" {
     if kind == "fast" {
-      return {thinkingBudget: 0}
+      return {thinking: {mode: "disabled"}}
     }
     if kind == "quality" {
-      return {thinkingBudget: 16384}
+      return {thinking: {mode: "enabled", budget_tokens: 16384}}
     }
-    return {thinkingBudget: 2048}
+    return {thinking: {mode: "enabled", budget_tokens: 2048}}
   }
   if family == "ollama_qwen3" || family == "ollama_generic" {
     if kind == "fast" {

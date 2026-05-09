@@ -1331,11 +1331,14 @@ fn parse_reasoning_effort_field(
     raw: &str,
 ) -> Result<crate::llm::api::ReasoningEffort, VmError> {
     match raw {
+        "none" => Ok(crate::llm::api::ReasoningEffort::None),
+        "minimal" => Ok(crate::llm::api::ReasoningEffort::Minimal),
         "low" => Ok(crate::llm::api::ReasoningEffort::Low),
         "medium" => Ok(crate::llm::api::ReasoningEffort::Medium),
         "high" => Ok(crate::llm::api::ReasoningEffort::High),
+        "xhigh" => Ok(crate::llm::api::ReasoningEffort::XHigh),
         other => Err(thinking_error(format!(
-            "{field}: expected \"low\" | \"medium\" | \"high\", got \"{other}\""
+            "{field}: expected \"none\" | \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\", got \"{other}\""
         ))),
     }
 }
@@ -1354,7 +1357,7 @@ fn parse_reasoning_effort_option(
         VmValue::Nil | VmValue::Bool(false) => Ok(None),
         VmValue::String(level) => parse_reasoning_effort_field("reasoning_effort", level).map(Some),
         other => Err(thinking_error(format!(
-            "reasoning_effort: expected \"low\" | \"medium\" | \"high\", got {}",
+            "reasoning_effort: expected \"none\" | \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\", got {}",
             other.type_name()
         ))),
     }
@@ -1408,11 +1411,11 @@ fn parse_thinking_option(
                 budget_tokens: None,
             }),
             "adaptive" => Ok(ThinkingConfig::Adaptive),
-            "low" | "medium" | "high" => Ok(ThinkingConfig::Effort {
+            "minimal" | "low" | "medium" | "high" | "xhigh" => Ok(ThinkingConfig::Effort {
                 level: parse_reasoning_effort(s.as_ref())?,
             }),
             other => Err(thinking_error(format!(
-                "thinking: expected bool, dict, or one of \"enabled\" | \"adaptive\" | \"low\" | \"medium\" | \"high\", got \"{other}\""
+                "thinking: expected bool, dict, or one of \"enabled\" | \"adaptive\" | \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\", got \"{other}\""
             ))),
         },
         VmValue::Dict(d) => {
@@ -2350,6 +2353,73 @@ mod routing_tests {
                 level: crate::llm::api::ReasoningEffort::High
             }
         );
+    }
+
+    #[test]
+    fn standalone_reasoning_effort_accepts_minimal_when_supported() {
+        let options = BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(Rc::from("mock".to_string())),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("o3".to_string())),
+            ),
+            (
+                "reasoning_effort".to_string(),
+                VmValue::String(Rc::from("minimal".to_string())),
+            ),
+        ]);
+
+        let opts = extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ])
+        .expect("minimal reasoning_effort");
+
+        assert_eq!(
+            opts.thinking,
+            crate::llm::api::ThinkingConfig::Effort {
+                level: crate::llm::api::ReasoningEffort::Minimal
+            }
+        );
+    }
+
+    #[test]
+    fn standalone_reasoning_effort_accepts_none_and_xhigh_when_supported() {
+        for (raw, expected) in [
+            ("none", crate::llm::api::ReasoningEffort::None),
+            ("xhigh", crate::llm::api::ReasoningEffort::XHigh),
+        ] {
+            let options = BTreeMap::from([
+                (
+                    "provider".to_string(),
+                    VmValue::String(Rc::from("mock".to_string())),
+                ),
+                (
+                    "model".to_string(),
+                    VmValue::String(Rc::from("gpt-5.5".to_string())),
+                ),
+                (
+                    "reasoning_effort".to_string(),
+                    VmValue::String(Rc::from(raw.to_string())),
+                ),
+            ]);
+
+            let opts = extract_llm_options(&[
+                VmValue::String(Rc::from("hello".to_string())),
+                VmValue::Nil,
+                VmValue::Dict(Rc::new(options)),
+            ])
+            .expect("reasoning_effort");
+
+            assert_eq!(
+                opts.thinking,
+                crate::llm::api::ThinkingConfig::Effort { level: expected }
+            );
+        }
     }
 
     #[test]

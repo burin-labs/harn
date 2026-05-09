@@ -131,6 +131,11 @@ pub struct ProviderRule {
     /// Whether this route accepts OpenAI's `reasoning_effort` request field.
     #[serde(default)]
     pub reasoning_effort_supported: Option<bool>,
+    /// Whether this route accepts `reasoning_effort: "none"` as a true
+    /// reasoning-off setting. Older GPT-5 variants support effort but only
+    /// floor at `minimal`.
+    #[serde(default)]
+    pub reasoning_none_supported: Option<bool>,
     /// Preferred endpoint family for this provider/model route. Values
     /// are descriptive labels consumed by providers, e.g.
     /// `/api/generate-raw` for Ollama raw prompt bypass.
@@ -176,6 +181,7 @@ pub struct Capabilities {
     pub honors_chat_template_kwargs: bool,
     pub requires_completion_tokens: bool,
     pub reasoning_effort_supported: bool,
+    pub reasoning_none_supported: bool,
     pub recommended_endpoint: Option<String>,
     pub text_tool_wire_format_supported: bool,
     pub thinking_disable_directive: Option<String>,
@@ -204,6 +210,7 @@ impl Default for Capabilities {
             honors_chat_template_kwargs: false,
             requires_completion_tokens: false,
             reasoning_effort_supported: false,
+            reasoning_none_supported: false,
             recommended_endpoint: None,
             text_tool_wire_format_supported: true,
             thinking_disable_directive: None,
@@ -460,6 +467,7 @@ fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
         honors_chat_template_kwargs: rule.honors_chat_template_kwargs.unwrap_or(false),
         requires_completion_tokens: rule.requires_completion_tokens.unwrap_or(false),
         reasoning_effort_supported: rule.reasoning_effort_supported.unwrap_or(false),
+        reasoning_none_supported: rule.reasoning_none_supported.unwrap_or(false),
         recommended_endpoint: rule.recommended_endpoint.clone(),
         text_tool_wire_format_supported: rule.text_tool_wire_format_supported.unwrap_or(true),
         thinking_disable_directive: rule.thinking_disable_directive.clone(),
@@ -623,16 +631,33 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert!(caps.defer_loading);
         assert_eq!(caps.tool_search, vec!["hosted", "client"]);
         assert_eq!(caps.json_schema.as_deref(), Some("native"));
+        assert_eq!(caps.thinking_modes, vec!["effort"]);
+        assert!(caps.reasoning_effort_supported);
+        assert!(caps.reasoning_none_supported);
     }
 
     #[test]
-    fn openai_gpt_53_has_native_tools_only() {
+    fn openai_gpt_53_has_reasoning_none_without_tool_search() {
         reset();
         let caps = lookup("openai", "gpt-5.3");
         assert!(caps.native_tools);
         assert!(!caps.defer_loading);
-        assert!(!caps.vision_supported);
+        assert!(caps.vision_supported);
         assert!(caps.tool_search.is_empty());
+        assert_eq!(caps.thinking_modes, vec!["effort"]);
+        assert!(caps.reasoning_effort_supported);
+        assert!(caps.reasoning_none_supported);
+    }
+
+    #[test]
+    fn openai_original_gpt_5_has_reasoning_floor_without_none() {
+        reset();
+        let caps = lookup("openai", "gpt-5");
+        assert!(caps.native_tools);
+        assert!(!caps.defer_loading);
+        assert_eq!(caps.thinking_modes, vec!["effort"]);
+        assert!(caps.reasoning_effort_supported);
+        assert!(!caps.reasoning_none_supported);
     }
 
     #[test]
