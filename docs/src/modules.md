@@ -81,8 +81,8 @@ code or inside any pipeline.
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/path`, `std/cache`, `std/llm/handlers`, `std/llm/budget`,
 `std/llm/prompts`, `std/vision`,
-`std/context`, `std/agent_state`, `std/agents`, `std/runtime`, `std/command`,
-`std/git`, `std/review`,
+`std/context`, `std/agent_state`, `std/agents`, `std/agent/user`,
+`std/runtime`, `std/command`, `std/git`, `std/review`,
 `std/experiments`,
 `std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
 `std/worktree`, `std/checkpoint`, `std/personas/prelude`,
@@ -99,6 +99,7 @@ Import them with the `std/` prefix:
 ```harn
 import "std/agent_state"
 import "std/agents"
+import "std/agent/user"
 import { retry_predicate_with_backoff } from "std/async"
 import "std/cache"
 import "std/collections"
@@ -697,6 +698,21 @@ For background or delegated execution, use the worker lifecycle builtins
 (`spawn_agent`, `send_input`, `resume_agent`, `wait_agent`, `close_agent`, `list_agents`)
 directly from the runtime, or the `worker_*` helpers above when you need the
 normalized request/provenance views.
+
+### std/agent/user
+
+Simulated-user helpers for eval harnesses:
+
+| Function | Description |
+|---|---|
+| `agentic_user(task_or_config, behavior?, tools?, model?, options?)` | Return an answerer that uses an LLM, optionally with read tools, to stand in for the harness user |
+| `scripted_user(script, options?)` | Return a deterministic fixture answerer with string or `{match, reply/action}` script entries |
+| `fixture_user(script, options?)` | Alias for `scripted_user(...)` |
+| `simulated_user_respond(answerer, payload?)` | Ask an answerer for `{action, message?, reason?}` |
+| `user_tools(answerer, registry?, options?)` | Add an `ask_user` tool backed by a simulated answerer |
+| `simulated_user_post_turn(answerer, options?)` | Build a `post_turn_callback` that answers plain-text clarification questions |
+| `simulated_user_status(answerer)` | Return public state such as reply and LLM-call counts |
+| `simulated_user_read_tools(registry?, options?)` | Alias for read-only host research tools appropriate for an agentic simulated user |
 
 ### std/handoffs
 

@@ -190,6 +190,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/loop.harn"),
     },
     StdlibSource {
+        module: "agent/user",
+        source: include_str!("stdlib/agent/user.harn"),
+    },
+    StdlibSource {
         module: "agent/tool_search",
         source: include_str!("stdlib/agent/tool_search.harn"),
     },
@@ -417,6 +421,14 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
     StdlibPromptAsset {
         path: "agent/prompts/default_nudge.harn.prompt",
         source: include_str!("stdlib/agent/prompts/default_nudge.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/agentic_user_system.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/agentic_user_system.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/agentic_user_user.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/agentic_user_user.harn.prompt"),
     },
     StdlibPromptAsset {
         path: "agent/prompts/loop_until_done_system.harn.prompt",
@@ -776,6 +788,7 @@ mod tests {
             "llm/rerank",
             "personas/prelude",
             "agent/host_tools",
+            "agent/user",
             "llm/optimize",
             "llm/judge",
             "llm/refine",

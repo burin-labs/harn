@@ -11,6 +11,7 @@ is the map; the detailed references now live in focused pages.
 | [`llm_call`](./llm/llm_call.md) | Single model requests, structured JSON output, completions, budgets, and mock responses |
 | [LLM reranking](./llm/rerank.md) | Pairwise candidate ranking and token-logprob self-certainty |
 | [`agent_loop`](./llm/agent_loop.md) | Loop-until-done agents, profiles, daemon loops, skills, and delegated workers |
+| [Simulated users](./llm/agent_loop.md#simulated-users-for-eval-harnesses) | Agentic or scripted users for clarification-question eval harnesses |
 | [Tools](./llm/tools.md) | Typed tools, Tool Vault progressive disclosure, and MCP server tools |
 | [LLM ensemble helpers](./llm/ensemble.md) | Deterministic search helpers such as `tree_of_thoughts(...)` |
 | [Streaming](./llm/streaming.md) | `llm_stream`, `llm_stream_call`, partial deltas, transcripts, workflow sessions, and token usage summaries |
@@ -94,6 +95,13 @@ println(result.llm.iterations)
 The result is namespaced as `llm`, `tools`, `trace`, `task_ledger`, and
 `transcript`. Profiles preload common loop budgets for tool-using, researcher,
 verifier, and completer loops. See [Agent loops](./llm/agent_loop.md).
+
+## Simulated users
+
+`std/agent/user` provides `agentic_user(...)`, `scripted_user(...)`, and
+`user_tools(...)` for eval harnesses that need a model or fixture to answer the
+agent's clarification questions. See
+[simulated users for eval harnesses](./llm/agent_loop.md#simulated-users-for-eval-harnesses).
 
 ## Daemon stdlib wrappers
 

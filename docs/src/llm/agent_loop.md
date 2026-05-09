@@ -106,6 +106,71 @@ result observation. Failed Harn-side handlers and blocked host-tool calls carry
 their error text in that observation, so the model can recover from prior failed
 attempts instead of inferring from an empty result.
 
+### Simulated users for eval harnesses
+
+Use `std/agent/user` when a harness needs another model, or a deterministic
+fixture, to stand in for the human user. The module returns an `answerer` object
+that can be wired into an agent as an `ask_user` tool, or as a post-turn callback
+for agents that ask clarification questions in plain text.
+
+```harn,ignore
+import {
+  agentic_user,
+  simulated_user_read_tools,
+  user_tools,
+} from "std/agent/user"
+
+let answerer = agentic_user(
+  "Provide a simple prompt to create ./index.test.ts with full edge coverage.",
+  "Research the codebase only if needed. Answer clarification questions with plausible user preferences. If the agent is done, stop.",
+  simulated_user_read_tools(),
+  "ollama:qwen3.6-coding",
+  {max_replies: 4, max_llm_calls: 8, max_iterations: 4},
+)
+
+let result = agent_loop(task, system, {
+  provider: "openai",
+  model: "gpt-5-mini",
+  tools: user_tools(answerer, coding_tools),
+  tool_format: "native",
+  loop_until_done: true,
+  max_iterations: 20,
+})
+```
+
+For deterministic eval fixtures, use `scripted_user(...)` or its alias
+`fixture_user(...)`. Script entries can be strings or dicts with `match`,
+`reply`, `action: "stop"`, or `action: "fail"`.
+
+```harn,ignore
+import { scripted_user, user_tools } from "std/agent/user"
+
+let answerer = scripted_user([
+  {match: "*test runner*", reply: "Use Vitest and cover empty, invalid, and boundary inputs."},
+  {match: "*done*", action: "stop", reason: "complete"},
+], {max_replies: 2})
+
+agent_loop(task, system, {
+  tools: user_tools(answerer),
+  tool_format: "native",
+  loop_until_done: true,
+})
+```
+
+When the target agent does not have an explicit user-question tool, use
+`simulated_user_post_turn(answerer)` as `post_turn_callback`. It watches for
+plain-text clarification questions, injects a simulated reply, and stops the
+loop when the answerer chooses silence.
+
+Both `agentic_user` and `scripted_user` enforce local guardrails. `max_replies`
+limits how many user messages can be produced, `max_llm_calls` caps the nested
+model calls used by an agentic user, and inner `max_iterations` / `max_nudges`
+bound any codebase-research loop. Simulated-user decisions also emit
+`tool_call_audit` events with `audit.event_type` set to
+`simulated_user_reply`, `simulated_user_stop`, `simulated_user_failed`, or
+`simulated_user_budget_exhausted` so evals can audit when the harness user
+intervened.
+
 ### agent_loop options
 
 Same as `llm_call`, plus additional options:

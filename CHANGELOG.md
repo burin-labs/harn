@@ -6,6 +6,16 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Simulated users for eval harnesses.** Added `std/agent/user` with
+  `agentic_user`, deterministic `scripted_user` / `fixture_user`, an `ask_user`
+  tool adapter, post-turn callback adapter, reply/LLM-call guardrails, and
+  audit events for harnesses that need a model or fixture to substitute for the
+  user during agent evals.
+
 ## v0.8.1
 
 ### Added
