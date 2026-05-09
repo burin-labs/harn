@@ -54,6 +54,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `ollama` | `bakllava*` | no | yes | no | no | yes | no | no | no | no |
 | `ollama` | `llama3.2-vision*` | no | yes | no | no | yes | no | no | no | no |
 | `ollama` | `gemma3*` | no | yes | no | no | yes | no | no | no | no |
+| `ollama` | `gemma4*` | no | yes | no | no | yes | no | no | no | no |
 | `ollama` | `qwen3.6*` | `enabled` | no | no | no | yes | no | `format_kw` | yes | no |
 | `ollama` | `qwen3*` | `enabled` | no | no | no | yes | no | `format_kw` | yes | no |
 | `openai` | `gpt-4o*` | no | yes | yes | no | yes | no | `native` | yes | no |

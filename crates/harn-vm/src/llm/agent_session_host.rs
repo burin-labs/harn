@@ -182,6 +182,15 @@ fn opt_json(map: &BTreeMap<String, VmValue>, key: &str) -> Option<serde_json::Va
         .map(vm_to_json)
 }
 
+fn initial_user_content(
+    opts_map: &BTreeMap<String, VmValue>,
+    fallback_message: &str,
+) -> serde_json::Value {
+    opt_json(opts_map, "initial_user_content")
+        .or_else(|| opt_json(opts_map, "initial_message_content"))
+        .unwrap_or_else(|| serde_json::Value::String(fallback_message.to_string()))
+}
+
 fn now_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
@@ -219,7 +228,10 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
             .map_err(VmError::Runtime)?;
     }
 
-    let user_msg = serde_json::json!({"role": "user", "content": message});
+    let user_msg = serde_json::json!({
+        "role": "user",
+        "content": initial_user_content(&opts_map, &message),
+    });
     let _ = crate::agent_sessions::inject_message(&resolved, json_to_vm(&user_msg));
 
     let max_iterations = opt_int(&opts_map, "max_iterations").unwrap_or(50).max(1);
@@ -1792,9 +1804,10 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        assistant_message_from_llm_result, canonical_acp_stop_reason, last_assistant_text,
-        tool_result_message_for_provider, vm_to_json,
+        assistant_message_from_llm_result, canonical_acp_stop_reason, initial_user_content,
+        last_assistant_text, tool_result_message_for_provider, vm_to_json,
     };
+    use std::collections::BTreeMap;
 
     #[test]
     fn native_tool_calls_replay_with_openai_wire_shape() {
@@ -1816,6 +1829,38 @@ mod tests {
         assert_eq!(
             message["tool_calls"][0]["function"]["arguments"],
             r#"{"command":"git status --short"}"#
+        );
+    }
+
+    #[test]
+    fn initial_user_content_preserves_multimodal_blocks() {
+        let mut opts = BTreeMap::new();
+        opts.insert(
+            "initial_user_content".to_string(),
+            crate::stdlib::json_to_vm_value(&json!([
+                {"type": "text", "text": "Describe this image."},
+                {
+                    "type": "image",
+                    "media_type": "image/png",
+                    "base64": "aGVsbG8="
+                }
+            ])),
+        );
+
+        let content = initial_user_content(&opts, "Describe this image.");
+
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["base64"], "aGVsbG8=");
+    }
+
+    #[test]
+    fn initial_user_content_falls_back_to_text_message() {
+        let opts = BTreeMap::new();
+
+        assert_eq!(
+            initial_user_content(&opts, "hello"),
+            serde_json::Value::String("hello".to_string())
         );
     }
 

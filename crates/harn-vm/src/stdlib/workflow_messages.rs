@@ -306,6 +306,13 @@ fn workflow_status_json(
     })
 }
 
+fn target_for_base(base_dir: &Path, workflow_id: &str) -> WorkflowTarget {
+    WorkflowTarget {
+        workflow_id: sanitize_workflow_id(workflow_id),
+        base_dir: base_dir.to_path_buf(),
+    }
+}
+
 fn enqueue_message(
     target: &WorkflowTarget,
     kind: &str,
@@ -314,6 +321,22 @@ fn enqueue_message(
     request_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let mut state = load_state(target)?;
+    let message = push_message(&mut state, kind, name, payload, request_id);
+    save_state(target, &state)?;
+    Ok(serde_json::json!({
+        "workflow_id": target.workflow_id,
+        "message": message,
+        "status": workflow_status_json(target, &state),
+    }))
+}
+
+fn push_message(
+    state: &mut WorkflowMailboxState,
+    kind: &str,
+    name: &str,
+    payload: serde_json::Value,
+    request_id: Option<String>,
+) -> WorkflowMessageRecord {
     state.next_seq += 1;
     let message = WorkflowMessageRecord {
         seq: state.next_seq,
@@ -324,12 +347,16 @@ fn enqueue_message(
         enqueued_at: now_rfc3339(),
     };
     state.mailbox.push_back(message.clone());
-    save_state(target, &state)?;
-    Ok(serde_json::json!({
-        "workflow_id": target.workflow_id,
-        "message": message,
-        "status": workflow_status_json(target, &state),
-    }))
+    message
+}
+
+fn receive_message(target: &WorkflowTarget) -> Result<Option<WorkflowMessageRecord>, String> {
+    let mut state = load_state(target)?;
+    let message = state.mailbox.pop_front();
+    if message.is_some() {
+        save_state(target, &state)?;
+    }
+    Ok(message)
 }
 
 pub fn workflow_signal_for_base(
@@ -338,10 +365,7 @@ pub fn workflow_signal_for_base(
     name: &str,
     payload: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let target = WorkflowTarget {
-        workflow_id: sanitize_workflow_id(workflow_id),
-        base_dir: base_dir.to_path_buf(),
-    };
+    let target = target_for_base(base_dir, workflow_id);
     enqueue_message(&target, "signal", name, payload, None)
 }
 
@@ -350,10 +374,7 @@ pub fn workflow_query_for_base(
     workflow_id: &str,
     name: &str,
 ) -> Result<serde_json::Value, String> {
-    let target = WorkflowTarget {
-        workflow_id: sanitize_workflow_id(workflow_id),
-        base_dir: base_dir.to_path_buf(),
-    };
+    let target = target_for_base(base_dir, workflow_id);
     let state = load_state(&target)?;
     Ok(state
         .queries
@@ -368,10 +389,7 @@ pub fn workflow_publish_query_for_base(
     name: &str,
     value: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let target = WorkflowTarget {
-        workflow_id: sanitize_workflow_id(workflow_id),
-        base_dir: base_dir.to_path_buf(),
-    };
+    let target = target_for_base(base_dir, workflow_id);
     let mut state = load_state(&target)?;
     state.queries.insert(
         name.to_string(),
@@ -388,21 +406,10 @@ pub fn workflow_pause_for_base(
     base_dir: &Path,
     workflow_id: &str,
 ) -> Result<serde_json::Value, String> {
-    let target = WorkflowTarget {
-        workflow_id: sanitize_workflow_id(workflow_id),
-        base_dir: base_dir.to_path_buf(),
-    };
+    let target = target_for_base(base_dir, workflow_id);
     let mut state = load_state(&target)?;
     state.paused = true;
-    state.next_seq += 1;
-    state.mailbox.push_back(WorkflowMessageRecord {
-        seq: state.next_seq,
-        kind: "control".to_string(),
-        name: "pause".to_string(),
-        request_id: None,
-        payload: serde_json::json!({}),
-        enqueued_at: now_rfc3339(),
-    });
+    push_message(&mut state, "control", "pause", serde_json::json!({}), None);
     save_state(&target, &state)?;
     Ok(workflow_status_json(&target, &state))
 }
@@ -411,21 +418,10 @@ pub fn workflow_resume_for_base(
     base_dir: &Path,
     workflow_id: &str,
 ) -> Result<serde_json::Value, String> {
-    let target = WorkflowTarget {
-        workflow_id: sanitize_workflow_id(workflow_id),
-        base_dir: base_dir.to_path_buf(),
-    };
+    let target = target_for_base(base_dir, workflow_id);
     let mut state = load_state(&target)?;
     state.paused = false;
-    state.next_seq += 1;
-    state.mailbox.push_back(WorkflowMessageRecord {
-        seq: state.next_seq,
-        kind: "control".to_string(),
-        name: "resume".to_string(),
-        request_id: None,
-        payload: serde_json::json!({}),
-        enqueued_at: now_rfc3339(),
-    });
+    push_message(&mut state, "control", "resume", serde_json::json!({}), None);
     save_state(&target, &state)?;
     Ok(workflow_status_json(&target, &state))
 }
@@ -437,18 +433,31 @@ pub async fn workflow_update_for_base(
     payload: serde_json::Value,
     timeout: StdDuration,
 ) -> Result<serde_json::Value, String> {
-    let target = WorkflowTarget {
-        workflow_id: sanitize_workflow_id(workflow_id),
-        base_dir: base_dir.to_path_buf(),
-    };
+    let target = target_for_base(base_dir, workflow_id);
+    let request_id = enqueue_update_request(&target, name, payload)?;
+    wait_for_update_response(&target, name, &request_id, timeout).await
+}
+
+fn enqueue_update_request(
+    target: &WorkflowTarget,
+    name: &str,
+    payload: serde_json::Value,
+) -> Result<String, String> {
     let request_id = uuid::Uuid::now_v7().to_string();
-    enqueue_message(&target, "update", name, payload, Some(request_id.clone()))?;
-    let started = std::time::Instant::now();
-    while started.elapsed() <= timeout {
-        if let Ok(state) = load_state(&target) {
-            if let Some(response) = state.responses.get(&request_id) {
-                return Ok(response.value.clone());
-            }
+    enqueue_message(target, "update", name, payload, Some(request_id.clone()))?;
+    Ok(request_id)
+}
+
+async fn wait_for_update_response(
+    target: &WorkflowTarget,
+    name: &str,
+    request_id: &str,
+    timeout: StdDuration,
+) -> Result<serde_json::Value, String> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    while tokio::time::Instant::now() <= deadline {
+        if let Ok(Some(value)) = update_response_value(target, request_id) {
+            return Ok(value);
         }
         tokio::time::sleep(StdDuration::from_millis(UPDATE_POLL_INTERVAL_MS)).await;
     }
@@ -458,6 +467,16 @@ pub async fn workflow_update_for_base(
     ))
 }
 
+fn update_response_value(
+    target: &WorkflowTarget,
+    request_id: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    Ok(load_state(target)?
+        .responses
+        .get(request_id)
+        .map(|response| response.value.clone()))
+}
+
 pub fn workflow_respond_update_for_base(
     base_dir: &Path,
     workflow_id: &str,
@@ -465,11 +484,17 @@ pub fn workflow_respond_update_for_base(
     name: Option<&str>,
     value: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let target = WorkflowTarget {
-        workflow_id: sanitize_workflow_id(workflow_id),
-        base_dir: base_dir.to_path_buf(),
-    };
-    let mut state = load_state(&target)?;
+    let target = target_for_base(base_dir, workflow_id);
+    record_update_response(&target, request_id, name, value)
+}
+
+fn record_update_response(
+    target: &WorkflowTarget,
+    request_id: &str,
+    name: Option<&str>,
+    value: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let mut state = load_state(target)?;
     state.responses.insert(
         request_id.to_string(),
         WorkflowUpdateResponseRecord {
@@ -479,8 +504,8 @@ pub fn workflow_respond_update_for_base(
             responded_at: now_rfc3339(),
         },
     );
-    save_state(&target, &state)?;
-    Ok(workflow_status_json(&target, &state))
+    save_state(target, &state)?;
+    Ok(workflow_status_json(target, &state))
 }
 
 pub(crate) fn register_workflow_message_builtins(vm: &mut Vm) {
@@ -615,11 +640,9 @@ fn workflow_publish_query_builtin(args: &[VmValue], _out: &mut String) -> Result
 
 fn workflow_receive_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let target = parse_target_vm(args.first(), None, "workflow.receive")?;
-    let mut state = load_state(&target).map_err(VmError::Runtime)?;
-    let Some(message) = state.mailbox.pop_front() else {
+    let Some(message) = receive_message(&target).map_err(VmError::Runtime)? else {
         return Ok(VmValue::Nil);
     };
-    save_state(&target, &state).map_err(VmError::Runtime)?;
     Ok(crate::stdlib::json_to_vm_value(&serde_json::json!({
         "workflow_id": target.workflow_id,
         "seq": message.seq,
@@ -711,56 +734,53 @@ fn continue_as_new_for_label(args: &[VmValue], label: &str) -> Result<VmValue, V
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::task::Poll;
 
     #[tokio::test(start_paused = true)]
     async fn update_round_trip_waits_for_response() {
         let dir = tempfile::tempdir().expect("tempdir");
         let workflow_id = "wf-update";
         let base_dir = dir.path().to_path_buf();
-        let base_dir_clone = base_dir.clone();
-        let task = tokio::spawn(async move {
-            workflow_update_for_base(
-                &base_dir_clone,
-                workflow_id,
-                "adjust_budget",
-                serde_json::json!({"max_usd": 10}),
-                StdDuration::from_millis(500),
-            )
-            .await
-        });
+        let target = target_for_base(&base_dir, workflow_id);
+        let request_id =
+            enqueue_update_request(&target, "adjust_budget", serde_json::json!({"max_usd": 10}))
+                .expect("enqueue update");
 
-        let target = WorkflowTarget {
-            workflow_id: workflow_id.to_string(),
-            base_dir: base_dir.clone(),
-        };
-        let mut state = None;
-        let mut message = None;
-        for _ in 0..100 {
-            if let Ok(mut loaded) = load_state(&target) {
-                if let Some(queued) = loaded.mailbox.pop_front() {
-                    state = Some(loaded);
-                    message = Some(queued);
-                    break;
-                }
-            }
-            tokio::task::yield_now().await;
-        }
-        let mut state = state.expect("load state with queued update");
-        let message = message.expect("queued update");
+        let message = receive_message(&target)
+            .expect("receive queued update")
+            .expect("queued update");
         assert_eq!(message.kind, "update");
-        state.responses.insert(
-            message.request_id.clone().expect("request id"),
-            WorkflowUpdateResponseRecord {
-                request_id: message.request_id.expect("request id"),
-                name: Some(message.name.clone()),
-                value: serde_json::json!({"ok": true}),
-                responded_at: now_rfc3339(),
-            },
+        assert_eq!(message.name, "adjust_budget");
+        assert_eq!(message.request_id.as_deref(), Some(request_id.as_str()));
+        assert_eq!(
+            update_response_value(&target, &request_id).expect("read response"),
+            None
         );
-        save_state(&target, &state).expect("save response");
+
+        let waiter = wait_for_update_response(
+            &target,
+            "adjust_budget",
+            &request_id,
+            StdDuration::from_millis(500),
+        );
+        tokio::pin!(waiter);
+        assert!(matches!(futures::poll!(&mut waiter), Poll::Pending));
+
+        workflow_respond_update_for_base(
+            &base_dir,
+            workflow_id,
+            &request_id,
+            Some("adjust_budget"),
+            serde_json::json!({"ok": true}),
+        )
+        .expect("save response");
+        assert_eq!(
+            update_response_value(&target, &request_id).expect("read response"),
+            Some(serde_json::json!({"ok": true}))
+        );
         tokio::time::advance(StdDuration::from_millis(UPDATE_POLL_INTERVAL_MS)).await;
 
-        let result = task.await.expect("join").expect("update result");
+        let result = waiter.await.expect("update result");
         assert_eq!(result, serde_json::json!({"ok": true}));
     }
 

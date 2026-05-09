@@ -696,6 +696,8 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert!(lookup("gemini", "gemini-2.5-flash").audio);
         assert!(lookup("gemini", "gemini-2.5-flash").pdf);
         assert!(lookup("ollama", "llava:latest").vision_supported);
+        assert!(lookup("ollama", "gemma4:26b").vision_supported);
+        assert!(lookup("ollama", "gemma4-128k:latest").vision_supported);
         assert!(!lookup("openai", "gpt-3.5-turbo").vision_supported);
         assert!(!lookup("ollama", "qwen3.5:35b-a3b-coding-nvfp4").vision_supported);
     }
