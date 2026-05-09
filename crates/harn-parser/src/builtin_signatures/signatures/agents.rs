@@ -487,6 +487,20 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         where_clauses: &[],
     },
     BuiltinSignature {
+        name: "agentic_user",
+        params: &[
+            Param::new("task_or_config", TY_ANY),
+            Param::optional("behavior", TY_ANY),
+            Param::optional("tools", TY_ANY),
+            Param::optional("model", TY_ANY),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "close_agent",
         // Worker handle: string id, dict (with `id` field), or task handle
         // — accepted polymorphically by `worker_id_from_value`.
@@ -500,6 +514,17 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         name: "conversation",
         params: &[],
         returns: TY_LIST,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "fixture_user",
+        params: &[
+            Param::new("script", TY_ANY),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        returns: TY_DICT,
         type_params: &[],
         has_rest: false,
         where_clauses: &[],
@@ -876,6 +901,58 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         where_clauses: &[],
     },
     BuiltinSignature {
+        name: "scripted_user",
+        params: &[
+            Param::new("script", TY_ANY),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "simulated_user_post_turn",
+        params: &[
+            Param::new("answerer", TY_ANY),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        returns: TY_CLOSURE,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "simulated_user_read_tools",
+        params: &[
+            Param::optional("registry", TY_ANY),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "simulated_user_respond",
+        params: &[
+            Param::new("answerer", TY_ANY),
+            Param::optional("payload", TY_ANY),
+        ],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "simulated_user_status",
+        params: &[Param::new("answerer", TY_ANY)],
+        returns: TY_DICT,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "spawn_agent",
         params: &[Param::new("config", TY_DICT)],
         returns: TY_DICT,
@@ -1112,6 +1189,18 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         // single summary dict or a list of summary dicts respectively.
         params: &[Param::new("handle", TY_ANY)],
         returns: TY_DICT_OR_LIST,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
+        name: "user_tools",
+        params: &[
+            Param::new("answerer", TY_ANY),
+            Param::optional("registry", TY_ANY),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        returns: TY_DICT,
         type_params: &[],
         has_rest: false,
         where_clauses: &[],

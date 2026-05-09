@@ -1,0 +1,726 @@
+// @harn-entrypoint-category agent.stdlib
+import { agent_read_tools } from "std/agent/host_tools"
+import { render_agent_prompt } from "std/agent/prompts"
+import { agent_emit_event, agent_session_messages } from "std/agent/state"
+import { safe_parse } from "std/json"
+
+fn __sim_user_string(value) {
+  if value == nil {
+    return ""
+  }
+  return to_string(value)
+}
+
+fn __sim_user_int(value, fallback) {
+  if type_of(value) == "int" {
+    return value
+  }
+  return fallback
+}
+
+fn __sim_user_bool(value, fallback) {
+  if type_of(value) == "bool" {
+    return value
+  }
+  return fallback
+}
+
+fn __sim_user_truncate(text, max_chars) {
+  let value = __sim_user_string(text)
+  if max_chars == nil || max_chars <= 0 || len(value) <= max_chars {
+    return value
+  }
+  if max_chars <= 16 {
+    return value.substring(0, max_chars)
+  }
+  return value.substring(0, max_chars - 16) + "\n...[truncated]"
+}
+
+fn __sim_user_reply(message, reason = nil, metadata = nil) {
+  return {action: "reply", message: __sim_user_string(message), reason: reason, metadata: metadata ?? {}}
+}
+
+fn __sim_user_stop(reason = nil, metadata = nil) {
+  return {action: "stop", reason: reason ?? "no_reply_needed", metadata: metadata ?? {}}
+}
+
+fn __sim_user_fail(reason = nil, message = nil, metadata = nil) {
+  return {
+    action: "fail",
+    reason: reason ?? "simulated_user_failed",
+    message: message ?? "",
+    metadata: metadata ?? {},
+  }
+}
+
+fn __sim_user_action(value) {
+  let action = lowercase(trim(__sim_user_string(value)))
+  if action == "" {
+    return "reply"
+  }
+  if contains(["reply", "stop", "fail"], action) {
+    return action
+  }
+  if contains(["done", "complete", "finished", "end"], action) {
+    return "stop"
+  }
+  if contains(["error", "abort"], action) {
+    return "fail"
+  }
+  return "reply"
+}
+
+fn __sim_user_normalize_decision(raw) {
+  if raw == nil {
+    return __sim_user_stop("empty_decision")
+  }
+  if type_of(raw) == "string" {
+    let text = trim(raw)
+    if text == "" {
+      return __sim_user_stop("empty_message")
+    }
+    return __sim_user_reply(text)
+  }
+  if type_of(raw) != "dict" {
+    return __sim_user_reply(__sim_user_string(raw))
+  }
+  let action = __sim_user_action(raw?.action ?? raw?.verdict)
+  if action == "stop" {
+    return __sim_user_stop(raw?.reason ?? raw?.message, raw?.metadata)
+  }
+  if action == "fail" {
+    return __sim_user_fail(raw?.reason, raw?.message, raw?.metadata)
+  }
+  let message = raw?.message ?? raw?.reply ?? raw?.answer ?? raw?.text ?? ""
+  if trim(__sim_user_string(message)) == "" {
+    return __sim_user_stop(raw?.reason ?? "empty_reply", raw?.metadata)
+  }
+  return __sim_user_reply(message, raw?.reason, raw?.metadata)
+}
+
+fn __sim_user_set(answerer, key, value) {
+  let state = answerer?.state ?? {}
+  let cell = state[key]
+  if type_of(cell) == "atomic" {
+    let stored = if key == "stopped" {
+      value ? 1 : 0
+    } else {
+      value
+    }
+    atomic_set(cell, stored)
+    return __sim_user_state(answerer)
+  }
+  return __sim_user_state(answerer) + {[key]: value}
+}
+
+fn __sim_user_state(answerer) {
+  let state = answerer?.state ?? {}
+  if type_of(state) != "dict" {
+    return {}
+  }
+  var out = {}
+  for entry in state {
+    let value = if type_of(entry.value) == "atomic" {
+      let stored = atomic_get(entry.value)
+      if entry.key == "stopped" {
+        stored != 0
+      } else {
+        stored
+      }
+    } else {
+      entry.value
+    }
+    out[entry.key] = value
+  }
+  return out
+}
+
+fn __sim_user_atomic_state(raw) {
+  let state = raw ?? {}
+  return {
+    index: atomic(__sim_user_int(state?.index, 0)),
+    replies: atomic(__sim_user_int(state?.replies, 0)),
+    llm_calls: atomic(__sim_user_int(state?.llm_calls, 0)),
+    stopped: atomic(__sim_user_bool(state?.stopped, false) ? 1 : 0),
+  }
+}
+
+fn __sim_user_state_int(answerer, key, fallback) {
+  return __sim_user_int(__sim_user_state(answerer)[key], fallback)
+}
+
+fn __sim_user_increment(answerer, key, amount = 1) {
+  let next = __sim_user_state_int(answerer, key, 0) + amount
+  __sim_user_set(answerer, key, next)
+  return next
+}
+
+fn __sim_user_mark_stopped(answerer) {
+  __sim_user_set(answerer, "stopped", true)
+}
+
+fn __sim_user_budget_stop(answerer, reason) {
+  __sim_user_mark_stopped(answerer)
+  return __sim_user_stop(
+    reason,
+    {
+      replies: __sim_user_state_int(answerer, "replies", 0),
+      llm_calls: __sim_user_state_int(answerer, "llm_calls", 0),
+    },
+  )
+}
+
+fn __sim_user_preflight(answerer) {
+  let state = __sim_user_state(answerer)
+  if state?.stopped ?? false {
+    if answerer?.max_replies != nil
+      && __sim_user_state_int(answerer, "replies", 0) >= answerer.max_replies {
+      return __sim_user_stop("max_replies")
+    }
+    if answerer?.max_llm_calls != nil
+      && __sim_user_state_int(answerer, "llm_calls", 0) >= answerer.max_llm_calls {
+      return __sim_user_stop("max_llm_calls")
+    }
+    return __sim_user_stop("stopped")
+  }
+  let max_replies = answerer?.max_replies
+  if max_replies != nil && __sim_user_state_int(answerer, "replies", 0) >= max_replies {
+    return __sim_user_budget_stop(answerer, "max_replies")
+  }
+  let max_llm_calls = answerer?.max_llm_calls
+  if max_llm_calls != nil && __sim_user_state_int(answerer, "llm_calls", 0) >= max_llm_calls {
+    return __sim_user_budget_stop(answerer, "max_llm_calls")
+  }
+  return nil
+}
+
+fn __sim_user_record_decision(answerer, decision) {
+  if decision.action == "reply" {
+    __sim_user_increment(answerer, "replies")
+  } else {
+    __sim_user_mark_stopped(answerer)
+  }
+  return decision
+}
+
+fn __sim_user_event_payload(answerer, payload, decision) {
+  return {
+    id: answerer?.id,
+    kind: answerer?.kind,
+    action: decision.action,
+    reason: decision?.reason,
+    question: __sim_user_extract_question(payload),
+    message_chars: len(decision?.message ?? ""),
+    replies: __sim_user_state_int(answerer, "replies", 0),
+    llm_calls: __sim_user_state_int(answerer, "llm_calls", 0),
+  }
+}
+
+fn __sim_user_emit(answerer, event_type, payload, decision) {
+  let session_id = agent_session_current_id()
+  if session_id == nil {
+    return nil
+  }
+  let audit = __sim_user_event_payload(answerer, payload, decision) + {event_type: event_type}
+  let result = try {
+    agent_emit_event(
+      session_id,
+      "tool_call_audit",
+      {
+        tool_call_id: payload?.tool_call_id ?? payload?.call_id ?? "simulated_user",
+        tool_name: payload?.tool_name ?? "ask_user",
+        audit: audit,
+      },
+    )
+  }
+  if is_err(result) {
+    return nil
+  }
+  return unwrap(result)
+}
+
+fn __sim_user_emit_decision(answerer, payload, decision) {
+  if decision.action == "reply" {
+    return __sim_user_emit(answerer, "simulated_user_reply", payload, decision)
+  }
+  if decision.action == "stop" {
+    return __sim_user_emit(answerer, "simulated_user_stop", payload, decision)
+  }
+  return __sim_user_emit(answerer, "simulated_user_failed", payload, decision)
+}
+
+fn __sim_user_extract_question(payload) {
+  if type_of(payload) == "string" {
+    return payload
+  }
+  if type_of(payload) != "dict" {
+    return __sim_user_string(payload)
+  }
+  return payload?.question ?? payload?.prompt ?? payload?.message ?? payload?.text ?? ""
+}
+
+fn __sim_user_payload_context(payload) {
+  if type_of(payload) != "dict" {
+    return ""
+  }
+  return payload?.context ?? payload?.background ?? payload?.visible_text ?? payload?.text ?? ""
+}
+
+fn __sim_user_contains_glob(text, pattern) {
+  let needle = __sim_user_string(pattern)
+  if needle == "" || needle == "*" {
+    return true
+  }
+  if !contains(needle, "*") {
+    return contains(text, needle)
+  }
+  var rest = text
+  var first = true
+  let anchored_start = !needle.starts_with("*")
+  let anchored_end = !needle.ends_with("*")
+  let parts = split(needle, "*")
+  for part in parts {
+    if part == "" {
+      continue
+    }
+    let at = rest.index_of(part)
+    if at < 0 {
+      return false
+    }
+    if first && anchored_start && at != 0 {
+      return false
+    }
+    rest = rest.substring(at + len(part), len(rest) - at - len(part))
+    first = false
+  }
+  if anchored_end && len(parts) > 0 {
+    let last = parts[len(parts) - 1]
+    if last != "" && !text.ends_with(last) {
+      return false
+    }
+  }
+  return true
+}
+
+fn __sim_user_matches(payload, matcher) {
+  if matcher == nil {
+    return true
+  }
+  let text = __sim_user_extract_question(payload) + "\n" + __sim_user_payload_context(payload)
+  if type_of(matcher) == "string" {
+    return __sim_user_contains_glob(text, matcher)
+  }
+  if type_of(matcher) == "list" {
+    for item in matcher {
+      if __sim_user_matches(payload, item) {
+        return true
+      }
+    }
+    return false
+  }
+  if type_of(matcher) == "closure" {
+    return matcher(payload) ? true : false
+  }
+  return false
+}
+
+fn __scripted_entry_decision(entry) {
+  if type_of(entry) == "string" {
+    return __sim_user_reply(entry)
+  }
+  if type_of(entry) != "dict" {
+    return __sim_user_reply(__sim_user_string(entry))
+  }
+  let action = __sim_user_action(entry?.action ?? entry?.verdict)
+  if action == "stop" {
+    return __sim_user_stop(entry?.reason ?? entry?.reply ?? entry?.message, entry?.metadata)
+  }
+  if action == "fail" {
+    return __sim_user_fail(entry?.reason, entry?.message ?? entry?.reply, entry?.metadata)
+  }
+  return __sim_user_reply(
+    entry?.reply ?? entry?.message ?? entry?.answer ?? "",
+    entry?.reason,
+    entry?.metadata,
+  )
+}
+
+fn __scripted_exhausted(answerer) {
+  let on_exhausted = answerer?.on_exhausted ?? "stop"
+  if on_exhausted == "fail" {
+    return __sim_user_fail("script_exhausted")
+  }
+  if on_exhausted == "reply" && answerer?.default_reply != nil {
+    return __sim_user_reply(answerer.default_reply, "default_reply")
+  }
+  return __sim_user_stop("script_exhausted")
+}
+
+fn __scripted_user_respond(answerer, payload = nil) {
+  let preflight = __sim_user_preflight(answerer)
+  if preflight != nil {
+    __sim_user_emit(answerer, "simulated_user_budget_exhausted", payload, preflight)
+    return preflight
+  }
+  let script = answerer?.script ?? []
+  var index = __sim_user_state_int(answerer, "index", 0)
+  while index < len(script) {
+    let entry = script[index]
+    let matcher = if type_of(entry) == "dict" {
+      entry?.match ?? entry?.when
+    } else {
+      nil
+    }
+    let consume = if type_of(entry) == "dict" {
+      entry?.consume ?? true
+    } else {
+      true
+    }
+    if __sim_user_matches(payload, matcher) {
+      if consume {
+        __sim_user_set(answerer, "index", index + 1)
+      }
+      let decision = __sim_user_record_decision(answerer, __scripted_entry_decision(entry))
+      __sim_user_emit_decision(answerer, payload, decision)
+      return decision
+    }
+    index = index + 1
+  }
+  __sim_user_set(answerer, "index", index)
+  let exhausted = __sim_user_record_decision(answerer, __scripted_exhausted(answerer))
+  __sim_user_emit_decision(answerer, payload, exhausted)
+  return exhausted
+}
+
+fn __sim_user_config(task_or_config, behavior, tools, model, options) {
+  if type_of(task_or_config) == "dict" && behavior == nil && tools == nil && model == nil
+    && options == nil {
+    return task_or_config
+  }
+  let opts = options ?? {}
+  return opts + {task: task_or_config, behavior: behavior, tools: tools, model: model}
+}
+
+fn __sim_user_json_object_text(raw) {
+  let text = trim(__sim_user_string(raw))
+  if text.starts_with("```") {
+    let first_newline = text.index_of("\n")
+    let last_fence = text.last_index_of("```")
+    if first_newline >= 0 && last_fence > first_newline {
+      return trim(text.substring(first_newline + 1, last_fence - first_newline - 1))
+    }
+  }
+  let start = text.index_of("{")
+  let end = text.last_index_of("}")
+  if start >= 0 && end > start {
+    return text.substring(start, end - start + 1)
+  }
+  return text
+}
+
+fn __agentic_user_parse(raw) {
+  let parsed = safe_parse(__sim_user_json_object_text(raw))
+  if parsed != nil {
+    return __sim_user_normalize_decision(parsed)
+  }
+  return __sim_user_normalize_decision(raw)
+}
+
+fn __sim_user_session_tail(session_id, max_chars) {
+  if session_id == nil || session_id == "" || max_chars == 0 {
+    return ""
+  }
+  let messages = try {
+    agent_session_messages(session_id)
+  }
+  if is_err(messages) {
+    return ""
+  }
+  var out = ""
+  for message in unwrap(messages) {
+    let role = message?.role ?? "message"
+    let content = message?.content ?? message?.text ?? json_stringify(message)
+    out = out + "\n[" + role + "] " + __sim_user_string(content)
+  }
+  return __sim_user_truncate(out, max_chars)
+}
+
+fn __agentic_user_bindings(answerer, payload) {
+  let question = __sim_user_extract_question(payload)
+  let context = __sim_user_payload_context(payload)
+  let transcript = __sim_user_session_tail(
+    payload?.session_id ?? agent_session_current_id(),
+    answerer?.transcript_max_chars ?? 4000,
+  )
+  return {
+    task: answerer?.task ?? "",
+    behavior: answerer?.behavior ?? "",
+    question: question,
+    context: context,
+    transcript: transcript,
+    reply_count: __sim_user_state_int(answerer, "replies", 0),
+    max_replies: answerer?.max_replies ?? "",
+  }
+}
+
+fn __agentic_user_prompt(answerer, payload) {
+  let bindings = __agentic_user_bindings(answerer, payload)
+  let system = answerer?.system_prompt
+    ?? render_agent_prompt("agentic_user_system.harn.prompt", bindings)
+  let prompt = answerer?.prompt
+    ?? render_agent_prompt("agentic_user_user.harn.prompt", bindings)
+  return {system: system, prompt: prompt}
+}
+
+fn __agentic_user_base_llm_options(answerer) {
+  var opts = answerer?.llm_options ?? {}
+  for key in ["provider", "model", "temperature", "top_p", "max_tokens", "seed", "api_base", "api_key"] {
+    if answerer[key] != nil {
+      opts[key] = answerer[key]
+    }
+  }
+  return opts
+}
+
+fn __agentic_user_remaining_llm_calls(answerer) {
+  let max_llm_calls = answerer?.max_llm_calls
+  if max_llm_calls == nil {
+    return answerer?.max_iterations ?? 4
+  }
+  let remaining = max_llm_calls - __sim_user_state_int(answerer, "llm_calls", 0)
+  return remaining > 0 ? remaining : 0
+}
+
+fn __agentic_user_call_once(answerer, prompts) {
+  let result = llm_call(prompts.prompt, prompts.system, __agentic_user_base_llm_options(answerer))
+  __sim_user_increment(answerer, "llm_calls")
+  return result?.text ?? result?.raw_text ?? json_stringify(result)
+}
+
+fn __agentic_user_call_loop(answerer, prompts) {
+  let remaining = __agentic_user_remaining_llm_calls(answerer)
+  let max_iterations = __sim_user_int(answerer?.max_iterations, 4)
+  let iteration_limit = if remaining > 0 && remaining < max_iterations {
+    remaining
+  } else {
+    max_iterations
+  }
+  let opts = __agentic_user_base_llm_options(answerer)
+    + {
+    tools: answerer.tools,
+    tool_format: answerer?.tool_format ?? "native",
+    loop_until_done: true,
+    max_iterations: iteration_limit,
+    max_nudges: answerer?.max_nudges ?? 2,
+    done_judge: answerer?.done_judge ?? false,
+    session_id: answerer?.session_id,
+  }
+  let result = agent_loop(prompts.prompt, prompts.system, opts)
+  __sim_user_increment(answerer, "llm_calls", result?.llm?.iterations ?? 1)
+  return result?.visible_text ?? result?.text ?? result?.raw_text ?? json_stringify(result)
+}
+
+fn __agentic_user_respond(answerer, payload = nil) {
+  let preflight = __sim_user_preflight(answerer)
+  if preflight != nil {
+    __sim_user_emit(answerer, "simulated_user_budget_exhausted", payload, preflight)
+    return preflight
+  }
+  let prompts = __agentic_user_prompt(answerer, payload)
+  let call = try {
+    if answerer?.tools != nil {
+      __agentic_user_call_loop(answerer, prompts)
+    } else {
+      __agentic_user_call_once(answerer, prompts)
+    }
+  }
+  if is_err(call) {
+    let decision = __sim_user_record_decision(
+      answerer,
+      __sim_user_fail("llm_call_failed", __sim_user_string(unwrap_err(call))),
+    )
+    __sim_user_emit_decision(answerer, payload, decision)
+    return decision
+  }
+  let decision = __sim_user_record_decision(answerer, __agentic_user_parse(unwrap(call)))
+  __sim_user_emit_decision(answerer, payload, decision)
+  return decision
+}
+
+fn __sim_user_should_answer_post_turn(payload, options) {
+  if payload?.has_tool_calls ?? false {
+    return false
+  }
+  if options?.answer_all_text ?? false {
+    return trim(payload?.text ?? "") != ""
+  }
+  let text = lowercase(payload?.text ?? "")
+  return contains(text, "?")
+    || contains(text, "clarify")
+    || contains(text, "which ")
+    || contains(text, "what ")
+    || contains(text, "should i")
+}
+
+/**
+ * agentic_user returns an answerer that uses an LLM, optionally with read tools,
+ * to simulate the harness user during an eval.
+ */
+pub fn agentic_user(task_or_config, behavior = nil, tools = nil, model = nil, options = nil) {
+  let config = __sim_user_config(task_or_config, behavior, tools, model, options)
+  let state = __sim_user_atomic_state(config?.state)
+  var answerer = {
+    kind: "agentic_user",
+    id: config?.id ?? ("agentic-user-" + uuid_v7()),
+    task: config?.task ?? "",
+    behavior: config?.behavior ?? "",
+    tools: config?.tools,
+    tool_format: config?.tool_format,
+    provider: config?.provider,
+    model: config?.model,
+    temperature: config?.temperature,
+    top_p: config?.top_p,
+    max_tokens: config?.max_tokens,
+    seed: config?.seed,
+    api_base: config?.api_base,
+    api_key: config?.api_key,
+    llm_options: config?.llm_options ?? {},
+    max_replies: config?.max_replies ?? 5,
+    max_llm_calls: config?.max_llm_calls ?? 8,
+    max_iterations: config?.max_iterations ?? 4,
+    max_nudges: config?.max_nudges ?? 2,
+    done_judge: config?.done_judge ?? false,
+    system_prompt: config?.system_prompt,
+    prompt: config?.prompt,
+    transcript_max_chars: config?.transcript_max_chars ?? 4000,
+    session_id: config?.session_id,
+    state: state,
+  }
+  answerer["respond"] = { payload -> __agentic_user_respond(answerer, payload) }
+  return answerer
+}
+
+/** scripted_user returns a deterministic fixture answerer. */
+pub fn scripted_user(script, options = nil) {
+  let opts = options ?? {}
+  let state = __sim_user_atomic_state(opts?.state)
+  var answerer = {
+    kind: "scripted_user",
+    id: opts?.id ?? ("scripted-user-" + uuid_v7()),
+    script: script ?? [],
+    default_reply: opts?.default_reply,
+    on_exhausted: opts?.on_exhausted ?? "stop",
+    max_replies: opts?.max_replies ?? 32,
+    state: state,
+  }
+  answerer["respond"] = { payload -> __scripted_user_respond(answerer, payload) }
+  return answerer
+}
+
+/** fixture_user is an alias for deterministic eval fixtures. */
+pub fn fixture_user(script, options = nil) {
+  return scripted_user(script, options)
+}
+
+/** simulated_user_respond asks an answerer for its next decision. */
+pub fn simulated_user_respond(answerer, payload = nil) {
+  if type_of(answerer) == "string" {
+    return __sim_user_reply(answerer)
+  }
+  if type_of(answerer) == "closure" {
+    return __sim_user_normalize_decision(answerer(payload))
+  }
+  if type_of(answerer) != "dict" {
+    throw "simulated_user_respond: answerer must be a dict, closure, or string"
+  }
+  let respond = answerer?.respond
+  if type_of(respond) != "closure" {
+    throw "simulated_user_respond: answerer missing respond closure"
+  }
+  return __sim_user_normalize_decision(respond(payload))
+}
+
+/** simulated_user_status returns public state for assertions and eval reports. */
+pub fn simulated_user_status(answerer) {
+  if type_of(answerer) != "dict" {
+    return {}
+  }
+  return {
+    id: answerer?.id,
+    kind: answerer?.kind,
+    state: __sim_user_state(answerer),
+    max_replies: answerer?.max_replies,
+    max_llm_calls: answerer?.max_llm_calls,
+  }
+}
+
+/** user_tools adds an ask_user tool backed by a simulated answerer. */
+pub fn user_tools(answerer, registry = nil, options = nil) {
+  let opts = options ?? {}
+  let tools = registry ?? tool_registry()
+  let name = opts?.name ?? answerer?.tool_name ?? "ask_user"
+  return tool_define(
+    tools,
+    name,
+    opts?.description
+      ?? "Ask the simulated user a clarification question and receive a plausible reply.",
+    {
+      handler: { args ->
+        let decision = simulated_user_respond(answerer, args)
+        if decision.action == "reply" {
+          return decision.message
+        }
+        if decision.action == "fail" {
+          let reason = decision?.reason ?? decision?.message ?? "unknown"
+          throw "simulated user failed: " + reason
+        }
+        return opts?.stop_observation
+          ?? "No further simulated user input is available; continue or finish from existing context."
+      },
+      parameters: {
+        question: {type: "string", description: "The clarification question to ask the simulated user."},
+        context: {type: "string", required: false, description: "Optional concise context for the question."},
+        choices: {
+          type: "array",
+          required: false,
+          description: "Optional answer choices, if this is multiple choice.",
+        },
+      },
+      returns: {type: "string"},
+      annotations: {kind: "read", readOnlyHint: true},
+    },
+  )
+}
+
+/** simulated_user_post_turn replies to plain-text clarification questions. */
+pub fn simulated_user_post_turn(answerer, options = nil) {
+  let opts = options ?? {}
+  return { payload ->
+    if !__sim_user_should_answer_post_turn(payload, opts) {
+      return nil
+    }
+    let decision = simulated_user_respond(
+      answerer,
+      {
+        question: payload?.text ?? "",
+        context: opts?.context ?? "",
+        session_id: payload?.session_id,
+        source: "post_turn_callback",
+      },
+    )
+    if decision.action == "reply" {
+      let prefix = opts?.prefix_reply ?? ""
+      return prefix + decision.message
+    }
+    if decision.action == "fail" {
+      let reason = decision?.reason ?? "unknown"
+      return {stop: true, message: "simulated user failed: " + reason}
+    }
+    return {stop: true}
+  }
+}
+
+/** simulated_user_read_tools is a named alias for read-only research tools. */
+pub fn simulated_user_read_tools(registry = nil, options = nil) {
+  return agent_read_tools(registry, options)
+}

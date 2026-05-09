@@ -1,0 +1,43 @@
+import { agent_capture_events } from "std/agent/events"
+import { scripted_user, simulated_user_status, user_tools } from "std/agent/user"
+
+pipeline main() {
+  llm_mock_clear()
+  llm_mock(
+    {
+      tool_calls: [{id: "ask_1", name: "ask_user", arguments: {question: "Which test runner should I use?"}}],
+    },
+  )
+  llm_mock({text: "Created index.test.ts with Vitest edge coverage."})
+  let answerer = scripted_user(
+    [{match: "*test runner*", reply: "Use Vitest and cover empty, invalid, and boundary inputs."}],
+    {max_replies: 2},
+  )
+  let session = "agentic-user-scripted-tool"
+  let captured = agent_capture_events(
+    session,
+    fn() { return agent_loop(
+      "Create index.test.ts with edge coverage.",
+      nil,
+      {
+        provider: "mock",
+        tools: user_tools(answerer),
+        tool_format: "native",
+        loop_until_done: true,
+        max_iterations: 3,
+        session_id: session,
+      },
+    ) },
+  )
+  let simulated_audit = captured.events
+    .find(
+    { event -> return event.type == "tool_call_audit" && event.audit.event_type == "simulated_user_reply" },
+  )
+  let calls = llm_mock_calls()
+  let status = simulated_user_status(answerer)
+  println(captured.result.status)
+  println(contains(captured.result.text, "Vitest edge coverage"))
+  println(status.state.replies)
+  println(simulated_audit != nil)
+  println(contains(json_stringify(calls[1].messages), "Use Vitest"))
+}
