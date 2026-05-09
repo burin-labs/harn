@@ -155,6 +155,7 @@ pub(crate) async fn check_connector_package(
             }
             continue;
         };
+        validate_setup_metadata(provider.id.as_str(), provider.setup.as_ref(), &mut failures);
 
         match check_one_connector(
             provider.id.clone(),
@@ -363,6 +364,11 @@ fn validate_connector_package_metadata(anchor: &Path) -> ConnectorGateCheck {
                     )),
                     ResolvedProviderConnectorKind::Invalid(message) => failures.push(message.clone()),
                 }
+                validate_setup_metadata(
+                    provider.id.as_str(),
+                    provider.setup.as_ref(),
+                    &mut failures,
+                );
             }
             if !package_dir.join("README.md").is_file() {
                 failures.push("README.md is required".to_string());
@@ -385,6 +391,123 @@ fn validate_connector_package_metadata(anchor: &Path) -> ConnectorGateCheck {
 fn require_metadata_field(value: Option<&str>, field: &str, failures: &mut Vec<String>) {
     if value.is_none_or(|value| value.trim().is_empty()) {
         failures.push(format!("{field} is required"));
+    }
+}
+
+fn validate_setup_metadata(
+    provider_id: &str,
+    setup: Option<&package::ProviderSetupManifest>,
+    failures: &mut Vec<String>,
+) {
+    let Some(setup) = setup else {
+        failures.push(format!(
+            "provider '{provider_id}' must declare setup metadata"
+        ));
+        return;
+    };
+    if setup.auth_type.as_deref().is_none_or(str::is_empty) {
+        failures.push(format!(
+            "provider '{provider_id}' setup.auth_type is required"
+        ));
+    }
+    if setup.flow.as_deref().is_none_or(str::is_empty) {
+        failures.push(format!("provider '{provider_id}' setup.flow is required"));
+    }
+    if setup.setup_command.is_empty() {
+        failures.push(format!(
+            "provider '{provider_id}' setup.setup_command is required"
+        ));
+    }
+    if setup.validation_command.is_empty() {
+        failures.push(format!(
+            "provider '{provider_id}' setup.validation_command is required"
+        ));
+    }
+    if setup.health_checks.is_empty() {
+        failures.push(format!(
+            "provider '{provider_id}' setup.health_checks must include at least one health check"
+        ));
+    }
+    for scope in &setup.required_scopes {
+        if scope.trim().is_empty() {
+            failures.push(format!(
+                "provider '{provider_id}' setup.required_scopes cannot include empty values"
+            ));
+        }
+    }
+    for secret in &setup.required_secrets {
+        if secret.split_once('/').is_none() {
+            failures.push(format!(
+                "provider '{provider_id}' setup.required_secrets entry '{secret}' must use namespace/name form"
+            ));
+        }
+    }
+    validate_recovery_copy(provider_id, &setup.recovery, failures);
+    for check in &setup.health_checks {
+        if check.id.trim().is_empty() {
+            failures.push(format!(
+                "provider '{provider_id}' setup health check id is required"
+            ));
+        }
+        match check.kind.as_str() {
+            "secret" if check.secret.as_deref().is_none_or(str::is_empty) => {
+                failures.push(format!(
+                    "provider '{provider_id}' secret health check '{}' must set secret",
+                    check.id
+                ));
+            }
+            "command" if check.command.is_empty() => {
+                failures.push(format!(
+                    "provider '{provider_id}' command health check '{}' must set command",
+                    check.id
+                ));
+            }
+            "http" | "mcp" | "resource" if check.url.as_deref().is_none_or(str::is_empty) => {
+                failures.push(format!(
+                    "provider '{provider_id}' {} health check '{}' must set url",
+                    check.kind, check.id
+                ));
+            }
+            "secret" | "command" | "http" | "mcp" | "resource" => {}
+            other => failures.push(format!(
+                "provider '{provider_id}' setup health check '{}' uses unsupported kind '{other}'",
+                check.id
+            )),
+        }
+    }
+}
+
+fn validate_recovery_copy(
+    provider_id: &str,
+    recovery: &package::ConnectorRecoveryCopy,
+    failures: &mut Vec<String>,
+) {
+    let required = [
+        ("missing_auth", recovery.missing_auth.as_deref()),
+        (
+            "expired_credentials",
+            recovery.expired_credentials.as_deref(),
+        ),
+        (
+            "revoked_credentials",
+            recovery.revoked_credentials.as_deref(),
+        ),
+        ("missing_scopes", recovery.missing_scopes.as_deref()),
+        (
+            "inaccessible_resource",
+            recovery.inaccessible_resource.as_deref(),
+        ),
+        (
+            "transient_provider_outage",
+            recovery.transient_provider_outage.as_deref(),
+        ),
+    ];
+    for (field, value) in required {
+        if value.is_none_or(|value| value.trim().is_empty()) {
+            failures.push(format!(
+                "provider '{provider_id}' setup.recovery.{field} is required"
+            ));
+        }
     }
 }
 
@@ -1533,6 +1656,27 @@ version = "0.1.0"
 [[providers]]
 id = "echo"
 connector = {{ harn = "./lib.harn" }}
+
+[providers.setup]
+auth_type = "api-key"
+flow = "api-key"
+required_secrets = ["echo/api-token"]
+setup_command = ["harn", "connect", "echo"]
+validation_command = ["harn", "connect", "status", "--connector", "echo", "--json"]
+
+[[providers.setup.health_checks]]
+id = "api-token"
+kind = "secret"
+secret = "echo/api-token"
+
+[providers.setup.recovery]
+missing_auth = "Store echo/api-token."
+expired_credentials = "Rotate echo/api-token."
+revoked_credentials = "Replace echo/api-token."
+missing_scopes = "Use an API key with the required scopes."
+inaccessible_resource = "Grant access to the target echo resource."
+transient_provider_outage = "Retry after the provider is reachable."
+
 {manifest_tail}
 "#
             ),
@@ -1670,6 +1814,39 @@ pub fn normalize_inbound(_raw) {
             .await
             .unwrap_err();
         assert!(error.contains("payload_schema() must return { harn_schema_name, json_schema? }"));
+    }
+
+    #[tokio::test]
+    async fn connector_check_rejects_missing_setup_metadata() {
+        let _guard = connector_check_test_guard().await;
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("harn.toml"),
+            r#"
+[package]
+name = "contract-test"
+version = "0.1.0"
+
+[[providers]]
+id = "echo"
+connector = { harn = "./lib.harn" }
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("lib.harn"),
+            r#"
+pub fn provider_id() { return "echo" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "EchoEventPayload" }
+pub fn normalize_inbound(_raw) { return {type: "reject", status: 400} }
+"#,
+        )
+        .unwrap();
+        let error = check_connector_package(&check_args(dir.path()))
+            .await
+            .unwrap_err();
+        assert!(error.contains("provider 'echo' must declare setup metadata"));
     }
 
     #[tokio::test]

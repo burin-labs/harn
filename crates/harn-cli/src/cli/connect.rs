@@ -28,6 +28,12 @@ pub(crate) struct ConnectArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ConnectCommand {
+    /// Report whether connector packages are installed and usable.
+    Status(ConnectStatusArgs),
+    /// Emit the generic host setup plan for a connector.
+    SetupPlan(ConnectSetupPlanArgs),
+    /// Store an API-key style connector secret.
+    ApiKey(ConnectApiKeyArgs),
     /// Capture GitHub App installation metadata and optional app secrets.
     Github(ConnectGithubArgs),
     /// Authorize Linear using OAuth, or register a webhook when --url is supplied.
@@ -41,6 +47,51 @@ pub(crate) enum ConnectCommand {
     /// Authorize a provider registered in harn.toml [[providers]] metadata.
     #[command(external_subcommand)]
     Provider(Vec<String>),
+}
+
+#[derive(Debug, Args, Clone)]
+pub(crate) struct ConnectApiKeyArgs {
+    /// Connector id that owns the API key.
+    #[arg(long = "connector", value_name = "ID")]
+    pub connector: String,
+    /// Secret id to store, in namespace/name form.
+    #[arg(long = "secret-id", value_name = "ID")]
+    pub secret_id: String,
+    /// Inline API key value. Prefer --value-file or prompt input in shared shells.
+    #[arg(long, conflicts_with = "value_file")]
+    pub value: Option<String>,
+    /// File containing the API key value.
+    #[arg(long = "value-file", conflicts_with = "value")]
+    pub value_file: Option<PathBuf>,
+    /// Optional scope string associated with this key.
+    #[arg(long = "scopes")]
+    pub scopes: Option<String>,
+    /// Emit machine-readable JSON instead of a human summary.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub(crate) struct ConnectStatusArgs {
+    /// Restrict status to one connector id.
+    #[arg(long = "connector", value_name = "ID")]
+    pub connector: Option<String>,
+    /// Execute declared health-check commands in addition to local credential checks.
+    #[arg(long = "run-health-checks")]
+    pub run_health_checks: bool,
+    /// Emit machine-readable JSON instead of a human summary.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub(crate) struct ConnectSetupPlanArgs {
+    /// Connector id to plan setup for.
+    #[arg(long = "connector", value_name = "ID")]
+    pub connector: String,
+    /// Emit machine-readable JSON instead of a human summary.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

@@ -8,6 +8,26 @@ id = "notion"
 connector = { harn = "./lib.harn" }
 capabilities = ["webhook", "rate_limit", "pagination"]
 
+[providers.setup]
+auth_type = "oauth2"
+flow = "browser"
+required_scopes = ["read_content", "update_content"]
+setup_command = ["harn", "connect", "notion", "--client-id", "<client-id>", "--client-secret", "<client-secret>"]
+validation_command = ["harn", "connect", "status", "--connector", "notion", "--json"]
+
+[[providers.setup.health_checks]]
+id = "credentials"
+kind = "command"
+command = ["harn", "connect", "status", "--connector", "notion", "--json"]
+
+[providers.setup.recovery]
+missing_auth = "Run `harn connect notion` with the integration OAuth client credentials."
+expired_credentials = "Refresh the Notion OAuth token or reconnect the workspace."
+revoked_credentials = "Remove stale Notion credentials with `harn connect --revoke notion`, then reconnect."
+missing_scopes = "Reconnect Notion with capabilities that cover the pages or databases being used."
+inaccessible_resource = "Share the target Notion page or database with the integration."
+transient_provider_outage = "Retry after Notion or the local credential backend is reachable."
+
 [connector_contract]
 version = 1
 

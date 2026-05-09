@@ -797,6 +797,8 @@ pub struct ProviderManifestEntry {
     #[serde(default)]
     pub oauth: Option<ProviderOAuthManifest>,
     #[serde(default)]
+    pub setup: Option<ProviderSetupManifest>,
+    #[serde(default)]
     pub capabilities: ConnectorCapabilities,
 }
 
@@ -826,6 +828,58 @@ pub struct ProviderOAuthManifest {
     pub client_secret: Option<String>,
     #[serde(default, alias = "token_auth_method", alias = "token-auth-method")]
     pub token_endpoint_auth_method: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProviderSetupManifest {
+    #[serde(default, alias = "auth-type")]
+    pub auth_type: Option<String>,
+    #[serde(default)]
+    pub flow: Option<String>,
+    #[serde(default, alias = "required-scopes", alias = "scopes")]
+    pub required_scopes: Vec<String>,
+    #[serde(default, alias = "required-secrets")]
+    pub required_secrets: Vec<String>,
+    #[serde(default, alias = "setup-command")]
+    pub setup_command: Vec<String>,
+    #[serde(default, alias = "validation-command")]
+    pub validation_command: Vec<String>,
+    #[serde(default, alias = "health-checks")]
+    pub health_checks: Vec<ConnectorHealthCheckManifest>,
+    #[serde(default)]
+    pub recovery: ConnectorRecoveryCopy,
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConnectorHealthCheckManifest {
+    pub id: String,
+    pub kind: String,
+    #[serde(default)]
+    pub command: Vec<String>,
+    #[serde(default)]
+    pub secret: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConnectorRecoveryCopy {
+    #[serde(default, alias = "missing-install")]
+    pub missing_install: Option<String>,
+    #[serde(default, alias = "missing-auth")]
+    pub missing_auth: Option<String>,
+    #[serde(default, alias = "expired-credentials")]
+    pub expired_credentials: Option<String>,
+    #[serde(default, alias = "revoked-credentials")]
+    pub revoked_credentials: Option<String>,
+    #[serde(default, alias = "missing-scopes")]
+    pub missing_scopes: Option<String>,
+    #[serde(default, alias = "inaccessible-resource")]
+    pub inaccessible_resource: Option<String>,
+    #[serde(default, alias = "transient-provider-outage")]
+    pub transient_provider_outage: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -984,6 +1038,7 @@ pub struct ResolvedProviderConnectorConfig {
     pub manifest_dir: PathBuf,
     pub connector: ResolvedProviderConnectorKind,
     pub oauth: Option<ProviderOAuthManifest>,
+    pub setup: Option<ProviderSetupManifest>,
 }
 
 #[derive(Debug, Clone)]

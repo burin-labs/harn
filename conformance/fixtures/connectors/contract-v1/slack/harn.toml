@@ -8,6 +8,26 @@ id = "slack"
 connector = { harn = "./lib.harn" }
 capabilities = ["webhook", "rate_limit", "pagination"]
 
+[providers.setup]
+auth_type = "oauth2"
+flow = "browser"
+required_scopes = ["app_mentions:read", "channels:history", "chat:write"]
+setup_command = ["harn", "connect", "slack", "--client-id", "<client-id>", "--client-secret", "<client-secret>"]
+validation_command = ["harn", "connect", "status", "--connector", "slack", "--json"]
+
+[[providers.setup.health_checks]]
+id = "credentials"
+kind = "command"
+command = ["harn", "connect", "status", "--connector", "slack", "--json"]
+
+[providers.setup.recovery]
+missing_auth = "Run `harn connect slack` with the app client credentials."
+expired_credentials = "Refresh the Slack OAuth token or reconnect the workspace."
+revoked_credentials = "Remove stale Slack credentials with `harn connect --revoke slack`, then reconnect."
+missing_scopes = "Reinstall the Slack app with the scopes listed in required_scopes."
+inaccessible_resource = "Confirm the Slack app is installed in the target workspace and channel."
+transient_provider_outage = "Retry after Slack or the local credential backend is reachable."
+
 [connector_contract]
 version = 1
 

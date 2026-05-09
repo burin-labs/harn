@@ -8,6 +8,26 @@ id = "linear"
 connector = { harn = "./lib.harn" }
 capabilities = ["webhook", "oauth", "rate_limit", "pagination", "graphql"]
 
+[providers.setup]
+auth_type = "oauth2"
+flow = "browser"
+required_scopes = ["read", "write"]
+setup_command = ["harn", "connect", "linear", "--client-id", "<client-id>", "--client-secret", "<client-secret>"]
+validation_command = ["harn", "connect", "status", "--connector", "linear", "--json"]
+
+[[providers.setup.health_checks]]
+id = "credentials"
+kind = "command"
+command = ["harn", "connect", "status", "--connector", "linear", "--json"]
+
+[providers.setup.recovery]
+missing_auth = "Run `harn connect linear` with the Linear OAuth client credentials."
+expired_credentials = "Refresh the Linear OAuth token or reconnect the workspace."
+revoked_credentials = "Remove stale Linear credentials with `harn connect --revoke linear`, then reconnect."
+missing_scopes = "Reconnect Linear with the scopes listed in required_scopes."
+inaccessible_resource = "Confirm the Linear token can access the target workspace, team, or project."
+transient_provider_outage = "Retry after Linear or the local credential backend is reachable."
+
 [connector_contract]
 version = 1
 

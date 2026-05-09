@@ -52,8 +52,8 @@ pub(crate) use bench::BenchArgs;
 pub(crate) use check::{CheckArgs, CheckOutputFormat};
 pub(crate) use completions::{CompletionShell, CompletionsArgs};
 pub(crate) use connect::{
-    ConnectArgs, ConnectCommand, ConnectGenericArgs, ConnectGithubArgs, ConnectLinearArgs,
-    ConnectOAuthArgs,
+    ConnectApiKeyArgs, ConnectArgs, ConnectCommand, ConnectGenericArgs, ConnectGithubArgs,
+    ConnectLinearArgs, ConnectOAuthArgs, ConnectSetupPlanArgs, ConnectStatusArgs,
 };
 pub(crate) use connector::{
     ConnectorArgs, ConnectorCheckArgs, ConnectorCommand, ConnectorTestArgs,

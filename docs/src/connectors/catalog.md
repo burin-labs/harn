@@ -189,7 +189,8 @@ A community connector is any Harn package that:
 2. Provides a `[[providers]]` manifest entry with `connector = { harn = ... }`.
 3. Exports `provider_id`, `kinds`, `payload_schema`, and the relevant
    `normalize_inbound`, `poll_tick`, or `call` exports.
-4. Ships deterministic `[connector_contract]` fixtures and passes
+4. Declares provider-scoped `setup` metadata for generic host setup/status UI.
+5. Ships deterministic `[connector_contract]` fixtures and passes
    `harn connector test .`.
 
 Minimal package shape:
@@ -207,6 +208,26 @@ default = "src/lib.harn"
 id = "acme"
 connector = { harn = "src/lib.harn" }
 capabilities = ["webhook"]
+
+[providers.setup]
+auth_type = "api-key"
+flow = "api-key"
+required_secrets = ["acme/api-key"]
+setup_command = ["harn", "connect", "api-key", "--connector", "acme", "--secret-id", "acme/api-key"]
+validation_command = ["harn", "connect", "status", "--connector", "acme", "--json"]
+
+[[providers.setup.health_checks]]
+id = "api-key"
+kind = "secret"
+secret = "acme/api-key"
+
+[providers.setup.recovery]
+missing_auth = "Store an Acme API key as acme/api-key."
+expired_credentials = "Rotate the Acme API key."
+revoked_credentials = "Replace the revoked Acme API key."
+missing_scopes = "Create an Acme API key with the required scopes."
+inaccessible_resource = "Grant the API key access to the target Acme resource."
+transient_provider_outage = "Retry after Acme or the credential backend recovers."
 
 [connector_contract]
 version = 1

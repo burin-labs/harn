@@ -337,6 +337,45 @@ Fixture fields:
 Use `--provider <id>` to check one provider from a multi-provider package and
 `--json` for machine-readable CI output.
 
+Connector packages must also declare setup metadata on each `[[providers]]`
+entry so GUI, TUI, and CLI hosts can render the same Connect/Fix experience
+without provider-specific code:
+
+```toml
+[[providers]]
+id = "example"
+connector = { harn = "./lib.harn" }
+capabilities = ["webhook", "oauth"]
+
+[providers.setup]
+auth_type = "oauth2"
+flow = "browser"
+required_scopes = ["example.read", "example.write"]
+required_secrets = []
+setup_command = ["harn", "connect", "example"]
+validation_command = ["harn", "connect", "status", "--connector", "example", "--json"]
+
+[[providers.setup.health_checks]]
+id = "credentials"
+kind = "command"
+command = ["harn", "connect", "status", "--connector", "example", "--json"]
+
+[providers.setup.recovery]
+missing_auth = "Run `harn connect example`."
+expired_credentials = "Refresh or reconnect the OAuth token."
+revoked_credentials = "Revoke the stale local token, then reconnect."
+missing_scopes = "Reconnect with the scopes listed in required_scopes."
+inaccessible_resource = "Grant the connector access to the requested resource."
+transient_provider_outage = "Retry after the provider or credential backend recovers."
+```
+
+`auth_type` names the credential family (`oauth2`, `device-code`, `api-key`,
+`github-app`, or `none`) and `flow` names the host interaction. `health_checks`
+can be `secret`, `command`, `http`, `mcp`, or `resource`; only `secret` and
+`command` are evaluated by `harn connect status`, while the remaining kinds are
+declared for hosts and provider-specific validators. `harn connector check`
+fails when setup metadata is missing or malformed.
+
 Minimal example:
 
 ```harn
