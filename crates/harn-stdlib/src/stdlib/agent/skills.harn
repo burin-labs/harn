@@ -195,6 +195,11 @@ fn __match_strategy(opts) {
   return __match_config(opts)?.strategy ?? "catalog"
 }
 
+fn __match_strategy_manual(opts) {
+  let strategy = __match_strategy(opts)
+  return strategy == "manual" || strategy == "none"
+}
+
 fn __match_top_n(opts) {
   let value = __match_config(opts)?.top_n
   if type_of(value) == "int" && value > 0 {
@@ -616,6 +621,9 @@ pub fn agent_skills_match(session, opts, iteration) {
   }
   let tool_opts = __with_load_skill_tool(session, opts)
   let prev = __active_from_ids(registry, agent_session_active_skills(session.session_id) ?? [])
+  if __match_strategy_manual(opts) {
+    return __opts_with_active_skills(tool_opts, registry, prev)
+  }
   if __match_strategy(opts) == "catalog" {
     return __opts_with_active_skills(tool_opts, registry, prev)
   }

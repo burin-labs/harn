@@ -212,6 +212,8 @@ pub struct ModelDef {
     pub provider: String,
     pub context_window: u64,
     #[serde(default)]
+    pub runtime_context_window: Option<u64>,
+    #[serde(default)]
     pub stream_timeout: Option<f64>,
     #[serde(default)]
     pub capabilities: Vec<String>,
@@ -1594,6 +1596,7 @@ fn default_config() -> ProvidersConfig {
                 name: "Claude Sonnet 4".to_string(),
                 provider: "anthropic".to_string(),
                 context_window: 200_000,
+                runtime_context_window: None,
                 stream_timeout: None,
                 capabilities: vec![
                     "tools".to_string(),
@@ -1615,6 +1618,7 @@ fn default_config() -> ProvidersConfig {
                 name: "GPT-4o Mini".to_string(),
                 provider: "openai".to_string(),
                 context_window: 128_000,
+                runtime_context_window: None,
                 stream_timeout: None,
                 capabilities: vec!["tools".to_string(), "streaming".to_string()],
                 pricing: Some(ModelPricing {
@@ -1631,6 +1635,7 @@ fn default_config() -> ProvidersConfig {
                 name: "Qwen3.5 9B".to_string(),
                 provider: "openrouter".to_string(),
                 context_window: 131_072,
+                runtime_context_window: None,
                 stream_timeout: None,
                 capabilities: vec!["tools".to_string(), "streaming".to_string()],
                 pricing: None,
@@ -1642,6 +1647,7 @@ fn default_config() -> ProvidersConfig {
                 name: "Llama 3.2".to_string(),
                 provider: "ollama".to_string(),
                 context_window: 32_000,
+                runtime_context_window: None,
                 stream_timeout: Some(300.0),
                 capabilities: vec!["tools".to_string(), "streaming".to_string()],
                 pricing: None,
@@ -2008,6 +2014,7 @@ mod tests {
                 name: "Acme Fast".to_string(),
                 provider: "acme".to_string(),
                 context_window: 65_536,
+                runtime_context_window: None,
                 stream_timeout: Some(42.0),
                 capabilities: vec!["tools".to_string(), "streaming".to_string()],
                 pricing: Some(ModelPricing {

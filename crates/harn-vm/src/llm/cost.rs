@@ -646,6 +646,7 @@ mod tests {
                 name: "Test GPT-4o Mini".to_string(),
                 provider: "openai".to_string(),
                 context_window: 128_000,
+                runtime_context_window: None,
                 stream_timeout: None,
                 capabilities: Vec::new(),
                 pricing: Some(crate::llm_config::ModelPricing {

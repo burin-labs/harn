@@ -1,0 +1,46 @@
+/**
+ * `skill_match: {strategy: "manual"}` lets a host render its own compact
+ * skill cards while still giving the model the `load_skill` tool for the
+ * supplied registry. Harn must not add its catalog prompt until the model
+ * explicitly loads a skill.
+ */
+pipeline test(task) {
+  skill alpha {
+    description "Alpha workflow"
+    when_to_use "Use alpha for alpha-shaped work"
+    prompt "Alpha instructions."
+  }
+  skill beta {
+    description "Beta workflow"
+    when_to_use "Use beta for beta-shaped work"
+    prompt "Beta instructions."
+  }
+  let registry = skill_define(alpha, "beta", skill_find(beta, "beta") ?? {})
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "load-alpha", name: "load_skill", arguments: {name: "alpha"}}]})
+  llm_mock({text: "Alpha loaded."})
+  let result = agent_loop(
+    "alpha please",
+    "Host-rendered cards mention `alpha`.",
+    {
+      provider: "mock",
+      tool_format: "native",
+      max_iterations: 2,
+      skills: registry,
+      skill_match: {strategy: "manual"},
+    },
+  )
+  assert(result?.status == "done", "manual skill loop completes")
+  let calls = llm_mock_calls()
+  assert(len(calls) == 2, "load_skill creates a second model turn")
+  assert(!contains(calls[0].system, "## Available skills"), "manual strategy suppresses catalog")
+  assert(
+    !contains(calls[0].system, "## Active skills"),
+    "manual strategy does not pre-activate skills",
+  )
+  assert(contains(json_stringify(calls[0].tools), "load_skill"), "load_skill is still advertised")
+  assert(contains(calls[1].system, "## Active skills"), "loaded skill is active on the next turn")
+  assert(contains(calls[1].system, "Alpha instructions."), "loaded skill prompt is active")
+  assert(!contains(calls[1].system, "## Available skills"), "manual strategy never adds the catalog")
+  log("skill_lifecycle_manual tests passed")
+}

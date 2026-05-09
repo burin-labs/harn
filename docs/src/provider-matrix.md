@@ -41,6 +41,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `gemini` | `gemini-*` | no | yes | yes | yes | yes | yes | no | no | no |
 | `gemini` | `models/gemini-*` | no | yes | yes | yes | yes | yes | no | no | no |
 | `huggingface` | `qwen/qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
+| `huggingface` | `qwen/qwen3-coder*` | no | no | no | no | yes | no | `native` | yes | no |
 | `huggingface` | `qwen/*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
 | `huggingface` | `deepseek-ai/deepseek-v3*` | `enabled` | no | no | no | yes | no | `native` | yes | yes |
 | `llamacpp` | `*qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
@@ -74,11 +75,13 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openai` | `openai/o3*` | `effort` | no | no | no | yes | no | `native` | yes | no |
 | `openai` | `openai/o4*` | `effort` | yes | no | no | yes | no | `native` | yes | no |
 | `openrouter` | `qwen/qwen3.6*` | `enabled,effort` | no | no | no | yes | no | `native` | yes | no |
+| `openrouter` | `qwen/qwen3-coder*` | no | no | no | no | yes | no | `native` | yes | no |
 | `openrouter` | `qwen/*` | `enabled,effort` | no | no | no | yes | no | `native` | yes | no |
 | `openrouter` | `deepseek/deepseek-v3*` | `enabled,effort` | no | no | no | yes | no | `native` | yes | yes |
 | `openrouter` | `google/gemini-2.5*` | `enabled,effort` | yes | yes | yes | yes | no | `native` | yes | yes |
 | `openrouter` | `google/gemma-4*` | no | no | no | no | yes | no | `native` | yes | no |
 | `together` | `qwen/qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
+| `together` | `qwen/qwen3-coder*` | no | no | no | no | yes | no | `native` | yes | no |
 | `together` | `qwen/*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
 | `together` | `deepseek-ai/deepseek-v3*` | `enabled` | no | no | no | yes | no | `native` | yes | yes |
 | `together` | `openai/gpt-oss-*` | `effort` | no | no | no | yes | no | `native` | no | no |

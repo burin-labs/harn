@@ -1,14 +1,29 @@
 // @harn-entrypoint-category agent.stdlib
-import { filter_nil } from "std/collections"
+import { filter_nil, pick_keys } from "std/collections"
 
 fn __agent_option_keys() {
   return [
     "provider",
     "model",
+    "model_tier",
+    "temperature",
+    "top_p",
+    "top_k",
+    "max_tokens",
     "thinking",
+    "reasoning_effort",
+    "reasoning_policy",
+    "thinking_policy",
+    "reasoning_scale",
+    "problem_scale",
+    "reasoning_task",
     "tools",
     "max_iterations",
+    "max_nudges",
+    "nudge",
+    "turn_policy",
     "tool_format",
+    "native_tool_fallback",
     "structural_experiment",
     "context_callback",
     "context_filter",
@@ -42,12 +57,7 @@ pub fn agent_config(agent, prompt) {
   if type_of(agent) != "dict" || agent?._type != "agent" {
     throw "agent_config: first argument must be an agent (created with agent())"
   }
-  var options = {}
-  for key in __agent_option_keys() {
-    if agent[key] != nil {
-      options = options + {[key]: agent[key]}
-    }
-  }
+  let options = pick_keys(agent, __agent_option_keys(), {drop_nil: true})
   return {prompt: prompt, system: agent?.system, options: options}
 }
 

@@ -1420,6 +1420,7 @@ fn auto_compact_messages_reduces_count() {
         &mut messages,
         &AutoCompactConfig {
             compact_strategy: CompactStrategy::Truncate,
+            token_threshold: 1,
             keep_last: 6,
             ..Default::default()
         },
@@ -1457,6 +1458,29 @@ fn auto_compact_noop_when_under_threshold() {
 }
 
 #[test]
+fn auto_compact_noop_when_message_tokens_under_threshold() {
+    let mut messages: Vec<serde_json::Value> = (0..20)
+        .map(|i| serde_json::json!({"role": "user", "content": format!("short message {i}")}))
+        .collect();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let compacted = runtime.block_on(auto_compact_messages(
+        &mut messages,
+        &AutoCompactConfig {
+            compact_strategy: CompactStrategy::Truncate,
+            token_threshold: 48_000,
+            keep_last: 6,
+            ..Default::default()
+        },
+        None,
+    ));
+    assert!(compacted.unwrap().is_none());
+    assert_eq!(messages.len(), 20);
+}
+
+#[test]
 fn observation_mask_preserves_errors_masks_verbose_output() {
     let verbose_lines: Vec<String> = (0..60)
         .map(|i| format!("// source line {} of the generated file", i))
@@ -1483,6 +1507,7 @@ fn observation_mask_preserves_errors_masks_verbose_output() {
         &mut messages,
         &AutoCompactConfig {
             compact_strategy: CompactStrategy::ObservationMask,
+            token_threshold: 1,
             keep_last: 2,
             ..Default::default()
         },

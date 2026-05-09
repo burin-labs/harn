@@ -2,6 +2,7 @@
 import { agent_read_tools } from "std/agent/host_tools"
 import { render_agent_prompt } from "std/agent/prompts"
 import { agent_emit_event, agent_session_messages } from "std/agent/state"
+import { pick_keys } from "std/collections"
 import { safe_parse } from "std/json"
 
 fn __sim_user_string(value) {
@@ -473,13 +474,29 @@ fn __agentic_user_prompt(answerer, payload) {
 }
 
 fn __agentic_user_base_llm_options(answerer) {
-  var opts = answerer?.llm_options ?? {}
-  for key in ["provider", "model", "temperature", "top_p", "max_tokens", "seed", "api_base", "api_key"] {
-    if answerer[key] != nil {
-      opts[key] = answerer[key]
-    }
-  }
-  return opts
+  let opts = answerer?.llm_options ?? {}
+  return opts + pick_keys(answerer, __agentic_user_llm_option_keys(), {drop_nil: true})
+}
+
+fn __agentic_user_llm_option_keys() {
+  return [
+    "provider",
+    "model",
+    "model_tier",
+    "temperature",
+    "top_p",
+    "max_tokens",
+    "seed",
+    "api_base",
+    "api_key",
+    "thinking",
+    "reasoning_effort",
+    "reasoning_policy",
+    "thinking_policy",
+    "reasoning_scale",
+    "problem_scale",
+    "reasoning_task",
+  ]
 }
 
 fn __agentic_user_remaining_llm_calls(answerer) {
@@ -576,14 +593,6 @@ pub fn agentic_user(task_or_config, behavior = nil, tools = nil, model = nil, op
     behavior: config?.behavior ?? "",
     tools: config?.tools,
     tool_format: config?.tool_format,
-    provider: config?.provider,
-    model: config?.model,
-    temperature: config?.temperature,
-    top_p: config?.top_p,
-    max_tokens: config?.max_tokens,
-    seed: config?.seed,
-    api_base: config?.api_base,
-    api_key: config?.api_key,
     llm_options: config?.llm_options ?? {},
     max_replies: config?.max_replies ?? 5,
     max_llm_calls: config?.max_llm_calls ?? 8,
@@ -596,6 +605,7 @@ pub fn agentic_user(task_or_config, behavior = nil, tools = nil, model = nil, op
     session_id: config?.session_id,
     state: state,
   }
+    + pick_keys(config, __agentic_user_llm_option_keys(), {drop_nil: true})
   answerer["respond"] = { payload -> __agentic_user_respond(answerer, payload) }
   return answerer
 }

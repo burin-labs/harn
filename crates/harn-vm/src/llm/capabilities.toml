@@ -681,6 +681,15 @@ text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
 
 [[provider.openrouter]]
+model_match = "qwen/qwen3-coder*"
+native_tools = true
+structured_output = "native"
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+
+[[provider.openrouter]]
 model_match = "qwen/*"
 native_tools = true
 structured_output = "native"
@@ -706,6 +715,15 @@ text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
 
 [[provider.huggingface]]
+model_match = "qwen/qwen3-coder*"
+native_tools = true
+structured_output = "native"
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+
+[[provider.huggingface]]
 model_match = "qwen/*"
 native_tools = true
 structured_output = "native"
@@ -727,6 +745,15 @@ honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+
+[[provider.together]]
+model_match = "qwen/qwen3-coder*"
+native_tools = true
+structured_output = "native"
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 [[provider.together]]
 model_match = "qwen/*"

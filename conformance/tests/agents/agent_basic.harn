@@ -5,7 +5,7 @@ fn agent_tools() {
     "read",
     "Read a file",
     {
-      handler: { args -> "" },
+      handler: { _args -> "" },
       parameters: {path: {type: "string", description: "Path to read"}},
       returns: {type: "string"},
     },
@@ -15,7 +15,7 @@ fn agent_tools() {
     "search",
     "Search project files",
     {
-      handler: { args -> "" },
+      handler: { _args -> "" },
       parameters: {
         pattern: {type: "string", description: "Pattern to search"},
         file_glob: {type: "string", description: "Optional file glob", required: false},
@@ -35,6 +35,9 @@ pipeline test(task) {
       provider: "mock",
       model: "test-model",
       max_iterations: 5,
+      reasoning_policy: "auto",
+      reasoning_scale: "large",
+      reasoning_task: "code",
       tools: agent_tools(),
     },
   )
@@ -54,5 +57,8 @@ pipeline test(task) {
   assert(cfg.options.provider == "mock", "should have provider in options")
   assert(cfg.options.model == "test-model", "should have model in options")
   assert(cfg.options.max_iterations == 5, "should have max_iterations in options")
+  assert(cfg.options.reasoning_policy == "auto", "should have reasoning_policy in options")
+  assert(cfg.options.reasoning_scale == "large", "should have reasoning_scale in options")
+  assert(cfg.options.reasoning_task == "code", "should have reasoning_task in options")
   log("agent tests passed")
 }
