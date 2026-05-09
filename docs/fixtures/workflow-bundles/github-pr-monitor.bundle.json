@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "id": "github-pr-monitor",
+  "name": "GitHub PR monitor",
+  "version": "1.0.0",
+  "triggers": [
+    {
+      "id": "github-pr-updated",
+      "kind": "github",
+      "provider": "github",
+      "events": ["pull_request.opened", "pull_request.synchronize"],
+      "node_id": "ingest"
+    },
+    {
+      "id": "delay-log-check",
+      "kind": "delay",
+      "delay": "PT10M",
+      "node_id": "query_logs"
+    }
+  ],
+  "workflow": {
+    "_type": "workflow_graph",
+    "id": "pr_monitor_workflow",
+    "name": "PR monitor",
+    "version": 1,
+    "entry": "ingest",
+    "nodes": {
+      "ingest": {
+        "id": "ingest",
+        "kind": "action",
+        "task_label": "Normalize PR event"
+      },
+      "wait_for_deploy": {
+        "id": "wait_for_deploy",
+        "kind": "waitpoint",
+        "task_label": "Wait for deploy"
+      },
+      "query_logs": {
+        "id": "query_logs",
+        "kind": "action",
+        "task_label": "Query logs"
+      },
+      "notify": {
+        "id": "notify",
+        "kind": "notification",
+        "task_label": "Notify user"
+      }
+    },
+    "edges": [
+      {
+        "from": "ingest",
+        "to": "wait_for_deploy"
+      },
+      {
+        "from": "wait_for_deploy",
+        "to": "query_logs"
+      },
+      {
+        "from": "query_logs",
+        "to": "notify"
+      }
+    ]
+  },
+  "prompt_capsules": {
+    "query-logs": {
+      "id": "query-logs",
+      "node_id": "query_logs",
+      "trigger_id": "delay-log-check",
+      "prompt": "Query deploy logs for the pull request and summarize failures."
+    }
+  },
+  "policy": {
+    "autonomy_tier": "act_with_approval",
+    "retry": {
+      "max_attempts": 2,
+      "backoff": "exponential"
+    },
+    "catchup": {
+      "mode": "latest",
+      "max_events": 1
+    }
+  },
+  "connectors": [
+    {
+      "id": "github",
+      "provider_id": "github",
+      "scopes": ["pull_requests:read", "checks:read"],
+      "setup_required": true,
+      "status_required": true
+    }
+  ],
+  "environment": {
+    "repo_setup_profile": "default",
+    "worktree_policy": "host_managed",
+    "command_gates": ["make test"]
+  },
+  "receipts": {
+    "run_id": "bundle_run_pr_monitor_fixture",
+    "event_ids": ["github:event:42"],
+    "workflow_version": 1
+  }
+}

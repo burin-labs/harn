@@ -656,6 +656,14 @@ async fn async_main() {
             }
             Err(error) => command_error(&error),
         },
+        Command::Workflow(args) => match commands::workflow::handle(args) {
+            Ok(code) => {
+                if code != 0 {
+                    process::exit(code);
+                }
+            }
+            Err(error) => command_error(&error),
+        },
         Command::Trace(args) => {
             if let Err(error) = commands::trace::handle(args).await {
                 eprintln!("error: {error}");
