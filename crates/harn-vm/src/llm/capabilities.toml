@@ -48,6 +48,7 @@
 #   honors_chat_template_kwargs: whether chat_template_kwargs are honored.
 #   requires_completion_tokens: whether to send max_completion_tokens instead of max_tokens.
 #   reasoning_effort_supported: whether reasoning_effort is accepted.
+#   reasoning_none_supported: whether reasoning_effort="none" is accepted.
 #   recommended_endpoint: preferred endpoint family for this route.
 #   text_tool_wire_format_supported: whether Harn text tool calls survive.
 #   thinking_disable_directive:
@@ -337,6 +338,28 @@ defer_loading = true
 tool_search = ["hosted", "client"]
 vision_supported = true
 structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = true
+
+[[provider.openai]]
+model_match = "gpt-*"
+version_min = [5, 1]
+native_tools = true
+vision_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = true
+
+[[provider.openai]]
+model_match = "gpt-*"
+version_min = [5, 0]
+native_tools = true
+vision_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
 
 # Legacy GPT: native tool calls only.
 [[provider.openai]]
@@ -393,6 +416,26 @@ defer_loading = true
 tool_search = ["hosted", "client"]
 vision_supported = true
 structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = true
+
+[[provider.openai]]
+model_match = "openai/gpt-*"
+version_min = [5, 1]
+native_tools = true
+json_schema = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = true
+
+[[provider.openai]]
+model_match = "openai/gpt-*"
+version_min = [5, 0]
+native_tools = true
+json_schema = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
 
 [[provider.openai]]
 model_match = "openai/gpt-*"
@@ -749,6 +792,22 @@ pdf_supported = true
 structured_output = "native"
 
 [[provider.gemini]]
+model_match = "gemini-2.5*"
+thinking_modes = ["enabled", "adaptive", "effort"]
+vision_supported = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+
+[[provider.gemini]]
+model_match = "models/gemini-2.5*"
+thinking_modes = ["enabled", "adaptive", "effort"]
+vision_supported = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+
+[[provider.gemini]]
 model_match = "gemini-*"
 vision_supported = true
 audio_supported = true
@@ -767,9 +826,51 @@ model_match = "google/gemma-4*"
 native_tools = true
 structured_output = "native"
 
-# ---------- Moonshot Kimi K2.5 (via Together) --------------------------------
+# ---------- Together reasoning models ----------------------------------------
 #
-# Kimi K2.5 does OpenAI-compatible native tool calls; no thinking surface.
+# Together exposes three reasoning surfaces today:
+#   - Qwen uses `chat_template_kwargs.thinking` / `enable_thinking`.
+#   - Hybrid Kimi/GLM/Gemma models use `reasoning.enabled`.
+#   - GPT-OSS uses top-level `reasoning_effort`.
+# Keep each host-specific rule explicit so the generic OpenAI fallback does
+# not accidentally claim the wrong wire format.
+
+[[provider.together]]
+model_match = "openai/gpt-oss-*"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+
+[[provider.together]]
+model_match = "deepseek-ai/deepseek-v4*"
+native_tools = true
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_supported = true
+prompt_caching = true
+structured_output = "native"
+server_parser = "none"
+honors_chat_template_kwargs = false
+
+[[provider.together]]
+model_match = "moonshotai/kimi-k2*"
+native_tools = true
+structured_output = "native"
+thinking_modes = ["enabled"]
+honors_chat_template_kwargs = false
+
+[[provider.together]]
+model_match = "zai-org/glm-5*"
+native_tools = true
+structured_output = "native"
+thinking_modes = ["enabled"]
+honors_chat_template_kwargs = false
+
+[[provider.together]]
+model_match = "google/gemma-4*"
+native_tools = true
+structured_output = "native"
+thinking_modes = ["enabled"]
+honors_chat_template_kwargs = false
 
 [[provider.together]]
 model_match = "moonshotai/*"

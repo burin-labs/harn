@@ -1,0 +1,227 @@
+fn __has_key(opts, key) {
+  return type_of(opts) == "dict" && contains(opts.keys(), key)
+}
+
+fn __caller_set_reasoning(opts) {
+  if __has_key(opts, "thinking") || __has_key(opts, "reasoning_effort") {
+    return true
+  }
+  let llm_overrides = opts?.llm_options
+  if type_of(llm_overrides) == "dict" {
+    return contains(llm_overrides.keys(), "thinking") || contains(llm_overrides.keys(), "reasoning_effort")
+  }
+  return false
+}
+
+fn __normalize_reasoning_policy(value) {
+  if value == nil {
+    return "auto"
+  }
+  if type_of(value) == "bool" {
+    if value {
+      return "auto"
+    }
+    return "off"
+  }
+  let policy = lowercase(trim(to_string(value)))
+  if policy == "" || policy == "default" {
+    return "auto"
+  }
+  if policy == "none" || policy == "disabled" || policy == "false" || policy == "no" {
+    return "off"
+  }
+  if policy == "enabled" || policy == "on" || policy == "true" {
+    return "auto"
+  }
+  if policy == "auto" || policy == "off" || policy == "minimal" || policy == "low"
+    || policy == "medium"
+    || policy == "high"
+    || policy == "xhigh" {
+    return policy
+  }
+  throw "agent_loop: reasoning_policy must be auto, off, minimal, low, medium, high, or xhigh; got "
+    + to_string(value)
+}
+
+fn __reasoning_policy(opts) {
+  return __normalize_reasoning_policy(opts?.reasoning_policy ?? opts?.thinking_policy)
+}
+
+fn __reasoning_scale(opts) {
+  let raw = opts?.reasoning_scale ?? opts?.problem_scale ?? "medium"
+  if raw == nil {
+    return "medium"
+  }
+  let scale = lowercase(trim(to_string(raw)))
+  if scale == "" || scale == "auto" {
+    return "medium"
+  }
+  if scale == "small" || scale == "medium" || scale == "large" {
+    return scale
+  }
+  throw "agent_loop: reasoning_scale must be small, medium, large, or auto; got " + to_string(raw)
+}
+
+fn __reasoning_task(opts) {
+  let raw = opts?.reasoning_task ?? opts?.task_kind
+  if raw != nil && trim(to_string(raw)) != "" {
+    let task = lowercase(trim(to_string(raw)))
+    if task == "code" || task == "agent" || task == "verify" || task == "summarize" || task == "chat" {
+      return task
+    }
+    throw "agent_loop: reasoning_task must be chat, agent, code, verify, or summarize; got "
+      + to_string(raw)
+  }
+  if opts?.profile == "verifier" {
+    return "verify"
+  }
+  if opts?.profile == "completer" {
+    return "summarize"
+  }
+  if opts?.tools != nil {
+    return "agent"
+  }
+  return "chat"
+}
+
+fn __scale_level(scale) {
+  if scale == "small" {
+    return "low"
+  }
+  if scale == "large" {
+    return "high"
+  }
+  return "medium"
+}
+
+fn __auto_reasoning_level(task, scale) {
+  if task == "summarize" {
+    return "off"
+  }
+  if task == "verify" {
+    return "low"
+  }
+  if task == "chat" && scale != "large" {
+    return "off"
+  }
+  return __scale_level(scale)
+}
+
+fn __resolved_model_route(opts) {
+  if opts?.model == nil || opts.model == "" {
+    return nil
+  }
+  var input = {model: opts.model}
+  if opts?.provider != nil && opts.provider != "" {
+    input = input + {provider: opts.provider}
+  }
+  let resolved = try {
+    llm_resolved_options(input)
+  }
+  if is_err(resolved) {
+    if opts?.provider == nil || opts.provider == "" {
+      return nil
+    }
+    return {provider: opts.provider, model: opts.model}
+  }
+  let value = unwrap(resolved)
+  return {provider: value?.provider ?? opts?.provider, model: value?.model ?? opts.model}
+}
+
+fn __reasoning_capabilities(route) {
+  if route == nil || route?.provider == nil || route?.model == nil {
+    return nil
+  }
+  let caps = try {
+    provider_capabilities(route.provider, route.model)
+  }
+  if is_err(caps) {
+    return nil
+  }
+  return unwrap(caps)
+}
+
+fn __caps_supports(caps, mode) {
+  if caps == nil {
+    return false
+  }
+  return contains(caps?.thinking_modes ?? [], mode)
+}
+
+fn __budget_for_reasoning_level(level) {
+  if level == "minimal" || level == "low" {
+    return 1024
+  }
+  if level == "high" || level == "xhigh" {
+    return 12000
+  }
+  return 4096
+}
+
+fn __thinking_for_reasoning_level(level, caps) {
+  if level == "off" {
+    if __caps_supports(caps, "effort") || caps?.reasoning_effort_supported ?? false {
+      if caps?.reasoning_none_supported ?? false {
+        return {mode: "effort", level: "none"}
+      }
+      return {mode: "effort", level: "minimal"}
+    }
+    return {mode: "disabled"}
+  }
+  if __caps_supports(caps, "effort") || caps?.reasoning_effort_supported ?? false {
+    return {mode: "effort", level: level}
+  }
+  if __caps_supports(caps, "enabled") {
+    return {mode: "enabled", budget_tokens: __budget_for_reasoning_level(level)}
+  }
+  if __caps_supports(caps, "adaptive") {
+    return {mode: "adaptive"}
+  }
+  return nil
+}
+
+fn __local_qwen_route(route) {
+  if route == nil {
+    return false
+  }
+  let provider = lowercase(to_string(route?.provider ?? ""))
+  let model = lowercase(to_string(route?.model ?? ""))
+  return (provider == "ollama" || provider == "llamacpp" || provider == "local" || provider == "mlx")
+    && contains(model, "qwen3")
+}
+
+/** Resolve provider-aware automatic reasoning options for an agent loop. */
+pub fn agent_reasoning_apply(opts) {
+  if __caller_set_reasoning(opts) {
+    return opts
+  }
+  let policy = __reasoning_policy(opts)
+  let scale = __reasoning_scale(opts)
+  let task = __reasoning_task(opts)
+  var level = if policy == "auto" {
+    __auto_reasoning_level(task, scale)
+  } else {
+    policy
+  }
+  let route = __resolved_model_route(opts)
+  let caps = __reasoning_capabilities(route)
+  if policy == "auto" && __local_qwen_route(route) && (level == "low" || level == "medium") {
+    level = "off"
+  }
+  let thinking = __thinking_for_reasoning_level(level, caps)
+  if thinking == nil {
+    return opts
+  }
+  return opts
+    + {
+    thinking: thinking,
+    _agent_reasoning_policy_applied: {
+      policy: policy,
+      task: task,
+      scale: scale,
+      level: level,
+      provider: route?.provider,
+      model: route?.model,
+    },
+  }
+}

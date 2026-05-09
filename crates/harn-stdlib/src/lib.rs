@@ -166,6 +166,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/llm/rerank.harn"),
     },
     StdlibSource {
+        module: "agent/reasoning",
+        source: include_str!("stdlib/agent/reasoning.harn"),
+    },
+    StdlibSource {
         module: "agent/options",
         source: include_str!("stdlib/agent/options.harn"),
     },

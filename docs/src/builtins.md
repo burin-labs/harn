@@ -1596,7 +1596,7 @@ llm_mock_clear()
 LLM provider endpoints, model aliases, inference rules, and default parameters
 are configured via a TOML file. The VM searches for config in this order:
 
-1. Built-in defaults (Anthropic, OpenAI, OpenRouter, HuggingFace, Ollama, Local)
+1. Built-in defaults (Anthropic, OpenAI, OpenRouter, HuggingFace, Ollama, Local, llama.cpp)
 2. `HARN_PROVIDERS_CONFIG` if set, otherwise `~/.config/harn/providers.toml`
 3. Installed package `[llm]` tables in `.harn/packages/*/harn.toml`
 4. The nearest project `harn.toml` `[llm]` table
@@ -1616,6 +1616,13 @@ chat_endpoint = "/messages"
 [llm.providers.local]
 base_url = "http://localhost:8000"
 base_url_env = "LOCAL_LLM_BASE_URL"
+auth_style = "none"
+chat_endpoint = "/v1/chat/completions"
+completion_endpoint = "/v1/completions"
+
+[llm.providers.llamacpp]
+base_url = "http://127.0.0.1:8001"
+base_url_env = "LLAMACPP_BASE_URL"
 auth_style = "none"
 chat_endpoint = "/v1/chat/completions"
 completion_endpoint = "/v1/completions"

@@ -1,5 +1,6 @@
 import "std/agents"
 import {
+  apply_reasoning_policy,
   effective_verify_command,
   evaluator_model,
   evaluator_options,
@@ -284,14 +285,16 @@ fn graph_research_template() {
     mode: "agent",
     tools: read_search_tools(),
     system: research_system(),
-    model_policy: {
-      provider: provider_name(),
-      model: generator_model(),
-      tool_format: "native",
-      temperature: 0,
-      max_iterations: 6,
-      turn_policy: {require_action_or_yield: true, allow_done_sentinel: true, max_prose_chars: 280},
-    },
+    model_policy: apply_reasoning_policy(
+      {
+        provider: provider_name(),
+        model: generator_model(),
+        temperature: 0,
+        max_iterations: 6,
+        turn_policy: {require_action_or_yield: true, allow_done_sentinel: true, max_prose_chars: 280},
+      },
+      "agent",
+    ),
     output_contract: {output_kinds: ["summary"]},
   }
 }
@@ -301,14 +304,16 @@ fn graph_execute_template() {
     mode: "agent",
     tools: edit_tools(),
     system: execute_system(),
-    model_policy: {
-      provider: provider_name(),
-      model: generator_model(),
-      tool_format: "native",
-      temperature: 0,
-      max_iterations: 8,
-      turn_policy: {require_action_or_yield: true, allow_done_sentinel: true, max_prose_chars: 360},
-    },
+    model_policy: apply_reasoning_policy(
+      {
+        provider: provider_name(),
+        model: generator_model(),
+        temperature: 0,
+        max_iterations: 8,
+        turn_policy: {require_action_or_yield: true, allow_done_sentinel: true, max_prose_chars: 360},
+      },
+      "agent",
+    ),
     output_contract: {output_kinds: ["summary"]},
   }
 }

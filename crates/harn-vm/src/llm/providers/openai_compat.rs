@@ -194,9 +194,19 @@ impl OpenAiCompatibleProvider {
             if let Some(reasoning) = openrouter_reasoning_config(&opts.thinking) {
                 body["reasoning"] = reasoning;
             }
-        } else if caps.reasoning_effort_supported {
-            if let ThinkingConfig::Effort { level } = &opts.thinking {
-                body["reasoning_effort"] = serde_json::json!(level.as_str());
+        } else {
+            if opts.provider == "together" && !caps.honors_chat_template_kwargs {
+                if let Some(reasoning) = together_reasoning_config(&opts.thinking, &caps) {
+                    body["reasoning"] = reasoning;
+                }
+            }
+            if caps.reasoning_effort_supported {
+                if let ThinkingConfig::Effort { level } = &opts.thinking {
+                    if *level != crate::llm::api::ReasoningEffort::None || opts.provider == "openai"
+                    {
+                        body["reasoning_effort"] = serde_json::json!(level.as_str());
+                    }
+                }
             }
         }
         match &opts.output_format {
@@ -280,9 +290,34 @@ fn openrouter_reasoning_config(thinking: &ThinkingConfig) -> Option<serde_json::
         ThinkingConfig::Adaptive => Some(serde_json::json!({
             "enabled": true
         })),
+        ThinkingConfig::Effort {
+            level: crate::llm::api::ReasoningEffort::None,
+        } => Some(serde_json::json!({
+            "enabled": false
+        })),
         ThinkingConfig::Effort { level } => Some(serde_json::json!({
             "effort": level.as_str()
         })),
+    }
+}
+
+fn together_reasoning_config(
+    thinking: &ThinkingConfig,
+    caps: &crate::llm::capabilities::Capabilities,
+) -> Option<serde_json::Value> {
+    let supports_enabled = caps.thinking_modes.iter().any(|mode| mode == "enabled");
+    if !supports_enabled {
+        return None;
+    }
+    match thinking {
+        ThinkingConfig::Disabled
+        | ThinkingConfig::Effort {
+            level: crate::llm::api::ReasoningEffort::None,
+        } => Some(serde_json::json!({ "enabled": false })),
+        ThinkingConfig::Enabled { .. } | ThinkingConfig::Adaptive => {
+            Some(serde_json::json!({ "enabled": true }))
+        }
+        ThinkingConfig::Effort { .. } => Some(serde_json::json!({ "enabled": true })),
     }
 }
 
@@ -466,6 +501,48 @@ mod tests {
         assert_eq!(body["reasoning_effort"], "high");
         assert_eq!(body["max_completion_tokens"], 64);
         assert!(body.get("max_tokens").is_none());
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn openai_none_effort_maps_to_reasoning_effort_none() {
+        let mut payload = base_request_payload();
+        payload.provider = "openai".to_string();
+        payload.model = "gpt-5.5".to_string();
+        payload.thinking = ThinkingConfig::Effort {
+            level: ReasoningEffort::None,
+        };
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["reasoning_effort"], "none");
+    }
+
+    #[test]
+    fn together_hybrid_reasoning_uses_reasoning_enabled() {
+        let mut payload = base_request_payload();
+        payload.provider = "together".to_string();
+        payload.model = "moonshotai/Kimi-K2.5".to_string();
+        payload.thinking = ThinkingConfig::Enabled {
+            budget_tokens: None,
+        };
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["reasoning"]["enabled"], true);
+        assert!(body.get("chat_template_kwargs").is_none());
+        assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn together_gpt_oss_effort_uses_reasoning_effort() {
+        let mut payload = base_request_payload();
+        payload.provider = "together".to_string();
+        payload.model = "openai/gpt-oss-120b".to_string();
+        payload.thinking = ThinkingConfig::Effort {
+            level: ReasoningEffort::Medium,
+        };
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["reasoning_effort"], "medium");
         assert!(body.get("reasoning").is_none());
     }
 

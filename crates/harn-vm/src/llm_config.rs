@@ -1246,6 +1246,30 @@ fn default_config() -> ProvidersConfig {
         },
     );
 
+    // llama.cpp / llama-server OpenAI-compatible server. This is separate
+    // from `local` so capability rules can distinguish Qwen chat-template
+    // thinking quirks from other local OpenAI-compatible hosts.
+    config.providers.insert(
+        "llamacpp".to_string(),
+        ProviderDef {
+            base_url: "http://127.0.0.1:8001".to_string(),
+            base_url_env: Some("LLAMACPP_BASE_URL".to_string()),
+            auth_style: "none".to_string(),
+            chat_endpoint: "/v1/chat/completions".to_string(),
+            completion_endpoint: Some("/v1/completions".to_string()),
+            healthcheck: Some(HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/v1/models".to_string()),
+                url: None,
+                body: None,
+            }),
+            cost_per_1k_in: Some(0.0),
+            cost_per_1k_out: Some(0.0),
+            latency_p50_ms: Some(900),
+            ..Default::default()
+        },
+    );
+
     // Apple Silicon MLX OpenAI-compatible server. Harn owns readiness
     // probing; hosts that want script-based auto-start should launch the
     // process first, then call Harn again to verify readiness.

@@ -731,6 +731,10 @@ fn capabilities_to_vm_value(
         "reasoning_effort_supported".to_string(),
         VmValue::Bool(caps.reasoning_effort_supported),
     );
+    dict.insert(
+        "reasoning_none_supported".to_string(),
+        VmValue::Bool(caps.reasoning_none_supported),
+    );
     VmValue::Dict(Rc::new(dict))
 }
 

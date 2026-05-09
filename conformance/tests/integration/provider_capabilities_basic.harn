@@ -37,6 +37,12 @@ pipeline test(task) {
   assert(len(gpt.tool_search) == 2, "gpt-5.4 advertises two tool_search modes")
   assert(gpt.tool_search[0] == "hosted", "hosted ordered first")
   assert(gpt.tool_search[1] == "client", "client second")
+  assert(gpt.thinking_modes[0] == "effort", "gpt-5.4 exposes effort thinking")
+  assert(gpt.reasoning_effort_supported, "gpt-5.4 supports reasoning_effort")
+  assert(gpt.reasoning_none_supported, "gpt-5.4 supports reasoning_effort none")
+  let gpt50 = provider_capabilities("openai", "gpt-5")
+  assert(gpt50.reasoning_effort_supported, "gpt-5 supports reasoning_effort")
+  assert(!gpt50.reasoning_none_supported, "gpt-5 floors reasoning off at minimal")
   // Legacy GPT — native tools only.
   let gpt4o = provider_capabilities("openai", "gpt-4o")
   assert(gpt4o.native_tools, "gpt-4o has native tools")
@@ -52,10 +58,21 @@ pipeline test(task) {
   assert(!qwen35.vision_supported, "qwen3.5 is not a vision route")
   let gemini = provider_capabilities("gemini", "gemini-2.5-flash")
   assert(gemini.vision_supported, "gemini native route accepts image content")
+  assert(gemini.thinking_modes[0] == "enabled", "gemini 2.5 native route exposes typed thinking")
+  let together_gpt_oss = provider_capabilities("together", "openai/gpt-oss-120b")
+  assert(together_gpt_oss.thinking_modes[0] == "effort", "Together GPT-OSS exposes effort thinking")
+  assert(together_gpt_oss.reasoning_effort_supported, "Together GPT-OSS accepts reasoning_effort")
+  let together_kimi = provider_capabilities("together", "moonshotai/Kimi-K2.5")
+  assert(together_kimi.thinking_modes[0] == "enabled", "Together Kimi exposes reasoning.enabled")
+  assert(
+    !together_kimi.honors_chat_template_kwargs,
+    "Together Kimi does not use Qwen chat template kwargs",
+  )
   // OpenRouter inherits the openai family.
   let routed = provider_capabilities("openrouter", "gpt-5.4")
   assert(routed.defer_loading, "openrouter inherits openai defer_loading")
   assert(routed.tool_search[0] == "hosted", "openrouter inherits hosted/client variants")
+  assert(routed.reasoning_none_supported, "openrouter inherits gpt-5.4 reasoning none support")
   // Sibling families: together, groq, deepseek, fireworks, huggingface, local.
   for family in ["together", "groq", "deepseek", "fireworks", "huggingface", "local"] {
     let caps = provider_capabilities(family, "gpt-5.4")

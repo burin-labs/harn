@@ -10,17 +10,23 @@ pub(crate) type DeltaSender = tokio::sync::mpsc::UnboundedSender<String>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ReasoningEffort {
+    None,
+    Minimal,
     Low,
     Medium,
     High,
+    XHigh,
 }
 
 impl ReasoningEffort {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
+            ReasoningEffort::None => "none",
+            ReasoningEffort::Minimal => "minimal",
             ReasoningEffort::Low => "low",
             ReasoningEffort::Medium => "medium",
             ReasoningEffort::High => "high",
+            ReasoningEffort::XHigh => "xhigh",
         }
     }
 }
@@ -42,7 +48,13 @@ pub(crate) enum ThinkingConfig {
 
 impl ThinkingConfig {
     pub(crate) fn is_disabled(&self) -> bool {
-        matches!(self, Self::Disabled)
+        matches!(
+            self,
+            Self::Disabled
+                | Self::Effort {
+                    level: ReasoningEffort::None
+                }
+        )
     }
 
     pub(crate) fn is_enabled(&self) -> bool {

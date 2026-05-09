@@ -245,6 +245,7 @@ Collection utilities and store helpers:
 | Function | Description |
 |---|---|
 | `filter_nil(dict)` | Remove entries where value is nil, empty string, or "null" |
+| `pick_keys(dict, keys, options?)` | Project a dict onto a key list; use `{drop_nil: true}` to omit nil values |
 | `store_stale(key, max_age_seconds)` | Check if a store key's timestamp is stale |
 | `store_refresh(key)` | Update a store key's timestamp to now |
 

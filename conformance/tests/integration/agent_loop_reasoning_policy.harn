@@ -1,0 +1,49 @@
+import { agent_loop_options } from "std/agent/options"
+
+pipeline test(task) {
+  let gpt = agent_loop_options(
+    {
+      provider: "openai",
+      model: "gpt-5",
+      tools: [{name: "read", description: "read", input_schema: {type: "object"}}],
+      reasoning_policy: "auto",
+      reasoning_task: "agent",
+      reasoning_scale: "medium",
+    },
+  )
+  assert_eq(gpt.thinking.mode, "effort")
+  assert_eq(gpt.thinking.level, "medium")
+  assert_eq(gpt._agent_reasoning_policy_applied.level, "medium")
+  let qwen_off = agent_loop_options(
+    {
+      provider: "ollama",
+      model: "qwen3.6:35b-a3b-coding-nvfp4",
+      reasoning_policy: "off",
+      reasoning_task: "agent",
+    },
+  )
+  assert_eq(qwen_off.thinking.mode, "disabled")
+  let qwen_auto = agent_loop_options(
+    {
+      provider: "llamacpp",
+      model: "qwen3.6-35b-a3b-ud-q4-k-xl",
+      reasoning_policy: "auto",
+      reasoning_task: "code",
+      reasoning_scale: "medium",
+    },
+  )
+  assert_eq(qwen_auto.thinking.mode, "disabled")
+  assert_eq(qwen_auto._agent_reasoning_policy_applied.level, "off")
+  let explicit = agent_loop_options(
+    {provider: "ollama", model: "qwen3.6:35b-a3b-coding-nvfp4", thinking: true, reasoning_policy: "off"},
+  )
+  assert_eq(explicit.thinking, true)
+  assert_eq(explicit.has("_agent_reasoning_policy_applied"), false)
+  let summary = agent_loop_options({model: "gpt-5", reasoning_task: "summarize"})
+  assert_eq(summary.thinking.mode, "effort")
+  assert_eq(summary.thinking.level, "minimal")
+  let current_gpt_summary = agent_loop_options({provider: "openai", model: "gpt-5.4", reasoning_task: "summarize"})
+  assert_eq(current_gpt_summary.thinking.mode, "effort")
+  assert_eq(current_gpt_summary.thinking.level, "none")
+  log("agent_loop_reasoning_policy passed")
+}

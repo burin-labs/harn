@@ -188,6 +188,9 @@ Same as `llm_call`, plus additional options:
 | `llm_caller` | closure | nil | Custom caller wrapping the per-turn `llm_call`. Preferred resilience surface. See [Composable callers and middleware](../stdlib/llm-handlers.md). |
 | `llm_retries` | int | `2` | (deprecated; prefer `llm_caller` with `with_retry` from `std/llm/handlers`) Retries on transient HTTP / provider errors. Off-by-one: `llm_retries: K` ≈ `with_retry(..., {max_attempts: K + 1})`. |
 | `llm_backoff_ms` | int | `2000` | (deprecated; prefer `with_retry`) Base exponential backoff in ms between LLM retries |
+| `reasoning_policy` / `thinking_policy` | string/bool | `"auto"` | Provider-aware reasoning policy. `auto` chooses a task/scale-appropriate setting; `off` disables thinking where possible and otherwise uses the provider's lowest reasoning floor; `minimal`, `low`, `medium`, `high`, and `xhigh` request explicit levels. Caller-supplied `thinking` or `reasoning_effort` always wins |
+| `reasoning_scale` / `problem_scale` | string | `"medium"` | Scale hint for `reasoning_policy: "auto"`: `small`, `medium`, or `large` |
+| `reasoning_task` | string | inferred | Task hint for `reasoning_policy: "auto"`: `chat`, `agent`, `code`, `verify`, or `summarize` |
 | `tool_retries` | int | `0` | Number of retry attempts for failed tool calls |
 | `tool_backoff_ms` | int | `1000` | Base backoff delay in ms for tool retries (doubles each attempt) |
 | `policy` | dict | nil | Capability ceiling applied to this agent loop |
@@ -222,10 +225,21 @@ Same as `llm_call`, plus additional options:
 | `working_files` | list\|string | `[]` | Paths that feed `paths:` glob auto-trigger in the metadata matcher and ride along as a hint to host-delegated matchers |
 | `mcp_servers` | list | nil | MCP servers to connect for this loop. Harn calls `tools/list` once per server, adds discovered tools as `<server>__<tool>`, and dispatches matching tool calls through `tools/call` |
 
-`agent_loop` forwards `thinking`, `interleaved_thinking`, and
-`anthropic_beta_features` to every model turn. For Claude Opus 4.6/4.7
-agent loops, `thinking: true` is the single switch that enables extended
-thinking and the Anthropic interleaved-thinking beta header.
+`agent_loop` forwards `thinking`, `reasoning_effort`, `interleaved_thinking`,
+and `anthropic_beta_features` to every model turn. When neither `thinking` nor
+`reasoning_effort` is set, `reasoning_policy: "auto"` lowers provider quirks
+into explicit typed thinking options before the call reaches the provider. For
+example, OpenAI reasoning models get `thinking: {mode: "effort"}` (`off`
+becomes `none` on newer GPT-5 routes that advertise it, otherwise `minimal`),
+Gemini 2.5 gets native `generationConfig.thinkingConfig`, Together hybrid
+models get `reasoning.enabled`, and Qwen-style local providers can use
+`thinking: {mode: "disabled"}` to trigger Harn's `/no_think` injection.
+For local Qwen routes (`ollama`, `llamacpp`, `local`, and `mlx`), `auto`
+keeps small/medium tasks at this disabled floor because those chat templates
+are more reliable on compact edit loops without forced thinking.
+For Claude Opus 4.6/4.7 agent loops, `thinking: true` remains the
+single explicit switch that enables extended thinking and the Anthropic
+interleaved-thinking beta header.
 
 Profiles preload the common loop-budget and retry keys below. Pass any
 key explicitly to override the profile's value for that call.

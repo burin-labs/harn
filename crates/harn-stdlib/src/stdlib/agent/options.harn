@@ -1,4 +1,5 @@
 import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
+import { agent_reasoning_apply } from "std/agent/reasoning"
 
 fn __profile_defaults(profile) {
   if profile == "tool_using" {
@@ -181,6 +182,39 @@ fn __validate_tool_caller(value) {
   }
 }
 
+fn __validate_removed_agent_loop_options(opts) {
+  if __has_key(opts, "persistent") {
+    throw "agent_loop: `persistent` was removed; use `loop_until_done` for completion looping and `session_id` for transcript persistence"
+  }
+}
+
+fn __validate_agent_loop_completion_options(opts) {
+  if __has_key(opts, "done_sentinel") {
+    __validate_done_sentinel(opts.done_sentinel)
+  }
+  if __has_key(opts, "verify_completion") {
+    __validate_verify_completion(opts.verify_completion)
+  }
+  if __has_key(opts, "verify_completion_judge") {
+    __validate_judge_dict_or_bool("verify_completion_judge", opts.verify_completion_judge)
+  }
+  if __has_key(opts, "done_judge") {
+    __validate_judge_dict_or_bool("done_judge", opts.done_judge)
+  }
+}
+
+fn __validate_agent_loop_callback_options(opts) {
+  if __has_key(opts, "loop_control") {
+    __validate_loop_control(opts.loop_control)
+  }
+  if __has_key(opts, "llm_caller") {
+    __validate_llm_caller(opts.llm_caller)
+  }
+  if __has_key(opts, "tool_caller") {
+    __validate_tool_caller(opts.tool_caller)
+  }
+}
+
 fn __normalize_iteration_budget(opts) {
   let raw = opts?.iteration_budget
   let legacy = opts?.max_iterations
@@ -277,30 +311,9 @@ pub fn autonomy_policy(tier = "act_auto", options = nil) {
 /** agent_loop_options. */
 pub fn agent_loop_options(options = nil) {
   var opts = options ?? {}
-  if __has_key(opts, "persistent") {
-    throw "agent_loop: `persistent` was removed; use `loop_until_done` for completion looping and `session_id` for transcript persistence"
-  }
-  if __has_key(opts, "done_sentinel") {
-    __validate_done_sentinel(opts.done_sentinel)
-  }
-  if __has_key(opts, "verify_completion") {
-    __validate_verify_completion(opts.verify_completion)
-  }
-  if __has_key(opts, "verify_completion_judge") {
-    __validate_judge_dict_or_bool("verify_completion_judge", opts.verify_completion_judge)
-  }
-  if __has_key(opts, "done_judge") {
-    __validate_judge_dict_or_bool("done_judge", opts.done_judge)
-  }
-  if __has_key(opts, "loop_control") {
-    __validate_loop_control(opts.loop_control)
-  }
-  if __has_key(opts, "llm_caller") {
-    __validate_llm_caller(opts.llm_caller)
-  }
-  if __has_key(opts, "tool_caller") {
-    __validate_tool_caller(opts.tool_caller)
-  }
+  __validate_removed_agent_loop_options(opts)
+  __validate_agent_loop_completion_options(opts)
+  __validate_agent_loop_callback_options(opts)
   let llm_caller = opts?.llm_caller
   let tool_caller = opts?.tool_caller
   let profile = opts?.profile ?? "tool_using"
@@ -349,6 +362,7 @@ pub fn agent_loop_options(options = nil) {
   opts = __with_task_ledger_shorthand(opts)
   let budget = __normalize_iteration_budget(opts)
   opts = opts + {iteration_budget: budget, max_iterations: budget.max}
+  opts = agent_reasoning_apply(opts)
   opts = opts + {_llm_caller: llm_caller, _tool_caller: tool_caller}
   return opts
 }
