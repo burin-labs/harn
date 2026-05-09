@@ -14,6 +14,7 @@ use crate::cli::OrchestratorLocalArgs;
 use crate::package::{self, CollectedManifestTrigger, Manifest};
 
 use super::role::OrchestratorRole;
+use super::supervisor_state::apply_supervisor_state;
 
 pub(crate) const STATE_SNAPSHOT_FILE: &str = "orchestrator-state.json";
 pub(crate) use harn_vm::{
@@ -141,6 +142,7 @@ pub(crate) async fn load_local_runtime(
         .await
         .map_err(|error| format!("failed to collect manifest triggers: {error}"))?;
     package::install_collected_manifest_triggers(&collected_triggers).await?;
+    apply_supervisor_state(&state_dir).await?;
 
     let event_log = harn_vm::event_log::active_event_log()
         .ok_or_else(|| "event log was not installed during VM initialization".to_string())?;

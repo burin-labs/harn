@@ -17,6 +17,7 @@ mod resume;
 pub(crate) mod role;
 mod serve;
 mod stats;
+pub(crate) mod supervisor_state;
 mod tenant;
 pub mod tls;
 
