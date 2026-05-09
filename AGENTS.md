@@ -84,6 +84,8 @@ This repository implements Harn, a programming language and runtime for orchestr
 - Edit `spec/HARN_SPEC.md`, not `docs/src/language-spec.md`; regenerate with
   `./scripts/sync_language_spec.sh`.
 - Do not hand-edit `docs/theme/harn-keywords.js`; regenerate it with `make gen-highlight`.
+- Do not hand-edit `spec/protocol-artifacts/*`; regenerate Harn protocol contracts with
+  `make gen-protocol-artifacts` and verify them with `make check-protocol-artifacts`.
 - `docs/dist/`, `.harn-runs/`, `.harn/`, `.claude/`, `.burin/`, `target/`, and `node_modules/` are
   generated or local-only paths.
 
