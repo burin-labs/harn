@@ -525,6 +525,16 @@ pub(crate) async fn dispatch_host_operation(
         return mocked;
     }
 
+    if (capability, operation) == ("process", "exec") {
+        let caller = serde_json::json!({
+            "surface": "host_call",
+            "capability": "process",
+            "operation": "exec",
+            "session_id": crate::llm::current_agent_session_id(),
+        });
+        return dispatch_process_exec_with_policy(params, caller).await;
+    }
+
     let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
     if let Some(bridge) = bridge {
         if let Some(value) = bridge.dispatch(capability, operation, params)? {
@@ -532,16 +542,15 @@ pub(crate) async fn dispatch_host_operation(
         }
     }
 
+    dispatch_builtin_host_operation(capability, operation, params).await
+}
+
+async fn dispatch_builtin_host_operation(
+    capability: &str,
+    operation: &str,
+    params: &BTreeMap<String, VmValue>,
+) -> Result<VmValue, VmError> {
     match (capability, operation) {
-        ("process", "exec") => {
-            let caller = serde_json::json!({
-                "surface": "host_call",
-                "capability": "process",
-                "operation": "exec",
-                "session_id": crate::llm::current_agent_session_id(),
-            });
-            dispatch_process_exec(params, caller).await
-        }
         ("process", "list_shells") => Ok(crate::shells::list_shells_vm_value()),
         ("process", "get_default_shell") => Ok(crate::shells::default_shell_vm_value()),
         ("process", "set_default_shell") => crate::shells::set_default_shell_vm_value(params),
@@ -602,6 +611,13 @@ pub(crate) async fn dispatch_process_exec(
     params: &BTreeMap<String, VmValue>,
     caller: serde_json::Value,
 ) -> Result<VmValue, VmError> {
+    dispatch_process_exec_with_policy(params, caller).await
+}
+
+async fn dispatch_process_exec_with_policy(
+    params: &BTreeMap<String, VmValue>,
+    caller: serde_json::Value,
+) -> Result<VmValue, VmError> {
     let (params, command_policy_context, command_policy_decisions) =
         match crate::orchestration::run_command_policy_preflight(params, caller).await? {
             crate::orchestration::CommandPolicyPreflight::Proceed {
@@ -620,20 +636,43 @@ pub(crate) async fn dispatch_process_exec(
                 ));
             }
         };
-    let (program, args) = process_exec_argv(&params)?;
-    let timeout_ms = optional_i64(&params, "timeout")
-        .or_else(|| optional_i64(&params, "timeout_ms"))
+
+    let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
+    if let Some(bridge) = bridge {
+        if let Some(value) = bridge.dispatch("process", "exec", &params)? {
+            return crate::orchestration::run_command_policy_postflight(
+                &params,
+                value,
+                command_policy_context,
+                command_policy_decisions,
+            )
+            .await;
+        }
+    }
+
+    dispatch_process_exec_after_policy(&params, command_policy_context, command_policy_decisions)
+        .await
+}
+
+async fn dispatch_process_exec_after_policy(
+    params: &BTreeMap<String, VmValue>,
+    command_policy_context: JsonValue,
+    command_policy_decisions: Vec<crate::orchestration::CommandPolicyDecision>,
+) -> Result<VmValue, VmError> {
+    let (program, args) = process_exec_argv(params)?;
+    let timeout_ms = optional_i64(params, "timeout")
+        .or_else(|| optional_i64(params, "timeout_ms"))
         .filter(|value| *value > 0)
         .map(|value| value as u64);
     let mut cmd = crate::process_sandbox::tokio_command_for(&program, &args)
         .map_err(|e| VmError::Runtime(format!("host_call process.exec sandbox setup: {e}")))?;
-    if let Some(cwd) = optional_string(&params, "cwd") {
+    if let Some(cwd) = optional_string(params, "cwd") {
         crate::process_sandbox::enforce_process_cwd(std::path::Path::new(&cwd))
             .map_err(|e| VmError::Runtime(format!("host_call process.exec cwd: {e}")))?;
         cmd.current_dir(cwd);
     }
-    if let Some(env) = optional_string_dict(&params, "env")? {
-        let env_mode = optional_string(&params, "env_mode");
+    if let Some(env) = optional_string_dict(params, "env")? {
+        let env_mode = optional_string(params, "env_mode");
         if env_mode.as_deref().unwrap_or("replace") == "replace" {
             cmd.env_clear();
         }
@@ -646,7 +685,7 @@ pub(crate) async fn dispatch_process_exec(
     // selectively unset (e.g. the git stdlib strips `GIT_*` so its
     // operations are self-contained even when Harn is invoked from
     // inside a git hook that sets `GIT_DIR`).
-    if let Some(env_remove) = optional_string_list(&params, "env_remove") {
+    if let Some(env_remove) = optional_string_list(params, "env_remove") {
         for key in env_remove {
             cmd.env_remove(key);
         }
@@ -686,7 +725,7 @@ pub(crate) async fn dispatch_process_exec(
                     timed_out: true,
                 });
                 return crate::orchestration::run_command_policy_postflight(
-                    &params,
+                    params,
                     response,
                     command_policy_context,
                     command_policy_decisions,
@@ -715,7 +754,7 @@ pub(crate) async fn dispatch_process_exec(
         timed_out,
     });
     crate::orchestration::run_command_policy_postflight(
-        &params,
+        params,
         response,
         command_policy_context,
         command_policy_decisions,
@@ -1000,10 +1039,11 @@ async fn host_tool_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
 #[cfg(test)]
 mod tests {
     use super::{
-        capability_manifest_with_mocks, clear_host_call_bridge, dispatch_host_tool_call,
-        dispatch_host_tool_list, dispatch_mock_host_call, push_host_mock, reset_host_state,
-        set_host_call_bridge, HostCallBridge, HostMock,
+        capability_manifest_with_mocks, clear_host_call_bridge, dispatch_host_operation,
+        dispatch_host_tool_call, dispatch_host_tool_list, dispatch_mock_host_call, push_host_mock,
+        reset_host_state, set_host_call_bridge, HostCallBridge, HostMock,
     };
+    use std::cell::Cell;
     use std::collections::BTreeMap;
     use std::rc::Rc;
 
@@ -1156,6 +1196,32 @@ mod tests {
         }
     }
 
+    struct CountingProcessExecBridge {
+        calls: Rc<Cell<usize>>,
+    }
+
+    impl HostCallBridge for CountingProcessExecBridge {
+        fn dispatch(
+            &self,
+            capability: &str,
+            operation: &str,
+            _params: &BTreeMap<String, VmValue>,
+        ) -> Result<Option<VmValue>, VmError> {
+            if (capability, operation) != ("process", "exec") {
+                return Ok(None);
+            }
+            self.calls.set(self.calls.get() + 1);
+            Ok(Some(VmValue::Dict(Rc::new(BTreeMap::from([
+                (
+                    "status".to_string(),
+                    VmValue::String(Rc::from("completed".to_string())),
+                ),
+                ("exit_code".to_string(), VmValue::Int(0)),
+                ("success".to_string(), VmValue::Bool(true)),
+            ])))))
+        }
+    }
+
     fn run_host_async_test<F, Fut>(test: F)
     where
         F: FnOnce() -> Fut,
@@ -1202,6 +1268,56 @@ mod tests {
                 .expect("tool call");
             clear_host_call_bridge();
             assert_eq!(value.display(), "read:README.md");
+        });
+    }
+
+    #[test]
+    fn process_exec_bridge_is_gated_by_command_policy() {
+        run_host_async_test(|| async {
+            crate::orchestration::clear_command_policies();
+            let calls = Rc::new(Cell::new(0));
+            set_host_call_bridge(Rc::new(CountingProcessExecBridge {
+                calls: calls.clone(),
+            }));
+            crate::orchestration::push_command_policy(crate::orchestration::CommandPolicy {
+                tools: vec!["run".to_string()],
+                workspace_roots: Vec::new(),
+                default_shell_mode: "shell".to_string(),
+                deny_patterns: vec!["cat *".to_string()],
+                require_approval: Default::default(),
+                pre: None,
+                post: None,
+                allow_recursive: false,
+            });
+
+            let result = dispatch_host_operation(
+                "process",
+                "exec",
+                &BTreeMap::from([
+                    ("mode".to_string(), VmValue::String(Rc::from("shell"))),
+                    (
+                        "command".to_string(),
+                        VmValue::String(Rc::from("cat Cargo.toml")),
+                    ),
+                ]),
+            )
+            .await
+            .expect("process.exec result");
+
+            crate::orchestration::clear_command_policies();
+            clear_host_call_bridge();
+
+            assert_eq!(calls.get(), 0, "blocked command must not reach host bridge");
+            let result = result.as_dict().expect("blocked result dict");
+            assert_eq!(result.get("status").unwrap().display(), "blocked");
+            assert!(
+                result
+                    .get("reason")
+                    .map(VmValue::display)
+                    .unwrap_or_default()
+                    .contains("cat *"),
+                "blocked result should name the matched policy pattern"
+            );
         });
     }
 

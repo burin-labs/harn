@@ -770,7 +770,7 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         reset();
         for (provider, model) in [
             ("openrouter", "qwen/qwen3.6-plus"),
-            ("together", "Qwen/Qwen3.6-35B-A3B"),
+            ("together", "Qwen/Qwen3.6-Plus"),
             ("huggingface", "Qwen/Qwen3.6-35B-A3B"),
             ("fireworks", "accounts/fireworks/models/qwen3p6-plus"),
             ("dashscope", "qwen3.6-plus"),
@@ -792,6 +792,32 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
             assert_ne!(
                 caps.server_parser, "ollama_qwen3coder",
                 "{provider}/{model}: only Ollama routes through the qwen3coder response parser"
+            );
+        }
+    }
+
+    #[test]
+    fn qwen_coder_models_do_not_claim_thinking_modes() {
+        reset();
+        for (provider, model) in [
+            ("together", "Qwen/Qwen3-Coder-Next-FP8"),
+            ("together", "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8"),
+            ("openrouter", "qwen/qwen3-coder-next"),
+            ("huggingface", "Qwen/Qwen3-Coder-Next"),
+        ] {
+            let caps = lookup(provider, model);
+            assert!(caps.native_tools, "{provider}/{model}: native_tools");
+            assert!(
+                caps.thinking_modes.is_empty(),
+                "{provider}/{model}: coder models are non-thinking routes"
+            );
+            assert!(
+                !caps.preserve_thinking,
+                "{provider}/{model}: preserve_thinking must stay off"
+            );
+            assert!(
+                caps.thinking_disable_directive.is_none(),
+                "{provider}/{model}: no /no_think shim should be needed"
             );
         }
     }

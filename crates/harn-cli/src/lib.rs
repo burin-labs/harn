@@ -1037,6 +1037,9 @@ async fn print_model_info(args: &ModelInfoArgs) -> bool {
         harn_vm::llm::fetch_provider_max_context(&resolved.provider, &resolved.id, &api_key).await;
     let readiness = local_openai_readiness(&resolved.provider, &resolved.id, &api_key).await;
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
+    let runtime_context_window = catalog
+        .as_ref()
+        .and_then(|entry| entry.runtime_context_window);
     let capabilities = harn_vm::llm::capabilities::lookup(&resolved.provider, &resolved.id);
     let mut payload = serde_json::json!({
         "alias": args.model,
@@ -1047,6 +1050,7 @@ async fn print_model_info(args: &ModelInfoArgs) -> bool {
         "tier": resolved.tier,
         "api_key_set": api_key_set,
         "context_window": context_window,
+        "runtime_context_window": runtime_context_window,
         "readiness": readiness,
         "catalog": catalog,
         "capabilities": {
@@ -1173,6 +1177,7 @@ fn print_provider_catalog(available_only: bool) {
                 "name": model.name,
                 "provider": model.provider,
                 "context_window": model.context_window,
+                "runtime_context_window": model.runtime_context_window,
                 "stream_timeout": model.stream_timeout,
                 "capabilities": model.capabilities,
                 "pricing": model.pricing,

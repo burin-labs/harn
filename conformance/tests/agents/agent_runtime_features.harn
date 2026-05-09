@@ -46,13 +46,14 @@ pipeline test(task) {
     {role: "assistant", content: "We should isolate the lexer first."},
     {role: "user", content: "Then update the diagnostics."},
   ]
-  let llm_compacted = transcript_auto_compact(base_messages, {provider: "mock", keep_last: 1})
+  let llm_compacted = transcript_auto_compact(base_messages, {provider: "mock", keep_last: 1, token_threshold: 1})
   println(len(llm_compacted))
   println(llm_compacted[0].content.contains("auto-compacted"))
   let custom_compacted = transcript_auto_compact(
     base_messages,
     {
       keep_last: 1,
+      token_threshold: 1,
       compact_strategy: "custom",
       compact_callback: { archived -> {summary: "custom compact " + to_string(len(archived))} },
     },

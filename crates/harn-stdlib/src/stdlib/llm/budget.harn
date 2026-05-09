@@ -79,8 +79,10 @@ pub fn estimate_text_tokens_detail(text, model = nil) {
 }
 
 /**
- * Look up the context window for a model. Falls back to 8192 if the catalog
- * has no entry. Returns int.
+ * Look up the effective runtime context window for a model. Configurable local
+ * providers may advertise a larger `context_window` while setting
+ * `runtime_context_window` to the safer default currently being served.
+ * Falls back to 8192 if the catalog has no entry. Returns int.
  */
 pub fn context_window_for(model) {
   let info = try {
@@ -97,7 +99,7 @@ pub fn context_window_for(model) {
   if type_of(catalog) != "dict" {
     return 8192
   }
-  let cw = catalog?.context_window
+  let cw = catalog?.runtime_context_window ?? catalog?.context_window
   if cw == nil {
     return 8192
   }

@@ -220,7 +220,10 @@ fn num_ctx_from_model_catalog(model: Option<&str>) -> Option<u64> {
         return None;
     }
     let entry = crate::llm_config::model_catalog_entry(model)?;
-    (entry.context_window > 0).then_some(entry.context_window)
+    entry
+        .runtime_context_window
+        .filter(|window| *window > 0)
+        .or_else(|| (entry.context_window > 0).then_some(entry.context_window))
 }
 
 fn keep_alive_from_env() -> Option<Value> {
@@ -726,6 +729,7 @@ mod tests {
                 name: "Qwen Test".to_string(),
                 provider: "ollama".to_string(),
                 context_window: 100_000,
+                runtime_context_window: None,
                 stream_timeout: None,
                 capabilities: vec![],
                 pricing: None,
@@ -814,6 +818,7 @@ mod tests {
                 name: "Qwen Test".to_string(),
                 provider: "ollama".to_string(),
                 context_window: 100_000,
+                runtime_context_window: Some(32_768),
                 stream_timeout: None,
                 capabilities: vec![],
                 pricing: None,
@@ -826,7 +831,7 @@ mod tests {
             "options": {"temperature": 0.1}
         });
         apply_ollama_runtime_settings(&mut body, None);
-        assert_eq!(body["options"]["num_ctx"], serde_json::json!(100000));
+        assert_eq!(body["options"]["num_ctx"], serde_json::json!(32768));
         assert_eq!(body["options"]["temperature"], serde_json::json!(0.1));
 
         crate::llm_config::clear_user_overrides();

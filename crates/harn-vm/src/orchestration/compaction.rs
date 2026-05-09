@@ -581,6 +581,9 @@ pub(crate) async fn auto_compact_messages(
     config: &AutoCompactConfig,
     llm_opts: Option<&crate::llm::api::LlmCallOptions>,
 ) -> Result<Option<String>, VmError> {
+    if config.token_threshold > 0 && estimate_message_tokens(messages) <= config.token_threshold {
+        return Ok(None);
+    }
     if messages.len() <= config.keep_first.saturating_add(config.keep_last) {
         return Ok(None);
     }
@@ -752,6 +755,7 @@ mod tests {
             serde_json::json!({"role": "tool", "tool_call_id": "call_1", "content": "file"}),
         ];
         let config = AutoCompactConfig {
+            token_threshold: 1,
             keep_last: 2,
             ..Default::default()
         };

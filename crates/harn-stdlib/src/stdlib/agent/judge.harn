@@ -70,7 +70,7 @@ fn __judge_invoke_structured(judge_cfg, opts, payload) {
     properties: {
       verdict: {type: "string", description: "Use `done` or `continue`."},
       reasoning: {type: "string"},
-      next_step: {type: "any"},
+      next_step: {type: "string"},
     },
     required: ["verdict"],
   }
@@ -92,6 +92,16 @@ fn __judge_invoke_structured(judge_cfg, opts, payload) {
   let checkpoint = agent_typed_output_checkpoint("agent.completion_judge", user, schema, llm_opts)
   let duration_ms = monotonic_ms() - started
   if !checkpoint.ok {
+    if judge_cfg?.fail_open_on_error ?? judge_cfg?.fail_open ?? false {
+      return {
+        vetoed: false,
+        verdict: "done",
+        reasoning: checkpoint.error,
+        next_step: "",
+        judge_duration_ms: duration_ms,
+        typed_checkpoint: checkpoint,
+      }
+    }
     return {
       vetoed: true,
       feedback: checkpoint.error,

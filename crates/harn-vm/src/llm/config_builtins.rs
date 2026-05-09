@@ -754,6 +754,13 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         VmValue::Int(model.context_window as i64),
     );
     dict.insert(
+        "runtime_context_window".to_string(),
+        model
+            .runtime_context_window
+            .map(|window| VmValue::Int(window as i64))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
         "stream_timeout".to_string(),
         model
             .stream_timeout

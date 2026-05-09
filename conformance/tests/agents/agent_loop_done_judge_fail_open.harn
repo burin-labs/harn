@@ -1,0 +1,14 @@
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "<user_response>The answer is 4.</user_response>\n<done>##DONE##</done>"})
+  llm_mock({error: {category: "generic", message: "structured output is unavailable"}})
+  let result = agent_loop(
+    "What is 2 + 2?",
+    nil,
+    {provider: "mock", loop_until_done: true, max_iterations: 2, done_judge: {fail_open_on_error: true}},
+  )
+  println(result.status)
+  println(result.visible_text)
+  println(result.llm.iterations)
+  println(len(llm_mock_calls()))
+}

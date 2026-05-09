@@ -447,7 +447,7 @@ pub(super) fn dump_llm_request(
             super::api::ThinkingConfig::Effort { level } => serde_json::json!({
                 "mode": "effort",
                 "level": level.as_str(),
-                "enabled": true,
+                "enabled": *level != super::api::ReasoningEffort::None,
                 "budget_tokens": serde_json::Value::Null,
             }),
         },

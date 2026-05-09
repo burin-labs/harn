@@ -958,8 +958,14 @@ pub(crate) fn extract_llm_options(
     } else {
         parse_thinking_option(options.as_ref())?
     };
+    let reasoning_effort_requires_provider_support = matches!(
+        thinking,
+        crate::llm::api::ThinkingConfig::Effort { level }
+            if level != crate::llm::api::ReasoningEffort::None
+    );
     if enforce_capability_gates
         && thinking_from_reasoning_effort
+        && reasoning_effort_requires_provider_support
         && !caps.reasoning_effort_supported
     {
         return Err(unsupported_option_error(
@@ -2420,6 +2426,38 @@ mod routing_tests {
                 crate::llm::api::ThinkingConfig::Effort { level: expected }
             );
         }
+    }
+
+    #[test]
+    fn standalone_reasoning_effort_none_disables_thinking_without_effort_capability() {
+        let options = BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(Rc::from("local".to_string())),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("no-effort-model".to_string())),
+            ),
+            (
+                "reasoning_effort".to_string(),
+                VmValue::String(Rc::from("none".to_string())),
+            ),
+        ]);
+
+        let opts = extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ])
+        .expect("reasoning_effort none should be universally accepted");
+
+        assert_eq!(
+            opts.thinking,
+            crate::llm::api::ThinkingConfig::Effort {
+                level: crate::llm::api::ReasoningEffort::None
+            }
+        );
     }
 
     #[test]

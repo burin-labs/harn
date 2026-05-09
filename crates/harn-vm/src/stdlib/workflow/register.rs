@@ -2188,9 +2188,17 @@ async fn transcript_auto_compact_builtin(args: Vec<VmValue>) -> Result<VmValue, 
     let mut config = crate::orchestration::AutoCompactConfig::default();
     if let Some(v) = options
         .as_ref()
-        .and_then(|o| o.get("compact_threshold"))
+        .and_then(|o| o.get("keep_first"))
         .and_then(|v| v.as_int())
     {
+        config.keep_first = v.max(0) as usize;
+    }
+    let threshold = options.as_ref().and_then(|o| {
+        o.get("token_threshold")
+            .or_else(|| o.get("compact_threshold"))
+            .and_then(|v| v.as_int())
+    });
+    if let Some(v) = threshold {
         config.token_threshold = v.max(0) as usize;
     }
     if let Some(v) = options
@@ -2207,12 +2215,35 @@ async fn transcript_auto_compact_builtin(args: Vec<VmValue>) -> Result<VmValue, 
     {
         config.keep_last = v.max(0) as usize;
     }
+    if let Some(v) = options
+        .as_ref()
+        .and_then(|o| o.get("hard_limit_tokens"))
+        .and_then(|v| v.as_int())
+    {
+        config.hard_limit_tokens = Some(v.max(0) as usize);
+    }
     if let Some(strategy) = options
         .as_ref()
         .and_then(|o| o.get("compact_strategy"))
         .map(|v| v.display())
     {
         config.compact_strategy = crate::orchestration::parse_compact_strategy(&strategy)?;
+    }
+    if let Some(strategy) = options
+        .as_ref()
+        .and_then(|o| o.get("hard_limit_strategy"))
+        .map(|v| v.display())
+    {
+        config.hard_limit_strategy = crate::orchestration::parse_compact_strategy(&strategy)?;
+    }
+    if let Some(prompt) = options
+        .as_ref()
+        .and_then(|o| o.get("summarize_prompt"))
+        .map(|v| v.display())
+    {
+        if !prompt.is_empty() {
+            config.summarize_prompt = Some(prompt);
+        }
     }
     if let Some(callback) = options.as_ref().and_then(|o| o.get("compact_callback")) {
         config.custom_compactor = Some(callback.clone());

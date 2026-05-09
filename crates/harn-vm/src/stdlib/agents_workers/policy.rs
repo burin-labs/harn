@@ -219,6 +219,7 @@ pub(in super::super) async fn compact_worker_transcript(
         .map(crate::llm::helpers::vm_value_to_json)
         .collect::<Vec<_>>();
     let config = crate::orchestration::AutoCompactConfig {
+        token_threshold: 1,
         keep_last: 2,
         compact_strategy: crate::orchestration::CompactStrategy::Truncate,
         hard_limit_tokens: None,
