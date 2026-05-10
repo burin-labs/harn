@@ -1,0 +1,156 @@
+// std/settled — aggregate `parallel settle` Result lists into typed shapes.
+//
+// `parallel settle xs with { max_concurrent: N } { x -> ... }` returns
+// `{results: list<Result>, ...}`. Harness authors invariably re-derive the
+// same shapes from those results: ok-only values, error-only messages,
+// counts, and tallies. These helpers replace ~15-30 LOC of bookkeeping
+// per parallel block.
+//
+// Import with: import { partition, oks, errs, count_oks, ... } from "std/settled"
+/** Counts and split lists from a settled-results aggregation. */
+type SettledPartition = {oks: list, errs: list, ok_count: int, err_count: int}
+
+/**
+ * Split a list of Result values into successful values and error payloads.
+ * Returns `{oks, errs, ok_count, err_count}` so callers can count and
+ * iterate without re-walking the list.
+ */
+pub fn partition(results: list) -> SettledPartition {
+  var oks = []
+  var errs = []
+  for r in results {
+    if is_ok(r) {
+      oks = oks + [unwrap(r)]
+    } else {
+      errs = errs + [unwrap_err(r)]
+    }
+  }
+  return {oks: oks, errs: errs, ok_count: len(oks), err_count: len(errs)}
+}
+
+/** Return only the successful values (drops errors). */
+pub fn oks(results: list) -> list {
+  var out = []
+  for r in results {
+    if is_ok(r) {
+      out = out + [unwrap(r)]
+    }
+  }
+  return out
+}
+
+/** Return only the error payloads (drops successes). */
+pub fn errs(results: list) -> list {
+  var out = []
+  for r in results {
+    if is_err(r) {
+      out = out + [unwrap_err(r)]
+    }
+  }
+  return out
+}
+
+/** Count successful Results in the list. */
+pub fn count_oks(results: list) -> int {
+  var n = 0
+  for r in results {
+    if is_ok(r) {
+      n = n + 1
+    }
+  }
+  return n
+}
+
+/** Count error Results in the list. */
+pub fn count_errs(results: list) -> int {
+  var n = 0
+  for r in results {
+    if is_err(r) {
+      n = n + 1
+    }
+  }
+  return n
+}
+
+/**
+ * Map successes through `on_ok` and errors through `on_err`, collecting the
+ * unified output list. The closures receive `(value, index)` for successes
+ * and `(error, index)` for errors so callers can preserve the original
+ * argument's position when reporting.
+ */
+pub fn map_settled(results: list, on_ok, on_err) -> list {
+  var out = []
+  var i = 0
+  for r in results {
+    if is_ok(r) {
+      out = out + [on_ok(unwrap(r), i)]
+    } else {
+      out = out + [on_err(unwrap_err(r), i)]
+    }
+    i = i + 1
+  }
+  return out
+}
+
+/**
+ * Group results by a string label produced by `classifier`. Errors are
+ * passed through `classifier` after being unwrapped; if `classifier` is
+ * nil, errors fall under the "error" bucket and successes under "ok".
+ */
+pub fn tally_by(results: list, classifier) -> dict<string, int> {
+  var counts = {}
+  for r in results {
+    let label = if classifier == nil {
+      if is_ok(r) {
+        "ok"
+      } else {
+        "error"
+      }
+    } else {
+      let payload = if is_ok(r) {
+        unwrap(r)
+      } else {
+        unwrap_err(r)
+      }
+      to_string(classifier(payload, is_ok(r)))
+    }
+    let prior = counts[label] ?? 0
+    counts = counts + {[label]: prior + 1}
+  }
+  return counts
+}
+
+/**
+ * Iterate Results as `{ok, value, index}` records. Useful when callers want
+ * one consolidated loop with both branches in scope at the same point.
+ */
+pub fn enumerate_settled(results: list) -> list<dict> {
+  var out = []
+  var i = 0
+  for r in results {
+    let row = if is_ok(r) {
+      {ok: true, value: unwrap(r), error: nil, index: i}
+    } else {
+      {ok: false, value: nil, error: unwrap_err(r), index: i}
+    }
+    out = out + [row]
+    i = i + 1
+  }
+  return out
+}
+
+/**
+ * Convert a settled-results list into `{any_failed, all_ok, ok_count,
+ * err_count, total}` so harnesses can produce one-shot summary output
+ * without re-walking the list.
+ */
+pub fn summary(results: list) -> dict {
+  let counts = partition(results)
+  return {
+    any_failed: counts.err_count > 0,
+    all_ok: counts.err_count == 0 && counts.ok_count > 0,
+    ok_count: counts.ok_count,
+    err_count: counts.err_count,
+    total: counts.ok_count + counts.err_count,
+  }
+}

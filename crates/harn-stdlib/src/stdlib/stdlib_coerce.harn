@@ -1,0 +1,193 @@
+// std/coerce — defensive value coercion for unpredictable LLM/JSON output.
+//
+// Pairs with std/llm/safe's `dict_get_ci` for case-insensitive key lookup.
+// Use these helpers when normalizing structured output whose values arrive
+// as the "wrong" shape — e.g. a list where you expected a string, a number
+// rendered as a string, or a deeply nested dict whose keys disagree on
+// casing across model runs.
+//
+// Import with: import { to_string_lossy, to_string_list, ... } from "std/coerce"
+/**
+ * Render any value as a single string. Lists join their stringified items
+ * with `separator`. Dicts are JSON-stringified. Primitives go through
+ * `to_string`. Nil collapses to the empty string.
+ */
+pub fn to_string_lossy(value: any, separator: string = " ") -> string {
+  if value == nil {
+    return ""
+  }
+  let kind = type_of(value)
+  if kind == "string" {
+    return value
+  }
+  if kind == "list" {
+    var parts = []
+    for item in value {
+      parts = parts + [to_string_lossy(item, separator)]
+    }
+    return join(parts, separator)
+  }
+  if kind == "dict" {
+    return json_stringify(value)
+  }
+  return to_string(value)
+}
+
+/**
+ * Normalize any value into list<string>. A single string yields a 1-element
+ * list (or [] when blank). A list has each element coerced via
+ * `to_string_lossy`. A dict becomes its JSON form wrapped in a list. The
+ * result is truncated to `max_items`.
+ */
+pub fn to_string_list(value: any, max_items: int = 256) -> list<string> {
+  if value == nil {
+    return []
+  }
+  let kind = type_of(value)
+  var raw = []
+  if kind == "list" {
+    raw = value
+  } else if kind == "string" {
+    if value != "" {
+      raw = [value]
+    }
+  } else if kind == "dict" {
+    raw = [json_stringify(value)]
+  } else {
+    raw = [to_string(value)]
+  }
+  var out = []
+  var count = 0
+  for item in raw {
+    if count >= max_items {
+      break
+    }
+    out = out + [to_string_lossy(item)]
+    count = count + 1
+  }
+  return out
+}
+
+/** Parse an int-like value, returning fallback on failure. */
+pub fn to_int_or(value: any, fallback: int) -> int {
+  return to_int(value) ?? fallback
+}
+
+/** Parse a float-like value, returning fallback on failure. */
+pub fn to_float_or(value: any, fallback: float) -> float {
+  return to_float(value) ?? fallback
+}
+
+/**
+ * Coerce value to bool with a fallback. Recognizes the canonical
+ * "true/false/yes/no/y/n/1/0" tokens (case-insensitive) on strings, treats
+ * numeric zero as false, and treats empty list/dict as false.
+ */
+pub fn to_bool_or(value: any, fallback: bool) -> bool {
+  if value == nil {
+    return fallback
+  }
+  let kind = type_of(value)
+  if kind == "bool" {
+    return value
+  }
+  if kind == "int" || kind == "float" {
+    return value != 0
+  }
+  if kind == "string" {
+    let normalized = lowercase(trim(value))
+    if normalized == "" {
+      return fallback
+    }
+    if normalized == "true" || normalized == "yes" || normalized == "y" || normalized == "1" {
+      return true
+    }
+    if normalized == "false" || normalized == "no" || normalized == "n" || normalized == "0" {
+      return false
+    }
+    return fallback
+  }
+  if kind == "list" {
+    return len(value) > 0
+  }
+  if kind == "dict" {
+    return len(value.keys()) > 0
+  }
+  return fallback
+}
+
+/**
+ * Case-insensitive nested dict lookup. Each path segment matches keys
+ * case-insensitively against the current dict layer; returns nil on the
+ * first miss or non-dict.
+ */
+pub fn dict_path_ci(d: any, path: list<string>) -> any {
+  var current = d
+  for segment in path {
+    if type_of(current) != "dict" {
+      return nil
+    }
+    let target = lowercase(to_string(segment))
+    var hit = nil
+    var found = false
+    for k in current.keys() {
+      if lowercase(to_string(k)) == target {
+        hit = current[k]
+        found = true
+        break
+      }
+    }
+    if !found {
+      return nil
+    }
+    current = hit
+  }
+  return current
+}
+
+/**
+ * Return the first value in `values` that is not nil. If every entry is
+ * nil, return `default`.
+ */
+pub fn first_non_nil(values: list, default: any = nil) -> any {
+  for v in values {
+    if v != nil {
+      return v
+    }
+  }
+  return default
+}
+
+/**
+ * Return the first non-empty value in `values`. Strings, lists, and dicts
+ * must have length > 0; primitives must be non-nil. Returns `default` when
+ * nothing qualifies.
+ */
+pub fn first_present(values: list, default: any = nil) -> any {
+  for v in values {
+    if v == nil {
+      continue
+    }
+    let kind = type_of(v)
+    if kind == "string" {
+      if v != "" {
+        return v
+      }
+      continue
+    }
+    if kind == "list" {
+      if len(v) > 0 {
+        return v
+      }
+      continue
+    }
+    if kind == "dict" {
+      if len(v.keys()) > 0 {
+        return v
+      }
+      continue
+    }
+    return v
+  }
+  return default
+}

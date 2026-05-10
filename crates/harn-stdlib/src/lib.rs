@@ -114,6 +114,30 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_async.harn"),
     },
     StdlibSource {
+        module: "poll",
+        source: include_str!("stdlib/stdlib_poll.harn"),
+    },
+    StdlibSource {
+        module: "coerce",
+        source: include_str!("stdlib/stdlib_coerce.harn"),
+    },
+    StdlibSource {
+        module: "settled",
+        source: include_str!("stdlib/stdlib_settled.harn"),
+    },
+    StdlibSource {
+        module: "cli",
+        source: include_str!("stdlib/stdlib_cli.harn"),
+    },
+    StdlibSource {
+        module: "jsonl",
+        source: include_str!("stdlib/stdlib_jsonl.harn"),
+    },
+    StdlibSource {
+        module: "config",
+        source: include_str!("stdlib/stdlib_config.harn"),
+    },
+    StdlibSource {
         module: "agents",
         source: include_str!("stdlib/stdlib_agents.harn"),
     },

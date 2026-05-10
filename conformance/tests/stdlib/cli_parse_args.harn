@@ -1,0 +1,48 @@
+// Verifies std/cli's declarative argument parser handles flags, options
+// (with `--key VALUE` and `--key=VALUE` syntaxes), typed parsing, multi-
+// valued options, positional capture, the `--` terminator, `--help`,
+// required-arg validation, and unknown-flag passthrough via `_extras`.
+import { parse_args, help_text } from "std/cli"
+
+let spec = [
+  {kind: "flag", name: "dry_run", flags: ["--dry-run"]},
+  {kind: "flag", name: "verbose", flags: ["--verbose", "-v"]},
+  {kind: "option", name: "model", flags: ["--model", "-m"], default: "claude"},
+  {kind: "option", name: "max", flags: ["--max"], parse: "int", default: 1},
+  {kind: "option", name: "ratio", flags: ["--ratio"], parse: "float"},
+  {kind: "option", name: "tags", flags: ["--tag"], multi: true},
+  {kind: "option", name: "labels", flags: ["--labels"], parse: "list", separator: ","},
+  {kind: "positional", name: "target"},
+  {kind: "positional", name: "extra"},
+]
+
+pipeline default() {
+  let one = parse_args(["--dry-run", "-v", "-m", "auto", "--max=3", "--ratio", "0.25", "--tag", "a", "--tag=b", "--labels", "x,y, z", "primary", "secondary", "trailing"], spec)
+  println(one.dry_run)
+  println(one.verbose)
+  println(one.model)
+  println(one.max)
+  println(one.ratio)
+  println(one.tags)
+  println(one.labels)
+  println(one.target)
+  println(one.extra)
+  println(one._positional)
+  println(one._help)
+  println(len(one._errors))
+
+  let two = parse_args(["--unknown-flag", "--", "--max", "raw"], spec)
+  println(two.dry_run)
+  println(two.max)
+  println(two._extras)
+  println(two._positional)
+  println(two.target)
+
+  let help = parse_args(["--help"], spec)
+  println(help._help)
+
+  let with_errors = parse_args(["--max", "not-an-int"], spec)
+  println(len(with_errors._errors) > 0)
+
+  println(starts_with(help_text(spec, "demo"), "Usage: demo"))
+}
