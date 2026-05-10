@@ -138,6 +138,7 @@
 - [Deterministic test patterns](./dev/testing.md)
 - [Testbench mode](./dev/testbench.md)
 - [Tape format](./dev/tape-format.md)
+- [Annotation tape format](./dev/annotation-tape-format.md)
 - [DES runtime mode](./dev/des-mode.md)
 - [VM and stdlib perf notes](./dev/vm-stdlib-perf-notes.md)
 

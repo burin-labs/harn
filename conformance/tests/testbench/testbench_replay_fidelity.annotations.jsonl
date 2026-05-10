@@ -1,0 +1,6 @@
+{"type":"header","schema_version":1,"tape_path":"testbench_replay_fidelity.testbench-tape","harn_version":"0.8.5"}
+{"type":"annotation","id":"ann-llm-correct","event_id":1,"kind":"correct","evidence":"mock LLM returned the expected fidelity-response payload","author":{"id":"alice","kind":"human","surface":"burin-code"},"timestamp":"2026-05-10T17:00:00Z"}
+{"type":"annotation","id":"ann-marker-replay-segment","event_id":1,"kind":"marker","evidence":"presenter mode: pause here to explain mock LLM call","span":{"start_event_id":1,"end_event_id":3},"author":{"id":"docs","kind":"system"}}
+{"type":"annotation","id":"ann-friction-1","event_id":2,"kind":"friction","friction_kind":"expensive_model_used_for_deterministic_step","evidence":"this clock advance did not need a frontier model — flag for context-pack candidate","author":{"id":"sre-bot","kind":"agent","surface":"harn-cloud"},"metadata":{"capability":"clock.advance"}}
+{"type":"annotation","id":"ann-hypothesis-1","event_id":4,"kind":"hypothesis","hypothesis_status":"active","evidence":"the second clock_read is redundant — investigate whether replay-for-teaching can mute one"}
+{"type":"annotation","id":"ann-crystallize","event_id":1,"kind":"crystallize_here","evidence":"this llm_call → sleep → re-read pattern repeats across runs","span":{"start_event_id":1,"end_event_id":4}}

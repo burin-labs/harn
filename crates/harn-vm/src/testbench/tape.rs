@@ -185,6 +185,25 @@ pub enum TapeRecordKind {
     Unknown,
 }
 
+impl TapeRecordKind {
+    /// Stable, snake_case label for this kind. Mirrors the `kind` tag
+    /// `serde` writes to disk so display-side code (CLI summaries,
+    /// report headers, error messages) is consistent with the wire
+    /// format without re-deriving the string each call site.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::ClockRead { .. } => "clock_read",
+            Self::ClockSleep { .. } => "clock_sleep",
+            Self::LlmCall { .. } => "llm_call",
+            Self::FileRead { .. } => "file_read",
+            Self::FileWrite { .. } => "file_write",
+            Self::FileDelete { .. } => "file_delete",
+            Self::ProcessSpawn { .. } => "process_spawn",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 /// Which face of the unified clock the script read. Captured so a
 /// fidelity report can attribute drift back to the right axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

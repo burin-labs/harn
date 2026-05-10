@@ -10,6 +10,29 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Annotation tape format for `harn test-bench`.** A new sidecar
+  format (`<tape>.annotations.jsonl`) attaches structured human
+  judgment — `correct`, `incorrect`, `alternative`, `note`, `marker`,
+  `mute`, `hypothesis`, `friction`, `crystallize_here` — to specific
+  events on a recorded testbench tape. Annotations are versioned JSONL
+  with a header carrying an optional `tape_content_hash` so the
+  validator catches tape edits that invalidate `event_id` references.
+  `friction` annotations adapt directly to `FrictionEvent` records so
+  they feed `orchestration::generate_context_pack_suggestions`
+  alongside natively-emitted events; `crystallize_here` annotations
+  surface as `CrystallizeAnchor` records ready for the
+  candidate-detection pipeline. Three new CLI surfaces:
+  `harn test-bench replay --annotations <path>` (validates + surfaces
+  annotations inline during replay), `harn test-bench
+  validate-annotations` (structured JSON report, exits `2` on any
+  problem), and `harn test-bench export-annotations --kind ... --format
+  jsonl|friction` (filter + re-emit for downstream pipelines). The
+  conformance runner picks up `<name>.annotations.jsonl` sidecars
+  automatically and gates the test on validation success; covered by
+  `conformance/tests/testbench/testbench_replay_fidelity.annotations.jsonl`
+  plus four `harn-cli` integration tests under
+  `tests/test_bench_cli.rs::annotations`. Documented in
+  `docs/src/dev/annotation-tape-format.md`. (#1474)
 - **String escape sequences `\r` and `\0`.** Double-quoted string
   literals now recognize `\r` (carriage return) and `\0` (NUL) in
   addition to the existing `\n`, `\t`, `\\`, `\"`, `\$`. Triple-quoted
