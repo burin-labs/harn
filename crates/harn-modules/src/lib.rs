@@ -467,7 +467,27 @@ impl ModuleGraph {
                 .or_else(|| self.modules.get(&normalize_path(import_path)))?;
             let names_to_collect: Vec<String> = match &import.selective_names {
                 None => imported.exports.iter().cloned().collect(),
-                Some(selective) => selective.iter().cloned().collect(),
+                Some(selective) => {
+                    // A selectively imported fn whose signature references a
+                    // type alias declared in the same module ("options:
+                    // PickKeysOptions") needs that alias visible at the call
+                    // site too — otherwise the caller sees only a phantom
+                    // `Named("PickKeysOptions")` and skips contract checks.
+                    // Pull every exported type alias / struct / enum /
+                    // interface from the same module into scope to keep the
+                    // selective-import contract honest.
+                    let mut names: Vec<String> = selective.iter().cloned().collect();
+                    for ty_decl in &imported.type_declarations {
+                        if let Some(name) = type_decl_name(ty_decl) {
+                            if imported.own_exports.contains(name)
+                                && !names.iter().any(|n| n == name)
+                            {
+                                names.push(name.to_string());
+                            }
+                        }
+                    }
+                    names
+                }
             };
             for name in &names_to_collect {
                 let mut visited = HashSet::new();

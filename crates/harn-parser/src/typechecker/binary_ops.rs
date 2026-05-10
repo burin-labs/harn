@@ -9,6 +9,12 @@ use crate::ast::*;
 
 use super::scope::InferredType;
 
+fn dict_like(ty: &TypeExpr) -> bool {
+    matches!(ty, TypeExpr::Named(n) if n == "dict")
+        || matches!(ty, TypeExpr::DictType(..))
+        || matches!(ty, TypeExpr::Shape(_))
+}
+
 /// Infer the result type of a binary operation.
 pub(super) fn infer_binary_op_type(
     op: &str,
@@ -29,6 +35,14 @@ pub(super) fn infer_binary_op_type(
                     ("dict", "dict") => Some(TypeExpr::Named("dict".into())),
                     _ => None,
                 }
+            }
+            // dict + dict shallow-merges. Recognize parameterized and shape
+            // forms so a `dict<string, V> + Shape{...}` chain (the common
+            // connector/agent option-projection idiom) keeps the dict-shaped
+            // typing instead of falling through to `None` and downgrading
+            // every subsequent inference step to untyped.
+            (Some(l), Some(r)) if dict_like(l) && dict_like(r) => {
+                Some(TypeExpr::Named("dict".into()))
             }
             _ => None,
         },
