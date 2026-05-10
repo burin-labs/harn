@@ -1,0 +1,5 @@
+first.ok=true
+second.ok=true
+byte_identical=true
+mock_calls=1
+after_tool_call_mock_calls=2

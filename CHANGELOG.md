@@ -10,6 +10,31 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **`std/cache` levels up to a cost-moat substrate (#1473).** The
+  module now ships three composable backends —
+  `mem_cache(opts?)` (thread-local LRU; per-VM, does not survive
+  `harn run`), `fs_cache(path, opts?)` (content-addressed JSON files
+  with atomic writes), and `sqlite_cache(path, opts?)` (one sqlite
+  file, many namespaces, TTL + LRU eviction inside the put
+  transaction). All three accept the same `namespace`/`ttl`/
+  `ttl_seconds`/`max_entries` options and surface a uniform
+  `{hit, value?, backend, namespace}` envelope. A generic
+  `with_cache(key, compute, options?)` helper wraps any 0-arity
+  closure (with `with_cache_envelope` for inline hit/miss/metrics),
+  and `cache_stats(options?)` / `cache_stats_reset(options?)` expose
+  in-process hit/miss counters per namespace. Cache TTL now reads
+  from the unified clock (`mock_time` / `advance_time` honored), so
+  testbench fixtures can reproduce expiry windows without wall-clock
+  flakiness. When `options.session_id` is set, `with_cache` emits
+  `cache.hit` / `cache.miss` events on the agent event tape with
+  cost-moat receipts (`model_calls_avoided`, `tokens_saved` from
+  `usage.input_tokens` + `usage.output_tokens`, `latency_saved_ms`
+  from `latency_ms`) for the persona value ledger
+  (harn-cloud#58) and crystallization receipts. The
+  `with_cache(next, opts?)` middleware form in `std/llm/handlers`
+  now actually caches — previously it was a passthrough — and shares
+  one cache key with the direct-call form. Docs at
+  [`docs/src/stdlib/cache.md`](docs/src/stdlib/cache.md).
 - **Annotation tape format for `harn test-bench`.** A new sidecar
   format (`<tape>.annotations.jsonl`) attaches structured human
   judgment — `correct`, `incorrect`, `alternative`, `note`, `marker`,

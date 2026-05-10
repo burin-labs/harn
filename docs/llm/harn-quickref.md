@@ -2194,6 +2194,35 @@ Per-provider RPM limiting is built in:
 RPM shapes sustained throughput; `max_concurrent` caps simultaneous
 in-flight work. Use both when batching LLM calls at scale.
 
+## Cache (`std/cache`)
+
+Content-addressed cache with three backends and a composable wrapper:
+
+```harn
+import { mem_cache, fs_cache, sqlite_cache, with_cache } from "std/cache"
+
+let store = sqlite_cache(state_path("evals.sqlite"), {ttl: "1h"})
+let answer = with_cache("key", { -> heavy_work() }, {store: store})
+```
+
+- `mem_cache(opts?)` — thread-local LRU. Does not survive `harn run`.
+- `fs_cache(path, opts?)` — one JSON file per key under `<path>/<namespace>/`.
+- `sqlite_cache(path, opts?)` — single sqlite file; many namespaces share it.
+
+Common options: `namespace`, `ttl` (string like `"10m"`) or `ttl_seconds`,
+`max_entries` (LRU bound). TTL honors the unified clock.
+
+`with_cache` is also a composable middleware in `std/llm/handlers` — drop
+it into `compose([...])` to deduplicate identical `(prompt, system, opts)`
+LLM calls. Tool-bearing calls bypass the cache by default.
+
+On a cache hit with `options.session_id` set, the wrapper emits
+`cache.hit` + receipts (`model_calls_avoided`, `tokens_saved`,
+`latency_saved_ms`) on the agent event tape. The persona value ledger
+and crystallization receipts read these back.
+
+Full reference: [`docs/src/stdlib/cache.md`](https://harnlang.com/docs/stdlib/cache.html).
+
 ## Gotchas (friction-log distilled)
 
 - Heredoc `<<TAG ... TAG` is **not** a source-level string. Use

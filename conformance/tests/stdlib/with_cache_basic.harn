@@ -1,0 +1,54 @@
+/**
+ * with_cache: the generic memoization wrapper.
+ *
+ * Confirms:
+ *  - first call invokes compute, second returns cached value
+ *  - the envelope form surfaces hit/miss
+ *  - TTL honors the unified clock (mock_time advances the mocked source
+ *    of truth that backs the cache's expiry check)
+ */
+import { cache_clear, mem_cache, with_cache, with_cache_envelope } from "std/cache"
+
+pipeline default() {
+  let store = mem_cache({namespace: "with-cache-basic-" + uuid(), ttl: "5s"})
+  cache_clear({store: store})
+  let compute_count = atomic(0)
+  let opts = {store: store}
+  let first = with_cache_envelope(
+    "key",
+    fn() {
+      let _ = atomic_add(compute_count, 1)
+      return {answer: 41 + atomic_get(compute_count)}
+    },
+    opts,
+  )
+  println("first.hit=" + to_string(first.hit))
+  println("first.value=" + json_stringify(first.value))
+  let second = with_cache_envelope(
+    "key",
+    fn() {
+      let _ = atomic_add(compute_count, 1)
+      return {answer: 999}
+    },
+    opts,
+  )
+  println("second.hit=" + to_string(second.hit))
+  println("second.value=" + json_stringify(second.value))
+  println("compute_count=" + to_string(atomic_get(compute_count)))
+  // Transparent (non-envelope) form returns just the value.
+  let plain = with_cache("key", fn() { return {answer: 999} }, opts)
+  println("plain=" + json_stringify(plain))
+  // TTL via the unified clock: advancing past 5s evicts the entry on read.
+  mock_time(1000000000000)
+  let ttl_store = mem_cache({namespace: "with-cache-ttl-" + uuid(), ttl: "5s"})
+  let ttl_opts = {store: ttl_store}
+  cache_clear(ttl_opts)
+  with_cache_envelope("ttl-key", fn() { return "stored-once" }, ttl_opts)
+  let fresh = with_cache_envelope("ttl-key", fn() { return "would-recompute" }, ttl_opts)
+  println("fresh.hit=" + to_string(fresh.hit))
+  advance_time(6000)
+  let stale = with_cache_envelope("ttl-key", fn() { return "recomputed" }, ttl_opts)
+  println("stale.hit=" + to_string(stale.hit))
+  println("stale.value=" + to_string(stale.value))
+  unmock_time()
+}

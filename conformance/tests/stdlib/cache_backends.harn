@@ -1,0 +1,60 @@
+/**
+ * std/cache: three backends (mem, fs, sqlite) share one envelope shape and
+ * pass identical hit/miss/expiry behavior. This is the cost-moat substrate
+ * we depend on for crystallization shadow-runs and persona caches.
+ */
+import {
+  cache_clear,
+  cache_get,
+  cache_put,
+  cache_stats,
+  cache_stats_reset,
+  fs_cache,
+  mem_cache,
+  sqlite_cache,
+} from "std/cache"
+
+pipeline default() {
+  let stamp = uuid()
+  let stores = [
+    {label: "mem", store: mem_cache({namespace: "cache-mem-" + stamp, max_entries: 2})},
+    {
+      label: "fs",
+      store: fs_cache(
+        path_join(temp_dir(), "harn-cache-fs-" + stamp),
+        {namespace: "cache-fs-" + stamp, max_entries: 2},
+      ),
+    },
+    {
+      label: "sqlite",
+      store: sqlite_cache(
+        path_join(temp_dir(), "harn-cache-sqlite-" + stamp + ".sqlite"),
+        {namespace: "cache-sqlite-" + stamp, max_entries: 2},
+      ),
+    },
+  ]
+  for entry in stores {
+    cache_clear({store: entry.store})
+    cache_stats_reset({store: entry.store})
+    let miss = cache_get("k", {store: entry.store})
+    println(entry.label + " miss.hit=" + to_string(miss.hit))
+    println(entry.label + " miss.backend=" + to_string(miss.backend))
+    cache_put("k", {answer: 42}, {store: entry.store})
+    let hit = cache_get("k", {store: entry.store})
+    println(entry.label + " hit.hit=" + to_string(hit.hit))
+    println(entry.label + " hit.value=" + json_stringify(hit.value))
+    // LRU eviction: after putting 3 keys with max_entries=2, the first key
+    // is evicted regardless of backend.
+    cache_put("a", "one", {store: entry.store})
+    cache_put("b", "two", {store: entry.store})
+    cache_put("c", "three", {store: entry.store})
+    let evicted = cache_get("a", {store: entry.store})
+    println(entry.label + " evicted_a=" + to_string(!evicted.hit))
+    let stats = cache_stats({store: entry.store})
+    println(entry.label + " stats.hits=" + to_string(stats.hits))
+    println(entry.label + " stats.misses=" + to_string(stats.misses))
+    cache_clear({store: entry.store})
+    let cleared = cache_get("c", {store: entry.store})
+    println(entry.label + " cleared=" + to_string(!cleared.hit))
+  }
+}

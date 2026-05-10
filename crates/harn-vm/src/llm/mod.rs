@@ -18,7 +18,7 @@ mod agent_session_host;
 mod agent_tools;
 pub(crate) mod api;
 pub(crate) mod autonomy_budget;
-mod cache;
+pub(crate) mod cache;
 pub mod capabilities;
 mod config_builtins;
 pub(crate) mod content;

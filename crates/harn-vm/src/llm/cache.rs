@@ -1,14 +1,16 @@
 //! Persistent cache primitives used by `std/cache` and LLM wrappers.
 
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::stdlib::clock::now_wall_ms;
 use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuiltin};
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
@@ -36,6 +38,17 @@ const SQLITE_CREATE_LRU_INDEX: &str = concat!(
 enum CacheBackend {
     Sqlite,
     Fs,
+    Mem,
+}
+
+impl CacheBackend {
+    fn name(&self) -> &'static str {
+        match self {
+            CacheBackend::Sqlite => "sqlite",
+            CacheBackend::Fs => "fs",
+            CacheBackend::Mem => "mem",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -95,18 +108,40 @@ const CACHE_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("__cache_clear(options?)")
         .arity(VmBuiltinArity::Range { min: 0, max: 1 })
         .doc("Clear one persistent cache namespace."),
+    SyncBuiltin::new("__cache_stats", cache_stats_builtin)
+        .signature("__cache_stats(options?)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
+        .doc("Return {hits, misses, lookups, hit_rate} for a cache namespace."),
+    SyncBuiltin::new("__cache_stats_reset", cache_stats_reset_builtin)
+        .signature("__cache_stats_reset(options?)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
+        .doc("Reset the in-process hit/miss counters for a cache namespace."),
     SyncBuiltin::new("__llm_cache_key", llm_cache_key_builtin)
         .signature("__llm_cache_key(prompt, system?, options?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 3 })
         .doc("Derive the canonical LLM with_cache key."),
 ];
 
+fn cache_envelope_base(options: &CacheOptions) -> BTreeMap<String, VmValue> {
+    let mut envelope = BTreeMap::new();
+    envelope.insert(
+        "backend".to_string(),
+        VmValue::String(Rc::from(options.backend.name())),
+    );
+    envelope.insert(
+        "namespace".to_string(),
+        VmValue::String(Rc::from(options.namespace.clone())),
+    );
+    envelope
+}
+
 fn cache_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let key = required_string_arg(args, 0, "__cache_get(key, options?)")?;
     let options = parse_cache_options(args.get(1))?;
-    let hit = cache_get_at(&options, &key, now_ms()?)?;
+    let hit = cache_get_at(&options, &key, now_wall_ms())?;
+    record_lookup(&options, hit.is_some());
 
-    let mut envelope = BTreeMap::new();
+    let mut envelope = cache_envelope_base(&options);
     envelope.insert("hit".to_string(), VmValue::Bool(hit.is_some()));
     if let Some(value) = hit {
         envelope.insert("value".to_string(), crate::stdlib::json_to_vm_value(&value));
@@ -124,10 +159,10 @@ fn cache_put_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         &options,
         &key,
         super::helpers::vm_value_to_json(value),
-        now_ms()?,
+        now_wall_ms(),
     )?;
 
-    let mut envelope = BTreeMap::new();
+    let mut envelope = cache_envelope_base(&options);
     envelope.insert("stored".to_string(), VmValue::Bool(true));
     envelope.insert("key".to_string(), VmValue::String(Rc::from(key)));
     Ok(VmValue::Dict(Rc::new(envelope)))
@@ -138,7 +173,45 @@ fn cache_clear_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     match options.backend {
         CacheBackend::Sqlite => sqlite_clear(&options)?,
         CacheBackend::Fs => fs_clear(&options)?,
+        CacheBackend::Mem => mem_clear(&options),
     }
+    reset_metrics_for(&options);
+    Ok(VmValue::Nil)
+}
+
+fn cache_stats_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let options = parse_cache_options(args.first())?;
+    let snapshot = metrics_snapshot(&options);
+    let total = snapshot.hits.saturating_add(snapshot.misses);
+    let mut dict = cache_envelope_base(&options);
+    dict.insert(
+        "hits".to_string(),
+        VmValue::Int(saturating_u64_to_i64(snapshot.hits)),
+    );
+    dict.insert(
+        "misses".to_string(),
+        VmValue::Int(saturating_u64_to_i64(snapshot.misses)),
+    );
+    dict.insert(
+        "lookups".to_string(),
+        VmValue::Int(saturating_u64_to_i64(total)),
+    );
+    let hit_rate = if total == 0 {
+        0.0
+    } else {
+        snapshot.hits as f64 / total as f64
+    };
+    dict.insert("hit_rate".to_string(), VmValue::Float(hit_rate));
+    Ok(VmValue::Dict(Rc::new(dict)))
+}
+
+fn saturating_u64_to_i64(value: u64) -> i64 {
+    value.min(i64::MAX as u64) as i64
+}
+
+fn cache_stats_reset_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let options = parse_cache_options(args.first())?;
+    reset_metrics_for(&options);
     Ok(VmValue::Nil)
 }
 
@@ -204,6 +277,7 @@ fn cache_get_at(
     match options.backend {
         CacheBackend::Sqlite => sqlite_get(options, key, now_ms),
         CacheBackend::Fs => fs_get(options, key, now_ms),
+        CacheBackend::Mem => Ok(mem_get(options, key, now_ms)),
     }
 }
 
@@ -216,6 +290,10 @@ fn cache_put_at(
     match options.backend {
         CacheBackend::Sqlite => sqlite_put(options, key, value, now_ms),
         CacheBackend::Fs => fs_put(options, key, value, now_ms),
+        CacheBackend::Mem => {
+            mem_put(options, key, value, now_ms);
+            Ok(())
+        }
     }
 }
 
@@ -292,8 +370,9 @@ fn parse_backend(value: &str) -> Result<CacheBackend, VmError> {
     match value.trim().to_ascii_lowercase().as_str() {
         "" | "sqlite" => Ok(CacheBackend::Sqlite),
         "fs" | "file" | "files" => Ok(CacheBackend::Fs),
+        "mem" | "memory" | "lru" => Ok(CacheBackend::Mem),
         other => Err(VmError::Runtime(format!(
-            "cache backend must be \"sqlite\" or \"fs\"; got {other:?}"
+            "cache backend must be \"mem\", \"fs\", or \"sqlite\"; got {other:?}"
         ))),
     }
 }
@@ -383,6 +462,7 @@ fn default_cache_path(backend: CacheBackend) -> PathBuf {
     match backend {
         CacheBackend::Sqlite => root.join("llm.sqlite"),
         CacheBackend::Fs => root.join("llm"),
+        CacheBackend::Mem => PathBuf::new(),
     }
 }
 
@@ -424,13 +504,6 @@ fn required_string_arg(args: &[VmValue], index: usize, signature: &str) -> Resul
             index + 1
         ))),
     }
-}
-
-fn now_ms() -> Result<i64, VmError> {
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| VmError::Runtime(format!("cache clock error: {error}")))?;
-    Ok(duration.as_millis().min(i64::MAX as u128) as i64)
 }
 
 fn sqlite_connection(path: &Path) -> Result<Connection, VmError> {
@@ -729,6 +802,142 @@ fn canonicalize_json_value(value: &serde_json::Value) -> serde_json::Value {
         }
         other => other.clone(),
     }
+}
+
+// -------------------------------------------------------------------------
+// in-process LRU backend
+// -------------------------------------------------------------------------
+
+struct MemEntry {
+    value: serde_json::Value,
+    expires_at_ms: Option<i64>,
+}
+
+thread_local! {
+    static MEM_STORE: RefCell<BTreeMap<String, MemNamespace>> =
+        const { RefCell::new(BTreeMap::new()) };
+}
+
+#[derive(Default)]
+struct MemNamespace {
+    /// LRU order: front is least-recently used, back is most-recently used.
+    order: VecDeque<String>,
+    entries: BTreeMap<String, MemEntry>,
+}
+
+fn mem_get(options: &CacheOptions, key: &str, now_ms: i64) -> Option<serde_json::Value> {
+    MEM_STORE.with(|store| {
+        let mut store = store.borrow_mut();
+        let ns = store.entry(options.namespace.clone()).or_default();
+        let expired = match ns.entries.get(key) {
+            Some(entry) if entry.expires_at_ms.is_some_and(|exp| exp <= now_ms) => true,
+            Some(_) => false,
+            None => return None,
+        };
+        if expired {
+            ns.entries.remove(key);
+            ns.order.retain(|k| k != key);
+            return None;
+        }
+        let value = ns.entries.get(key).map(|entry| entry.value.clone());
+        ns.order.retain(|k| k != key);
+        ns.order.push_back(key.to_string());
+        value
+    })
+}
+
+fn mem_put(options: &CacheOptions, key: &str, value: serde_json::Value, now_ms: i64) {
+    MEM_STORE.with(|store| {
+        let mut store = store.borrow_mut();
+        let max_entries = options.max_entries;
+        let expires_at_ms = Some(now_ms.saturating_add(ttl_ms(options.ttl_seconds)));
+        let ns = store.entry(options.namespace.clone()).or_default();
+        ns.entries.insert(
+            key.to_string(),
+            MemEntry {
+                value,
+                expires_at_ms,
+            },
+        );
+        ns.order.retain(|k| k != key);
+        ns.order.push_back(key.to_string());
+        while ns.entries.len() > max_entries {
+            if let Some(evicted) = ns.order.pop_front() {
+                ns.entries.remove(&evicted);
+            } else {
+                break;
+            }
+        }
+    });
+}
+
+fn mem_clear(options: &CacheOptions) {
+    MEM_STORE.with(|store| {
+        store.borrow_mut().remove(&options.namespace);
+    });
+}
+
+// -------------------------------------------------------------------------
+// in-process metrics
+// -------------------------------------------------------------------------
+
+#[derive(Default, Clone, Copy)]
+struct MetricsSnapshot {
+    hits: u64,
+    misses: u64,
+}
+
+#[derive(Default)]
+struct MetricsStore {
+    by_namespace: BTreeMap<String, MetricsSnapshot>,
+}
+
+thread_local! {
+    static METRICS: RefCell<MetricsStore> = const { RefCell::new(MetricsStore { by_namespace: BTreeMap::new() }) };
+}
+
+fn metrics_key(options: &CacheOptions) -> String {
+    format!("{}:{}", options.backend.name(), options.namespace)
+}
+
+fn record_lookup(options: &CacheOptions, hit: bool) {
+    let key = metrics_key(options);
+    METRICS.with(|metrics| {
+        let mut metrics = metrics.borrow_mut();
+        let entry = metrics.by_namespace.entry(key).or_default();
+        if hit {
+            entry.hits = entry.hits.saturating_add(1);
+        } else {
+            entry.misses = entry.misses.saturating_add(1);
+        }
+    });
+}
+
+fn metrics_snapshot(options: &CacheOptions) -> MetricsSnapshot {
+    let key = metrics_key(options);
+    METRICS.with(|metrics| {
+        metrics
+            .borrow()
+            .by_namespace
+            .get(&key)
+            .copied()
+            .unwrap_or_default()
+    })
+}
+
+fn reset_metrics_for(options: &CacheOptions) {
+    let key = metrics_key(options);
+    METRICS.with(|metrics| {
+        metrics.borrow_mut().by_namespace.remove(&key);
+    });
+}
+
+/// Drop the per-thread in-memory cache and metrics. Called by
+/// `reset_stdlib_state` between top-level VM runs so the LRU store and
+/// hit/miss counters do not leak across test cases.
+pub fn reset_in_process_cache_state() {
+    MEM_STORE.with(|store| store.borrow_mut().clear());
+    METRICS.with(|metrics| metrics.borrow_mut().by_namespace.clear());
 }
 
 #[cfg(test)]
