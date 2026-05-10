@@ -50,7 +50,7 @@ mod runtime_scope;
 pub(crate) mod sandbox;
 pub mod secret_scan;
 mod sets;
-mod shapes;
+pub(crate) mod shapes;
 mod skills;
 mod strings;
 pub(crate) mod supervisor;

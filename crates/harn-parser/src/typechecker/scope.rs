@@ -6,7 +6,7 @@
 //! `ImplMethodSig` / `FnSignature`). It also re-exports the type-checker's
 //! gradual-typing alias (`InferredType`) and the variance polarity tracker.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::*;
 use crate::builtin_signatures;
@@ -114,6 +114,14 @@ pub(super) struct TypeScope {
     /// `unknown`-typed variable. Drives the exhaustive-narrowing warning at
     /// `unreachable()` / `throw` / `never`-returning calls.
     pub(super) unknown_ruled_out: BTreeMap<String, Vec<String>>,
+    /// Variables whose type came from a user-written annotation (let/var
+    /// `: T`, fn param `: T`, fn return type, struct field). Variables in
+    /// this set carry an explicit contract, so a property access against a
+    /// `Shape` or named struct type is checked strictly. Variables whose
+    /// type was *inferred* from a dict literal stay lenient: their `Shape`
+    /// type is a best-effort guess, and historical scripts treat them like
+    /// loose dicts.
+    pub(super) annotated_vars: BTreeSet<String>,
     pub(super) parent: Option<Box<TypeScope>>,
 }
 
@@ -162,6 +170,7 @@ impl TypeScope {
             schema_bindings: BTreeMap::new(),
             untyped_sources: BTreeMap::new(),
             unknown_ruled_out: BTreeMap::new(),
+            annotated_vars: BTreeSet::new(),
             parent: None,
         };
         scope.enums.insert(
@@ -219,6 +228,7 @@ impl TypeScope {
             schema_bindings: BTreeMap::new(),
             untyped_sources: BTreeMap::new(),
             unknown_ruled_out: BTreeMap::new(),
+            annotated_vars: BTreeSet::new(),
             parent: Some(Box::new(self.clone())),
         }
     }
@@ -423,6 +433,28 @@ impl TypeScope {
         }
         self.vars.insert(name.to_string(), ty);
         self.mutable_vars.insert(name.to_string());
+    }
+
+    /// Record that `name`'s type came from a written annotation (let/var
+    /// `: T`, fn param, etc.) rather than literal-driven inference. The
+    /// strict missing-field property-access check consults this — a
+    /// `let d = {a: 1, b: 2}` whose type is the inferred shape should
+    /// stay lenient, while a `let u: User = ...` should not.
+    pub(super) fn mark_annotated(&mut self, name: &str) {
+        if is_discard_name(name) {
+            return;
+        }
+        self.annotated_vars.insert(name.to_string());
+    }
+
+    pub(super) fn is_annotated(&self, name: &str) -> bool {
+        if self.annotated_vars.contains(name) {
+            return true;
+        }
+        self.parent
+            .as_ref()
+            .map(|parent| parent.is_annotated(name))
+            .unwrap_or(false)
     }
 
     pub(super) fn mark_nil_widenable(&mut self, name: &str) {

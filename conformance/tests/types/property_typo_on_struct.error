@@ -1,0 +1,2 @@
+field `emial` does not exist on struct `User` — did you mean `email`?
+available fields: name, email

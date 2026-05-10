@@ -176,6 +176,193 @@ impl TypeChecker {
         );
     }
 
+    /// Diagnose a property access (`obj.field` or `obj?.field`) against the
+    /// statically-known type of `object`. Emits actionable errors for the
+    /// common authoring failures that would otherwise surface late as a
+    /// generic VM `cannot access property` runtime error or a downstream
+    /// type mismatch:
+    ///
+    /// * Missing field on a known shape (with `did you mean` suggestion).
+    /// * Missing field on a known struct.
+    /// * Property access on a `nil` value (suggest `?.`).
+    /// * Property access on a `T?` nilable value (suggest `?.` or guard).
+    /// * Property access on an `unknown` value (suggest shape narrowing).
+    ///
+    /// Optional access (`obj?.field`) suppresses the nil-related diagnostics
+    /// because that is exactly what `?.` is for; the missing-field check
+    /// still fires so a typo in `user?.emial` is still caught.
+    fn check_property_access(
+        &mut self,
+        object: &SNode,
+        property: &str,
+        scope: &TypeScope,
+        span: Span,
+        optional: bool,
+    ) {
+        let Some(raw) = self.infer_type(object, scope) else {
+            return;
+        };
+        let resolved = self.resolve_alias(&raw, scope);
+        // Decide whether to take the strict path. The "loose" case is the
+        // ambient dict literal idiom (`let d = {a: 1}; d.missing` returns
+        // nil at runtime) and the unannotated `var x = nil; ...; x.field`
+        // widening pattern — both rely on the runtime's silent-nil
+        // behavior. Strict diagnostics fire when the type came from a
+        // real contract: a written annotation, a named alias or struct,
+        // a struct/function-call return, or a nested property access.
+        let is_strict_source = match &object.node {
+            Node::Identifier(name) => {
+                scope.is_annotated(name) || self.is_named_contract_type(&raw, scope)
+            }
+            _ => true,
+        };
+        if !is_strict_source {
+            return;
+        }
+        match &resolved {
+            TypeExpr::Named(name) if name == "nil" && !optional => {
+                self.error_at_with_help(
+                    format!(
+                        "cannot access property `{property}` on `nil`; the value is statically known to be nil here"
+                    ),
+                    span,
+                    format!("use the optional access operator `?.{property}`, or narrow the value with a `!= nil` guard before reading fields"),
+                );
+            }
+            TypeExpr::Named(name) if matches!(name.as_str(), "unknown") => {
+                self.warning_at_with_help(
+                    format!("property access `.{property}` on an `unknown` value will fail at runtime if the value is not a shape with that field"),
+                    span,
+                    "narrow with `is_a`/`type_of`, validate with `assert_shape`, or annotate with a shape type before accessing fields"
+                        .to_string(),
+                );
+            }
+            TypeExpr::Shape(fields) if !fields.iter().any(|f| f.name == *property) => {
+                let actual: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+                let max_dist = if property.len() <= 4 { 1 } else { 2 };
+                let suggestion = crate::diagnostic::find_closest_match(
+                    property,
+                    actual.iter().copied(),
+                    max_dist,
+                );
+                let shape_str = format_type(&resolved);
+                let mut msg = format!("field `{property}` does not exist on shape `{shape_str}`");
+                if let Some(close) = suggestion {
+                    msg.push_str(&format!(" — did you mean `{close}`?"));
+                }
+                let help = format!("available fields: {}", actual.join(", "));
+                self.error_at_with_help(msg, span, help);
+            }
+            TypeExpr::Named(name) if scope.get_struct(name).is_some() => {
+                self.check_struct_property(name, property, scope, span);
+            }
+            TypeExpr::Applied { name, .. } if scope.get_struct(name).is_some() => {
+                self.check_struct_property(name, property, scope, span);
+            }
+            _ if !optional => self.check_nilable_property_access(&resolved, property, scope, span),
+            _ => {}
+        }
+    }
+
+    /// True if `ty` carries a real type contract (named struct, named
+    /// type alias, or a generic instantiation thereof). Used to decide
+    /// whether an Identifier whose type was *inferred* (no annotation)
+    /// should still take the strict property-access path. A bare
+    /// `Shape(...)` returns false — that almost always came from a dict
+    /// literal and historically tolerates `.missing` returning nil.
+    fn is_named_contract_type(&self, ty: &TypeExpr, scope: &TypeScope) -> bool {
+        let name = match ty {
+            TypeExpr::Named(name) => name,
+            TypeExpr::Applied { name, .. } => name,
+            _ => return false,
+        };
+        scope.get_struct(name).is_some()
+            || scope.resolve_type_alias(name).is_some()
+            || scope.get_enum(name).is_some()
+    }
+
+    /// Verify that `property` is declared on struct `name`. The
+    /// existence check ignores type-parameter bindings — fields are
+    /// declared by name, and generic instantiation only changes their
+    /// types, not which names exist.
+    fn check_struct_property(&mut self, name: &str, property: &str, scope: &TypeScope, span: Span) {
+        let Some(info) = scope.get_struct(name) else {
+            return;
+        };
+        if info.fields.iter().any(|f| f.name == property) {
+            return;
+        }
+        let field_names: Vec<&str> = info.fields.iter().map(|f| f.name.as_str()).collect();
+        let max_dist = if property.len() <= 4 { 1 } else { 2 };
+        let suggestion =
+            crate::diagnostic::find_closest_match(property, field_names.iter().copied(), max_dist);
+        let mut msg = format!("field `{property}` does not exist on struct `{name}`");
+        if let Some(close) = suggestion {
+            msg.push_str(&format!(" — did you mean `{close}`?"));
+        }
+        let help = if field_names.is_empty() {
+            format!("struct `{name}` has no fields")
+        } else {
+            format!("available fields: {}", field_names.join(", "))
+        };
+        self.error_at_with_help(msg, span, help);
+    }
+
+    /// If `ty` is a `T | nil` union (any width), emit a hint to use `?.`
+    /// or a nil guard. The generic `Union` member access already returns
+    /// `None` from inference for non-optional access, but the resulting
+    /// silent-pass leaves authors guessing why a runtime nil-property
+    /// error fired. Pointing at the nilable type up-front matches the rest
+    /// of the diagnostics in this module.
+    fn check_nilable_property_access(
+        &mut self,
+        ty: &TypeExpr,
+        property: &str,
+        scope: &TypeScope,
+        span: Span,
+    ) {
+        if !matches!(ty, TypeExpr::Union(_)) {
+            return;
+        }
+        let TypeExpr::Union(members) = ty else {
+            return;
+        };
+        let has_nil = members.iter().any(|m| self.type_is_nil(m, scope));
+        if !has_nil {
+            return;
+        }
+        // Only complain when the non-nil arms could plausibly accept the
+        // property. Otherwise the user gets a useful "field does not
+        // exist" diagnostic from the per-arm checks instead.
+        let non_nil_admits_property = members.iter().any(|m| {
+            if self.type_is_nil(m, scope) {
+                return false;
+            }
+            let resolved = self.resolve_alias(m, scope);
+            match &resolved {
+                TypeExpr::Shape(fields) => fields.iter().any(|f| f.name == property),
+                TypeExpr::Named(name) if scope.get_struct(name).is_some() => scope
+                    .get_struct(name)
+                    .map(|info| info.fields.iter().any(|f| f.name == property))
+                    .unwrap_or(false),
+                _ => false,
+            }
+        });
+        if !non_nil_admits_property {
+            return;
+        }
+        self.error_at_with_help(
+            format!(
+                "cannot access property `{property}` on nilable type `{ty}`; the value may be nil at runtime",
+                ty = format_type(ty)
+            ),
+            span,
+            format!(
+                "use the optional access operator `?.{property}`, or narrow the value with a `!= nil` guard to drop the nil arm"
+            ),
+        );
+    }
+
     fn check_strict_untyped_access(
         &mut self,
         object: &SNode,
@@ -255,6 +442,9 @@ impl TypeChecker {
                     }
                     let ty = type_ann.clone().or(inferred);
                     scope.define_var(name, ty);
+                    if type_ann.is_some() {
+                        scope.mark_annotated(name);
+                    }
                     scope.clear_nil_widenable(name);
                     scope.define_schema_binding(name, schema_type_expr_from_node(value, scope));
                     // Strict types: mark variables assigned from boundary APIs
@@ -311,6 +501,9 @@ impl TypeChecker {
                         type_ann.is_none() && inferred.as_ref().is_some_and(Self::is_nil_type);
                     let ty = type_ann.clone().or(inferred);
                     scope.define_var_mutable(name, ty);
+                    if type_ann.is_some() {
+                        scope.mark_annotated(name);
+                    }
                     if inferred_is_nil {
                         scope.mark_nil_widenable(name);
                     } else {
@@ -1046,13 +1239,15 @@ impl TypeChecker {
                 }
                 self.check_generic_method_bound(object, method, scope, span);
             }
-            Node::PropertyAccess { object, .. } => {
+            Node::PropertyAccess { object, property } => {
                 self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Property);
+                self.check_property_access(object, property, scope, span, false);
                 self.check_node(object, scope);
             }
             Node::OptionalPropertyAccess { object, property } => {
                 self.check_unnecessary_safe_property_access(snode, object, property, scope);
                 self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Property);
+                self.check_property_access(object, property, scope, span, true);
                 self.check_node(object, scope);
             }
             Node::SubscriptAccess { object, index } => {

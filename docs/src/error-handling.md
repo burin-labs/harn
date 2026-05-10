@@ -2,6 +2,11 @@
 
 Harn provides `try`/`catch`/`throw` for error handling and `retry` for automatic recovery.
 
+> **Reading errors.** Most type-check and runtime errors around shapes,
+> structs, schemas, and nilable values follow a small set of patterns
+> that point straight at the fix. See
+> [Reading diagnostics](./diagnostics.md) for a tour.
+
 ## throw
 
 Any value can be thrown as an error:

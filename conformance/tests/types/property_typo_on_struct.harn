@@ -1,0 +1,12 @@
+// Typoed property on a struct should call out the struct name and
+// available fields. Mirrors the shape diagnostic so authors get the
+// same UX whether they used `struct` or a type alias.
+struct User {
+  name: string
+  email: string
+}
+
+pipeline default(_) {
+  let u = User {name: "Ada", email: "ada@x"}
+  println(u.emial)
+}

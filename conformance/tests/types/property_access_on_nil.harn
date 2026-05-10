@@ -1,0 +1,7 @@
+// Property access on a value statically known to be `nil` is almost
+// always a mistake. The diagnostic explicitly tells the author the
+// type is nil here and points at `?.` / nil-guard fixes.
+pipeline default(_) {
+  let x: nil = nil
+  println(x.foo)
+}

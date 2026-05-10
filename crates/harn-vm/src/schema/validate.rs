@@ -599,15 +599,17 @@ fn first_object_param_error(
                     .and_then(VmValue::as_dict)
                     .map(schema_expected_label)
                     .unwrap_or_else(|| "value".to_string());
+                let actual_keys: Vec<&str> = fields.keys().map(String::as_str).collect();
+                let actual_summary = crate::stdlib::shapes::format_available_fields(&actual_keys);
                 if let Some(suggestion) = suggestion {
                     return Some(format!(
-                        "parameter '{}': missing field '{}' ({}), did you mean '{}'?",
-                        param_name, key, expected, suggestion
+                        "parameter '{}': missing field '{}' ({}), did you mean '{}'? — {}",
+                        param_name, key, expected, suggestion, actual_summary
                     ));
                 }
                 return Some(format!(
-                    "parameter '{}': missing field '{}' ({})",
-                    param_name, key, expected
+                    "parameter '{}': missing field '{}' ({}) — {}",
+                    param_name, key, expected, actual_summary
                 ));
             }
         }

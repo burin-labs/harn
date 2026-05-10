@@ -162,7 +162,11 @@ impl TypeChecker {
             } else {
                 param.type_expr.clone()
             };
+            let has_annotation = param.type_expr.is_some();
             fn_scope.define_var(&param.name, param_type);
+            if has_annotation {
+                fn_scope.mark_annotated(&param.name);
+            }
             fn_scope.clear_nil_widenable(&param.name);
             if let Some(default) = &param.default_value {
                 self.check_node(default, &mut fn_scope);

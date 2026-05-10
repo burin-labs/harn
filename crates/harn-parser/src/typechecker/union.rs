@@ -172,6 +172,19 @@ pub(super) fn intersect_types(current: &TypeExpr, schema_type: &TypeExpr) -> Opt
             let value = intersect_types(current_value, schema_value)?;
             Some(TypeExpr::DictType(Box::new(key), Box::new(value)))
         }
+        // `unknown` and `any` are top types in the value-narrowing
+        // direction — a successful `schema_is(x, S)` proves `x` matches
+        // `S`, so the truthy branch can narrow to `S` regardless of how
+        // wide the original type was. Without this, an annotated
+        // `let x: unknown = …` stays `unknown` after `schema_is` (the
+        // refinement set is empty), and field access on the narrowed
+        // value triggers spurious "property access on unknown" warnings.
+        (TypeExpr::Named(name), other) if matches!(name.as_str(), "unknown" | "any") => {
+            Some(other.clone())
+        }
+        (current, TypeExpr::Named(name)) if matches!(name.as_str(), "unknown" | "any") => {
+            Some(current.clone())
+        }
         _ => None,
     }
 }
@@ -189,6 +202,15 @@ pub(super) fn subtract_type(current: &TypeExpr, schema_type: &TypeExpr) -> Optio
                 1 => remaining.into_iter().next(),
                 _ => Some(TypeExpr::Union(remaining)),
             }
+        }
+        // `unknown` and `any` are top types: the falsy branch of
+        // `schema_is(x, S)` knows `x` did not match `S`, but Harn has
+        // no negative-type form to express "unknown except S". Stay at
+        // `unknown` so the branch keeps requiring narrowing — without
+        // this, the new top-type intersect arms would collapse the
+        // falsy branch to `Never` and silence real diagnostics.
+        TypeExpr::Named(name) if matches!(name.as_str(), "unknown" | "any") => {
+            Some(current.clone())
         }
         other if intersect_types(other, schema_type).is_some() => None,
         other => Some(other.clone()),

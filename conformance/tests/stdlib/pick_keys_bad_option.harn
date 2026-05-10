@@ -1,0 +1,8 @@
+// Calling a typed stdlib helper with the wrong shape should land at the
+// helper's parameter-type guard with a clear, actionable error — not as
+// a generic VM failure several frames down.
+import "std/collections"
+
+pipeline default(_) {
+  pick_keys("not a dict", ["a"])
+}
