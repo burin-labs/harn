@@ -1,0 +1,22 @@
+[
+  {
+    "program": "git",
+    "args": ["status"],
+    "cwd": null,
+    "env": {},
+    "stdout": "On branch main nothing to commit",
+    "stderr": "",
+    "exit_code": 0,
+    "duration_ms": 42
+  },
+  {
+    "program": "echo",
+    "args": ["hi"],
+    "cwd": null,
+    "env": {},
+    "stdout": "hi",
+    "stderr": "",
+    "exit_code": 0,
+    "duration_ms": 1
+  }
+]

@@ -123,6 +123,20 @@ condensed series summaries instead of full per-patch history.
   `GitHubConnectorConfig`/`GitHubCallOptions`/`GitHubWaitOptions` shapes so
   the high-traffic agent/workflow and connector paths advertise their
   contract instead of accepting freeform `dict`.
+- **Testbench conformance suite.** Added `conformance/tests/testbench/`
+  covering the deterministic axes of `harn test-bench`: paused-clock
+  sleep, 30 simulated cron days under one `trigger_test_harness` call,
+  100 concurrent mocked agents settling deterministically, recorded
+  subprocess replay, copy-on-write fs overlay diff, deny-by-default
+  network egress, and byte-identical replay fidelity against a checked-in
+  event tape. The conformance runner now activates the testbench session
+  automatically when sidecar files (`.process-tape.json`, `.fs-overlay/`,
+  `.testbench-tape`) are present next to a `.harn` test, and two new
+  script-side builtins (`testbench_is_active`, `testbench_fs_diff`)
+  expose the active overlay diff to assertions. The eighth case from
+  the original issue (a runtime audit warning when a host capability
+  bypasses the unified mock clock) is filed against #1466 since it
+  depends on a runtime feature that doesn't exist yet. (#1442)
 
 ### Changed
 

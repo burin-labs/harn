@@ -84,12 +84,16 @@ def verify_tag_state(version: str) -> None:
     Passes when:
       - the tag does not exist yet (we're staging a future release), OR
       - HEAD is at the tagged commit, OR
-      - HEAD descends from the tagged commit (released; main has moved on
-        with non-release commits — fine, the next release PR will bump).
+      - HEAD descends from the tagged commit, OR
+      - HEAD contains a commit whose subject is `Release v{version}`
+        (handles the squash-merge case where the release PR lands on
+        main as a new SHA, leaving the tag pointing at the pre-merge
+        commit).
 
-    Fails only when HEAD is an ancestor of the tag, or unrelated — both
-    of which mean Cargo.toml is at version X.Y.Z but HEAD doesn't
-    contain the X.Y.Z release commit, which would tag the wrong state.
+    Fails only when HEAD is an ancestor of the tag, or unrelated, AND
+    has no `Release v{version}` commit of its own — both of which mean
+    Cargo.toml is at version X.Y.Z but HEAD doesn't actually contain
+    the X.Y.Z release.
     """
     tag = f"v{version}"
     tag_lookup = subprocess.run(
@@ -124,10 +128,31 @@ def verify_tag_state(version: str) -> None:
     )
     if is_descendant.returncode == 0:
         return
+    # Fallback for squash-merged release commits: the tag points at the
+    # pre-merge SHA, but main has an equivalent commit with the same
+    # subject. Walk HEAD's history for one and accept it.
+    rebrand = subprocess.run(
+        [
+            "git",
+            "log",
+            "--format=%H",
+            f"--grep=^Release {tag}( |$|\\()",
+            "--extended-regexp",
+            "-n",
+            "1",
+            "HEAD",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if rebrand.returncode == 0 and rebrand.stdout.strip():
+        return
     raise SystemExit(
         f"error: current version {version} is already tagged at {tag_commit}, "
-        f"but HEAD ({head}) does not include that commit; either bump the "
-        f"version or rebase onto the tagged commit before continuing"
+        f"but HEAD ({head}) does not include that commit and has no "
+        f"`Release {tag}` commit of its own; either bump the version or "
+        f"rebase onto the tagged commit before continuing"
     )
 
 

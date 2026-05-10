@@ -163,9 +163,16 @@ impl ProcessTape {
 }
 
 fn invocation_matches(expected: &TapeEntry, recorded: &TapeEntry) -> bool {
-    expected.program == recorded.program
-        && expected.args == recorded.args
-        && expected.cwd == recorded.cwd
+    if expected.program != recorded.program || expected.args != recorded.args {
+        return false;
+    }
+    // A `null` cwd in the recorded tape acts as a wildcard: portable
+    // fixtures don't pin to a particular machine layout. An explicit
+    // recorded cwd still has to match exactly.
+    match &recorded.cwd {
+        None => true,
+        Some(_) => expected.cwd == recorded.cwd,
+    }
 }
 
 thread_local! {
@@ -432,6 +439,31 @@ mod tests {
         assert_eq!(recorded.len(), 1);
         assert_eq!(recorded[0].stdout, "hi\n");
         assert_eq!(recorded[0].duration_ms, 7);
+    }
+
+    #[test]
+    fn replay_recorded_cwd_none_acts_as_wildcard() {
+        // A fixture authored with `cwd: null` is portable — it matches
+        // whatever cwd the conformance runner happens to set.
+        let tape = ProcessTape::replay_from(vec![TapeEntry {
+            program: "echo".to_string(),
+            args: vec!["hi".to_string()],
+            cwd: None,
+            env: BTreeMap::new(),
+            stdout: "hi\n".to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+            duration_ms: 0,
+        }]);
+        let _guard = install_process_tape(Arc::new(tape));
+        let intercepted = intercept_spawn(
+            "echo",
+            &["hi".to_string()],
+            Some(Path::new("/some/runner/cwd")),
+        )
+        .expect("tape produced output")
+        .expect("replay succeeded");
+        assert_eq!(intercepted.stdout, b"hi\n");
     }
 
     #[test]

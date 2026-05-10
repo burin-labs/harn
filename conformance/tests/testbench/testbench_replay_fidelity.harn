@@ -1,0 +1,24 @@
+/**
+ * Script performs deterministic work under a mocked LLM and paused
+ * clock. The .testbench-tape sidecar contains the golden tape from the
+ * first run; the conformance runner records a fresh tape on every
+ * subsequent run and compares it byte-for-byte against the golden
+ * version via the fidelity oracle.
+ *
+ * A byte-identical comparison passing means: given the same fixture and
+ * the same paused clock, the runtime always produces the same sequence
+ * of host-boundary events.
+ */
+pipeline test(task) {
+  llm_mock_clear()
+  llm_mock({text: "fidelity-response", input_tokens: 5, output_tokens: 3, model: "mock"})
+  mock_time(1767225600000)
+  let before = now_ms()
+  let resp = llm_call("replay test", nil, {provider: "mock", model: "mock"})
+  advance_time(1000)
+  let after = now_ms()
+  println(resp.text == "fidelity-response")
+  println(after - before == 1000)
+  unmock_time()
+  llm_mock_clear()
+}

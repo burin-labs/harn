@@ -1,0 +1,25 @@
+/**
+ * Script writes 3 files, deletes 1, and modifies 1 through the fs
+ * overlay. The testbench_fs_diff() builtin surfaces the in-memory diff
+ * without touching the underlying filesystem.
+ *
+ * The .fs-overlay/ sidecar directory activates the overlay; the runner
+ * installs a paused clock automatically.
+ */
+pipeline test(task) {
+  let root = source_dir() + "/testbench_fs_overlay_diff.fs-overlay"
+  write_file(root + "/new_a.txt", "alpha")
+  write_file(root + "/new_b.txt", "beta")
+  write_file(root + "/new_c.txt", "gamma")
+  write_file(root + "/existing.txt", "updated content")
+  delete_file(root + "/to_delete.txt")
+  let diff = testbench_fs_diff()
+  let added = diff.filter({ e -> e.kind == "added" })
+  let modified = diff.filter({ e -> e.kind == "modified" })
+  let deleted = diff.filter({ e -> e.kind == "deleted" })
+  println(len(added) == 3)
+  println(len(modified) == 1)
+  println(len(deleted) == 1)
+  println(added.any({ e -> contains(e.path, "new_a.txt") && e.content == "alpha" }))
+  println(modified[0].content == "updated content")
+}

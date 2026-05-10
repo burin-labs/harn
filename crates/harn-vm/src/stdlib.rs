@@ -55,6 +55,7 @@ mod skills;
 mod strings;
 pub(crate) mod supervisor;
 pub mod template;
+mod testbench;
 mod testing;
 pub(crate) mod tools;
 pub mod tracing;
@@ -122,6 +123,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     // Clock builtins overlay process::timestamp/elapsed so they honor
     // mock_time / advance_time. Register AFTER process to take precedence.
     clock::register_clock_builtins(vm);
+    testbench::register_testbench_builtins(vm);
     project::register_project_builtins(vm);
     tracing::register_tracing_builtins(vm);
 }
