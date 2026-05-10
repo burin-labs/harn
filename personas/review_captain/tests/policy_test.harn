@@ -1,0 +1,32 @@
+// Run: harn test personas/review_captain/tests/policy_test.harn
+import { default_policy, load_policy_json } from "../lib/policy"
+
+pipeline test_default_policy_has_baseline_patterns(task) {
+  let policy = default_policy()
+  assert(len(policy.risky_paths) > 0)
+  assert(len(policy.test_globs) > 0)
+}
+
+pipeline test_load_policy_json_returns_default_when_empty(task) {
+  let result = load_policy_json("")
+  assert_eq(result.ok, true)
+  assert(len(result.policy.risky_paths) > 0)
+}
+
+pipeline test_load_policy_json_round_trips(task) {
+  let raw = "{\"repo\":\"burin-labs/burin-code\",\"risky_paths\":[\"Package.swift\"],\"test_globs\":[\"Tests/\"]}"
+  let result = load_policy_json(raw)
+  assert_eq(result.ok, true)
+  assert_eq(result.policy.repo, "burin-labs/burin-code")
+  assert_eq(len(result.policy.risky_paths), 1)
+  assert_eq(result.policy.risky_paths[0], "Package.swift")
+  assert_eq(len(result.policy.test_globs), 1)
+  assert_eq(result.policy.test_globs[0], "Tests/")
+}
+
+pipeline test_load_policy_json_falls_back_to_default_test_globs(task) {
+  let raw = "{\"repo\":\"x/y\",\"risky_paths\":[\"a\"]}"
+  let result = load_policy_json(raw)
+  assert_eq(result.ok, true)
+  assert(len(result.policy.test_globs) > 0)
+}

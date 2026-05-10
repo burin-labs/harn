@@ -4,8 +4,8 @@ version = "0.1.0"
 
 [[personas]]
 name = "review_captain"
-version = "0.1.0"
-description = "Harn-native review captain. Produces deterministic review receipts, missing-test checks, and approval-ready follow-up handoff summaries."
+version = "0.2.0"
+description = "Harn-native review captain. Runs deterministic secret/risk checks plus optional self_review LLM rounds and emits a structured review receipt."
 entry_workflow = "manifest.harn#run"
 tools = ["github", "mcp"]
 capabilities = [
@@ -17,7 +17,7 @@ capabilities = [
 ]
 autonomy_tier = "suggest"
 receipt_policy = "required"
-triggers = ["github.review_requested", "github.pull_request_synchronized"]
+triggers = ["github.review_requested", "github.pull_request_synchronized", "github.pull_request_opened"]
 schedules = ["0 */2 * * *"]
 handoffs = []
 context_packs = ["repo_policy", "review_policy"]

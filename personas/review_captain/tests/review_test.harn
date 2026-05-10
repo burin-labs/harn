@@ -1,0 +1,90 @@
+// Run: harn test personas/review_captain/tests/review_test.harn
+import { default_policy } from "../lib/policy"
+import { review_pr } from "../lib/review"
+
+fn _request(diff, files, dry_run) {
+  return {
+    repo: "burin-labs/burin-code",
+    pr_number: 1234,
+    head_sha: "abc",
+    base_sha: "def",
+    diff: diff,
+    changed_files: files,
+    max_rounds: 1,
+    dry_run: dry_run,
+  }
+}
+
+fn _llm_no_findings(_request) {
+  return {findings: [], summary: "all clear", rounds: 1, skipped_reason: nil}
+}
+
+fn _llm_blocking(_request) {
+  return {
+    findings: [
+      {
+        id: "llm:1",
+        severity: "blocking",
+        category: "correctness",
+        title: "off-by-one",
+        detail: "loop bound is wrong",
+        source: "self_review",
+      },
+    ],
+    summary: "found 1 blocking finding",
+    rounds: 1,
+    skipped_reason: nil,
+  }
+}
+
+pipeline test_dry_run_skips_llm(task) {
+  let receipt = review_pr(_request("", [], true), default_policy(), nil)
+  assert_eq(receipt.self_review_skipped_reason, "dry_run")
+  assert_eq(receipt.rounds, 0)
+}
+
+pipeline test_secret_in_diff_returns_blocking(task) {
+  let diff = "+let key = \"AKIAIOSFODNN7EXAMPLE\""
+  let receipt = review_pr(_request(diff, ["src/secret.swift"], true), default_policy(), nil)
+  assert_eq(receipt.blocking, true)
+  assert_eq(receipt.verdict, "blocking")
+  assert(len(receipt.secret_scan_findings) > 0)
+  assert(len(receipt.findings) > 0)
+}
+
+pipeline test_clean_diff_returns_approve(task) {
+  let diff = "+let answer = 42"
+  let receipt = review_pr(
+    _request(diff, ["Tests/AnswerTests.swift"], false),
+    default_policy(),
+    {llm_hook: _llm_no_findings},
+  )
+  assert_eq(receipt.verdict, "approve")
+  assert_eq(receipt.blocking, false)
+  assert_eq(receipt.rounds, 1)
+  assert_eq(receipt.summary, "all clear")
+}
+
+pipeline test_llm_blocking_finding_is_propagated(task) {
+  let diff = "+let answer = 42"
+  let receipt = review_pr(
+    _request(diff, ["Tests/AnswerTests.swift"], false),
+    default_policy(),
+    {llm_hook: _llm_blocking},
+  )
+  assert_eq(receipt.blocking, true)
+  assert_eq(receipt.verdict, "blocking")
+  assert_eq(receipt.handoff, "merge_captain")
+  assert_eq(len(receipt.findings), 1)
+}
+
+pipeline test_risky_paths_surface_in_receipt(task) {
+  let diff = "+# changed workflow"
+  let receipt = review_pr(
+    _request(diff, [".github/workflows/deploy.yml"], false),
+    default_policy(),
+    {llm_hook: _llm_no_findings},
+  )
+  assert(len(receipt.risky_paths) > 0)
+  assert_eq(receipt.verdict, "needs_follow_up")
+}

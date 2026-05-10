@@ -1,0 +1,107 @@
+// Run: harn test personas/review_captain/tests/receipt_test.harn
+import { build_review_receipt, envelope_for_dry_run } from "../lib/receipt"
+
+fn _request() {
+  return {repo: "burin-labs/burin-code", pr_number: 42, head_sha: "abc", base_sha: "def"}
+}
+
+pipeline test_clean_receipt_returns_approve(task) {
+  let receipt = build_review_receipt(
+    {
+      request: _request(),
+      secret_findings: [],
+      llm_findings: [],
+      llm_summary: "",
+      llm_rounds: 1,
+      risky_hits: [],
+      missing_tests: [],
+    },
+  )
+  assert_eq(receipt.verdict, "approve")
+  assert_eq(receipt.blocking, false)
+  assert_eq(len(receipt.findings), 0)
+  assert_eq(receipt.handoff, nil)
+  assert_eq(receipt.persona, "review_captain")
+  assert_eq(receipt.kind, "review_receipt")
+  assert_eq(receipt.repo, "burin-labs/burin-code")
+}
+
+pipeline test_secret_findings_set_blocking(task) {
+  let receipt = build_review_receipt(
+    {
+      request: _request(),
+      secret_findings: [{detector: "aws-access-key-id", title: "AWS access key id", line: 4, fingerprint: "abc123"}],
+      llm_findings: [],
+      llm_summary: "",
+      llm_rounds: 0,
+      risky_hits: [],
+      missing_tests: [],
+    },
+  )
+  assert_eq(receipt.verdict, "blocking")
+  assert_eq(receipt.blocking, true)
+  assert_eq(len(receipt.findings), 1)
+  assert_eq(receipt.findings[0].source, "secret_scan")
+  assert_eq(receipt.findings[0].severity, "blocking")
+  assert_eq(receipt.handoff, "merge_captain")
+}
+
+pipeline test_warning_findings_set_needs_follow_up(task) {
+  let receipt = build_review_receipt(
+    {
+      request: _request(),
+      secret_findings: [],
+      llm_findings: [
+        {
+          id: "warn1",
+          severity: "warning",
+          category: "tests",
+          title: "missing test",
+          detail: "x",
+          source: "self_review",
+        },
+      ],
+      llm_summary: "1 warning",
+      llm_rounds: 1,
+      risky_hits: [],
+      missing_tests: [],
+    },
+  )
+  assert_eq(receipt.verdict, "needs_follow_up")
+  assert_eq(receipt.blocking, false)
+  assert_eq(len(receipt.findings), 1)
+}
+
+pipeline test_dedupe_drops_duplicate_ids(task) {
+  let receipt = build_review_receipt(
+    {
+      request: _request(),
+      secret_findings: [],
+      llm_findings: [
+        {id: "warn1", severity: "warning", category: "x", title: "t", detail: "d", source: "self_review"},
+        {
+          id: "warn1",
+          severity: "warning",
+          category: "x",
+          title: "t-dup",
+          detail: "d",
+          source: "self_review",
+        },
+      ],
+      llm_summary: "",
+      llm_rounds: 1,
+      risky_hits: [],
+      missing_tests: [],
+    },
+  )
+  assert_eq(len(receipt.findings), 1)
+}
+
+pipeline test_dry_run_envelope_skips_llm(task) {
+  let receipt = envelope_for_dry_run(_request(), [], ["sources/foo.swift"], ["scripts/release.sh"])
+  assert_eq(receipt.self_review_skipped_reason, "dry_run")
+  assert_eq(receipt.rounds, 0)
+  assert_eq(receipt.verdict, "needs_follow_up")
+  assert_eq(len(receipt.risky_paths), 1)
+  assert_eq(len(receipt.missing_tests), 1)
+}

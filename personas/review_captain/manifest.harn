@@ -1,17 +1,30 @@
 // Review Captain entry pipeline.
 //
-// This package is the canonical Harn home for the review persona Burin
-// surfaces in its persona manager. The workflow remains deterministic by
-// default so local smoke runs do not require live GitHub credentials.
+// One invocation reviews one PR. The pipeline accepts an `input` JSON
+// object on stdin so any embedder (Burin Code, harn-cloud, the CLI)
+// drives the persona by piping a `ReviewCaptainRequest` payload in;
+// when stdin is empty it falls back to the bundled smoke fixture so
+// `harn run personas/review_captain/manifest.harn` still produces a
+// deterministic receipt.
 import { runtime_pipeline_input } from "std/runtime"
+import { default_policy, load_policy_json } from "lib/policy"
+import { review_pr } from "lib/review"
 
-@persona(name: "review_captain", description: "Harn-native review quality captain.", tools: [github], autonomy: suggest, receipts: required, triggers: [github.review_requested, github.pull_request_synchronized])
+@persona(name: "review_captain", description: "Harn-native review captain. Runs deterministic secret/risk checks plus optional self_review LLM rounds and emits a structured review receipt.", tools: [github, mcp], autonomy: suggest, receipts: required, triggers: [github.review_requested, github.pull_request_synchronized, github.pull_request_opened])
 /** Static persona graph used by `harn persona inspect` to expose Review Captain's durable steps. */
 pub fn review_captain_persona(ctx) {
   let input = resolve_review_input_step(ctx)
-  let diff = collect_review_context_step(input)
-  let verdict = classify_review_risk_step(diff)
-  let receipt = emit_review_receipt_step({input: input, verdict: verdict})
+  let secret_scan_findings = scan_secrets_step(input)
+  let risky_paths = classify_risky_paths_step({input: input, secret_scan_findings: secret_scan_findings})
+  let llm_findings = run_self_review_step({input: input, risky_paths: risky_paths})
+  let receipt = build_review_receipt_step(
+    {
+      input: input,
+      llm_findings: llm_findings,
+      secret_scan_findings: secret_scan_findings,
+      risky_paths: risky_paths,
+    },
+  )
   return summarize_review_step(receipt)
 }
 
@@ -20,18 +33,23 @@ fn resolve_review_input_step(ctx) {
   return ctx
 }
 
-@step(name: "collect_review_context", receipt: audit, error_boundary: fail)
-fn collect_review_context_step(ctx) {
+@step(name: "scan_secrets", receipt: audit, error_boundary: fail)
+fn scan_secrets_step(ctx) {
   return ctx
 }
 
-@step(name: "classify_review_risk", model: "gpt-5.4-mini", receipt: audit, error_boundary: escalate)
-fn classify_review_risk_step(ctx) {
+@step(name: "classify_risky_paths", receipt: audit, error_boundary: fail)
+fn classify_risky_paths_step(ctx) {
   return ctx
 }
 
-@step(name: "emit_review_receipt", receipt: audit, error_boundary: fail)
-fn emit_review_receipt_step(ctx) {
+@step(name: "run_self_review", model: "gpt-5.4-mini", receipt: audit, error_boundary: continue, retry: {max_attempts: 2})
+fn run_self_review_step(ctx) {
+  return ctx
+}
+
+@step(name: "build_review_receipt", receipt: audit, error_boundary: fail)
+fn build_review_receipt_step(ctx) {
   return ctx
 }
 
@@ -40,67 +58,84 @@ fn summarize_review_step(ctx) {
   return ctx
 }
 
-fn _default_review() {
+fn _default_request() {
   return {
-    repo: "burin-labs/harn",
-    pr_number: 463,
-    changed_files: ["personas/review_captain/harn.toml", "personas/review_captain/manifest.harn"],
-    missing_tests: ["persona smoke run"],
-    risky_paths: ["personas/review_captain/harn.toml"],
+    repo: "burin-labs/burin-code",
+    pr_number: 235,
+    head_sha: "0000000000000000000000000000000000000000",
+    base_sha: "0000000000000000000000000000000000000000",
+    diff: "",
+    changed_files: [],
+    max_rounds: 1,
+    dry_run: true,
+    rubric_preset: "code",
+    policy_path: nil,
   }
 }
 
-fn _resolve_review() {
+fn _resolve_request() {
+  let from_stdin = _try_stdin()
+  if from_stdin != nil {
+    return _merge_with_defaults(from_stdin)
+  }
+  let from_runtime = _try_runtime_input()
+  if from_runtime != nil {
+    return _merge_with_defaults(from_runtime)
+  }
+  return _default_request()
+}
+
+fn _try_stdin() {
+  let raw = trim(read_stdin() ?? "")
+  if raw == "" {
+    return nil
+  }
+  return json_parse(raw)
+}
+
+fn _try_runtime_input() {
   let attempt = try {
     runtime_pipeline_input()
   }
-  let provided = if is_ok(attempt) {
-    unwrap(attempt) ?? {}
-  } else {
-    {}
+  if !is_ok(attempt) {
+    return nil
   }
-  let review = provided.review_captain ?? provided
-  let defaults = _default_review()
+  return unwrap(attempt)
+}
+
+fn _merge_with_defaults(provided) {
+  let defaults = _default_request()
   return {
-    repo: review.repo ?? defaults.repo,
-    pr_number: review.pr_number ?? defaults.pr_number,
-    changed_files: review.changed_files ?? defaults.changed_files,
-    missing_tests: review.missing_tests ?? defaults.missing_tests,
-    risky_paths: review.risky_paths ?? defaults.risky_paths,
+    repo: provided.repo ?? defaults.repo,
+    pr_number: provided.pr_number ?? defaults.pr_number,
+    head_sha: provided.head_sha ?? defaults.head_sha,
+    base_sha: provided.base_sha ?? defaults.base_sha,
+    diff: provided.diff ?? defaults.diff,
+    changed_files: provided.changed_files ?? defaults.changed_files,
+    max_rounds: provided.max_rounds ?? defaults.max_rounds,
+    dry_run: provided.dry_run ?? defaults.dry_run,
+    rubric_preset: provided.rubric_preset ?? defaults.rubric_preset,
+    policy_path: provided.policy_path ?? defaults.policy_path,
   }
 }
 
-fn _review_verdict(review) {
-  if len(review.missing_tests) > 0 || len(review.risky_paths) > 0 {
-    return "needs_follow_up"
+fn _resolve_policy(request) {
+  let path = request.policy_path
+  if path == nil || path == "" {
+    return default_policy()
   }
-  return "low_risk"
+  let raw = read_file(path)
+  let result = load_policy_json(raw)
+  if result.ok {
+    return result.policy
+  }
+  return default_policy()
 }
 
 pipeline run(task) {
-  let review = _resolve_review()
-  let verdict = _review_verdict(review)
-  let result = {
-    persona: "review_captain",
-    execution_mode: "dry_run",
-    approval_required: false,
-    repo: review.repo,
-    pr_number: review.pr_number,
-    summary: "structured review receipt for PR #${review.pr_number}",
-    focus: ["regressions", "missing tests", "risky diffs"],
-    receipt: {
-      kind: "review_receipt",
-      verdict: verdict,
-      missing_tests: review.missing_tests,
-      risky_paths: review.risky_paths,
-      changed_files: review.changed_files,
-    },
-    handoff: if verdict == "needs_follow_up" {
-      "merge_captain"
-    } else {
-      nil
-    },
-  }
-  println(json_stringify(result))
-  return result
+  let request = _resolve_request()
+  let policy = _resolve_policy(request)
+  let receipt = review_pr(request, policy, nil)
+  println(json_stringify(receipt))
+  return receipt
 }

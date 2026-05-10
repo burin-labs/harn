@@ -1,0 +1,66 @@
+// Per-repo policy loading for review_captain.
+//
+// Each repo can declare a JSON policy file that lists risky path
+// patterns and test-file globs. The policy is intentionally tiny —
+// anything more elaborate belongs in the LLM rubric, not in
+// deterministic Harn code.
+/** load_policy_json(raw) -> {ok, policy?, error?}. */
+pub fn load_policy_json(raw) {
+  let text = raw ?? ""
+  if text == "" {
+    return _default_policy_result()
+  }
+  let parsed = json_parse(text)
+  if parsed == nil {
+    return {ok: false, error: "policy JSON failed to parse"}
+  }
+  let risky_paths = parsed.risky_paths ?? []
+  let test_globs = parsed.test_globs ?? _default_test_globs()
+  return {ok: true, policy: {repo: parsed.repo ?? "", risky_paths: risky_paths, test_globs: test_globs}}
+}
+
+/**
+ * default_policy() returns a baseline policy used when no per-repo
+ * policy file is present. The patterns favour false positives over
+ * false negatives — review_captain would rather over-warn than miss a
+ * risky touch.
+ */
+pub fn default_policy() {
+  return {repo: "", risky_paths: _default_risky_paths(), test_globs: _default_test_globs()}
+}
+
+fn _default_policy_result() {
+  return {ok: true, policy: default_policy()}
+}
+
+fn _default_risky_paths() {
+  return [
+    ".github/workflows",
+    "scripts/release",
+    "scripts/build-release",
+    "scripts/fetch-harn",
+    "Package.swift",
+    "harn.toml",
+    "providers.toml",
+    ".env",
+    ".burin/",
+    "migrations/",
+    "schema.sql",
+  ]
+}
+
+fn _default_test_globs() {
+  return [
+    "tests/",
+    "Tests/",
+    "test/",
+    "__tests__",
+    "_test.swift",
+    "_test.go",
+    "_test.ts",
+    "_test.tsx",
+    "Test.swift",
+    ".test.ts",
+    ".spec.ts",
+  ]
+}
