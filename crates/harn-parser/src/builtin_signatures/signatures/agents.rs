@@ -36,1181 +36,716 @@ const TY_FLOAT_OR_NIL: Ty = Ty::Union(&[TY_FLOAT, TY_NIL]);
 const TY_BOOL_OR_INT_OR_NIL: Ty = Ty::Union(&[TY_BOOL, TY_INT, TY_NIL]);
 
 pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
-    BuiltinSignature {
-        name: "__llm_self_certainty",
-        params: &[
+    BuiltinSignature::simple(
+        "__llm_self_certainty",
+        &[
             Param::new("text_or_result", TY_STRING_OR_DICT),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_FLOAT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "add_assistant",
-        params: &[
+        TY_FLOAT,
+    ),
+    BuiltinSignature::simple(
+        "add_assistant",
+        &[
             Param::new("messages_or_transcript", TY_LIST_OR_DICT),
             Param::new("content", TY_ANY),
         ],
-        returns: TY_LIST_OR_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "add_message",
-        params: &[
+        TY_LIST_OR_DICT,
+    ),
+    BuiltinSignature::simple(
+        "add_message",
+        &[
             Param::new("messages_or_transcript", TY_LIST_OR_DICT),
             Param::new("role", TY_STRING),
             Param::new("content", TY_ANY),
         ],
-        returns: TY_LIST_OR_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "add_system",
-        params: &[
+        TY_LIST_OR_DICT,
+    ),
+    BuiltinSignature::simple(
+        "add_system",
+        &[
             Param::new("messages_or_transcript", TY_LIST_OR_DICT),
             Param::new("content", TY_ANY),
         ],
-        returns: TY_LIST_OR_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "add_tool_result",
-        params: &[
+        TY_LIST_OR_DICT,
+    ),
+    BuiltinSignature::simple(
+        "add_tool_result",
+        &[
             Param::new("messages_or_transcript", TY_LIST_OR_DICT),
             Param::new("tool_use_id", TY_STRING),
             Param::new("content", TY_ANY),
         ],
-        returns: TY_LIST_OR_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "add_user",
-        params: &[
+        TY_LIST_OR_DICT,
+    ),
+    BuiltinSignature::simple(
+        "add_user",
+        &[
             Param::new("messages_or_transcript", TY_LIST_OR_DICT),
             Param::new("content", TY_ANY),
         ],
-        returns: TY_LIST_OR_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent",
-        params: &[
+        TY_LIST_OR_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent",
+        &[
             Param::new("name", TY_STRING),
             Param::optional("config", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_config",
-        params: &[Param::new("agent", TY_DICT), Param::new("prompt", TY_ANY)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_daemon_snapshot",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_config",
+        &[Param::new("agent", TY_DICT), Param::new("prompt", TY_ANY)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_daemon_snapshot",
+        &[
             Param::new("session", TY_DICT),
             Param::new("opts", TY_DICT),
             Param::optional("daemon_state", TY_STRING),
             Param::optional("iteration", TY_INT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_daemon_step",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_daemon_step",
+        &[
             Param::new("session", TY_DICT),
             Param::new("opts", TY_DICT),
             Param::new("iteration", TY_INT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_inject_feedback",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_inject_feedback",
+        &[
             Param::new("session_id", TY_STRING),
             Param::new("kind", TY_STRING),
             Param::new("content", TY_STRING),
         ],
-        returns: TY_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_dispatch_tool_batch",
-        params: &[
+        TY_NIL,
+    ),
+    BuiltinSignature::simple(
+        "agent_dispatch_tool_batch",
+        &[
             Param::new("calls", TY_LIST),
             Param::optional("tools", TY_DICT_OR_NIL),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_LIST,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_dispatch_tool_call",
-        params: &[
+        TY_LIST,
+    ),
+    BuiltinSignature::simple(
+        "agent_dispatch_tool_call",
+        &[
             Param::new("call", TY_DICT),
             Param::optional("tools", TY_DICT_OR_NIL),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_llm_turn",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_llm_turn",
+        &[
             Param::new("prompt", TY_STRING),
             Param::optional("system", TY_STRING_OR_NIL),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_loop",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_loop",
+        &[
             Param::new("prompt", TY_STRING),
             Param::optional("system", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_parse_tool_calls",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_parse_tool_calls",
+        &[
             Param::new("text", TY_STRING),
             Param::optional("tools", TY_DICT_OR_NIL),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_turn",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_turn",
+        &[
             Param::new("prompt", TY_STRING),
             Param::optional("opts", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_preset",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_preset",
+        &[
             Param::new("kind", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_budget",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_budget",
+        &[
             Param::new("kind_or_options", Ty::Union(&[TY_STRING, TY_DICT])),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "audit_agent",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "audit_agent",
+        &[
             Param::new("prompt", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "repair_agent",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "repair_agent",
+        &[
             Param::new("prompt", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "summary_agent",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "summary_agent",
+        &[
             Param::new("prompt", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "verify_agent",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "verify_agent",
+        &[
             Param::new("prompt", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_name",
-        params: &[Param::new("agent", TY_DICT)],
-        returns: TY_STRING_OR_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_ancestry",
-        params: &[Param::new("id", TY_STRING)],
-        returns: TY_DICT_OR_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_claim_tool_format",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_name",
+        &[Param::new("agent", TY_DICT)],
+        TY_STRING_OR_NIL,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_ancestry",
+        &[Param::new("id", TY_STRING)],
+        TY_DICT_OR_NIL,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_claim_tool_format",
+        &[
             Param::new("id", TY_STRING),
             Param::new("tool_format", TY_STRING),
         ],
-        returns: TY_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_close",
-        params: &[Param::new("id", TY_STRING)],
-        returns: TY_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_compact",
-        params: &[
+        TY_NIL,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_close",
+        &[Param::new("id", TY_STRING)],
+        TY_NIL,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_compact",
+        &[
             Param::new("id", TY_STRING),
             Param::optional("opts", TY_DICT),
         ],
-        returns: TY_INT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_current_id",
-        params: &[],
-        returns: TY_STRING_OR_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_exists",
-        params: &[Param::new("id", TY_STRING)],
-        returns: TY_BOOL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_fork",
-        params: &[
+        TY_INT,
+    ),
+    BuiltinSignature::simple("agent_session_current_id", &[], TY_STRING_OR_NIL),
+    BuiltinSignature::simple(
+        "agent_session_exists",
+        &[Param::new("id", TY_STRING)],
+        TY_BOOL,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_fork",
+        &[
             Param::new("src", TY_STRING),
             Param::optional("dst", TY_STRING),
         ],
-        returns: TY_STRING,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_fork_at",
-        params: &[
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_fork_at",
+        &[
             Param::new("src", TY_STRING),
             Param::new("keep_first", TY_INT),
             Param::optional("dst", TY_STRING),
         ],
-        returns: TY_STRING,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_inject",
-        params: &[Param::new("id", TY_STRING), Param::new("message", TY_ANY)],
-        returns: TY_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_length",
-        params: &[Param::new("id", TY_STRING)],
-        returns: TY_INT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_open",
-        params: &[Param::optional("id", TY_STRING)],
-        returns: TY_STRING,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_reset",
-        params: &[Param::new("id", TY_STRING)],
-        returns: TY_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_snapshot",
-        params: &[Param::new("id", TY_STRING)],
-        returns: TY_DICT_OR_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_system_prompt",
-        params: &[Param::new("id", TY_STRING)],
-        returns: TY_STRING_OR_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_tool_format",
-        params: &[Param::new("id", TY_STRING)],
-        returns: TY_STRING_OR_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_session_trim",
-        params: &[Param::new("id", TY_STRING), Param::new("keep_last", TY_INT)],
-        returns: TY_INT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_subscribe",
-        params: &[
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_inject",
+        &[Param::new("id", TY_STRING), Param::new("message", TY_ANY)],
+        TY_NIL,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_length",
+        &[Param::new("id", TY_STRING)],
+        TY_INT,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_open",
+        &[Param::optional("id", TY_STRING)],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_reset",
+        &[Param::new("id", TY_STRING)],
+        TY_NIL,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_snapshot",
+        &[Param::new("id", TY_STRING)],
+        TY_DICT_OR_NIL,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_system_prompt",
+        &[Param::new("id", TY_STRING)],
+        TY_STRING_OR_NIL,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_tool_format",
+        &[Param::new("id", TY_STRING)],
+        TY_STRING_OR_NIL,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_trim",
+        &[Param::new("id", TY_STRING), Param::new("keep_last", TY_INT)],
+        TY_INT,
+    ),
+    BuiltinSignature::simple(
+        "agent_subscribe",
+        &[
             Param::new("session_id", TY_STRING),
             Param::new("callback", TY_CLOSURE),
         ],
-        returns: TY_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_trace",
-        params: &[],
-        returns: TY_LIST,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_trace_summary",
-        params: &[],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agent_typed_output_checkpoint",
-        params: &[
+        TY_NIL,
+    ),
+    BuiltinSignature::simple("agent_trace", &[], TY_LIST),
+    BuiltinSignature::simple("agent_trace_summary", &[], TY_DICT),
+    BuiltinSignature::simple(
+        "agent_typed_output_checkpoint",
+        &[
             Param::new("name", TY_STRING),
             Param::new("prompt", TY_STRING),
             Param::new("schema", TY_SCHEMA_VALUE),
             Param::optional("options", TY_DICT_OR_NIL),
             Param::optional("validator", Ty::Union(&[TY_CLOSURE, TY_NIL])),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "agentic_user",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agentic_user",
+        &[
             Param::new("task_or_config", TY_ANY),
             Param::optional("behavior", TY_ANY),
             Param::optional("tools", TY_ANY),
             Param::optional("model", TY_ANY),
             Param::optional("options", TY_DICT_OR_NIL),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "close_agent",
-        // Worker handle: string id, dict (with `id` field), or task handle
-        // — accepted polymorphically by `worker_id_from_value`.
-        params: &[Param::new("handle", TY_ANY)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "conversation",
-        params: &[],
-        returns: TY_LIST,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "fixture_user",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple("close_agent", &[Param::new("handle", TY_ANY)], TY_DICT),
+    BuiltinSignature::simple("conversation", &[], TY_LIST),
+    BuiltinSignature::simple(
+        "fixture_user",
+        &[
             Param::new("script", TY_ANY),
             Param::optional("options", TY_DICT_OR_NIL),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "list_agents",
-        params: &[],
-        returns: TY_LIST,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_budget",
-        params: &[Param::new("max_cost", Ty::Union(&[TY_FLOAT, TY_INT]))],
-        returns: TY_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_budget_remaining",
-        params: &[],
-        returns: TY_FLOAT_OR_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "tiktoken_count_tokens",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple("list_agents", &[], TY_LIST),
+    BuiltinSignature::simple(
+        "llm_budget",
+        &[Param::new("max_cost", Ty::Union(&[TY_FLOAT, TY_INT]))],
+        TY_NIL,
+    ),
+    BuiltinSignature::simple("llm_budget_remaining", &[], TY_FLOAT_OR_NIL),
+    BuiltinSignature::simple(
+        "tiktoken_count_tokens",
+        &[
             Param::new("text", TY_STRING),
             Param::new("model", TY_STRING),
         ],
-        returns: TY_INT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "tiktoken_tokenizer_info",
-        params: &[Param::new("model", TY_STRING)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_call",
-        params: &[
+        TY_INT,
+    ),
+    BuiltinSignature::simple(
+        "tiktoken_tokenizer_info",
+        &[Param::new("model", TY_STRING)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "llm_call",
+        &[
             Param::new("prompt", TY_STRING),
             Param::optional("system", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_call_safe",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "llm_call_safe",
+        &[
             Param::new("prompt", TY_STRING),
             Param::optional("system", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_stream_call",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "llm_stream_call",
+        &[
             Param::new("prompt", TY_STRING),
             Param::optional("system", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        returns: Ty::Named("stream"),
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_call_structured",
-        // Return is schema-dependent; a typed `Schema<T>` argument narrows
-        // the call result to `T`.
-        params: &[
+        Ty::Named("stream"),
+    ),
+    BuiltinSignature::simple(
+        "llm_call_structured",
+        &[
             Param::new("prompt", TY_STRING),
             Param::new("schema", TY_SCHEMA_VALUE),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_ANY,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_call_structured_safe",
-        params: &[
+        TY_ANY,
+    ),
+    BuiltinSignature::simple(
+        "llm_call_structured_safe",
+        &[
             Param::new("prompt", TY_STRING),
             Param::new("schema", TY_SCHEMA_VALUE),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_call_structured_result",
-        // `data` is schema-dependent; the top-level result is the
-        // diagnostic envelope dict.
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "llm_call_structured_result",
+        &[
             Param::new("prompt", TY_STRING),
             Param::new("schema", TY_SCHEMA_VALUE),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_ANY,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_completion",
-        params: &[
+        TY_ANY,
+    ),
+    BuiltinSignature::simple(
+        "llm_completion",
+        &[
             Param::new("prefix", TY_STRING),
             Param::optional("suffix", TY_STRING),
             Param::optional("system", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_config",
-        params: &[Param::optional("provider", TY_STRING)],
-        returns: TY_DICT_OR_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_cost",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "llm_config",
+        &[Param::optional("provider", TY_STRING)],
+        TY_DICT_OR_NIL,
+    ),
+    BuiltinSignature::simple(
+        "llm_cost",
+        &[
             Param::new("model", TY_STRING),
             Param::new("input_tokens", TY_INT),
             Param::new("output_tokens", TY_INT),
         ],
-        returns: TY_FLOAT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_healthcheck",
-        // First arg is either a provider name string OR a dict of
-        // options ({provider, api_key, model, ...}). Second arg is an
-        // optional secondary options dict.
-        params: &[
+        TY_FLOAT,
+    ),
+    BuiltinSignature::simple(
+        "llm_healthcheck",
+        &[
             Param::optional("provider_or_options", Ty::Union(&[TY_STRING, TY_DICT])),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_available_providers",
-        params: &[],
-        returns: TY_LIST,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_infer_provider",
-        params: &[Param::new("model_id", TY_STRING)],
-        returns: TY_STRING,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_info",
-        params: &[],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_mock",
-        params: &[Param::new("config", TY_DICT)],
-        returns: TY_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_mock_calls",
-        params: &[],
-        returns: TY_LIST,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_mock_clear",
-        params: &[],
-        returns: TY_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_mock_pop_scope",
-        params: &[],
-        returns: TY_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_mock_push_scope",
-        params: &[],
-        returns: TY_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_model_tier",
-        params: &[Param::new("model_id", TY_STRING)],
-        returns: TY_STRING,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_model_info",
-        params: &[Param::new("selector", TY_STRING)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_model_defaults",
-        params: &[Param::new("model_id", TY_STRING)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_resolved_options",
-        params: &[Param::new("opts", TY_DICT)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_known_models",
-        params: &[],
-        returns: TY_LIST,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_pick_model",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple("llm_available_providers", &[], TY_LIST),
+    BuiltinSignature::simple(
+        "llm_infer_provider",
+        &[Param::new("model_id", TY_STRING)],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple("llm_info", &[], TY_DICT),
+    BuiltinSignature::simple("llm_mock", &[Param::new("config", TY_DICT)], TY_NIL),
+    BuiltinSignature::simple("llm_mock_calls", &[], TY_LIST),
+    BuiltinSignature::simple("llm_mock_clear", &[], TY_NIL),
+    BuiltinSignature::simple("llm_mock_pop_scope", &[], TY_NIL),
+    BuiltinSignature::simple("llm_mock_push_scope", &[], TY_NIL),
+    BuiltinSignature::simple(
+        "llm_model_tier",
+        &[Param::new("model_id", TY_STRING)],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "llm_model_info",
+        &[Param::new("selector", TY_STRING)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "llm_model_defaults",
+        &[Param::new("model_id", TY_STRING)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "llm_resolved_options",
+        &[Param::new("opts", TY_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple("llm_known_models", &[], TY_LIST),
+    BuiltinSignature::simple(
+        "llm_pick_model",
+        &[
             Param::new("target", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_provider_catalog",
-        params: &[],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_providers",
-        params: &[],
-        returns: TY_LIST,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_qc_default_model",
-        params: &[Param::new("provider", TY_STRING)],
-        returns: TY_STRING_OR_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_rate_limit",
-        // Setter mode (`{rpm: N}`) returns Bool; query mode returns Int
-        // or Nil. Caller dispatches on the union.
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple("llm_provider_catalog", &[], TY_DICT),
+    BuiltinSignature::simple("llm_providers", &[], TY_LIST),
+    BuiltinSignature::simple(
+        "llm_qc_default_model",
+        &[Param::new("provider", TY_STRING)],
+        TY_STRING_OR_NIL,
+    ),
+    BuiltinSignature::simple(
+        "llm_rate_limit",
+        &[
             Param::new("provider", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_BOOL_OR_INT_OR_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_resolve_model",
-        params: &[Param::new("alias", TY_STRING)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_session_cost",
-        params: &[],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_stream",
-        params: &[
+        TY_BOOL_OR_INT_OR_NIL,
+    ),
+    BuiltinSignature::simple(
+        "llm_resolve_model",
+        &[Param::new("alias", TY_STRING)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple("llm_session_cost", &[], TY_DICT),
+    BuiltinSignature::simple(
+        "llm_stream",
+        &[
             Param::new("prompt", TY_STRING),
             Param::optional("system", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        returns: Ty::Named("channel"),
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "llm_usage",
-        params: &[],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "resume_agent",
-        // Accepts a worker id string or a snapshot path string.
-        params: &[Param::new("target", TY_STRING)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "send_input",
-        params: &[Param::new("handle", TY_ANY), Param::new("task", TY_STRING)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "scripted_user",
-        params: &[
+        Ty::Named("channel"),
+    ),
+    BuiltinSignature::simple("llm_usage", &[], TY_DICT),
+    BuiltinSignature::simple("resume_agent", &[Param::new("target", TY_STRING)], TY_DICT),
+    BuiltinSignature::simple(
+        "send_input",
+        &[Param::new("handle", TY_ANY), Param::new("task", TY_STRING)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "scripted_user",
+        &[
             Param::new("script", TY_ANY),
             Param::optional("options", TY_DICT_OR_NIL),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "simulated_user_post_turn",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "simulated_user_post_turn",
+        &[
             Param::new("answerer", TY_ANY),
             Param::optional("options", TY_DICT_OR_NIL),
         ],
-        returns: TY_CLOSURE,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "simulated_user_read_tools",
-        params: &[
+        TY_CLOSURE,
+    ),
+    BuiltinSignature::simple(
+        "simulated_user_read_tools",
+        &[
             Param::optional("registry", TY_ANY),
             Param::optional("options", TY_DICT_OR_NIL),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "simulated_user_respond",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "simulated_user_respond",
+        &[
             Param::new("answerer", TY_ANY),
             Param::optional("payload", TY_ANY),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "simulated_user_status",
-        params: &[Param::new("answerer", TY_ANY)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "spawn_agent",
-        params: &[Param::new("config", TY_DICT)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "sub_agent_run",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "simulated_user_status",
+        &[Param::new("answerer", TY_ANY)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple("spawn_agent", &[Param::new("config", TY_DICT)], TY_DICT),
+    BuiltinSignature::simple(
+        "sub_agent_run",
+        &[
             Param::new("task", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "sub_agent_request",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "sub_agent_request",
+        &[
             Param::new("task", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript",
-        params: &[Param::optional("metadata", TY_DICT)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_abandon",
-        params: &[Param::new("transcript", TY_LIST_OR_DICT)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_add_asset",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "transcript",
+        &[Param::optional("metadata", TY_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "transcript_abandon",
+        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "transcript_add_asset",
+        &[
             Param::new("transcript", TY_LIST_OR_DICT),
             Param::new("asset", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_archive",
-        params: &[Param::new("transcript", TY_LIST_OR_DICT)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_assets",
-        params: &[Param::new("transcript", TY_LIST_OR_DICT)],
-        returns: TY_LIST,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_auto_compact",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "transcript_archive",
+        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "transcript_assets",
+        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        TY_LIST,
+    ),
+    BuiltinSignature::simple(
+        "transcript_auto_compact",
+        &[
             Param::new("messages", TY_LIST),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_LIST,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_compact",
-        params: &[
+        TY_LIST,
+    ),
+    BuiltinSignature::simple(
+        "transcript_compact",
+        &[
             Param::new("transcript", TY_LIST_OR_DICT),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_events",
-        params: &[Param::new("transcript", TY_LIST_OR_DICT)],
-        returns: TY_LIST,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_events_by_kind",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "transcript_events",
+        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        TY_LIST,
+    ),
+    BuiltinSignature::simple(
+        "transcript_events_by_kind",
+        &[
             Param::new("transcript", TY_LIST_OR_DICT_OR_NIL),
             Param::new("kind", TY_STRING),
         ],
-        returns: TY_LIST,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_export",
-        params: &[Param::new("transcript", TY_LIST_OR_DICT)],
-        returns: TY_STRING,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_fork",
-        params: &[
+        TY_LIST,
+    ),
+    BuiltinSignature::simple(
+        "transcript_export",
+        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "transcript_fork",
+        &[
             Param::new("transcript", TY_LIST_OR_DICT),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_from_messages",
-        // Accepts either a message list or an existing transcript dict
-        // (the latter is treated as `transcript_messages(...)` upstream).
-        params: &[Param::new("messages_or_transcript", TY_LIST_OR_DICT)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_id",
-        params: &[Param::new("transcript", TY_LIST_OR_DICT)],
-        returns: TY_STRING,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_import",
-        // Returns whatever the imported JSON deserializes into. In
-        // practice callers feed `transcript_export` output and get a
-        // dict back, but the runtime is permissive.
-        params: &[Param::new("text", TY_STRING)],
-        returns: TY_ANY,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_messages",
-        params: &[Param::new("transcript", TY_LIST_OR_DICT)],
-        returns: TY_LIST,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_render_full",
-        params: &[Param::new("transcript", TY_LIST_OR_DICT)],
-        returns: TY_STRING,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_render_visible",
-        params: &[Param::new("transcript", TY_LIST_OR_DICT)],
-        returns: TY_STRING,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_reset",
-        // Only the `metadata` field is consulted, so extra options fields
-        // are intentionally allowed.
-        params: &[Param::optional("opts", TY_DICT)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_resume",
-        params: &[Param::new("transcript", TY_LIST_OR_DICT)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_stats",
-        params: &[Param::new("transcript", TY_LIST_OR_DICT_OR_NIL)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_summarize",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "transcript_from_messages",
+        &[Param::new("messages_or_transcript", TY_LIST_OR_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "transcript_id",
+        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "transcript_import",
+        &[Param::new("text", TY_STRING)],
+        TY_ANY,
+    ),
+    BuiltinSignature::simple(
+        "transcript_messages",
+        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        TY_LIST,
+    ),
+    BuiltinSignature::simple(
+        "transcript_render_full",
+        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "transcript_render_visible",
+        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "transcript_reset",
+        &[Param::optional("opts", TY_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "transcript_resume",
+        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "transcript_stats",
+        &[Param::new("transcript", TY_LIST_OR_DICT_OR_NIL)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "transcript_summarize",
+        &[
             Param::new("transcript", TY_LIST_OR_DICT),
             Param::optional("options", TY_DICT),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "transcript_summary",
-        params: &[Param::new("transcript", TY_LIST_OR_DICT)],
-        returns: TY_STRING_OR_NIL,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "wait_agent",
-        // Accepts a single handle or a list of handles. Returns a
-        // single summary dict or a list of summary dicts respectively.
-        params: &[Param::new("handle", TY_ANY)],
-        returns: TY_DICT_OR_LIST,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "user_tools",
-        params: &[
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "transcript_summary",
+        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        TY_STRING_OR_NIL,
+    ),
+    BuiltinSignature::simple(
+        "wait_agent",
+        &[Param::new("handle", TY_ANY)],
+        TY_DICT_OR_LIST,
+    ),
+    BuiltinSignature::simple(
+        "user_tools",
+        &[
             Param::new("answerer", TY_ANY),
             Param::optional("registry", TY_ANY),
             Param::optional("options", TY_DICT_OR_NIL),
         ],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
-    BuiltinSignature {
-        name: "worker_trigger",
-        params: &[Param::new("handle", TY_ANY), Param::new("payload", TY_ANY)],
-        returns: TY_DICT,
-        type_params: &[],
-        has_rest: false,
-        where_clauses: &[],
-    },
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "worker_trigger",
+        &[Param::new("handle", TY_ANY), Param::new("payload", TY_ANY)],
+        TY_DICT,
+    ),
 ];
