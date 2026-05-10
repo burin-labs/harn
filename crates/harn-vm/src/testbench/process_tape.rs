@@ -207,11 +207,24 @@ pub fn active_tape() -> Option<Arc<ProcessTape>> {
 /// subprocess will be spawned by the caller, and a follow-up call to
 /// [`start_recording`] / [`RecordingSpan::finish`] should append the
 /// entry to the tape).
+///
+/// When a WASI toolchain is active and `<toolchain>/<program>.wasm`
+/// exists, the WASM module is run under wasmtime (with the testbench
+/// clock virtualized into `clock_time_get` and `poll_oneoff`) and its
+/// output is returned without consulting the process tape. WASI hits
+/// take precedence over native record/replay so a partial `.wasm`
+/// toolchain can coexist with a recorded native tape — wasm-backed
+/// programs route through wasmtime, the rest hit the tape or host.
 pub fn intercept_spawn(
     program: &str,
     args: &[String],
     cwd: Option<&Path>,
 ) -> Option<Result<Output, String>> {
+    #[cfg(feature = "testbench-wasi")]
+    if let Some(intercepted) = wasi_intercept(program, args, cwd) {
+        return Some(intercepted);
+    }
+
     let tape = active_tape()?;
     if matches!(tape.mode(), ProcessTapeMode::Record) {
         return None;
@@ -236,6 +249,36 @@ pub fn intercept_spawn(
         }
         Err(err) => Err(err),
     })
+}
+
+#[cfg(feature = "testbench-wasi")]
+fn wasi_intercept(
+    program: &str,
+    args: &[String],
+    cwd: Option<&Path>,
+) -> Option<Result<Output, String>> {
+    use crate::testbench::wasi_process;
+    let module = wasi_process::wasi_module_for(program)?;
+    let env: Vec<(String, String)> = Vec::new();
+    let result = wasi_process::run_wasm_module(&module, args, &env);
+    Some(result.map(|out| {
+        let entry = TapeEntry {
+            program: program.to_string(),
+            args: args.to_vec(),
+            cwd: cwd.map(|p| p.to_string_lossy().into_owned()),
+            env: BTreeMap::new(),
+            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+            exit_code: out.exit_code,
+            duration_ms: out.virtual_duration_ms,
+        };
+        record_unified_spawn(&entry);
+        Output {
+            status: synthesize_status(out.exit_code),
+            stdout: out.stdout,
+            stderr: out.stderr,
+        }
+    }))
 }
 
 fn record_unified_spawn(entry: &TapeEntry) {

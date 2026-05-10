@@ -450,3 +450,84 @@ pipeline default() {
         report.divergences
     );
 }
+
+/// Steel thread for #1443: a `WasiToolchain` testbench routes
+/// `command_output` to a WASI-compiled tool, virtualizes its clocks via
+/// the testbench `MockClock`, and surfaces the WASM module's stdout to
+/// the parent.
+#[test]
+fn wasi_toolchain_runs_module_with_virtualized_clock() {
+    use harn_vm::process_sandbox::{command_output, ProcessCommandConfig};
+    use harn_vm::testbench::SubprocessConfig;
+
+    // Minimal WASI module: read realtime clock, write 8 bytes (LE
+    // nanoseconds) to stdout, exit 0.
+    const CLOCK_READ_WAT: &str = r#"
+        (module
+          (import "wasi_snapshot_preview1" "clock_time_get"
+            (func $clock_time_get (param i32 i64 i32) (result i32)))
+          (import "wasi_snapshot_preview1" "fd_write"
+            (func $fd_write (param i32 i32 i32 i32) (result i32)))
+          (import "wasi_snapshot_preview1" "proc_exit"
+            (func $proc_exit (param i32)))
+          (memory (export "memory") 1)
+          (data (i32.const 16) "\40\00\00\00\08\00\00\00")
+          (func (export "_start")
+            i32.const 0
+            i64.const 1
+            i32.const 64
+            call $clock_time_get
+            drop
+            i32.const 1
+            i32.const 16
+            i32.const 1
+            i32.const 80
+            call $fd_write
+            drop
+            i32.const 0
+            call $proc_exit
+          )
+        )
+    "#;
+
+    let toolchain = TempDir::new().unwrap();
+    let wasm_bytes = wat::parse_str(CLOCK_READ_WAT).expect("parse WAT");
+    fs::write(toolchain.path().join("readclock.wasm"), &wasm_bytes).unwrap();
+
+    let start_ms: i64 = 1_767_225_600_000;
+    let bench = Testbench {
+        clock: harn_vm::testbench::ClockConfig::Paused {
+            starting_at_ms: start_ms,
+        },
+        subprocess: SubprocessConfig::WasiToolchain {
+            dir: toolchain.path().to_path_buf(),
+        },
+        ..Default::default()
+    };
+    let _session = bench.activate().expect("activate testbench");
+
+    let output =
+        command_output("readclock", &[], &ProcessCommandConfig::default()).expect("run wasi tool");
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        output.stdout.len(),
+        8,
+        "module wrote 8 LE-encoded nanoseconds"
+    );
+    let nanos = u64::from_le_bytes(output.stdout[..8].try_into().unwrap());
+    assert_eq!(
+        nanos,
+        start_ms as u64 * 1_000_000,
+        "clock_time_get returned the testbench wall-clock time"
+    );
+
+    // Programs without a matching `.wasm` should fall through. Since this
+    // testbench has only `readclock.wasm`, an unknown program would attempt
+    // a real spawn — verify by asking for a non-existent tool name; this
+    // returns a spawn error from the host OS, not a tape-replay error.
+    let fallback = command_output("nonexistent-cmd-xyz", &[], &ProcessCommandConfig::default());
+    assert!(
+        fallback.is_err(),
+        "non-WASI fallback should attempt the host spawn and fail there"
+    );
+}
