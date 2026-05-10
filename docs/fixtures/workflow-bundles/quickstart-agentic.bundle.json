@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "id": "quickstart-agentic",
+  "name": "Quickstart agentic review",
+  "version": "1.0.0",
+  "triggers": [
+    {
+      "id": "github-pr-opened",
+      "kind": "github",
+      "provider": "github",
+      "events": ["pull_request.opened", "pull_request.synchronize"],
+      "node_id": "ingest"
+    },
+    {
+      "id": "manual-rerun",
+      "kind": "manual",
+      "node_id": "ingest"
+    }
+  ],
+  "workflow": {
+    "_type": "workflow_graph",
+    "id": "quickstart_agentic_workflow",
+    "name": "Quickstart agentic review",
+    "version": 1,
+    "entry": "ingest",
+    "nodes": {
+      "ingest": {
+        "id": "ingest",
+        "kind": "action",
+        "task_label": "Normalize PR event"
+      },
+      "review": {
+        "id": "review",
+        "kind": "agent",
+        "task_label": "Draft review summary"
+      },
+      "approve": {
+        "id": "approve",
+        "kind": "approval",
+        "task_label": "Owner approval"
+      },
+      "notify": {
+        "id": "notify",
+        "kind": "notification",
+        "task_label": "Post review comment"
+      }
+    },
+    "edges": [
+      { "from": "ingest", "to": "review" },
+      { "from": "review", "to": "approve" },
+      { "from": "approve", "to": "notify" }
+    ]
+  },
+  "prompt_capsules": {
+    "draft-review": {
+      "id": "draft-review",
+      "node_id": "review",
+      "trigger_id": "github-pr-opened",
+      "prompt": "Summarize the pull request diff and call out risk areas. Cite file paths and lines for any concerns.",
+      "system": "You are a careful code reviewer. Be terse and specific."
+    }
+  },
+  "policy": {
+    "autonomy_tier": "act_with_approval",
+    "approval_required": ["github.post_comment"],
+    "retry": {
+      "max_attempts": 2,
+      "backoff": "exponential"
+    },
+    "catchup": {
+      "mode": "latest",
+      "max_events": 1
+    }
+  },
+  "connectors": [
+    {
+      "id": "github",
+      "provider_id": "github",
+      "scopes": ["pull_requests:read", "pull_requests:write"],
+      "setup_required": true,
+      "status_required": true
+    }
+  ],
+  "environment": {
+    "worktree_policy": "host_managed",
+    "command_gates": ["make test"]
+  },
+  "receipts": {
+    "run_id": "bundle_run_quickstart_agentic_fixture",
+    "event_ids": ["github:event:pr-1"]
+  }
+}

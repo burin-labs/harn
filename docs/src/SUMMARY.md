@@ -137,6 +137,7 @@
 # Tutorials and Guides
 
 - [Cookbook](./cookbook.md)
+- [Workflow authoring quickstart](./workflow-authoring-quickstart.md)
 - [Tutorial: code review agent](./tutorial-code-review-agent.md)
 - [Tutorial: MCP server](./tutorial-mcp-server.md)
 - [Tutorial: eval pipeline](./tutorial-eval-pipeline.md)

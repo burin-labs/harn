@@ -7,6 +7,11 @@ identity, graph, policy, or replay metadata.
 
 The canonical on-disk format is JSON. The current schema version is `1`.
 
+For an end-to-end walkthrough that authors a bundle, validates it,
+previews the graph, and runs a deterministic local receipt — all
+without paid credentials — see the
+[workflow authoring quickstart](./workflow-authoring-quickstart.md).
+
 ```bash
 harn workflow validate --bundle docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json --json
 harn workflow preview --bundle docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json --json
