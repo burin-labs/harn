@@ -209,6 +209,11 @@ fn __tool_envelope(call, tools, options) {
   } else {
     entry?.parameters ?? entry?.input_schema ?? entry?.inputSchema
   }
+  let annotations = if entry == nil {
+    nil
+  } else {
+    entry?.annotations
+  }
   let description = if entry == nil {
     ""
   } else {
@@ -230,6 +235,7 @@ fn __tool_envelope(call, tools, options) {
     call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
     declared_executor: declared_executor,
     schema: schema,
+    annotations: annotations,
     description: description,
     turn: {iteration: options?._turn_iteration ?? 0, session_id: to_string(options?.session_id ?? "")},
   }
@@ -721,11 +727,65 @@ fn __missing_required_successful_tools(result, opts) {
   return missing
 }
 
+fn __required_tools_friction_event(result, opts, missing) {
+  let session_id = to_string(result?.session_id ?? "")
+  var recurrence = ["missing_required_tools=" + to_string(len(missing))]
+  if opts?.persona != nil {
+    recurrence = recurrence.push("persona=" + to_string(opts.persona))
+  }
+  return {
+    kind: "tool_gap",
+    source: "agent_loop.require_successful_tools",
+    actor: opts?.persona,
+    run_id: if session_id == "" {
+      nil
+    } else {
+      session_id
+    },
+    redacted_summary: "agent_loop completed without invoking required tool(s): "
+      + join(missing, ", "),
+    recurrence_hints: recurrence,
+    metadata: {
+      missing_required_tools: missing,
+      successful_tool_names: result?.tools?.successful ?? [],
+      iterations: result?.llm?.iterations ?? 0,
+      preset_kind: opts?._preset_kind,
+    },
+  }
+}
+
+fn __require_successful_tools_envelope(result, missing, iterations) {
+  return {
+    schema_version: 1,
+    kind: "missing_required_tools",
+    reason: "Required tool(s) did not succeed",
+    missing: missing,
+    successful_tool_names: result?.tools?.successful ?? [],
+    iterations: iterations,
+  }
+}
+
+fn __maybe_emit_required_tools_friction(result, opts, missing) {
+  let event = __required_tools_friction_event(result, opts, missing)
+  let _ = try {
+    friction_record(event)
+  }
+  let session_id = to_string(result?.session_id ?? "")
+  if session_id != "" {
+    let _ = try {
+      agent_emit_event(session_id, "require_successful_tools_violation", event)
+    }
+  }
+}
+
 fn __enforce_required_successful_tools(result, opts) {
   let missing = __missing_required_successful_tools(result, opts)
   if len(missing) == 0 {
     return result
   }
+  let iterations = result?.llm?.iterations ?? 0
+  let envelope = __require_successful_tools_envelope(result, missing, iterations)
+  __maybe_emit_required_tools_friction(result, opts, missing)
   return result
     + {
     status: "failed",
@@ -733,6 +793,7 @@ fn __enforce_required_successful_tools(result, opts) {
     stop_reason: "missing_required_tools",
     missing_required_tools: missing,
     error: "Required tools did not succeed: " + join(missing, ", "),
+    error_envelope: envelope,
   }
 }
 

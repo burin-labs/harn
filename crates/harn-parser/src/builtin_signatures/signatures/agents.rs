@@ -228,6 +228,38 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple(
+        "merge_captain_agent",
+        &[
+            Param::new("prompt", TY_STRING),
+            Param::optional("options", TY_DICT),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "review_captain_agent",
+        &[
+            Param::new("prompt", TY_STRING),
+            Param::optional("options", TY_DICT),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "oncall_captain_agent",
+        &[
+            Param::new("prompt", TY_STRING),
+            Param::optional("options", TY_DICT),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "release_captain_agent",
+        &[
+            Param::new("prompt", TY_STRING),
+            Param::optional("options", TY_DICT),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "agent_name",
         &[Param::new("agent", TY_DICT)],
         TY_STRING_OR_NIL,

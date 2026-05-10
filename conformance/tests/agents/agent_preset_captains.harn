@@ -1,0 +1,173 @@
+/**
+ * Captain presets — verify that each of the four captain shapes
+ * (merge_captain, review_captain, oncall_captain, release_captain)
+ * returns the expected agent_loop options envelope, that opt-in tool
+ * middleware layers wire correctly, and that captain-specific defaults
+ * (merge: read-only auto-approve consent; oncall: 50-call rate cap)
+ * fire when nothing is supplied.
+ */
+import {
+  agent_preset,
+  merge_captain_agent,
+  oncall_captain_agent,
+  release_captain_agent,
+  review_captain_agent,
+} from "std/agent/presets"
+
+pipeline default() {
+  // (1) merge_captain — long adaptive budget; tool_using profile;
+  // captain max-nudges of 3.
+  let merge = agent_preset("merge_captain")
+  println(merge.profile)
+  println(merge.iteration_budget.mode)
+  println(merge.iteration_budget.initial)
+  println(merge.iteration_budget.max)
+  println(merge.iteration_budget.extend_by)
+  println(merge.max_nudges)
+  println(merge._preset_kind)
+  println(merge.turn_policy.allow_done_sentinel)
+  // No layers wired without sinks/consent — tool_caller stays unset
+  // because the default consent is auto-approve-reads / deny-writes,
+  // which IS a layer.
+  println(merge?.tool_caller != nil)
+  // (2) review_captain — tool-using profile, medium adaptive budget.
+  let review = agent_preset("review_captain")
+  println(review.profile)
+  println(review.iteration_budget.mode)
+  println(review.iteration_budget.initial)
+  println(review.iteration_budget.max)
+  println(review._preset_kind)
+  // No tool middleware default for review_captain.
+  println(review?.tool_caller == nil)
+  // (3) oncall_captain — tool_using profile + default rate-limit
+  // (max_calls=50) layer wired automatically.
+  let oncall = agent_preset("oncall_captain")
+  println(oncall.profile)
+  println(oncall.iteration_budget.initial)
+  println(oncall.iteration_budget.max)
+  println(oncall?.tool_caller != nil)
+  // (4) release_captain — long adaptive budget. Dry-run is opt-in.
+  let release = agent_preset("release_captain")
+  println(release.iteration_budget.initial)
+  println(release.iteration_budget.max)
+  println(release?.tool_caller == nil)
+  // (5) Caller-supplied audit/telemetry sinks compose into the stack.
+  let audit_sink = { _record -> nil }
+  let telemetry_sink = { _record -> nil }
+  let merge_with_sinks = agent_preset("merge_captain", {audit_sink: audit_sink, telemetry_sink: telemetry_sink})
+  println(merge_with_sinks?.tool_caller != nil)
+  // (6) Caller-supplied cheap-default + frontier escalation builds
+  // the with_routing-backed llm_caller.
+  let cheap = { _call -> {
+    ok: true,
+    value: {text: "cheap", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
+  } }
+  let frontier = { _call -> {
+    ok: true,
+    value: {text: "frontier", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
+  } }
+  let escalate = { _call -> false }
+  let routed = agent_preset(
+    "release_captain",
+    {cheap_caller: cheap, frontier_caller: frontier, escalate_predicate: escalate},
+  )
+  println(routed?.llm_caller != nil)
+  // (7) Caller-supplied tool_caller wins outright over preset-built layers.
+  let custom_caller = { call, next -> next(call) }
+  let overridden = agent_preset("merge_captain", {tool_caller: custom_caller, audit_sink: audit_sink})
+  println(overridden.tool_caller == custom_caller)
+  // (8) merge_captain default consent ALLOWS read-annotated tools and
+  // BLOCKS unannotated/write tools. Drive a real agent_loop through
+  // both paths to confirm short-circuit behavior.
+  llm_mock_clear()
+  llm_mock(
+    {
+      tool_calls: [
+        {id: "ok1", name: "lookup", arguments: {q: "x"}},
+        {id: "block1", name: "delete", arguments: {path: "/tmp/y"}},
+      ],
+    },
+  )
+  llm_mock({text: "<user_response>Done.</user_response>"})
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "lookup",
+    "Read evidence",
+    {
+      handler: { args -> "evidence: " + to_string(args?.q ?? "") },
+      parameters: {q: {type: "string"}},
+      annotations: {kind: "read"},
+    },
+  )
+  registry = tool_define(
+    registry,
+    "delete",
+    "Delete a file",
+    {
+      handler: { args -> "deleted " + to_string(args?.path ?? "") },
+      parameters: {path: {type: "string"}},
+      annotations: {kind: "delete"},
+    },
+  )
+  let merge_run = merge_captain_agent(
+    "Try one read and one write.",
+    {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3},
+  )
+  println(merge_run.status)
+  // The read tool succeeded; the delete tool was denied by default
+  // consent and never reached the dispatch layer.
+  println(contains(merge_run.tools.successful, "lookup"))
+  println(!contains(merge_run.tools.successful, "delete"))
+  // (9) oncall_captain default rate-limit caps tool calls at 50.
+  // Verify the cap is wired by passing an absurdly small override.
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "rl1", name: "lookup", arguments: {q: "1"}}]})
+  llm_mock({tool_calls: [{id: "rl2", name: "lookup", arguments: {q: "2"}}]})
+  llm_mock({tool_calls: [{id: "rl3", name: "lookup", arguments: {q: "3"}}]})
+  llm_mock({text: "<user_response>Stopping.</user_response>"})
+  let oncall_capped = oncall_captain_agent(
+    "Hammer the same tool.",
+    {
+      provider: "mock",
+      tools: registry,
+      tool_format: "native",
+      max_iterations: 5,
+      rate_limit: {max_calls: 1},
+    },
+  )
+  // Status may be done or stuck depending on whether the model
+  // recovers — what matters is that exactly one tool succeeded
+  // and the rest were rejected by the rate-limit layer.
+  println(len(oncall_capped.tools.successful))
+  // (10) release_captain dry_run: opt-in via {dry_run: true}.
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "dr1", name: "delete", arguments: {path: "/tmp/preview"}}]})
+  llm_mock({text: "<user_response>Dry run preview.</user_response>"})
+  let release_dry = release_captain_agent(
+    "Preview the action.",
+    {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3, dry_run: true},
+  )
+  println(release_dry.status)
+  // Dry-run reports the tool call as successful (status=dry_run with ok=true).
+  println(contains(release_dry.tools.successful, "delete"))
+  // (11) review_captain_agent runs with tool_using profile and an
+  // adaptive budget — exercise it end-to-end.
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "rv1", name: "lookup", arguments: {q: "review"}}]})
+  llm_mock({text: "<user_response>Looks good.</user_response>"})
+  let review_run = review_captain_agent("Review this PR.", {provider: "mock", tools: registry, tool_format: "native"})
+  println(review_run.status)
+  // (12) Explicit `false` opts the caller out of a per-captain default
+  // layer (here: merge_captain's default consent). With consent
+  // disabled the previously-blocked write tool succeeds.
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "ow1", name: "delete", arguments: {path: "/tmp/yes"}}]})
+  llm_mock({text: "<user_response>Done.</user_response>"})
+  let merge_no_consent = merge_captain_agent(
+    "Delete with consent disabled.",
+    {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3, consent: false},
+  )
+  println(merge_no_consent.status)
+  println(contains(merge_no_consent.tools.successful, "delete"))
+}

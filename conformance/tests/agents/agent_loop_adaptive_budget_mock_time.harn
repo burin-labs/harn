@@ -1,0 +1,55 @@
+/**
+ * `iteration_budget` adaptive mode under mock_time. The budget logic
+ * is decoupled from wall-clock — it counts turns and tool progress —
+ * but pinning the test under `mock_time` proves the budget extension
+ * decisions aren't quietly observing real time anywhere on the path
+ * (e.g. a hidden `now_ms()` in stall diagnostics). Mirrors the
+ * `agent_loop_adaptive_budget` shape and exercises the
+ * extend-on-progress path that captain presets rely on.
+ */
+fn lookup_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "lookup",
+    "Read evidence",
+    {
+      handler: { args -> "evidence: " + to_string(args.q) },
+      parameters: {q: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+pipeline default() {
+  mock_time(1700000000000)
+  let start_ms = now_ms()
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "t1", name: "lookup", arguments: {q: "1"}}]})
+  llm_mock({tool_calls: [{id: "t2", name: "lookup", arguments: {q: "2"}}]})
+  llm_mock({tool_calls: [{id: "t3", name: "lookup", arguments: {q: "3"}}]})
+  llm_mock({text: "<user_response>Done.</user_response>"})
+  let result = agent_loop(
+    "Inspect everything.",
+    nil,
+    {
+      provider: "mock",
+      tools: lookup_tools(),
+      tool_format: "native",
+      loop_until_done: true,
+      iteration_budget: {mode: "adaptive", initial: 2, max: 8, extend_by: 2},
+    },
+  )
+  println(result.status)
+  println(result.adaptive_budget.mode)
+  println(result.adaptive_budget.initial)
+  println(result.adaptive_budget.max)
+  println(result.adaptive_budget.extensions_used >= 1)
+  println(result.adaptive_budget.decisions[0].action)
+  // Mock time stayed pinned: no opaque wall-clock observation lurks
+  // in the budget path.
+  println(now_ms() == start_ms)
+  unmock_time()
+}

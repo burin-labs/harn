@@ -1,0 +1,81 @@
+/**
+ * `require_successful_tools` is an active gate: when a required tool
+ * never succeeds the agent_loop result carries a structured
+ * `error_envelope` (consumable by Harn Cloud receipts) AND emits a
+ * `tool_gap` friction event onto the friction sink so context-pack
+ * suggestions and dashboards pick it up alongside natively-emitted
+ * events.
+ */
+fn tools() {
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "lookup",
+    "Lookup evidence",
+    {
+      handler: { _args -> "evidence" },
+      parameters: {query: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return registry
+}
+
+pipeline main() {
+  friction_clear()
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "x"}}]})
+  llm_mock({text: "Finished."})
+  let failed = agent_loop(
+    "Use one tool.",
+    nil,
+    {
+      provider: "mock",
+      tools: tools(),
+      tool_format: "native",
+      loop_until_done: true,
+      max_iterations: 3,
+      require_successful_tools: ["missing_tool"],
+      persona: "test_persona",
+      _preset_kind: "test",
+    },
+  )
+  println(failed.status)
+  println(failed.stop_reason)
+  println(failed.missing_required_tools[0])
+  // Structured error envelope shape.
+  println(failed.error_envelope.schema_version)
+  println(failed.error_envelope.kind)
+  println(failed.error_envelope.missing[0])
+  println(contains(failed.error_envelope.successful_tool_names, "lookup"))
+  // Friction event was recorded with kind=tool_gap and persona actor.
+  let events = friction_events()
+  println(len(events))
+  println(events[0].kind)
+  println(events[0].source)
+  println(events[0].actor)
+  println(events[0].metadata.preset_kind)
+  println(contains(events[0].metadata.successful_tool_names, "lookup"))
+  println(events[0].metadata.missing_required_tools[0])
+  // No friction event when require_successful_tools is satisfied.
+  friction_clear()
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "lookup_2", name: "lookup", arguments: {query: "y"}}]})
+  llm_mock({text: "<user_response>Done.</user_response>"})
+  let satisfied = agent_loop(
+    "Use one tool.",
+    nil,
+    {
+      provider: "mock",
+      tools: tools(),
+      tool_format: "native",
+      loop_until_done: true,
+      max_iterations: 3,
+      require_successful_tools: ["lookup"],
+    },
+  )
+  println(satisfied.status)
+  println(satisfied?.error_envelope == nil)
+  println(len(friction_events()))
+}

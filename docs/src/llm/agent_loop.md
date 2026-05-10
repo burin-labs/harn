@@ -463,6 +463,71 @@ Preset roles, defaults summarized:
 | `repair` | `tool_using` | `native` | true | 2 | adaptive `{initial: 4, max: 16, extend_by: 2}` | enabled, threshold 3 | both `nil` |
 | `summary` | `completer` | unset | false | 0 | fixed `{initial: 1, max: 1}` | unset | both `nil`, `tool_choice: "none"` |
 | `verify` | `verifier` | unset | false | 0 | adaptive `{initial: 1, max: 5, extend_by: 1}` | unset | `done_judge: true` |
+| `merge_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 8, max: 60, extend_by: 4}` | enabled, threshold 3 | both `nil`; default consent denies writes |
+| `review_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 30, extend_by: 3}` | enabled, threshold 3 | both `nil` |
+| `oncall_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 24, extend_by: 3}` | enabled, threshold 3 | both `nil`; default `with_rate_limit({max_calls: 50})` |
+| `release_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 8, max: 40, extend_by: 4}` | enabled, threshold 3 | both `nil`; opt-in `with_dry_run` shadow runs |
+
+### Captain presets
+
+The four captain presets package the persona-shaped service contracts
+adopters were re-deriving by hand: a long-enough adaptive budget, a
+HITL-friendly consent gate where it matters, a default rate-limit
+where unbounded fan-out would hurt, and the canonical cheap-default /
+frontier-escalation routing scaffolding from `std/llm/handlers`. They
+are the substrate the persona template pack (harn#463) ships entries
+on top of.
+
+```harn
+import {
+  merge_captain_agent,
+  oncall_captain_agent,
+  release_captain_agent,
+  review_captain_agent,
+} from "std/agent/presets"
+
+// Merge Captain: long adaptive budget; default consent layer auto-
+// approves tools annotated `read`/`search`/`fetch`/`think` and denies
+// everything else unless the caller passes a `consent` callable.
+let sweep = merge_captain_agent("Sweep open PRs.", {
+  provider: "anthropic",
+  model: "claude-opus-4-7",
+  tools: github_tools,
+  consent: { call -> approval_bridge.prompt(call) },     // HITL bridge
+  audit_sink: { record -> receipts.append(record) },     // captain ledger
+})
+
+// Oncall Captain: defaults `with_rate_limit({max_calls: 50})` so an
+// alert-storm loop can't fan out unbounded. Override via `rate_limit`.
+let triaged = oncall_captain_agent("Triage paging alerts.", {
+  provider: "openai",
+  model: "gpt-5.4",
+  tools: oncall_tools,
+  rate_limit: {max_calls: 100, message: "alert-loop cap"},
+})
+
+// Release Captain: long checkpointed budget; pass `dry_run: true` (or
+// a `with_dry_run` opts dict) to layer a shadow-run gate.
+let shipping = release_captain_agent("Cut v0.9.0.", {
+  provider: "anthropic",
+  model: "claude-opus-4-7",
+  tools: release_tools,
+  dry_run: true,
+  cheap_caller: cheap_default_caller,
+  frontier_caller: frontier_caller,
+  escalate_predicate: { call -> call?.opts?.task_kind == "judge" },
+  logging_sink: { record -> receipts.llm_call(record) },
+})
+```
+
+Captain layers are opt-in: the preset only adds an `audit_sink` /
+`telemetry_sink` / `consent` / `rate_limit` / `dry_run` /
+`handoff_sink` layer when the caller supplies the matching dependency
+(plus the per-captain defaults in the table above). Pass an explicit
+`tool_caller` to opt out completely. Captain presets also build an
+`llm_caller` from `cheap_caller` + `frontier_caller` +
+`escalate_predicate` (cheap-by-default with frontier escalation, per
+the cost-moat substrate) and an optional `logging_sink` for receipts.
 
 Each preset also installs a provider-aware `thinking` choice when the caller
 hasn't already set one:
