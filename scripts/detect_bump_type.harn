@@ -1,0 +1,89 @@
+// Print the semver bump type that takes Cargo.toml's workspace version
+// to CHANGELOG.md's top-entry version.
+//
+// Used by .github/workflows/bump-release.yml to derive the right
+// `release_ship.sh --bump <type>` flag automatically when a "Prepare
+// vX.Y.Z release" commit lands on main. The version comparison is
+// canonical via CHANGELOG (verify_release_metadata.py already enforces
+// that the top entry is exactly one patch/minor/major step ahead of
+// Cargo.toml at prepare time), so this script just figures out which
+// step it is.
+//
+// Exits 0 with `patch`, `minor`, or `major` on stdout.
+// Exits 1 on shape mismatch with a human-readable error on stderr.
+// Exits 2 when Cargo.toml and CHANGELOG.md already match (no bump needed).
+let CARGO_PATH = "Cargo.toml"
+
+let CHANGELOG_PATH = "CHANGELOG.md"
+
+/**
+ * Pull the workspace version literal from a Cargo.toml. Errors loudly
+ * if no `version = "..."` line is at the top of the file.
+ */
+pub fn read_cargo_version() -> string {
+  let captures = regex_captures(r"(?m)^version = \x22([^\x22]+)\x22", read_file(CARGO_PATH))
+  if captures.count == 0 {
+    throw "could not find workspace version in ${CARGO_PATH}"
+  }
+  return captures[0].groups[0]
+}
+
+/** Pull the topmost `## vX.Y.Z` heading from CHANGELOG.md. */
+pub fn read_changelog_top_version() -> string {
+  let captures = regex_captures(r"(?m)^## v(\d+\.\d+\.\d+)\s*$", read_file(CHANGELOG_PATH))
+  if captures.count == 0 {
+    throw "no `## vX.Y.Z` heading found in ${CHANGELOG_PATH}"
+  }
+  return captures[0].groups[0]
+}
+
+/**
+ * Parse a "X.Y.Z" string into a `[major, minor, patch]` int triple.
+ * Throws on non-semver input.
+ */
+pub fn parse(version: string) -> list<int> {
+  let parts = version.split(".")
+  if parts.count != 3 {
+    throw "not semver: ${version}"
+  }
+  let nums = parts.map({ p -> to_int(p) })
+  if nums.any({ n -> n == nil }) {
+    throw "not semver: ${version}"
+  }
+  return nums
+}
+
+/**
+ * Decide which single semver step takes `current` to `target`. Throws
+ * if it isn't exactly one patch/minor/major step.
+ */
+pub fn detect(current: string, target: string) -> string {
+  let cur = parse(current)
+  let tgt = parse(target)
+  if tgt[0] == cur[0] + 1 && tgt[1] == 0 && tgt[2] == 0 {
+    return "major"
+  }
+  if tgt[0] == cur[0] && tgt[1] == cur[1] + 1 && tgt[2] == 0 {
+    return "minor"
+  }
+  if tgt[0] == cur[0] && tgt[1] == cur[1] && tgt[2] == cur[2] + 1 {
+    return "patch"
+  }
+  throw "${current} -> ${target} is not a single patch/minor/major bump"
+}
+
+pipeline main(task) {
+  try {
+    let current = read_cargo_version()
+    let target = read_changelog_top_version()
+    if current == target {
+      eprintln("warning: Cargo.toml and CHANGELOG.md both at ${current}; nothing to bump")
+      return 2
+    }
+    println(detect(current, target))
+    return 0
+  } catch (e) {
+    eprintln("error: ${e}")
+    return 1
+  }
+}

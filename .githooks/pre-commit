@@ -80,7 +80,7 @@ if hook_paths_match "$changed" "$HOOK_LANGSPEC_PATTERN"; then
   # the consistency fixup inline rather than failing the commit and
   # leaving the human to run the script. Mirrors the highlight stanza.
   echo "=== Pre-commit: syncing generated language spec ==="
-  ./scripts/sync_language_spec.sh
+  cargo run --quiet --bin harn -- run scripts/sync_language_spec.harn
   git add docs/src/language-spec.md
   echo "    Language spec OK."
 else

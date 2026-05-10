@@ -1,0 +1,29 @@
+// Tests for scripts/compare_generated_text.harn — exercise the
+// line-ending normalization helper end-to-end on both equal and
+// unequal inputs.
+import "../compare_generated_text.harn"
+
+@test
+pipeline test_normalize_strips_crlf(task) {
+  assert_eq(normalize("a\r\nb\r\nc"), "a\nb\nc")
+}
+
+@test
+pipeline test_normalize_strips_bare_cr(task) {
+  assert_eq(normalize("a\rb\rc"), "a\nb\nc")
+}
+
+@test
+pipeline test_normalize_passes_lf_through(task) {
+  assert_eq(normalize("a\nb\nc"), "a\nb\nc")
+}
+
+@test
+pipeline test_normalize_handles_mixed(task) {
+  assert_eq(normalize("a\r\nb\rc\nd"), "a\nb\nc\nd")
+}
+
+@test
+pipeline test_normalize_empty_string(task) {
+  assert_eq(normalize(""), "")
+}

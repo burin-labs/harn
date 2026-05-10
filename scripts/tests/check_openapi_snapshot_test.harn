@@ -1,0 +1,75 @@
+// Tests for scripts/check_openapi_snapshot.harn — exercise
+// `collect_surface` against a small synthetic OpenAPI document so the
+// section-detection logic gets covered without depending on the full
+// spec.
+import "../check_openapi_snapshot.harn"
+
+let MINI_SPEC = """
+openapi: 3.1.0
+paths:
+  /v1/widgets:
+    get:
+      summary: list widgets
+    post:
+      summary: create widget
+  /v1/widgets/{id}:
+    get:
+      summary: read widget
+    delete:
+      summary: delete widget
+components:
+  schemas:
+    Widget:
+      type: object
+    WidgetList:
+      type: object
+"""
+
+@test
+pipeline test_collect_surface_paths_and_methods(task) {
+  let out = collect_surface(MINI_SPEC)
+  assert(out.contains("GET /v1/widgets"))
+  assert(out.contains("POST /v1/widgets"))
+  assert(out.contains("GET /v1/widgets/{id}"))
+  assert(out.contains("DELETE /v1/widgets/{id}"))
+}
+
+@test
+pipeline test_collect_surface_schemas(task) {
+  let out = collect_surface(MINI_SPEC)
+  assert(out.contains("Widget"))
+  assert(out.contains("WidgetList"))
+}
+
+@test
+pipeline test_collect_surface_section_order(task) {
+  let out = collect_surface(MINI_SPEC)
+  let paths_idx = out.index_of("## Paths")
+  let schemas_idx = out.index_of("## Schemas")
+  assert(paths_idx >= 0 && schemas_idx >= 0)
+  assert(paths_idx < schemas_idx)
+}
+
+@test
+pipeline test_collect_surface_ignores_nested_path_methods(task) {
+  // Methods nested under a path/parameters block shouldn't get picked up
+  // — the regex matches only on a four-space indent under a path key.
+  let nested = """
+paths:
+  /v1/foo:
+    parameters:
+      - name: id
+    get:
+      summary: ok
+"""
+  let out = collect_surface(nested)
+  assert(out.contains("GET /v1/foo"))
+  assert(!out.contains("PARAMETERS /v1/foo"))
+}
+
+@test
+pipeline test_collect_surface_empty_spec(task) {
+  let out = collect_surface("")
+  assert(out.contains("## Paths"))
+  assert(out.contains("## Schemas"))
+}

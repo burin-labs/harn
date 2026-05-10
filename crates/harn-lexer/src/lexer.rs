@@ -358,7 +358,9 @@ impl Lexer {
                 let escaped = self.source[self.pos];
                 match escaped {
                     'n' => value.push('\n'),
+                    'r' => value.push('\r'),
                     't' => value.push('\t'),
+                    '0' => value.push('\0'),
                     '\\' => value.push('\\'),
                     '"' => value.push('"'),
                     '$' => value.push('$'),
@@ -1121,6 +1123,13 @@ mod tests {
         let mut lexer = Lexer::new(r#""a\nb\t\\""#);
         let tokens = lexer.tokenize().unwrap();
         assert_eq!(tokens[0].kind, TokenKind::StringLiteral("a\nb\t\\".into()));
+    }
+
+    #[test]
+    fn test_escape_carriage_return_and_null() {
+        let mut lexer = Lexer::new(r#""a\rb\0c""#);
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::StringLiteral("a\rb\0c".into()));
     }
 
     #[test]

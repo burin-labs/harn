@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast conformance protocol-conformance replay-oracle bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-bindings gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec lint-test-patterns check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression
+.PHONY: setup install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts conformance protocol-conformance replay-oracle bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-bindings gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec lint-test-patterns check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance protocol-conformance replay-oracle check-highlight check-protocol-artifacts check-bindings check-language-spec check-trigger-quickref check-provider-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart lint-test-patterns check-receipt-structs portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts conformance protocol-conformance replay-oracle check-highlight check-protocol-artifacts check-bindings check-language-spec check-trigger-quickref check-provider-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart lint-test-patterns check-receipt-structs portal-check
 
 check: all
 
@@ -102,7 +102,7 @@ lint-md:
 # Validate the Harn Agents Protocol OpenAPI artifact and its public path/schema snapshot.
 spec-lint:
 	npx redocly lint spec/openapi.yaml
-	./scripts/check_openapi_snapshot.py
+	cargo run --quiet --bin harn -- run scripts/check_openapi_snapshot.harn
 
 # Lint GitHub Actions workflows.
 lint-actions:
@@ -139,6 +139,8 @@ lint-harn:
 	if [ "$$status" -ne 0 ]; then echo "Lint issues found in conformance tests"; exit 1; fi
 	@echo "=== Checking Harn experiment support modules ==="
 	@cargo run --quiet --bin harn -- check $(EXPERIMENT_HARN_CHECK)
+	@echo "=== Linting Harn-authored scripts ==="
+	@cargo run --quiet --bin harn -- lint scripts/*.harn scripts/tests/*.harn
 	@echo "    Harn lint OK."
 
 # Check harn formatting on canonical stdlib sources and repo test fixtures.
@@ -154,6 +156,8 @@ fmt-harn-fix:
 		| xargs -0 cargo run --quiet --bin harn -- fmt
 	@find experiments -name '*.harn' -print0 \
 		| xargs -0 cargo run --quiet --bin harn -- fmt
+	@find scripts -name '*.harn' -print0 \
+		| xargs -0 cargo run --quiet --bin harn -- fmt
 	@echo "    Harn formatting OK."
 
 fmt-harn:
@@ -164,7 +168,17 @@ fmt-harn:
 		| xargs -0 cargo run --quiet --bin harn -- fmt --check
 	@find experiments -name '*.harn' -print0 \
 		| xargs -0 cargo run --quiet --bin harn -- fmt --check
+	@find scripts -name '*.harn' -print0 \
+		| xargs -0 cargo run --quiet --bin harn -- fmt --check
 	@echo "    Harn formatting OK."
+
+# Run the @test pipelines that cover scripts/*.harn against pure-logic
+# fixtures (no filesystem dependency outside the canonical spec mirror
+# check). Wired into `make all` and exercised by CI.
+test-harn-scripts:
+	@echo "=== Running Harn script test suite ==="
+	@cargo run --quiet --bin harn -- test scripts/tests/
+	@echo "    Harn script tests OK."
 
 # Format check (no changes, for CI)
 fmt-check:
@@ -243,15 +257,15 @@ check-bindings:
 
 # Regenerate docs/src/language-spec.md from spec/HARN_SPEC.md (the
 # canonical authoring source). Mirrors what release_gate.sh audit's
-# sync_language_spec.sh step does.
+# sync_language_spec.harn step does.
 sync-language-spec:
-	./scripts/sync_language_spec.sh
+	cargo run --quiet --bin harn -- run scripts/sync_language_spec.harn
 
 # CI guard: fail if docs/src/language-spec.md is stale relative to
 # spec/HARN_SPEC.md. `make sync-language-spec` fixes it.
 check-language-spec:
 	@echo "=== Checking docs/src/language-spec.md is up to date ==="
-	@./scripts/sync_language_spec.sh --check
+	@cargo run --quiet --bin harn -- run scripts/sync_language_spec.harn -- --check
 	@echo "    Language spec mirror OK."
 
 # Regenerate the LLM trigger quickref from the live ProviderCatalog metadata.
@@ -275,7 +289,7 @@ check-provider-matrix:
 	tmp=$$(mktemp); \
 	trap 'rm -f "$$tmp"' EXIT; \
 	cargo run --quiet -p harn-cli -- check --provider-matrix --format markdown > "$$tmp"; \
-	if ! python3 scripts/compare_generated_text.py docs/src/provider-matrix.md "$$tmp"; then \
+	if ! cargo run --quiet --bin harn -- run scripts/compare_generated_text.harn -- docs/src/provider-matrix.md "$$tmp"; then \
 		echo "error: docs/src/provider-matrix.md is stale relative to capabilities.toml" >&2; \
 		echo "hint: run 'make gen-provider-matrix' and commit the result" >&2; \
 		diff -u docs/src/provider-matrix.md "$$tmp" >&2 || true; \
@@ -329,4 +343,4 @@ lint-no-rust-prompt-prose:
 	@./scripts/check_no_rust_prompt_prose.sh
 
 lint-no-xfail-regression:
-	@./scripts/check_xfail_count.sh
+	@cargo run --quiet --bin harn -- run scripts/check_xfail_count.harn

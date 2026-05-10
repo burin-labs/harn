@@ -1,0 +1,51 @@
+// CI ratchet: fail if the number of `@xfail:` markers across the
+// conformance suite exceeds the threshold checked into
+// scripts/xfail_threshold.txt. Catches "fix one, regress one" drift
+// without forcing a clean-up sprint every time a flake is muted.
+/** Count occurrences of `needle` in `haystack`. */
+pub fn count_substring(haystack: string, needle: string) -> int {
+  if needle == "" {
+    return 0
+  }
+  return haystack.split(needle).count - 1
+}
+
+/**
+ * Sum `@xfail:` occurrences across every file under `root`. Skips
+ * directories so binary fixtures never get string-decoded.
+ */
+pub fn count_xfail_markers(root: string) -> int {
+  let entries = walk_dir(root)
+  var total = 0
+  for entry in entries {
+    if entry.is_file {
+      let text = try {
+        read_file(entry.path)
+      } catch (_) {
+        ""
+      }
+      total = total + count_substring(text, "@xfail:")
+    }
+  }
+  return total
+}
+
+pipeline main(task) {
+  let threshold_file = "scripts/xfail_threshold.txt"
+  if !file_exists(threshold_file) {
+    eprintln("missing ${threshold_file}")
+    return 1
+  }
+  let raw = read_file(threshold_file).trim()
+  let threshold = to_int(raw)
+  if threshold == nil || threshold < 0 {
+    eprintln("${threshold_file} must contain a non-negative integer")
+    return 1
+  }
+  let count = count_xfail_markers("conformance")
+  if count > threshold {
+    eprintln("::error::xfail count went up: ${count} > ${threshold}")
+    return 1
+  }
+  println("xfail regression ratchet OK (${count} <= ${threshold})")
+}

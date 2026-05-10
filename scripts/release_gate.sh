@@ -125,7 +125,7 @@ time_phase() {
 }
 
 run_docs_audit() {
-  time_phase "sync_language_spec" ./scripts/sync_language_spec.sh
+  time_phase "sync_language_spec" cargo run --quiet --bin harn -- run scripts/sync_language_spec.harn
   time_phase "markdownlint" npx markdownlint-cli2 "**/*.md"
   if command -v mdbook >/dev/null 2>&1; then
     time_phase "mdbook build" mdbook build docs
@@ -140,7 +140,7 @@ run_grammar_audit() {
     return 1
   fi
   time_phase "verify_release_metadata" ./scripts/verify_release_metadata.py
-  time_phase "sync_language_spec" ./scripts/sync_language_spec.sh
+  time_phase "sync_language_spec" cargo run --quiet --bin harn -- run scripts/sync_language_spec.harn
   time_phase "verify_language_spec" ./scripts/verify_language_spec.py
   if [[ ! -d tree-sitter-harn ]]; then
     echo "warning: tree-sitter-harn not present; skipping tree-sitter grammar audit"

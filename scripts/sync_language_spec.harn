@@ -1,0 +1,60 @@
+// Mirror spec/HARN_SPEC.md to docs/src/language-spec.md (with a "do not
+// edit" header). Used by `make sync-language-spec` and friends; the
+// pre-commit hook re-runs the same path so the docs mirror never goes
+// stale.
+//
+// Usage:
+//   harn run scripts/sync_language_spec.harn               (rewrite the mirror)
+//   harn run scripts/sync_language_spec.harn -- --check    (fail if stale)
+import "./compare_generated_text.harn"
+
+let SRC = "spec/HARN_SPEC.md"
+
+let DST = "docs/src/language-spec.md"
+
+let HEADER = "<!-- Generated from spec/HARN_SPEC.md by scripts/sync_language_spec.harn -->\n\n"
+
+/** Render the mirror's expected contents from the spec source text. */
+pub fn render_from(spec_text: string) -> string {
+  return HEADER + spec_text
+}
+
+/**
+ * Render the mirror's expected contents from the canonical spec on
+ * disk. Equivalent to `render_from(read_file(SRC))`.
+ */
+pub fn render_mirror() -> string {
+  return render_from(read_file(SRC))
+}
+
+pipeline main(task) {
+  if !file_exists(SRC) {
+    eprintln("error: missing ${SRC}")
+    return 1
+  }
+  let mode = if argv.count == 0 {
+    "write"
+  } else {
+    argv[0]
+  }
+  if mode == "write" {
+    write_file(DST, render_mirror())
+    return 0
+  }
+  if mode == "--check" {
+    let expected = render_mirror()
+    let actual = if file_exists(DST) {
+      read_file(DST)
+    } else {
+      ""
+    }
+    if normalize(expected) == normalize(actual) {
+      return 0
+    }
+    eprintln("error: ${DST} is stale relative to ${SRC}")
+    eprintln("hint: run 'make sync-language-spec' and commit the result")
+    return 1
+  }
+  eprintln("usage: sync_language_spec.harn [--check]")
+  return 2
+}
