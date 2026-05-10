@@ -50,6 +50,7 @@
   - [Autonomy tiers](./autonomy.md)
   - [OpenTrustGraph v0 spec](./spec/open-trust-graph/v0.md)
 - [Audit receipts](./audit-receipts.md)
+- [Redaction policy](./redaction.md)
 - [Skills](./skills.md)
 - [Personas](./personas.md)
   - [Persona Prelude](./personas/prelude.md)

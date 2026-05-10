@@ -190,6 +190,29 @@ pub struct ArtifactRecord {
 }
 
 impl ArtifactRecord {
+    /// Apply the unified redaction policy in place. Hosts that opt into
+    /// redacted artifact persistence call this before writing to a run
+    /// record; the policy strips known secret patterns from `text` and
+    /// scrubs auth-shaped fields nested under `data` and `metadata`.
+    pub fn redact_in_place(&mut self, policy: &crate::redact::RedactionPolicy) {
+        if let Some(text) = self.text.as_mut() {
+            let scrubbed = policy.redact_string(text);
+            if let std::borrow::Cow::Owned(replacement) = scrubbed {
+                *text = replacement;
+            }
+        }
+        if let Some(data) = self.data.as_mut() {
+            policy.redact_json_in_place(data);
+        }
+        for (key, value) in self.metadata.iter_mut() {
+            if policy.field_is_sensitive(key) {
+                *value = serde_json::Value::String(crate::redact::REDACTED_PLACEHOLDER.to_string());
+            } else {
+                policy.redact_json_in_place(value);
+            }
+        }
+    }
+
     pub fn normalize(mut self) -> Self {
         if self.type_name.is_empty() {
             self.type_name = "artifact".to_string();

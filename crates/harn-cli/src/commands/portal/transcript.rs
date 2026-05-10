@@ -33,12 +33,17 @@ fn parse_transcript_steps(path: &Path) -> Result<Vec<PortalTranscriptStep>, Stri
     let mut current_schema_names: Vec<String> = Vec::new();
     let mut accumulated_messages: Vec<PortalTranscriptMessage> = Vec::new();
     let mut previous_total: usize = 0;
+    let policy = harn_vm::redact::current_policy();
 
     for line in content.lines().filter(|line| !line.trim().is_empty()) {
-        let raw: serde_json::Value = match serde_json::from_str(line) {
+        let mut raw: serde_json::Value = match serde_json::from_str(line) {
             Ok(value) => value,
             Err(_) => continue,
         };
+        // Re-apply redaction on the read side: transcripts written before
+        // the unified policy landed (or by external tools that write to
+        // the JSONL directly) are scrubbed before they reach the portal.
+        policy.redact_json_in_place(&mut raw);
         let event_type = raw
             .get("type")
             .and_then(|value| value.as_str())

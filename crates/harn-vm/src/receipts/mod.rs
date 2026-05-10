@@ -162,6 +162,50 @@ impl Receipt {
             self.push_step_breakdown(&summary);
         }
     }
+
+    /// Apply the unified [`crate::redact::RedactionPolicy`] to every
+    /// caller-supplied JSON field on the receipt. Fixed envelope fields
+    /// (id, persona, trace_id, status, schema, digests, cost) are not
+    /// touched — the persistence layer needs them stable for query and
+    /// replay.
+    pub fn redact_in_place(&mut self, policy: &crate::redact::RedactionPolicy) {
+        fn redact_entries(
+            entries: &mut [BTreeMap<String, JsonValue>],
+            policy: &crate::redact::RedactionPolicy,
+        ) {
+            for entry in entries {
+                for (key, value) in entry.iter_mut() {
+                    if policy.field_is_sensitive(key) {
+                        *value = JsonValue::String(crate::redact::REDACTED_PLACEHOLDER.to_string());
+                    } else {
+                        policy.redact_json_in_place(value);
+                    }
+                }
+            }
+        }
+
+        redact_entries(&mut self.model_calls, policy);
+        redact_entries(&mut self.tool_calls, policy);
+        redact_entries(&mut self.approvals, policy);
+        redact_entries(&mut self.handoffs, policy);
+        redact_entries(&mut self.side_effects, policy);
+        if let Some(error) = self.error.as_mut() {
+            for (key, value) in error.iter_mut() {
+                if policy.field_is_sensitive(key) {
+                    *value = JsonValue::String(crate::redact::REDACTED_PLACEHOLDER.to_string());
+                } else {
+                    policy.redact_json_in_place(value);
+                }
+            }
+        }
+        for (key, value) in self.metadata.iter_mut() {
+            if policy.field_is_sensitive(key) {
+                *value = JsonValue::String(crate::redact::REDACTED_PLACEHOLDER.to_string());
+            } else {
+                policy.redact_json_in_place(value);
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -169,6 +213,42 @@ pub trait ReceiptSink {
     type Error;
 
     async fn persist_receipt(&self, receipt: &Receipt) -> Result<(), Self::Error>;
+}
+
+/// `ReceiptSink` decorator that runs each receipt through
+/// [`Receipt::redact_in_place`] before delegating to the inner sink.
+/// Hosts can wrap their existing sinks to opt every persistence path
+/// into the unified redaction policy without touching call sites that
+/// build the receipts.
+pub struct RedactingReceiptSink<Inner> {
+    inner: Inner,
+    policy: crate::redact::RedactionPolicy,
+}
+
+impl<Inner> RedactingReceiptSink<Inner> {
+    pub fn new(inner: Inner, policy: crate::redact::RedactionPolicy) -> Self {
+        Self { inner, policy }
+    }
+
+    /// Convenience constructor that wraps `inner` with the currently
+    /// installed thread-local policy.
+    pub fn with_current_policy(inner: Inner) -> Self {
+        Self::new(inner, crate::redact::current_policy())
+    }
+}
+
+#[async_trait]
+impl<Inner> ReceiptSink for RedactingReceiptSink<Inner>
+where
+    Inner: ReceiptSink + Send + Sync,
+{
+    type Error = Inner::Error;
+
+    async fn persist_receipt(&self, receipt: &Receipt) -> Result<(), Self::Error> {
+        let mut redacted = receipt.clone();
+        redacted.redact_in_place(&self.policy);
+        self.inner.persist_receipt(&redacted).await
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
