@@ -1,0 +1,805 @@
+//! Plain-data record types and action graph constants used across run records, replay fixtures,
+//! eval reports, and diff utilities.
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+
+use super::super::{
+    ArtifactRecord, CapabilityPolicy, HandoffArtifact, PersonaEvalLadderManifest,
+    PersonaEvalLadderReport,
+};
+use crate::personas::{
+    PersonaAssignmentStatus, PersonaBudgetStatus, PersonaHandoffInboxItem, PersonaQueuedWork,
+    PersonaStatus, PersonaValueReceipt,
+};
+
+pub const ACTION_GRAPH_NODE_KIND_RUN: &str = "run";
+pub const ACTION_GRAPH_NODE_KIND_TRIGGER: &str = "trigger";
+pub const ACTION_GRAPH_NODE_KIND_PREDICATE: &str = "predicate";
+pub const ACTION_GRAPH_NODE_KIND_TRIGGER_PREDICATE: &str = "trigger_predicate";
+pub const ACTION_GRAPH_NODE_KIND_STAGE: &str = "stage";
+pub const ACTION_GRAPH_NODE_KIND_WORKER: &str = "worker";
+pub const ACTION_GRAPH_NODE_KIND_DISPATCH: &str = "dispatch";
+pub const ACTION_GRAPH_NODE_KIND_A2A_HOP: &str = "a2a_hop";
+pub const ACTION_GRAPH_NODE_KIND_WORKER_ENQUEUE: &str = "worker_enqueue";
+pub const ACTION_GRAPH_NODE_KIND_RETRY: &str = "retry";
+pub const ACTION_GRAPH_NODE_KIND_DLQ: &str = "dlq";
+
+pub const ACTION_GRAPH_EDGE_KIND_ENTRY: &str = "entry";
+pub const ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH: &str = "trigger_dispatch";
+pub const ACTION_GRAPH_EDGE_KIND_A2A_DISPATCH: &str = "a2a_dispatch";
+pub const ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE: &str = "predicate_gate";
+pub const ACTION_GRAPH_EDGE_KIND_REPLAY_CHAIN: &str = "replay_chain";
+pub const ACTION_GRAPH_EDGE_KIND_TRANSITION: &str = "transition";
+pub const ACTION_GRAPH_EDGE_KIND_DELEGATES: &str = "delegates";
+pub const ACTION_GRAPH_EDGE_KIND_RETRY: &str = "retry";
+pub const ACTION_GRAPH_EDGE_KIND_DLQ_MOVE: &str = "dlq_move";
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct LlmUsageRecord {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub total_duration_ms: i64,
+    pub call_count: i64,
+    pub total_cost: f64,
+    pub models: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct RunStageRecord {
+    pub id: String,
+    pub node_id: String,
+    pub kind: String,
+    pub status: String,
+    pub outcome: String,
+    pub branch: Option<String>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub visible_text: Option<String>,
+    pub private_reasoning: Option<String>,
+    pub transcript: Option<serde_json::Value>,
+    pub verification: Option<serde_json::Value>,
+    pub usage: Option<LlmUsageRecord>,
+    pub artifacts: Vec<ArtifactRecord>,
+    pub consumed_artifact_ids: Vec<String>,
+    pub produced_artifact_ids: Vec<String>,
+    pub attempts: Vec<RunStageAttemptRecord>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct RunStageAttemptRecord {
+    pub attempt: usize,
+    pub status: String,
+    pub outcome: String,
+    pub branch: Option<String>,
+    pub error: Option<String>,
+    pub verification: Option<serde_json::Value>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunTransitionRecord {
+    pub id: String,
+    pub from_stage_id: Option<String>,
+    pub from_node_id: Option<String>,
+    pub to_node_id: String,
+    pub branch: Option<String>,
+    pub timestamp: String,
+    pub consumed_artifact_ids: Vec<String>,
+    pub produced_artifact_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunCheckpointRecord {
+    pub id: String,
+    pub ready_nodes: Vec<String>,
+    pub completed_nodes: Vec<String>,
+    pub last_stage_id: Option<String>,
+    pub persisted_at: String,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ReplayFixture {
+    #[serde(rename = "_type")]
+    pub type_name: String,
+    pub id: String,
+    pub source_run_id: String,
+    pub workflow_id: String,
+    pub workflow_name: Option<String>,
+    pub created_at: String,
+    pub eval_kind: Option<String>,
+    pub clarifying_question: Option<ClarifyingQuestionEvalSpec>,
+    pub expected_status: String,
+    pub stage_assertions: Vec<ReplayStageAssertion>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ClarifyingQuestionEvalSpec {
+    pub expected_question: Option<String>,
+    pub accepted_questions: Vec<String>,
+    pub required_terms: Vec<String>,
+    pub forbidden_terms: Vec<String>,
+    pub min_questions: usize,
+    pub max_questions: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ReplayStageAssertion {
+    pub node_id: String,
+    pub expected_status: String,
+    pub expected_outcome: String,
+    pub expected_branch: Option<String>,
+    pub required_artifact_kinds: Vec<String>,
+    pub visible_text_contains: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ReplayEvalReport {
+    pub pass: bool,
+    pub failures: Vec<String>,
+    pub stage_count: usize,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ReplayEvalCaseReport {
+    pub run_id: String,
+    pub workflow_id: String,
+    pub label: Option<String>,
+    pub pass: bool,
+    pub failures: Vec<String>,
+    pub stage_count: usize,
+    pub source_path: Option<String>,
+    pub comparison: Option<RunDiffReport>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ReplayEvalSuiteReport {
+    pub pass: bool,
+    pub total: usize,
+    pub passed: usize,
+    pub failed: usize,
+    pub cases: Vec<ReplayEvalCaseReport>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunDeliverableSummaryRecord {
+    pub id: String,
+    pub text: String,
+    pub status: String,
+    pub note: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunTaskLedgerSummaryRecord {
+    pub root_task: String,
+    pub rationale: String,
+    pub deliverables: Vec<RunDeliverableSummaryRecord>,
+    pub observations: Vec<String>,
+    pub blocking_count: usize,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunPlannerRoundRecord {
+    pub stage_id: String,
+    pub node_id: String,
+    pub stage_kind: String,
+    pub status: String,
+    pub outcome: String,
+    pub iteration_count: usize,
+    pub llm_call_count: usize,
+    pub tool_execution_count: usize,
+    pub tool_rejection_count: usize,
+    pub intervention_count: usize,
+    pub compaction_count: usize,
+    pub native_text_tool_fallback_count: usize,
+    pub native_text_tool_fallback_rejection_count: usize,
+    pub empty_completion_retry_count: usize,
+    pub tools_used: Vec<String>,
+    pub successful_tools: Vec<String>,
+    pub ledger_done_rejections: usize,
+    pub task_ledger: Option<RunTaskLedgerSummaryRecord>,
+    pub research_facts: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunWorkerLineageRecord {
+    pub worker_id: String,
+    pub worker_name: String,
+    pub parent_stage_id: Option<String>,
+    pub task: String,
+    pub status: String,
+    pub session_id: Option<String>,
+    pub parent_session_id: Option<String>,
+    pub run_id: Option<String>,
+    pub run_path: Option<String>,
+    pub snapshot_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunActionGraphNodeRecord {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub status: String,
+    pub outcome: String,
+    pub trace_id: Option<String>,
+    pub stage_id: Option<String>,
+    pub node_id: Option<String>,
+    pub worker_id: Option<String>,
+    pub run_id: Option<String>,
+    pub run_path: Option<String>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunActionGraphEdgeRecord {
+    pub from_id: String,
+    pub to_id: String,
+    pub kind: String,
+    pub label: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunVerificationOutcomeRecord {
+    pub stage_id: String,
+    pub node_id: String,
+    pub status: String,
+    pub passed: Option<bool>,
+    pub summary: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunTranscriptPointerRecord {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub location: String,
+    pub path: Option<String>,
+    pub available: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct CompactionEventRecord {
+    pub id: String,
+    pub transcript_id: Option<String>,
+    pub stage_id: Option<String>,
+    pub node_id: Option<String>,
+    pub mode: String,
+    pub strategy: String,
+    pub archived_messages: usize,
+    pub estimated_tokens_before: usize,
+    pub estimated_tokens_after: usize,
+    pub snapshot_asset_id: Option<String>,
+    pub snapshot_location: String,
+    pub snapshot_path: Option<String>,
+    pub available: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonEventKindRecord {
+    #[default]
+    Spawned,
+    Triggered,
+    Snapshotted,
+    Resumed,
+    Stopped,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct DaemonEventRecord {
+    pub daemon_id: String,
+    pub name: String,
+    pub kind: DaemonEventKindRecord,
+    pub timestamp: String,
+    pub persist_path: String,
+    pub payload_summary: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunObservabilityRecord {
+    pub schema_version: usize,
+    pub planner_rounds: Vec<RunPlannerRoundRecord>,
+    pub research_fact_count: usize,
+    pub action_graph_nodes: Vec<RunActionGraphNodeRecord>,
+    pub action_graph_edges: Vec<RunActionGraphEdgeRecord>,
+    pub worker_lineage: Vec<RunWorkerLineageRecord>,
+    pub verification_outcomes: Vec<RunVerificationOutcomeRecord>,
+    pub transcript_pointers: Vec<RunTranscriptPointerRecord>,
+    pub compaction_events: Vec<CompactionEventRecord>,
+    pub daemon_events: Vec<DaemonEventRecord>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunStageDiffRecord {
+    pub node_id: String,
+    pub change: String,
+    pub details: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ToolCallDiffRecord {
+    pub tool_name: String,
+    pub args_hash: String,
+    pub result_changed: bool,
+    pub left_result: Option<String>,
+    pub right_result: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunObservabilityDiffRecord {
+    pub section: String,
+    pub label: String,
+    pub details: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunDiffReport {
+    pub left_run_id: String,
+    pub right_run_id: String,
+    pub identical: bool,
+    pub status_changed: bool,
+    pub left_status: String,
+    pub right_status: String,
+    pub stage_diffs: Vec<RunStageDiffRecord>,
+    pub tool_diffs: Vec<ToolCallDiffRecord>,
+    pub observability_diffs: Vec<RunObservabilityDiffRecord>,
+    pub transition_count_delta: isize,
+    pub artifact_count_delta: isize,
+    pub checkpoint_count_delta: isize,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct EvalSuiteManifest {
+    #[serde(rename = "_type")]
+    pub type_name: String,
+    pub id: String,
+    pub name: Option<String>,
+    pub base_dir: Option<String>,
+    pub cases: Vec<EvalSuiteCase>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct EvalSuiteCase {
+    pub label: Option<String>,
+    pub run_path: String,
+    pub fixture_path: Option<String>,
+    pub compare_to: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackManifest {
+    pub version: u32,
+    pub id: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub base_dir: Option<String>,
+    pub baseline: Option<String>,
+    pub package: Option<EvalPackPackage>,
+    pub defaults: EvalPackDefaults,
+    pub fixtures: Vec<EvalPackFixtureRef>,
+    pub rubrics: Vec<EvalPackRubric>,
+    pub judge: Option<EvalPackJudgeConfig>,
+    pub cases: Vec<EvalPackCase>,
+    pub ladders: Vec<PersonaEvalLadderManifest>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct EvalPackPackage {
+    pub name: Option<String>,
+    pub version: Option<String>,
+    pub source: Option<String>,
+    pub templates: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackDefaults {
+    pub severity: Option<String>,
+    pub fixture_root: Option<String>,
+    pub thresholds: EvalPackThresholds,
+    pub judge: Option<EvalPackJudgeConfig>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackFixtureRef {
+    pub id: String,
+    pub kind: String,
+    pub path: Option<String>,
+    #[serde(default, alias = "trace-id")]
+    pub trace_id: Option<String>,
+    pub provider: Option<String>,
+    #[serde(default, alias = "event-kind")]
+    pub event_kind: Option<String>,
+    pub inline: Option<serde_json::Value>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackRubric {
+    pub id: String,
+    pub kind: String,
+    pub description: Option<String>,
+    pub prompt: Option<String>,
+    pub assertions: Vec<EvalPackAssertion>,
+    pub judge: Option<EvalPackJudgeConfig>,
+    pub calibration: Vec<EvalPackGoldenExample>,
+    pub thresholds: EvalPackThresholds,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackAssertion {
+    pub kind: String,
+    pub stage: Option<String>,
+    pub path: Option<String>,
+    pub op: Option<String>,
+    pub expected: Option<serde_json::Value>,
+    pub contains: Option<String>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackJudgeConfig {
+    pub model: Option<String>,
+    #[serde(default, alias = "prompt-version")]
+    pub prompt_version: Option<String>,
+    #[serde(default, alias = "tie-break")]
+    pub tie_break: Option<String>,
+    #[serde(default, alias = "confidence-min")]
+    pub confidence_min: Option<f64>,
+    pub temperature: Option<f64>,
+    pub rubric: Option<String>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackGoldenExample {
+    pub input: serde_json::Value,
+    pub output: serde_json::Value,
+    pub score: Option<f64>,
+    pub explanation: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackThresholds {
+    pub severity: Option<String>,
+    #[serde(default, alias = "min-score")]
+    pub min_score: Option<f64>,
+    #[serde(default, alias = "min-confidence")]
+    pub min_confidence: Option<f64>,
+    #[serde(default, alias = "max-cost-usd")]
+    pub max_cost_usd: Option<f64>,
+    #[serde(default, alias = "max-latency-ms")]
+    pub max_latency_ms: Option<i64>,
+    #[serde(default, alias = "max-tokens")]
+    pub max_tokens: Option<i64>,
+    #[serde(default, alias = "max-stage-count")]
+    pub max_stage_count: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackCase {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub run: Option<String>,
+    #[serde(default, alias = "run-path")]
+    pub run_path: Option<String>,
+    #[serde(default, alias = "friction-events", alias = "friction_events")]
+    pub friction_events: Option<String>,
+    pub fixture: Option<String>,
+    #[serde(default, alias = "fixture-path")]
+    pub fixture_path: Option<String>,
+    #[serde(default, alias = "compare-to")]
+    pub compare_to: Option<String>,
+    pub rubrics: Vec<String>,
+    pub severity: Option<String>,
+    pub thresholds: EvalPackThresholds,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackReport {
+    pub pack_id: String,
+    pub pass: bool,
+    pub total: usize,
+    pub passed: usize,
+    pub failed: usize,
+    pub blocking_failed: usize,
+    pub warning_failed: usize,
+    pub informational_failed: usize,
+    pub cases: Vec<EvalPackCaseReport>,
+    pub ladders: Vec<PersonaEvalLadderReport>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct EvalPackCaseReport {
+    pub id: String,
+    pub label: String,
+    pub severity: String,
+    pub pass: bool,
+    pub blocking: bool,
+    pub run_id: String,
+    pub workflow_id: String,
+    pub source_path: Option<String>,
+    pub stage_count: usize,
+    pub failures: Vec<String>,
+    pub warnings: Vec<String>,
+    pub informational: Vec<String>,
+    pub comparison: Option<RunDiffReport>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunHitlQuestionRecord {
+    pub request_id: String,
+    pub prompt: String,
+    pub agent: String,
+    pub trace_id: Option<String>,
+    pub asked_at: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct RunPersonaRuntimeRecord {
+    pub name: String,
+    pub role: String,
+    pub template_ref: Option<String>,
+    pub state: String,
+    pub entry_workflow: String,
+    pub current_assignment: Option<PersonaAssignmentStatus>,
+    pub queued_work: Vec<PersonaQueuedWork>,
+    pub handoff_inbox: Vec<PersonaHandoffInboxItem>,
+    pub budget: PersonaBudgetStatus,
+    pub value_receipts: Vec<PersonaValueReceipt>,
+    pub last_run: Option<String>,
+    pub last_error: Option<String>,
+}
+
+impl From<&PersonaStatus> for RunPersonaRuntimeRecord {
+    fn from(status: &PersonaStatus) -> Self {
+        Self {
+            name: status.name.clone(),
+            role: status.role.clone(),
+            template_ref: status.template_ref.clone(),
+            state: status.state.as_str().to_string(),
+            entry_workflow: status.entry_workflow.clone(),
+            current_assignment: status.current_assignment.clone(),
+            queued_work: status.queued_work.clone(),
+            handoff_inbox: status.handoff_inbox.clone(),
+            budget: status.budget.clone(),
+            value_receipts: status.value_receipts.clone(),
+            last_run: status.last_run.clone(),
+            last_error: status.last_error.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct RunRecord {
+    #[serde(rename = "_type")]
+    pub type_name: String,
+    pub id: String,
+    pub workflow_id: String,
+    pub workflow_name: Option<String>,
+    pub task: String,
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub parent_run_id: Option<String>,
+    pub root_run_id: Option<String>,
+    pub stages: Vec<RunStageRecord>,
+    pub transitions: Vec<RunTransitionRecord>,
+    pub checkpoints: Vec<RunCheckpointRecord>,
+    pub pending_nodes: Vec<String>,
+    pub completed_nodes: Vec<String>,
+    pub child_runs: Vec<RunChildRecord>,
+    pub artifacts: Vec<ArtifactRecord>,
+    pub handoffs: Vec<HandoffArtifact>,
+    pub policy: CapabilityPolicy,
+    pub execution: Option<RunExecutionRecord>,
+    pub transcript: Option<serde_json::Value>,
+    pub usage: Option<LlmUsageRecord>,
+    pub replay_fixture: Option<ReplayFixture>,
+    pub observability: Option<RunObservabilityRecord>,
+    pub trace_spans: Vec<RunTraceSpanRecord>,
+    pub tool_recordings: Vec<ToolCallRecord>,
+    pub hitl_questions: Vec<RunHitlQuestionRecord>,
+    pub persona_runtime: Vec<RunPersonaRuntimeRecord>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+    pub persisted_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ToolCallRecord {
+    pub tool_name: String,
+    pub tool_use_id: String,
+    pub args_hash: String,
+    pub result: String,
+    pub is_rejected: bool,
+    pub duration_ms: u64,
+    pub iteration: usize,
+    pub timestamp: String,
+}
+
+/// Hash a tool invocation for fixture lookup (name + canonical args JSON).
+pub fn tool_fixture_hash(tool_name: &str, args: &serde_json::Value) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    tool_name.hash(&mut hasher);
+    let args_str = serde_json::to_string(args).unwrap_or_default();
+    args_str.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunTraceSpanRecord {
+    pub span_id: u64,
+    pub parent_id: Option<u64>,
+    pub kind: String,
+    pub name: String,
+    pub start_ms: u64,
+    pub duration_ms: u64,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunChildRecord {
+    pub worker_id: String,
+    pub worker_name: String,
+    pub parent_stage_id: Option<String>,
+    pub session_id: Option<String>,
+    pub parent_session_id: Option<String>,
+    pub mutation_scope: Option<String>,
+    pub approval_policy: Option<super::super::ToolApprovalPolicy>,
+    pub task: String,
+    pub request: Option<serde_json::Value>,
+    pub provenance: Option<serde_json::Value>,
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub run_id: Option<String>,
+    pub run_path: Option<String>,
+    pub snapshot_path: Option<String>,
+    pub execution: Option<RunExecutionRecord>,
+}
+
+pub(crate) fn run_child_record_from_worker_metadata(
+    parent_stage_id: Option<String>,
+    worker: &serde_json::Value,
+) -> Option<RunChildRecord> {
+    let worker_id = worker.get("id").and_then(|value| value.as_str())?;
+    if worker_id.is_empty() {
+        return None;
+    }
+    Some(RunChildRecord {
+        worker_id: worker_id.to_string(),
+        worker_name: worker
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("worker")
+            .to_string(),
+        parent_stage_id,
+        session_id: worker
+            .get("audit")
+            .and_then(|value| value.get("session_id"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        parent_session_id: worker
+            .get("audit")
+            .and_then(|value| value.get("parent_session_id"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        mutation_scope: worker
+            .get("audit")
+            .and_then(|value| value.get("mutation_scope"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        approval_policy: worker
+            .get("audit")
+            .and_then(|value| value.get("approval_policy"))
+            .and_then(|value| {
+                serde_json::from_value::<super::super::ToolApprovalPolicy>(value.clone()).ok()
+            }),
+        task: worker
+            .get("task")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        request: worker.get("request").cloned(),
+        provenance: worker.get("provenance").cloned(),
+        status: worker
+            .get("status")
+            .and_then(|value| value.as_str())
+            .unwrap_or("completed")
+            .to_string(),
+        started_at: worker
+            .get("started_at")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        finished_at: worker
+            .get("finished_at")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        run_id: worker
+            .get("child_run_id")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        run_path: worker
+            .get("child_run_path")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        snapshot_path: worker
+            .get("snapshot_path")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        execution: worker
+            .get("execution")
+            .cloned()
+            .and_then(|value| serde_json::from_value(value).ok()),
+    })
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunExecutionRecord {
+    pub cwd: Option<String>,
+    pub source_dir: Option<String>,
+    pub env: BTreeMap<String, String>,
+    pub adapter: Option<String>,
+    pub repo_path: Option<String>,
+    pub worktree_path: Option<String>,
+    pub branch: Option<String>,
+    pub base_ref: Option<String>,
+    pub cleanup: Option<String>,
+}

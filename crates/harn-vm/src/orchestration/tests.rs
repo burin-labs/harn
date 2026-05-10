@@ -1,5 +1,6 @@
 //! Orchestration integration tests for policy/workflow/mutation-session.
 
+use super::records::{myers_diff, DiffOp};
 use super::*;
 use std::collections::BTreeMap;
 use std::rc::Rc;
