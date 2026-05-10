@@ -103,6 +103,19 @@ pub(crate) struct TestBenchRunArgs {
     /// `docs/src/dev/tape-format.md`.
     #[arg(long = "emit-tape", value_name = "PATH")]
     pub emit_tape: Option<String>,
+    /// Tokio runtime mode.
+    ///
+    /// `paused-tokio` (default): multi-threaded runtime with a paused mock
+    /// clock. Adequate for most testbench workloads.
+    ///
+    /// `des`: single-threaded `current_thread` runtime with a paused mock
+    /// clock. All tasks, I/O callbacks, and timer firings are coalesced onto
+    /// one OS thread, eliminating inter-thread scheduling non-determinism.
+    /// Produces bit-exact tape replays for scripts that stay within the
+    /// DES-safe primitive set. See `docs/src/dev/des-mode.md` for the
+    /// constraint surface and benchmark data.
+    #[arg(long = "runtime", default_value = "paused-tokio", value_name = "MODE")]
+    pub runtime: String,
     /// Positional script arguments. Pass after `--`:
     /// `harn test-bench run script.harn -- a b c`.
     #[arg(last = true)]

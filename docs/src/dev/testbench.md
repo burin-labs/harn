@@ -56,6 +56,8 @@ Flag reference:
 | `--network deny` (default) / `--network real` | Egress policy |
 | `--allow-host <h-or-cidr>` | Whitelist a destination. Repeatable |
 | `--emit-diff <path>` | Write a unified-style diff of overlay writes to `path` |
+| `--emit-tape <path>` | Write the unified event tape to `path` (sidecar at `path.cas/`) |
+| `--runtime paused-tokio` (default) / `--runtime des` | Tokio runtime mode. `des` pins everything to a single OS thread for bit-exact tape replay; see [DES runtime mode](./des-mode.md) |
 
 The default flag-set composes to "run hermetically; fail loud on any
 leak":

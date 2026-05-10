@@ -26,6 +26,19 @@ condensed series summaries instead of full per-patch history.
   pre-commit `harn fmt` / `harn lint` stanza now covers `scripts/`
   too, so these scripts stay typecheck-clean and warning-free as
   they evolve.
+- **`harn test-bench run --runtime des` (single-threaded testbench).**
+  Opt-in flag that swaps the testbench's default multi-thread Tokio
+  runtime for a `current_thread` runtime so all VM tasks, I/O
+  callbacks, and timer firings share one OS thread. Eliminates
+  inter-thread scheduling races and yields bit-exact event tapes for
+  scripts that stay within the DES-safe primitive set. Adds three
+  `testbench_*` conformance fixtures under
+  `conformance/tests/testbench/` plus three `des_runtime_*` Rust
+  integration tests covering paused-sleep, byte-identical concurrent
+  settle, and parity with `--runtime paused-tokio`. The constraint
+  surface, benchmark methodology, and the decision to ship as opt-in
+  (rather than the default) are written up in
+  `docs/src/dev/des-mode.md`. (#1444)
 - **Package manager maturity: provenance, outdated, audit, and
   generated-artifact contract checks.** Bumped `harn.lock` to version 2
   with top-level `generator_version` / `protocol_artifact_version` and

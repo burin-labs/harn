@@ -6,11 +6,25 @@
 //! filesystem overlay — all with deny-by-default network egress.
 //!
 //! The CLI flag names map onto [`harn_vm::testbench::Testbench`] one-for-one.
+//!
+//! # Runtime modes
+//!
+//! `--runtime paused-tokio` (default): multi-threaded Tokio runtime. Tasks
+//! from concurrent Harn agents run in parallel across worker threads. The
+//! paused mock clock keeps virtual time stable, but task-interleaving order
+//! varies between runs.
+//!
+//! `--runtime des`: single-threaded `current_thread` Tokio runtime. All
+//! tasks, I/O completions, and timer callbacks share one OS thread. Combined
+//! with the paused mock clock this produces bit-exact event tapes across
+//! reruns for scripts that stay within the DES-safe primitive set (no real
+//! network, no real subprocess, no real clock). See `docs/src/dev/des-mode.md`.
 
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
+use std::thread;
 
 use harn_vm::testbench::fidelity::{compare, FidelityMode, FidelityReport};
 use harn_vm::testbench::overlay_fs::{render_unified_diff, DiffEntry, DiffKind};
@@ -22,6 +36,7 @@ use harn_vm::testbench::{
 
 use crate::cli::{TestBenchCommand, TestBenchFidelityArgs, TestBenchReplayArgs, TestBenchRunArgs};
 use crate::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
+use crate::CLI_RUNTIME_STACK_SIZE;
 
 /// Default starting point for `--clock paused` runs. Picked to be
 /// stable, RFC-3339-friendly, and after every prerequisite Y2K38
@@ -51,25 +66,30 @@ async fn run_args(args: TestBenchRunArgs) -> RunOutcome {
         Ok(bench) => bench,
         Err(message) => return error_outcome(message),
     };
-    let llm_mode = match (&args.llm_fixture, &args.llm_record) {
-        (Some(_), Some(_)) => {
-            return error_outcome(
-                "--llm-fixture and --llm-record are mutually exclusive".to_string(),
-            )
-        }
-        (Some(path), None) => CliLlmMockMode::Replay {
-            fixture_path: PathBuf::from(path),
-        },
-        (None, Some(path)) => CliLlmMockMode::Record {
-            fixture_path: PathBuf::from(path),
-        },
-        (None, None) => CliLlmMockMode::Off,
+    let llm_mode = match build_llm_mode(&args) {
+        Ok(mode) => mode,
+        Err(message) => return error_outcome(message),
     };
+    match args.runtime.as_str() {
+        "paused-tokio" | "" => run_with_bench(args, bench, llm_mode).await,
+        "des" => run_with_des_runtime(args, bench, llm_mode).await,
+        other => error_outcome(format!(
+            "--runtime must be `paused-tokio` or `des`, got `{other}`"
+        )),
+    }
+}
+
+/// Execute the script under a standard multi-thread Tokio runtime with the
+/// testbench mocks already active on the calling async task.
+async fn run_with_bench(
+    args: TestBenchRunArgs,
+    bench: Testbench,
+    llm_mode: CliLlmMockMode,
+) -> RunOutcome {
     let session = match bench.activate() {
         Ok(session) => session,
         Err(error) => return error_outcome(format!("activate testbench: {error}")),
     };
-
     let outcome = execute_run(
         &args.file,
         false,
@@ -81,12 +101,89 @@ async fn run_args(args: TestBenchRunArgs) -> RunOutcome {
         RunProfileOptions::default(),
     )
     .await;
+    finalize_session(outcome, session, &args)
+}
 
+/// Execute the script under a **single-threaded** `current_thread` Tokio
+/// runtime for maximum inter-task scheduling determinism.
+///
+/// Spawns a fresh OS thread so we can call `Runtime::block_on` without
+/// nesting inside the caller's multi-thread runtime. The stack size is
+/// matched to the main CLI thread so deep recursion in scripts works.
+/// Thread-local testbench mocks (clock, overlay, process tape, recorder)
+/// are installed inside the new thread so they are visible to every task
+/// that runs there.
+///
+/// The `current_thread` scheduler cooperatively multiplexes all tasks on one
+/// OS thread, eliminating the inter-thread wake-up races that cause tape
+/// records to appear in different orders between runs. Combined with the
+/// paused mock clock this yields bit-exact event tapes for DES-safe scripts.
+async fn run_with_des_runtime(
+    args: TestBenchRunArgs,
+    bench: Testbench,
+    llm_mode: CliLlmMockMode,
+) -> RunOutcome {
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::Builder::new()
+        .name("harn-des".to_string())
+        .stack_size(CLI_RUNTIME_STACK_SIZE)
+        .spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap_or_else(|e| panic!("failed to build DES runtime: {e}"));
+            let outcome = rt.block_on(async move {
+                harn_vm::reset_thread_local_state();
+                let session = match bench.activate() {
+                    Ok(s) => s,
+                    Err(e) => return error_outcome(format!("activate testbench: {e}")),
+                };
+                let outcome = execute_run(
+                    &args.file,
+                    false,
+                    HashSet::new(),
+                    args.argv.clone(),
+                    Vec::new(),
+                    llm_mode,
+                    None,
+                    RunProfileOptions::default(),
+                )
+                .await;
+                finalize_session(outcome, session, &args)
+            });
+            let _ = tx.send(outcome);
+        })
+        .expect("spawn DES thread");
+    tokio::task::spawn_blocking(move || {
+        rx.recv()
+            .unwrap_or_else(|_| error_outcome("DES runtime thread panicked".to_string()))
+    })
+    .await
+    .unwrap_or_else(|e| error_outcome(format!("DES runtime blocking task failed: {e:?}")))
+}
+
+fn build_llm_mode(args: &TestBenchRunArgs) -> Result<CliLlmMockMode, String> {
+    match (&args.llm_fixture, &args.llm_record) {
+        (Some(_), Some(_)) => Err("--llm-fixture and --llm-record are mutually exclusive".into()),
+        (Some(path), None) => Ok(CliLlmMockMode::Replay {
+            fixture_path: PathBuf::from(path),
+        }),
+        (None, Some(path)) => Ok(CliLlmMockMode::Record {
+            fixture_path: PathBuf::from(path),
+        }),
+        (None, None) => Ok(CliLlmMockMode::Off),
+    }
+}
+
+fn finalize_session(
+    outcome: RunOutcome,
+    session: harn_vm::testbench::TestbenchSession,
+    args: &TestBenchRunArgs,
+) -> RunOutcome {
     let finalize = match session.finalize() {
         Ok(f) => f,
         Err(error) => return append_error(outcome, format!("finalize testbench: {error}")),
     };
-
     let mut outcome = outcome;
     if matches!(args.network.as_str(), "deny") {
         outcome
@@ -140,6 +237,7 @@ async fn replay_args(args: TestBenchReplayArgs) -> RunOutcome {
         allow_host: Vec::new(),
         emit_diff: None,
         emit_tape: args.emit_tape.clone(),
+        runtime: "paused-tokio".to_string(),
         argv: args.argv.clone(),
     };
     run_args(derived).await
@@ -191,6 +289,7 @@ async fn fidelity_args(args: TestBenchFidelityArgs) -> RunOutcome {
                 allow_host: Vec::new(),
                 emit_diff: None,
                 emit_tape: Some(replay_tape_path.to_string_lossy().into_owned()),
+                runtime: "paused-tokio".to_string(),
                 argv: args.argv.clone(),
             };
             let inner = run_args(derived).await;

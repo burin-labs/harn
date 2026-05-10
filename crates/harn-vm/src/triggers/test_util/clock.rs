@@ -50,7 +50,9 @@ pub struct ClockOverrideGuard;
 
 impl Drop for ClockOverrideGuard {
     fn drop(&mut self) {
-        MOCK_CLOCK_STACK.with(|slot| {
+        // `try_with` handles the case where TLS is already being torn down
+        // at process exit, which causes a panic if accessed via `with`.
+        let _ = MOCK_CLOCK_STACK.try_with(|slot| {
             slot.borrow_mut().pop();
         });
     }
