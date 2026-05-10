@@ -210,6 +210,13 @@ fi
 echo "Running a quick workspace build check..."
 cargo check --workspace
 
+# macOS-only: sign any locally-built harn binaries with the team Developer
+# ID Application identity so Gatekeeper doesn't pop up "Verifying harn..."
+# when agents in fresh worktrees launch them. No-op on non-macOS or when
+# the cert isn't in the user's login keychain (the script self-skips with
+# a hint pointing at the team .p12 in 1Password).
+./scripts/sign_local_macos.sh
+
 echo ""
 echo "Dev setup complete."
 echo "Suggested next commands:"

@@ -100,6 +100,9 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          # Used by `gh release view` in the no-drift branch below to
+          # confirm the existing release artifact actually shipped.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           CARGO_VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
@@ -135,7 +138,22 @@ jobs:
             echo "::notice::Cargo.toml=$CARGO_VERSION ahead of latest tag $LATEST_TAG → finalize needed."
           else
             DRIFT=false
-            echo "::notice::Cargo.toml=$CARGO_VERSION matches latest tag $LATEST_TAG → no-op."
+            # No drift on push-to-main: tag was already published by the
+            # tag-push trigger of this workflow (or by the build-release-
+            # binaries.yml tag trigger for the binaries). Confirm the
+            # release artifact actually shipped — a clear "already
+            # published" notice reads better than an unexplained
+            # "Publish release: skipped" job in the run UI.
+            if [[ "$EVENT_NAME" == "push" ]]; then
+              ASSET_COUNT="$(gh release view "$LATEST_TAG" --json assets --jq '.assets | length' 2>/dev/null || echo 0)"
+              if (( ASSET_COUNT >= 5 )); then
+                echo "::notice::$LATEST_TAG already published — $ASSET_COUNT assets on https://github.com/$GITHUB_REPOSITORY/releases/tag/$LATEST_TAG. Publish job will skip; this is the intended behavior under tag-first publishing."
+              else
+                echo "::warning::$LATEST_TAG only has $ASSET_COUNT release assets (expected ≥5). The tag-push trigger of build-release-binaries.yml may have failed — re-fire it manually if so."
+              fi
+            else
+              echo "::notice::Cargo.toml=$CARGO_VERSION matches latest tag $LATEST_TAG → no-op."
+            fi
           fi
           PUBLISH_REF=main
           if [[ "$EVENT_NAME" == "workflow_dispatch" && "$DRIFT" == "false" && -n "$LATEST_TAG" ]]; then

@@ -1,4 +1,4 @@
-.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast conformance protocol-conformance replay-oracle bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-bindings gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec lint-test-patterns check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression
+.PHONY: setup install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast conformance protocol-conformance replay-oracle bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-bindings gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec lint-test-patterns check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -18,15 +18,23 @@ install-hooks:
 configure-merge-drivers:
 	./scripts/configure_merge_drivers.sh
 
-# Build the harn binary. On macOS, ad-hoc signs it so Gatekeeper skips
-# the "Verifying harn..." dialog on first run.
+# Build the harn binary. On macOS, signs it (Developer ID Application if
+# the team cert is in the login keychain, ad-hoc otherwise) so Gatekeeper
+# skips the "Verifying harn..." dialog on first run. Single source of
+# truth: scripts/sign_local_macos.sh.
 build:
 	cargo build
-	@if [ "$$(uname -s)" = "Darwin" ]; then codesign -s - -f target/debug/harn 2>/dev/null || true; fi
+	@HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh
 
 build-release:
 	cargo build --release
-	@if [ "$$(uname -s)" = "Darwin" ]; then codesign -s - -f target/release/harn 2>/dev/null || true; fi
+	@HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh
+
+# Re-sign already-built harn binaries without rebuilding. Useful after
+# pulling, switching worktrees, or any path that touched target/ without
+# going through `make build` (e.g. `cargo run` with sccache).
+sign-local:
+	./scripts/sign_local_macos.sh
 
 # Format all code
 fmt:
