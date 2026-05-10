@@ -582,6 +582,32 @@ pub enum AgentEvent {
         tool_name: String,
         audit: serde_json::Value,
     },
+    /// Emitted by `std/cache::with_cache` (both the generic and LLM
+    /// forms) when a cached lookup returns a hit. Carries the
+    /// content-addressed key, the backend that served the value, and a
+    /// `metrics` block with the cost-moat receipts the persona value
+    /// ledger (harn-cloud#58) and crystallization receipts read:
+    /// `model_calls_avoided`, plus `tokens_saved` / `latency_saved_ms`
+    /// when the cached envelope carried `usage` / `latency_ms`.
+    CacheHit {
+        session_id: String,
+        key: String,
+        backend: String,
+        namespace: String,
+        payload: serde_json::Value,
+    },
+    /// Paired with `CacheHit`. Emitted on the miss path when the
+    /// fresh result is stored. `payload.metrics.compute_ms` carries
+    /// the wall-clock cost of the underlying computation, which
+    /// callers can feed back as `estimate.latency_saved_ms` on the
+    /// next hit.
+    CacheMiss {
+        session_id: String,
+        key: String,
+        backend: String,
+        namespace: String,
+        payload: serde_json::Value,
+    },
 }
 
 impl AgentEvent {
@@ -613,7 +639,9 @@ impl AgentEvent {
             | Self::HitlResolved { session_id, .. }
             | Self::LoopControlDecision { session_id, .. }
             | Self::AgentLoopStallWarning { session_id, .. }
-            | Self::ToolCallAudit { session_id, .. } => session_id,
+            | Self::ToolCallAudit { session_id, .. }
+            | Self::CacheHit { session_id, .. }
+            | Self::CacheMiss { session_id, .. } => session_id,
         }
     }
 }

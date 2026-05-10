@@ -3,3 +3,6 @@ second.ok=true
 byte_identical=true
 mock_calls=1
 after_tool_call_mock_calls=2
+misses=1
+hits=1
+hit.tokens_saved=18

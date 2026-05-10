@@ -102,22 +102,29 @@ fn __llm_handler_should_skip_cache(prompt, system, opts) -> bool {
 }
 
 fn __llm_handler_cache_options(opts) -> dict {
-  var ttl = opts?.ttl
-  if ttl == nil && opts?.ttl_seconds == nil && opts?.max_age_seconds == nil {
-    ttl = "10m"
+  // LLM caches default to a 10-minute TTL when the caller has not supplied
+  // any TTL-equivalent. Deterministic builtins set their own.
+  var cache_opts = {store: opts?.store ?? "llm.with_cache"}
+  if opts?.ttl != nil {
+    cache_opts = cache_opts + {ttl: opts.ttl}
+  } else if opts?.ttl_seconds == nil && opts?.max_age_seconds == nil {
+    cache_opts = cache_opts + {ttl: "10m"}
   }
-  return {
-    store: opts?.store ?? "llm.with_cache",
-    backend: opts?.backend,
-    namespace: opts?.namespace,
-    name: opts?.name,
-    path: opts?.path,
-    cache_dir: opts?.cache_dir,
-    ttl: ttl,
-    ttl_seconds: opts?.ttl_seconds,
-    max_age_seconds: opts?.max_age_seconds,
-    max_entries: opts?.max_entries ?? 256,
+  for key in [
+    "backend",
+    "namespace",
+    "name",
+    "path",
+    "cache_dir",
+    "ttl_seconds",
+    "max_age_seconds",
+    "max_entries",
+  ] {
+    if opts?[key] != nil {
+      cache_opts = cache_opts + {[key]: opts[key]}
+    }
   }
+  return cache_opts
 }
 
 fn __safe_invoke(next, call) {
@@ -669,13 +676,15 @@ pub fn llm_cache_key(prompt, system = nil, options = nil) -> string {
  *   with_cache(next, opts?) -> caller     (composable middleware)
  *
  * Both forms share the same on-disk cache namespaced under
- * `llm.with_cache` by default. The caller-wrapper form keys on the
- * canonical LLM cache key derived from `call.prompt`, `call.system`, and
- * `call.opts`, and emits `cache.hit` / `cache.miss` events on the agent
- * event tape when the call carries a session_id. On hits, the wrapper
- * also records "model calls avoided" + "tokens saved" + "latency saved"
- * receipts pulled from the cached envelope so the persona value ledger
- * (harn-cloud#58) and crystallization receipts can read them back.
+ * `llm.with_cache` by default and key on the canonical
+ * `llm_cache_key(prompt, system, opts)` sha256. When a session_id is
+ * available — `call.turn.session_id` for the caller form,
+ * `options.session_id` for the direct form — both forms emit
+ * `cache_hit` / `cache_miss` events on the agent event tape. On hits,
+ * the wrapper records "model calls avoided" + "tokens saved" +
+ * "latency saved" receipts pulled from the cached envelope so the
+ * persona value ledger (harn-cloud#58) and crystallization receipts
+ * can read them back.
  */
 pub fn with_cache(first, second = nil, third = nil) {
   if __llm_handler_is_callable(first) {
@@ -687,55 +696,69 @@ pub fn with_cache(first, second = nil, third = nil) {
         return __safe_invoke(next, call)
       }
       let merged_opts = opts + cfg
-      let key = llm_cache_key(call?.prompt, call?.system, merged_opts)
-      let cache_options = __llm_handler_cache_options(merged_opts)
-      let session_id = to_string(call?.turn?.session_id ?? "")
-      let cached = cache_get(key, cache_options)
-      if cached.hit {
-        __with_cache_emit_hit(session_id, key, cached, merged_opts)
-        return cached.value
-      }
-      let started_ms = monotonic_ms()
-      let result = __safe_invoke(next, call)
-      let compute_ms = monotonic_ms() - started_ms
-      if __llm_handler_should_store_result(result) {
-        cache_put(key, result, cache_options)
-        __with_cache_emit_miss(session_id, key, cached, compute_ms)
-      }
-      return result
+      let session_id = to_string(call?.turn?.session_id ?? merged_opts?.session_id ?? "")
+      return __with_cache_run(
+        call?.prompt,
+        call?.system,
+        merged_opts,
+        session_id,
+        fn() { return __safe_invoke(next, call) },
+        __llm_handler_should_store_result,
+      )
     }
   }
   let prompt = first
   let system = second
   let opts = third ?? {}
+  let session_id = to_string(opts?.session_id ?? "")
+  return __with_cache_run(
+    prompt,
+    system,
+    opts,
+    session_id,
+    fn() { return llm_call(prompt, system, opts) },
+    fn(result) { return __llm_handler_should_store_direct_result(result) },
+  )
+}
+
+fn __with_cache_run(prompt, system, opts, session_id, compute, should_store) {
   if __llm_handler_should_skip_cache(prompt, system, opts) {
-    return llm_call(prompt, system, opts)
+    return compute()
   }
   let key = llm_cache_key(prompt, system, opts)
   let cache_options = __llm_handler_cache_options(opts)
   let cached = cache_get(key, cache_options)
   if cached.hit {
+    __with_cache_emit_hit(session_id, key, cached, opts)
     return cached.value
   }
-  let result = llm_call(prompt, system, opts)
-  cache_put(key, result, cache_options)
+  let started_ms = monotonic_ms()
+  let result = compute()
+  let compute_ms = monotonic_ms() - started_ms
+  if should_store(result) {
+    cache_put(key, result, cache_options)
+    __with_cache_emit_miss(session_id, key, cached, compute_ms)
+  }
   return result
 }
 
-fn __llm_handler_should_store_result(result) -> bool {
+fn __llm_handler_should_store_direct_result(result) -> bool {
+  // Direct-call form returns the raw llm_call envelope; cache anything
+  // that is not an error envelope (i.e. has no `status` field).
   if type_of(result) != "dict" {
     return false
   }
+  return !contains(result.keys(), "status")
+}
+
+fn __llm_handler_should_store_result(result) -> bool {
   // The caller seam returns `{ok: true, value}` on success and
   // `{ok: false, status: ...}` on failure. Only cache successes; failure
   // envelopes are transient retry state, not durable answers.
-  let keys = result.keys()
-  if contains(keys, "ok") {
-    return result?.ok ?? false
+  if type_of(result) != "dict" {
+    return false
   }
-  // Pre-existing direct-call shape: cache anything that is not an error
-  // envelope (i.e. has no `status` field).
-  return !contains(keys, "status")
+  return result?.ok ?? false
 }
 
 fn __with_cache_hit_metrics_from_envelope(cached_value) -> dict {
@@ -776,7 +799,7 @@ fn __with_cache_emit_hit(session_id, key, cached, opts) {
   }
   __emit_event(
     session_id,
-    "cache.hit",
+    "cache_hit",
     {
       key: key,
       backend: cached?.backend ?? "",
@@ -794,7 +817,7 @@ fn __with_cache_emit_miss(session_id, key, cached, compute_ms) {
   }
   __emit_event(
     session_id,
-    "cache.miss",
+    "cache_miss",
     {
       key: key,
       backend: cached?.backend ?? "",

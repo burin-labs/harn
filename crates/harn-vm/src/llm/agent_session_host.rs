@@ -1200,6 +1200,20 @@ fn build_agent_event(
                 .cloned()
                 .unwrap_or(serde_json::Value::Null),
         }),
+        "cache_hit" => Ok(AgentEvent::CacheHit {
+            session_id: session_id.to_string(),
+            key: get_string("key"),
+            backend: get_string("backend"),
+            namespace: get_string("namespace"),
+            payload: payload.clone(),
+        }),
+        "cache_miss" => Ok(AgentEvent::CacheMiss {
+            session_id: session_id.to_string(),
+            key: get_string("key"),
+            backend: get_string("backend"),
+            namespace: get_string("namespace"),
+            payload: payload.clone(),
+        }),
         other => Err(VmError::Runtime(format!(
             "{HOST_AGENT_EMIT_EVENT}: unsupported event type `{other}`"
         ))),
