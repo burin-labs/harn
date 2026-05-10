@@ -10,6 +10,20 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Python and Go protocol bindings.** Extended
+  `harn dump-protocol-artifacts` to emit a stdlib-only Python 3.9+ module
+  (`spec/protocol-artifacts/python/harn_protocol.py`) and a Go package
+  (`spec/protocol-artifacts/go/harnprotocol/`) mirroring the existing
+  TypeScript and Swift surface: ACP session updates, JSON-RPC envelopes,
+  Harn tool lifecycle metadata, A2A task structures, and MCP tool/resource
+  records. `manifest.json` now exposes a `bindings` block with per-language
+  stability and module-path metadata so downstream consumers (Burin Code,
+  Harn Cloud, Python integrators, Go workers) can detect generator/runtime
+  mismatch without bespoke compatibility checks. A new `make check-bindings`
+  target round-trips a checked-in JSON fixture
+  (`spec/protocol-artifacts/fixtures/round_trip.json`) through both bindings
+  and runs in CI to catch wire-vocabulary drift before downstream consumers
+  see it. (#1429)
 - **Workflow-authoring skill pack and small-model evals.** Added
   `examples/skill-packs/workflow-authoring/` with a top-level `SKILL.md`,
   small-model prompting guide, validated PR-monitor and PR-repair recipe

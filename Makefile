@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast conformance protocol-conformance replay-oracle bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec lint-test-patterns check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression
+.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast conformance protocol-conformance replay-oracle bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-bindings gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec lint-test-patterns check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance protocol-conformance replay-oracle check-highlight check-protocol-artifacts check-language-spec check-trigger-quickref check-provider-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart lint-test-patterns check-receipt-structs portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance protocol-conformance replay-oracle check-highlight check-protocol-artifacts check-bindings check-language-spec check-trigger-quickref check-provider-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart lint-test-patterns check-receipt-structs portal-check
 
 check: all
 
@@ -213,6 +213,25 @@ check-protocol-artifacts:
 	@echo "=== Checking Harn protocol artifacts are up to date ==="
 	@cargo run --quiet -p harn-cli -- dump-protocol-artifacts --check
 	@echo "    Harn protocol artifacts OK."
+
+# Round-trip the published JSON fixture through the Python and Go protocol
+# bindings to catch wire-vocabulary drift before downstream consumers vendor
+# the artifacts. Skips the Go half if the toolchain is missing so contributors
+# without Go installed locally are not blocked, but CI requires both.
+check-bindings:
+	@echo "=== Checking Harn protocol bindings round-trip the published fixture ==="
+	@python3 -m py_compile spec/protocol-artifacts/python/harn_protocol.py
+	@python3 scripts/check_protocol_bindings.py
+	@if command -v go >/dev/null 2>&1; then \
+		stale=$$(gofmt -l spec/protocol-artifacts/go/harnprotocol); \
+		if [ -n "$$stale" ]; then \
+			echo "error: gofmt would change:"; echo "$$stale"; exit 1; \
+		fi; \
+		(cd spec/protocol-artifacts/go/harnprotocol && go vet ./... && go test ./...); \
+	else \
+		echo "    skipping go round-trip (go not installed)"; \
+	fi
+	@echo "    Harn protocol bindings OK."
 
 # Regenerate docs/src/language-spec.md from spec/HARN_SPEC.md (the
 # canonical authoring source). Mirrors what release_gate.sh audit's

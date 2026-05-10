@@ -162,6 +162,26 @@
     ]
   },
   "artifactVersion": "0.8.4",
+  "bindings": {
+    "go": {
+      "artifact": "go/harnprotocol/harnprotocol.go",
+      "modulePath": "github.com/burin-labs/harn/spec/protocol-artifacts/go/harnprotocol",
+      "stability": "stable"
+    },
+    "python": {
+      "artifact": "python/harn_protocol.py",
+      "minimumPythonVersion": "3.9",
+      "stability": "stable"
+    },
+    "swift": {
+      "artifact": "HarnProtocol.swift",
+      "stability": "stable"
+    },
+    "typescript": {
+      "artifact": "harn-protocol.ts",
+      "stability": "stable"
+    }
+  },
   "checkCommand": "make check-protocol-artifacts",
   "generatedBy": "harn dump-protocol-artifacts",
   "mcp": {
