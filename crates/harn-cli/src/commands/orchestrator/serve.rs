@@ -48,6 +48,7 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), OrchestratorE
                 .unwrap_or(manifest.orchestrator.pumps.max_outstanding),
         },
         log_format: Some(log_format(args.log_format)),
+        clock: harn_vm::clock::RealClock::arc(),
     };
 
     let harness = OrchestratorHarness::start(config)

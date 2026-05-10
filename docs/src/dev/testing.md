@@ -21,6 +21,63 @@ enforces that new test code does not reintroduce these patterns.
 
 ## Approved patterns
 
+### `harn_clock::Clock` injection (preferred for runtime code)
+
+The unified `harn_clock::Clock` trait is the canonical way to read time and
+sleep in Harn runtime code. Cron, the trigger dispatcher, the stdlib
+`now_ms` / `monotonic_ms` / `sleep_ms` builtins, the `OrchestratorHarness`,
+and (via re-export) every downstream crate route through it.
+
+```rust
+use std::sync::Arc;
+use std::time::Duration;
+use harn_clock::Clock;
+
+struct Worker {
+    clock: Arc<dyn Clock>,
+}
+
+impl Worker {
+    async fn poll_until(&self, deadline_ms: i64) {
+        while self.clock.now_utc().unix_timestamp_nanos() / 1_000_000 < deadline_ms {
+            self.clock.sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+```
+
+Tests substitute `harn_clock::PausedClock` to drive virtual time
+deterministically — see the `MockClock` section below for the existing trigger
+test surface or use `PausedClock` directly:
+
+```rust
+use harn_clock::{Clock, PausedClock};
+
+#[tokio::test]
+async fn worker_resumes_after_advance() {
+    let clock = PausedClock::new(time::OffsetDateTime::now_utc());
+    let worker = Worker { clock: clock.clone() as Arc<dyn Clock> };
+    let task = tokio::spawn(async move { worker.poll_until(/* future ms */ ...).await });
+    clock.advance(Duration::from_secs(60));
+    task.await.unwrap();
+}
+```
+
+`PausedClock` works in both `current_thread` and `multi_thread` runtimes and
+does not require `start_paused = true`. `RecordedClock` wraps any inner clock
+and captures every observation to a `ClockEventLog`, which is the substrate
+the recording/replay child issue (#1441) builds on.
+
+For runtime code that needs `tokio::time::sleep` directly (e.g. `timeout`),
+combine `PausedClock` with `tokio::time::pause()` so both surfaces freeze
+together.
+
+The lint at `scripts/lint_test_patterns.sh` forbids new wall-clock reads in
+non-test files under `crates/harn-vm/src/` and `crates/harn-cli/src/` outside
+the explicit `NON_TEST_WALL_CLOCK_ALLOWLIST`. The allowlist freezes existing
+sites as gradual cleanup; new files must accept `Arc<dyn Clock>` instead of
+calling `OffsetDateTime::now_utc()` / `Instant::now()` directly.
+
 ### `tokio::time::pause()` and `advance()`
 
 For tests that need to simulate time passing, use Tokio's paused-time runtime.
@@ -87,6 +144,18 @@ For tests that need the orchestrator running but do not need real subprocesses,
 use `OrchestratorHarness` from the test-util crate. It boots the orchestrator
 in-process with an injectable clock and exposes event subscriptions so tests can
 wait deterministically.
+
+Pass a custom clock via `OrchestratorConfig::with_clock(...)`:
+
+```rust
+let clock = harn_vm::clock::PausedClock::new(time::OffsetDateTime::now_utc());
+let config = OrchestratorConfig::for_test(manifest, state_dir).with_clock(clock.clone());
+let harness = OrchestratorHarness::start(config).await?;
+clock.advance(Duration::from_secs(60));
+```
+
+Cron and trigger-dispatch logic inside the harness then run on the injected
+virtual clock.
 
 ### `MockProcess`
 

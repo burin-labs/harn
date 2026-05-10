@@ -1,0 +1,18 @@
+[package]
+name = "harn-clock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Unified time + sleep abstraction for the Harn runtime, CLI, triggers, cron, and harn-cloud."
+
+[dependencies]
+async-trait = "0.1"
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }
+time = { version = "0.3", features = ["formatting", "parsing", "serde", "macros"] }
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "test-util", "time"] }

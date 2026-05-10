@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
+use harn_clock::{Clock, RealClock};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use time::OffsetDateTime;
@@ -19,7 +20,7 @@ use crate::triggers::{
     DEFAULT_INBOX_RETENTION_DAYS,
 };
 
-use self::scheduler::{run_tick_loop, Clock, CronSchedule, RealClock, ShutdownSignal, TickHandler};
+use self::scheduler::{run_tick_loop, CronSchedule, ShutdownSignal, TickHandler};
 use self::state::{CronStateStore, PersistedCronState};
 
 pub(crate) mod scheduler;
@@ -54,10 +55,12 @@ pub struct CronConnector {
 
 impl CronConnector {
     pub fn new() -> Self {
-        Self::with_clock(Arc::new(RealClock))
+        Self::with_clock(Arc::new(RealClock::new()))
     }
 
-    pub(crate) fn with_clock(clock: Arc<dyn Clock>) -> Self {
+    /// Build a connector backed by an injected clock. Production callers use
+    /// [`harn_clock::RealClock`]; tests use [`harn_clock::PausedClock`].
+    pub fn with_clock(clock: Arc<dyn Clock>) -> Self {
         Self {
             provider_id: ProviderId::from("cron"),
             kinds: vec![TriggerKind::from("cron")],
@@ -177,7 +180,7 @@ impl Connector for CronConnector {
                 .load(&trigger.trigger_id)
                 .await?
                 .map(|state| state.last_fired_at);
-            let now = clock.now();
+            let now = clock.now_utc();
             let catchup_ticks = match trigger.catchup_mode {
                 CatchupMode::Skip => Vec::new(),
                 CatchupMode::All => trigger.schedule.due_ticks_between(last_fired, now)?,
