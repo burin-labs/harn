@@ -18,6 +18,15 @@ condensed series summaries instead of full per-patch history.
   pipeline. A new `crates/harn-cli/tests/workflow_authoring_eval.rs`
   regression gate fails CI when a recipe golden or a case's structural
   assertions drift.
+- **Workflow authoring quickstart.** New tutorial at
+  `docs/src/workflow-authoring-quickstart.md` walks `validate` →
+  `preview` → `run` → connector status/setup-plan → supervisor in one
+  copy-paste path with no paid credentials. Backed by checked-in
+  fixtures (`docs/fixtures/workflow-bundles/quickstart-{minimal,agentic}.bundle.json`,
+  `docs/fixtures/connect-demo/`) and a CI gate
+  (`make check-docs-workflow-quickstart`) that pins the deterministic
+  bundle digest, executed-node sequence, and connector-status shape so
+  the snippets cannot drift.
 
 ## v0.8.4
 

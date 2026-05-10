@@ -1,0 +1,9 @@
+/**
+ * Placeholder connector module for the quickstart docs fixture.
+ * Real connectors implement webhook/poll handlers; this stub only
+ * satisfies the manifest's `connector = { harn = "./demo_connector.harn" }`
+ * pointer so `harn connect status` can resolve the provider declaration.
+ */
+pipeline default() {
+  return "demo connector placeholder"
+}

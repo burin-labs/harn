@@ -1,0 +1,26 @@
+[package]
+name = "quickstart-connect-demo"
+
+# A pretend "demo" connector that lets the docs quickstart exercise
+# `harn connect status --json` and `harn connect setup-plan --json`
+# without binding to a real provider or asking the reader to run an
+# OAuth flow. Real connectors live in their own packages — see
+# `conformance/fixtures/connectors/contract-v1/` for the shape.
+
+[[providers]]
+id = "demo"
+connector = { harn = "./demo_connector.harn" }
+
+[providers.setup]
+auth_type = "api-key"
+flow = "cli"
+required_scopes = ["demo:read"]
+required_secrets = ["api_token"]
+setup_command = ["harn", "connect", "api-key", "--connector", "demo", "--secret-id", "demo/api-token", "--scopes", "demo:read"]
+validation_command = ["harn", "connect", "status", "--connector", "demo", "--json"]
+
+[providers.setup.recovery]
+missing_auth = "Run the setup command above to store a demo API key. The fixture is local-only — any non-empty value works."
+missing_scopes = "Re-run the setup command and pass --scopes demo:read."
+expired_credentials = "Re-run the setup command to overwrite the stored secret."
+revoked_credentials = "Run `harn connect --revoke demo` and re-run setup."

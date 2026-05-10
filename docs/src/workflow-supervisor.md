@@ -4,6 +4,10 @@
 automation management. It wraps the existing orchestrator runtime instead of
 creating a second scheduler or queue implementation.
 
+For a step-by-step walkthrough that introduces validation, preview,
+local runs, connector status, and supervisor control commands together,
+see the [workflow authoring quickstart](./workflow-authoring-quickstart.md).
+
 The supervisor uses the same manifest and EventLog as `harn orchestrator`:
 
 ```bash

@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "id": "quickstart-minimal",
+  "name": "Quickstart minimal",
+  "version": "1.0.0",
+  "triggers": [
+    {
+      "id": "manual-start",
+      "kind": "manual",
+      "node_id": "summarize"
+    }
+  ],
+  "workflow": {
+    "_type": "workflow_graph",
+    "id": "quickstart_minimal_workflow",
+    "name": "Quickstart minimal",
+    "version": 1,
+    "entry": "summarize",
+    "nodes": {
+      "summarize": {
+        "id": "summarize",
+        "kind": "action",
+        "task_label": "Summarize input"
+      },
+      "notify": {
+        "id": "notify",
+        "kind": "notification",
+        "task_label": "Notify completion"
+      }
+    },
+    "edges": [
+      {
+        "from": "summarize",
+        "to": "notify"
+      }
+    ]
+  },
+  "policy": {
+    "autonomy_tier": "act_auto",
+    "retry": {
+      "max_attempts": 1,
+      "backoff": "none"
+    },
+    "catchup": {
+      "mode": "none"
+    }
+  },
+  "receipts": {
+    "run_id": "bundle_run_quickstart_minimal_fixture"
+  }
+}

@@ -205,4 +205,6 @@ harn mcp login https://mcp.notion.com/mcp --scope "read write"
 - **[Why Harn?](./why-harn.md)** -- What problems Harn solves
 - **[Language basics](./language-basics.md)** -- Syntax, types, control flow
 - **[LLM calls and agent loops](./llm-and-agents.md)** -- Calling models and building agents
+- **[Workflow authoring quickstart](./workflow-authoring-quickstart.md)** -- Author, validate, preview, run, and
+  supervise a portable workflow bundle without paid credentials
 - **[Cookbook](./cookbook.md)** -- Practical recipes and patterns
