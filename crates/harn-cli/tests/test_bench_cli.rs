@@ -531,3 +531,188 @@ fn wasi_toolchain_runs_module_with_virtualized_clock() {
         "non-WASI fallback should attempt the host spawn and fail there"
     );
 }
+
+// ── DES runtime mode (#1444) ────────────────────────────────────────────────
+
+/// Run a script inside a single-threaded `current_thread` Tokio runtime with
+/// the testbench mocks active. Mirrors `run_under_testbench` but substitutes
+/// `new_current_thread` for `new_multi_thread` to validate the DES mode's
+/// bit-exact determinism property.
+fn run_under_des_runtime<F>(cwd: PathBuf, script: PathBuf, configure: F) -> RunOutcome
+where
+    F: FnOnce() -> Testbench + Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::Builder::new()
+        .name("harn-des-test".to_string())
+        .stack_size(harn_cli::CLI_RUNTIME_STACK_SIZE)
+        .spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build DES runtime");
+            let outcome = rt.block_on(async move {
+                let _env_guard = env_lock::lock_env().lock().await;
+                let _cwd_guard = cwd_lock::lock_cwd_async().await;
+                harn_vm::reset_thread_local_state();
+                let original_cwd = std::env::current_dir().ok();
+                std::env::set_current_dir(&cwd).expect("set cwd");
+
+                let bench = configure();
+                let session = bench.activate().expect("activate testbench");
+                let outcome = execute_run(
+                    &script.to_string_lossy(),
+                    false,
+                    HashSet::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    CliLlmMockMode::Off,
+                    None,
+                    RunProfileOptions::default(),
+                )
+                .await;
+                let _ = session.finalize();
+
+                if let Some(prev) = original_cwd {
+                    let _ = std::env::set_current_dir(prev);
+                }
+                outcome
+            });
+            let _ = tx.send(outcome);
+        })
+        .expect("spawn DES test thread");
+    rx.recv().expect("DES runtime completed")
+}
+
+#[test]
+fn des_runtime_paused_sleep_returns_immediately() {
+    // Acceptance criterion from #1444: the DES runtime drives a script
+    // containing sleep() under a paused mock clock. The sleep must complete
+    // immediately (no wall-clock wait) and virtual time must advance correctly.
+    let temp = TempDir::new().unwrap();
+    let script = write_file(
+        temp.path(),
+        "des_sleep.harn",
+        r#"
+pipeline default() {
+  mock_time(1000000)
+  let start = now_ms()
+  sleep(86400000)
+  let delta = now_ms() - start
+  println("delta=${delta}")
+}
+"#,
+    );
+    let outcome = run_under_des_runtime(temp.path().to_path_buf(), script, move || {
+        Testbench::builder().paused_clock_at_ms(1_000_000).build()
+    });
+    assert_eq!(outcome.exit_code, 0, "stderr: {}", outcome.stderr);
+    assert!(
+        outcome.stdout.contains("delta=86400000"),
+        "expected 24h virtual advance, got: {}",
+        outcome.stdout
+    );
+}
+
+#[test]
+fn des_runtime_concurrent_agents_settle_byte_identical() {
+    // Acceptance criterion from #1444: running the same `parallel settle` script
+    // twice under the DES runtime produces bit-exact tapes across reruns.
+    let temp = TempDir::new().unwrap();
+    let script = write_file(
+        temp.path(),
+        "des_settle.harn",
+        r#"
+pipeline default() {
+  mock_time(1000000)
+  let outcome = parallel settle [1, 2, 3, 4, 5] { item ->
+    sleep(item * 100)
+    item * item
+  }
+  println("succeeded=${outcome.succeeded}")
+  println("failed=${outcome.failed}")
+}
+"#,
+    );
+    let tape_a = temp.path().join("a.tape");
+    let tape_b = temp.path().join("b.tape");
+    let script_b = script.clone();
+    let tape_a_clone = tape_a.clone();
+    let tape_b_clone = tape_b.clone();
+    let ws_a = temp.path().to_path_buf();
+    let ws_b = temp.path().to_path_buf();
+
+    let outcome_a = run_under_des_runtime(ws_a, script, move || {
+        Testbench::builder()
+            .paused_clock_at_ms(1_000_000)
+            .emit_tape(tape_a_clone)
+            .build()
+    });
+    assert_eq!(outcome_a.exit_code, 0, "run A stderr: {}", outcome_a.stderr);
+
+    let outcome_b = run_under_des_runtime(ws_b, script_b, move || {
+        Testbench::builder()
+            .paused_clock_at_ms(1_000_000)
+            .emit_tape(tape_b_clone)
+            .build()
+    });
+    assert_eq!(outcome_b.exit_code, 0, "run B stderr: {}", outcome_b.stderr);
+
+    assert!(outcome_a.stdout.contains("succeeded=5"));
+    assert!(outcome_b.stdout.contains("succeeded=5"));
+
+    let tape_a_loaded = EventTape::load(&tape_a).expect("load tape A");
+    let tape_b_loaded = EventTape::load(&tape_b).expect("load tape B");
+
+    let report = compare(&tape_a_loaded, &tape_b_loaded, FidelityMode::ByteIdentical);
+    assert!(
+        report.is_byte_identical(),
+        "DES mode must produce bit-exact tapes; divergences: {:#?}",
+        report.divergences
+    );
+}
+
+#[test]
+fn des_runtime_output_matches_paused_tokio() {
+    // Smoke: the DES runtime produces the same user-visible output as the
+    // default paused-tokio runtime for a deterministic script.
+    let temp = TempDir::new().unwrap();
+    let script = write_file(
+        temp.path(),
+        "fidelity_smoke.harn",
+        r#"
+pipeline default() {
+  mock_time(1767225600000)
+  let t0 = now_ms()
+  advance_time(5000)
+  let t1 = now_ms()
+  println("delta=${t1 - t0}")
+}
+"#,
+    );
+    let script_b = script.clone();
+    let ws_a = temp.path().to_path_buf();
+    let ws_b = temp.path().to_path_buf();
+
+    // Run under paused-tokio (default).
+    let paused_outcome = run_under_testbench(ws_a, script, move || {
+        Testbench::builder()
+            .paused_clock_at_ms(1_767_225_600_000)
+            .build()
+    });
+    assert_eq!(paused_outcome.exit_code, 0, "{}", paused_outcome.stderr);
+
+    // Run under DES (current_thread).
+    let des_outcome = run_under_des_runtime(ws_b, script_b, move || {
+        Testbench::builder()
+            .paused_clock_at_ms(1_767_225_600_000)
+            .build()
+    });
+    assert_eq!(des_outcome.exit_code, 0, "{}", des_outcome.stderr);
+
+    assert_eq!(
+        paused_outcome.stdout.trim(),
+        des_outcome.stdout.trim(),
+        "DES and paused-tokio must produce identical stdout"
+    );
+}
