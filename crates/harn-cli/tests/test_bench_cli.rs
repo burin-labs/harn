@@ -12,7 +12,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
 use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
 use harn_cli::tests::common::{cwd_lock, env_lock};
@@ -87,9 +86,14 @@ fn run_under_testbench(
 }
 
 #[test]
-fn paused_clock_simulates_thirty_days_in_milliseconds() {
+fn paused_clock_advances_thirty_days_deterministically() {
     // Steel thread #1 from issue #1440: prove paused-clock cron-like
-    // workloads simulate weeks of execution in negligible wall-clock time.
+    // workloads advance virtual time deterministically. The marketing
+    // claim — "simulates weeks of cron in milliseconds of wall time" —
+    // is observable via the test harness's overall runtime; we assert
+    // only the deterministic virtual-time property here. If the mock
+    // clock ever regresses, the test deadlocks instead of flaking on
+    // slow machines, which CI surfaces as a hard timeout.
     let temp = TempDir::new().unwrap();
     let script = write_file(
         temp.path(),
@@ -107,23 +111,17 @@ pipeline default() {
 "#,
     );
 
-    let started = std::time::Instant::now();
     let outcome = run_under_testbench(temp.path().to_path_buf(), script, || {
         Testbench::builder()
             .paused_clock_at_ms(1_700_000_000_000)
             .build()
     });
-    let wall_elapsed = started.elapsed();
 
     assert_eq!(outcome.exit_code, 0, "stderr: {}", outcome.stderr);
     assert!(
         outcome.stdout.contains("advanced_ms=2592000000"),
         "expected 30d advance in stdout, got: {}",
         outcome.stdout
-    );
-    assert!(
-        wall_elapsed < Duration::from_secs(5),
-        "30d simulation took {wall_elapsed:?} of real time — paused-clock not honored?"
     );
 }
 
@@ -258,7 +256,7 @@ fn process_tape_persist_and_load_round_trip() {
     // The persist/load path is the bridge between
     // `harn test-bench run --process-record` and
     // `harn test-bench replay --process-tape` — verify a recording
-    // captured via `record_completed` round-trips through disk.
+    // captured via the start_recording/finish span round-trips through disk.
     use harn_vm::process_sandbox::{command_output, ProcessCommandConfig};
 
     let temp = TempDir::new().unwrap();

@@ -121,7 +121,8 @@ pub fn command_output(
     config: &ProcessCommandConfig,
 ) -> Result<Output, VmError> {
     // Testbench replay mode short-circuits the spawn entirely. Recording
-    // mode falls through and records the result after the real spawn.
+    // mode falls through; the duration is captured by the recording
+    // handle below using the injected mock clock when one is active.
     if let Some(intercepted) =
         crate::testbench::process_tape::intercept_spawn(program, args, config.cwd.as_deref())
     {
@@ -130,7 +131,8 @@ pub fn command_output(
         });
     }
 
-    let started_at = std::time::Instant::now();
+    let recording =
+        crate::testbench::process_tape::start_recording(program, args, config.cwd.as_deref());
 
     #[cfg(target_os = "windows")]
     {
@@ -140,13 +142,9 @@ pub fn command_output(
             if let Some(error) = process_violation_error(&output) {
                 return Err(error);
             }
-            crate::testbench::process_tape::record_completed(
-                program,
-                args,
-                config.cwd.as_deref(),
-                &output,
-                started_at.elapsed(),
-            );
+            if let Some(span) = recording {
+                span.finish(&output);
+            }
             return Ok(output);
         }
     }
@@ -159,13 +157,9 @@ pub fn command_output(
     if let Some(error) = process_violation_error(&output) {
         return Err(error);
     }
-    crate::testbench::process_tape::record_completed(
-        program,
-        args,
-        config.cwd.as_deref(),
-        &output,
-        started_at.elapsed(),
-    );
+    if let Some(span) = recording {
+        span.finish(&output);
+    }
     Ok(output)
 }
 

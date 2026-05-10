@@ -197,7 +197,8 @@ pub fn active_tape() -> Option<Arc<ProcessTape>> {
 /// the call was satisfied by the tape; `None` means the caller should
 /// spawn a real subprocess. In record mode this returns `None` (the real
 /// subprocess will be spawned by the caller, and a follow-up call to
-/// [`record_completed`] should append the entry to the tape).
+/// [`start_recording`] / [`RecordingSpan::finish`] should append the
+/// entry to the tape).
 pub fn intercept_spawn(
     program: &str,
     args: &[String],
@@ -228,31 +229,57 @@ pub fn intercept_spawn(
     })
 }
 
-/// Append a recorded subprocess invocation to the active tape (if any).
-pub fn record_completed(
+/// Begin recording a subprocess invocation. Returns `Some(span)` when a
+/// tape is in record mode; `None` otherwise. The span captures the
+/// invocation's start time on the injected clock so [`RecordingSpan::finish`]
+/// can stamp the elapsed delta deterministically — under a paused mock
+/// clock the recording is virtual time, matching what replay will
+/// advance.
+pub fn start_recording(
     program: &str,
     args: &[String],
     cwd: Option<&Path>,
-    output: &Output,
-    duration: Duration,
-) {
-    let Some(tape) = active_tape() else {
-        return;
-    };
+) -> Option<RecordingSpan> {
+    let tape = active_tape()?;
     if !matches!(tape.mode(), ProcessTapeMode::Record) {
-        return;
+        return None;
     }
-    let entry = TapeEntry {
+    Some(RecordingSpan {
+        tape,
         program: program.to_string(),
         args: args.to_vec(),
         cwd: cwd.map(|p| p.to_string_lossy().into_owned()),
-        env: BTreeMap::new(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        exit_code: output.status.code().unwrap_or(-1),
-        duration_ms: duration.as_millis().min(u64::MAX as u128) as u64,
-    };
-    tape.record_entry(entry);
+        started_at: clock_mock::instant_now(),
+    })
+}
+
+/// Pending tape entry for a subprocess invocation that is currently
+/// running. Stamping the elapsed time happens at [`RecordingSpan::finish`]
+/// using the unified mock clock, so testbench callers see virtual time
+/// in their tapes.
+pub struct RecordingSpan {
+    tape: Arc<ProcessTape>,
+    program: String,
+    args: Vec<String>,
+    cwd: Option<String>,
+    started_at: clock_mock::ClockInstant,
+}
+
+impl RecordingSpan {
+    pub fn finish(self, output: &Output) {
+        let duration = clock_mock::instant_now().duration_since(self.started_at);
+        let entry = TapeEntry {
+            program: self.program,
+            args: self.args,
+            cwd: self.cwd,
+            env: BTreeMap::new(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            exit_code: output.status.code().unwrap_or(-1),
+            duration_ms: duration.as_millis().min(u64::MAX as u128) as u64,
+        };
+        self.tape.record_entry(entry);
+    }
 }
 
 #[cfg(unix)]
@@ -328,17 +355,17 @@ mod tests {
     fn record_mode_appends_completed_entries() {
         let tape = Arc::new(ProcessTape::recording());
         let _guard = install_process_tape(Arc::clone(&tape));
-        record_completed(
-            "echo",
-            &["hi".to_string()],
-            None,
-            &Output {
-                status: synthesize_status(0),
-                stdout: b"hi\n".to_vec(),
-                stderr: Vec::new(),
-            },
-            Duration::from_millis(7),
-        );
+        // Drive the recording span under a paused mock clock so the
+        // captured duration is deterministic — proves the duration
+        // capture honors the injected clock, not wall time.
+        let _clock = clock_mock::install_override(clock_mock::MockClock::at_wall_ms(0));
+        let span = start_recording("echo", &["hi".to_string()], None).expect("recording active");
+        clock_mock::advance(Duration::from_millis(7));
+        span.finish(&Output {
+            status: synthesize_status(0),
+            stdout: b"hi\n".to_vec(),
+            stderr: Vec::new(),
+        });
         let recorded = tape.recorded();
         assert_eq!(recorded.len(), 1);
         assert_eq!(recorded[0].stdout, "hi\n");
