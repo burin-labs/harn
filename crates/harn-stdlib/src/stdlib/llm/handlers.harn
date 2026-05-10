@@ -666,15 +666,44 @@ pub fn llm_cache_key(prompt, system = nil, options = nil) -> string {
  * with_cache supports both public cache forms:
  *
  *   with_cache(prompt, system?, options?) -> llm_call envelope
- *   with_cache(next, opts?) -> caller
+ *   with_cache(next, opts?) -> caller     (composable middleware)
  *
- * The caller-wrapper form remains a transparent middleware for now; direct
- * calls use the persistent runtime cache.
+ * Both forms share the same on-disk cache namespaced under
+ * `llm.with_cache` by default. The caller-wrapper form keys on the
+ * canonical LLM cache key derived from `call.prompt`, `call.system`, and
+ * `call.opts`, and emits `cache.hit` / `cache.miss` events on the agent
+ * event tape when the call carries a session_id. On hits, the wrapper
+ * also records "model calls avoided" + "tokens saved" + "latency saved"
+ * receipts pulled from the cached envelope so the persona value ledger
+ * (harn-cloud#58) and crystallization receipts can read them back.
  */
 pub fn with_cache(first, second = nil, third = nil) {
   if __llm_handler_is_callable(first) {
     let next = first
-    return { call -> return __safe_invoke(next, call) }
+    let cfg = __opts_dict(second)
+    return { call ->
+      let opts = __opts_dict(call?.opts)
+      if __llm_handler_should_skip_cache(call?.prompt, call?.system, opts) {
+        return __safe_invoke(next, call)
+      }
+      let merged_opts = opts + cfg
+      let key = llm_cache_key(call?.prompt, call?.system, merged_opts)
+      let cache_options = __llm_handler_cache_options(merged_opts)
+      let session_id = to_string(call?.turn?.session_id ?? "")
+      let cached = cache_get(key, cache_options)
+      if cached.hit {
+        __with_cache_emit_hit(session_id, key, cached, merged_opts)
+        return cached.value
+      }
+      let started_ms = monotonic_ms()
+      let result = __safe_invoke(next, call)
+      let compute_ms = monotonic_ms() - started_ms
+      if __llm_handler_should_store_result(result) {
+        cache_put(key, result, cache_options)
+        __with_cache_emit_miss(session_id, key, cached, compute_ms)
+      }
+      return result
+    }
   }
   let prompt = first
   let system = second
@@ -691,6 +720,88 @@ pub fn with_cache(first, second = nil, third = nil) {
   let result = llm_call(prompt, system, opts)
   cache_put(key, result, cache_options)
   return result
+}
+
+fn __llm_handler_should_store_result(result) -> bool {
+  if type_of(result) != "dict" {
+    return false
+  }
+  // The caller seam returns `{ok: true, value}` on success and
+  // `{ok: false, status: ...}` on failure. Only cache successes; failure
+  // envelopes are transient retry state, not durable answers.
+  let keys = result.keys()
+  if contains(keys, "ok") {
+    return result?.ok ?? false
+  }
+  // Pre-existing direct-call shape: cache anything that is not an error
+  // envelope (i.e. has no `status` field).
+  return !contains(keys, "status")
+}
+
+fn __with_cache_hit_metrics_from_envelope(cached_value) -> dict {
+  var metrics = {model_calls_avoided: 1}
+  if type_of(cached_value) != "dict" {
+    return metrics
+  }
+  // The caller seam wraps the LLM dict in {ok: true, value: ...}; the
+  // direct-call form caches the LLM dict directly. Unwrap once so this
+  // helper reads the same shape either way.
+  let llm = if cached_value?.value != nil && type_of(cached_value.value) == "dict" {
+    cached_value.value
+  } else {
+    cached_value
+  }
+  let usage = llm?.usage
+  if type_of(usage) == "dict" {
+    var tokens_saved = 0
+    if usage?.input_tokens != nil {
+      tokens_saved = tokens_saved + to_int(usage.input_tokens)
+    }
+    if usage?.output_tokens != nil {
+      tokens_saved = tokens_saved + to_int(usage.output_tokens)
+    }
+    if tokens_saved > 0 {
+      metrics = metrics + {tokens_saved: tokens_saved}
+    }
+  }
+  if llm?.latency_ms != nil {
+    metrics = metrics + {latency_saved_ms: to_int(llm.latency_ms)}
+  }
+  return metrics
+}
+
+fn __with_cache_emit_hit(session_id, key, cached, opts) {
+  if session_id == "" {
+    return
+  }
+  __emit_event(
+    session_id,
+    "cache.hit",
+    {
+      key: key,
+      backend: cached?.backend ?? "",
+      namespace: cached?.namespace ?? "",
+      provider: opts?.provider ?? "",
+      model: opts?.model ?? "",
+      metrics: __with_cache_hit_metrics_from_envelope(cached?.value),
+    },
+  )
+}
+
+fn __with_cache_emit_miss(session_id, key, cached, compute_ms) {
+  if session_id == "" {
+    return
+  }
+  __emit_event(
+    session_id,
+    "cache.miss",
+    {
+      key: key,
+      backend: cached?.backend ?? "",
+      namespace: cached?.namespace ?? "",
+      metrics: {compute_ms: compute_ms},
+    },
+  )
 }
 
 // -------------------------------------------------------------------------------------------------

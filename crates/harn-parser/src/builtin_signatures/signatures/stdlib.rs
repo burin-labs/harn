@@ -36,6 +36,16 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_DICT,
     ),
+    BuiltinSignature::simple(
+        "__cache_stats",
+        &[Param::optional("options", TY_DICT_OR_NIL)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "__cache_stats_reset",
+        &[Param::optional("options", TY_DICT_OR_NIL)],
+        TY_NIL,
+    ),
     BuiltinSignature::simple("__dict_filter_nil", &[Param::new("d", TY_DICT)], TY_DICT),
     BuiltinSignature::simple(
         "__dict_merge",

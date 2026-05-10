@@ -1,5 +1,20 @@
-// std/cache: Persistent cache helpers.
-/** cache_get returns {hit: bool, value?} for a persistent cache key. */
+// std/cache — content-addressed cache primitives + composable `with_cache`.
+//
+// Three backends share one envelope shape:
+//   - mem_cache    in-process LRU (per VM thread)
+//   - fs_cache     content-addressed JSON files at <path>/<namespace>/<sha>.json
+//   - sqlite_cache sqlite-backed with TTL + LRU eviction
+//
+// `with_cache(key, compute, options?)` wraps any 0-arity closure and returns
+// either the cached value or the freshly-computed result. The wrapper tracks
+// hit/miss counters and, when configured with a `session_id`, emits cache
+// events on the agent event tape so testbench replay can pin them.
+//
+// See docs/src/cache.md for adoption recipes (persona caller, context-pack
+// query, crystallization shadow-run fixture).
+import { agent_emit_event } from "std/agent/state"
+
+/** cache_get returns {hit: bool, value?, backend, namespace} for key. */
 pub fn cache_get(key: string, options = nil) -> dict {
   return __cache_get(key, options ?? {})
 }
@@ -9,7 +24,206 @@ pub fn cache_put(key: string, value, options = nil) -> dict {
   return __cache_put(key, value, options ?? {})
 }
 
-/** cache_clear removes all entries in the configured cache namespace. */
+/**
+ * cache_clear removes all entries in the configured cache namespace and
+ *  resets the in-process hit/miss counters for that namespace.
+ */
 pub fn cache_clear(options = nil) {
   return __cache_clear(options ?? {})
+}
+
+/** cache_stats returns {hits, misses, lookups, hit_rate, ...} for a namespace. */
+pub fn cache_stats(options = nil) -> dict {
+  return __cache_stats(options ?? {})
+}
+
+/**
+ * cache_stats_reset clears the in-process hit/miss counters without
+ *  touching cached entries.
+ */
+pub fn cache_stats_reset(options = nil) {
+  return __cache_stats_reset(options ?? {})
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// store-config constructors
+//
+// Each returns a dict that goes into options.store. Constructors are sugar
+// over the raw {backend, namespace, path, ttl, max_entries} shape so call
+// sites read like recipes:
+//
+//   let store = mem_cache({namespace: "evals", ttl: "5m"})
+//   let result = with_cache("k", { -> heavy() }, {store: store})
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * mem_cache(options?) — process-local LRU cache (per VM thread).
+ *
+ * Options: namespace, ttl ("10m") or ttl_seconds (int), max_entries (default 256).
+ * Memory caches do not survive across `harn run` invocations.
+ */
+pub fn mem_cache(options = nil) -> dict {
+  let opts = options ?? {}
+  return __cache_store_dict("mem", nil, opts)
+}
+
+/**
+ * fs_cache(path, options?) — content-addressed JSON files at <path>.
+ *
+ * Each entry lands at <path>/<namespace>/<sha256(key)>.json. Atomic writes
+ * make the on-disk store safe for concurrent harn processes pointing at the
+ * same path with different namespaces.
+ */
+pub fn fs_cache(path: string, options = nil) -> dict {
+  let opts = options ?? {}
+  return __cache_store_dict("fs", path, opts)
+}
+
+/**
+ * sqlite_cache(path, options?) — sqlite-backed cache at <path>.
+ *
+ * One sqlite file can host many namespaces. TTL + LRU eviction run inside
+ * each cache_put transaction.
+ */
+pub fn sqlite_cache(path: string, options = nil) -> dict {
+  let opts = options ?? {}
+  return __cache_store_dict("sqlite", path, opts)
+}
+
+fn __cache_store_dict(backend, path, opts) -> dict {
+  var store = {backend: backend}
+  if path != nil {
+    store = store + {path: path}
+  }
+  if opts?.namespace != nil {
+    store = store + {namespace: opts.namespace}
+  } else if opts?.name != nil {
+    store = store + {namespace: opts.name}
+  }
+  if opts?.ttl != nil {
+    store = store + {ttl: opts.ttl}
+  }
+  if opts?.ttl_seconds != nil {
+    store = store + {ttl_seconds: opts.ttl_seconds}
+  }
+  if opts?.max_entries != nil {
+    store = store + {max_entries: opts.max_entries}
+  }
+  return store
+}
+
+// -------------------------------------------------------------------------------------------------
+// with_cache higher-order helper
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * with_cache(key, compute, options?) — content-addressed memoization.
+ *
+ * Behavior:
+ *   - Looks up `key` in the configured store. On a hit, returns the cached
+ *     value without invoking `compute`.
+ *   - On a miss, runs `compute()`, stores the result under `key`, and
+ *     returns the fresh value.
+ *
+ * Options:
+ *   - store         : dict from mem_cache/fs_cache/sqlite_cache, OR a bare
+ *                     string treated as a namespace name on the default
+ *                     sqlite store.
+ *   - ttl, ttl_seconds, max_entries — passthrough overrides at the call
+ *                     site (most callers should set these on the store
+ *                     constructor instead).
+ *   - session_id    : optional string. When set, cache hits and misses emit
+ *                     `cache.hit` / `cache.miss` events on the agent event
+ *                     tape (replay-deterministic; testbench can pin them).
+ *   - estimate      : optional dict with cost-moat receipts shown on hit:
+ *                     {model_calls_avoided?: int, tokens_saved?: int,
+ *                      latency_saved_ms?: int}. Defaults to
+ *                     {model_calls_avoided: 1} so a hit always increments the
+ *                     "calls avoided" counter on the tape.
+ *
+ * Returns the cached or freshly-computed value directly; use
+ * `with_cache_envelope` if you need the hit flag and metrics inline.
+ */
+pub fn with_cache(key: string, compute, options = nil) {
+  return with_cache_envelope(key, compute, options).value
+}
+
+/**
+ * with_cache_envelope returns {value, hit, key, metrics} so callers can act
+ * on cache state (e.g. emit a budget receipt, branch on miss).
+ *
+ * `metrics` carries `{model_calls_avoided, tokens_saved, latency_saved_ms}`
+ * on hits; on misses it carries `{compute_ms}` measured from the local
+ * monotonic clock — useful for callers seeding a future `estimate` block.
+ */
+pub fn with_cache_envelope(key: string, compute, options = nil) -> dict {
+  let opts = options ?? {}
+  let store_opts = __with_cache_store_opts(opts)
+  let session_id = to_string(opts?.session_id ?? "")
+  let cached = cache_get(key, store_opts)
+  if cached.hit {
+    let metrics = __with_cache_hit_metrics(opts)
+    if session_id != "" {
+      __with_cache_emit(
+        session_id,
+        "cache.hit",
+        {key: key, backend: cached?.backend ?? "", namespace: cached?.namespace ?? "", metrics: metrics},
+      )
+    }
+    return {value: cached.value, hit: true, key: key, metrics: metrics}
+  }
+  let started_ms = monotonic_ms()
+  let value = compute()
+  let compute_ms = monotonic_ms() - started_ms
+  cache_put(key, value, store_opts)
+  if session_id != "" {
+    __with_cache_emit(
+      session_id,
+      "cache.miss",
+      {
+        key: key,
+        backend: cached?.backend ?? "",
+        namespace: cached?.namespace ?? "",
+        metrics: {compute_ms: compute_ms},
+      },
+    )
+  }
+  return {value: value, hit: false, key: key, metrics: {compute_ms: compute_ms}}
+}
+
+fn __with_cache_store_opts(opts) -> dict {
+  var passthrough = {}
+  if opts?.store != nil {
+    passthrough = passthrough + {store: opts.store}
+  }
+  if opts?.ttl != nil {
+    passthrough = passthrough + {ttl: opts.ttl}
+  }
+  if opts?.ttl_seconds != nil {
+    passthrough = passthrough + {ttl_seconds: opts.ttl_seconds}
+  }
+  if opts?.max_entries != nil {
+    passthrough = passthrough + {max_entries: opts.max_entries}
+  }
+  return passthrough
+}
+
+fn __with_cache_hit_metrics(opts) -> dict {
+  let estimate = opts?.estimate ?? {}
+  var metrics = {model_calls_avoided: estimate?.model_calls_avoided ?? 1}
+  if estimate?.tokens_saved != nil {
+    metrics = metrics + {tokens_saved: estimate.tokens_saved}
+  }
+  if estimate?.latency_saved_ms != nil {
+    metrics = metrics + {latency_saved_ms: estimate.latency_saved_ms}
+  }
+  return metrics
+}
+
+fn __with_cache_emit(session_id, name, payload) {
+  let _ = try {
+    agent_emit_event(session_id, name, payload)
+  }
 }

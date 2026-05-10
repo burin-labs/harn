@@ -7,7 +7,7 @@ mod agents_daemon;
 pub(crate) mod assemble;
 pub mod asset_paths;
 mod bytes;
-mod clock;
+pub(crate) mod clock;
 mod collections;
 mod command_policy;
 mod compression;
@@ -240,4 +240,5 @@ pub fn reset_stdlib_state() {
     crate::skills::clear_current_skill_registry();
     template::reset_prompt_registry();
     crate::triggers::clear_webhook_intake_state();
+    crate::llm::cache::reset_in_process_cache_state();
 }

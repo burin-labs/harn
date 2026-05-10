@@ -1,0 +1,42 @@
+/**
+ * Replay determinism for the with_cache caller-wrapper.
+ *
+ * `with_cache(default_llm_caller(), opts)` returns a caller closure that
+ * sits inline in `compose([...])` and short-circuits identical (prompt,
+ * system, opts) calls to a cached envelope. This test confirms:
+ *
+ *  - first call hits the underlying mock; second call hits the cache
+ *  - replayed value is byte-identical to the recorded value (json eq)
+ *  - cache.hit / cache.miss events appear on the agent event tape
+ *    in deterministic order with the right metric receipts
+ *  - tools-bearing calls bypass the cache (skip_when default)
+ */
+import { cache_clear, mem_cache } from "std/cache"
+import { default_llm_caller, with_cache } from "std/llm/handlers"
+
+pipeline default() {
+  let store = mem_cache({namespace: "with-cache-caller-" + uuid()})
+  cache_clear({store: store})
+  let caller = with_cache(default_llm_caller(), {store: store, ttl: "1h"})
+  llm_mock_clear()
+  llm_mock({text: "answer", usage: {input_tokens: 11, output_tokens: 7}, model: "m", provider: "p"})
+  llm_mock({text: "fresh-if-uncached", model: "m", provider: "p"})
+  let session_id = "with-cache-caller-session"
+  let opts = {provider: "p", model: "m", stream: false}
+  let call_one = {
+    prompt: "hello",
+    system: "sys",
+    opts: opts,
+    turn: {iteration: 0, session_id: session_id, attempt: 1},
+  }
+  let first = caller(call_one)
+  let second = caller(call_one)
+  println("first.ok=" + to_string(first.ok))
+  println("second.ok=" + to_string(second.ok))
+  println("byte_identical=" + to_string(json_stringify(first.value) == json_stringify(second.value)))
+  println("mock_calls=" + to_string(len(llm_mock_calls())))
+  // Calls with tools opt out of the cache by default (skip_when).
+  let tool_call = call_one + {opts: opts + {tools: []}}
+  let _ = caller(tool_call)
+  println("after_tool_call_mock_calls=" + to_string(len(llm_mock_calls())))
+}

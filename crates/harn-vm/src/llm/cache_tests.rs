@@ -121,3 +121,66 @@ fn cache_record_large_ttl_saturates_forward() {
 
     assert_eq!(record.expires_at_ms, Some(i64::MAX));
 }
+
+fn mem_options(namespace: &str, max_entries: usize, ttl_seconds: u64) -> CacheOptions {
+    CacheOptions {
+        backend: CacheBackend::Mem,
+        namespace: namespace.to_string(),
+        path: PathBuf::new(),
+        ttl_seconds,
+        max_entries,
+    }
+}
+
+#[test]
+fn mem_cache_hits_update_lru_and_evict_oldest() {
+    reset_in_process_cache_state();
+    let options = mem_options("mem_lru", 2, 60);
+
+    cache_put_at(&options, "a", serde_json::json!({"value": "a"}), 1_000).unwrap();
+    cache_put_at(&options, "b", serde_json::json!({"value": "b"}), 2_000).unwrap();
+    assert_eq!(
+        cache_get_at(&options, "a", 3_000).unwrap(),
+        Some(serde_json::json!({"value": "a"}))
+    );
+    cache_put_at(&options, "c", serde_json::json!({"value": "c"}), 4_000).unwrap();
+
+    assert_eq!(cache_get_at(&options, "b", 5_000).unwrap(), None);
+    assert!(cache_get_at(&options, "a", 5_000).unwrap().is_some());
+    assert!(cache_get_at(&options, "c", 5_000).unwrap().is_some());
+}
+
+#[test]
+fn mem_cache_expires_entries() {
+    reset_in_process_cache_state();
+    let options = mem_options("mem_ttl", 4, 1);
+
+    cache_put_at(&options, "a", serde_json::json!("cached"), 1_000).unwrap();
+    assert_eq!(
+        cache_get_at(&options, "a", 1_999).unwrap(),
+        Some(serde_json::json!("cached"))
+    );
+    assert_eq!(cache_get_at(&options, "a", 2_000).unwrap(), None);
+}
+
+#[test]
+fn mem_cache_clear_resets_metrics_and_entries() {
+    reset_in_process_cache_state();
+    let options = mem_options("mem_clear", 4, 60);
+
+    cache_put_at(&options, "a", serde_json::json!(1), 1_000).unwrap();
+    cache_get_at(&options, "a", 2_000).unwrap();
+    cache_get_at(&options, "missing", 2_000).unwrap();
+    record_lookup(&options, true);
+    record_lookup(&options, false);
+
+    assert_eq!(metrics_snapshot(&options).hits, 1);
+    assert_eq!(metrics_snapshot(&options).misses, 1);
+
+    mem_clear(&options);
+    reset_metrics_for(&options);
+
+    assert_eq!(cache_get_at(&options, "a", 3_000).unwrap(), None);
+    assert_eq!(metrics_snapshot(&options).hits, 0);
+    assert_eq!(metrics_snapshot(&options).misses, 0);
+}
