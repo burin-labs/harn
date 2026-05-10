@@ -1,3 +1,12 @@
+//! Trigger dispatcher: routes inbox envelopes to bindings, applies retry/flow control,
+//! and emits trust + lifecycle events.
+//!
+//! Most support code lives in dedicated submodules (`types`, `state`, `util`, `audit`,
+//! `action_graph`, `vm_invoke`, plus the pre-existing `circuits`, `flow_control`,
+//! `predicate_eval`, `retry`, `uri`). The single `impl Dispatcher { ... }` block in this
+//! file is intentionally kept whole — splitting it across multiple files would scatter
+//! the dispatch state machine across modules without a natural seam.
+
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;

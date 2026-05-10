@@ -1,4 +1,7 @@
+use super::bundle::redact_trace_for_bundle;
 use super::*;
+use serde_json::json;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn version_trace(id: &str, version: &str, side_target: &str, fuzzy: bool) -> CrystallizationTrace {
     CrystallizationTrace {

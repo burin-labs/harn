@@ -1,5 +1,6 @@
 use super::*;
 use std::fs;
+use std::path::PathBuf;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

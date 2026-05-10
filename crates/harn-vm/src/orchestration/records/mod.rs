@@ -11,9 +11,6 @@ mod json;
 mod persistence;
 mod types;
 
-#[cfg(test)]
-use std::path::PathBuf;
-
 pub use action_graph::{append_action_graph_update, derive_run_observability};
 pub use diff::{diff_run_records, render_unified_diff};
 pub use eval_pack::{
@@ -52,7 +49,6 @@ pub use types::{
 pub(crate) use types::run_child_record_from_worker_metadata;
 
 #[cfg(test)]
-#[allow(unused_imports)]
 pub(crate) use diff::{myers_diff, DiffOp};
 
 #[cfg(test)]

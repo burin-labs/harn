@@ -37,17 +37,5 @@ pub use types::{
 };
 
 #[cfg(test)]
-mod test_imports {
-    pub(super) use std::collections::{BTreeMap, BTreeSet};
-
-    pub(super) use serde_json::json;
-
-    pub(super) use super::bundle::redact_trace_for_bundle;
-}
-
-#[cfg(test)]
-use test_imports::*;
-
-#[cfg(test)]
 #[path = "../crystallize_tests.rs"]
 mod crystallize_tests;
