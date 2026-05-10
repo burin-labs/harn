@@ -6,6 +6,30 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Fixed
+
+- **Workflow stages now thread `iteration_budget` through to per-stage
+  `agent_loop`.** `ModelPolicy` carried a `max_iterations` field but
+  not `iteration_budget`, so any workflow node policy authored through
+  `agent_preset(...)` / `agent_budget(...)` silently lost its adaptive
+  budget at the serde boundary in `workflow_commit`. The per-stage
+  `agent_loop` then fell back to the static `max_iterations: 16`
+  default and never emitted `loop_control_decision` events, defeating
+  the v0.7.61 adaptive-budget contract for any harness that authored
+  per-stage policies through the std presets. The fix adds a typed
+  `iteration_budget: Option<serde_json::Value>` field to `ModelPolicy`
+  in `crates/harn-vm/src/orchestration/policy/types.rs`, and threads
+  the same key through the `loop_option_keys` list in
+  `std/workflow/options.harn` so `workflow_stage_agent_options` passes
+  it to the per-stage `agent_loop`. `agent_loop`'s
+  `__normalize_iteration_budget` already prefers `iteration_budget`
+  over `max_iterations` when both are present, so callers that supply
+  both still get the adaptive shape and `loop_control_decision`
+  visibility. Locked in by
+  `conformance/tests/agents/workflow_stage_options_iteration_budget.harn`.
+
 ## v0.8.8
 
 ### Added

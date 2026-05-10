@@ -345,7 +345,21 @@ pub struct ModelPolicy {
     pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
     /// Maximum agent_loop iterations for this stage. Overrides the default 16.
+    /// Static cap; prefer `iteration_budget` so the per-stage `agent_loop`
+    /// receives Harn's adaptive `loop_control` policy and emits
+    /// `loop_control_decision` events on extension/stop. Both fields are
+    /// passed through to `agent_loop`; if both are present, the budget's
+    /// `max` wins because `agent_loop` reads `iteration_budget` first.
     pub max_iterations: Option<usize>,
+    /// Adaptive iteration budget for this stage. Surfaced on the per-stage
+    /// `agent_loop` so the runtime emits `loop_control_decision` events
+    /// when extending or stopping the loop. Pipelines author this through
+    /// `agent_preset(...) / agent_budget(...)` from `std/agent/presets`,
+    /// or as a literal dict like `{mode: "adaptive", initial: 4, max: 16, extend_by: 2}`.
+    /// Stored as a free-form JSON value so the std/agent budget shapes
+    /// can evolve without churn here; `__normalize_iteration_budget` in
+    /// `std/agent/options` does the per-call validation.
+    pub iteration_budget: Option<serde_json::Value>,
     /// Maximum consecutive text-only (no tool call) responses before declaring stuck.
     pub max_nudges: Option<usize>,
     /// Custom nudge message injected when the model produces text without tool calls.
