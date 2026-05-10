@@ -319,6 +319,294 @@ condensed series summaries instead of full per-patch history.
   by `let`/`var` inside the body resolve correctly when reused in a
   structural return literal.
 
+## v0.8.6
+
+### Added
+
+- **Annotation tape format for `harn test-bench`.** A new sidecar
+  format (`<tape>.annotations.jsonl`) attaches structured human
+  judgment — `correct`, `incorrect`, `alternative`, `note`, `marker`,
+  `mute`, `hypothesis`, `friction`, `crystallize_here` — to specific
+  events on a recorded testbench tape. Annotations are versioned JSONL
+  with a header carrying an optional `tape_content_hash` so the
+  validator catches tape edits that invalidate `event_id` references.
+  `friction` annotations adapt directly to `FrictionEvent` records so
+  they feed `orchestration::generate_context_pack_suggestions`
+  alongside natively-emitted events; `crystallize_here` annotations
+  surface as `CrystallizeAnchor` records ready for the
+  candidate-detection pipeline. Three new CLI surfaces:
+  `harn test-bench replay --annotations <path>` (validates + surfaces
+  annotations inline during replay), `harn test-bench
+  validate-annotations` (structured JSON report, exits `2` on any
+  problem), and `harn test-bench export-annotations --kind ... --format
+  jsonl|friction` (filter + re-emit for downstream pipelines). The
+  conformance runner picks up `<name>.annotations.jsonl` sidecars
+  automatically and gates the test on validation success; covered by
+  `conformance/tests/testbench/testbench_replay_fidelity.annotations.jsonl`
+  plus four `harn-cli` integration tests under
+  `tests/test_bench_cli.rs::annotations`. Documented in
+  `docs/src/dev/annotation-tape-format.md`. (#1474)
+- **`std/llm/handlers` cost-moat handlers — `with_repair`,
+  `with_coerce`, `with_timeout`, `with_routing`.** Closes the persona
+  platform's "cost moat substrate" gap from #1470: the four handlers
+  let any caller compose cheap-model-by-default with frontier
+  escalation (`with_routing`), per-call deadlines that honor the
+  unified clock and forward `timeout_ms` to providers
+  (`with_timeout`), one-shot schema-validation repair with a
+  deterministic corrective nudge (`with_repair`), and uniform
+  case-insensitive key normalization on the success envelope
+  (`with_coerce`). `safe_structured_call`'s structured-output dance is
+  now documented as the canonical preset equivalent to
+  `compose([with_coerce({})])(structured_caller)`, with judge-friendly
+  defaults baked in. Each handler ships with a conformance gate under
+  `conformance/tests/integration/llm_handlers_with_*` that exercises
+  the success and edge-case paths without reaching for a live
+  provider; the persona-shaped composition is documented in
+  `docs/src/stdlib/llm-handlers.md` and the quickref. (#1470)
+- **Partial-application form for `(next, opts)` handler middleware.**
+  `with_retry`, `with_logging`, `with_budget`, `with_circuit_breaker`,
+  `with_repair`, `with_coerce`, and `with_timeout` now accept either
+  `with_X(next, opts)` (direct) or `with_X(opts)` (curried — returns a
+  wrapper for `compose`). The auto-currying makes the canonical
+  `compose([with_logging({...}), with_retry({...})])(base)` pattern
+  documented in the quickref and llm-handlers reference actually work
+  — previously the opts dict was silently bound as `next` and the
+  composition failed at first invocation. A new
+  `llm_handlers_persona_compose` conformance fixture pins the
+  end-to-end persona-shaped chain (routing + budget + logging) so the
+  cost-moat substrate stays exercised. (#1470)
+- **Testbench clock-leak audit.** New `crate::clock_mock::leak_audit`
+  shim records every `capability_id` that observes the OS wall or
+  monotonic clock while a testbench mock is installed.
+  `TestbenchSession::finalize` now returns a `clock_leaks` vector
+  alongside `fs_diff` / `recorded_subprocesses` / `tape`; `harn
+  test-bench run` prints `[testbench] clock leak: <capability>
+  (count=N)` to stderr for each unique entry; scripts introspect via
+  the new `testbench_clock_leaks()` builtin. Three demonstration call
+  sites (`stdlib/date_iso`, `host_call/process.exec.{started_at,
+  ended_at}`) are migrated to the audited helpers, and the new
+  `conformance/tests/testbench/testbench_clock_leak_warns.harn` case
+  pins the contract. Closes the testbench-mode epic (#1438) and its
+  fidelity-audit follow-up (#1466).
+- **String escape sequences `\r` and `\0`.** Double-quoted string
+  literals now recognize `\r` (carriage return) and `\0` (NUL) in
+  addition to the existing `\n`, `\t`, `\\`, `\"`, `\$`. Triple-quoted
+  multiline strings remain literal. The formatter emits `\r` / `\0`
+  back out for those bytes when re-rendering string literals so
+  round-trips stay readable. Spec updated in
+  `spec/HARN_SPEC.md#single-line-strings`.
+- **Repo automation scripts ported to Harn.** Five one-off
+  Python/Bash scripts (`check_xfail_count`, `compare_generated_text`,
+  `sync_language_spec`, `detect_bump_type`, `check_openapi_snapshot`)
+  are now `.harn` files under `scripts/`, with companion
+  `@test`-pipeline coverage in `scripts/tests/`. Wired into a new
+  `make test-harn-scripts` target and into `make all`; the existing
+  pre-commit `harn fmt` / `harn lint` stanza now covers `scripts/`
+  too, so these scripts stay typecheck-clean and warning-free as
+  they evolve.
+- **`harn test-bench run --runtime des` (single-threaded testbench).**
+  Opt-in flag that swaps the testbench's default multi-thread Tokio
+  runtime for a `current_thread` runtime so all VM tasks, I/O
+  callbacks, and timer firings share one OS thread. Eliminates
+  inter-thread scheduling races and yields bit-exact event tapes for
+  scripts that stay within the DES-safe primitive set. Adds three
+  `testbench_*` conformance fixtures under
+  `conformance/tests/testbench/` plus three `des_runtime_*` Rust
+  integration tests covering paused-sleep, byte-identical concurrent
+  settle, and parity with `--runtime paused-tokio`. The constraint
+  surface, benchmark methodology, and the decision to ship as opt-in
+  (rather than the default) are written up in
+  `docs/src/dev/des-mode.md`. (#1444)
+- **`harn fmt` normalizes trailing commas, and the `trailing-comma`
+  rule is now AST-aware.** Previously the rule walked tokens with a
+  brace-vs-block heuristic that fired stray "missing trailing comma"
+  diagnostics on `eval_pack { cases: ... summarize { ... } }` and
+  multi-field `struct Foo { bar: int fn name() ... }`, sometimes
+  inserting commas that broke the source. Trailing-comma detection
+  now runs against the parsed AST so it only fires on confirmed
+  comma-separated bracket pairs (call args, list/dict/struct
+  literals, selective imports), and `harn fmt` applies the same
+  normalization as a post-pass — `xs.filter(...).to_list()`-style
+  multi-line constructs round-trip cleanly without relying on `harn
+  lint --fix`. The traversal lives in `harn_parser::visit` and is
+  reused by the linter.
+- **Iter-style sinks (`.to_list()`, `.to_set()`, `.to_dict()`) work
+  on already-realized collections.** `xs.filter(...).to_list()` used
+  to silently return `nil` because list method dispatch had no
+  handler for `to_list` and fell through a silent-`Nil` catch-all.
+  List/dict/set now expose `to_list` / `to_set` / `to_dict` as the
+  obvious identity/conversion (dict→list yields key/value entry
+  dicts to match `.entries()`), so the same chain works whether
+  `filter` returned an `iter` or a `list`.
+- **Method dispatch raises a clear error on unknown methods instead
+  of returning `nil`.** Every per-type method handler (list, dict,
+  set, string, generator, stream, iter, plus the outer dispatch)
+  used to bottom out in `Ok(VmValue::Nil)`, which made typos in
+  method names fail silently far from the call site. Unknown method
+  calls now throw a runtime error of the form ``list has no method
+  `whatever``` so issues surface at the offending line. *Breaking*
+  for any script that relied on the silent-`nil` fallthrough.
+- **`cargo build` self-heals git hook configuration.** The
+  `harn-cli` build script now resets `core.hooksPath` to `.githooks`
+  whenever it drifts (the most common cause of CI surprises being
+  pre-commit / pre-push hooks that *would* have caught a `harn fmt
+  --check` regression but never ran because the user's hook config
+  pointed elsewhere). Set `HARN_DISABLE_AUTO_HOOK_SETUP=1` to opt
+  out. Skipped automatically when not building inside the Harn
+  source tree.
+- **`websocket_connect` retries transient TCP errors during
+  handshake.** Connection-reset / broken-pipe / unexpected-EOF on
+  the very first attempt — typically caused by the OS recycling an
+  ephemeral port still in TIME_WAIT — now self-heal with up to two
+  retries within the user's `timeout_ms` budget. Permanent failures
+  (DNS, refused, TLS, protocol) bypass the retry path and surface
+  immediately.
+- **Package manager maturity: provenance, outdated, audit, and
+  generated-artifact contract checks.** Bumped `harn.lock` to version 2
+  with top-level `generator_version` / `protocol_artifact_version` and
+  per-entry `package_version`, `harn_compat`, `manifest_digest`, and
+  `[package.registry]` provenance for entries originally added through
+  the registry index (the manifest now also stores `registry`,
+  `registry_name`, `registry_version` so the source survives round-trips).
+  Three new subcommands give downstream automation a single Harn binary
+  to call: `harn package outdated` (with `--remote` for branch-tracking
+  git deps), `harn package audit` (stable JSON `code` per finding for
+  yanked-version, content-hash, manifest-digest, and harn-range
+  violations), and `harn package artifacts manifest|check` for vendoring
+  and drift-checking the protocol-artifact manifest. `harn install` and
+  `harn update` now accept `--json`. v1 lockfiles migrate transparently
+  on the next install. Documented the cross-repo bump workflow in
+  `docs/src/package-authoring.md`. (#1428)
+- **Workflow patch proposals + safe Harn function tools.** Agents can now
+  author bounded, auditable changes to a workflow bundle through a flat
+  patch JSON (`insert_node`, `add_edge`, `upsert_prompt_capsule`,
+  `update_node_policy`, `update_bundle_policy`) instead of regenerating
+  the whole bundle. Three new `harn workflow patch
+  {validate,apply,preview}` subcommands apply the patch to a copy,
+  re-run the bundle validator, emit a structural diff, and reject
+  anything that widens the parent capability ceiling along *tools*,
+  *capabilities*, *side-effect level*, *workspace roots*, *connector
+  scopes*, *command gates*, or *autonomy tier*. `harn workflow
+  function-tools` enumerates an allowlist of read-only / pure-think
+  Harn functions an agent may call from inside the patch loop, each
+  carrying an ACP-aligned `ToolAnnotations` block hosts can wire
+  straight into a model surface. `harn workflow nested-ceiling`
+  exposes the same scanner used internally so hosts can reject nested
+  Harn invocations (workflow bundles, Harn scripts, Burin harness
+  manifests) that would widen the active execution policy. The
+  workflow-authoring skill pack and `docs/src/workflow-bundles.md`
+  cover the contract; a new
+  `crates/harn-cli/tests/workflow_patch_cli.rs` gate exercises the
+  validate / apply / preview / function-tools / nested-ceiling surfaces
+  end-to-end. (#1423)
+- **Python and Go protocol bindings.** Extended
+  `harn dump-protocol-artifacts` to emit a stdlib-only Python 3.9+ module
+  (`spec/protocol-artifacts/python/harn_protocol.py`) and a Go package
+  (`spec/protocol-artifacts/go/harnprotocol/`) mirroring the existing
+  TypeScript and Swift surface: ACP session updates, JSON-RPC envelopes,
+  Harn tool lifecycle metadata, A2A task structures, and MCP tool/resource
+  records. `manifest.json` now exposes a `bindings` block with per-language
+  stability and module-path metadata so downstream consumers (Burin Code,
+  Harn Cloud, Python integrators, Go workers) can detect generator/runtime
+  mismatch without bespoke compatibility checks. A new `make check-bindings`
+  target round-trips a checked-in JSON fixture
+  (`spec/protocol-artifacts/fixtures/round_trip.json`) through both bindings
+  and runs in CI to catch wire-vocabulary drift before downstream consumers
+  see it. (#1429)
+- **Workflow-authoring skill pack and small-model evals.** Added
+  `examples/skill-packs/workflow-authoring/` with a top-level `SKILL.md`,
+  small-model prompting guide, validated PR-monitor and PR-repair recipe
+  bundles, eval cases with structural assertions, and an `eval.harn` driver
+  that feeds a configurable provider through the validate → preview → run
+  pipeline. A new `crates/harn-cli/tests/workflow_authoring_eval.rs`
+  regression gate fails CI when a recipe golden or a case's structural
+  assertions drift.
+- **Workflow authoring quickstart.** New tutorial at
+  `docs/src/workflow-authoring-quickstart.md` walks `validate` →
+  `preview` → `run` → connector status/setup-plan → supervisor in one
+  copy-paste path with no paid credentials. Backed by checked-in
+  fixtures (`docs/fixtures/workflow-bundles/quickstart-{minimal,agentic}.bundle.json`,
+  `docs/fixtures/connect-demo/`) and a CI gate
+  (`make check-docs-workflow-quickstart`) that pins the deterministic
+  bundle digest, executed-node sequence, and connector-status shape so
+  the snippets cannot drift.
+- **Cross-platform release smoke matrix.** Added
+  `.github/workflows/release-smoke.yml`, `scripts/release_smoke.sh`,
+  and `tests/smoke/` fixtures so every release-relevant PR runs the
+  user-visible CLI surface (`--help`, `check`, `fmt --check`,
+  `package check`, `--provider-matrix`, `run`, `command_run`,
+  no-credentials mock workflow, `harn watch` boot) on macOS, Linux,
+  and Windows. Failures surface as
+  `::error::release-smoke (<platform>): <capability> failed`
+  annotations and the smoke audit lane is now part of
+  `release_gate.sh audit`.
+- **Platform compatibility docs.** Added
+  [docs/src/dev/platform-compatibility.md](docs/src/dev/platform-compatibility.md)
+  with a per-capability support matrix and rationale for the
+  Windows-deferred features (POSIX-signal drain, `unveil`/`pledge`).
+- **Tag-first publish trigger.** `publish-release.yml` now also fires
+  on `push: tags: ['v*']`, in addition to the existing `push: main`
+  drift trigger. Detect-drift recognizes the tag-push event and sets
+  `publish_ref=$tag, drift=true` so the publish job checks out the
+  tagged commit (detached) and ships from there. Lets the bump-fleet
+  `release_harn.harn` harness push `vX.Y.Z` at a pinned commit BEFORE
+  the Release PR merges — what gets shipped to crates.io and the
+  GitHub release is anchored to that exact commit, and commits that
+  land on `main` between PR-open and merge cannot leak into the
+  published artifact. The `push: main` drift trigger remains as the
+  legacy/recovery path for releases authored without the harness;
+  workflow_dispatch with no drift still recovers from an existing
+  tag.
+
+### Fixed
+
+- **Recognize `/** */` doc comments in `harn package check`.** The
+  publish-readiness check previously saw only `///` doc comments, so
+  the canonical HarnDoc form preferred by the linter would surface
+  spurious "no doc comment" warnings on otherwise-documented public
+  symbols. Both forms now produce identical `docs` bodies.
+- **Typed stdlib option/result shapes.** `std/collections.filter_nil` and
+  `pick_keys`, plus `std/json.merge`/`pick`/`omit`, are now generic over the
+  value type — a `dict<string, V>` (or homogeneous shape literal) projects back
+  to a dict that still carries `V`. Introduced `PickKeysOptions` and the
+  workflow `WorkflowAutonomyPolicyConfig`/`WorkflowModelPolicy`/
+  `WorkflowStageOptionsConfig`/`WorkflowStageAgentOptions` and connector
+  `GitHubConnectorConfig`/`GitHubCallOptions`/`GitHubWaitOptions` shapes so
+  the high-traffic agent/workflow and connector paths advertise their
+  contract instead of accepting freeform `dict`.
+- **Testbench conformance suite.** Added `conformance/tests/testbench/`
+  covering the deterministic axes of `harn test-bench`: paused-clock
+  sleep, 30 simulated cron days under one `trigger_test_harness` call,
+  100 concurrent mocked agents settling deterministically, recorded
+  subprocess replay, copy-on-write fs overlay diff, deny-by-default
+  network egress, and byte-identical replay fidelity against a checked-in
+  event tape. The conformance runner now activates the testbench session
+  automatically when sidecar files (`.process-tape.json`, `.fs-overlay/`,
+  `.testbench-tape`) are present next to a `.harn` test, and two new
+  script-side builtins (`testbench_is_active`, `testbench_fs_diff`)
+  expose the active overlay diff to assertions. The eighth case from
+  the original issue (a runtime audit warning when a host capability
+  bypasses the unified mock clock) is filed against #1466 since it
+  depends on a runtime feature that doesn't exist yet. (#1442)
+
+### Changed
+
+- **Type-checker generics.** `dict<string, V>` parameter slots now bind `V`
+  from a heterogeneous shape literal (union of field types) so generic
+  stdlib helpers preserve element typing through projection.
+  Optional shape fields validate the value type when supplied — a
+  `{drop_nil?: bool}` parameter rejects `{drop_nil: "yes"}` instead of
+  silently accepting it.
+- **Cross-module type aliases.** Selectively importing a function (e.g.
+  `import { pick_keys } from "std/collections"`) now also pulls every
+  exported type alias / struct / enum / interface from the same module
+  into scope so call-site contract checks resolve referenced shapes
+  instead of seeing phantom `Named("PickKeysOptions")`.
+- **Return-type checking scope.** `fn` return-type validation now runs
+  against the post-body scope (with narrowing rolled back) so values bound
+  by `let`/`var` inside the body resolve correctly when reused in a
+  structural return literal.
+
 ## v0.8.5
 
 ### Added
