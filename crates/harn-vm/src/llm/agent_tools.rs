@@ -329,7 +329,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
             Err(_) if attempt < tool_retries => {
                 attempt += 1;
                 let delay = tool_backoff_ms * (1u64 << attempt.min(5));
-                tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                crate::clock_mock::sleep(tokio::time::Duration::from_millis(delay)).await;
             }
             Err(_) => break ToolDispatchOutcome { result, executor },
         }

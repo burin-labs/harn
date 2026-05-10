@@ -1635,7 +1635,11 @@ impl RateLimiterFactory {
                 }
                 bucket.wait_duration(self.config)
             };
-            tokio::time::sleep(wait).await;
+            // Honor the unified mock clock so tests that pin time via
+            // `mock_time(...)` don't deadlock here: the bucket reads
+            // `instant_now()` (mocked), and this sleep advances the same
+            // mock instead of waiting on a wall-clock that never moves.
+            clock::sleep(wait).await;
         }
     }
 }

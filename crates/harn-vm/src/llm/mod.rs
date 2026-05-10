@@ -2106,7 +2106,7 @@ async fn with_rate_limit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError>
                         attempt + 1
                     ),
                 );
-                tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                crate::clock_mock::sleep(std::time::Duration::from_millis(backoff_ms)).await;
                 backoff_ms = backoff_ms.saturating_mul(2).min(30_000);
                 attempt += 1;
             }
