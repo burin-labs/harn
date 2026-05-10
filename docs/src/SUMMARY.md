@@ -135,6 +135,7 @@
 - [Platform compatibility](./dev/platform-compatibility.md)
 - [Windows test coverage](./dev/windows-test-coverage.md)
 - [Deterministic test patterns](./dev/testing.md)
+- [Testbench mode](./dev/testbench.md)
 
 # Tutorials and Guides
 

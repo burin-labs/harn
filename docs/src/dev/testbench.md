@@ -1,0 +1,179 @@
+# Testbench mode
+
+Testbench mode is the composition primitive that wires Harn's
+deterministic substrate — virtual time, mocked LLMs, filesystem
+overlay, recorded subprocesses, and a deny-by-default network — behind
+a single CLI surface (`harn test-bench`) and a single Rust API
+(`harn_vm::testbench::Testbench`).
+
+It is the answer to the question "how do I run this `.harn` script
+hermetically?". Production wires the real implementations of every
+host capability; tests and demos pick a configuration and get an audit
+trail of everything that crossed the host boundary.
+
+## Host capabilities
+
+A Harn pipeline reaches the outside world through five host
+capabilities. Testbench mode lets the operator override every one of
+them, leaving production behavior untouched.
+
+| Capability | Default | Testbench override |
+|---|---|---|
+| Wall-clock + monotonic time | Real `tokio::time` | `MockClock` — `now_ms()`, `sleep(...)`, cron, and the trigger dispatcher all honor it |
+| LLM responses | Configured providers | JSONL fixture replay (same format as `harn run --llm-mock`) or scripted recording |
+| Filesystem (read/write/append/delete) | Real disk | Read-through, copy-on-write `OverlayFs` with diff emission |
+| Subprocess invocations | Real `std::process::Command` | `ProcessTape` records `(program, args, cwd) → (stdout, stderr, exit, virtual Δt)` for replay |
+| Network egress | Configured `HARN_EGRESS_*` policy | Deny-by-default; `--allow-host` opens specific destinations |
+
+Every override is opt-in. Activating one axis does not change the
+others.
+
+## CLI
+
+### `harn test-bench run`
+
+```sh
+harn test-bench run examples/cron-rollup.harn \
+    --clock paused --start-at 1767225600000 \
+    --llm-fixture llm.jsonl \
+    --fs-overlay ./worktree \
+    --process-record process.tape \
+    --network deny --allow-host github.com \
+    --emit-diff fs.diff -- arg1 arg2
+```
+
+Flag reference:
+
+| Flag | Behavior |
+|---|---|
+| `--clock paused` (default) | Pin the unified mock clock; `sleep(...)` advances it. `--clock real` skips this layer |
+| `--start-at <unix_ms>` | Initial wall-clock time. Defaults to `2026-01-01T00:00:00Z` |
+| `--llm-fixture <path>` | Replay scripted LLM responses (same JSONL format as `harn run --llm-mock`) |
+| `--llm-record <path>` | Capture executed responses for a future replay |
+| `--fs-overlay <dir>` | Mount the COW overlay rooted at `dir` |
+| `--process-record <path>` / `--process-replay <path>` | Record or replay subprocess invocations |
+| `--network deny` (default) / `--network real` | Egress policy |
+| `--allow-host <h-or-cidr>` | Whitelist a destination. Repeatable |
+| `--emit-diff <path>` | Write a unified-style diff of overlay writes to `path` |
+
+The default flag-set composes to "run hermetically; fail loud on any
+leak":
+
+```sh
+harn test-bench run script.harn
+```
+
+is equivalent to `--clock paused --network deny`, with no LLM/FS/process
+overrides.
+
+### `harn test-bench replay`
+
+```sh
+harn test-bench replay script.harn --process-tape run.tape
+```
+
+Replays a prior `--process-record` tape. The script must request the
+same `(program, args, cwd)` tuples in the same order; divergence
+fails the run.
+
+## Rust API
+
+The CLI is a thin wrapper over `harn_vm::testbench::Testbench`:
+
+```rust
+use harn_vm::testbench::Testbench;
+
+let session = Testbench::builder()
+    .paused_clock_at_ms(1_767_225_600_000)
+    .replay_llm("fixtures/llm.jsonl")
+    .fs_overlay("./worktree")
+    .replay_subprocesses("fixtures/process.tape")
+    .deny_network()
+    .build()
+    .activate()?;
+
+// run a Harn pipeline through the existing VM entry points...
+
+let finalize = session.finalize()?;
+println!("fs diff: {} change(s)", finalize.fs_diff.len());
+```
+
+The `TestbenchSession` returned from `activate()` is RAII-scoped:
+dropping it tears down every override and restores the prior thread
+state. `finalize()` persists recorded LLM/process tapes (when in
+record mode) and returns the structured artifacts.
+
+## Subprocess time leak
+
+Subprocesses are spawned by the host kernel and observe real wall-clock
+time. Testbench mode does *not* virtualize that — recorded tapes capture
+the duration the *parent* observed via the unified clock and replay it
+into the parent's clock, but a script that depends on a subprocess'
+internal timing (e.g. a `sh -c 'date +%s'` round-trip) will see the
+real clock and may diverge between record and replay.
+
+Full subprocess virtualization is tracked separately under the WASI
+sandbox child of [#1438](https://github.com/burin-labs/harn/issues/1438).
+
+## Filesystem overlay semantics
+
+The overlay is a copy-on-write layer in front of a real worktree. The
+sandbox enforcement — `enforce_fs_path` — runs *before* the overlay
+hook, so a write that would normally be rejected by the workspace-root
+policy is still rejected in testbench mode. Reads and writes to paths
+*outside* the overlay's root fall through to the real filesystem; the
+overlay is bounded to the worktree the operator declared.
+
+`OverlayFs::diff()` returns one entry per change. `render_unified_diff`
+formats them as a `git apply`-style hunk list:
+
+```text
+--- /dev/null
++++ b/new-file.txt
++hello
+--- a/existing.txt
++++ b/existing.txt
+-old content
++new content
+--- a/doomed.txt
++++ /dev/null
+-content
+```
+
+Binary content is rendered via `String::from_utf8_lossy`, so the
+unified output is informational, not necessarily reapplicable for
+non-utf8 files. The structured `diff()` value retains exact bytes.
+
+## Defaults that fail loud
+
+The testbench is opinionated about its defaults so a single
+`harn test-bench run script.harn` is a meaningful signal:
+
+- **Paused clock** — wall-clock-based assertions are deterministic.
+- **Deny network** — accidental egress fails the run.
+- **Empty LLM fixture queue** — calls without a recorded response
+  surface a clear "no script installed" error instead of falling
+  through to the real provider.
+
+Operators opt into looser defaults explicitly (`--clock real`,
+`--network real`, `--llm-fixture <path>`) when the test under
+development calls for it.
+
+## Relationship to other surfaces
+
+- `harn run --llm-mock` is a strict subset: it activates only the LLM
+  axis. `harn test-bench run --llm-fixture` does the same plus pins the
+  clock and denies network egress.
+- The unified mock clock (`mock_time(...)` / `advance_time(...)` /
+  `unmock_time()` script builtins) is the same clock testbench mode
+  pins; mixing the two is supported.
+- `OrchestratorHarness` accepts a `Clock`; testbench mode pre-installs
+  the same `MockClock` trait the harness uses.
+
+See also:
+
+- `docs/src/dev/testing.md` for approved test-pattern guidance.
+- `crates/harn-vm/src/testbench/` for the Rust source of every
+  composable axis.
+- Issue [#1440](https://github.com/burin-labs/harn/issues/1440) for the
+  composition primitive's design rationale.

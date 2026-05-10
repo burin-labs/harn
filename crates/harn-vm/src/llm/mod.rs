@@ -28,6 +28,7 @@ pub(crate) mod cost_route;
 pub(crate) mod daemon;
 pub(crate) mod fake;
 pub(crate) mod helpers;
+pub mod jsonl;
 pub(crate) mod mock;
 mod model_test;
 pub(crate) mod permissions;
@@ -493,6 +494,7 @@ pub(crate) use self::helpers::extract_llm_options;
 pub use self::helpers::no_credentials_message;
 pub use self::helpers::resolve_api_key;
 pub use self::helpers::vm_value_to_json;
+pub use self::jsonl::{load_llm_mocks_jsonl, parse_llm_mock_value, serialize_llm_mock};
 pub use self::mock::{
     clear_cli_llm_mock_mode, enable_cli_llm_mock_recording, install_cli_llm_mocks, set_replay_mode,
     take_cli_llm_recordings, LlmMock, LlmReplayMode, MockError,

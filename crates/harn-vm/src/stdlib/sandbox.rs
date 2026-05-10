@@ -120,6 +120,18 @@ pub fn command_output(
     args: &[String],
     config: &ProcessCommandConfig,
 ) -> Result<Output, VmError> {
+    // Testbench replay mode short-circuits the spawn entirely. Recording
+    // mode falls through and records the result after the real spawn.
+    if let Some(intercepted) =
+        crate::testbench::process_tape::intercept_spawn(program, args, config.cwd.as_deref())
+    {
+        return intercepted.map_err(|message| {
+            VmError::Thrown(crate::value::VmValue::String(std::rc::Rc::from(message)))
+        });
+    }
+
+    let started_at = std::time::Instant::now();
+
     #[cfg(target_os = "windows")]
     {
         if let Some(policy) = active_sandbox_policy() {
@@ -128,6 +140,13 @@ pub fn command_output(
             if let Some(error) = process_violation_error(&output) {
                 return Err(error);
             }
+            crate::testbench::process_tape::record_completed(
+                program,
+                args,
+                config.cwd.as_deref(),
+                &output,
+                started_at.elapsed(),
+            );
             return Ok(output);
         }
     }
@@ -140,6 +159,13 @@ pub fn command_output(
     if let Some(error) = process_violation_error(&output) {
         return Err(error);
     }
+    crate::testbench::process_tape::record_completed(
+        program,
+        args,
+        config.cwd.as_deref(),
+        &output,
+        started_at.elapsed(),
+    );
     Ok(output)
 }
 

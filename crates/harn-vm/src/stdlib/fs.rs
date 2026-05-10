@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 use std::{cell::RefCell, thread_local};
 
+use crate::testbench::overlay_fs::helpers as overlay;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -267,7 +268,7 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
         if let Some(cached) = read_cached_text(&resolved) {
             return Ok(VmValue::String(cached));
         }
-        match std::fs::read_to_string(&resolved) {
+        match overlay::read_to_string(&resolved) {
             Ok(content) => {
                 let shared: Rc<str> = Rc::from(content);
                 write_cached_text(resolved.clone(), shared.clone());
@@ -301,7 +302,7 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
         if let Some(cached) = read_cached_text(&resolved) {
             return Ok(result_ok(VmValue::String(cached)));
         }
-        match std::fs::read_to_string(&resolved) {
+        match overlay::read_to_string(&resolved) {
             Ok(content) => {
                 let shared: Rc<str> = Rc::from(content);
                 write_cached_text(resolved.clone(), shared.clone());
@@ -322,7 +323,7 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
             &resolved,
             crate::stdlib::sandbox::FsAccess::Read,
         )?;
-        match std::fs::read(&resolved) {
+        match overlay::read(&resolved) {
             Ok(content) => Ok(VmValue::Bytes(Rc::new(content))),
             Err(e) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
                 "Failed to read file {}: {e}",
@@ -341,7 +342,7 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
                 &resolved,
                 crate::stdlib::sandbox::FsAccess::Write,
             )?;
-            std::fs::write(&resolved, &content).map_err(|e| {
+            overlay::write(&resolved, content.as_bytes()).map_err(|e| {
                 VmError::Thrown(VmValue::String(Rc::from(format!(
                     "Failed to write file {}: {e}",
                     resolved.display()
@@ -370,7 +371,7 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
                 &resolved,
                 crate::stdlib::sandbox::FsAccess::Write,
             )?;
-            std::fs::write(&resolved, content).map_err(|e| {
+            overlay::write(&resolved, content).map_err(|e| {
                 VmError::Thrown(VmValue::String(Rc::from(format!(
                     "Failed to write file {}: {e}",
                     resolved.display()
@@ -391,7 +392,7 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
             &resolved,
             crate::stdlib::sandbox::FsAccess::Read,
         )?;
-        Ok(VmValue::Bool(resolved.exists()))
+        Ok(VmValue::Bool(overlay::exists(&resolved)))
     });
 
     vm.register_builtin("delete_file", |args, _out| {
@@ -402,7 +403,18 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
             &resolved,
             crate::stdlib::sandbox::FsAccess::Delete,
         )?;
-        if resolved.is_dir() {
+        // Overlay treats files and directories alike — both become an
+        // overlay "deleted" marker. When no overlay is active we fall
+        // back to the historical std::fs path that distinguishes the
+        // two so directory deletion still recurses on the real tree.
+        if crate::testbench::overlay_fs::active_overlay().is_some() {
+            overlay::remove_file(&resolved).map_err(|e| {
+                VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "Failed to delete {}: {e}",
+                    resolved.display()
+                ))))
+            })?;
+        } else if resolved.is_dir() {
             std::fs::remove_dir_all(&resolved).map_err(|e| {
                 VmError::Thrown(VmValue::String(Rc::from(format!(
                     "Failed to delete directory {}: {e}",
@@ -424,7 +436,6 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("append_file", |args, _out| {
-        use std::io::Write;
         if args.len() >= 2 {
             let path = args[0].display();
             let content = args[1].display();
@@ -434,17 +445,7 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
                 &resolved,
                 crate::stdlib::sandbox::FsAccess::Write,
             )?;
-            let mut file = std::fs::OpenOptions::new()
-                .append(true)
-                .create(true)
-                .open(&resolved)
-                .map_err(|e| {
-                    VmError::Thrown(VmValue::String(Rc::from(format!(
-                        "Failed to open file {}: {e}",
-                        resolved.display()
-                    ))))
-                })?;
-            file.write_all(content.as_bytes()).map_err(|e| {
+            overlay::append(&resolved, content.as_bytes()).map_err(|e| {
                 VmError::Thrown(VmValue::String(Rc::from(format!(
                     "Failed to append to file {}: {e}",
                     resolved.display()
@@ -493,7 +494,7 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
             &resolved,
             crate::stdlib::sandbox::FsAccess::Write,
         )?;
-        std::fs::create_dir_all(&resolved).map_err(|e| {
+        overlay::create_dir_all(&resolved).map_err(|e| {
             VmError::Thrown(VmValue::String(Rc::from(format!(
                 "Failed to create directory {}: {e}",
                 resolved.display()
