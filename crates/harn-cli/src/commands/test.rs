@@ -161,6 +161,39 @@ fn conformance_llm_mock_mode(harn_file: &Path) -> CliLlmMockMode {
     }
 }
 
+/// Testbench sidecar activation config for a single conformance test.
+///
+/// Sidecars are optional files adjacent to the `.harn` test:
+/// - `<name>.process-tape.json` → subprocess replay tape
+/// - `<name>.fs-overlay/`       → filesystem overlay root
+/// - `<name>.testbench-tape`    → expected event tape for fidelity check
+///
+/// When any sidecar is present the runner also activates a paused clock
+/// (pinned at `CONFORMANCE_TESTBENCH_START_MS`) so clock-advancing
+/// replay behaves deterministically.
+struct TestbenchSidecarConfig {
+    process_tape: Option<PathBuf>,
+    fs_overlay: Option<PathBuf>,
+    expected_tape: Option<PathBuf>,
+}
+
+impl TestbenchSidecarConfig {
+    fn is_empty(&self) -> bool {
+        self.process_tape.is_none() && self.fs_overlay.is_none() && self.expected_tape.is_none()
+    }
+}
+
+fn conformance_testbench_config(harn_file: &Path) -> TestbenchSidecarConfig {
+    let process_tape = harn_file.with_extension("process-tape.json");
+    let fs_overlay = harn_file.with_extension("fs-overlay");
+    let expected_tape = harn_file.with_extension("testbench-tape");
+    TestbenchSidecarConfig {
+        process_tape: process_tape.is_file().then_some(process_tape),
+        fs_overlay: fs_overlay.is_dir().then_some(fs_overlay),
+        expected_tape: expected_tape.is_file().then_some(expected_tape),
+    }
+}
+
 enum ConformanceExecution {
     Completed(Result<String, String>),
     TimedOut,
@@ -171,15 +204,74 @@ struct ConformanceRun {
     duration_ms: u64,
 }
 
+/// Pinned testbench clock start, same constant the CLI uses, so
+/// conformance fixtures and CLI invocations are interchangeable.
+const CONFORMANCE_TESTBENCH_START_MS: i64 = 1_767_225_600_000; // 2026-01-01T00:00:00Z
+
 async fn execute_conformance_source(
     source: &str,
     harn_file: &Path,
     timeout_ms: u64,
     llm_mock_mode: &CliLlmMockMode,
+    testbench: &TestbenchSidecarConfig,
 ) -> Result<ConformanceRun, String> {
+    use harn_vm::testbench::{
+        ClockConfig, FilesystemConfig, SubprocessConfig, TapeConfig, Testbench,
+    };
+
     harn_vm::reset_thread_local_state();
     install_cli_llm_mock_mode(llm_mock_mode)
         .map_err(|error| format!("llm mock setup error: {error}"))?;
+
+    // Activate testbench axes for any present sidecars. A paused clock is
+    // included whenever any sidecar is active so subprocess duration_ms and
+    // overlay timestamps stay deterministic.
+    let tape_temp_dir = if testbench.expected_tape.is_some() {
+        Some(tempfile::tempdir().map_err(|e| format!("tempdir for tape: {e}"))?)
+    } else {
+        None
+    };
+    let tape_path = tape_temp_dir
+        .as_ref()
+        .map(|dir| dir.path().join("run.tape"));
+
+    let bench = if !testbench.is_empty() {
+        let clock = ClockConfig::Paused {
+            starting_at_ms: CONFORMANCE_TESTBENCH_START_MS,
+        };
+        let subprocess = match &testbench.process_tape {
+            Some(tape) => SubprocessConfig::Replay { tape: tape.clone() },
+            None => SubprocessConfig::Real,
+        };
+        let filesystem = match &testbench.fs_overlay {
+            Some(root) => FilesystemConfig::Overlay {
+                worktree: root.clone(),
+            },
+            None => FilesystemConfig::Real,
+        };
+        let tape_cfg = match &tape_path {
+            Some(path) => TapeConfig::Emit {
+                path: path.clone(),
+                argv: Vec::new(),
+                script_path: Some(harn_file.to_string_lossy().into_owned()),
+            },
+            None => TapeConfig::Off,
+        };
+        Some(
+            Testbench {
+                clock,
+                llm: harn_vm::testbench::LlmConfig::Real,
+                filesystem,
+                subprocess,
+                network: harn_vm::testbench::NetworkConfig::Real,
+                tape: tape_cfg,
+            }
+            .activate()
+            .map_err(|e| format!("testbench activate: {e}"))?,
+        )
+    } else {
+        None
+    };
 
     let start = std::time::Instant::now();
     let result = tokio::time::timeout(
@@ -190,8 +282,49 @@ async fn execute_conformance_source(
     let duration_ms = start.elapsed().as_millis() as u64;
     harn_vm::llm::clear_cli_llm_mock_mode();
 
+    // Finalize the testbench session before comparing tapes.
+    if let Some(session) = bench {
+        session
+            .finalize()
+            .map_err(|e| format!("testbench finalize: {e}"))?;
+    }
+
+    // Post-run tape fidelity check: compare emitted tape to the expected fixture.
+    let fidelity_error: Option<String> =
+        if let (Some(tape_path), Some(expected_path)) = (&tape_path, &testbench.expected_tape) {
+            use harn_vm::testbench::fidelity::{compare, FidelityMode};
+            use harn_vm::testbench::tape::EventTape;
+            match (EventTape::load(tape_path), EventTape::load(expected_path)) {
+                (Ok(actual), Ok(expected)) => {
+                    let report = compare(&expected, &actual, FidelityMode::ByteIdentical);
+                    if !report.is_byte_identical() {
+                        Some(format!(
+                            "tape fidelity: {} divergence(s) vs {}",
+                            report.divergences.len(),
+                            expected_path.display()
+                        ))
+                    } else {
+                        None
+                    }
+                }
+                (Err(e), _) => Some(format!("load emitted tape: {e}")),
+                (_, Err(e)) => Some(format!(
+                    "load expected tape {}: {e}",
+                    expected_path.display()
+                )),
+            }
+        } else {
+            None
+        };
+
     let execution = match result {
-        Ok(result) => ConformanceExecution::Completed(result),
+        // Surface the script error first when both happen — fidelity
+        // divergence is usually a downstream symptom of a script failure.
+        Ok(inner_result) => match (inner_result, fidelity_error) {
+            (Err(error), _) => ConformanceExecution::Completed(Err(error)),
+            (Ok(_), Some(fidelity_err)) => ConformanceExecution::Completed(Err(fidelity_err)),
+            (Ok(output), None) => ConformanceExecution::Completed(Ok(output)),
+        },
         Err(_) => ConformanceExecution::TimedOut,
     };
     Ok(ConformanceRun {
@@ -456,20 +589,26 @@ pub(crate) async fn run_conformance_tests(
             };
 
             let llm_mock_mode = conformance_llm_mock_mode(harn_file);
-            let run =
-                match execute_conformance_source(&source, harn_file, timeout_ms, &llm_mock_mode)
-                    .await
-                {
-                    Ok(run) => run,
-                    Err(error) => {
-                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                        let msg = format!("{rel_path}: {error}");
-                        errors.push(msg.clone());
-                        junit_results.push((rel_path, false, msg, 0));
-                        failed += 1;
-                        continue;
-                    }
-                };
+            let testbench_config = conformance_testbench_config(harn_file);
+            let run = match execute_conformance_source(
+                &source,
+                harn_file,
+                timeout_ms,
+                &llm_mock_mode,
+                &testbench_config,
+            )
+            .await
+            {
+                Ok(run) => run,
+                Err(error) => {
+                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                    let msg = format!("{rel_path}: {error}");
+                    errors.push(msg.clone());
+                    junit_results.push((rel_path, false, msg, 0));
+                    failed += 1;
+                    continue;
+                }
+            };
             let duration_ms = run.duration_ms;
 
             match run.execution {
@@ -561,20 +700,26 @@ pub(crate) async fn run_conformance_tests(
             };
 
             let llm_mock_mode = conformance_llm_mock_mode(harn_file);
-            let run =
-                match execute_conformance_source(&source, harn_file, timeout_ms, &llm_mock_mode)
-                    .await
-                {
-                    Ok(run) => run,
-                    Err(error) => {
-                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                        let msg = format!("{rel_path}: {error}");
-                        errors.push(msg.clone());
-                        junit_results.push((rel_path, false, msg, 0));
-                        failed += 1;
-                        continue;
-                    }
-                };
+            let testbench_config = conformance_testbench_config(harn_file);
+            let run = match execute_conformance_source(
+                &source,
+                harn_file,
+                timeout_ms,
+                &llm_mock_mode,
+                &testbench_config,
+            )
+            .await
+            {
+                Ok(run) => run,
+                Err(error) => {
+                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                    let msg = format!("{rel_path}: {error}");
+                    errors.push(msg.clone());
+                    junit_results.push((rel_path, false, msg, 0));
+                    failed += 1;
+                    continue;
+                }
+            };
             let duration_ms = run.duration_ms;
 
             match run.execution {
