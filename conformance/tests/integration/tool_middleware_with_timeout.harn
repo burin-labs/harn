@@ -1,0 +1,80 @@
+/**
+ * with_timeout — observes elapsed wall-clock per tool call. Calls inside
+ * the budget pass through with `audit.layers[0].status == "ok"`. Calls
+ * that breach the budget surface `error_category: "timeout"` and
+ * `audit.layers[0].status == "timeout"` on the result.
+ *
+ * The middleware does not cancel the in-flight dispatch (hard cancel
+ * belongs in `agent_loop({deadline_ms})`); it observes the breach so
+ * upstream layers can react.
+ */
+import { with_timeout } from "std/llm/tool_middleware"
+
+fn fast_next() {
+  return { call -> return {
+    ok: true,
+    status: "ok",
+    tool_name: call.tool_name,
+    tool_call_id: call.call_id,
+    arguments: call.tool_args,
+    result: "fast",
+    rendered_result: "fast",
+    observation: "",
+    error: nil,
+    error_category: nil,
+    executor: "harn",
+  } }
+}
+
+fn slow_next(elapsed_simulator) {
+  // The middleware reads `now_ms()` directly, so we can't easily mock
+  // wall clock from a synthetic next. Instead, drive the breach path by
+  // setting `max_ms: -1` so any non-negative elapsed is over budget.
+  return { call -> return {
+    ok: true,
+    status: "ok",
+    tool_name: call.tool_name,
+    tool_call_id: call.call_id,
+    arguments: call.tool_args,
+    result: "slow:" + to_string(elapsed_simulator),
+    rendered_result: "slow",
+    observation: "",
+    error: nil,
+    error_category: nil,
+    executor: "harn",
+  } }
+}
+
+fn envelope(name) {
+  return {
+    tool_name: name,
+    tool_args: {},
+    call_id: "c-" + name,
+    declared_executor: "harn",
+    schema: nil,
+    description: "",
+    turn: {iteration: 0, session_id: ""},
+  }
+}
+
+pipeline default() {
+  // (1) Generous budget — call passes, layer status "ok".
+  let mw_ok = with_timeout({max_ms: 60000})
+  let r1 = mw_ok(envelope("read"), fast_next())
+  println(r1.ok)
+  println(r1.audit.layers[0].name)
+  println(r1.audit.layers[0].status)
+  // (2) max_ms = 0 — every call breaches; tag and pass-through preserved.
+  let mw_strict = with_timeout({max_ms: 0, message: "tool over budget"})
+  let r2 = mw_strict(envelope("write"), slow_next(50))
+  println(r2.ok)
+  println(r2.error_category)
+  println(r2.audit.layers[0].status)
+  // (3) per_tool override — `read` keeps the generous budget; `write`
+  // gets the strict 0 budget that breaches.
+  let mw_mixed = with_timeout({max_ms: 60000, per_tool: {write: 0}})
+  let r3 = mw_mixed(envelope("read"), fast_next())
+  let r4 = mw_mixed(envelope("write"), fast_next())
+  println(r3.ok)
+  println(r4.error_category)
+}

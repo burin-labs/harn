@@ -1944,7 +1944,8 @@ Nine opinionated modules wrap common LLM patterns:
   decorator), `tool_inject_param`, plus the bundled library
   (`with_required_reason`, `with_audit_log`, `with_consent`,
   `with_dry_run`, `with_redaction`, `with_idempotency`,
-  `with_rate_limit`, `with_telemetry`, `with_summary`).
+  `with_rate_limit`, `with_telemetry`, `with_summary`,
+  `with_handoff_artifact`, `with_timeout`).
 - `std/llm/ensemble` — multi-call quality strategies: `best_of_n`,
   `self_consistency`, `parallel_judge`, `debate`. Cites Wang 2022
   (arxiv:2203.11171) and Du 2023 (arxiv:2305.14325).

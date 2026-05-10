@@ -770,3 +770,189 @@ pub fn with_summary(format_fn) {
     return __tool_mw_attach_audit(result, {summary: summary, layers: [{name: "with_summary", status: "ok"}]})
   }
 }
+
+/**
+ * with_handoff_artifact(opts?) -> caller
+ *
+ * Detects when a tool's result carries a handoff payload and emits a
+ * typed handoff record (matching `std/handoffs`'s handoff schema) with
+ * full provenance: source persona, target, kind, and the originating
+ * tool call. Three modes:
+ *
+ *   1. Dict-result: tool returns `{__handoff: {...}}` or `{handoff: {...}}`.
+ *   2. JSON-string result: tool returns `json_stringify({__handoff: ...})` —
+ *      the runtime stringifies most Harn tool results as it ships them
+ *      back to the model, so emitting JSON keeps the side-channel
+ *      machine-readable for both the model and the middleware.
+ *   3. Predicate: caller supplies `detect(call, result) -> dict|nil`
+ *      for handoff-shaped outputs that don't follow the conventional
+ *      keys (legacy tools, MCP-served tools, etc.).
+ *
+ * The emitted record lands on `audit.handoff` so downstream consumers
+ * (receipts ledger, OTel exporter, ACP gateway) can fan it out without
+ * peeking at the tool result. The optional `sink(record, call)` callback
+ * runs after `handoff()` normalization for side-effecting persistence.
+ *
+ * Options (all optional):
+ *   sink:      fn(record, call) — called with the normalized handoff
+ *   detect:    fn(call, result) -> dict|nil — custom payload locator
+ *   keys:      list — additional result keys to inspect (default
+ *              ["__handoff", "handoff"])
+ *   source:    string — override `source_persona` if the tool didn't set one
+ *   strict:    bool — throw if detect returns malformed payload (default false)
+ */
+pub fn with_handoff_artifact(opts = nil) {
+  let cfg = __tool_mw_dict(opts)
+  let sink = cfg?.sink
+  let detect = cfg?.detect
+  let extra_keys = __tool_mw_list(cfg?.keys)
+  let source_override = cfg?.source
+  let strict = cfg?.strict ?? false
+  if sink != nil && !__tool_mw_is_callable(sink) {
+    throw "with_handoff_artifact: sink must be callable; got " + type_of(sink)
+  }
+  if detect != nil && !__tool_mw_is_callable(detect) {
+    throw "with_handoff_artifact: detect must be callable; got " + type_of(detect)
+  }
+  let candidate_keys = ["__handoff", "handoff"] + extra_keys
+  return { call, next ->
+    let result = next(call)
+    if !(result?.ok ?? false) {
+      return result
+    }
+    var payload = nil
+    if detect != nil {
+      let detected = try {
+        detect(call, result)
+      }
+      if !is_err(detected) {
+        payload = unwrap(detected)
+      }
+    }
+    if payload == nil {
+      let candidate = __tool_mw_handoff_dict_candidate(result?.result)
+      if type_of(candidate) == "dict" {
+        for key in candidate_keys {
+          if payload == nil && candidate?[key] != nil {
+            payload = candidate[key]
+          }
+        }
+      }
+    }
+    if payload == nil {
+      return result
+    }
+    if type_of(payload) != "dict" {
+      if strict {
+        throw "with_handoff_artifact: detect/`result.handoff` must be a dict; got " + type_of(payload)
+      }
+      return result
+    }
+    let enriched = if source_override != nil && payload?.source_persona == nil {
+      payload + {source_persona: to_string(source_override)}
+    } else {
+      payload
+    }
+    let normalized_outcome = try {
+      handoff(enriched)
+    }
+    if is_err(normalized_outcome) {
+      if strict {
+        throw unwrap_err(normalized_outcome)
+      }
+      return __tool_mw_attach_audit(
+        result,
+        {
+          layers: [
+            {name: "with_handoff_artifact", status: "invalid", error: to_string(unwrap_err(normalized_outcome))},
+          ],
+        },
+      )
+    }
+    let record = unwrap(normalized_outcome)
+    if sink != nil {
+      let _ = try {
+        sink(record, call)
+      }
+    }
+    return __tool_mw_attach_audit(
+      result,
+      {
+        handoff: record,
+        kind: "handoff",
+        layers: [{name: "with_handoff_artifact", status: "emitted", handoff_id: record?.id}],
+      },
+    )
+  }
+}
+
+fn __tool_mw_handoff_dict_candidate(raw_result) {
+  if type_of(raw_result) == "dict" {
+    return raw_result
+  }
+  if type_of(raw_result) == "string" {
+    let parsed = try {
+      json_parse(raw_result)
+    }
+    if is_err(parsed) {
+      return nil
+    }
+    let value = unwrap(parsed)
+    if type_of(value) == "dict" {
+      return value
+    }
+  }
+  return nil
+}
+
+/**
+ * with_timeout(opts) -> caller
+ *
+ * Caps wall-clock time per tool call. The result of `next(call)` is
+ * tagged "ok" when `elapsed < max_ms` and "timeout" otherwise — the
+ * middleware does *not* cancel the in-flight dispatch (hard cancel
+ * belongs in `agent_loop({deadline_ms})`); it observes the breach so
+ * upstream layers can react. Mirrors `with_rate_limit`'s strict cap
+ * semantics: `max_ms: 0` rejects every call, just like `max_calls: 0`.
+ *
+ * Options:
+ *   max_ms:  int       (required; non-negative)
+ *   per_tool: dict     (optional; map of tool_name -> override max_ms)
+ *   message: string    (override error message)
+ */
+pub fn with_timeout(opts) {
+  let cfg = __tool_mw_dict(opts)
+  let default_ms = cfg?.max_ms
+  if type_of(default_ms) != "int" || default_ms < 0 {
+    throw "with_timeout: max_ms must be a non-negative int"
+  }
+  let per_tool = __tool_mw_dict(cfg?.per_tool)
+  let message = to_string(cfg?.message ?? "tool call exceeded time budget")
+  return { call, next ->
+    let limit = if per_tool?[call.tool_name] != nil {
+      per_tool[call.tool_name]
+    } else {
+      default_ms
+    }
+    let started = now_ms()
+    let result = next(call)
+    let elapsed = now_ms() - started
+    if elapsed < limit {
+      return __tool_mw_attach_audit(
+        result,
+        {layers: [{name: "with_timeout", status: "ok", elapsed_ms: elapsed, limit_ms: limit}]},
+      )
+    }
+    let breached = result
+      + {
+      ok: false,
+      status: "error",
+      error: message + " (elapsed: " + to_string(elapsed) + "ms, limit: " + to_string(limit) + "ms)",
+      error_category: "timeout",
+    }
+    return __tool_mw_attach_audit(
+      breached,
+      {layers: [{name: "with_timeout", status: "timeout", elapsed_ms: elapsed, limit_ms: limit}]},
+    )
+  }
+}

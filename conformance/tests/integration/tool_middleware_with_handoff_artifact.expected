@@ -1,0 +1,13 @@
+true
+handoff
+merge_captain
+review_captain
+Review the PR before landing
+1
+true
+true
+1
+review_captain
+merge_captain
+ship_captain
+human
