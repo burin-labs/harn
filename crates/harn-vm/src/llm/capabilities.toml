@@ -493,6 +493,10 @@ model_match = "gemma3*"
 vision_supported = true
 
 [[provider.ollama]]
+model_match = "gemma4*"
+vision_supported = true
+
+[[provider.ollama]]
 model_match = "qwen3.6*"
 native_tools = true
 structured_output = "format_kw"
