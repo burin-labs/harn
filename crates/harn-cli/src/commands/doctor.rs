@@ -38,6 +38,15 @@ pub(crate) struct DoctorCheck {
     pub(crate) status: DoctorStatus,
     pub(crate) label: String,
     pub(crate) detail: String,
+    /// Shell command a contributor can run to fix this check.
+    pub(crate) fix_command: Option<String>,
+    /// Link to docs that explain the underlying tool or env var.
+    pub(crate) docs_url: Option<String>,
+    /// Workflows this check gates when it is failing — stable strings such as
+    /// `"build"`, `"test"`, `"release"`, `"publish"`, `"portal"`,
+    /// `"scripting"`, or `"editor"`. Consumed by Burin Code / Harn Cloud
+    /// preflight automation.
+    pub(crate) blocks: Vec<&'static str>,
 }
 
 impl DoctorCheck {
@@ -47,6 +56,11 @@ impl DoctorCheck {
         }
     }
 }
+
+/// Stable schema version for `harn doctor --json`. Bump when the JSON shape
+/// changes in a way that downstream consumers (Burin Code preflight, Harn
+/// Cloud onboarding) need to react to.
+pub(crate) const DOCTOR_JSON_SCHEMA_VERSION: &str = "1";
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DoctorOptions {
@@ -67,8 +81,11 @@ pub(crate) async fn run_doctor_with_options(opts: DoctorOptions) {
     let version_check = check_harn_version();
     let mut checks: Vec<DoctorCheck> = Vec::new();
     checks.push(version_check.clone());
-    checks.push(check_binary("rustc"));
-    checks.push(check_binary("cargo"));
+    checks.extend(check_toolchain());
+    checks.extend(check_dev_tools());
+    checks.extend(check_protocol_artifacts());
+    checks.extend(check_portal());
+    checks.extend(check_platform_capabilities());
     checks.extend(check_provider_selection());
     checks.extend(check_secret_providers());
     checks.extend(check_provider_credentials());
@@ -104,11 +121,35 @@ pub(crate) async fn run_doctor_with_options(opts: DoctorOptions) {
     println!();
     for check in &checks {
         println!(
-            "{:>4}  {:<22} {}",
+            "{:>4}  {:<24} {}",
             check.status.label(),
             check.label,
             check.detail
         );
+        if check.status != DoctorStatus::Ok && check.status != DoctorStatus::Skip {
+            if let Some(fix) = &check.fix_command {
+                println!("       fix: {fix}");
+            }
+            if let Some(docs) = &check.docs_url {
+                println!("       docs: {docs}");
+            }
+            if !check.blocks.is_empty() {
+                println!("       blocks: {}", check.blocks.join(", "));
+            }
+        }
+    }
+    println!();
+    println!("--- Summary ---");
+    let summary = doctor_summary(&checks);
+    println!(
+        "OK={ok} WARN={warn} FAIL={fail} SKIP={skip}",
+        ok = summary.ok,
+        warn = summary.warn,
+        fail = summary.fail,
+        skip = summary.skip,
+    );
+    if !summary.blocked_flows.is_empty() {
+        println!("blocked: {}", summary.blocked_flows.join(", "));
     }
     println!();
     println!("--- Next step ---");
@@ -117,6 +158,35 @@ pub(crate) async fn run_doctor_with_options(opts: DoctorOptions) {
     if failed {
         std::process::exit(1);
     }
+}
+
+#[derive(Debug, Default)]
+struct DoctorSummary {
+    ok: usize,
+    warn: usize,
+    fail: usize,
+    skip: usize,
+    blocked_flows: Vec<&'static str>,
+}
+
+fn doctor_summary(checks: &[DoctorCheck]) -> DoctorSummary {
+    let mut summary = DoctorSummary::default();
+    let mut blocks: std::collections::BTreeSet<&'static str> = std::collections::BTreeSet::new();
+    for check in checks {
+        match check.status {
+            DoctorStatus::Ok => summary.ok += 1,
+            DoctorStatus::Warn => summary.warn += 1,
+            DoctorStatus::Fail => summary.fail += 1,
+            DoctorStatus::Skip => summary.skip += 1,
+        }
+        if check.status == DoctorStatus::Fail {
+            for flow in &check.blocks {
+                blocks.insert(flow);
+            }
+        }
+    }
+    summary.blocked_flows = blocks.into_iter().collect();
+    summary
 }
 
 #[derive(Debug, Clone, Default)]
@@ -148,14 +218,26 @@ fn build_doctor_json(
                     DoctorStatus::Skip => "skip",
                 },
                 "detail": c.detail,
+                "fix_command": c.fix_command,
+                "docs_url": c.docs_url,
+                "blocks": c.blocks,
             })
         })
         .collect();
+    let summary = doctor_summary(checks);
     serde_json::json!({
+        "schema_version": DOCTOR_JSON_SCHEMA_VERSION,
         "harn_version": env!("CARGO_PKG_VERSION"),
         "providers_config_path": providers_path,
         "model_defaults": model_defaults,
         "checks": checks_json,
+        "summary": {
+            "ok": summary.ok,
+            "warn": summary.warn,
+            "fail": summary.fail,
+            "skip": summary.skip,
+            "blocked_flows": summary.blocked_flows,
+        },
         "hardware": {
             "ram_gb": hardware.ram_gb,
             "gpu": hardware.gpu,
@@ -198,6 +280,7 @@ fn check_harn_version() -> DoctorCheck {
         status: DoctorStatus::Ok,
         label: "harn version".to_string(),
         detail: format!("v{version} (providers: {providers_path})"),
+        ..Default::default()
     }
 }
 
@@ -217,6 +300,7 @@ fn check_provider_credentials() -> Vec<DoctorCheck> {
                 status: DoctorStatus::Skip,
                 label: format!("creds:{name}"),
                 detail: "no key required".to_string(),
+                ..Default::default()
             });
             continue;
         }
@@ -227,6 +311,7 @@ fn check_provider_credentials() -> Vec<DoctorCheck> {
                 status: DoctorStatus::Skip,
                 label: format!("creds:{name}"),
                 detail: "no env vars declared".to_string(),
+                ..Default::default()
             });
             continue;
         }
@@ -242,6 +327,9 @@ fn check_provider_credentials() -> Vec<DoctorCheck> {
                 status: DoctorStatus::Warn,
                 label: format!("creds:{name}"),
                 detail: format!("missing: {}", envs.join(", ")),
+                fix_command: Some(format!("export {}=…", envs[0])),
+                docs_url: Some("https://harnlang.com/docs/llm/providers.html".to_string()),
+                blocks: Vec::new(),
             });
         } else {
             any_creds = true;
@@ -250,6 +338,7 @@ fn check_provider_credentials() -> Vec<DoctorCheck> {
                 status: DoctorStatus::Ok,
                 label: format!("creds:{name}"),
                 detail: format!("present: {}", found.join(", ")),
+                ..Default::default()
             });
         }
     }
@@ -273,11 +362,24 @@ fn check_provider_credentials() -> Vec<DoctorCheck> {
     } else {
         "no provider credentials and no local Ollama".to_string()
     };
+    let aggregate_blocks: Vec<&'static str> = if aggregate_status == DoctorStatus::Fail {
+        vec!["scripting"]
+    } else {
+        Vec::new()
+    };
+    let aggregate_fix = if aggregate_status == DoctorStatus::Fail {
+        Some("harn models recommend && harn quickstart --non-interactive".to_string())
+    } else {
+        None
+    };
     checks.push(DoctorCheck {
         id: "creds:any".to_string(),
         status: aggregate_status,
         label: "credentials".to_string(),
         detail: aggregate_detail,
+        fix_command: aggregate_fix,
+        docs_url: Some("https://harnlang.com/docs/llm/providers.html".to_string()),
+        blocks: aggregate_blocks,
     });
 
     checks
@@ -290,6 +392,7 @@ async fn check_ollama() -> DoctorCheck {
             status: DoctorStatus::Skip,
             label: "ollama".to_string(),
             detail: "ollama not installed; see https://ollama.com".to_string(),
+            ..Default::default()
         };
     }
     let output = tokio::process::Command::new("ollama")
@@ -311,6 +414,7 @@ async fn check_ollama() -> DoctorCheck {
                     label: "ollama".to_string(),
                     detail: "ollama running, no models pulled; try `harn models recommend`"
                         .to_string(),
+                    ..Default::default()
                 }
             } else {
                 let total = models.len();
@@ -320,6 +424,7 @@ async fn check_ollama() -> DoctorCheck {
                     status: DoctorStatus::Ok,
                     label: "ollama".to_string(),
                     detail: format!("{total} models: {}", models.join(", ")),
+                    ..Default::default()
                 }
             }
         }
@@ -328,12 +433,14 @@ async fn check_ollama() -> DoctorCheck {
             status: DoctorStatus::Warn,
             label: "ollama".to_string(),
             detail: format!("`ollama list` exited {}", out.status),
+            ..Default::default()
         },
         Err(error) => DoctorCheck {
             id: "ollama".to_string(),
             status: DoctorStatus::Skip,
             label: "ollama".to_string(),
             detail: format!("ollama not callable: {error}"),
+            ..Default::default()
         },
     }
 }
@@ -371,6 +478,7 @@ fn check_hardware() -> (DoctorCheck, HardwareSnapshot) {
             status,
             label: "hardware".to_string(),
             detail: detail_parts.join(", "),
+            ..Default::default()
         },
         snapshot,
     )
@@ -494,30 +602,403 @@ fn next_step_suggestion(checks: &[DoctorCheck]) -> String {
     "Address the failing checks above, then re-run `harn doctor`.".to_string()
 }
 
-fn check_binary(name: &str) -> DoctorCheck {
-    match Command::new(name).arg("--version").output() {
-        Ok(output) if output.status.success() => DoctorCheck {
-            id: String::new(),
-            status: DoctorStatus::Ok,
-            label: name.to_string(),
-            detail: String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .unwrap_or("version detected")
-                .to_string(),
+/// Definition for a CLI tool we want `harn doctor` to inspect.
+struct ToolCheck {
+    id: &'static str,
+    /// Binary name on PATH.
+    binary: &'static str,
+    /// `--version` arguments. Defaults to `["--version"]` when empty.
+    version_args: &'static [&'static str],
+    /// Severity when the tool is missing. Use `Fail` only for genuinely
+    /// load-bearing toolchain components; everything else should be `Warn`.
+    missing_status: DoctorStatus,
+    /// Shell command to install the tool — surfaced as `fix_command` in JSON.
+    install_hint: &'static str,
+    /// Documentation URL for the tool.
+    docs_url: &'static str,
+    /// Workflows that fail when this tool is missing or broken.
+    blocks: &'static [&'static str],
+}
+
+impl ToolCheck {
+    fn run(&self) -> DoctorCheck {
+        let args: &[&str] = if self.version_args.is_empty() {
+            &["--version"]
+        } else {
+            self.version_args
+        };
+        let label = self.id.to_string();
+        let result = Command::new(self.binary).args(args).output();
+        let mut check = match result {
+            Ok(output) if output.status.success() => DoctorCheck {
+                id: self.id.to_string(),
+                status: DoctorStatus::Ok,
+                label,
+                detail: String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("version detected")
+                    .to_string(),
+                ..Default::default()
+            },
+            Ok(output) => DoctorCheck {
+                id: self.id.to_string(),
+                status: self.missing_status,
+                label,
+                detail: format!(
+                    "`{} {}` exited with {}",
+                    self.binary,
+                    args.join(" "),
+                    output.status
+                ),
+                ..Default::default()
+            },
+            Err(error) => DoctorCheck {
+                id: self.id.to_string(),
+                status: self.missing_status,
+                label,
+                detail: format!("{} not found in PATH: {error}", self.binary),
+                ..Default::default()
+            },
+        };
+        check.fix_command = Some(self.install_hint.to_string());
+        check.docs_url = Some(self.docs_url.to_string());
+        check.blocks = self.blocks.to_vec();
+        check
+    }
+}
+
+/// Checks the load-bearing toolchain — Rust + Cargo. These block every code
+/// workflow if missing, so they FAIL hard.
+fn check_toolchain() -> Vec<DoctorCheck> {
+    const TOOLS: &[ToolCheck] = &[
+        ToolCheck {
+            id: "rustc",
+            binary: "rustc",
+            version_args: &["--version"],
+            missing_status: DoctorStatus::Fail,
+            install_hint:
+                "https://rustup.rs (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh)",
+            docs_url: "https://www.rust-lang.org/tools/install",
+            blocks: &["build", "test", "release", "publish"],
         },
-        Ok(output) => DoctorCheck {
-            id: String::new(),
+        ToolCheck {
+            id: "cargo",
+            binary: "cargo",
+            version_args: &["--version"],
+            missing_status: DoctorStatus::Fail,
+            install_hint: "https://rustup.rs",
+            docs_url: "https://doc.rust-lang.org/cargo/",
+            blocks: &["build", "test", "release", "publish"],
+        },
+    ];
+    TOOLS.iter().map(ToolCheck::run).collect()
+}
+
+/// Checks optional but recommended developer tools. These never FAIL — every
+/// missing tool degrades a workflow but has a documented fallback (cargo test
+/// for nextest, no-op for sccache, skipped lint for actionlint, etc).
+fn check_dev_tools() -> Vec<DoctorCheck> {
+    const TOOLS: &[ToolCheck] = &[
+        ToolCheck {
+            id: "cargo-nextest",
+            binary: "cargo-nextest",
+            version_args: &["nextest", "--version"],
+            missing_status: DoctorStatus::Warn,
+            install_hint: "cargo install cargo-nextest --locked",
+            docs_url: "https://nexte.st",
+            blocks: &[],
+        },
+        ToolCheck {
+            id: "sccache",
+            binary: "sccache",
+            version_args: &["--version"],
+            missing_status: DoctorStatus::Warn,
+            install_hint: "cargo install sccache --locked",
+            docs_url: "https://github.com/mozilla/sccache",
+            blocks: &[],
+        },
+        ToolCheck {
+            id: "actionlint",
+            binary: "actionlint",
+            version_args: &["-version"],
+            missing_status: DoctorStatus::Warn,
+            install_hint: "brew install actionlint  # or: go install github.com/rhysd/actionlint/cmd/actionlint@latest",
+            docs_url: "https://github.com/rhysd/actionlint",
+            blocks: &[],
+        },
+    ];
+    TOOLS.iter().map(ToolCheck::run).collect()
+}
+
+/// Checks the portal frontend toolchain — node, npm, and the installed
+/// `node_modules`. Skipped entirely when not running inside the repo.
+fn check_portal() -> Vec<DoctorCheck> {
+    let Some(repo) = find_harn_repo_root(&std::env::current_dir().unwrap_or_default()) else {
+        return vec![DoctorCheck {
+            id: "portal".to_string(),
+            status: DoctorStatus::Skip,
+            label: "portal".to_string(),
+            detail: "not running inside the harn repo; skipping portal checks".to_string(),
+            ..Default::default()
+        }];
+    };
+
+    let mut checks = Vec::new();
+
+    const NODE_TOOLS: &[ToolCheck] = &[
+        ToolCheck {
+            id: "node",
+            binary: "node",
+            version_args: &["--version"],
+            missing_status: DoctorStatus::Warn,
+            install_hint: "https://nodejs.org (or `brew install node`, `nvm install --lts`)",
+            docs_url: "https://nodejs.org",
+            blocks: &["portal", "editor"],
+        },
+        ToolCheck {
+            id: "npm",
+            binary: "npm",
+            version_args: &["--version"],
+            missing_status: DoctorStatus::Warn,
+            install_hint: "ships with Node.js — install Node first",
+            docs_url: "https://docs.npmjs.com",
+            blocks: &["portal", "editor"],
+        },
+    ];
+    for tool in NODE_TOOLS {
+        checks.push(tool.run());
+    }
+
+    let portal_dir = repo.join("crates/harn-cli/portal");
+    let pkg_json = portal_dir.join("package.json");
+    let node_modules = portal_dir.join("node_modules");
+    if !pkg_json.is_file() {
+        // The portal directory disappeared — surface as Warn so we don't
+        // crash on a malformed checkout.
+        checks.push(DoctorCheck {
+            id: "portal:deps".to_string(),
+            status: DoctorStatus::Warn,
+            label: "portal:deps".to_string(),
+            detail: format!("missing {}", pkg_json.display()),
+            ..Default::default()
+        });
+        return checks;
+    }
+    let detail = if node_modules.is_dir() {
+        DoctorCheck {
+            id: "portal:deps".to_string(),
+            status: DoctorStatus::Ok,
+            label: "portal:deps".to_string(),
+            detail: format!("installed at {}", node_modules.display()),
+            ..Default::default()
+        }
+    } else {
+        DoctorCheck {
+            id: "portal:deps".to_string(),
+            status: DoctorStatus::Warn,
+            label: "portal:deps".to_string(),
+            detail: format!("node_modules missing under {}", portal_dir.display()),
+            fix_command: Some(format!("(cd {} && npm install)", portal_dir.display())),
+            docs_url: Some("https://harnlang.com/docs/portal.html".to_string()),
+            blocks: vec!["portal"],
+        }
+    };
+    checks.push(detail);
+    checks
+}
+
+/// Checks the checked-in protocol artifacts against what the current binary
+/// would generate. Only runs inside the harn repo.
+fn check_protocol_artifacts() -> Vec<DoctorCheck> {
+    let Some(repo) = find_harn_repo_root(&std::env::current_dir().unwrap_or_default()) else {
+        return vec![DoctorCheck {
+            id: "protocol-artifacts".to_string(),
+            status: DoctorStatus::Skip,
+            label: "protocol-artifacts".to_string(),
+            detail: "not running inside the harn repo; skipping artifact drift check".to_string(),
+            ..Default::default()
+        }];
+    };
+
+    let ts_path = repo.join("spec/protocol-artifacts/harn-protocol.ts");
+    let Ok(text) = fs::read_to_string(&ts_path) else {
+        return vec![DoctorCheck {
+            id: "protocol-artifacts".to_string(),
+            status: DoctorStatus::Warn,
+            label: "protocol-artifacts".to_string(),
+            detail: format!("unable to read {}", ts_path.display()),
+            fix_command: Some("make gen-protocol-artifacts".to_string()),
+            docs_url: Some("https://harnlang.com/docs/protocol-artifacts.html".to_string()),
+            blocks: vec!["release"],
+        }];
+    };
+
+    // The TS artifact records the harn version it was generated against:
+    //   export const HARN_PROTOCOL_ARTIFACT_VERSION = "0.8.4"
+    let pinned_version = text
+        .lines()
+        .find_map(|line| {
+            line.split_once("HARN_PROTOCOL_ARTIFACT_VERSION = \"")
+                .map(|(_, rest)| rest)
+                .and_then(|rest| rest.split_once('"').map(|(v, _)| v.to_string()))
+        })
+        .unwrap_or_default();
+    let current = env!("CARGO_PKG_VERSION");
+    if pinned_version.is_empty() {
+        return vec![DoctorCheck {
+            id: "protocol-artifacts".to_string(),
+            status: DoctorStatus::Warn,
+            label: "protocol-artifacts".to_string(),
+            detail: format!(
+                "could not parse HARN_PROTOCOL_ARTIFACT_VERSION from {}",
+                ts_path.display()
+            ),
+            fix_command: Some("make gen-protocol-artifacts".to_string()),
+            docs_url: Some("https://harnlang.com/docs/protocol-artifacts.html".to_string()),
+            blocks: vec!["release"],
+        }];
+    }
+    if pinned_version == current {
+        vec![DoctorCheck {
+            id: "protocol-artifacts".to_string(),
+            status: DoctorStatus::Ok,
+            label: "protocol-artifacts".to_string(),
+            detail: format!("pinned at v{pinned_version}"),
+            ..Default::default()
+        }]
+    } else {
+        vec![DoctorCheck {
+            id: "protocol-artifacts".to_string(),
             status: DoctorStatus::Fail,
-            label: name.to_string(),
-            detail: format!("command exists but exited with {}", output.status),
+            label: "protocol-artifacts".to_string(),
+            detail: format!("stale: pinned v{pinned_version}, current v{current}"),
+            fix_command: Some("make gen-protocol-artifacts".to_string()),
+            docs_url: Some("https://harnlang.com/docs/protocol-artifacts.html".to_string()),
+            blocks: vec!["release"],
+        }]
+    }
+}
+
+/// Best-effort platform capability probes. None of these block builds; they
+/// help the contributor understand what features will work on this machine.
+fn check_platform_capabilities() -> Vec<DoctorCheck> {
+    let mut checks = Vec::new();
+
+    // File watching — `harn run --watch`, `harn test --watch`, and the
+    // playground depend on the `notify` crate's recommended backend.
+    let watcher = notify::recommended_watcher(|_res: notify::Result<notify::Event>| {});
+    let watcher_check = match watcher {
+        Ok(_) => DoctorCheck {
+            id: "platform:file-watcher".to_string(),
+            status: DoctorStatus::Ok,
+            label: "file-watcher".to_string(),
+            detail: format!("notify backend `{}`", notify_backend_name()),
+            ..Default::default()
         },
         Err(error) => DoctorCheck {
-            id: String::new(),
-            status: DoctorStatus::Fail,
-            label: name.to_string(),
-            detail: format!("not found in PATH: {error}"),
+            id: "platform:file-watcher".to_string(),
+            status: DoctorStatus::Warn,
+            label: "file-watcher".to_string(),
+            detail: format!(
+                "notify backend unavailable: {error}; --watch and the playground will fall back to polling"
+            ),
+            fix_command: None,
+            docs_url: Some("https://docs.rs/notify".to_string()),
+            blocks: vec![],
         },
+    };
+    checks.push(watcher_check);
+
+    // Browser opener — `harn portal`, `harn mcp login`, and OAuth flows
+    // shell out via the `webbrowser` crate. We don't open a browser here;
+    // we just check whether a known opener is on PATH.
+    let opener = browser_opener();
+    let opener_check = if let Some(name) = opener {
+        DoctorCheck {
+            id: "platform:browser-opener".to_string(),
+            status: DoctorStatus::Ok,
+            label: "browser-opener".to_string(),
+            detail: format!("`{name}` available"),
+            ..Default::default()
+        }
+    } else {
+        DoctorCheck {
+            id: "platform:browser-opener".to_string(),
+            status: DoctorStatus::Warn,
+            label: "browser-opener".to_string(),
+            detail: "no system opener (open/xdg-open/start) on PATH; OAuth flows print URLs"
+                .to_string(),
+            docs_url: None,
+            fix_command: Some(
+                "install xdg-utils (Linux) or use `--no-open` flags to print URLs".to_string(),
+            ),
+            blocks: vec![],
+        }
+    };
+    checks.push(opener_check);
+
+    checks
+}
+
+#[cfg(target_os = "macos")]
+fn notify_backend_name() -> &'static str {
+    "fsevents"
+}
+#[cfg(target_os = "linux")]
+fn notify_backend_name() -> &'static str {
+    "inotify"
+}
+#[cfg(target_os = "windows")]
+fn notify_backend_name() -> &'static str {
+    "ReadDirectoryChangesW"
+}
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn notify_backend_name() -> &'static str {
+    "polling"
+}
+
+#[cfg(target_os = "macos")]
+fn browser_opener() -> Option<&'static str> {
+    if which::which("open").is_ok() {
+        Some("open")
+    } else {
+        None
+    }
+}
+#[cfg(target_os = "linux")]
+fn browser_opener() -> Option<&'static str> {
+    if which::which("xdg-open").is_ok() {
+        Some("xdg-open")
+    } else {
+        None
+    }
+}
+#[cfg(target_os = "windows")]
+fn browser_opener() -> Option<&'static str> {
+    // `start` is a cmd.exe builtin, not a binary on PATH. Treat the platform
+    // as always supporting it.
+    Some("start")
+}
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn browser_opener() -> Option<&'static str> {
+    None
+}
+
+/// Walk up from `start` looking for a marker that uniquely identifies the
+/// harn repo (the checked-in protocol artifacts directory). Returns the repo
+/// root when found.
+fn find_harn_repo_root(start: &Path) -> Option<PathBuf> {
+    let mut dir = start.to_path_buf();
+    loop {
+        if dir.join("spec/protocol-artifacts/manifest.json").is_file()
+            && dir.join("crates/harn-cli/Cargo.toml").is_file()
+        {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
     }
 }
 
@@ -536,6 +1017,7 @@ fn check_provider_selection() -> Vec<DoctorCheck> {
             status,
             label: "providers config".to_string(),
             detail: format!("HARN_PROVIDERS_CONFIG={path}"),
+            ..Default::default()
         });
     }
 
@@ -550,6 +1032,7 @@ fn check_provider_selection() -> Vec<DoctorCheck> {
             status,
             label: "selected provider".to_string(),
             detail: format!("HARN_LLM_PROVIDER={provider}"),
+            ..Default::default()
         });
     }
 
@@ -576,6 +1059,7 @@ fn check_secret_providers() -> Vec<DoctorCheck> {
                 configured.replace(',', " -> "),
                 namespace
             ),
+            ..Default::default()
         }),
         Err(error) => {
             checks.push(DoctorCheck {
@@ -583,6 +1067,7 @@ fn check_secret_providers() -> Vec<DoctorCheck> {
                 status: DoctorStatus::Fail,
                 label: "secret providers".to_string(),
                 detail: error.to_string(),
+                ..Default::default()
             });
             return checks;
         }
@@ -602,6 +1087,7 @@ fn check_secret_providers() -> Vec<DoctorCheck> {
                     status: DoctorStatus::Ok,
                     label: "secret:env".to_string(),
                     detail: format!("reads process env via {sample}"),
+                    ..Default::default()
                 });
             }
             "keyring" => {
@@ -612,12 +1098,14 @@ fn check_secret_providers() -> Vec<DoctorCheck> {
                         status: DoctorStatus::Ok,
                         label: "secret:keyring".to_string(),
                         detail,
+                        ..Default::default()
                     }),
                     Err(error) => checks.push(DoctorCheck {
                         id: String::new(),
                         status: DoctorStatus::Fail,
                         label: "secret:keyring".to_string(),
                         detail: error.to_string(),
+                        ..Default::default()
                     }),
                 }
             }
@@ -626,6 +1114,7 @@ fn check_secret_providers() -> Vec<DoctorCheck> {
                 status: DoctorStatus::Fail,
                 label: format!("secret:{other}"),
                 detail: format!("unsupported provider '{other}'"),
+                ..Default::default()
             }),
         }
     }
@@ -640,6 +1129,7 @@ async fn check_manifest() -> Vec<DoctorCheck> {
             status: DoctorStatus::Warn,
             label: "manifest".to_string(),
             detail: "no harn.toml found in the current directory or its parents".to_string(),
+            ..Default::default()
         }];
     };
 
@@ -652,6 +1142,7 @@ async fn check_manifest() -> Vec<DoctorCheck> {
                 status: DoctorStatus::Fail,
                 label: "manifest".to_string(),
                 detail: format!("{}: {error}", path.display()),
+                ..Default::default()
             }];
         }
     };
@@ -667,6 +1158,7 @@ async fn check_manifest() -> Vec<DoctorCheck> {
         status: DoctorStatus::Ok,
         label: "manifest".to_string(),
         detail: format!("{} ({package_name})", path.display()),
+        ..Default::default()
     }];
 
     let mut seen_names = HashSet::new();
@@ -678,6 +1170,7 @@ async fn check_manifest() -> Vec<DoctorCheck> {
                 status: DoctorStatus::Fail,
                 label: format!("mcp:{name}"),
                 detail: "duplicate MCP server name".to_string(),
+                ..Default::default()
             });
             continue;
         }
@@ -687,6 +1180,7 @@ async fn check_manifest() -> Vec<DoctorCheck> {
                 status: DoctorStatus::Warn,
                 label: format!("mcp:{name}"),
                 detail: "entry has neither url nor command".to_string(),
+                ..Default::default()
             });
         } else {
             checks.push(DoctorCheck {
@@ -698,6 +1192,7 @@ async fn check_manifest() -> Vec<DoctorCheck> {
                 } else {
                     format!("stdio {}", server.command)
                 },
+                ..Default::default()
             });
         }
     }
@@ -724,6 +1219,7 @@ async fn check_manifest() -> Vec<DoctorCheck> {
                             trigger.version,
                             format_trigger_metrics(&trigger.metrics),
                         ),
+                        ..Default::default()
                     });
                 }
                 let dispatcher = harn_vm::snapshot_dispatcher_stats();
@@ -735,6 +1231,7 @@ async fn check_manifest() -> Vec<DoctorCheck> {
                         "in_flight={} retry_queue_depth={} dlq_depth={}",
                         dispatcher.in_flight, dispatcher.retry_queue_depth, dispatcher.dlq_depth,
                     ),
+                    ..Default::default()
                 });
                 harn_vm::clear_trigger_registry();
             }
@@ -743,6 +1240,7 @@ async fn check_manifest() -> Vec<DoctorCheck> {
                 status: DoctorStatus::Fail,
                 label: "triggers".to_string(),
                 detail: error.to_string(),
+                ..Default::default()
             }),
         }
     }
@@ -773,6 +1271,7 @@ fn check_skills() -> Vec<DoctorCheck> {
             status: DoctorStatus::Skip,
             label: "skills".to_string(),
             detail: "no SKILL.md files discovered (use --skill-dir, $HARN_SKILLS_PATH, .harn/skills, or harn.toml [skills])".to_string(),
+            ..Default::default()
         });
     } else {
         let mut by_layer: std::collections::BTreeMap<&str, usize> =
@@ -786,6 +1285,7 @@ fn check_skills() -> Vec<DoctorCheck> {
             status: DoctorStatus::Ok,
             label: "skills".to_string(),
             detail: format!("{} loaded ({})", winners.len(), breakdown.join(", ")),
+            ..Default::default()
         });
     }
 
@@ -800,6 +1300,7 @@ fn check_skills() -> Vec<DoctorCheck> {
                 shadow.loser.label(),
                 shadow.loser_origin,
             ),
+            ..Default::default()
         });
     }
 
@@ -812,6 +1313,7 @@ fn check_skills() -> Vec<DoctorCheck> {
                 "unknown frontmatter field(s) forwarded as metadata: {}",
                 fields.join(", ")
             ),
+            ..Default::default()
         });
     }
 
@@ -821,6 +1323,7 @@ fn check_skills() -> Vec<DoctorCheck> {
             status: DoctorStatus::Skip,
             label: format!("skills-layer:{}", layer.label()),
             detail: "layer disabled by harn.toml [skills.disable]".to_string(),
+            ..Default::default()
         });
     }
 
@@ -838,6 +1341,7 @@ fn check_metadata_cache() -> Vec<DoctorCheck> {
                 status: DoctorStatus::Skip,
                 label: "metadata".to_string(),
                 detail: format!("no metadata cache under {}", metadata_dir.display()),
+                ..Default::default()
             }];
         }
         Err(error) => {
@@ -846,6 +1350,7 @@ fn check_metadata_cache() -> Vec<DoctorCheck> {
                 status: DoctorStatus::Warn,
                 label: "metadata".to_string(),
                 detail: format!("failed to read {}: {error}", metadata_dir.display()),
+                ..Default::default()
             }];
         }
     };
@@ -901,6 +1406,7 @@ fn check_metadata_cache() -> Vec<DoctorCheck> {
         status: DoctorStatus::Ok,
         label: "metadata".to_string(),
         detail,
+        ..Default::default()
     }]
 }
 
@@ -922,6 +1428,7 @@ fn check_event_log() -> Vec<DoctorCheck> {
                 status: DoctorStatus::Ok,
                 label: "event log".to_string(),
                 detail,
+                ..Default::default()
             }]
         }
         Err(error) => vec![DoctorCheck {
@@ -929,6 +1436,7 @@ fn check_event_log() -> Vec<DoctorCheck> {
             status: DoctorStatus::Fail,
             label: "event log".to_string(),
             detail: error.to_string(),
+            ..Default::default()
         }],
     }
 }
@@ -950,6 +1458,7 @@ async fn check_provider_health(network: bool) -> Vec<DoctorCheck> {
                 status: DoctorStatus::Skip,
                 label: format!("provider:{provider_name}"),
                 detail: "network checks disabled".to_string(),
+                ..Default::default()
             });
             continue;
         }
@@ -1004,6 +1513,7 @@ async fn run_model_readiness(provider_name: &str, model: &str, api_key: &str) ->
         status,
         label: format!("provider:{provider_name}"),
         detail: format!("{}: {}", readiness.category, readiness.message),
+        ..Default::default()
     }
 }
 
@@ -1057,6 +1567,7 @@ fn healthcheck_result_to_doctor_check(
         status,
         label: format!("provider:{}", result.provider),
         detail,
+        ..Default::default()
     }
 }
 
@@ -1100,8 +1611,10 @@ fn read_manifest(path: &Path) -> Result<package::Manifest, String> {
 mod tests {
     use super::{
         build_doctor_json, check_event_log, check_hardware, check_manifest, check_ollama,
+        check_platform_capabilities, check_protocol_artifacts, doctor_summary, find_harn_repo_root,
         find_nearest_manifest, format_trigger_metrics, healthcheck_result_to_doctor_check,
         next_step_suggestion, read_manifest, DoctorCheck, DoctorStatus, HardwareSnapshot,
+        DOCTOR_JSON_SCHEMA_VERSION,
     };
     use harn_vm::llm::ProviderHealthcheckResult;
     use harn_vm::llm_config::{AuthEnv, HealthcheckDef, ProviderDef};
@@ -1315,6 +1828,7 @@ pub fn on_new_issue(event: TriggerEvent) {
             status,
             label: id.to_string(),
             detail: String::new(),
+            ..Default::default()
         }
     }
 
@@ -1397,5 +1911,138 @@ pub fn on_new_issue(event: TriggerEvent) {
             "unexpected ollama detail: {}",
             result.detail
         );
+    }
+
+    #[test]
+    fn doctor_summary_aggregates_status_counts_and_blocked_flows() {
+        let checks = vec![
+            DoctorCheck {
+                id: "rustc".to_string(),
+                status: DoctorStatus::Fail,
+                blocks: vec!["build", "test"],
+                ..Default::default()
+            },
+            DoctorCheck {
+                id: "node".to_string(),
+                status: DoctorStatus::Fail,
+                blocks: vec!["portal"],
+                ..Default::default()
+            },
+            DoctorCheck {
+                id: "creds:openai".to_string(),
+                status: DoctorStatus::Warn,
+                blocks: vec!["scripting"], // not blocking — only Fail counts
+                ..Default::default()
+            },
+            DoctorCheck {
+                id: "harn_version".to_string(),
+                status: DoctorStatus::Ok,
+                ..Default::default()
+            },
+            DoctorCheck {
+                id: "metadata".to_string(),
+                status: DoctorStatus::Skip,
+                ..Default::default()
+            },
+        ];
+        let summary = doctor_summary(&checks);
+        assert_eq!(summary.ok, 1);
+        assert_eq!(summary.warn, 1);
+        assert_eq!(summary.fail, 2);
+        assert_eq!(summary.skip, 1);
+        // Sorted, deduplicated, alphabetical.
+        assert_eq!(summary.blocked_flows, vec!["build", "portal", "test"]);
+    }
+
+    #[test]
+    fn doctor_json_includes_schema_version_summary_and_per_check_metadata() {
+        let checks = vec![
+            DoctorCheck {
+                id: "rustc".to_string(),
+                status: DoctorStatus::Fail,
+                label: "rustc".to_string(),
+                detail: "missing".to_string(),
+                fix_command: Some("install rust".to_string()),
+                docs_url: Some("https://rustup.rs".to_string()),
+                blocks: vec!["build", "test"],
+            },
+            DoctorCheck {
+                id: "harn_version".to_string(),
+                status: DoctorStatus::Ok,
+                label: "harn version".to_string(),
+                detail: "v0.0.0".to_string(),
+                ..Default::default()
+            },
+        ];
+        let hardware = HardwareSnapshot::default();
+        let value = build_doctor_json(&checks, &hardware, "next");
+
+        assert_eq!(value["schema_version"], DOCTOR_JSON_SCHEMA_VERSION);
+        assert_eq!(value["summary"]["ok"], 1);
+        assert_eq!(value["summary"]["fail"], 1);
+        assert_eq!(
+            value["summary"]["blocked_flows"],
+            serde_json::json!(["build", "test"])
+        );
+
+        let first = &value["checks"][0];
+        assert_eq!(first["fix_command"], "install rust");
+        assert_eq!(first["docs_url"], "https://rustup.rs");
+        assert_eq!(first["blocks"], serde_json::json!(["build", "test"]));
+
+        let second = &value["checks"][1];
+        // Optional fields surface as JSON null / empty array — the keys
+        // themselves are always present so consumers can rely on the shape.
+        assert!(second["fix_command"].is_null());
+        assert!(second["docs_url"].is_null());
+        assert_eq!(second["blocks"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn find_harn_repo_root_walks_up_from_nested_dir() {
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(root.path().join("spec/protocol-artifacts")).unwrap();
+        std::fs::write(
+            root.path().join("spec/protocol-artifacts/manifest.json"),
+            "{}",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.path().join("crates/harn-cli")).unwrap();
+        std::fs::write(root.path().join("crates/harn-cli/Cargo.toml"), "").unwrap();
+
+        let nested = root.path().join("crates/harn-cli/src/commands");
+        std::fs::create_dir_all(&nested).unwrap();
+
+        let found = find_harn_repo_root(&nested).expect("repo root");
+        assert_eq!(found, root.path());
+
+        let unrelated = tempfile::tempdir().expect("tempdir");
+        assert!(find_harn_repo_root(unrelated.path()).is_none());
+    }
+
+    #[test]
+    fn protocol_artifacts_check_skipped_outside_repo() {
+        let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let prev = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("set cwd");
+        let checks = check_protocol_artifacts();
+        std::env::set_current_dir(prev).expect("restore cwd");
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, DoctorStatus::Skip);
+        assert_eq!(checks[0].id, "protocol-artifacts");
+    }
+
+    #[test]
+    fn platform_capability_check_emits_known_ids() {
+        let checks = check_platform_capabilities();
+        let ids: std::collections::BTreeSet<&str> = checks.iter().map(|c| c.id.as_str()).collect();
+        assert!(ids.contains("platform:file-watcher"), "ids: {ids:?}");
+        assert!(ids.contains("platform:browser-opener"), "ids: {ids:?}");
+        // None of the platform checks should ever be FAIL — they're
+        // best-effort capability probes with documented fallbacks.
+        for check in &checks {
+            assert_ne!(check.status, DoctorStatus::Fail, "{}", check.detail);
+        }
     }
 }
