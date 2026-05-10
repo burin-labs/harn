@@ -40,6 +40,8 @@ pub mod fidelity;
 pub mod overlay_fs;
 pub mod process_tape;
 pub mod tape;
+#[cfg(feature = "testbench-wasi")]
+pub mod wasi_process;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -115,6 +117,14 @@ pub enum SubprocessConfig {
     /// Look every spawn up in `tape` and emit the recorded result. Errors
     /// loudly when a tuple is not in the tape.
     Replay { tape: PathBuf },
+    /// Resolve subprocess invocations against a directory of WASI
+    /// (`wasm32-wasi`) modules. Each `program` resolves to
+    /// `<dir>/<program>.wasm`; the module runs under wasmtime with the
+    /// testbench's mock clock virtualized into `clock_time_get` and
+    /// `poll_oneoff`. Calls whose program has no matching `.wasm` fall
+    /// through to the native spawn path. Requires the `testbench-wasi`
+    /// Cargo feature.
+    WasiToolchain { dir: PathBuf },
 }
 
 /// Network policy. Defaults to the production egress policy (no
@@ -211,6 +221,13 @@ impl TestbenchBuilder {
         self
     }
 
+    /// Use a directory of WASI modules as the subprocess source. See
+    /// [`SubprocessConfig::WasiToolchain`].
+    pub fn wasi_toolchain(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.bench.subprocess = SubprocessConfig::WasiToolchain { dir: dir.into() };
+        self
+    }
+
     pub fn deny_network(mut self) -> Self {
         self.bench.network = NetworkConfig::DenyByDefault { allow: Vec::new() };
         self
@@ -268,6 +285,8 @@ pub struct TestbenchSession {
     tape_argv: Vec<String>,
     subprocess_mode: ProcessTapeMode,
     subprocess_tape_path: Option<PathBuf>,
+    #[cfg(feature = "testbench-wasi")]
+    _wasi_toolchain: Option<wasi_process::WasiToolchainGuard>,
     /// Saved env state (`HARN_EGRESS_DEFAULT`, `_ALLOW`, `_DENY`) for
     /// restoration on drop. `None` means the testbench did not override
     /// network policy this run.
@@ -296,6 +315,9 @@ impl TestbenchSession {
         // declarative config visible to test inspection.
         let _llm_config = bench.llm;
 
+        #[cfg(feature = "testbench-wasi")]
+        let mut wasi_guard: Option<wasi_process::WasiToolchainGuard> = None;
+
         let (process_tape, process_guard, subprocess_mode, subprocess_tape_path) =
             match bench.subprocess {
                 SubprocessConfig::Real => (None, None, ProcessTapeMode::Replay, None),
@@ -319,6 +341,23 @@ impl TestbenchSession {
                         ProcessTapeMode::Replay,
                         Some(tape),
                     )
+                }
+                #[cfg(feature = "testbench-wasi")]
+                SubprocessConfig::WasiToolchain { dir } => {
+                    if !dir.exists() {
+                        return Err(TestbenchError::Subprocess(format!(
+                            "wasi toolchain directory does not exist: {}",
+                            dir.display()
+                        )));
+                    }
+                    wasi_guard = Some(wasi_process::install_wasi_toolchain(dir));
+                    (None, None, ProcessTapeMode::Replay, None)
+                }
+                #[cfg(not(feature = "testbench-wasi"))]
+                SubprocessConfig::WasiToolchain { .. } => {
+                    return Err(TestbenchError::Subprocess(
+                        "WasiToolchain requires the `testbench-wasi` Cargo feature".to_string(),
+                    ));
                 }
             };
 
@@ -387,6 +426,8 @@ impl TestbenchSession {
             tape_argv,
             subprocess_mode,
             subprocess_tape_path,
+            #[cfg(feature = "testbench-wasi")]
+            _wasi_toolchain: wasi_guard,
             saved_egress_env,
         })
     }

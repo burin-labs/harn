@@ -110,6 +110,11 @@ async fn run_args(args: TestBenchRunArgs) -> RunOutcome {
             finalize.recorded_subprocesses.len()
         ));
     }
+    if let Some(toolchain_dir) = args.process_wasi.as_ref() {
+        outcome.stderr.push_str(&format!(
+            "[testbench] subprocess invocations resolved against WASI toolchain at {toolchain_dir}.\n"
+        ));
+    }
     if let Some(tape) = finalize.tape.as_ref() {
         outcome.stderr.push_str(&format!(
             "[testbench] emitted unified tape with {} record(s) to {}.\n",
@@ -130,6 +135,7 @@ async fn replay_args(args: TestBenchReplayArgs) -> RunOutcome {
         fs_overlay: args.fs_overlay.clone(),
         process_replay: Some(args.process_tape.clone()),
         process_record: None,
+        process_wasi: None,
         network: "deny".to_string(),
         allow_host: Vec::new(),
         emit_diff: None,
@@ -180,6 +186,7 @@ async fn fidelity_args(args: TestBenchFidelityArgs) -> RunOutcome {
                 fs_overlay: args.fs_overlay.clone(),
                 process_replay: None,
                 process_record: None,
+                process_wasi: None,
                 network: "deny".to_string(),
                 allow_host: Vec::new(),
                 emit_diff: None,
@@ -278,6 +285,10 @@ fn build_testbench(args: &TestBenchRunArgs) -> Result<Testbench, String> {
     } else if let Some(replay) = &args.process_replay {
         SubprocessConfig::Replay {
             tape: PathBuf::from(replay),
+        }
+    } else if let Some(toolchain) = &args.process_wasi {
+        SubprocessConfig::WasiToolchain {
+            dir: PathBuf::from(toolchain),
         }
     } else {
         SubprocessConfig::Real

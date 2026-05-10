@@ -60,7 +60,7 @@ pub(crate) struct TestBenchRunArgs {
     #[arg(
         long = "process-replay",
         value_name = "PATH",
-        conflicts_with = "process_record"
+        conflicts_with_all = ["process_record", "process_wasi"]
     )]
     pub process_replay: Option<String>,
     /// Record subprocess invocations to a tape file. The tape captures
@@ -68,9 +68,21 @@ pub(crate) struct TestBenchRunArgs {
     #[arg(
         long = "process-record",
         value_name = "PATH",
-        conflicts_with = "process_replay"
+        conflicts_with_all = ["process_replay", "process_wasi"]
     )]
     pub process_record: Option<String>,
+    /// Resolve subprocess invocations against a directory of WASI
+    /// (`wasm32-wasi`) modules. Each `program` resolves to
+    /// `<dir>/<program>.wasm`; the module runs under wasmtime with the
+    /// testbench's mock clock virtualized into `clock_time_get` and
+    /// `poll_oneoff`. Programs with no matching `.wasm` fall through to
+    /// the native spawn path.
+    #[arg(
+        long = "process-wasi",
+        value_name = "DIR",
+        conflicts_with_all = ["process_replay", "process_record"]
+    )]
+    pub process_wasi: Option<String>,
     /// Network policy. `deny` (default) blocks every outbound request
     /// unless `--allow-host` matches; `real` reverts to the host's
     /// configured policy.

@@ -22,7 +22,7 @@ them, leaving production behavior untouched.
 | Wall-clock + monotonic time | Real `tokio::time` | `MockClock` — `now_ms()`, `sleep(...)`, cron, and the trigger dispatcher all honor it |
 | LLM responses | Configured providers | JSONL fixture replay (same format as `harn run --llm-mock`) or scripted recording |
 | Filesystem (read/write/append/delete) | Real disk | Read-through, copy-on-write `OverlayFs` with diff emission |
-| Subprocess invocations | Real `std::process::Command` | `ProcessTape` records `(program, args, cwd) → (stdout, stderr, exit, virtual Δt)` for replay |
+| Subprocess invocations | Real `std::process::Command` | `ProcessTape` records `(program, args, cwd) → (stdout, stderr, exit, virtual Δt)` for replay; `WasiToolchain` runs WASM modules under wasmtime with `clock_time_get` and `poll_oneoff` virtualized into the mock clock |
 | Network egress | Configured `HARN_EGRESS_*` policy | Deny-by-default; `--allow-host` opens specific destinations |
 
 Every override is opt-in. Activating one axis does not change the
@@ -52,6 +52,7 @@ Flag reference:
 | `--llm-record <path>` | Capture executed responses for a future replay |
 | `--fs-overlay <dir>` | Mount the COW overlay rooted at `dir` |
 | `--process-record <path>` / `--process-replay <path>` | Record or replay subprocess invocations |
+| `--process-wasi <dir>` | Resolve subprocesses against a directory of WASI (`wasm32-wasi`) modules — see [WASI subprocess sandbox](#wasi-subprocess-sandbox) |
 | `--network deny` (default) / `--network real` | Egress policy |
 | `--allow-host <h-or-cidr>` | Whitelist a destination. Repeatable |
 | `--emit-diff <path>` | Write a unified-style diff of overlay writes to `path` |
@@ -103,17 +104,86 @@ dropping it tears down every override and restores the prior thread
 state. `finalize()` persists recorded LLM/process tapes (when in
 record mode) and returns the structured artifacts.
 
-## Subprocess time leak
+## Subprocess modes
 
-Subprocesses are spawned by the host kernel and observe real wall-clock
-time. Testbench mode does *not* virtualize that — recorded tapes capture
-the duration the *parent* observed via the unified clock and replay it
-into the parent's clock, but a script that depends on a subprocess'
-internal timing (e.g. a `sh -c 'date +%s'` round-trip) will see the
-real clock and may diverge between record and replay.
+The testbench has three composable subprocess modes; pick the one that
+matches the trade your test wants to make.
 
-Full subprocess virtualization is tracked separately under the WASI
-sandbox child of [#1438](https://github.com/burin-labs/harn/issues/1438).
+| Mode | Flag | Native binary support | Subprocess clock virtualization |
+|---|---|---|---|
+| **Real** | (default) | yes | none — real wall clock |
+| **Record / Replay** | `--process-record` / `--process-replay` | yes | parent's observation only — child reads real clock during recording, replay re-injects the recorded Δt into the parent's clock |
+| **WASI** | `--process-wasi <dir>` | no — only WASM modules | full — `clock_time_get` and `poll_oneoff` clock subscriptions read/advance the testbench `MockClock` |
+
+### Record/replay time leak
+
+Subprocesses spawned in record mode are spawned by the host kernel and
+observe real wall-clock time. Recorded tapes capture the duration the
+*parent* observed via the unified clock and replay it into the parent's
+clock — but a script that depends on a subprocess' internal timing
+(e.g. a `sh -c 'date +%s'` round-trip) will see the real clock and may
+diverge between record and replay. WASI mode is the answer when that
+matters; record/replay is the answer when the tool can't be compiled to
+WASM.
+
+### WASI subprocess sandbox
+
+`--process-wasi <dir>` resolves every subprocess invocation against
+`<dir>/<program>.wasm`. Programs that match are run inside wasmtime
+with the testbench's mock clock virtualized into `clock_time_get` and
+`poll_oneoff`, so a 24-hour `sleep` inside the WASI tool returns
+immediately while the parent's testbench clock advances by 24 hours.
+
+```sh
+harn test-bench run script.harn --process-wasi ./wasm-toolchain/
+```
+
+#### What's virtualized
+
+- `wasi_snapshot_preview1::clock_time_get` — both `CLOCK_REALTIME` and
+  `CLOCK_MONOTONIC` return the testbench mock clock, in nanoseconds.
+- `wasi_snapshot_preview1::poll_oneoff` — clock subscriptions
+  (relative or absolute) advance the mock clock by their timeout and
+  resolve immediately. `std::thread::sleep` and `tokio::time::sleep`
+  inside the WASM module both compile down to this path on the
+  `wasm32-wasi` target, so neither blocks the host thread.
+- **Filesystem**: a fresh temp directory mounted at `/`. Any files the
+  module writes are merged into the active overlay before
+  `command_output` returns, so the parent observes them in
+  `OverlayFs::diff()`.
+- **Network**: socket imports are not linked. Any WASM module that
+  tries to dial a socket fails at link time with a deterministic error
+  — the same `deny-by-default` posture as the host network policy, but
+  enforced one layer deeper.
+
+#### Limits
+
+- Only WASI preview 1 modules (`wasm32-wasi`) are supported. Native
+  binaries (`git`, `gh`, `bash`) are not compiled to WASI; they fall
+  through to the host spawn path. A directory like
+  `--process-wasi ./toolchain/` can contain a partial set of tools —
+  invocations whose program has no matching `.wasm` use the underlying
+  subprocess mode (real spawn, or recorded tape if `--process-record` /
+  `--process-replay` is also active).
+- `poll_oneoff` FD-read/write subscriptions return `ERRNO_NOTSUP`. A
+  module that blocks on stdin polling cannot run; pass input via args
+  or pre-stage files in the overlay.
+- The preopened `/` directory starts empty. Tools that need to read
+  files from the workspace overlay should be invoked after the
+  relevant files have been materialized to the host filesystem the
+  overlay mirrors.
+- The `wasmtime` runtime adds ≈20 MB to the published `harn` binary;
+  the feature is gated behind the `testbench-wasi` Cargo feature for
+  library consumers that don't need it.
+
+#### When to reach for it
+
+WASI mode is the right answer when a test depends on a subprocess
+*observing* the same virtual time as its parent — agent-loop scenarios
+that simulate hours of work in milliseconds, deterministic eval suites
+where the tool reads `time.time()` for retry backoff, anything where
+record/replay's duration-only capture would lose information. For
+arbitrary native tooling, record/replay remains the workhorse.
 
 ## Filesystem overlay semantics
 
@@ -181,3 +251,5 @@ See also:
   composition primitive's design rationale.
 - Issue [#1441](https://github.com/burin-labs/harn/issues/1441) for the
   recording/replay tape format and fidelity oracle.
+- Issue [#1443](https://github.com/burin-labs/harn/issues/1443) for the
+  WASI subprocess sandbox.

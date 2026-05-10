@@ -415,6 +415,11 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   # scripts; the SystemTime::now reads are the fallback when no mock is
   # active. Routing through Clock would create a cycle.
   "crates/harn-vm/src/stdlib/clock.rs"
+  # testbench/wasi_process.rs's #[cfg(test)] module compares real wall
+  # time vs virtual time to prove that WASM-side `poll_oneoff` sleeps
+  # don't actually block the host thread — the wall-clock read is the
+  # signal under test, not a flake source.
+  "crates/harn-vm/src/testbench/wasi_process.rs"
   "crates/harn-vm/src/stdlib/agent_state/backend.rs"
   "crates/harn-vm/src/stdlib/agents_daemon.rs"
   "crates/harn-vm/src/stdlib/agents_workers/execution.rs"
