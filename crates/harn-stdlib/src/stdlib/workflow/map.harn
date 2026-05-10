@@ -181,6 +181,7 @@ fn __map_has_model_policy(policy) {
     "temperature",
     "max_tokens",
     "max_iterations",
+    "iteration_budget",
     "max_nudges",
     "nudge",
     "tool_examples",
