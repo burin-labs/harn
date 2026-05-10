@@ -6,103 +6,93 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.8.5
 
 ### Added
 
-- **Python and Go protocol bindings.** Extended
-  `harn dump-protocol-artifacts` to emit a stdlib-only Python 3.9+ module
-  (`spec/protocol-artifacts/python/harn_protocol.py`) and a Go package
-  (`spec/protocol-artifacts/go/harnprotocol/`) mirroring the existing
-  TypeScript and Swift surface: ACP session updates, JSON-RPC envelopes,
-  Harn tool lifecycle metadata, A2A task structures, and MCP tool/resource
-  records. `manifest.json` now exposes a `bindings` block with per-language
-  stability and module-path metadata so downstream consumers (Burin Code,
-  Harn Cloud, Python integrators, Go workers) can detect generator/runtime
-  mismatch without bespoke compatibility checks. A new `make check-bindings`
-  target round-trips a checked-in JSON fixture
-  (`spec/protocol-artifacts/fixtures/round_trip.json`) through both bindings
-  and runs in CI to catch wire-vocabulary drift before downstream consumers
-  see it. (#1429)
-- **Workflow-authoring skill pack and small-model evals.** Added
-  `examples/skill-packs/workflow-authoring/` with a top-level `SKILL.md`,
-  small-model prompting guide, validated PR-monitor and PR-repair recipe
-  bundles, eval cases with structural assertions, and an `eval.harn` driver
-  that feeds a configurable provider through the validate → preview → run
-  pipeline. A new `crates/harn-cli/tests/workflow_authoring_eval.rs`
-  regression gate fails CI when a recipe golden or a case's structural
-  assertions drift.
-- **Workflow authoring quickstart.** New tutorial at
-  `docs/src/workflow-authoring-quickstart.md` walks `validate` →
-  `preview` → `run` → connector status/setup-plan → supervisor in one
-  copy-paste path with no paid credentials. Backed by checked-in
-  fixtures (`docs/fixtures/workflow-bundles/quickstart-{minimal,agentic}.bundle.json`,
-  `docs/fixtures/connect-demo/`) and a CI gate
-  (`make check-docs-workflow-quickstart`) that pins the deterministic
-  bundle digest, executed-node sequence, and connector-status shape so
-  the snippets cannot drift.
-- **Cross-platform release smoke matrix.** Added
-  `.github/workflows/release-smoke.yml`, `scripts/release_smoke.sh`,
-  and `tests/smoke/` fixtures so every release-relevant PR runs the
-  user-visible CLI surface (`--help`, `check`, `fmt --check`,
-  `package check`, `--provider-matrix`, `run`, `command_run`,
-  no-credentials mock workflow, `harn watch` boot) on macOS, Linux,
-  and Windows. Failures surface as
-  `::error::release-smoke (<platform>): <capability> failed`
-  annotations and the smoke audit lane is now part of
-  `release_gate.sh audit`.
-- **Platform compatibility docs.** Added
-  [docs/src/dev/platform-compatibility.md](docs/src/dev/platform-compatibility.md)
-  with a per-capability support matrix and rationale for the
-  Windows-deferred features (POSIX-signal drain, `unveil`/`pledge`).
-- **Tag-first publish trigger.** `publish-release.yml` now also fires
-  on `push: tags: ['v*']`, in addition to the existing `push: main`
-  drift trigger. Detect-drift recognizes the tag-push event and sets
-  `publish_ref=$tag, drift=true` so the publish job checks out the
-  tagged commit (detached) and ships from there. Lets the bump-fleet
-  `release_harn.harn` harness push `vX.Y.Z` at a pinned commit BEFORE
-  the Release PR merges — what gets shipped to crates.io and the
-  GitHub release is anchored to that exact commit, and commits that
-  land on `main` between PR-open and merge cannot leak into the
-  published artifact. The `push: main` drift trigger remains as the
-  legacy/recovery path for releases authored without the harness;
-  workflow_dispatch with no drift still recovers from an existing
-  tag.
-
-### Fixed
-
-- **Recognize `/** */` doc comments in `harn package check`.** The
-  publish-readiness check previously saw only `///` doc comments, so
-  the canonical HarnDoc form preferred by the linter would surface
-  spurious "no doc comment" warnings on otherwise-documented public
-  symbols. Both forms now produce identical `docs` bodies.
-- **Typed stdlib option/result shapes.** `std/collections.filter_nil` and
-  `pick_keys`, plus `std/json.merge`/`pick`/`omit`, are now generic over the
-  value type — a `dict<string, V>` (or homogeneous shape literal) projects back
-  to a dict that still carries `V`. Introduced `PickKeysOptions` and the
-  workflow `WorkflowAutonomyPolicyConfig`/`WorkflowModelPolicy`/
-  `WorkflowStageOptionsConfig`/`WorkflowStageAgentOptions` and connector
-  `GitHubConnectorConfig`/`GitHubCallOptions`/`GitHubWaitOptions` shapes so
-  the high-traffic agent/workflow and connector paths advertise their
-  contract instead of accepting freeform `dict`.
+- **Python and Go protocol bindings.** Extended `harn dump-protocol-artifacts`
+  to emit Python and Go bindings mirroring the existing TypeScript and Swift
+  surface. The `manifest.json` now exposes a `bindings` block with per-language
+  stability and module-path metadata so downstream consumers can detect
+  generator/runtime mismatch without bespoke checks. A new `make check-bindings`
+  target round-trips a JSON fixture through both bindings to catch wire-vocabulary
+  drift. (#1429)
+- **Workflow authoring skill pack and evals.** Added `examples/skill-packs/`
+  with a top-level `SKILL.md`, small-model prompting guide, PR-monitor and
+  PR-repair recipe bundles, and eval cases with structural assertions. A new
+  `crates/harn-cli/tests/workflow_authoring_eval.rs` regression gate fails CI
+  when a recipe golden or a case's structural assertions drift. (#1435)
+- **Workflow authoring quickstart.** New tutorial at `docs/src/workflow-authoring-quickstart.md`
+  walks `validate` → `preview` → `run` → connector status/setup-plan → supervisor
+  in one copy-paste path with no paid credentials. Backed by checked-in fixtures
+  and a CI gate that pins the deterministic bundle digest, executed-node sequence,
+  and connector-status shape. (#1436)
+- **Cross-platform release smoke matrix.** Added `.github/workflows/release-smoke.yml`,
+  `scripts/release_smoke.sh`, and `tests/smoke/` fixtures so every release-relevant
+  PR runs the user-visible CLI surface on macOS, Linux, and Windows. Failures
+  surface as `::error::release-smoke` annotations in the smoke audit lane. (#1434)
+- **Platform compatibility docs.** Added `docs/src/dev/platform-compatibility.md`
+  with a per-capability support matrix and rationale for Windows-deferred
+  features (POSIX-signal drain, `unveil`/`pledge`). (#1434)
+- **Testbench composition primitive.** Wires Harn's deterministic substrate —
+  virtual time, mocked LLM, filesystem overlay, recorded subprocess, and a
+  deny-by-default network — behind a single `Testbench` handle and a new
+  `harn test-bench` CLI surface. Production wires the real implementations;
+  tests/demos pick a config and get an audit trail of every host boundary
+  crossing. (#1440)
+- **Unified redaction policy.** Added a unified redaction policy across
+  persistence surfaces. Includes `crates/harn-vm/src/redact/` and `patterns.rs`
+  for consistent masking in transcripts, receipts, and event logs. (#1445)
+- **Unified clock crate.** Extracted a `harn-clock` crate providing the `Clock`
+  trait with `RealClock`, `PausedClock`, and `RecordedClock`. Unifies
+  deterministic clocks across VM, stdlib, conformance, and CLI. (#1446, #1449,
+  #1450)
+- **Tag-first publish trigger.** `publish-release.yml` now fires on `push: tags:
+  ['v*']` in addition to `push: main`. Detect-drift recognizes the tag-push
+  event and sets `publish_ref=$tag, drift=true` so the publish job checks out
+  the tagged commit (detached) and ships from there. This anchors what reaches
+  crates.io and the GitHub release to the pinned commit, preventing commits
+  landing on `main` between PR-open and merge from leaking. (#1456)
 
 ### Changed
 
 - **Type-checker generics.** `dict<string, V>` parameter slots now bind `V`
-  from a heterogeneous shape literal (union of field types) so generic
-  stdlib helpers preserve element typing through projection.
-  Optional shape fields validate the value type when supplied — a
-  `{drop_nil?: bool}` parameter rejects `{drop_nil: "yes"}` instead of
-  silently accepting it.
-- **Cross-module type aliases.** Selectively importing a function (e.g.
-  `import { pick_keys } from "std/collections"`) now also pulls every
-  exported type alias / struct / enum / interface from the same module
-  into scope so call-site contract checks resolve referenced shapes
-  instead of seeing phantom `Named("PickKeysOptions")`.
-- **Return-type checking scope.** `fn` return-type validation now runs
-  against the post-body scope (with narrowing rolled back) so values bound
-  by `let`/`var` inside the body resolve correctly when reused in a
-  structural return literal.
+  from a heterogeneous shape literal (union of field types) so generic stdlib
+  helpers preserve element typing through projection. Optional shape fields
+  validate the value type when supplied — a `{drop_nil?: bool}` parameter
+  rejects `{drop_nil: "yes"}` instead of silently accepting it. (#1448)
+- **Cross-module type aliases.** Selectively importing a function now also pulls
+  every exported type alias / struct / enum / interface from the same module
+  into scope so call-site contract checks resolve referenced shapes. (#1448)
+- **Return-type checking scope.** `fn` return-type validation now runs against
+  the post-body scope (with narrowing rolled back) so values bound by `let`/`var`
+  inside the body resolve correctly when reused in a structural return literal.
+  (#1448)
+- **Typed stdlib option/result shapes.** `std/collections.filter_nil` and
+  `pick_keys`, plus `std/json.merge`/`pick`/`omit`, are now generic over the
+  value type — a `dict<string, V>` projects back to a dict that still carries
+  `V`. Introduced `PickKeysOptions` and workflow/connector shape types so high-
+  traffic paths advertise their contract instead of accepting freeform `dict`.
+  (#1448)
+
+### Fixed
+
+- **Recognize `/** */` doc comments in `harn package check`.** The publish-
+  readiness check previously saw only `///` doc comments, so the canonical
+  HarnDoc form preferred by the linter would surface spurious "no doc comment"
+  warnings on otherwise-documented public symbols. Both forms now produce
+  identical `docs` bodies. (#1448)
+- **Improve diagnostics for shape, property, and stdlib contract failures.**
+  Common authoring failures around structured values now surface with actionable,
+  span-anchored messages instead of bottoming out as generic nil/property
+  runtime errors. Property access on `nil` includes `?.` / nil-guard
+  suggestions; `__assert_shape` and `schema_recover` validator append actually-
+  present keys to missing-field errors. (#1455)
+- **Expand `harn doctor`.** Expanded `harn doctor` for one-command environment
+  readiness checks, improving the initial setup and troubleshooting experience.
+  (#1437)
+- **Add Bitbucket entry to connector parity matrix.** Added Bitbucket entry to
+  the connector parity matrix, ensuring parity tracking is up to date. (#1451)
 
 ## v0.8.4
 
