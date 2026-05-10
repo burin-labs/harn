@@ -21,8 +21,8 @@ use std::{env, fs, process, thread};
 
 use cli::{
     Cli, Command, CompletionShell, MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs,
-    PackageCacheCommand, PackageCommand, PersonaCommand, RunsCommand, ServeCommand, SkillCommand,
-    SkillKeyCommand, SkillTrustCommand, SkillsCommand,
+    PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PersonaCommand, RunsCommand,
+    ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -760,6 +760,7 @@ async fn async_main() {
             args.frozen || args.locked || args.offline,
             args.refetch.as_deref(),
             args.offline,
+            args.json,
         ),
         Command::Add(args) => package::add_package_with_registry(
             &args.name_or_spec,
@@ -771,7 +772,9 @@ async fn async_main() {
             args.path.as_deref(),
             args.registry.as_deref(),
         ),
-        Command::Update(args) => package::update_packages(args.alias.as_deref(), args.all),
+        Command::Update(args) => {
+            package::update_packages(args.alias.as_deref(), args.all, args.json)
+        }
         Command::Remove(args) => package::remove_package(&args.alias),
         Command::Lock => package::lock_packages(),
         Command::Package(args) => match args.command {
@@ -802,6 +805,23 @@ async fn async_main() {
                 PackageCacheCommand::Clean(clean) => package::clean_package_cache(clean.all),
                 PackageCacheCommand::Verify(verify) => {
                     package::verify_package_cache(verify.materialized)
+                }
+            },
+            PackageCommand::Outdated(args) => package::outdated_packages(
+                args.refresh,
+                args.remote,
+                args.registry.as_deref(),
+                args.json,
+            ),
+            PackageCommand::Audit(args) => {
+                package::audit_packages(args.registry.as_deref(), args.skip_materialized, args.json)
+            }
+            PackageCommand::Artifacts(args) => match args.command {
+                PackageArtifactsCommand::Manifest(manifest) => {
+                    package::artifacts_manifest(manifest.output.as_deref())
+                }
+                PackageArtifactsCommand::Check(check) => {
+                    package::artifacts_check(&check.manifest, check.json)
                 }
             },
         },

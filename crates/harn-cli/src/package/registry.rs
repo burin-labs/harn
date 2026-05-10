@@ -721,6 +721,25 @@ pub(crate) fn latest_registry_version(
         .find(|version| !version.yanked)
 }
 
+impl PackageRegistryIndex {
+    pub(crate) fn latest_unyanked_version(&self, name: &str) -> Option<&str> {
+        self.packages
+            .iter()
+            .find(|package| package.name == name)
+            .and_then(latest_registry_version)
+            .map(|version| version.version.as_str())
+    }
+
+    pub(crate) fn is_version_yanked(&self, name: &str, version: &str) -> bool {
+        self.packages
+            .iter()
+            .find(|package| package.name == name)
+            .into_iter()
+            .flat_map(|package| package.versions.iter())
+            .any(|entry| entry.version == version && entry.yanked)
+    }
+}
+
 pub(crate) fn find_registry_package_version(
     index: &PackageRegistryIndex,
     name: &str,
@@ -802,6 +821,7 @@ pub(crate) fn registry_dependency_from_spec_in(
         )
         .into());
     };
+    let registry_source = workspace.resolve_registry_source(registry)?;
     let info = package_registry_info_in(workspace, &format!("{name}@{version}"), registry)?;
     let selected = info
         .selected_version
@@ -820,11 +840,13 @@ pub(crate) fn registry_dependency_from_spec_in(
         alias.clone(),
         Dependency::Table(DepTable {
             git: Some(git),
-            tag: None,
             rev: selected.rev,
             branch: selected.branch,
-            path: None,
             package: (alias != package_name).then_some(package_name),
+            registry: Some(registry_source),
+            registry_name: Some(name.to_string()),
+            registry_version: Some(version.to_string()),
+            ..DepTable::default()
         }),
     ))
 }
@@ -1817,7 +1839,7 @@ mod tests {
     }
 
     #[test]
-    fn add_registry_dependency_writes_existing_git_dependency_shape() {
+    fn add_registry_dependency_preserves_provenance_in_manifest_and_lock() {
         let (_repo_tmp, repo, _branch) = create_git_package_repo();
         let project_tmp = tempfile::tempdir().unwrap();
         let root = project_tmp.path();
@@ -1852,14 +1874,30 @@ mod tests {
 
         let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
         assert!(
-            manifest.contains(&format!(
-                "acme-lib = {{ git = \"{git}\", rev = \"v1.0.0\" }}"
-            )),
-            "registry install should write the same dependency line as a direct git add: {manifest}"
+            manifest.contains(&format!("git = \"{git}\"")),
+            "registry install must record the resolved git URL: {manifest}"
+        );
+        assert!(
+            manifest.contains("rev = \"v1.0.0\""),
+            "registry install must pin the resolved rev: {manifest}"
+        );
+        assert!(
+            manifest.contains("registry_name = \"@burin/acme-lib\""),
+            "registry install must preserve the registry-side package name: {manifest}"
+        );
+        assert!(
+            manifest.contains("registry_version = \"1.0.0\""),
+            "registry install must preserve the requested registry version: {manifest}"
         );
         let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
         let entry = lock.find("acme-lib").unwrap();
         assert_eq!(entry.source, format!("git+{git}"));
+        let registry = entry
+            .registry
+            .as_ref()
+            .expect("registry-added entry should carry registry provenance");
+        assert_eq!(registry.name, "@burin/acme-lib");
+        assert_eq!(registry.version, "1.0.0");
         assert!(root
             .join(PKG_DIR)
             .join("acme-lib")

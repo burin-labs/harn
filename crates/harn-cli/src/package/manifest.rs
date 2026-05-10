@@ -695,7 +695,7 @@ pub enum Dependency {
     Path(String),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct DepTable {
     pub git: Option<String>,
     pub tag: Option<String>,
@@ -703,6 +703,19 @@ pub struct DepTable {
     pub branch: Option<String>,
     pub path: Option<String>,
     pub package: Option<String>,
+    /// Registry index URL/path the dependency was originally added from.
+    /// Persisted in the manifest so registry provenance survives
+    /// round-trips and the lockfile can compare against the registry's
+    /// latest version.
+    #[serde(default)]
+    pub registry: Option<String>,
+    /// Registry-side package name (e.g. `@burin/notion-sdk`). May differ
+    /// from the alias and from the git URL's repo name.
+    #[serde(default, alias = "registry-name")]
+    pub registry_name: Option<String>,
+    /// Registry version specifier the dependency was added against.
+    #[serde(default, alias = "registry-version")]
+    pub registry_version: Option<String>,
 }
 
 impl Dependency {
@@ -732,6 +745,21 @@ impl Dependency {
             Dependency::Table(t) => t.path.as_deref(),
             Dependency::Path(p) => Some(p.as_str()),
         }
+    }
+
+    pub(crate) fn registry_provenance(&self) -> Option<crate::package::RegistryProvenance> {
+        let Dependency::Table(table) = self else {
+            return None;
+        };
+        let source = table.registry.clone()?;
+        let name = table.registry_name.clone()?;
+        let version = table.registry_version.clone()?;
+        Some(crate::package::RegistryProvenance {
+            source,
+            name,
+            version,
+            provenance_url: None,
+        })
     }
 }
 

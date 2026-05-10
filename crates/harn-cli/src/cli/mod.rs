@@ -105,8 +105,8 @@ pub(crate) use orchestrator::{
     OrchestratorTenantSuspendArgs,
 };
 pub(crate) use package::{
-    AddArgs, InstallArgs, PackageArgs, PackageCacheCommand, PackageCommand, PublishArgs,
-    RemoveArgs, UpdateArgs,
+    AddArgs, InstallArgs, PackageArgs, PackageArtifactsCommand, PackageCacheCommand,
+    PackageCommand, PublishArgs, RemoveArgs, UpdateArgs,
 };
 pub(crate) use persona::{
     PersonaArgs, PersonaCheckArgs, PersonaCommand, PersonaControlArgs, PersonaDoctorArgs,

@@ -16,6 +16,9 @@ pub(crate) struct InstallArgs {
     /// Force refetching one dependency (or every dependency with `--refetch all`).
     #[arg(long, value_name = "ALIAS|all")]
     pub refetch: Option<String>,
+    /// Emit a JSON install summary instead of a human-readable line.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -52,6 +55,9 @@ pub(crate) struct UpdateArgs {
     pub all: bool,
     /// Refresh only this dependency alias.
     pub alias: Option<String>,
+    /// Emit a JSON update summary instead of a human-readable line.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -80,6 +86,12 @@ pub(crate) enum PackageCommand {
     Docs(PackageDocsArgs),
     /// Inspect, clean, and verify the shared package cache.
     Cache(PackageCacheArgs),
+    /// Report dependencies whose lockfile entries have newer registry or branch HEAD versions.
+    Outdated(PackageOutdatedArgs),
+    /// Audit harn.lock provenance, package compatibility, and supply-chain integrity.
+    Audit(PackageAuditArgs),
+    /// Inspect or verify the published Harn protocol-artifact contract.
+    Artifacts(PackageArtifactsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -185,4 +197,63 @@ pub(crate) struct PackageCacheVerifyArgs {
     /// Also verify materialized packages under .harn/packages/.
     #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
     pub materialized: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageOutdatedArgs {
+    /// Resolve registry latest versions over the network instead of relying on the local index cache.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub refresh: bool,
+    /// Probe git remotes for branch-tracking dependencies. Requires git in PATH.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub remote: bool,
+    /// Override the registry index URL or path.
+    #[arg(long, value_name = "URL|PATH")]
+    pub registry: Option<String>,
+    /// Emit JSON instead of a human-readable report.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageAuditArgs {
+    /// Override the registry index URL or path used for yanked-version checks.
+    #[arg(long, value_name = "URL|PATH")]
+    pub registry: Option<String>,
+    /// Skip integrity hashing of materialized packages under .harn/packages/.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub skip_materialized: bool,
+    /// Emit JSON instead of a human-readable report.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageArtifactsArgs {
+    #[command(subcommand)]
+    pub command: PackageArtifactsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum PackageArtifactsCommand {
+    /// Print the protocol-artifact manifest the running Harn would generate.
+    Manifest(PackageArtifactsManifestArgs),
+    /// Compare a downstream-vendored manifest against the running Harn manifest and report drift.
+    Check(PackageArtifactsCheckArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageArtifactsManifestArgs {
+    /// Write the manifest to this path instead of stdout.
+    #[arg(long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageArtifactsCheckArgs {
+    /// Path to the vendored protocol-artifact manifest the downstream consumer is shipping.
+    pub manifest: PathBuf,
+    /// Emit JSON instead of a human-readable report.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub json: bool,
 }

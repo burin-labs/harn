@@ -5,9 +5,10 @@ use super::{
     CheckOutputFormat, Cli, Command, CompletionShell, ConnectCommand, ConnectorCommand,
     CrystallizeCommand, FlowArchivistCommand, FlowCommand, McpCommand, ModelsCommand,
     OrchestratorCommand, OrchestratorDeployProvider, OrchestratorLogFormat,
-    OrchestratorQueueCommand, OrchestratorTenantCommand, PackageCacheCommand, PackageCommand,
-    PersonaCommand, ProjectTemplate, RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
-    SkillsCommand, TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+    OrchestratorQueueCommand, OrchestratorTenantCommand, PackageArtifactsCommand,
+    PackageCacheCommand, PackageCommand, PersonaCommand, ProjectTemplate, RunsCommand,
+    SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TraceCommand, TriggerCommand,
+    TrustCommand, TrustOutcomeArg, TrustTierArg,
 };
 use clap::{CommandFactory, Parser};
 
@@ -1596,6 +1597,105 @@ fn test_parses_package_cache_subcommands() {
         panic!("expected package cache verify");
     };
     assert!(verify.materialized);
+}
+
+#[test]
+fn test_parses_package_outdated_audit_artifacts() {
+    let cli = Cli::parse_from([
+        "harn",
+        "package",
+        "outdated",
+        "--remote",
+        "--refresh",
+        "--registry",
+        "index.toml",
+        "--json",
+    ]);
+    let Command::Package(args) = cli.command.unwrap() else {
+        panic!("expected package command");
+    };
+    let PackageCommand::Outdated(outdated) = args.command else {
+        panic!("expected package outdated");
+    };
+    assert!(outdated.remote);
+    assert!(outdated.refresh);
+    assert_eq!(outdated.registry.as_deref(), Some("index.toml"));
+    assert!(outdated.json);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "package",
+        "audit",
+        "--registry",
+        "index.toml",
+        "--skip-materialized",
+        "--json",
+    ]);
+    let Command::Package(args) = cli.command.unwrap() else {
+        panic!("expected package command");
+    };
+    let PackageCommand::Audit(audit) = args.command else {
+        panic!("expected package audit");
+    };
+    assert_eq!(audit.registry.as_deref(), Some("index.toml"));
+    assert!(audit.skip_materialized);
+    assert!(audit.json);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "package",
+        "artifacts",
+        "manifest",
+        "--output",
+        "vendor/manifest.json",
+    ]);
+    let Command::Package(args) = cli.command.unwrap() else {
+        panic!("expected package command");
+    };
+    let PackageCommand::Artifacts(artifacts) = args.command else {
+        panic!("expected package artifacts");
+    };
+    let PackageArtifactsCommand::Manifest(manifest) = artifacts.command else {
+        panic!("expected artifacts manifest");
+    };
+    assert_eq!(manifest.output, Some(PathBuf::from("vendor/manifest.json")));
+
+    let cli = Cli::parse_from([
+        "harn",
+        "package",
+        "artifacts",
+        "check",
+        "vendor/manifest.json",
+        "--json",
+    ]);
+    let Command::Package(args) = cli.command.unwrap() else {
+        panic!("expected package command");
+    };
+    let PackageCommand::Artifacts(artifacts) = args.command else {
+        panic!("expected package artifacts");
+    };
+    let PackageArtifactsCommand::Check(check) = artifacts.command else {
+        panic!("expected artifacts check");
+    };
+    assert_eq!(check.manifest, PathBuf::from("vendor/manifest.json"));
+    assert!(check.json);
+}
+
+#[test]
+fn test_install_and_update_accept_json_flag() {
+    let cli = Cli::parse_from(["harn", "install", "--frozen", "--json"]);
+    let Command::Install(install) = cli.command.unwrap() else {
+        panic!("expected install command");
+    };
+    assert!(install.frozen);
+    assert!(install.json);
+
+    let cli = Cli::parse_from(["harn", "update", "--all", "--json"]);
+    let Command::Update(update) = cli.command.unwrap() else {
+        panic!("expected update command");
+    };
+    assert!(update.all);
+    assert!(update.json);
 }
 
 #[test]

@@ -10,6 +10,22 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Package manager maturity: provenance, outdated, audit, and
+  generated-artifact contract checks.** Bumped `harn.lock` to version 2
+  with top-level `generator_version` / `protocol_artifact_version` and
+  per-entry `package_version`, `harn_compat`, `manifest_digest`, and
+  `[package.registry]` provenance for entries originally added through
+  the registry index (the manifest now also stores `registry`,
+  `registry_name`, `registry_version` so the source survives round-trips).
+  Three new subcommands give downstream automation a single Harn binary
+  to call: `harn package outdated` (with `--remote` for branch-tracking
+  git deps), `harn package audit` (stable JSON `code` per finding for
+  yanked-version, content-hash, manifest-digest, and harn-range
+  violations), and `harn package artifacts manifest|check` for vendoring
+  and drift-checking the protocol-artifact manifest. `harn install` and
+  `harn update` now accept `--json`. v1 lockfiles migrate transparently
+  on the next install. Documented the cross-repo bump workflow in
+  `docs/src/package-authoring.md`. (#1428)
 - **Python and Go protocol bindings.** Extended
   `harn dump-protocol-artifacts` to emit a stdlib-only Python 3.9+ module
   (`spec/protocol-artifacts/python/harn_protocol.py`) and a Go package
