@@ -7,7 +7,6 @@ use serde_json::json;
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, Notify};
 
-use crate::connectors::cron::scheduler::Clock;
 use crate::event_log::{
     sanitize_topic_component, AnyEventLog, EventLog, LogError, LogEvent, Topic,
 };
@@ -94,7 +93,7 @@ impl FlowControlManager {
             json!({"gate": gate, "token": token}),
         )
         .await?;
-        sleep_duration(period).await;
+        clock::sleep(period).await;
         let latest = {
             let state = self.state.lock().await;
             state.debounce_latest.get(gate).copied()
@@ -178,7 +177,7 @@ impl FlowControlManager {
                         json!({"gate": gate, "delay_ms": delay.as_millis()}),
                     )
                     .await?;
-                    sleep_duration(delay).await;
+                    clock::sleep(delay).await;
                 }
                 None => {
                     self.append_event(
@@ -433,25 +432,12 @@ fn trim_window(hits: &mut VecDeque<OffsetDateTime>, now: OffsetDateTime, period:
     }
 }
 
-async fn sleep_duration(duration: Duration) {
-    if duration.is_zero() {
-        return;
-    }
-    if let Some(mock_clock) = clock::active_mock_clock() {
-        mock_clock
-            .sleep_until(clock::now_utc() + time::Duration::try_from(duration).unwrap_or_default())
-            .await;
-    } else {
-        tokio::time::sleep(duration).await;
-    }
-}
-
 async fn sleep_until(deadline: OffsetDateTime) {
     let now = clock::now_utc();
     if deadline <= now {
         return;
     }
     if let Ok(duration) = (deadline - now).try_into() {
-        sleep_duration(duration).await;
+        clock::sleep(duration).await;
     }
 }

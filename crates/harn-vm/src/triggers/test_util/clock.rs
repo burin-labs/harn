@@ -216,3 +216,27 @@ pub fn advance(duration: StdDuration) {
         clock.advance_std_sync(duration);
     }
 }
+
+/// Sleep for `duration`, honoring the unified mock clock.
+///
+/// When a `MockClock` override is installed the sleep advances the mock
+/// instantly and returns — the same semantics scripts get from
+/// `mock_time(...)` + `sleep(...)`. When no mock is installed the call
+/// falls through to `tokio::time::sleep`, which is itself virtualized
+/// inside a `#[tokio::test(start_paused = true)]` runtime.
+///
+/// Production runtime code that needs to back off (rate limiters,
+/// retry loops, the trigger dispatcher's flow-control window) should
+/// route through this helper so a single Rust test can pin time across
+/// both Harn and Rust layers.
+pub async fn sleep(duration: StdDuration) {
+    if duration.is_zero() {
+        return;
+    }
+    if let Some(mock) = active_mock_clock() {
+        let next = mock.now() + time::Duration::try_from(duration).unwrap_or_default();
+        mock.sleep_until(next).await;
+        return;
+    }
+    tokio::time::sleep(duration).await;
+}

@@ -968,7 +968,7 @@ pub(crate) async fn observed_llm_call(
                     ),
                 );
                 if backoff > 0 {
-                    tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+                    crate::clock_mock::sleep(std::time::Duration::from_millis(backoff)).await;
                 }
             }
         }

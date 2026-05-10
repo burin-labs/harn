@@ -66,7 +66,7 @@ pub mod trust_graph;
 pub mod clock_mock {
     pub use crate::triggers::test_util::clock::{
         active_mock_clock, advance, clear_overrides, install_override, instant_now, is_mocked,
-        now_ms, now_utc, ClockInstant, ClockOverrideGuard, MockClock,
+        now_ms, now_utc, sleep, ClockInstant, ClockOverrideGuard, MockClock,
     };
 }
 

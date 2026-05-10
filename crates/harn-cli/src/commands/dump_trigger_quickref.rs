@@ -360,8 +360,37 @@ fn method_summary(provider: &ProviderMetadata) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn generated_quickref_contains_catalog_and_contract() {
+    use crate::package::lock_manifest_provider_schemas;
+
+    /// `collect_manifest_triggers` (in `package::extensions`) installs a
+    /// manifest-derived `ProviderCatalog` into the process-global
+    /// registry. Any test that reads the catalog has to take the same
+    /// `lock_manifest_provider_schemas()` lock those tests use, reset the
+    /// catalog while holding it, and reset again on drop. Otherwise the
+    /// regenerator picks up stray dynamic providers (like the `echo`
+    /// fixtures registered by package tests) and the snapshot diverges
+    /// from the committed file under workspace test ordering.
+    struct CatalogTestScope {
+        _guard: tokio::sync::MutexGuard<'static, ()>,
+    }
+
+    impl CatalogTestScope {
+        async fn new() -> Self {
+            let guard = lock_manifest_provider_schemas().await;
+            harn_vm::reset_provider_catalog();
+            Self { _guard: guard }
+        }
+    }
+
+    impl Drop for CatalogTestScope {
+        fn drop(&mut self) {
+            harn_vm::reset_provider_catalog();
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn generated_quickref_contains_catalog_and_contract() {
+        let _scope = CatalogTestScope::new().await;
         let out = generate_file();
         assert!(out.contains("| `github` | `webhook` | `GitHubEventPayload` | placeholder |"));
         assert!(out.contains("Connector Contract V1"));
@@ -370,8 +399,9 @@ mod tests {
         assert!(out.contains("harn-svn-connector"));
     }
 
-    #[test]
-    fn committed_trigger_quickref_matches_generator() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn committed_trigger_quickref_matches_generator() {
+        let _scope = CatalogTestScope::new().await;
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let path = std::path::Path::new(manifest_dir)
             .join("..")
