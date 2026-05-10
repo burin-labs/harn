@@ -6,6 +6,19 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Workflow-authoring skill pack and small-model evals.** Added
+  `examples/skill-packs/workflow-authoring/` with a top-level `SKILL.md`,
+  small-model prompting guide, validated PR-monitor and PR-repair recipe
+  bundles, eval cases with structural assertions, and an `eval.harn` driver
+  that feeds a configurable provider through the validate → preview → run
+  pipeline. A new `crates/harn-cli/tests/workflow_authoring_eval.rs`
+  regression gate fails CI when a recipe golden or a case's structural
+  assertions drift.
+
 ## v0.8.4
 
 ### Added
