@@ -315,17 +315,19 @@ impl TypeChecker {
             (TypeExpr::Shape(_), TypeExpr::Named(n)) if n == "dict" => true,
             (TypeExpr::Named(n), TypeExpr::Shape(_)) if n == "dict" => true,
             (TypeExpr::Shape(ef), TypeExpr::Shape(af)) => ef.iter().all(|expected_field| {
-                if expected_field.optional {
-                    return true;
+                let matched = af.iter().find(|f| f.name == expected_field.name);
+                match matched {
+                    // Optional fields may be omitted, but when supplied the
+                    // value type still has to match — a typed
+                    // `{drop_nil?: bool}` slot must reject a `drop_nil: string`
+                    // literal at the call site instead of silently accepting.
+                    None => expected_field.optional,
+                    Some(actual_field) => self.types_compatible(
+                        &expected_field.type_expr,
+                        &actual_field.type_expr,
+                        scope,
+                    ),
                 }
-                af.iter().any(|actual_field| {
-                    actual_field.name == expected_field.name
-                        && self.types_compatible(
-                            &expected_field.type_expr,
-                            &actual_field.type_expr,
-                            scope,
-                        )
-                })
             }),
             // dict<K, V> expected, Shape actual → all field values must match V
             (TypeExpr::DictType(ek, ev), TypeExpr::Shape(af)) => {

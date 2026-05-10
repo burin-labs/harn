@@ -1,0 +1,22 @@
+// Verifies that std/json's merge/pick/omit preserve `dict<string, V>` typing
+// through generic projection — both with explicit annotations on inputs and
+// with explicit type arguments at the call site.
+import { merge, omit, pick } from "std/json"
+
+pipeline default(task) {
+  let scores: dict<string, int> = {alice: 1, bob: 2}
+  let bonus: dict<string, int> = {bob: 5, carol: 3}
+  let combined: dict<string, int> = merge(scores, bonus)
+  println(combined.alice)
+  println(combined.bob)
+  println(combined.carol)
+  let kept: dict<string, int> = pick(scores, ["alice"])
+  println(kept.alice)
+  println(contains(kept.keys(), "bob"))
+  let dropped: dict<string, int> = omit(scores, ["bob"])
+  println(dropped.alice)
+  println(contains(dropped.keys(), "bob"))
+  let extras = merge<string>({region: "us"}, {tier: "gold"})
+  println(extras.region)
+  println(extras.tier)
+}

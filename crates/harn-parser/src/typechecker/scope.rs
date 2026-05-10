@@ -401,6 +401,22 @@ impl TypeScope {
         self.vars.insert(name.to_string(), ty);
     }
 
+    /// Roll back any flow-narrowed variables to their pre-narrowing types.
+    /// Used when reusing the post-body fn scope for return-type checking, so a
+    /// parameter typed `T?` is still seen as `T?` in the return position even
+    /// when narrowing leaked out of an `if x != nil { ... }` branch above.
+    pub(super) fn restore_narrowed_vars(&mut self) {
+        let entries: Vec<(String, InferredType)> = self
+            .narrowed_vars
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        for (name, original) in entries {
+            self.vars.insert(name, original);
+        }
+        self.narrowed_vars.clear();
+    }
+
     pub(super) fn define_var_mutable(&mut self, name: &str, ty: InferredType) {
         if is_discard_name(name) {
             return;

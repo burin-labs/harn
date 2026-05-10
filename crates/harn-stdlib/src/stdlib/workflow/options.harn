@@ -1,5 +1,82 @@
 import { pick_keys } from "std/collections"
 
+/** Allowed values for `WorkflowAutonomyPolicyConfig.autonomy_tier`. */
+type WorkflowAutonomyTier = "shadow" | "suggest" | "act_with_approval" | "act_auto"
+
+/** Caller-supplied config consumed by `workflow_autonomy_policy`. */
+type WorkflowAutonomyPolicyConfig = {
+  agent_id?: string,
+  agent?: string,
+  autonomy_tier?: WorkflowAutonomyTier,
+  tier?: WorkflowAutonomyTier,
+  action_tiers?: dict,
+  agent_tiers?: dict,
+  agent_action_tiers?: dict,
+  reviewers?: list<string>,
+}
+
+/** Normalized autonomy policy returned by `workflow_autonomy_policy`. */
+type WorkflowAutonomyPolicy = {
+  agent_id: string?,
+  autonomy_tier: WorkflowAutonomyTier,
+  action_tiers: dict,
+  agent_tiers: dict,
+  agent_action_tiers: dict,
+  reviewers: list<string>,
+}
+
+/**
+ * Per-stage model and tool-loop policy. Open shape — every field is optional
+ * so callers can supply only the dimensions they care about.
+ */
+type WorkflowModelPolicy = {
+  provider?: string,
+  model?: string,
+  model_tier?: string,
+  temperature?: float,
+  top_p?: float,
+  top_k?: int,
+  max_tokens?: int,
+  thinking?: any,
+  reasoning_effort?: string,
+  reasoning_policy?: any,
+  thinking_policy?: any,
+  reasoning_scale?: any,
+  problem_scale?: any,
+  reasoning_task?: string,
+  nudge?: any,
+  tool_examples?: list,
+  turn_policy?: string,
+  stop_after_successful_tools?: bool,
+  require_successful_tools?: bool,
+  max_iterations?: int,
+  max_nudges?: int,
+  tool_format?: string,
+  native_tool_fallback?: string,
+}
+
+/** Host-supplied tool-format defaults consumed when normalizing a stage. */
+type WorkflowStageHostConfig = {env_tool_format?: string, default_tool_format?: string}
+
+/** Caller-supplied config consumed by `workflow_stage_agent_options`. */
+type WorkflowStageOptionsConfig = {
+  model_policy?: WorkflowModelPolicy,
+  host?: WorkflowStageHostConfig,
+  session_id?: string,
+  done_sentinel?: any,
+  exit_when_verified?: bool,
+  mode?: string,
+  has_tools?: bool,
+}
+
+/** Normalized stage options returned by `workflow_stage_agent_options`. */
+type WorkflowStageAgentOptions = {
+  run_agent_loop: bool,
+  tool_format: string,
+  llm_options: dict,
+  agent_loop_options: dict,
+}
+
 fn __workflow_non_empty_string(value) {
   if type_of(value) != "string" {
     return nil
@@ -11,23 +88,23 @@ fn __workflow_non_empty_string(value) {
   return trimmed
 }
 
-fn __workflow_stage_tool_format(model_policy, host) {
-  let explicit = __workflow_non_empty_string(model_policy?.tool_format)
+fn __workflow_stage_tool_format(model_policy: WorkflowModelPolicy, host: WorkflowStageHostConfig) -> string {
+  let explicit = __workflow_non_empty_string(model_policy.tool_format)
   if explicit != nil {
     return explicit
   }
-  let env = __workflow_non_empty_string(host?.env_tool_format)
+  let env = __workflow_non_empty_string(host.env_tool_format)
   if env != nil {
     return env
   }
-  let default_format = __workflow_non_empty_string(host?.default_tool_format)
+  let default_format = __workflow_non_empty_string(host.default_tool_format)
   if default_format != nil {
     return default_format
   }
   return "text"
 }
 
-fn __workflow_native_tool_fallback(value) {
+fn __workflow_native_tool_fallback(value) -> string {
   let policy = __workflow_non_empty_string(value)
   if policy != nil {
     return policy
@@ -35,7 +112,7 @@ fn __workflow_native_tool_fallback(value) {
   return "reject"
 }
 
-fn __workflow_autonomy_tier(value) {
+fn __workflow_autonomy_tier(value) -> WorkflowAutonomyTier {
   let tier = value ?? "act_auto"
   if tier == "shadow" || tier == "suggest" || tier == "act_with_approval" || tier == "act_auto" {
     return tier
@@ -44,28 +121,35 @@ fn __workflow_autonomy_tier(value) {
 }
 
 /** workflow_autonomy_policy normalizes tier policy for with_autonomy_policy. */
-pub fn workflow_autonomy_policy(config = nil) {
-  let cfg = config ?? {}
+pub fn workflow_autonomy_policy(config: WorkflowAutonomyPolicyConfig = {}) -> WorkflowAutonomyPolicy {
   return {
-    agent_id: cfg?.agent_id ?? cfg?.agent,
-    autonomy_tier: __workflow_autonomy_tier(cfg?.autonomy_tier ?? cfg?.tier),
-    action_tiers: cfg?.action_tiers ?? {},
-    agent_tiers: cfg?.agent_tiers ?? {},
-    agent_action_tiers: cfg?.agent_action_tiers ?? {},
-    reviewers: cfg?.reviewers ?? [],
+    agent_id: config.agent_id ?? config.agent,
+    autonomy_tier: __workflow_autonomy_tier(config.autonomy_tier ?? config.tier),
+    action_tiers: config.action_tiers ?? {},
+    agent_tiers: config.agent_tiers ?? {},
+    agent_action_tiers: config.agent_action_tiers ?? {},
+    reviewers: config.reviewers ?? [],
   }
 }
 
-fn __workflow_llm_options(config, model_policy, tool_format) {
+fn __workflow_llm_options(
+  config: WorkflowStageOptionsConfig,
+  model_policy: WorkflowModelPolicy,
+  tool_format: string,
+) -> dict {
   let model_option_keys = ["provider", "model", "model_tier", "temperature", "max_tokens", "thinking", "reasoning_effort"]
   var options = {tool_format: tool_format} + pick_keys(model_policy, model_option_keys, {drop_nil: true})
-  if __workflow_non_empty_string(config?.session_id) != nil {
-    options = options + {session_id: __workflow_non_empty_string(config?.session_id)}
+  if __workflow_non_empty_string(config.session_id) != nil {
+    options = options + {session_id: __workflow_non_empty_string(config.session_id)}
   }
   return options
 }
 
-fn __workflow_agent_loop_options(config, model_policy, tool_format) {
+fn __workflow_agent_loop_options(
+  config: WorkflowStageOptionsConfig,
+  model_policy: WorkflowModelPolicy,
+  tool_format: string,
+) -> dict {
   let loop_option_keys = [
     "nudge",
     "tool_examples",
@@ -80,40 +164,39 @@ fn __workflow_agent_loop_options(config, model_policy, tool_format) {
   ]
   var options = {
     loop_until_done: true,
-    max_iterations: model_policy?.max_iterations ?? 16,
-    max_nudges: model_policy?.max_nudges ?? 3,
+    max_iterations: model_policy.max_iterations ?? 16,
+    max_nudges: model_policy.max_nudges ?? 3,
     tool_retries: 0,
     tool_backoff_ms: 1000,
     schema_retries: 0,
     tool_format: tool_format,
-    native_tool_fallback: __workflow_native_tool_fallback(model_policy?.native_tool_fallback),
+    native_tool_fallback: __workflow_native_tool_fallback(model_policy.native_tool_fallback),
     daemon: false,
     llm_retries: 2,
     llm_backoff_ms: 2000,
-    exit_when_verified: config?.exit_when_verified ?? false,
+    exit_when_verified: config.exit_when_verified ?? false,
     loop_detect_warn: 2,
     loop_detect_block: 3,
     loop_detect_skip: 4,
   }
-  if __workflow_non_empty_string(config?.session_id) != nil {
-    options = options + {session_id: __workflow_non_empty_string(config?.session_id)}
+  if __workflow_non_empty_string(config.session_id) != nil {
+    options = options + {session_id: __workflow_non_empty_string(config.session_id)}
   }
-  if config?.done_sentinel != nil {
-    options = options + {done_sentinel: config?.done_sentinel}
+  if config.done_sentinel != nil {
+    options = options + {done_sentinel: config.done_sentinel}
   }
   return options + pick_keys(model_policy, loop_option_keys, {drop_nil: true})
 }
 
 /** workflow_stage_agent_options. */
-pub fn workflow_stage_agent_options(config = nil) {
-  let cfg = config ?? {}
-  let model_policy = cfg?.model_policy ?? {}
-  let host = cfg?.host ?? {}
-  let tool_format = __workflow_stage_tool_format(model_policy, host)
-  let llm_options = __workflow_llm_options(cfg, model_policy, tool_format)
-  let loop_options = __workflow_agent_loop_options(cfg, model_policy, tool_format)
+pub fn workflow_stage_agent_options(config: WorkflowStageOptionsConfig = {}) -> WorkflowStageAgentOptions {
+  let model_policy: WorkflowModelPolicy = config.model_policy ?? {}
+  let host: WorkflowStageHostConfig = config.host ?? {}
+  let tool_format: string = __workflow_stage_tool_format(model_policy, host)
+  let llm_options = __workflow_llm_options(config, model_policy, tool_format)
+  let loop_options = __workflow_agent_loop_options(config, model_policy, tool_format)
   return {
-    run_agent_loop: cfg?.mode == "agent" || cfg?.has_tools,
+    run_agent_loop: config.mode == "agent" || config.has_tools ?? false,
     tool_format: tool_format,
     llm_options: llm_options,
     agent_loop_options: llm_options + loop_options,

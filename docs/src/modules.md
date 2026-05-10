@@ -244,10 +244,16 @@ Collection utilities and store helpers:
 
 | Function | Description |
 |---|---|
-| `filter_nil(dict)` | Remove entries where value is nil, empty string, or "null" |
-| `pick_keys(dict, keys, options?)` | Project a dict onto a key list; use `{drop_nil: true}` to omit nil values |
+| `filter_nil<V>(dict<string, V>)` | Remove entries where value is nil, empty string, or "null"; preserves the value type |
+| `pick_keys<V>(dict<string, V>, keys, options: PickKeysOptions = {})` | Project a dict onto a key list; pass `{drop_nil: true}` to omit nil values |
 | `store_stale(key, max_age_seconds)` | Check if a store key's timestamp is stale |
 | `store_refresh(key)` | Update a store key's timestamp to now |
+
+Typed shapes:
+
+| Type | Description |
+|---|---|
+| `PickKeysOptions = {drop_nil?: bool}` | Options shape consumed by `pick_keys` |
 
 ### std/math
 
@@ -361,9 +367,9 @@ JSON utility patterns:
 |---|---|
 | `pretty(value)` | Pretty-print a value as indented JSON |
 | `safe_parse(text)` | Safely parse JSON, returning nil on failure instead of throwing |
-| `merge(a, b)` | Shallow-merge two dicts (keys in b override keys in a) |
-| `pick(data, keys)` | Pick specific keys from a dict |
-| `omit(data, keys)` | Omit specific keys from a dict |
+| `merge<V>(a: dict<string, V>, b: dict<string, V>)` | Shallow-merge two dicts (keys in b override); preserves the value type |
+| `pick<V>(data: dict<string, V>, keys)` | Pick specific keys from a dict, dropping nil values; preserves the value type |
+| `omit<V>(data: dict<string, V>, keys)` | Omit specific keys from a dict; preserves the value type |
 
 ```harn
 import "std/json"

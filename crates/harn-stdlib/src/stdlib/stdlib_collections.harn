@@ -1,31 +1,40 @@
 // std/collections — Collection utilities.
-// Remove entries from a dict where the value is nil, empty string, or "null" string.
-/** filter_nil. */
-pub fn filter_nil(d) {
-  return d
-    .filter(
-    { v ->
-      if v == nil {
-        return false
-      }
-      if v == "" {
-        return false
-      }
-      if v == "null" {
-        return false
-      }
-      return true
-    },
-  )
+/**
+ * Options for `pick_keys`.
+ *
+ * `drop_nil` removes selected keys whose value is `nil` from the result;
+ * defaults to `false`.
+ */
+type PickKeysOptions = {drop_nil?: bool}
+
+/**
+ * Remove entries from a dict where the value is nil, an empty string, or the
+ * literal "null" string. Generic over the value type so a typed input
+ * (`dict<string, V>` or a structural shape) projects back to a dict with the
+ * same value contract instead of collapsing to untyped `dict`.
+ */
+pub fn filter_nil<V>(d: dict<string, V>) -> dict<string, V> {
+  var out = {}
+  for entry in d {
+    let v = entry.value
+    if v == nil || v == "" || v == "null" {
+      continue
+    }
+    out[entry.key] = v
+  }
+  return out
 }
 
-/** pick_keys. */
-pub fn pick_keys(d, selected_keys, options = nil) {
+/**
+ * Project a dict onto an explicit list of keys, preserving the original value
+ * contract. Pass `{drop_nil: true}` to omit keys whose value resolves to nil
+ * after lookup. Missing keys are silently dropped.
+ */
+pub fn pick_keys<V>(d: dict<string, V>, selected_keys: list<string>, options: PickKeysOptions = {}) -> dict<string, V> {
   if type_of(d) != "dict" {
     return {}
   }
-  let opts = options ?? {}
-  let drop_nil = opts?.drop_nil ?? false
+  let drop_nil = options.drop_nil ?? false
   var out = {}
   for key in selected_keys {
     if contains(d.keys(), key) {

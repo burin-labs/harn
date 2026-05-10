@@ -24,10 +24,11 @@ pub fn safe_parse(text) {
 }
 
 /**
- * Merge two dicts (shallow). Keys in b override keys in a.
- * merge.
+ * Shallow-merge two dicts. Keys in `b` override matching keys in `a`. Generic
+ * over the value type so the resulting dict keeps the same value contract as
+ * the inputs (`dict<string, V>` in, `dict<string, V>` out).
  */
-pub fn merge(a, b) {
+pub fn merge<V>(a: dict<string, V>, b: dict<string, V>) -> dict<string, V> {
   var result = a
   for entry in b {
     result = result + {[entry.key]: entry.value}
@@ -36,10 +37,11 @@ pub fn merge(a, b) {
 }
 
 /**
- * Pick specific keys from a dict.
- * pick.
+ * Pick the listed keys from `data`, dropping entries whose stored value is
+ * `nil`. Generic over the value type — when called with a `dict<string, V>`
+ * the projection keeps the same V.
  */
-pub fn pick(data, keys) {
+pub fn pick<V>(data: dict<string, V>, keys: list<string>) -> dict<string, V> {
   var result = {}
   for k in keys {
     if data[k] != nil {
@@ -50,10 +52,10 @@ pub fn pick(data, keys) {
 }
 
 /**
- * Omit specific keys from a dict.
- * omit.
+ * Drop the listed keys from `data`. Generic over the value type — the
+ * resulting dict keeps the same value contract as the input.
  */
-pub fn omit(data, keys) {
+pub fn omit<V>(data: dict<string, V>, keys: list<string>) -> dict<string, V> {
   let exclude = set(keys)
   var result = {}
   for entry in data {

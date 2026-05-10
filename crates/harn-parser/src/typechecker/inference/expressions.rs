@@ -395,6 +395,16 @@ impl TypeChecker {
                                 );
                             }
                         }
+                        // Type parameters that the call site never pinned (e.g.
+                        // `pick_keys({})` with an empty literal) would otherwise
+                        // surface as a phantom `Named("V")` in downstream
+                        // checks. Default them to the wildcard so they behave
+                        // like an unconstrained generic in the result type.
+                        for tp in &sig.type_param_names {
+                            bindings
+                                .entry(tp.clone())
+                                .or_insert_with(Self::wildcard_type);
+                        }
                         return Some(Self::apply_type_bindings(&ty, &bindings));
                     }
                     return None;

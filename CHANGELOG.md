@@ -49,6 +49,33 @@ condensed series summaries instead of full per-patch history.
   the canonical HarnDoc form preferred by the linter would surface
   spurious "no doc comment" warnings on otherwise-documented public
   symbols. Both forms now produce identical `docs` bodies.
+- **Typed stdlib option/result shapes.** `std/collections.filter_nil` and
+  `pick_keys`, plus `std/json.merge`/`pick`/`omit`, are now generic over the
+  value type — a `dict<string, V>` (or homogeneous shape literal) projects back
+  to a dict that still carries `V`. Introduced `PickKeysOptions` and the
+  workflow `WorkflowAutonomyPolicyConfig`/`WorkflowModelPolicy`/
+  `WorkflowStageOptionsConfig`/`WorkflowStageAgentOptions` and connector
+  `GitHubConnectorConfig`/`GitHubCallOptions`/`GitHubWaitOptions` shapes so
+  the high-traffic agent/workflow and connector paths advertise their
+  contract instead of accepting freeform `dict`.
+
+### Changed
+
+- **Type-checker generics.** `dict<string, V>` parameter slots now bind `V`
+  from a heterogeneous shape literal (union of field types) so generic
+  stdlib helpers preserve element typing through projection.
+  Optional shape fields validate the value type when supplied — a
+  `{drop_nil?: bool}` parameter rejects `{drop_nil: "yes"}` instead of
+  silently accepting it.
+- **Cross-module type aliases.** Selectively importing a function (e.g.
+  `import { pick_keys } from "std/collections"`) now also pulls every
+  exported type alias / struct / enum / interface from the same module
+  into scope so call-site contract checks resolve referenced shapes
+  instead of seeing phantom `Named("PickKeysOptions")`.
+- **Return-type checking scope.** `fn` return-type validation now runs
+  against the post-body scope (with narrowing rolled back) so values bound
+  by `let`/`var` inside the body resolve correctly when reused in a
+  structural return literal.
 
 ## v0.8.4
 

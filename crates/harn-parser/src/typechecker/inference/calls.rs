@@ -47,6 +47,24 @@ impl TypeChecker {
         Some((entry.0.as_str(), entry.1.as_ref()))
     }
 
+    /// Collapse the field types of a shape into a single value type. Used when
+    /// binding `dict<string, V>` against a heterogeneous shape literal — V is
+    /// the union of every field type, simplified so a homogeneous shape stays
+    /// a single named type instead of a one-element union.
+    fn union_of_shape_field_types(fields: &[ShapeField]) -> Option<TypeExpr> {
+        let mut members: Vec<TypeExpr> = Vec::new();
+        for field in fields {
+            if !members.contains(&field.type_expr) {
+                members.push(field.type_expr.clone());
+            }
+        }
+        match members.len() {
+            0 => None,
+            1 => Some(members.into_iter().next().unwrap()),
+            _ => Some(TypeExpr::Union(members)),
+        }
+    }
+
     fn type_without_nil(ty: &TypeExpr) -> Option<TypeExpr> {
         match ty {
             TypeExpr::Named(name) if name == "nil" => None,
@@ -270,6 +288,20 @@ impl TypeChecker {
             (TypeExpr::DictType(pk, pv), TypeExpr::DictType(ak, av)) => {
                 Self::extract_type_bindings(pk, ak, type_params, bindings)?;
                 Self::extract_type_bindings(pv, av, type_params, bindings)
+            }
+            // A shape literal `{a: 1, b: "x"}` flowing into a `dict<string, V>`
+            // parameter is the most common stdlib call pattern — `pick_keys`,
+            // `filter_nil`, `merge`, etc. all advertise a generic dict-shape
+            // contract. Bind V to the union of field types so the projected
+            // result keeps useful element typing instead of collapsing to
+            // `dict`.
+            (TypeExpr::DictType(pk, pv), TypeExpr::Shape(arg_fields)) => {
+                if matches!(pk.as_ref(), TypeExpr::Named(name) if name == "string") {
+                    let value_union = Self::union_of_shape_field_types(arg_fields)
+                        .unwrap_or_else(|| TypeExpr::Named("nil".into()));
+                    Self::extract_type_bindings(pv, &value_union, type_params, bindings)?;
+                }
+                Ok(())
             }
             (
                 TypeExpr::Applied {

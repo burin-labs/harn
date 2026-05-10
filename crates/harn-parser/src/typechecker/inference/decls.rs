@@ -168,14 +168,6 @@ impl TypeChecker {
                 self.check_node(default, &mut fn_scope);
             }
         }
-        // Snapshot scope before main pass (which may mutate it with narrowing)
-        // so that return-type checking starts from the original parameter types.
-        let ret_scope_base = if return_type.is_some() {
-            Some(fn_scope.child())
-        } else {
-            None
-        };
-
         self.check_block(body, &mut fn_scope);
 
         if is_stream && !matches!(return_type, None | Some(TypeExpr::Stream(_))) {
@@ -190,9 +182,14 @@ impl TypeChecker {
             }
         }
 
-        // Check return statements against declared return type
+        // Check return statements against the declared return type using the
+        // post-body scope so locally-bound `let` values are visible, with any
+        // outstanding narrowings rolled back so a parameter typed (e.g.) `T?`
+        // is still seen as `T?` here even when the body narrowed it inside a
+        // conditional that fell through.
         if let Some(ret_type) = return_type {
-            let mut ret_scope = ret_scope_base.unwrap();
+            let mut ret_scope = fn_scope.clone();
+            ret_scope.restore_narrowed_vars();
             for stmt in body {
                 self.check_return_type(stmt, ret_type, expected_span, &mut ret_scope);
             }
