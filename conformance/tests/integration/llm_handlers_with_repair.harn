@@ -1,0 +1,48 @@
+// Conformance test for std/llm/handlers::with_repair — runs a single
+// repair pass on schema_validation failures, appends a corrective
+// nudge to the prompt, and tags the response with repair_attempted.
+import { with_repair } from "std/llm/handlers"
+
+pipeline default() {
+  // Track call counts and whether the second-attempt prompt was nudged.
+  let counter = atomic(0)
+  let nudged = atomic(0)
+  let synthetic = { call ->
+    let n = atomic_add(counter, 1)
+    if n < 1 {
+      return {ok: false, status: "schema_validation", error: {message: "missing required key 'verdict'"}}
+    }
+    if contains(call.prompt, "schema validation") {
+      let _ = atomic_set(nudged, 1)
+    }
+    return {
+      ok: true,
+      value: {text: "fixed", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
+    }
+  }
+  let caller = with_repair(synthetic, {})
+  let env = caller(
+    {
+      prompt: "judge this",
+      system: "",
+      opts: {temperature: 0.7, max_tokens: 4096},
+      turn: {iteration: 0, session_id: "", attempt: 1},
+    },
+  )
+  println(env.ok)
+  println(env.value.text)
+  println(env.repair_attempted)
+  println(atomic_get(nudged))
+  // Non-schema failures pass through unchanged (no repair attempt).
+  let other_calls = atomic(0)
+  let other_synth = { _call ->
+    let _ = atomic_add(other_calls, 1)
+    return {ok: false, status: "rate_limited", error: "429"}
+  }
+  let other_caller = with_repair(other_synth, {})
+  let other_env = other_caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  println(other_env.ok)
+  println(other_env.status)
+  println(other_env?.repair_attempted ?? false)
+  println(atomic_get(other_calls))
+}

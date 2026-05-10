@@ -1,0 +1,50 @@
+// Conformance test for std/llm/handlers::with_timeout — injects
+// timeout_ms into call.opts so providers can cancel mid-flight,
+// converts overrun successes to a uniform timeout status, and honors
+// the unified clock (mockable in tests).
+import { with_timeout } from "std/llm/handlers"
+
+pipeline default() {
+  // Fast call under the deadline passes through; timeout_ms is forwarded.
+  let seen_timeout = atomic(0)
+  let fast = { call ->
+    if call.opts?.timeout_ms != nil {
+      let _ = atomic_set(seen_timeout, to_int(call.opts.timeout_ms))
+    }
+    return {
+      ok: true,
+      value: {text: "fast", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
+    }
+  }
+  let _ = mock_time(0)
+  let fast_caller = with_timeout(fast, {ms: 1000})
+  let fast_env = fast_caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  println(fast_env.ok)
+  println(fast_env.value.text)
+  println(atomic_get(seen_timeout))
+  // Slow success that overran the deadline: relabel to timeout.
+  let slow = { _call ->
+    let _ = advance_time(2000)
+    return {
+      ok: true,
+      value: {text: "late", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
+    }
+  }
+  let slow_caller = with_timeout(slow, {ms: 500})
+  let slow_env = slow_caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  println(slow_env.ok)
+  println(slow_env.status)
+  println(slow_env.error.timeout_ms)
+  println(slow_env.error.elapsed_ms >= 500)
+  // Slow failure with relabel_failures: false preserves the original status.
+  let slow_failure = { _call ->
+    let _ = advance_time(2000)
+    return {ok: false, status: "rate_limited", error: "429"}
+  }
+  let preserve = with_timeout(slow_failure, {ms: 500, relabel_failures: false})
+  let preserve_env = preserve({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  println(preserve_env.ok)
+  println(preserve_env.status)
+  println(preserve_env.elapsed_ms >= 500)
+  let _ = unmock_time()
+}

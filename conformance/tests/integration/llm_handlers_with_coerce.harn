@@ -1,0 +1,48 @@
+// Conformance test for std/llm/handlers::with_coerce — recursively
+// lowercases keys on envelope.value.data; preserves the original under
+// raw_data; passes failure envelopes through unchanged; optional
+// on_text_json parses JSON-shaped value.text into value.data.
+import { with_coerce } from "std/llm/handlers"
+
+pipeline default() {
+  let synthetic_with_data = { _call -> return {
+    ok: true,
+    value: {
+      text: "{}",
+      model: "mock",
+      provider: "mock",
+      input_tokens: 0,
+      output_tokens: 0,
+      data: {Verdict: "YES", Bullets: ["A", "B"], Nested: {KeyOne: 1}},
+    },
+  } }
+  let caller_data = with_coerce(synthetic_with_data, {})
+  let env_data = caller_data({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  println(env_data.value.data.verdict)
+  println(env_data.value.data.bullets[0])
+  println(env_data.value.data.nested.keyone)
+  // Original mixed-case data preserved at raw_data.
+  println(env_data.value.raw_data.Verdict)
+  // Failure envelope passes through unchanged.
+  let failing = { _call -> return {ok: false, status: "rate_limited", error: "429"} }
+  let failing_caller = with_coerce(failing, {})
+  let failing_env = failing_caller(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
+  println(failing_env.ok)
+  println(failing_env.status)
+  // on_text_json parses JSON-shaped value.text into value.data.
+  let synthetic_text = { _call -> return {
+    ok: true,
+    value: {
+      text: "{\"Decision\":\"approve\"}",
+      model: "mock",
+      provider: "mock",
+      input_tokens: 0,
+      output_tokens: 0,
+    },
+  } }
+  let caller_text = with_coerce(synthetic_text, {on_text_json: true})
+  let env_text = caller_text({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  println(env_text.value.data.decision)
+}

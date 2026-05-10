@@ -246,6 +246,17 @@ pub fn schema_retry_nudge_for(schema, hint) {
  * lowercase-key-normalized `data`) and `ok` already populated. Callers
  * dispatch on `result.ok` and read structured fields off `result.value`.
  *
+ * Conceptually equivalent to the structured-output preset
+ *
+ *     compose([with_coerce({})])(__structured_caller(schema))
+ *
+ * with `__apply_judge_defaults` baking in judge-friendly options before
+ * the call. Schema retries + the repair pass are owned by
+ * `llm_call_structured_result` (the structured base caller), so this
+ * function is the canonical preset; it stays in `std/llm/safe` rather
+ * than `std/llm/handlers` because callers consume it as a one-shot,
+ * not as a caller-seam middleware.
+ *
  * Defaults applied when the corresponding option is unset:
  *   temperature      -> 0.0
  *   schema_retries   -> 2

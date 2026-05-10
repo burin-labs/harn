@@ -15,6 +15,7 @@
 // "context_window_exceeded", "auth", "policy_blocked", "circuit_open".
 import { agent_emit_event } from "std/agent/state"
 import { cache_get, cache_put } from "std/cache"
+import { with_case_insensitive_keys } from "std/llm/safe"
 
 /**
  * default_llm_caller returns a closure with the canonical (call) -> result
@@ -131,6 +132,22 @@ fn __safe_invoke(next, call) {
     return {ok: false, status: "exception", error: "caller returned non-dict"}
   }
   return value
+}
+
+/*
+ * Partial-application support for the canonical `(next, opts) -> caller`
+ * middleware shape. Every middleware in this module starts its body
+ * with `if !__llm_handler_is_callable(first) { return __partial(impl,
+ * first) }` so call sites can use either form interchangeably:
+ *
+ *   with_X(next, opts)   // direct: returns a caller
+ *   with_X(opts)         // curried: returns fn(next) -> caller, drops into compose
+ *
+ * Without this, `compose([with_logging({...})])` silently treats the
+ * opts dict as `next` and fails at the first invocation.
+ */
+fn __partial(handler_impl, opts) {
+  return { next -> handler_impl(next, opts) }
 }
 
 fn __emit_event(session_id, name, payload) {
@@ -260,6 +277,9 @@ fn __backoff_delay(attempt, base_ms, max_ms, backoff, jitter) {
  * Never throws — raw throws from `next` become {ok: false, status: "exception"}.
  */
 pub fn with_retry(next, opts = nil) {
+  if !__llm_handler_is_callable(next) {
+    return __partial(with_retry, next)
+  }
   let cfg = __opts_dict(opts)
   let max_attempts = cfg?.max_attempts ?? 3
   let base_ms = cfg?.base_ms ?? 250
@@ -513,6 +533,9 @@ pub fn with_prompt_rewrite(next, rewriter) {
  * Emits `llm_call_log` event when call.turn.session_id is non-empty.
  */
 pub fn with_logging(next, opts = nil) {
+  if !__llm_handler_is_callable(next) {
+    return __partial(with_logging, next)
+  }
   let cfg = __opts_dict(opts)
   let level = cfg?.level ?? "info"
   let include_prompt = cfg?.include_prompt ?? false
@@ -594,6 +617,9 @@ fn __budget_check(limit_name, max_value, observed, on_exceed) {
  *   - "throw": throws (propagates to caller)
  */
 pub fn with_budget(next, opts = nil) {
+  if !__llm_handler_is_callable(next) {
+    return __partial(with_budget, next)
+  }
   let cfg = __opts_dict(opts)
   let max_total_tokens = cfg?.max_total_tokens
   let max_input_tokens = cfg?.max_input_tokens
@@ -681,7 +707,7 @@ pub fn with_cache(first, second = nil, third = nil) {
  */
 pub fn with_circuit_breaker(handler, options = nil) {
   if !__llm_handler_is_callable(handler) {
-    throw "with_circuit_breaker: handler must be callable"
+    return __partial(with_circuit_breaker, handler)
   }
   let opts = options ?? {}
   let threshold = opts?.threshold ?? 5
@@ -707,6 +733,383 @@ pub fn with_circuit_breaker(handler, options = nil) {
       circuit_record_success(name)
     }
     return result
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// with_repair
+// -------------------------------------------------------------------------------------------------
+
+fn __repair_default_nudge(error_dict) {
+  var lines = [
+    "Your previous response did not pass schema validation.",
+    "Re-emit valid JSON only:",
+    "- Use lowercase keys exactly as specified.",
+    "- Do not wrap in markdown fences.",
+    "- Do not include prose, commentary, or trailing text.",
+  ]
+  if type_of(error_dict) == "dict" {
+    let detail = to_string(error_dict?.message ?? error_dict?.error ?? "")
+    if detail != "" {
+      lines = lines.push("Validator said: " + detail)
+    }
+  }
+  return join(lines, "\n")
+}
+
+fn __repair_apply_strategy(call, envelope, strategy, max_tokens, temperature) {
+  let nudge = if __llm_handler_is_callable(strategy) {
+    let r = try {
+      strategy(call?.prompt, call?.system, call?.opts, envelope)
+    }
+    if is_err(r) {
+      __repair_default_nudge(envelope?.error)
+    } else {
+      let v = unwrap(r)
+      if type_of(v) == "string" && v != "" {
+        v
+      } else {
+        __repair_default_nudge(envelope?.error)
+      }
+    }
+  } else {
+    if type_of(strategy) == "string" && strategy != "" {
+      strategy
+    } else {
+      __repair_default_nudge(envelope?.error)
+    }
+  }
+  let original_prompt = to_string(call?.prompt ?? "")
+  var repaired_opts = __opts_dict(call?.opts)
+  if max_tokens != nil {
+    repaired_opts = repaired_opts + {max_tokens: to_int(max_tokens)}
+  }
+  if temperature != nil {
+    repaired_opts = repaired_opts + {temperature: temperature}
+  }
+  return {
+    prompt: original_prompt + "\n\n" + nudge,
+    system: call?.system,
+    opts: repaired_opts,
+    turn: call?.turn ?? {iteration: 0, session_id: "", attempt: 1},
+  }
+}
+
+/**
+ * with_repair(next, opts) -> caller
+ *
+ * One-shot repair pass on `schema_validation` failures. When `next(call)`
+ * returns `{ok: false, status: "schema_validation", error}`, the wrapper
+ * appends a corrective nudge to `call.prompt`, lowers `max_tokens` and
+ * `temperature` for the repair pass, and asks `next` once more. The
+ * second envelope is returned with `repair_attempted: true`.
+ *
+ * Options:
+ *   - strategy: string | closure(prompt, system, opts, envelope) -> string
+ *               Custom corrective nudge. Falls back to a deterministic
+ *               schema-failure message that lists the validator's hint.
+ *   - max_tokens: int (default 600) — applied to the repair-pass opts
+ *   - temperature: float (default 0.0)
+ *   - enabled: bool (default true) — when false, behaves as a no-op pass
+ *
+ * Other failure statuses pass through unchanged. Successful responses
+ * pass through untouched. Schema-retry loops live in
+ * `llm_call_structured_result`; this handler is the caller-seam form for
+ * unstructured callers that surface `schema_validation` themselves.
+ */
+pub fn with_repair(next, opts = nil) {
+  if !__llm_handler_is_callable(next) {
+    return __partial(with_repair, next)
+  }
+  let cfg = __opts_dict(opts)
+  let enabled = cfg?.enabled ?? true
+  let strategy = cfg?.strategy
+  let max_tokens = cfg?.max_tokens ?? 600
+  let temperature = cfg?.temperature ?? 0.0
+  return { call ->
+    let first = __safe_invoke(next, call)
+    if !enabled {
+      return first
+    }
+    if first?.ok ?? false {
+      return first
+    }
+    let status = to_string(first?.status ?? "")
+    if status != "schema_validation" {
+      return first
+    }
+    let repair_call = __repair_apply_strategy(call, first, strategy, max_tokens, temperature)
+    let second = __safe_invoke(next, repair_call)
+    return second + {repair_attempted: true}
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// with_coerce
+// -------------------------------------------------------------------------------------------------
+
+fn __coerce_value_dict(value, lower_keys) {
+  if !lower_keys {
+    return value
+  }
+  return with_case_insensitive_keys(value)
+}
+
+/**
+ * with_coerce(next, opts) -> caller
+ *
+ * Normalize successful envelopes for downstream consumers. By default
+ * recursively lowercases keys on `value.data` (when present) so callers
+ * can read fields case-insensitively without per-site `dict_get_ci`
+ * dances. The original `value.data` is preserved on the envelope as
+ * `raw_data`; the lowercase form lives at `value.data` and is also
+ * surfaced at the top-level `value` field for parity with
+ * `safe_structured_call`.
+ *
+ * Options:
+ *   - lower_keys: bool (default true) — recursively lowercase dict keys
+ *   - on_text_json: bool (default false) — when value.data is missing
+ *                   and value.text looks like JSON, parse + normalize it
+ *                   into envelope.value
+ *
+ * Failure envelopes pass through unchanged.
+ */
+pub fn with_coerce(next, opts = nil) {
+  if !__llm_handler_is_callable(next) {
+    return __partial(with_coerce, next)
+  }
+  let cfg = __opts_dict(opts)
+  let lower_keys = cfg?.lower_keys ?? true
+  let on_text_json = cfg?.on_text_json ?? false
+  return { call ->
+    let envelope = __safe_invoke(next, call)
+    if !(envelope?.ok ?? false) {
+      return envelope
+    }
+    let value = if type_of(envelope?.value) == "dict" {
+      envelope.value
+    } else {
+      {}
+    }
+    var augmented = envelope
+    if type_of(value?.data) == "dict" {
+      let normalized = __coerce_value_dict(value.data, lower_keys)
+      augmented = augmented + {value: value + {data: normalized, raw_data: value.data}}
+    } else {
+      if on_text_json {
+        let text = to_string(value?.text ?? "")
+        if text != "" {
+          let parsed = try {
+            json_parse(text)
+          }
+          if !is_err(parsed) {
+            let unwrapped = unwrap(parsed)
+            if type_of(unwrapped) == "dict" {
+              let normalized = __coerce_value_dict(unwrapped, lower_keys)
+              augmented = augmented + {value: value + {data: normalized}}
+            }
+          }
+        }
+      }
+    }
+    return augmented
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// with_timeout
+// -------------------------------------------------------------------------------------------------
+
+fn __timeout_resolve_ms(opts) {
+  if type_of(opts) == "int" {
+    return opts
+  }
+  if type_of(opts) == "float" {
+    return to_int(opts)
+  }
+  if type_of(opts) != "dict" {
+    return 0
+  }
+  if opts?.ms != nil {
+    return to_int(opts.ms)
+  }
+  if opts?.seconds != nil {
+    return to_int(opts.seconds * 1000.0)
+  }
+  if opts?.duration_ms != nil {
+    return to_int(opts.duration_ms)
+  }
+  return 0
+}
+
+/**
+ * with_timeout(next, opts) -> caller
+ *
+ * Soft, clock-aware deadline. Three things happen on each call:
+ *
+ *   1. The deadline is forwarded to `call.opts.timeout_ms` so providers
+ *      that respect it (HTTP clients, Ollama keep-alive, Anthropic
+ *      `request_timeout`) can cancel mid-flight.
+ *   2. `now_ms()` measures elapsed time; success envelopes that overran
+ *      the deadline are converted to
+ *      `{ok: false, status: "timeout", error: {timeout_ms, elapsed_ms}}`.
+ *   3. Failure envelopes whose elapsed time exceeded the budget are
+ *      relabeled `status: "timeout"` so retry / fallback policies treat
+ *      them uniformly.
+ *
+ * Honors the unified clock — `now_ms()` is mockable in tests via
+ * `mock_time` / `advance_time`.
+ *
+ * Options:
+ *   - ms / seconds / duration_ms: deadline (one of). Bare int/float is
+ *     interpreted as milliseconds for ergonomic call sites.
+ *   - relabel_failures: bool (default true) — relabel slow failures to
+ *     `timeout`. Set false to keep the original status code.
+ */
+pub fn with_timeout(next, opts = nil) {
+  if !__llm_handler_is_callable(next) {
+    return __partial(with_timeout, next)
+  }
+  let timeout_ms = __timeout_resolve_ms(opts)
+  let cfg = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  let relabel = cfg?.relabel_failures ?? true
+  return { call ->
+    let original_opts = __opts_dict(call?.opts)
+    let injected = if timeout_ms > 0 && original_opts?.timeout_ms == nil {
+      original_opts + {timeout_ms: timeout_ms}
+    } else {
+      original_opts
+    }
+    let deadline_call = call + {opts: injected}
+    let start = now_ms()
+    let envelope = __safe_invoke(next, deadline_call)
+    let elapsed = now_ms() - start
+    if timeout_ms <= 0 {
+      return envelope
+    }
+    if elapsed <= timeout_ms {
+      return envelope
+    }
+    if envelope?.ok ?? false {
+      return {
+        ok: false,
+        status: "timeout",
+        error: {timeout_ms: timeout_ms, elapsed_ms: elapsed},
+        elapsed_ms: elapsed,
+      }
+    }
+    if !relabel {
+      return envelope + {elapsed_ms: elapsed}
+    }
+    return envelope + {status: "timeout", elapsed_ms: elapsed}
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// with_routing
+// -------------------------------------------------------------------------------------------------
+
+fn __routing_resolve(routes, call) {
+  var idx = 0
+  let total = if type_of(routes) == "list" {
+    len(routes)
+  } else {
+    0
+  }
+  while idx < total {
+    let route = routes[idx]
+    let matched = if type_of(route) == "dict" {
+      let predicate = route?.when
+      if predicate == nil {
+        true
+      } else {
+        if __llm_handler_is_callable(predicate) {
+          let r = try {
+            predicate(call)
+          }
+          if is_err(r) {
+            false
+          } else {
+            let v = unwrap(r)
+            if v == nil {
+              false
+            } else {
+              !!v
+            }
+          }
+        } else {
+          !!predicate
+        }
+      }
+    } else {
+      false
+    }
+    if matched {
+      return {index: idx, caller: route?.caller, name: to_string(route?.name ?? "")}
+    }
+    idx = idx + 1
+  }
+  return {index: -1, caller: nil, name: ""}
+}
+
+/**
+ * with_routing(opts) -> caller
+ *
+ * Pre-call routing: pick the right caller before the request goes out.
+ * The canonical use case is **cheap-model-by-default with frontier
+ * escalation on ambiguity**:
+ *
+ *     let cheap   = with_retry(default_llm_caller(), {max_attempts: 2})
+ *     let strong  = with_retry(default_llm_caller(), {max_attempts: 3})
+ *     let router  = with_routing({
+ *       default: cheap,
+ *       routes: [
+ *         {name: "frontier",
+ *          when: { call -> call?.opts?.task_kind == "judge" || (call?.opts?.escalate ?? false) },
+ *          caller: strong},
+ *       ],
+ *     })
+ *
+ * The first matching route wins; otherwise `opts.default` runs.
+ * Emits an `llm_routing_decision` event tagged with the route name and
+ * index so receipt sinks can audit cost decisions per call. Differs
+ * from `with_fallback`, which is post-failure: routing chooses ONE
+ * caller before any provider work happens.
+ */
+pub fn with_routing(opts) {
+  let cfg = __opts_dict(opts)
+  let default_caller = cfg?.default
+  let routes = if type_of(cfg?.routes) == "list" {
+    cfg.routes
+  } else {
+    []
+  }
+  if !__llm_handler_is_callable(default_caller) {
+    throw "with_routing: opts.default must be a callable caller"
+  }
+  return { call ->
+    let pick = __routing_resolve(routes, call)
+    let chosen = if __llm_handler_is_callable(pick?.caller) {
+      pick.caller
+    } else {
+      default_caller
+    }
+    let route_name = if pick.index >= 0 {
+      pick.name
+    } else {
+      to_string(cfg?.default_name ?? "default")
+    }
+    __emit_event(
+      to_string(call?.turn?.session_id ?? ""),
+      "llm_routing_decision",
+      {route_index: pick.index, route_name: route_name, used_default: pick.index < 0},
+    )
+    let envelope = __safe_invoke(chosen, call)
+    return envelope + {route_index: pick.index, route_name: route_name}
   }
 }
 
