@@ -101,3 +101,44 @@ harn workflow run \
 The same bundle and replayed event produce the same receipt bytes, which lets
 Burin compare local executions and later cloud imports against one stable
 artifact.
+
+## Authoring skill pack
+
+The `examples/skill-packs/workflow-authoring/` directory ships a Harn skill
+pack that teaches an agent (including 4–8B local models such as qwen, gemma,
+or llama.cpp) how to author bundles that pass `harn workflow validate`. It
+contains:
+
+- `SKILL.md` — a Claude Code / Agent Skills compatible card the model loads
+  before responding.
+- `prompting.md` — explicit XML output envelope (`<bundle>`, `<rationale>`,
+  `<verify>`), a hard-rule checklist that mirrors the validator, and a
+  validation-and-retry loop.
+- `recipes/{pr-monitor,pr-repair}/bundle.json` — validated golden bundles for
+  the two steel-thread workflows from the parent epic.
+- `cases/*.case.json` — eval cases pinning each prompt to its golden bundle
+  and a list of structural assertions (entry node id, required trigger kinds,
+  required approval nodes, etc.).
+- `eval.harn` — a Harn driver that feeds a case to any provider/model,
+  extracts the `<bundle>` block, runs the validate → preview → run pipeline,
+  and emits a JSON report.
+
+Run the offline eval (no network — replays the golden):
+
+```bash
+harn run examples/skill-packs/workflow-authoring/eval.harn -- \
+  --case examples/skill-packs/workflow-authoring/cases/pr-monitor.case.json
+```
+
+Run a live eval against any provider / model (point `HARN_BIN` at the binary
+under test if it is not on `PATH`):
+
+```bash
+harn run examples/skill-packs/workflow-authoring/eval.harn -- \
+  --case examples/skill-packs/workflow-authoring/cases/pr-monitor.case.json \
+  --provider ollama --model qwen3:4b
+```
+
+`crates/harn-cli/tests/workflow_authoring_eval.rs` is the CI regression gate.
+It validates every recipe golden and every case's structural assertions, so a
+new case automatically extends the gate.

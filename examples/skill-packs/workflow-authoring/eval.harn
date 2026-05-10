@@ -1,0 +1,215 @@
+/**
+ * Live workflow-authoring eval driver.
+ *
+ * Examples:
+ *
+ *   # Offline (replays the case's golden bundle, no network):
+ *   harn run examples/skill-packs/workflow-authoring/eval.harn -- \
+ *     --case examples/skill-packs/workflow-authoring/cases/pr-monitor.case.json
+ *
+ *   # Live, against a local Ollama model:
+ *   harn run examples/skill-packs/workflow-authoring/eval.harn -- \
+ *     --case examples/skill-packs/workflow-authoring/cases/pr-monitor.case.json \
+ *     --provider ollama --model qwen3:4b
+ *
+ * Always prints a JSON report on stdout. Exits 0 when the produced bundle
+ * validates, previews, runs, and meets every structural assertion in the
+ * case; non-zero otherwise.
+ */
+pipeline default() {
+  let opts = parse_argv(argv)
+  if opts.case == "" {
+    eprint(
+      "usage: harn run eval.harn -- --case <path> [--provider <id>] [--model <name>] [--tmp <dir>]\n",
+    )
+    return 2
+  }
+  let case = json_parse(read_file(opts.case))
+  let case_dir = dirname(opts.case)
+  let golden_path = case_dir + "/" + case.golden_bundle_path
+  let golden_text = read_file(golden_path)
+  var bundle_text = ""
+  if opts.provider == "fake" {
+    bundle_text = golden_text
+  } else {
+    let opts_dict = {provider: opts.provider, model: opts.model, temperature: 0.0, max_tokens: 4000}
+    let response = llm_call(case.user_prompt, case.system_prompt, opts_dict)
+    bundle_text = extract_block(response.text, "bundle")
+    if bundle_text == "" {
+      eprint("eval: model response missing <bundle>...</bundle>\n")
+      return 3
+    }
+  }
+  exec("mkdir", "-p", opts.tmp)
+  let bundle_path = opts.tmp + "/" + case.id + ".bundle.json"
+  write_file(bundle_path, bundle_text)
+  let harn_bin = opts.harn_bin
+  let validate = exec(harn_bin, "workflow", "validate", "--bundle", bundle_path, "--json")
+  let preview = exec(harn_bin, "workflow", "preview", "--bundle", bundle_path, "--json")
+  let runres = exec(harn_bin, "workflow", "run", "--bundle", bundle_path, "--json")
+  let validate_ok = validate.success
+  let preview_ok = preview.success
+  let run_ok = runres.success
+  let assertions = if validate_ok {
+    check_structural_assertions(json_parse(bundle_text), case.structural_assertions)
+  } else {
+    {ok: false, failures: ["bundle did not validate; skipping structural assertions"]}
+  }
+  let report = {
+    case_id: case.id,
+    provider: opts.provider,
+    model: opts.model,
+    bundle_path: bundle_path,
+    validation_passed: validate_ok,
+    preview_passed: preview_ok,
+    run_passed: run_ok,
+    structural_assertions: assertions,
+    validate_stdout: validate.stdout,
+    validate_stderr: validate.stderr,
+  }
+  print(json_stringify(report))
+  print("\n")
+  if validate_ok && preview_ok && run_ok && assertions.ok {
+    return 0
+  }
+  return 1
+}
+
+fn parse_argv(args: list<string>) -> dict {
+  var opts = {
+    case: "",
+    provider: "fake",
+    model: "fake-model",
+    tmp: ".harn-runs/workflow-authoring-eval",
+    harn_bin: env_or("HARN_BIN", "harn"),
+  }
+  var i = 0
+  while i < len(args) {
+    let flag = args[i]
+    let value = if i + 1 < len(args) {
+      args[i + 1]
+    } else {
+      ""
+    }
+    if flag == "--case" {
+      opts.case = value
+      i = i + 2
+    } else if flag == "--provider" {
+      opts.provider = value
+      i = i + 2
+    } else if flag == "--model" {
+      opts.model = value
+      i = i + 2
+    } else if flag == "--tmp" {
+      opts.tmp = value
+      i = i + 2
+    } else if flag == "--harn-bin" {
+      opts.harn_bin = value
+      i = i + 2
+    } else {
+      i = i + 1
+    }
+  }
+  return opts
+}
+
+fn extract_block(text: string, tag: string) -> string {
+  let open = "<" + tag + ">"
+  let close = "</" + tag + ">"
+  let after_open = split(text, open)
+  if len(after_open) < 2 {
+    return ""
+  }
+  let body = split(after_open[1], close)
+  if len(body) < 2 {
+    return ""
+  }
+  return trim(body[0])
+}
+
+fn check_structural_assertions(bundle: dict, want: dict) -> dict {
+  let scalar_failures = check_scalar_fields(bundle, want)
+  let collection_failures = check_collection_fields(bundle, want)
+  let failures = scalar_failures + collection_failures
+  return {ok: len(failures) == 0, failures: failures}
+}
+
+fn check_scalar_fields(bundle: dict, want: dict) -> list<string> {
+  let want_keys = keys(want)
+  var out = []
+  if contains(want_keys, "bundle_id") && bundle.id != want.bundle_id {
+    out = out + ["bundle.id != " + want.bundle_id]
+  }
+  if contains(want_keys, "workflow_id") && bundle.workflow.id != want.workflow_id {
+    out = out + ["workflow.id != " + want.workflow_id]
+  }
+  if contains(want_keys, "entry") && bundle.workflow.entry != want.entry {
+    out = out + ["workflow.entry != " + want.entry]
+  }
+  if contains(want_keys, "autonomy_tier") && bundle.policy.autonomy_tier != want.autonomy_tier {
+    out = out + ["policy.autonomy_tier != " + want.autonomy_tier]
+  }
+  if contains(want_keys, "retry_backoff") && bundle.policy.retry.backoff != want.retry_backoff {
+    out = out + ["policy.retry.backoff != " + want.retry_backoff]
+  }
+  if contains(want_keys, "catchup_mode") && bundle.policy.catchup.mode != want.catchup_mode {
+    out = out + ["policy.catchup.mode != " + want.catchup_mode]
+  }
+  if contains(want_keys, "required_worktree_policy")
+    && bundle.environment.worktree_policy != want.required_worktree_policy {
+    out = out + ["environment.worktree_policy != " + want.required_worktree_policy]
+  }
+  return out
+}
+
+fn check_collection_fields(bundle: dict, want: dict) -> list<string> {
+  let want_keys = keys(want)
+  var out = []
+  if contains(want_keys, "required_node_ids") {
+    out = out
+      + missing_members(want.required_node_ids, keys(bundle.workflow.nodes), "workflow.nodes missing ")
+  }
+  if contains(want_keys, "required_trigger_kinds") {
+    out = out
+      + missing_members(
+      want.required_trigger_kinds,
+      project(bundle.triggers, "kind"),
+      "triggers missing kind ",
+    )
+  }
+  if contains(want_keys, "required_connector_ids") {
+    out = out
+      + missing_members(
+      want.required_connector_ids,
+      project(bundle.connectors, "id"),
+      "connectors missing ",
+    )
+  }
+  if contains(want_keys, "required_approval_nodes") {
+    out = out
+      + missing_members(
+      want.required_approval_nodes,
+      bundle.policy.approval_required,
+      "policy.approval_required missing ",
+    )
+  }
+  return out
+}
+
+fn project(items: list<dict>, field: string) -> list<string> {
+  var out = []
+  for item in items {
+    out = out + [item[field]]
+  }
+  return out
+}
+
+fn missing_members(required: list<string>, present: list<string>, prefix: string) -> list<string> {
+  var out = []
+  for item in required {
+    if !contains(present, item) {
+      out = out + [prefix + item]
+    }
+  }
+  return out
+}

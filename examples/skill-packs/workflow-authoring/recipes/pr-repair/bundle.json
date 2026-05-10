@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "id": "pr-repair",
+  "name": "PR repair",
+  "version": "1.0.0",
+  "triggers": [
+    {
+      "id": "github-checks-failed",
+      "kind": "github",
+      "provider": "github",
+      "events": ["check_suite.completed", "pull_request.synchronize"],
+      "node_id": "ingest"
+    },
+    {
+      "id": "hourly-pr-sweep",
+      "kind": "cron",
+      "schedule": "0 * * * *",
+      "node_id": "ingest"
+    }
+  ],
+  "workflow": {
+    "_type": "workflow_graph",
+    "id": "pr_repair_workflow",
+    "name": "PR repair",
+    "version": 1,
+    "entry": "ingest",
+    "nodes": {
+      "ingest": {
+        "id": "ingest",
+        "kind": "action",
+        "task_label": "Classify failure surface (conflict, lint, test, build)"
+      },
+      "open_worktree": {
+        "id": "open_worktree",
+        "kind": "action",
+        "task_label": "Create or reuse a worktree on the PR branch"
+      },
+      "repo_setup": {
+        "id": "repo_setup",
+        "kind": "action",
+        "task_label": "Run deterministic repo setup"
+      },
+      "repair_loop": {
+        "id": "repair_loop",
+        "kind": "agent",
+        "task_label": "Run repair agent under capability policy"
+      },
+      "verify": {
+        "id": "verify",
+        "kind": "action",
+        "task_label": "Run gated commands and capture receipt"
+      },
+      "approval": {
+        "id": "approval",
+        "kind": "approval",
+        "task_label": "Surface diff + receipt for HITL approval"
+      },
+      "notify": {
+        "id": "notify",
+        "kind": "notification",
+        "task_label": "Notify requester with outcome"
+      }
+    },
+    "edges": [
+      { "from": "ingest", "to": "open_worktree" },
+      { "from": "open_worktree", "to": "repo_setup" },
+      { "from": "repo_setup", "to": "repair_loop" },
+      { "from": "repair_loop", "to": "verify" },
+      { "from": "verify", "to": "approval", "label": "fix proposed" },
+      { "from": "approval", "to": "notify" }
+    ]
+  },
+  "prompt_capsules": {
+    "repair-loop": {
+      "id": "repair-loop",
+      "node_id": "repair_loop",
+      "trigger_id": "github-checks-failed",
+      "prompt": "Repair the PR's failing checks. Make the smallest change that turns red checks green. Use the gated commands to verify. Stop and request approval if a change touches more than the affected files."
+    }
+  },
+  "policy": {
+    "autonomy_tier": "act_with_approval",
+    "approval_required": ["repair_loop", "verify"],
+    "retry": { "max_attempts": 3, "backoff": "exponential" },
+    "catchup": { "mode": "latest", "max_events": 1 }
+  },
+  "connectors": [
+    {
+      "id": "github",
+      "provider_id": "github",
+      "scopes": [
+        "pull_requests:read",
+        "pull_requests:write",
+        "checks:read",
+        "contents:write"
+      ],
+      "setup_required": true,
+      "status_required": true
+    }
+  ],
+  "environment": {
+    "repo_setup_profile": "default",
+    "worktree_policy": "new_worktree",
+    "command_gates": ["make test", "make lint"]
+  }
+}
