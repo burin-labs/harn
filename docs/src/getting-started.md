@@ -32,7 +32,26 @@ Verify the installation:
 harn version
 ```
 
-Optional shell completions:
+### Run this first
+
+`harn doctor` is the one-command environment readiness check. It probes the
+toolchain, optional dev tools, portal dependencies, platform capabilities,
+provider credentials, and protocol artifact freshness, then prints a
+red/yellow/green summary with the exact fix command for anything that needs
+attention.
+
+```bash
+harn doctor                # full check incl. provider connectivity
+harn doctor --no-network   # skip remote /models probes (CI-friendly)
+harn doctor --json         # machine-readable output for preflight automation
+```
+
+The JSON output is versioned (`schema_version`) and stable across patch
+releases — Burin Code and Harn Cloud read the `summary.blocked_flows` array to
+decide whether a host can build, test, release, run scripts, or work on the
+portal.
+
+### Optional shell completions
 
 ```bash
 mkdir -p ~/.local/share/bash-completion/completions

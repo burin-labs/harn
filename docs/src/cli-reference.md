@@ -555,18 +555,85 @@ provider/model defaults.
 
 ## harn doctor
 
-Inspect the local environment and report the current Harn setup,
-including the hardware snapshot, resolved secret-provider chain, and
-keyring health.
+One-command readiness check for new contributors and host integrators. The
+command surfaces actionable, secret-free output for both humans and machine
+consumers (Burin Code preflight, Harn Cloud onboarding).
 
 ```bash
-harn doctor
-harn doctor --no-network
+harn doctor                # default: full check including provider /models probes
+harn doctor --no-network   # skip remote checks (CI-friendly)
+harn doctor --json         # versioned machine-readable output
 ```
 
-For OpenAI-compatible local providers, `/models` checks parse the model
-listing and report missing configured models instead of only checking HTTP
-reachability.
+Each check reports a red/yellow/green status (`fail` / `warn` / `ok`, plus
+`skip` when a check is not applicable) along with:
+
+- A single-line `detail`.
+- An optional `fix_command` that the user can copy-paste.
+- An optional `docs_url` pointing at relevant documentation.
+- A `blocks` array naming workflows that fail when this check fails. Stable
+  values are `build`, `test`, `release`, `publish`, `portal`, `scripting`,
+  and `editor`.
+
+The command exits non-zero when at least one check is `fail`.
+
+### What it checks
+
+- **Toolchain** — `rustc`, `cargo` (FAIL when missing).
+- **Optional dev tools** — `cargo-nextest`, `sccache`, `actionlint` (WARN
+  when missing; each has a documented fallback).
+- **Protocol artifacts** — when run inside the harn repo, compares the
+  pinned `HARN_PROTOCOL_ARTIFACT_VERSION` in
+  `spec/protocol-artifacts/harn-protocol.ts` against the binary's own
+  version and FAILs on drift.
+- **Portal frontend** — `node`, `npm`, and the portal's `node_modules`
+  directory when run inside the repo.
+- **Platform capabilities** — `notify` file-watcher backend availability and
+  the system browser opener used by OAuth and `harn portal`.
+- **Provider configuration** — `HARN_PROVIDERS_CONFIG`, `HARN_LLM_PROVIDER`,
+  the resolved secret-provider chain, and per-provider env vars (printed by
+  name only — never by value).
+- **Manifest** — nearest `harn.toml`, declared MCP servers, and registered
+  triggers.
+- **Runtime state** — event log backend, metadata cache, loaded skills,
+  Ollama presence and pulled models, hardware snapshot.
+- **Provider connectivity** (`--no-network` to skip) — for OpenAI-compatible
+  local providers, `/v1/models` probes parse the listing and report missing
+  configured models instead of only checking HTTP reachability.
+
+### JSON schema
+
+The JSON document is versioned via the top-level `schema_version` string;
+patch releases never break the documented field shapes.
+
+```json
+{
+  "schema_version": "1",
+  "harn_version": "0.8.4",
+  "providers_config_path": "...",
+  "model_defaults": { ... },
+  "checks": [
+    {
+      "id": "rustc",
+      "label": "rustc",
+      "status": "ok",
+      "detail": "rustc 1.84.0 (...)",
+      "fix_command": "https://rustup.rs",
+      "docs_url": "https://www.rust-lang.org/tools/install",
+      "blocks": ["build", "test", "release", "publish"]
+    }
+  ],
+  "summary": {
+    "ok": 18, "warn": 2, "fail": 0, "skip": 1,
+    "blocked_flows": []
+  },
+  "hardware": { "ram_gb": 64, "gpu": "Apple Silicon (MPS available)", "free_disk_gb": 240 },
+  "next_step": "..."
+}
+```
+
+Secrets never appear in any output. Credential checks list the env var
+**names** they looked for, not the values.
 
 ## harn provider-ready
 
