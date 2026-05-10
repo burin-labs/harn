@@ -485,42 +485,80 @@ impl super::super::Vm {
         let var_name = Self::const_string(&frame.chunk.constants[var_idx])?;
         let index = self.pop()?;
         let new_value = self.pop()?;
-        if let Some(obj) = self
-            .active_local_slot_value(&var_name)
-            .or_else(|| self.env.get(&var_name))
-        {
-            let assign_value = |vm: &mut Self, value: VmValue| -> Result<(), VmError> {
-                if !vm.assign_active_local_slot(&var_name, value.clone(), false)? {
-                    vm.env.assign(&var_name, value)?;
+
+        // Fast path: when the binding is an active local slot, mutate the
+        // contained dict/list in place via `Rc::make_mut`. This skips the
+        // defensive `VmValue::clone` + collection clone the env-fallback
+        // path has to pay, which is the per-iteration cost behind builder
+        // loops like `out[k] = v` and `aliases[id] = …`.
+        if let Some(slot_idx) = self.active_local_slot_index(&var_name) {
+            let frame = self.frames.last_mut().unwrap();
+            if !frame.chunk.local_slots[slot_idx].mutable {
+                return Err(VmError::ImmutableAssignment(var_name));
+            }
+            let slot = &mut frame.local_slots[slot_idx];
+            match &mut slot.value {
+                VmValue::List(items) => {
+                    if let Some(i) = index.as_int() {
+                        let len = items.len();
+                        let idx = if i < 0 {
+                            (len as i64 + i).max(0) as usize
+                        } else {
+                            i as usize
+                        };
+                        if idx >= len {
+                            return Err(VmError::Runtime(format!(
+                                "Index {i} out of bounds for list of length {len}",
+                            )));
+                        }
+                        Rc::make_mut(items)[idx] = new_value;
+                        slot.synced = false;
+                    }
+                    return Ok(());
                 }
-                Ok(())
-            };
+                VmValue::Dict(map) => {
+                    let key = index.display();
+                    Rc::make_mut(map).insert(key, new_value);
+                    slot.synced = false;
+                    return Ok(());
+                }
+                _ => return Ok(()),
+            }
+        }
+
+        // Fallback: variable lives in `env` (e.g. captured by a closure or
+        // declared in an outer scope). The env path still has to rebind
+        // because `env.get` returns by value, but `Rc::try_unwrap` keeps
+        // the no-other-references case allocation-free.
+        if let Some(obj) = self.env.get(&var_name) {
             match obj {
                 VmValue::List(items) => {
                     if let Some(i) = index.as_int() {
-                        let mut new_items = (*items).clone();
+                        let mut new_items =
+                            Rc::try_unwrap(items).unwrap_or_else(|items| (*items).clone());
                         let idx = if i < 0 {
                             (new_items.len() as i64 + i).max(0) as usize
                         } else {
                             i as usize
                         };
-                        if idx < new_items.len() {
-                            new_items[idx] = new_value;
-                            assign_value(self, VmValue::List(Rc::new(new_items)))?;
-                        } else {
+                        if idx >= new_items.len() {
                             return Err(VmError::Runtime(format!(
                                 "Index {} out of bounds for list of length {}",
                                 i,
-                                items.len()
+                                new_items.len()
                             )));
                         }
+                        new_items[idx] = new_value;
+                        self.env
+                            .assign(&var_name, VmValue::List(Rc::new(new_items)))?;
                     }
                 }
                 VmValue::Dict(map) => {
                     let key = index.display();
-                    let mut new_map = (*map).clone();
+                    let mut new_map = Rc::try_unwrap(map).unwrap_or_else(|map| (*map).clone());
                     new_map.insert(key, new_value);
-                    assign_value(self, VmValue::Dict(Rc::new(new_map)))?;
+                    self.env
+                        .assign(&var_name, VmValue::Dict(Rc::new(new_map)))?;
                 }
                 _ => {}
             }

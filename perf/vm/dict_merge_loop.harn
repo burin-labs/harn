@@ -1,0 +1,39 @@
+/**
+ * Mirrors the `result = result + {[k]: v}` pattern used by std/json `merge`,
+ * `pick`, `omit` and the connector option-builder pipelines. Stresses the
+ * dict `+` operator and the per-iteration single-entry dict allocation that
+ * helper pipelines pay on every option-merge call.
+ */
+pipeline default(task) {
+  let base = {
+    provider_id: "github",
+    repo: "burin-labs/harn",
+    branch: "main",
+    auth: "token",
+    timeout_ms: 30000,
+    user_agent: "harn",
+    accept: "application/json",
+  }
+  let overlays = [
+    {repo: "burin-labs/burin", branch: "ksinder/feature"},
+    {auth: "oauth", user_agent: "harn-bench"},
+    {timeout_ms: 5000, accept: "application/vnd.github+json"},
+    {repo: "burin-labs/persona-platform"},
+    {branch: "main"},
+  ]
+  var iteration = 0
+  var total = 0
+  while iteration < 4000 {
+    var merged = base
+    for overlay in overlays {
+      for entry in overlay {
+        merged = merged + {[entry.key]: entry.value}
+      }
+    }
+    total = total + len(merged.keys())
+    iteration = iteration + 1
+  }
+  if total < 0 {
+    log("unreachable")
+  }
+}

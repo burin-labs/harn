@@ -334,11 +334,22 @@ impl Vm {
 
     pub(crate) fn active_local_slot_value(&self, name: &str) -> Option<VmValue> {
         let frame = self.frames.last()?;
+        let idx = self.active_local_slot_index(name)?;
+        frame.local_slots.get(idx).map(|slot| slot.value.clone())
+    }
+
+    /// Returns the slot index of an initialized active local with the given
+    /// name, walking from innermost to outermost scope. Used by hot paths
+    /// (subscript-store, etc.) that want to mutate the slot value in place
+    /// without paying a defensive `VmValue::clone` first.
+    pub(crate) fn active_local_slot_index(&self, name: &str) -> Option<usize> {
+        let frame = self.frames.last()?;
         for (idx, info) in frame.chunk.local_slots.iter().enumerate().rev() {
             if info.name == name && info.scope_depth <= frame.local_scope_depth {
-                let slot = frame.local_slots.get(idx)?;
-                if slot.initialized {
-                    return Some(slot.value.clone());
+                if let Some(slot) = frame.local_slots.get(idx) {
+                    if slot.initialized {
+                        return Some(idx);
+                    }
                 }
             }
         }
