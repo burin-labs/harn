@@ -159,6 +159,37 @@ Operators opt into looser defaults explicitly (`--clock real`,
 `--network real`, `--llm-fixture <path>`) when the test under
 development calls for it.
 
+## Conformance coverage
+
+Testbench mode has first-class coverage in the conformance suite under
+`conformance/tests/testbench/`. Run them with:
+
+```sh
+cargo run --bin harn -- test conformance --filter testbench
+```
+
+The conformance runner activates the testbench session automatically
+when sidecar files are present next to the `.harn` test:
+
+| Sidecar | Effect |
+|---|---|
+| `<name>.process-tape.json` | Activates subprocess replay against the tape; a `cwd: null` entry acts as a wildcard for portable fixtures |
+| `<name>.fs-overlay/` (directory) | Mounts the directory as the overlay root for the run; `testbench_fs_diff()` returns the in-memory diff |
+| `<name>.testbench-tape` | Records a fresh unified tape during the run and compares it byte-for-byte against the fixture via the fidelity oracle |
+
+Any sidecar's presence also activates a paused clock pinned at
+`2026-01-01T00:00:00Z` so `now_ms()`, `sleep(...)`, and recorded
+durations stay deterministic across runs.
+
+Two script-side builtins are wired for tests that need to introspect the
+testbench from inside a pipeline:
+
+- `testbench_is_active()` — `true` when a mock clock is currently
+  installed.
+- `testbench_fs_diff()` — list of `{path, kind, content?}` dicts
+  describing every overlay change made so far. Returns an empty list
+  when no overlay is active.
+
 ## Relationship to other surfaces
 
 - `harn run --llm-mock` is a strict subset: it activates only the LLM

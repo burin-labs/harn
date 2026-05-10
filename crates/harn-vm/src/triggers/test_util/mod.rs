@@ -47,6 +47,7 @@ pub const TRIGGER_TEST_FIXTURES: &[&str] = &[
     "cost_guard_short_circuits",
     "crash_recovery_replays_in_flight_events",
     "cron_fires_on_schedule",
+    "cron_30_days",
     "dead_man_switch_alerts_on_silent_binding",
     "dedupe_swallows_duplicate_key",
     "dispatcher_retries_with_exponential_backoff",
@@ -218,6 +219,7 @@ impl TriggerTestHarness {
                 self.crash_recovery_replays_in_flight_events().await
             }
             "cron_fires_on_schedule" => self.cron_fires_on_schedule().await,
+            "cron_30_days" => self.cron_30_days().await,
             "dead_man_switch_alerts_on_silent_binding" => {
                 self.dead_man_switch_alerts_on_silent_binding().await
             }
@@ -292,6 +294,83 @@ impl TriggerTestHarness {
             notes: Vec::new(),
             details: json!({
                 "clock_ms": self.clock.monotonic_now().as_millis(),
+            }),
+        })
+    }
+
+    /// Simulate 30 daily cron ticks under a paused clock. The clock starts
+    /// at 2026-01-01T00:00:00Z; the daily schedule fires on each midnight
+    /// boundary, so the first tick lands at 2026-01-02T00:00:00Z and the
+    /// thirtieth at 2026-01-31T00:00:00Z.
+    async fn cron_30_days(self) -> Result<TriggerHarnessResult, String> {
+        self.clock.set(parse_rfc3339("2026-01-01T00:00:00Z")).await;
+        let _guard = clock::install_override(self.clock.clone());
+        let notify = Arc::new(Notify::new());
+        let sink = Arc::new(RecordingCronSink {
+            binding_id: "cron.30days".to_string(),
+            binding_version: 1,
+            registry: self.connector_registry.clone(),
+            notify: notify.clone(),
+        });
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(64)));
+        let inbox = build_inbox(&log).await;
+        let mut connector = CronConnector::with_clock_and_sink(self.clock.clone(), sink.clone());
+        connector
+            .init(connector_ctx(log, Arc::new(EmptySecretProvider), inbox))
+            .await
+            .map_err(|error| error.to_string())?;
+        connector
+            .activate(&[cron_binding(
+                "cron.30days",
+                "0 0 * * *",
+                "UTC",
+                CatchupMode::Skip,
+            )])
+            .await
+            .map_err(|error| error.to_string())?;
+
+        for target in 1..=30usize {
+            self.clock
+                .advance_std(StdDuration::from_secs(24 * 60 * 60))
+                .await;
+            let _ = tokio::time::timeout(TEST_DEFAULT_TIMEOUT, async {
+                loop {
+                    // Arm the notified future BEFORE checking the count.
+                    // `notify_waiters` only wakes already-waiting tasks, so
+                    // checking the count first would lose a notification
+                    // that fires between the check and the await.
+                    let notified = notify.notified();
+                    tokio::pin!(notified);
+                    if self.connector_registry.emitted().len() >= target {
+                        return;
+                    }
+                    notified.await;
+                }
+            })
+            .await;
+        }
+
+        let emitted = self.connector_registry.emitted();
+        let ok = emitted.len() == 30
+            && emitted
+                .iter()
+                .all(|e| e.provider == "cron" && e.kind == "tick")
+            && emitted[0].occurred_at.as_deref() == Some("2026-01-02T00:00:00Z")
+            && emitted[29].occurred_at.as_deref() == Some("2026-01-31T00:00:00Z");
+        Ok(TriggerHarnessResult {
+            fixture: "cron_30_days".to_string(),
+            ok,
+            stub: false,
+            summary: "cron connector fires daily for 30 simulated days under a paused clock"
+                .to_string(),
+            emitted,
+            attempts: Vec::new(),
+            dlq: Vec::new(),
+            alerts: Vec::new(),
+            bindings: Vec::new(),
+            notes: Vec::new(),
+            details: json!({
+                "clock_elapsed_ms": self.clock.monotonic_now().as_millis(),
             }),
         })
     }

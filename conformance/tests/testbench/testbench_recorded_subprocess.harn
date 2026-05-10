@@ -1,0 +1,17 @@
+/**
+ * Script invokes two subprocesses whose outputs were recorded into a
+ * process tape fixture. Replay mode returns the recorded stdout/stderr
+ * without spawning real processes, and advances the virtual clock by
+ * the recorded duration.
+ *
+ * The .process-tape.json sidecar activates subprocess replay mode; the
+ * paused clock is installed automatically by the conformance runner.
+ */
+pipeline test(task) {
+  let git_out = exec("git", "status")
+  println(git_out.success)
+  println(trim(git_out.stdout))
+  let echo_out = exec("echo", "hi")
+  println(echo_out.success)
+  println(trim(echo_out.stdout))
+}
