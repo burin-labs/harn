@@ -114,8 +114,13 @@ at `.claude/skills/harn-scripting/SKILL.md`.
 - Edit `spec/HARN_SPEC.md`, not `docs/src/language-spec.md`; regenerate with
   `./scripts/sync_language_spec.sh`.
 - Do not hand-edit `docs/theme/harn-keywords.js`; regenerate it with `make gen-highlight`.
-- Do not hand-edit `spec/protocol-artifacts/*`; regenerate Harn protocol contracts with
-  `make gen-protocol-artifacts` and verify them with `make check-protocol-artifacts`.
+- Do not hand-edit `spec/protocol-artifacts/*` (excluding `*_test.go`); regenerate Harn
+  protocol contracts with `make gen-protocol-artifacts`, verify drift with
+  `make check-protocol-artifacts`, and exercise the Python and Go bindings with
+  `make check-bindings`. Python lives in `spec/protocol-artifacts/python/`,
+  Go in `spec/protocol-artifacts/go/harnprotocol/`. The Go test file
+  `harnprotocol_test.go` is hand-written and round-trips the published
+  fixture.
 - `docs/dist/`, `.harn-runs/`, `.harn/`, `.claude/`, `.burin/`, `target/`, and `node_modules/` are
   generated or local-only paths.
 

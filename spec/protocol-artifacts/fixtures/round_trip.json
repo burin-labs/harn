@@ -1,0 +1,99 @@
+{
+  "a2aTask": {
+    "contextId": "ctx-7",
+    "id": "task-1",
+    "status": {
+      "message": {
+        "id": "msg-1",
+        "parts": [
+          {
+            "text": "ok",
+            "type": "text"
+          }
+        ],
+        "role": "agent"
+      },
+      "state": "working"
+    }
+  },
+  "artifactVersion": "0.8.4",
+  "envelopes": {
+    "agentEventNotification": {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "kind": "turn_end",
+        "sessionId": "sess-42",
+        "turnId": "turn-9"
+      }
+    },
+    "errorResponse": {
+      "error": {
+        "code": -32601,
+        "message": "method not found"
+      },
+      "id": "abc",
+      "jsonrpc": "2.0"
+    },
+    "request": {
+      "id": 17,
+      "jsonrpc": "2.0",
+      "method": "session/prompt",
+      "params": {
+        "prompt": [
+          {
+            "text": "hi",
+            "type": "text"
+          }
+        ],
+        "sessionId": "sess-42"
+      }
+    },
+    "response": {
+      "id": 17,
+      "jsonrpc": "2.0",
+      "result": {
+        "ok": true
+      }
+    },
+    "sessionUpdateNotification": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "sess-42",
+        "update": {
+          "_meta": {
+            "harn": {
+              "durationMs": 12.5,
+              "executionDurationMs": 11.2,
+              "executor": "harn_builtin",
+              "parsing": false
+            }
+          },
+          "kind": "read",
+          "rawInput": {
+            "path": "README.md"
+          },
+          "sessionUpdate": "tool_call",
+          "status": "in_progress",
+          "title": "Read README.md",
+          "toolCallId": "call-001"
+        }
+      }
+    }
+  },
+  "harnAgentEventMethod": "_harn/agentEvent",
+  "mcpTool": {
+    "description": "Echoes input",
+    "inputSchema": {
+      "properties": {
+        "x": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "echo",
+    "title": "Echo"
+  }
+}

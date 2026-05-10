@@ -17,7 +17,9 @@ The generated contract includes:
 
 - `manifest.json`: protocol versions, schema provenance, ACP method names,
   `sessionUpdate` discriminators, Harn extension fields, tool lifecycle
-  metadata fields, A2A task states, and MCP metadata vocabulary.
+  metadata fields, A2A task states, MCP metadata vocabulary, and a `bindings`
+  block enumerating the published TypeScript, Swift, Python, and Go modules
+  with their stability tier and (for Go) the canonical module path.
 - `schemas/*.schema.json`: stable copies of the ACP, A2A, and MCP adapter
   profiles validated by `harn test protocols`.
 - `harn-protocol.ts`: TypeScript bindings for JSON-RPC messages, ACP
@@ -25,6 +27,34 @@ The generated contract includes:
   tool/resource/prompt metadata.
 - `HarnProtocol.swift`: Swift `Codable` definitions for the same
   host-facing surface.
+- `python/harn_protocol.py`: stdlib-only Python 3.9+ module with `Enum`
+  classes for every wire vocabulary, dataclasses for the JSON-RPC envelopes,
+  ACP session updates, Harn tool lifecycle metadata, A2A task structures, and
+  MCP tool/resource metadata, plus `to_wire`/`from_wire` helpers that strip
+  unset optional fields so envelopes stay byte-equivalent to the Rust adapter
+  output. Field names match the wire JSON (camelCase).
+- `go/harnprotocol/`: Go module (`harnprotocol` package) mirroring the same
+  surface with typed string aliases and `encoding/json`-tagged structs. The
+  `go.mod` declares `github.com/burin-labs/harn/spec/protocol-artifacts/go/harnprotocol`
+  as the canonical module path so consumers can `go get` directly from the
+  repository.
+- `fixtures/round_trip.json`: representative request/response/notification
+  envelopes plus an A2A task and an MCP tool entry. `make check-bindings`
+  decodes and re-encodes these through the Python and Go bindings on every
+  CI run, catching wire-vocabulary drift before downstream consumers see it.
+
+## Stability
+
+The host-facing surface listed above is **stable**: existing wire values and
+field names will not change without a Harn minor-version migration note plus a
+regenerated artifact diff. Hosts can pin to the artifact directory for the
+full surface or to the `manifest.json` `bindings` block when they only need to
+detect generator/runtime mismatch.
+
+VM internals (the AST, code-index, scanner schemas under
+`crates/harn-hostlib/schemas/**` aside from the published wire profiles) are
+**not** part of this surface. They evolve with the runtime and should be
+consumed via the Rust crates rather than vendored as bindings.
 
 ## Versioning
 
@@ -51,7 +81,11 @@ mirroring Harn protocol enums by hand. Burin consumers can replace local
 `ACPSessionUpdate`, `ACPToolKind`, and `ACPToolCallStatus` mirrors with
 `spec/protocol-artifacts/harn-protocol.ts`, and can use
 `spec/protocol-artifacts/HarnProtocol.swift` as the Swift contract source for
-ACP session updates and tool-call metadata.
+ACP session updates and tool-call metadata. Python and Go integrators can
+import `spec/protocol-artifacts/python/harn_protocol.py` (e.g. by vendoring
+the file or pinning the artifact directory) and the
+`harnprotocol` Go module under `spec/protocol-artifacts/go/harnprotocol`
+respectively.
 
 For ACP, clients should still follow the wire namespacing rules in
 [Bridge protocol](./bridge-protocol.md): canonical ACP fields remain at the
