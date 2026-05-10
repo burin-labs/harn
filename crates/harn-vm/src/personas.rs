@@ -250,38 +250,210 @@ pub trait PersonaValueSink: Send + Sync {
     fn handle_value_event(&self, event: &PersonaValueEvent);
 }
 
-type PersonaValueSinkRegistry = RwLock<Vec<(u64, Arc<dyn PersonaValueSink>)>>;
-
-fn persona_value_sinks() -> &'static PersonaValueSinkRegistry {
-    static REGISTRY: OnceLock<PersonaValueSinkRegistry> = OnceLock::new();
-    REGISTRY.get_or_init(|| RwLock::new(Vec::new()))
+/// Append-only multiplexed feed mirroring the harn-cloud
+/// `persona_supervision_events` projection. Sinks see the runtime-sourced
+/// `queue_position`, `repair_worker_status`, `receipt`, and
+/// `checkpoint` (restore-ack) variants; supervisor-sourced variants
+/// (`control`, `feedback`, `approval`, `handoff`, and checkpoint writes)
+/// originate on the hosted side and aren't routed here.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "update_kind", rename_all = "snake_case")]
+pub enum PersonaSupervisionEvent {
+    QueuePosition(PersonaQueuePositionUpdate),
+    RepairWorkerStatus(PersonaRepairWorkerStatusUpdate),
+    Receipt(PersonaReceiptUpdate),
+    Checkpoint(PersonaCheckpointUpdate),
 }
 
-fn next_persona_value_sink_id() -> u64 {
-    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PersonaQueuePositionUpdate {
+    pub persona_id: String,
+    #[serde(default)]
+    pub template_ref: Option<String>,
+    pub work_key: String,
+    pub queue_depth: i64,
+    /// 1-indexed position of `work_key`; `0` means the item left the queue.
+    pub position: i64,
+    pub queued_at_ms: i64,
+    pub occurred_at_ms: i64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersonaRepairWorkerLifecycle {
+    Pending,
+    Running,
+    Verifying,
+    Pushing,
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+impl PersonaRepairWorkerLifecycle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Verifying => "verifying",
+            Self::Pushing => "pushing",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PersonaRepairWorkerStatusUpdate {
+    pub persona_id: String,
+    #[serde(default)]
+    pub template_ref: Option<String>,
+    pub repair_worker_id: String,
+    pub lifecycle: PersonaRepairWorkerLifecycle,
+    #[serde(default)]
+    pub work_key: Option<String>,
+    #[serde(default)]
+    pub lease_id: Option<String>,
+    #[serde(default)]
+    pub scratchpad_url: Option<String>,
+    pub last_heartbeat_ms: i64,
+    pub occurred_at_ms: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PersonaReceiptUpdate {
+    pub persona_id: String,
+    #[serde(default)]
+    pub template_ref: Option<String>,
+    pub receipt: PersonaRunReceipt,
+    pub occurred_at_ms: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PersonaCheckpointUpdate {
+    pub persona_id: String,
+    #[serde(default)]
+    pub template_ref: Option<String>,
+    pub action: PersonaCheckpointAction,
+    pub checkpoint_id: String,
+    #[serde(default)]
+    pub work_key: Option<String>,
+    /// Coordinates the runtime actually resumed from when acking a restore.
+    #[serde(default)]
+    pub resumed_from: Option<PersonaCheckpointResume>,
+    pub occurred_at_ms: i64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersonaCheckpointAction {
+    RestoreAcked,
+}
+
+impl PersonaCheckpointAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RestoreAcked => "restore_acked",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PersonaCheckpointResume {
+    pub run_id: Option<Uuid>,
+    pub lease_id: Option<String>,
+    pub last_run_ms: Option<i64>,
+    pub queued_work_keys: Vec<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+pub trait PersonaSupervisionSink: Send + Sync {
+    fn handle_supervision_event(&self, event: &PersonaSupervisionEvent);
+}
+
+struct TypedSinkRegistry<T: ?Sized + Send + Sync> {
+    sinks: RwLock<Vec<(u64, Arc<T>)>>,
+    next_id: AtomicU64,
+}
+
+impl<T: ?Sized + Send + Sync> TypedSinkRegistry<T> {
+    const fn new() -> Self {
+        Self {
+            sinks: RwLock::new(Vec::new()),
+            next_id: AtomicU64::new(1),
+        }
+    }
+
+    fn register(&self, sink: Arc<T>) -> u64 {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut sinks) = self.sinks.write() {
+            sinks.push((id, sink));
+        }
+        id
+    }
+
+    fn unregister(&self, id: u64) {
+        if let Ok(mut sinks) = self.sinks.write() {
+            sinks.retain(|(existing, _)| *existing != id);
+        }
+    }
+
+    fn snapshot(&self) -> Vec<Arc<T>> {
+        self.sinks
+            .read()
+            .map(|sinks| sinks.iter().map(|(_, sink)| Arc::clone(sink)).collect())
+            .unwrap_or_default()
+    }
+}
+
+fn persona_value_sinks() -> &'static TypedSinkRegistry<dyn PersonaValueSink> {
+    static REGISTRY: OnceLock<TypedSinkRegistry<dyn PersonaValueSink>> = OnceLock::new();
+    REGISTRY.get_or_init(TypedSinkRegistry::new)
+}
+
+fn persona_supervision_sinks() -> &'static TypedSinkRegistry<dyn PersonaSupervisionSink> {
+    static REGISTRY: OnceLock<TypedSinkRegistry<dyn PersonaSupervisionSink>> = OnceLock::new();
+    REGISTRY.get_or_init(TypedSinkRegistry::new)
+}
+
+#[must_use = "dropping the registration immediately unregisters the sink"]
 pub struct PersonaValueSinkRegistration {
     id: u64,
 }
 
 impl Drop for PersonaValueSinkRegistration {
     fn drop(&mut self) {
-        if let Ok(mut sinks) = persona_value_sinks().write() {
-            sinks.retain(|(id, _)| *id != self.id);
-        }
+        persona_value_sinks().unregister(self.id);
     }
 }
 
 pub fn register_persona_value_sink(
     sink: Arc<dyn PersonaValueSink>,
 ) -> PersonaValueSinkRegistration {
-    let id = next_persona_value_sink_id();
-    if let Ok(mut sinks) = persona_value_sinks().write() {
-        sinks.push((id, sink));
+    PersonaValueSinkRegistration {
+        id: persona_value_sinks().register(sink),
     }
-    PersonaValueSinkRegistration { id }
+}
+
+#[must_use = "dropping the registration immediately unregisters the sink"]
+pub struct PersonaSupervisionSinkRegistration {
+    id: u64,
+}
+
+impl Drop for PersonaSupervisionSinkRegistration {
+    fn drop(&mut self) {
+        persona_supervision_sinks().unregister(self.id);
+    }
+}
+
+pub fn register_persona_supervision_sink(
+    sink: Arc<dyn PersonaSupervisionSink>,
+) -> PersonaSupervisionSinkRegistration {
+    PersonaSupervisionSinkRegistration {
+        id: persona_supervision_sinks().register(sink),
+    }
 }
 
 pub async fn persona_status(
@@ -594,7 +766,191 @@ pub async fn record_persona_spend(
         .map(|status| status.budget)
 }
 
+/// Report a `repair_worker_status` lifecycle transition for a sandboxed PR
+/// repair run.
+///
+/// Append-only and idempotent on `(repair_worker_id, lifecycle)`: replaying
+/// the same lifecycle is a no-op (`Ok(false)` indicates the event was already
+/// recorded). Hosted runtimes call this when a repair-worker job created by
+/// the persona transitions states.
+pub async fn report_repair_worker_status(
+    log: &Arc<AnyEventLog>,
+    binding: &PersonaRuntimeBinding,
+    status: PersonaRepairWorkerStatusUpdate,
+    now_ms: i64,
+) -> Result<bool, String> {
+    let mut status = status;
+    if status.persona_id.is_empty() {
+        status.persona_id = binding.name.clone();
+    }
+    if status.template_ref.is_none() {
+        status.template_ref = binding.template_ref.clone();
+    }
+    if status.occurred_at_ms == 0 {
+        status.occurred_at_ms = now_ms;
+    }
+    if status.last_heartbeat_ms == 0 {
+        status.last_heartbeat_ms = now_ms;
+    }
+
+    if repair_worker_status_recorded(log, &binding.name, &status).await? {
+        return Ok(false);
+    }
+    append_persona_event(
+        log,
+        &binding.name,
+        "persona.repair_worker.status",
+        serde_json::to_value(&status).map_err(|error| error.to_string())?,
+        status.occurred_at_ms,
+    )
+    .await?;
+    emit_persona_supervision_sink_event(&PersonaSupervisionEvent::RepairWorkerStatus(status));
+    Ok(true)
+}
+
+/// Acknowledge a checkpoint-restore request initiated by the supervision API.
+///
+/// Idempotent on `checkpoint_id`: a repeated restore request resolves to the
+/// same ack (returns `Ok(false)`). The runtime emits a typed
+/// `Checkpoint(action: RestoreAcked)` supervision event carrying the
+/// coordinates the runtime resumed from.
+pub async fn restore_persona_checkpoint(
+    log: &Arc<AnyEventLog>,
+    binding: &PersonaRuntimeBinding,
+    request: PersonaCheckpointRestoreRequest,
+    now_ms: i64,
+) -> Result<PersonaCheckpointRestoreOutcome, String> {
+    let PersonaCheckpointRestoreRequest {
+        checkpoint_id,
+        work_key,
+        resumed_from,
+    } = request;
+    let status = persona_status(log, binding, now_ms).await?;
+
+    if let Some(prior) = find_checkpoint_restore_ack(log, &binding.name, &checkpoint_id).await? {
+        return Ok(PersonaCheckpointRestoreOutcome {
+            acked: false,
+            update: prior,
+        });
+    }
+
+    let resume_coordinates = resumed_from.unwrap_or_else(|| PersonaCheckpointResume {
+        run_id: None,
+        lease_id: status.active_lease.as_ref().map(|lease| lease.id.clone()),
+        last_run_ms: status
+            .last_run
+            .as_deref()
+            .and_then(|value| parse_rfc3339_ms(value).ok()),
+        queued_work_keys: status
+            .queued_work
+            .iter()
+            .map(|item| item.work_key.clone())
+            .collect(),
+        note: None,
+    });
+
+    let update = PersonaCheckpointUpdate {
+        persona_id: binding.name.clone(),
+        template_ref: binding.template_ref.clone(),
+        action: PersonaCheckpointAction::RestoreAcked,
+        checkpoint_id: checkpoint_id.clone(),
+        work_key,
+        resumed_from: Some(resume_coordinates),
+        occurred_at_ms: now_ms,
+    };
+
+    append_persona_event(
+        log,
+        &binding.name,
+        "persona.checkpoint.restore_acked",
+        serde_json::to_value(&update).map_err(|error| error.to_string())?,
+        now_ms,
+    )
+    .await?;
+    emit_persona_supervision_sink_event(&PersonaSupervisionEvent::Checkpoint(update.clone()));
+    Ok(PersonaCheckpointRestoreOutcome {
+        acked: true,
+        update,
+    })
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PersonaCheckpointRestoreRequest {
+    pub checkpoint_id: String,
+    #[serde(default)]
+    pub work_key: Option<String>,
+    #[serde(default)]
+    pub resumed_from: Option<PersonaCheckpointResume>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PersonaCheckpointRestoreOutcome {
+    pub acked: bool,
+    pub update: PersonaCheckpointUpdate,
+}
+
+async fn repair_worker_status_recorded(
+    log: &Arc<AnyEventLog>,
+    persona: &str,
+    update: &PersonaRepairWorkerStatusUpdate,
+) -> Result<bool, String> {
+    let events = read_persona_events(log, persona).await?;
+    Ok(events.into_iter().any(|(_, event)| {
+        event.kind == "persona.repair_worker.status"
+            && event
+                .payload
+                .get("repair_worker_id")
+                .and_then(serde_json::Value::as_str)
+                == Some(update.repair_worker_id.as_str())
+            && event
+                .payload
+                .get("lifecycle")
+                .and_then(serde_json::Value::as_str)
+                == Some(update.lifecycle.as_str())
+    }))
+}
+
+async fn find_checkpoint_restore_ack(
+    log: &Arc<AnyEventLog>,
+    persona: &str,
+    checkpoint_id: &str,
+) -> Result<Option<PersonaCheckpointUpdate>, String> {
+    let events = read_persona_events(log, persona).await?;
+    for (_, event) in events.into_iter().rev() {
+        if event.kind != "persona.checkpoint.restore_acked" {
+            continue;
+        }
+        if event
+            .payload
+            .get("checkpoint_id")
+            .and_then(serde_json::Value::as_str)
+            != Some(checkpoint_id)
+        {
+            continue;
+        }
+        let update: PersonaCheckpointUpdate =
+            serde_json::from_value(event.payload).map_err(|error| error.to_string())?;
+        return Ok(Some(update));
+    }
+    Ok(None)
+}
+
 async fn run_for_envelope(
+    log: &Arc<AnyEventLog>,
+    binding: &PersonaRuntimeBinding,
+    envelope: PersonaTriggerEnvelope,
+    cost: PersonaRunCost,
+    now_ms: i64,
+) -> Result<PersonaRunReceipt, String> {
+    let pre_queue = queue_snapshot(log, binding, now_ms).await?;
+    let receipt = run_for_envelope_inner(log, binding, envelope, cost, now_ms).await?;
+    let post_queue = queue_snapshot(log, binding, now_ms).await?;
+    emit_queue_position_supervision(binding, &pre_queue, &post_queue, now_ms);
+    emit_receipt_supervision(binding, &receipt, now_ms);
+    Ok(receipt)
+}
+
+async fn run_for_envelope_inner(
     log: &Arc<AnyEventLog>,
     binding: &PersonaRuntimeBinding,
     envelope: PersonaTriggerEnvelope,
@@ -1278,18 +1634,93 @@ async fn emit_persona_value_event(
 }
 
 fn emit_persona_value_sink_event(event: &PersonaValueEvent) {
-    let sinks = persona_value_sinks()
-        .read()
-        .map(|sinks| {
-            sinks
-                .iter()
-                .map(|(_, sink)| Arc::clone(sink))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    for sink in sinks {
+    for sink in persona_value_sinks().snapshot() {
         sink.handle_value_event(event);
     }
+}
+
+fn emit_persona_supervision_sink_event(event: &PersonaSupervisionEvent) {
+    for sink in persona_supervision_sinks().snapshot() {
+        sink.handle_supervision_event(event);
+    }
+}
+
+#[derive(Clone, Debug)]
+struct QueueEntry {
+    work_key: String,
+    queued_at_ms: i64,
+}
+
+async fn queue_snapshot(
+    log: &Arc<AnyEventLog>,
+    binding: &PersonaRuntimeBinding,
+    now_ms: i64,
+) -> Result<Vec<QueueEntry>, String> {
+    let status = persona_status(log, binding, now_ms).await?;
+    Ok(status
+        .queued_work
+        .into_iter()
+        .map(|item| QueueEntry {
+            queued_at_ms: parse_rfc3339_ms(&item.queued_at).unwrap_or(now_ms),
+            work_key: item.work_key,
+        })
+        .collect())
+}
+
+fn emit_queue_position_supervision(
+    binding: &PersonaRuntimeBinding,
+    before: &[QueueEntry],
+    after: &[QueueEntry],
+    now_ms: i64,
+) {
+    use std::collections::HashSet;
+    let before_keys: HashSet<&str> = before.iter().map(|e| e.work_key.as_str()).collect();
+    let after_keys: HashSet<&str> = after.iter().map(|e| e.work_key.as_str()).collect();
+    let after_depth = after.len() as i64;
+
+    for (index, entry) in after.iter().enumerate() {
+        if !before_keys.contains(entry.work_key.as_str()) {
+            emit_persona_supervision_sink_event(&PersonaSupervisionEvent::QueuePosition(
+                PersonaQueuePositionUpdate {
+                    persona_id: binding.name.clone(),
+                    template_ref: binding.template_ref.clone(),
+                    work_key: entry.work_key.clone(),
+                    queue_depth: after_depth,
+                    position: (index + 1) as i64,
+                    queued_at_ms: entry.queued_at_ms,
+                    occurred_at_ms: now_ms,
+                },
+            ));
+        }
+    }
+    for entry in before {
+        if !after_keys.contains(entry.work_key.as_str()) {
+            emit_persona_supervision_sink_event(&PersonaSupervisionEvent::QueuePosition(
+                PersonaQueuePositionUpdate {
+                    persona_id: binding.name.clone(),
+                    template_ref: binding.template_ref.clone(),
+                    work_key: entry.work_key.clone(),
+                    queue_depth: after_depth,
+                    position: 0,
+                    queued_at_ms: entry.queued_at_ms,
+                    occurred_at_ms: now_ms,
+                },
+            ));
+        }
+    }
+}
+
+fn emit_receipt_supervision(
+    binding: &PersonaRuntimeBinding,
+    receipt: &PersonaRunReceipt,
+    now_ms: i64,
+) {
+    emit_persona_supervision_sink_event(&PersonaSupervisionEvent::Receipt(PersonaReceiptUpdate {
+        persona_id: binding.name.clone(),
+        template_ref: binding.template_ref.clone(),
+        receipt: receipt.clone(),
+        occurred_at_ms: now_ms,
+    }));
 }
 
 fn run_value_metadata(
@@ -1783,5 +2214,332 @@ mod tests {
             })
             .expect("run completed value event");
         assert_eq!(completion.paid_cost_usd, 0.0);
+    }
+
+    struct CapturingSupervisionSink {
+        events: Arc<Mutex<Vec<PersonaSupervisionEvent>>>,
+    }
+
+    impl PersonaSupervisionSink for CapturingSupervisionSink {
+        fn handle_supervision_event(&self, event: &PersonaSupervisionEvent) {
+            self.events.lock().unwrap().push(event.clone());
+        }
+    }
+
+    fn pr_metadata(repository: &str, number: &str) -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("repository".to_string(), repository.to_string()),
+            ("number".to_string(), number.to_string()),
+        ])
+    }
+
+    fn binding_named(name: &str) -> PersonaRuntimeBinding {
+        PersonaRuntimeBinding {
+            name: name.to_string(),
+            ..binding()
+        }
+    }
+
+    fn supervision_events_for(
+        captured: &Arc<Mutex<Vec<PersonaSupervisionEvent>>>,
+        persona: &str,
+    ) -> Vec<PersonaSupervisionEvent> {
+        captured
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| match event {
+                PersonaSupervisionEvent::QueuePosition(update) => update.persona_id == persona,
+                PersonaSupervisionEvent::RepairWorkerStatus(update) => update.persona_id == persona,
+                PersonaSupervisionEvent::Receipt(update) => update.persona_id == persona,
+                PersonaSupervisionEvent::Checkpoint(update) => update.persona_id == persona,
+            })
+            .cloned()
+            .collect()
+    }
+
+    async fn drive_pause_then_resume(binding: &PersonaRuntimeBinding, now: i64) {
+        let log = log();
+        pause_persona(&log, binding, now).await.unwrap();
+        let _ = fire_trigger(
+            &log,
+            binding,
+            "github",
+            "pull_request",
+            pr_metadata("burin-labs/harn", "1480"),
+            PersonaRunCost::default(),
+            now,
+        )
+        .await
+        .unwrap();
+        let _ = resume_persona(&log, binding, now + 1).await.unwrap();
+        let _ = restore_persona_checkpoint(
+            &log,
+            binding,
+            PersonaCheckpointRestoreRequest {
+                checkpoint_id: "cp_42".to_string(),
+                work_key: Some("github:burin-labs/harn:pr:1480".to_string()),
+                resumed_from: Some(PersonaCheckpointResume {
+                    note: Some("resumed from cp 42".to_string()),
+                    ..Default::default()
+                }),
+            },
+            now + 2,
+        )
+        .await
+        .unwrap();
+        let _ = report_repair_worker_status(
+            &log,
+            binding,
+            PersonaRepairWorkerStatusUpdate {
+                persona_id: String::new(),
+                template_ref: None,
+                repair_worker_id: "rw_42".to_string(),
+                lifecycle: PersonaRepairWorkerLifecycle::Running,
+                work_key: Some("github:burin-labs/harn:pr:1480".to_string()),
+                lease_id: Some("persona_lease_xyz".to_string()),
+                scratchpad_url: Some("https://factory.local/rw_42".to_string()),
+                last_heartbeat_ms: 0,
+                occurred_at_ms: 0,
+            },
+            now + 3,
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn supervision_sink_emits_queue_position_and_receipt() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let _registration = register_persona_supervision_sink(Arc::new(CapturingSupervisionSink {
+            events: captured.clone(),
+        }));
+        let log = log();
+        let binding = binding_named("supervision_sink_emits_queue_position_and_receipt");
+        let now = parse_rfc3339_ms("2026-05-01T00:00:00Z").unwrap();
+
+        pause_persona(&log, &binding, now).await.unwrap();
+        fire_trigger(
+            &log,
+            &binding,
+            "github",
+            "pull_request",
+            pr_metadata("burin-labs/harn", "1480"),
+            PersonaRunCost::default(),
+            now + 100,
+        )
+        .await
+        .unwrap();
+        resume_persona(&log, &binding, now + 200).await.unwrap();
+
+        let events = supervision_events_for(&captured, &binding.name);
+        let queue_events: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                PersonaSupervisionEvent::QueuePosition(update) => Some(update.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(queue_events.len(), 2, "enqueue + drain emitted");
+        assert_eq!(queue_events[0].position, 1);
+        assert_eq!(queue_events[0].queue_depth, 1);
+        assert_eq!(queue_events[1].position, 0);
+        assert_eq!(queue_events[1].queue_depth, 0);
+        let receipt_events: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                PersonaSupervisionEvent::Receipt(update) => Some(update.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(receipt_events.len(), 2, "queued + drained receipt");
+        assert_eq!(receipt_events[0].receipt.status, "queued");
+        assert_eq!(receipt_events[1].receipt.status, "completed");
+        for event in &receipt_events {
+            assert_eq!(event.receipt.persona, binding.name);
+            assert_eq!(event.persona_id, binding.name);
+            assert_eq!(event.template_ref.as_deref(), Some("software_factory@v0"));
+        }
+    }
+
+    #[tokio::test]
+    async fn supervision_sink_emits_repair_worker_status_idempotently() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let _registration = register_persona_supervision_sink(Arc::new(CapturingSupervisionSink {
+            events: captured.clone(),
+        }));
+        let log = log();
+        let binding = binding_named("supervision_sink_emits_repair_worker_status_idempotently");
+        let now = parse_rfc3339_ms("2026-05-01T01:00:00Z").unwrap();
+        let update = PersonaRepairWorkerStatusUpdate {
+            persona_id: String::new(),
+            template_ref: None,
+            repair_worker_id: "rw_test".to_string(),
+            lifecycle: PersonaRepairWorkerLifecycle::Running,
+            work_key: Some("github:burin-labs/harn:pr:1480".to_string()),
+            lease_id: Some("persona_lease_abc".to_string()),
+            scratchpad_url: Some("https://factory.local/rw_test".to_string()),
+            last_heartbeat_ms: 0,
+            occurred_at_ms: 0,
+        };
+        let first = report_repair_worker_status(&log, &binding, update.clone(), now)
+            .await
+            .unwrap();
+        let second = report_repair_worker_status(&log, &binding, update.clone(), now + 5)
+            .await
+            .unwrap();
+        assert!(first);
+        assert!(!second, "second identical lifecycle is idempotent");
+
+        let mut next = update.clone();
+        next.lifecycle = PersonaRepairWorkerLifecycle::Succeeded;
+        let third = report_repair_worker_status(&log, &binding, next, now + 10)
+            .await
+            .unwrap();
+        assert!(third);
+
+        let kinds: Vec<_> = supervision_events_for(&captured, &binding.name)
+            .into_iter()
+            .filter_map(|event| match event {
+                PersonaSupervisionEvent::RepairWorkerStatus(update) => Some(update.lifecycle),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                PersonaRepairWorkerLifecycle::Running,
+                PersonaRepairWorkerLifecycle::Succeeded
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn supervision_sink_emits_checkpoint_restore_ack() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let _registration = register_persona_supervision_sink(Arc::new(CapturingSupervisionSink {
+            events: captured.clone(),
+        }));
+        let log = log();
+        let binding = binding_named("supervision_sink_emits_checkpoint_restore_ack");
+        let now = parse_rfc3339_ms("2026-05-01T02:00:00Z").unwrap();
+        fire_trigger(
+            &log,
+            &binding,
+            "github",
+            "pull_request",
+            pr_metadata("burin-labs/harn", "1480"),
+            PersonaRunCost::default(),
+            now,
+        )
+        .await
+        .unwrap();
+
+        let outcome = restore_persona_checkpoint(
+            &log,
+            &binding,
+            PersonaCheckpointRestoreRequest {
+                checkpoint_id: "cp_1".to_string(),
+                work_key: Some("github:burin-labs/harn:pr:1480".to_string()),
+                resumed_from: None,
+            },
+            now + 100,
+        )
+        .await
+        .unwrap();
+        assert!(outcome.acked);
+        assert_eq!(outcome.update.checkpoint_id, "cp_1");
+        let resume = outcome
+            .update
+            .resumed_from
+            .as_ref()
+            .expect("resume coordinates default-derived from status");
+        assert_eq!(resume.last_run_ms, Some(now));
+
+        let replay = restore_persona_checkpoint(
+            &log,
+            &binding,
+            PersonaCheckpointRestoreRequest {
+                checkpoint_id: "cp_1".to_string(),
+                work_key: None,
+                resumed_from: None,
+            },
+            now + 200,
+        )
+        .await
+        .unwrap();
+        assert!(!replay.acked, "duplicate restore is a no-op ack");
+        assert_eq!(replay.update.occurred_at_ms, now + 100);
+
+        let ack_events: Vec<_> = supervision_events_for(&captured, &binding.name)
+            .into_iter()
+            .filter_map(|event| match event {
+                PersonaSupervisionEvent::Checkpoint(update) => Some(update),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ack_events.len(), 1, "ack emitted once, replay suppressed");
+        assert_eq!(ack_events[0].action, PersonaCheckpointAction::RestoreAcked);
+    }
+
+    #[tokio::test]
+    async fn supervision_sink_replay_is_deterministic_under_recorded_clock() {
+        use harn_clock::{ClockEventLog, PausedClock, RecordedClock};
+        use time::OffsetDateTime;
+
+        let now_ms = parse_rfc3339_ms("2026-05-01T03:00:00Z").unwrap();
+        async fn drive(now_ms: i64) -> (Vec<PersonaSupervisionEvent>, Vec<harn_clock::ClockEvent>) {
+            let captured = Arc::new(Mutex::new(Vec::new()));
+            let _registration =
+                register_persona_supervision_sink(Arc::new(CapturingSupervisionSink {
+                    events: captured.clone(),
+                }));
+            let paused = PausedClock::new(
+                OffsetDateTime::from_unix_timestamp_nanos((now_ms as i128) * 1_000_000).unwrap(),
+            );
+            let recorded = Arc::new(RecordedClock::new(paused, Arc::new(ClockEventLog::new())));
+            let binding = binding_named("supervision_replay_persona");
+            let ts = harn_clock::now_wall_ms(&*recorded);
+            drive_pause_then_resume(&binding, ts).await;
+            let clock_log = recorded.log().snapshot();
+            let events = supervision_events_for(&captured, &binding.name);
+            (events, clock_log)
+        }
+
+        let (events_a, clock_a) = drive(now_ms).await;
+        let (events_b, clock_b) = drive(now_ms).await;
+        // Run receipts carry per-run `run_id`s (UUIDv7) and lease ids that
+        // differ across runs. Normalize them so the deterministic envelope
+        // remains comparable.
+        fn normalize(event: &PersonaSupervisionEvent) -> PersonaSupervisionEvent {
+            match event.clone() {
+                PersonaSupervisionEvent::Receipt(mut update) => {
+                    update.receipt.run_id = None;
+                    if let Some(lease) = update.receipt.lease.as_mut() {
+                        lease.id = "lease".to_string();
+                    }
+                    update.receipt.budget_receipt_id = update
+                        .receipt
+                        .budget_receipt_id
+                        .map(|_| "budget".to_string());
+                    PersonaSupervisionEvent::Receipt(update)
+                }
+                PersonaSupervisionEvent::Checkpoint(mut update) => {
+                    if let Some(resume) = update.resumed_from.as_mut() {
+                        resume.run_id = None;
+                        resume.lease_id = None;
+                    }
+                    PersonaSupervisionEvent::Checkpoint(update)
+                }
+                other => other,
+            }
+        }
+        let a: Vec<_> = events_a.iter().map(normalize).collect();
+        let b: Vec<_> = events_b.iter().map(normalize).collect();
+        assert_eq!(a, b, "supervision sink emits identical event envelopes");
+        assert_eq!(
+            clock_a, clock_b,
+            "recorded clock observation log is identical across replays"
+        );
     }
 }
