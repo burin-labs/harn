@@ -2135,6 +2135,7 @@ version = "0.8.5"
 name = "harn-lint"
 version = "0.8.5"
 dependencies = [
+ "harn-fmt",
  "harn-lexer",
  "harn-modules",
  "harn-parser",

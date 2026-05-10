@@ -1,0 +1,30 @@
+/**
+ * Iter-style sink methods (`.to_list()`, `.to_set()`, `.to_dict()`)
+ * also work on already-realized collections so that
+ * `xs.filter(...).to_list()` round-trips uniformly whether `filter`
+ * stayed eager (`list` → `list`) or went lazy (`iter` → `iter`).
+ */
+pipeline test(_task) {
+  let xs = [1, 2, 3, 4]
+  let allowed = [2, 4]
+  let filtered = xs.filter({ x -> allowed.contains(x) }).to_list()
+  assert_eq(filtered, [2, 4])
+  // Identity on lists.
+  let same = xs.to_list()
+  assert_eq(same, xs)
+  // List → set deduplicates.
+  let dups = [1, 1, 2, 2, 3]
+  let s = dups.to_set()
+  assert_eq(len(s), 3)
+  // Set → set is identity.
+  let s2 = s.to_set()
+  assert_eq(len(s2), 3)
+  assert_eq(len(s2.to_list()), 3)
+  // Dict → dict is identity; dict → list yields key/value entries.
+  let d = {a: 1, b: 2}
+  let same_d = d.to_dict()
+  assert_eq(same_d.a, 1)
+  assert_eq(same_d.b, 2)
+  let entries = d.to_list()
+  assert_eq(len(entries), 2)
+}

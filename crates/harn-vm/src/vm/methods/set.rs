@@ -121,6 +121,7 @@ impl crate::vm::Vm {
                 }
             }
             "to_list" => Ok(VmValue::List(Rc::new(items.to_vec()))),
+            "to_set" => Ok(VmValue::Set(Rc::clone(items))),
             "map" => {
                 if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
                     let mut result = Vec::new();
@@ -175,7 +176,7 @@ impl crate::vm::Vm {
                     Ok(VmValue::Bool(true))
                 }
             }
-            _ => Ok(VmValue::Nil),
+            _ => Err(VmError::Runtime(format!("set has no method `{method}`"))),
         }
     }
 }

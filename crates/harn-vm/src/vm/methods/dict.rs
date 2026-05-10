@@ -103,11 +103,26 @@ impl crate::vm::Vm {
                 let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
                 Ok(map.get(&key).cloned().unwrap_or(default))
             }
+            // Iter-style sinks: identity for `to_dict`, list of entries
+            // for `to_list`. Mirrors the eager versions in stdlib so
+            // `dict.filter(...).to_dict()` and `dict.entries()` /
+            // `dict.to_list()` behave consistently.
+            "to_dict" => Ok(VmValue::Dict(Rc::clone(map))),
+            "to_list" => Ok(VmValue::List(Rc::new(
+                map.iter()
+                    .map(|(k, v)| {
+                        VmValue::Dict(Rc::new(BTreeMap::from([
+                            ("key".to_string(), VmValue::String(Rc::from(k.as_str()))),
+                            ("value".to_string(), v.clone()),
+                        ])))
+                    })
+                    .collect(),
+            ))),
             _ => {
                 if let Some(callable) = map.get(method).filter(|v| Self::is_callable_value(v)) {
                     self.call_callable_value(callable, args).await
                 } else {
-                    Ok(VmValue::Nil)
+                    Err(VmError::Runtime(format!("dict has no method `{method}`")))
                 }
             }
         }

@@ -3,6 +3,7 @@ pub mod builtin_signatures;
 pub mod diagnostic;
 mod parser;
 pub mod typechecker;
+pub mod visit;
 
 pub use ast::*;
 pub use parser::*;

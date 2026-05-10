@@ -39,6 +39,50 @@ condensed series summaries instead of full per-patch history.
   surface, benchmark methodology, and the decision to ship as opt-in
   (rather than the default) are written up in
   `docs/src/dev/des-mode.md`. (#1444)
+- **`harn fmt` normalizes trailing commas, and the `trailing-comma`
+  rule is now AST-aware.** Previously the rule walked tokens with a
+  brace-vs-block heuristic that fired stray "missing trailing comma"
+  diagnostics on `eval_pack { cases: ... summarize { ... } }` and
+  multi-field `struct Foo { bar: int fn name() ... }`, sometimes
+  inserting commas that broke the source. Trailing-comma detection
+  now runs against the parsed AST so it only fires on confirmed
+  comma-separated bracket pairs (call args, list/dict/struct
+  literals, selective imports), and `harn fmt` applies the same
+  normalization as a post-pass — `xs.filter(...).to_list()`-style
+  multi-line constructs round-trip cleanly without relying on `harn
+  lint --fix`. The traversal lives in `harn_parser::visit` and is
+  reused by the linter.
+- **Iter-style sinks (`.to_list()`, `.to_set()`, `.to_dict()`) work
+  on already-realized collections.** `xs.filter(...).to_list()` used
+  to silently return `nil` because list method dispatch had no
+  handler for `to_list` and fell through a silent-`Nil` catch-all.
+  List/dict/set now expose `to_list` / `to_set` / `to_dict` as the
+  obvious identity/conversion (dict→list yields key/value entry
+  dicts to match `.entries()`), so the same chain works whether
+  `filter` returned an `iter` or a `list`.
+- **Method dispatch raises a clear error on unknown methods instead
+  of returning `nil`.** Every per-type method handler (list, dict,
+  set, string, generator, stream, iter, plus the outer dispatch)
+  used to bottom out in `Ok(VmValue::Nil)`, which made typos in
+  method names fail silently far from the call site. Unknown method
+  calls now throw a runtime error of the form ``list has no method
+  `whatever``` so issues surface at the offending line. *Breaking*
+  for any script that relied on the silent-`nil` fallthrough.
+- **`cargo build` self-heals git hook configuration.** The
+  `harn-cli` build script now resets `core.hooksPath` to `.githooks`
+  whenever it drifts (the most common cause of CI surprises being
+  pre-commit / pre-push hooks that *would* have caught a `harn fmt
+  --check` regression but never ran because the user's hook config
+  pointed elsewhere). Set `HARN_DISABLE_AUTO_HOOK_SETUP=1` to opt
+  out. Skipped automatically when not building inside the Harn
+  source tree.
+- **`websocket_connect` retries transient TCP errors during
+  handshake.** Connection-reset / broken-pipe / unexpected-EOF on
+  the very first attempt — typically caused by the OS recycling an
+  ephemeral port still in TIME_WAIT — now self-heal with up to two
+  retries within the user's `timeout_ms` budget. Permanent failures
+  (DNS, refused, TLS, protocol) bypass the retry path and surface
+  immediately.
 - **Package manager maturity: provenance, outdated, audit, and
   generated-artifact contract checks.** Bumped `harn.lock` to version 2
   with top-level `generator_version` / `protocol_artifact_version` and

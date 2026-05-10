@@ -41,7 +41,10 @@ impl crate::vm::Vm {
                 VmValue::Generator(gen) => self.call_generator_method(gen, method).await,
                 VmValue::Stream(stream) => self.call_stream_method(stream, method).await,
                 VmValue::Iter(handle) => self.call_iter_method(handle, method, args).await,
-                _ => Ok(VmValue::Nil),
+                other => Err(VmError::TypeError(format!(
+                    "value of type {} has no method `{method}`",
+                    other.type_name()
+                ))),
             }
         })
     }
