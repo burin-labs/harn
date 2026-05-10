@@ -14,15 +14,7 @@ type PickKeysOptions = {drop_nil?: bool}
  * same value contract instead of collapsing to untyped `dict`.
  */
 pub fn filter_nil<V>(d: dict<string, V>) -> dict<string, V> {
-  var out = {}
-  for entry in d {
-    let v = entry.value
-    if v == nil || v == "" || v == "null" {
-      continue
-    }
-    out[entry.key] = v
-  }
-  return out
+  return __dict_filter_nil(d ?? {})
 }
 
 /**
@@ -35,16 +27,7 @@ pub fn pick_keys<V>(d: dict<string, V>, selected_keys: list<string>, options: Pi
     return {}
   }
   let drop_nil = options.drop_nil ?? false
-  var out = {}
-  for key in selected_keys {
-    if contains(d.keys(), key) {
-      let value = d[key]
-      if !drop_nil || value != nil {
-        out[key] = value
-      }
-    }
-  }
-  return out
+  return __dict_pick_keys(d, selected_keys, drop_nil)
 }
 
 // Check if a store key is stale (older than max_age_seconds).

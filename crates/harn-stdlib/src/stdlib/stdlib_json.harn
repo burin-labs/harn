@@ -29,11 +29,7 @@ pub fn safe_parse(text) {
  * the inputs (`dict<string, V>` in, `dict<string, V>` out).
  */
 pub fn merge<V>(a: dict<string, V>, b: dict<string, V>) -> dict<string, V> {
-  var result = a
-  for entry in b {
-    result = result + {[entry.key]: entry.value}
-  }
-  return result
+  return __dict_merge(a ?? {}, b ?? {})
 }
 
 /**
@@ -42,13 +38,7 @@ pub fn merge<V>(a: dict<string, V>, b: dict<string, V>) -> dict<string, V> {
  * the projection keeps the same V.
  */
 pub fn pick<V>(data: dict<string, V>, keys: list<string>) -> dict<string, V> {
-  var result = {}
-  for k in keys {
-    if data[k] != nil {
-      result = result + {[k]: data[k]}
-    }
-  }
-  return result
+  return __dict_pick(data ?? {}, keys ?? [])
 }
 
 /**
@@ -56,12 +46,5 @@ pub fn pick<V>(data: dict<string, V>, keys: list<string>) -> dict<string, V> {
  * resulting dict keeps the same value contract as the input.
  */
 pub fn omit<V>(data: dict<string, V>, keys: list<string>) -> dict<string, V> {
-  let exclude = set(keys)
-  var result = {}
-  for entry in data {
-    if !set_contains(exclude, entry.key) {
-      result = result + {[entry.key]: entry.value}
-    }
-  }
-  return result
+  return __dict_omit(data ?? {}, keys ?? [])
 }

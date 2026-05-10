@@ -1,0 +1,34 @@
+/**
+ * Mirrors the `out[key] = value` builder pattern used by std/collections
+ * `pick_keys`, std/agents alias maps, and command-step assemblers. Each
+ * iteration grows a dict by setting a single key.
+ */
+pipeline default(task) {
+  let keys = [
+    "alpha",
+    "beta",
+    "gamma",
+    "delta",
+    "epsilon",
+    "zeta",
+    "eta",
+    "theta",
+    "iota",
+    "kappa",
+    "lambda",
+    "mu",
+  ]
+  var iteration = 0
+  var total = 0
+  while iteration < 4000 {
+    var out = {}
+    for key in keys {
+      out[key] = iteration
+    }
+    total = total + len(out.keys())
+    iteration = iteration + 1
+  }
+  if total < 0 {
+    log("unreachable")
+  }
+}

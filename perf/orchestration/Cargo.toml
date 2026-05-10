@@ -17,3 +17,8 @@ criterion = "0.8"
 name = "bench_hook_dispatch"
 path = "bench_hook_dispatch.rs"
 harness = false
+
+[[bench]]
+name = "bench_workflow_bundle"
+path = "bench_workflow_bundle.rs"
+harness = false

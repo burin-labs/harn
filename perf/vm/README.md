@@ -47,6 +47,14 @@ cargo bench -p harn-vm-perf --bench bench_vm_fixtures
 It runs the checked-in `.harn` fixtures in-process and prints allocation
 operations and allocated bytes per fixture run.
 
+The fixture set covers core interpreter ops (arithmetic, function calls,
+struct/dict/list reads), the option-builder pipelines that connector
+helpers and `agent_dispatch_tool_batch` exercise on every call
+(`dict_merge_loop`, `dict_subscript_assign`, `filter_nil_loop`), and a
+representative agent-tool dispatch loop (`agent_tool_dispatch`).
+[`docs/src/dev/vm-stdlib-perf-notes.md`](../../docs/src/dev/vm-stdlib-perf-notes.md)
+captures the analysis behind the current allocation budget.
+
 This suite is intentionally not part of `make all`; local CPU load, thermal
 state, and target cache state are too noisy for a default correctness gate. For
 before/after VM optimization work, run the suite several times on the same

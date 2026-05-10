@@ -1,0 +1,34 @@
+import { filter_nil, pick_keys } from "std/collections"
+
+/**
+ * Mirrors the `filter_nil(merge(config, {...}))` and `pick_keys` pipelines
+ * every connector helper (notion/linear/github/slack) runs on each call to
+ * build option dicts. The fixture exercises both helpers to keep changes
+ * honest about the path they share.
+ */
+pipeline default(task) {
+  let raw = {
+    repo: "burin-labs/harn",
+    branch: "main",
+    title: "perf",
+    body: "bench fixture",
+    draft: nil,
+    labels: nil,
+    accept: "",
+    method: "null",
+    timeout_ms: 30000,
+    user_agent: "harn",
+  }
+  let pickable = ["repo", "branch", "title", "body", "labels", "method"]
+  var iteration = 0
+  var total = 0
+  while iteration < 4000 {
+    let cleaned = filter_nil(raw)
+    let picked = pick_keys(cleaned, pickable)
+    total = total + len(cleaned.keys()) + len(picked.keys())
+    iteration = iteration + 1
+  }
+  if total < 0 {
+    log("unreachable")
+  }
+}

@@ -137,6 +137,7 @@
 - [Windows test coverage](./dev/windows-test-coverage.md)
 - [Deterministic test patterns](./dev/testing.md)
 - [Testbench mode](./dev/testbench.md)
+- [VM and stdlib perf notes](./dev/vm-stdlib-perf-notes.md)
 
 # Tutorials and Guides
 
