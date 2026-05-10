@@ -58,6 +58,7 @@ pub mod step_runtime;
 pub mod store;
 pub(crate) mod synchronization;
 pub mod tenant;
+pub mod testbench;
 pub mod tool_annotations;
 pub mod tool_surface;
 pub mod tracing;

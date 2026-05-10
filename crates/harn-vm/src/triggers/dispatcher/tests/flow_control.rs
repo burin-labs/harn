@@ -81,10 +81,12 @@ async fn flow_control_throttle_waits_for_window() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let clock = crate::triggers::test_util::clock::MockClock::new(
-                time::OffsetDateTime::from_unix_timestamp(0).expect("epoch"),
-            );
-            let _guard = crate::triggers::test_util::clock::install_override(clock.clone());
+            // `dispatcher_fixture_with_flow_control` calls
+            // `reset_thread_local_state()` internally, so the MockClock
+            // override must be installed *after* the fixture builds —
+            // otherwise the reset wipes the override and `clock::sleep`
+            // falls through to real `tokio::time::sleep`, turning the
+            // virtual-time advance below into a 30-second wall-clock wait.
             let (_dir, log, dispatcher) = dispatcher_fixture_with_flow_control(
                 r#"
 import "std/triggers"
@@ -106,6 +108,10 @@ pub fn local_fn(event: TriggerEvent) -> string {
                 },
             )
             .await;
+            let clock = crate::triggers::test_util::clock::MockClock::new(
+                time::OffsetDateTime::from_unix_timestamp(0).expect("epoch"),
+            );
+            let _guard = crate::triggers::test_util::clock::install_override(clock.clone());
 
             let first = dispatcher
                 .dispatch_event(trigger_event("issues.opened", "delivery-throttle-1"))
@@ -400,11 +406,16 @@ async fn flow_control_debounce_keeps_latest_event() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
+            // `reset_thread_local_state` clears the MockClock override
+            // stack, so it must run *before* the override is installed —
+            // otherwise `clock::sleep` falls through to real
+            // `tokio::time::sleep` and the virtual-time advance below
+            // turns into a 30-second wall-clock wait.
+            crate::reset_thread_local_state();
             let clock = crate::triggers::test_util::clock::MockClock::new(
                 time::OffsetDateTime::from_unix_timestamp(0).expect("epoch"),
             );
             let _guard = crate::triggers::test_util::clock::install_override(clock.clone());
-            crate::reset_thread_local_state();
             let dir = tempfile::tempdir().expect("tempdir");
             let log = install_default_for_base_dir(dir.path()).expect("install event log");
             let lib_path = dir.path().join("lib.harn");

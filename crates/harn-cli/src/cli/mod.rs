@@ -40,6 +40,7 @@ mod skill;
 mod skills;
 mod supervisor;
 mod test;
+mod test_bench;
 mod trace;
 mod trigger;
 mod trust;
@@ -138,6 +139,9 @@ pub(crate) use supervisor::{
     SupervisorStartArgs, SupervisorStopArgs,
 };
 pub(crate) use test::TestArgs;
+pub(crate) use test_bench::{
+    TestBenchArgs, TestBenchCommand, TestBenchReplayArgs, TestBenchRunArgs,
+};
 pub(crate) use trace::{TraceArgs, TraceCommand, TraceImportArgs};
 pub(crate) use trigger::{TriggerArgs, TriggerCancelArgs, TriggerCommand, TriggerReplayArgs};
 pub(crate) use try_cmd::TryArgs;
@@ -214,6 +218,10 @@ SCRIPTING
     Fmt(FmtArgs),
     /// Run user tests or the conformance suite.
     Test(TestArgs),
+    /// Run a .harn script under a hermetic testbench (paused clock,
+    /// optional LLM/process tapes, fs overlay, deny-by-default network).
+    #[command(name = "test-bench")]
+    TestBench(TestBenchArgs),
     /// Scaffold a new project with harn.toml.
     Init(InitArgs),
     /// Scaffold a new project, package, or connector from a starter template.

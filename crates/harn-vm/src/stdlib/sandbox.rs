@@ -120,6 +120,20 @@ pub fn command_output(
     args: &[String],
     config: &ProcessCommandConfig,
 ) -> Result<Output, VmError> {
+    // Testbench replay mode short-circuits the spawn entirely. Recording
+    // mode falls through; the duration is captured by the recording
+    // handle below using the injected mock clock when one is active.
+    if let Some(intercepted) =
+        crate::testbench::process_tape::intercept_spawn(program, args, config.cwd.as_deref())
+    {
+        return intercepted.map_err(|message| {
+            VmError::Thrown(crate::value::VmValue::String(std::rc::Rc::from(message)))
+        });
+    }
+
+    let recording =
+        crate::testbench::process_tape::start_recording(program, args, config.cwd.as_deref());
+
     #[cfg(target_os = "windows")]
     {
         if let Some(policy) = active_sandbox_policy() {
@@ -127,6 +141,9 @@ pub fn command_output(
                 .map_err(|error| windows_process_error("process sandbox failed", error))?;
             if let Some(error) = process_violation_error(&output) {
                 return Err(error);
+            }
+            if let Some(span) = recording {
+                span.finish(&output);
             }
             return Ok(output);
         }
@@ -139,6 +156,9 @@ pub fn command_output(
         .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))?;
     if let Some(error) = process_violation_error(&output) {
         return Err(error);
+    }
+    if let Some(span) = recording {
+        span.finish(&output);
     }
     Ok(output)
 }
