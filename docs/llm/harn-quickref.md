@@ -227,12 +227,20 @@ In tests: `mock_stdin(text)` / `unmock_stdin()`,
 
 - `now_ms()` — wall-clock millis since UNIX_EPOCH (`int`).
 - `monotonic_ms()` — monotonic millis since process start (`int`).
-- `sleep_ms(n)` — async sleep. **Mock-aware**: under `mock_time`, this
-  advances mocked time instantly instead of blocking — so tests of
-  retry/backoff/timeout logic stay deterministic and fast.
-- `mock_time(ms)` / `advance_time(ms)` / `unmock_time()` —
-  `timestamp` and `elapsed` also route through this clock, so
-  every time-sensitive builtin is mockable.
+- `sleep(d)` / `sleep_ms(n)` — async sleep. **Mock-aware**: under
+  `mock_time`, both advance the mocked clock instantly instead of
+  blocking — so tests of retry/backoff/timeout logic stay
+  deterministic and fast. The same mock is observed by `now_ms`,
+  `monotonic_ms`, `timestamp`, `elapsed`, the trigger dispatcher, and
+  the cron scheduler.
+- `yield_now()` — cooperative scheduling primitive. Lets sibling
+  `parallel each` / spawned tasks make progress without advancing time.
+  Useful inside `mock_time(...)` blocks where you want one more poll
+  cycle but no clock movement.
+- `mock_time(ms)` / `advance_time(ms)` / `unmock_time()` — install,
+  advance, and tear down the mock. The clock stack nests, so a Rust
+  test harness can install an outer mock and a Harn pipeline can layer
+  its own on top.
 
 ## Strings
 

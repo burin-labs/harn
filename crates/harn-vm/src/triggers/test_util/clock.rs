@@ -1,3 +1,16 @@
+//! Single source of truth for clock mocking across the VM.
+//!
+//! This module owns the thread-local "mock clock" stack consulted by
+//! every time-sensitive subsystem: stdlib `now_ms` / `monotonic_ms` /
+//! `sleep` builtins, the trigger dispatcher, the cron scheduler, and any
+//! Rust-side test that needs to pin or advance time. All of them route
+//! through [`active_mock_clock`] so that pushing one mock pins time
+//! everywhere it would otherwise be read.
+//!
+//! The lives-in-`triggers/` path is historical — the abstraction is now
+//! crate-wide and re-exported as `harn_vm::clock_mock` for callers
+//! outside the trigger subsystem.
+
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration as StdDuration, Instant};
@@ -56,6 +69,14 @@ impl MockClock {
         })
     }
 
+    /// Construct a clock pinned to `wall_ms` (UNIX epoch milliseconds).
+    pub fn at_wall_ms(wall_ms: i64) -> Arc<Self> {
+        let nanos = (wall_ms as i128).saturating_mul(1_000_000);
+        let now =
+            OffsetDateTime::from_unix_timestamp_nanos(nanos).unwrap_or(OffsetDateTime::UNIX_EPOCH);
+        Self::new(now)
+    }
+
     pub fn monotonic_now(&self) -> ClockInstant {
         ClockInstant(
             *self
@@ -65,7 +86,20 @@ impl MockClock {
         )
     }
 
-    pub async fn set(&self, now: OffsetDateTime) {
+    /// Wall clock in millis since `UNIX_EPOCH`.
+    pub fn now_wall_ms(&self) -> i64 {
+        self.now().unix_timestamp_nanos() as i64 / 1_000_000
+    }
+
+    /// Monotonic millis since this clock was created.
+    pub fn now_monotonic_ms(&self) -> i64 {
+        self.monotonic_now().as_millis() as i64
+    }
+
+    /// Synchronous form of [`set`]. Notifying waiters is itself a sync
+    /// operation, so we expose this to callers (stdlib builtins, sync
+    /// test helpers) that cannot await.
+    pub fn set_sync(&self, now: OffsetDateTime) {
         let mut wall = self.now.lock().expect("mock clock mutex poisoned");
         let previous = *wall;
         *wall = now;
@@ -85,14 +119,8 @@ impl MockClock {
         self.notify.notify_waiters();
     }
 
-    pub async fn advance(&self, duration: time::Duration) {
-        let Ok(delta) = TryInto::<StdDuration>::try_into(duration) else {
-            return;
-        };
-        self.advance_std(delta).await;
-    }
-
-    pub async fn advance_std(&self, duration: StdDuration) {
+    /// Synchronous form of [`advance_std`].
+    pub fn advance_std_sync(&self, duration: StdDuration) {
         if duration.is_zero() {
             self.notify.notify_waiters();
             return;
@@ -100,12 +128,27 @@ impl MockClock {
         let delta =
             time::Duration::try_from(duration).expect("std duration should fit in time::Duration");
         let next = *self.now.lock().expect("mock clock mutex poisoned") + delta;
-        self.set(next).await;
+        self.set_sync(next);
+    }
+
+    pub async fn set(&self, now: OffsetDateTime) {
+        self.set_sync(now);
+    }
+
+    pub async fn advance(&self, duration: time::Duration) {
+        let Ok(delta) = TryInto::<StdDuration>::try_into(duration) else {
+            return;
+        };
+        self.advance_std_sync(delta);
+    }
+
+    pub async fn advance_std(&self, duration: StdDuration) {
+        self.advance_std_sync(duration);
     }
 
     pub async fn advance_ticks(&self, ticks: u32, tick: StdDuration) {
         for _ in 0..ticks {
-            self.advance_std(tick).await;
+            self.advance_std_sync(tick);
         }
     }
 }
@@ -137,6 +180,19 @@ pub fn active_mock_clock() -> Option<Arc<MockClock>> {
     MOCK_CLOCK_STACK.with(|slot| slot.borrow().last().cloned())
 }
 
+pub fn is_mocked() -> bool {
+    MOCK_CLOCK_STACK.with(|slot| !slot.borrow().is_empty())
+}
+
+/// Clear the entire override stack. Called from the per-test reset hook
+/// so stray overrides (e.g. from a Harn pipeline that called
+/// `mock_time` without `unmock_time`) cannot leak between tests.
+pub fn clear_overrides() {
+    MOCK_CLOCK_STACK.with(|slot| {
+        slot.borrow_mut().clear();
+    });
+}
+
 pub fn now_utc() -> OffsetDateTime {
     active_mock_clock()
         .map(|clock| clock.now())
@@ -151,4 +207,12 @@ pub fn instant_now() -> ClockInstant {
     active_mock_clock()
         .map(|clock| clock.monotonic_now())
         .unwrap_or_else(|| ClockInstant(process_start().elapsed()))
+}
+
+/// Advance the topmost mock clock by `duration`. No-op if no clock is
+/// installed.
+pub fn advance(duration: StdDuration) {
+    if let Some(clock) = active_mock_clock() {
+        clock.advance_std_sync(duration);
+    }
 }

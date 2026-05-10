@@ -1,32 +1,29 @@
-//! Mockable wall-clock and monotonic clock.
+//! Mockable wall-clock and monotonic clock for stdlib builtins.
 //!
-//! All time-sensitive builtins route through this module so scripts can
-//! pin time in tests via `mock_time(ms)` / `advance_time(ms)`. When the
-//! mock is active, `sleep_ms` advances the mocked clock instead of
-//! suspending the runtime — this lets tests exercise time-dependent
-//! logic deterministically.
+//! All time-sensitive builtins route through [`clock_mock`] so scripts can
+//! pin time in tests via `mock_time(ms)` / `advance_time(ms)`. When a mock
+//! is active, `sleep_ms` and `sleep` advance the mocked clock instead of
+//! suspending the runtime — this lets tests exercise time-dependent logic
+//! deterministically and converges with the trigger dispatcher / cron
+//! scheduler, which read from the same mock stack.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::clock_mock;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-#[derive(Clone, Copy)]
-struct ClockMock {
-    /// Wall-clock millis since UNIX_EPOCH.
-    wall_ms: i64,
-    /// Monotonic millis (resets to 0 when the mock is installed).
-    monotonic_ms: i64,
-}
+static MONOTONIC_START: OnceLock<Instant> = OnceLock::new();
 
 thread_local! {
-    static CLOCK_MOCK: RefCell<Option<ClockMock>> = const { RefCell::new(None) };
+    /// RAII guards held alive by `mock_time(...)` calls from Harn scripts.
+    /// `unmock_time()` pops one. The per-test reset hook clears the lot.
+    static MOCK_TIME_GUARDS: RefCell<Vec<clock_mock::ClockOverrideGuard>> =
+        const { RefCell::new(Vec::new()) };
 }
-
-static MONOTONIC_START: OnceLock<Instant> = OnceLock::new();
 
 fn real_wall_ms() -> i64 {
     SystemTime::now()
@@ -43,8 +40,8 @@ fn real_monotonic_ms() -> i64 {
 /// Current wall-clock time in milliseconds since UNIX_EPOCH.
 /// Honors the active mock if one is installed.
 pub fn now_wall_ms() -> i64 {
-    CLOCK_MOCK
-        .with(|m| m.borrow().map(|mock| mock.wall_ms))
+    clock_mock::active_mock_clock()
+        .map(|c| c.now_wall_ms())
         .unwrap_or_else(real_wall_ms)
 }
 
@@ -56,46 +53,42 @@ pub fn now_wall_seconds() -> f64 {
 /// Monotonic milliseconds. Honors the active mock; otherwise returns
 /// elapsed millis since process start.
 pub fn now_monotonic_ms() -> i64 {
-    CLOCK_MOCK
-        .with(|m| m.borrow().map(|mock| mock.monotonic_ms))
+    clock_mock::active_mock_clock()
+        .map(|c| c.now_monotonic_ms())
         .unwrap_or_else(real_monotonic_ms)
 }
 
 /// Whether a clock mock is currently active.
 pub fn is_mocked() -> bool {
-    CLOCK_MOCK.with(|m| m.borrow().is_some())
+    clock_mock::is_mocked()
 }
 
-/// Advance the mocked clock by `ms` milliseconds. No-op if the mock is
-/// not installed (real time advances on its own).
+/// Advance the mocked clock by `ms` milliseconds. No-op if no mock is
+/// installed (real time advances on its own).
 pub fn advance(ms: i64) {
-    CLOCK_MOCK.with(|m| {
-        if let Some(mock) = m.borrow_mut().as_mut() {
-            mock.wall_ms = mock.wall_ms.saturating_add(ms);
-            mock.monotonic_ms = mock.monotonic_ms.saturating_add(ms);
-        }
-    });
+    if ms <= 0 {
+        return;
+    }
+    clock_mock::advance(Duration::from_millis(ms as u64));
 }
 
-fn install_mock(wall_ms: i64) {
-    CLOCK_MOCK.with(|m| {
-        *m.borrow_mut() = Some(ClockMock {
-            wall_ms,
-            monotonic_ms: 0,
-        });
-    });
+fn push_mock(wall_ms: i64) {
+    let clock = clock_mock::MockClock::at_wall_ms(wall_ms);
+    let guard = clock_mock::install_override(clock);
+    MOCK_TIME_GUARDS.with(|stack| stack.borrow_mut().push(guard));
 }
 
-fn clear_mock() {
-    CLOCK_MOCK.with(|m| *m.borrow_mut() = None);
+fn pop_mock() -> bool {
+    MOCK_TIME_GUARDS.with(|stack| stack.borrow_mut().pop().is_some())
 }
 
 /// Reset clock state for test isolation.
 pub(crate) fn reset_clock_state() {
-    clear_mock();
+    MOCK_TIME_GUARDS.with(|stack| stack.borrow_mut().clear());
+    clock_mock::clear_overrides();
 }
 
-/// RAII guard that installs the stdlib clock mock for the lifetime of the
+/// RAII guard that installs a clock mock for the lifetime of the
 /// guard and restores the previous state on drop. Use from Rust-side tests
 /// that exercise builtins (`elapsed`, `now_ms`, `timestamp`, `sleep_ms`)
 /// without needing to drive a `tokio::time::pause()` runtime.
@@ -106,20 +99,16 @@ pub(crate) fn reset_clock_state() {
 /// and Harn scripts.
 #[allow(dead_code)]
 pub struct MockClockGuard {
-    previous: Option<ClockMock>,
+    _override: clock_mock::ClockOverrideGuard,
 }
 
 #[allow(dead_code)]
 impl MockClockGuard {
     /// Install a mock pinned to `wall_ms`. Monotonic counter starts at 0.
     pub fn install(wall_ms: i64) -> Self {
-        let previous = CLOCK_MOCK.with(|m| {
-            m.borrow_mut().replace(ClockMock {
-                wall_ms,
-                monotonic_ms: 0,
-            })
-        });
-        Self { previous }
+        let clock = clock_mock::MockClock::at_wall_ms(wall_ms);
+        let guard = clock_mock::install_override(clock);
+        Self { _override: guard }
     }
 
     /// Advance the mocked clock by `ms` milliseconds.
@@ -135,14 +124,6 @@ impl MockClockGuard {
     /// Current mocked monotonic millis.
     pub fn now_monotonic_ms(&self) -> i64 {
         now_monotonic_ms()
-    }
-}
-
-impl Drop for MockClockGuard {
-    fn drop(&mut self) {
-        CLOCK_MOCK.with(|m| {
-            *m.borrow_mut() = self.previous.take();
-        });
     }
 }
 
@@ -183,7 +164,7 @@ pub(crate) fn register_clock_builtins(vm: &mut Vm) {
                 "mock_time(ms): expected an integer millisecond timestamp",
             ))));
         };
-        install_mock(ms);
+        push_mock(ms);
         Ok(VmValue::Nil)
     });
 
@@ -199,7 +180,7 @@ pub(crate) fn register_clock_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("unmock_time", |_args, _out| {
-        clear_mock();
+        pop_mock();
         Ok(VmValue::Nil)
     });
 }
@@ -210,20 +191,20 @@ mod tests {
 
     #[test]
     fn mock_overrides_wall_and_monotonic() {
-        clear_mock();
-        install_mock(1_000_000);
+        reset_clock_state();
+        push_mock(1_000_000);
         assert_eq!(now_wall_ms(), 1_000_000);
         assert_eq!(now_monotonic_ms(), 0);
         advance(500);
         assert_eq!(now_wall_ms(), 1_000_500);
         assert_eq!(now_monotonic_ms(), 500);
-        clear_mock();
+        reset_clock_state();
         assert!(!is_mocked());
     }
 
     #[test]
     fn unmocked_real_time_progresses() {
-        clear_mock();
+        reset_clock_state();
         let a = now_wall_ms();
         std::thread::sleep(Duration::from_millis(2));
         let b = now_wall_ms();
@@ -232,7 +213,7 @@ mod tests {
 
     #[test]
     fn mock_clock_guard_restores_previous_state_on_drop() {
-        clear_mock();
+        reset_clock_state();
         assert!(!is_mocked());
         {
             let guard = MockClockGuard::install(2_000_000);
@@ -247,7 +228,7 @@ mod tests {
 
     #[test]
     fn mock_clock_guard_nests_and_restores_outer() {
-        clear_mock();
+        reset_clock_state();
         let outer = MockClockGuard::install(1_000);
         outer.advance(50);
         assert_eq!(now_wall_ms(), 1_050);
@@ -259,5 +240,18 @@ mod tests {
         assert_eq!(now_wall_ms(), 1_050, "outer mock restored after inner drop");
         drop(outer);
         assert!(!is_mocked());
+    }
+
+    #[test]
+    fn stdlib_mock_visible_to_trigger_module() {
+        // Confirms the unification: stdlib mock_time installs an override
+        // visible to the crate-wide clock_mock query.
+        reset_clock_state();
+        push_mock(123_000);
+        let active = clock_mock::active_mock_clock().expect("active mock present");
+        assert_eq!(active.now_wall_ms(), 123_000);
+        advance(77);
+        assert_eq!(active.now_wall_ms(), 123_077);
+        reset_clock_state();
     }
 }

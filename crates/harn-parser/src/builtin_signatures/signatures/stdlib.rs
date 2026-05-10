@@ -4055,6 +4055,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         where_clauses: &[],
     },
     BuiltinSignature {
+        name: "yield_now",
+        params: &[],
+        returns: TY_NIL,
+        type_params: &[],
+        has_rest: false,
+        where_clauses: &[],
+    },
+    BuiltinSignature {
         name: "read_stdin",
         params: &[Param::new("args", TY_ANY)],
         returns: TY_STRING_OR_NIL,

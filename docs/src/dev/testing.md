@@ -94,6 +94,43 @@ For subprocess tests that do not need real shell behavior, use `MockProcess`.
 It exposes a synchronous control channel so the test drives process state
 (exit code, stdout lines, signal receipt) without polling.
 
+### Unified `mock_time(...)` for Harn fixtures and stdlib builtins
+
+Conformance fixtures and Rust-side tests that exercise stdlib timing
+builtins (`sleep`, `sleep_ms`, `now_ms`, `monotonic_ms`, `timestamp`,
+`elapsed`, `command_step` retry) all share one mock-clock stack
+(`harn_vm::clock_mock`). This same stack also drives the trigger
+dispatcher and the cron scheduler — installing one mock pins time
+everywhere a Harn script, a connector, or a Rust test would otherwise
+read it.
+
+```harn
+pipeline test(task) {
+  mock_time(1700000000000)
+  // sleep advances the mock; no wall-clock burn, no scheduler races.
+  sleep(50ms)
+  log(now_ms())          // 1700000000050
+  advance_time(1000)
+  log(monotonic_ms())    // 1050
+  // yield_now lets sibling parallel-each tasks make progress without
+  // advancing time at all.
+  yield_now()
+  unmock_time()
+}
+```
+
+Rust tests can install the same mock through `stdlib::clock::MockClockGuard`
+or `clock_mock::install_override(MockClock::new(...))` — both push onto
+the same thread-local stack, so a stdlib-side guard is observed by the
+trigger dispatcher and vice versa.
+
+Fixtures that genuinely need wall-clock time (real subprocess I/O,
+real socket-bound servers, scheduler tests timing real backoffs) are
+exempt via `CONFORMANCE_REAL_TIME_ALLOWLIST` in
+`scripts/lint_test_patterns.sh`. The lint catches new fixtures that
+sleep on a literal duration without either entering a `mock_time(...)`
+block or being added to the allowlist with reviewer justification.
+
 ## Forbidden patterns
 
 The following patterns are banned in test files by `make lint-test-patterns`.
@@ -110,6 +147,7 @@ The script searches files under `crates/**/tests/**/*.rs`,
 | `recv_timeout(Duration::from_millis(…))` | Busy-wait with a short literal timeout | `tokio::time::timeout` with event channel |
 | copied conformance subprocess wait helpers | Drifts retry ceilings and diagnostics between fixtures | import `conformance/tests/_common.harn` |
 | `random_int(20000, 45000)` for server ports | Races with other tests and local services | bind port `0` and read the readiness log |
+| `sleep(<literal>)` / `time.sleep(<literal>)` in `.harn` fixtures (outside `mock_time(...)`) | Wall-clock burn that races against scheduler load | wrap in `mock_time(...)` / `unmock_time()` and let the unified clock auto-advance, or add the file to `CONFORMANCE_REAL_TIME_ALLOWLIST` with justification |
 
 ## Opting out
 

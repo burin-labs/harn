@@ -58,6 +58,18 @@ pub mod tool_surface;
 pub mod tracing;
 pub mod triggers;
 pub mod trust_graph;
+
+/// Crate-wide deterministic clock mock used by stdlib time builtins, the
+/// trigger dispatcher, the cron scheduler, and Rust-side tests. Re-exports
+/// the long-lived implementation under `triggers::test_util::clock` so all
+/// callers go through one source of truth.
+pub mod clock_mock {
+    pub use crate::triggers::test_util::clock::{
+        active_mock_clock, advance, clear_overrides, install_override, instant_now, is_mocked,
+        now_ms, now_utc, ClockInstant, ClockOverrideGuard, MockClock,
+    };
+}
+
 pub mod typecheck;
 pub mod value;
 pub mod visible_text;
