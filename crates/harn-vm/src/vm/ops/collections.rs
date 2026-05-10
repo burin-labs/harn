@@ -199,13 +199,13 @@ impl super::super::Vm {
             },
             VmValue::Nil => {
                 return Err(VmError::TypeError(format!(
-                    "cannot access property `{name}` on nil"
+                    "cannot access property `{name}` on nil — use `?.{name}` for optional access, or narrow with a `!= nil` guard before reading fields"
                 )));
             }
             _ if optional => VmValue::Nil,
             _ => {
                 return Err(VmError::TypeError(format!(
-                    "cannot access property `{name}` on {}",
+                    "cannot access property `{name}` on {} — only dicts, structs, lists, strings, and pairs support property access",
                     obj.type_name()
                 )));
             }

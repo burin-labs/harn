@@ -10,8 +10,13 @@ pipeline default() {
   }
   let r = schema_recover("{\"name\": \"Ada\", \"age\": 36}", schema)
   println(r.ok)
-  println(r.data.name)
-  println(r.data.age)
+  // `r.data` is `T | nil`; bind it to a local and narrow with a
+  // nil guard before reading fields.
+  let data = r.data
+  if data != nil {
+    println(data.name)
+    println(data.age)
+  }
   println(r.stage)
   println(r.attempts)
   println(r.repaired)

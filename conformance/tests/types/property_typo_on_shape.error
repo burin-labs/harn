@@ -1,0 +1,2 @@
+field `emial` does not exist on shape `{name: string, email: string, age: int}` — did you mean `email`?
+available fields: name, email, age

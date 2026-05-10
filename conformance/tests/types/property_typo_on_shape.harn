@@ -1,0 +1,10 @@
+// Typoed property on a shape-annotated value should report the missing
+// field, the closest match, and the full list of available fields. This
+// is one of the most common authoring mistakes and benefits the most
+// from an actionable static error.
+type User = {name: string, email: string, age: int}
+
+pipeline default(_) {
+  let u: User = {name: "Ada", email: "ada@x", age: 36}
+  println(u.emial)
+}

@@ -1165,7 +1165,7 @@ impl TypeChecker {
         }
     }
 
-    fn type_is_nil(&self, ty: &TypeExpr, scope: &TypeScope) -> bool {
+    pub(in crate::typechecker) fn type_is_nil(&self, ty: &TypeExpr, scope: &TypeScope) -> bool {
         matches!(self.resolve_alias(ty, scope), TypeExpr::Named(name) if name == "nil")
     }
 

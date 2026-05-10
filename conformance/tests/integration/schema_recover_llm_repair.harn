@@ -11,6 +11,9 @@ pipeline default() {
   let r = schema_recover("model said pass but failed to format it", schema, {provider: "mock"})
   println(r.ok)
   println(r.stage)
-  println(r.data.verdict)
+  let data = r.data
+  if data != nil {
+    println(data.verdict)
+  }
   println(r.repaired)
 }

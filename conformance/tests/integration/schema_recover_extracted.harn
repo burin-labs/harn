@@ -13,8 +13,11 @@ pipeline default() {
   let r = schema_recover(raw, schema, {llm_repair: false})
   println(r.ok)
   println(r.stage)
-  println(r.data.verdict)
-  println(r.data.note)
+  let data = r.data
+  if data != nil {
+    println(data.verdict)
+    println(data.note)
+  }
   println(r.attempts)
   println(r.repaired)
 }
