@@ -1,0 +1,10 @@
+[package]
+name = "harn-release-smoke"
+version = "0.0.0"
+description = "Cross-platform release smoke fixtures exercised by scripts/release_smoke.sh and the release-smoke CI matrix."
+license = "MIT"
+repository = "https://github.com/burin-labs/harn"
+harn = ">=0.8,<0.9"
+
+[exports]
+lib = "lib.harn"

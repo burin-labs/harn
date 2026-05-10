@@ -1,0 +1,9 @@
+/**
+ * Trivial smoke fixture: the entry point exercised by `harn check` and
+ * `harn run` in the cross-platform release smoke matrix. Uses LF line
+ * endings and ASCII-only output so the smoke driver can byte-compare
+ * stdout on every platform.
+ */
+pipeline default() {
+  println("harn-release-smoke ok")
+}

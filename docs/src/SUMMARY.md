@@ -132,6 +132,7 @@
 - [Deploy to Fly.io](./deploy/fly.md)
 - [Deploy to Railway](./deploy/railway.md)
 - [Maintainer release workflow](./maintainer-release.md)
+- [Platform compatibility](./dev/platform-compatibility.md)
 - [Windows test coverage](./dev/windows-test-coverage.md)
 - [Deterministic test patterns](./dev/testing.md)
 

@@ -27,6 +27,28 @@ condensed series summaries instead of full per-patch history.
   (`make check-docs-workflow-quickstart`) that pins the deterministic
   bundle digest, executed-node sequence, and connector-status shape so
   the snippets cannot drift.
+- **Cross-platform release smoke matrix.** Added
+  `.github/workflows/release-smoke.yml`, `scripts/release_smoke.sh`,
+  and `tests/smoke/` fixtures so every release-relevant PR runs the
+  user-visible CLI surface (`--help`, `check`, `fmt --check`,
+  `package check`, `--provider-matrix`, `run`, `command_run`,
+  no-credentials mock workflow, `harn watch` boot) on macOS, Linux,
+  and Windows. Failures surface as
+  `::error::release-smoke (<platform>): <capability> failed`
+  annotations and the smoke audit lane is now part of
+  `release_gate.sh audit`.
+- **Platform compatibility docs.** Added
+  [docs/src/dev/platform-compatibility.md](docs/src/dev/platform-compatibility.md)
+  with a per-capability support matrix and rationale for the
+  Windows-deferred features (POSIX-signal drain, `unveil`/`pledge`).
+
+### Fixed
+
+- **Recognize `/** */` doc comments in `harn package check`.** The
+  publish-readiness check previously saw only `///` doc comments, so
+  the canonical HarnDoc form preferred by the linter would surface
+  spurious "no doc comment" warnings on otherwise-documented public
+  symbols. Both forms now produce identical `docs` bodies.
 
 ## v0.8.4
 

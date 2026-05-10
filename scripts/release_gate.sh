@@ -171,6 +171,18 @@ run_harn_audit() {
   time_phase "harn fmt --check" make fmt-harn
 }
 
+# Host-platform reproduction of the cross-platform release smoke
+# matrix. CI exercises the full macOS/Linux/Windows fan-out via
+# .github/workflows/release-smoke.yml; this lane catches host-side
+# regressions (binary failing to start, generated artifact emitter
+# drift, mock provider plumbing) before a maintainer pushes a release
+# tag. Uses the debug binary populated by the warm prebuild so the
+# lane does not fight the cargo lock with rust-audit's clippy +
+# nextest. The cross-platform deltas still depend on the CI matrix.
+run_smoke_audit() {
+  time_phase "release smoke" make smoke-audit
+}
+
 cmd_audit() {
   echo "=== Parallel release audit ==="
   local audit_started
@@ -229,6 +241,7 @@ cmd_audit() {
   run_step grammar-audit run_grammar_audit & steps+=("grammar-audit") pids+=("$!")
   run_step security-audit run_security_audit & steps+=("security-audit") pids+=("$!")
   run_step package-audit ./scripts/verify_crate_packages.sh & steps+=("package-audit") pids+=("$!")
+  run_step smoke-audit run_smoke_audit & steps+=("smoke-audit") pids+=("$!")
 
   local failed=0
   local idx

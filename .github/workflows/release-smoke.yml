@@ -1,0 +1,86 @@
+name: Release smoke
+
+# Cross-platform release smoke matrix. Builds a release `harn` binary on
+# macOS, Linux, and Windows runners and runs `scripts/release_smoke.sh`
+# against it so a release tag can never publish a binary that breaks the
+# user-visible CLI surface (`--help`, `check`, `run`, package check,
+# generated artifacts, process tool, file watcher, no-credentials
+# workflow) on any supported platform.
+#
+# The per-PR `windows` job in `ci.yml` covers Windows-specific compile
+# breaks and the curated unit slice. This job is the explicit
+# *capability* gate — failures point at a specific (platform, capability)
+# pair via `::error::` annotations from the smoke driver. See
+# docs/src/dev/platform-compatibility.md for the support matrix.
+on:
+  pull_request:
+    paths:
+      - 'crates/**'
+      - 'conformance/**'
+      - 'examples/**'
+      - 'tests/smoke/**'
+      - 'scripts/release_smoke.sh'
+      - '.github/workflows/release-smoke.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.cargo/**'
+      - 'rust-toolchain.toml'
+      - 'Makefile'
+  merge_group:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-smoke-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTFLAGS: "-D warnings"
+  HARN_LLM_CALLS_DISABLED: "1"
+
+jobs:
+  smoke:
+    name: Release smoke (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runner: ubuntu-latest
+            harn_binary: target/release/harn
+          - platform: macos
+            runner: macos-latest
+            harn_binary: target/release/harn
+          - platform: windows
+            runner: windows-latest
+            harn_binary: target/release/harn.exe
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        continue-on-error: true
+        with:
+          # Piggy-back on the per-platform release cache key from
+          # build-release-binaries.yml whenever it lines up. On Windows
+          # we share the per-PR `workspace-windows` key so the smoke
+          # boots quickly when the unit slice already filled the cache.
+          shared-key: release-smoke-${{ matrix.platform }}
+          cache-on-failure: true
+      - name: Build release harn binary
+        shell: bash
+        run: cargo build --release -p harn-cli --bin harn
+      - name: Run release smoke
+        shell: bash
+        env:
+          HARN_BINARY: ${{ matrix.harn_binary }}
+        run: ./scripts/release_smoke.sh
