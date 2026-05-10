@@ -1,0 +1,12 @@
+/**
+ * An http_get call under egress_policy default=deny raises an
+ * EgressBlocked error whose message names the target host.
+ *
+ * This validates the testbench's deny-by-default network axis: scripts
+ * can install the policy themselves, so the testbench network mode is
+ * scriptable without requiring a CLI flag.
+ */
+pipeline test(task) {
+  egress_policy({default: "deny"})
+  let _result = http_get("https://example.com/api")
+}
