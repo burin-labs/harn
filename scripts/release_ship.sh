@@ -69,8 +69,9 @@ Merge-queue-safe release sequence for a prepared Harn release.
 DEFAULT FLOW (one human PR, then bot finalizes)
 ==============================================================================
 
-  1. Branch off main and write the release content:
-       git checkout -b release/vX.Y.Z
+  1. Branch off main at a frozen commit (release_harn.harn does this
+     automatically) and write the release content:
+       git checkout -b release/vX.Y.Z <pin-sha>
        # author code/docs changes
        # add `## vX.Y.Z` heading at the top of CHANGELOG.md
 
@@ -81,14 +82,22 @@ DEFAULT FLOW (one human PR, then bot finalizes)
      everything ready for a single commit:
        ./scripts/release_ship.sh --prepare --bump patch
 
-  4. Commit + push + open PR (one commit, one PR for the whole release):
+  4. Commit + push + tag + push tag + open PR. The release_harn.harn
+     harness orchestrates these in order so the tag is on origin BEFORE
+     the PR is opened:
        git commit -m "Release vX.Y.Z"
        git push -u origin release/vX.Y.Z
+       git tag -a vX.Y.Z -m "Release vX.Y.Z"
+       git push origin vX.Y.Z              # ← triggers publish-release.yml
        gh pr create
 
-  5. Land the PR through the merge queue. Walk away — the Finalize
-     Release workflow auto-fires on tag drift, tags vX.Y.Z, publishes
-     to crates.io, and creates the GitHub release. No second PR.
+  5. publish-release.yml fires on the tag push, checks out the tagged
+     commit (detached), and finalizes — crates.io publish, GitHub
+     release, build-release-binaries cascade — all from the pinned
+     commit. The Release PR remains as paperwork; auto-merge can land
+     it whenever, even if main has moved on. The post-merge push to
+     main no-ops (no drift, since Cargo.toml on main now matches the
+     tag).
 
 ==============================================================================
 PREPARE MODE
@@ -124,18 +133,30 @@ FINALIZE MODE
   highlight + language-spec sync checks, docs-snippets, trigger
   quickref + examples, verify_release_metadata, portal lint+build).
 
+  Two checkout shapes are supported, picked automatically:
+
+    a. Detached at vX.Y.Z (the canonical "tag is truth" path) — fired
+       by publish-release.yml on tag push, OR a local recovery run
+       after manually `git checkout v0.7.53`. Skips the main
+       fast-forward and publishes the already-tagged commit, so
+       crates.io content, release notes, and the tag stay aligned
+       even if main has moved on.
+
+    b. On main with drift — legacy/recovery path. Fast-forwards local
+       main, tags HEAD as vX.Y.Z (must match Cargo.toml's workspace
+       version), pushes the tag, and publishes. Used when a release
+       was authored without release_harn.harn or the tag-push trigger
+       failed and we're recovering via push:main drift.
+
+  Steps in either case:
+
   1. Builds the portal frontend (needed for the cargo-publish include).
   2. Runs the publish dry-run as a quick pre-publish sanity check.
-  3. Creates and pushes tag vX.Y.Z from main.
-  4. Runs cargo publish to upload crates to crates.io.
-  5. Renders changelog-backed release notes.
-  6. Creates/updates a GitHub release with the rendered notes.
-
-  Manual recovery after a tag was already pushed may run from a
-  detached HEAD at vX.Y.Z. In that case finalize skips the main
-  fast-forward check and publishes the already-tagged commit, keeping
-  crates.io content, release notes, and the tag aligned even if main
-  has moved on.
+  3. Creates the tag vX.Y.Z at HEAD (no-op if it already exists at HEAD).
+  4. Pushes the tag (no-op if origin already has it).
+  5. Runs cargo publish to upload crates to crates.io.
+  6. Renders changelog-backed release notes.
+  7. Creates/updates a GitHub release with the rendered notes.
 
   Set RELEASE_FINALIZE_REAUDIT=1 (or pass --reaudit) to opt back into
   the full release-gate audit before finalizing — useful when running
