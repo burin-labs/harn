@@ -6,6 +6,28 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## v0.8.4
+
+### Added
+
+- Preserve structured initial user content in agent sessions so ACP multimodal
+  prompt blocks reach the agent transcript.
+- Mark Ollama Gemma 4 routes as vision-capable in the Harn capability matrix.
+- Export normalized workflow bundle graphs as JSON, including graph nodes/edges,
+  node-scoped diagnostics, editable field metadata, and embedded Mermaid
+  diagrams.
+- Add `harn workflow preview --mermaid` for a debug diagram view of workflow bundles.
+- Generate complete Swift protocol contracts from Harn, including ACP
+  method/notification enums, MCP/A2A constants, JSON-RPC IDs, JSON values,
+  response/error helpers, and executor display labels.
+
+### Changed
+
+- Standardize workflow message handling in the stdlib to support the new
+  multimodal session input flow.
+- Align generated protocol README with the artifact ownership boundary for
+  downstream hosts.
+
 ## v0.8.3
 
 ### Added

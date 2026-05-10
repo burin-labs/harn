@@ -161,7 +161,7 @@
       "rawInputPartial"
     ]
   },
-  "artifactVersion": "0.8.3",
+  "artifactVersion": "0.8.4",
   "checkCommand": "make check-protocol-artifacts",
   "generatedBy": "harn dump-protocol-artifacts",
   "mcp": {
