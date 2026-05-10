@@ -1,0 +1,196 @@
+name: Release PR drift check
+
+# Guards `release/v*.*.*` PRs against silent CHANGELOG `## Unreleased`
+# drift absorption. When a release PR sits on a frozen pin SHA and
+# another PR merges to main that appends bullets under `## Unreleased`,
+# GitHub's automatic 3-way merge folds those new bullets into the
+# release section. The merge is textually clean, `mergeable: MERGEABLE`,
+# and auto-merge would happily ship a CHANGELOG that lies about the
+# published artifact.
+#
+# This workflow posts a `release-pr-drift-check` check_run on each
+# release PR's head SHA. It fails whenever the pin-time `## Unreleased`
+# body (read from the release branch's merge-base with `main`) differs
+# from the current `main` `## Unreleased` body. Remediation: rerun
+# `release_harn.harn` from `burin-labs/harn-bump-fleet` — that re-pins
+# on fresh `main`, runs the smart-subtract, and force-pushes the PR.
+#
+# Wire `release-pr-drift-check` as a required status check on a ruleset
+# scoped to PRs from `release/v*` head refs so branch protection
+# evaluates the most recent posted check_run on the PR head SHA.
+#
+# Background: burin-labs/harn-bump-fleet#39.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+  push:
+    branches: [main]
+    paths:
+      - CHANGELOG.md
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: read
+
+concurrency:
+  group: release-pr-drift-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Identify release PR targets
+        id: targets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            if [[ "$PR_HEAD_REF" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              jq -nc \
+                --arg ref "$PR_HEAD_REF" \
+                --arg sha "$PR_HEAD_SHA" \
+                --arg pr "$PR_NUMBER" \
+                '[{ref:$ref, sha:$sha, pr:$pr}]' > targets.json
+            else
+              echo '[]' > targets.json
+              echo "Head ref '$PR_HEAD_REF' is not a release branch; nothing to check." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            gh pr list \
+              --repo "$GITHUB_REPOSITORY" \
+              --state open \
+              --base main \
+              --json number,headRefName,headRefOid \
+              --jq '[
+                .[]
+                | select(.headRefName | test("^release/v[0-9]+\\.[0-9]+\\.[0-9]+$"))
+                | {ref:.headRefName, sha:.headRefOid, pr:(.number|tostring)}
+              ]' > targets.json
+          fi
+          count=$(jq 'length' targets.json)
+          echo "Found $count release PR target(s):"
+          jq . targets.json
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Run drift check and post check_runs
+        if: steps.targets.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Body of the first `## Unreleased` up to the next `## ` heading,
+          # with leading/trailing blank lines stripped. Matches the harness's
+          # `trim(text[unreleased.end:next_heading.start])`. Single awk pass
+          # so an early `exit` cannot SIGPIPE the upstream `git show` and
+          # trip `pipefail`.
+          extract_unreleased() {
+            awk '
+              !done && /^## [Uu]nreleased[[:space:]]*$/ { in_section = 1; next }
+              in_section && /^## / { in_section = 0; done = 1 }
+              in_section { lines[++n] = $0 }
+              END {
+                first = 1
+                while (first <= n && lines[first] ~ /^[[:space:]]*$/) first++
+                last = n
+                while (last >= first && lines[last] ~ /^[[:space:]]*$/) last--
+                for (i = first; i <= last; i++) print lines[i]
+              }
+            '
+          }
+
+          post_check() {
+            local sha="$1" conclusion="$2" title="$3" summary_file="$4"
+            jq -nc \
+              --arg name "release-pr-drift-check" \
+              --arg head_sha "$sha" \
+              --arg conclusion "$conclusion" \
+              --arg title "$title" \
+              --rawfile summary "$summary_file" \
+              '{name:$name, head_sha:$head_sha, status:"completed", conclusion:$conclusion, output:{title:$title, summary:$summary}}' \
+              | gh api -X POST "repos/$REPO/check-runs" --input -
+          }
+
+          drift_detected=0
+          while read -r target; do
+            ref=$(jq -r '.ref' <<< "$target")
+            sha=$(jq -r '.sha' <<< "$target")
+            pr=$(jq -r '.pr' <<< "$target")
+            ver=${ref#release/v}
+
+            git fetch origin "$ref" --quiet || true
+            pin=$(git merge-base "$sha" origin/main)
+
+            pin_body=$(git show "$pin:CHANGELOG.md" | extract_unreleased)
+            main_body=$(git show origin/main:CHANGELOG.md | extract_unreleased)
+
+            summary_file=$(mktemp)
+            if [ "$pin_body" = "$main_body" ]; then
+              cat > "$summary_file" <<EOF
+          \`main\`'s \`## Unreleased\` matches the pin the release branch is parented at.
+
+          - Release branch: \`$ref\`
+          - Pin SHA: \`$pin\`
+          EOF
+              post_check "$sha" success "No drift detected" "$summary_file"
+              echo "::notice title=PR #$pr ($ref)::No CHANGELOG drift detected at pin $pin."
+            else
+              # Cap the diff so the check_run summary stays well under the
+              # 64KB GitHub limit even on a large CHANGELOG diff.
+              diff_out=$(diff -u <(printf '%s\n' "$pin_body") <(printf '%s\n' "$main_body") | head -200 || true)
+              cat > "$summary_file" <<EOF
+          \`main\`'s \`## Unreleased\` body has diverged from the pin-time \`## Unreleased\`
+          that this release PR is parented at. GitHub's automatic 3-way merge would
+          silently absorb the new bullets into \`## v$ver\` on merge, publishing a
+          CHANGELOG that lies about what's in the shipped artifact.
+
+          **Remediation:** rerun the release harness from \`harn-bump-fleet\`:
+
+          \`\`\`
+          harn run release_harn.harn -- --mode ship-pr --agent --yes-live-release
+          \`\`\`
+
+          The harness re-pins on fresh \`origin/main\`, smart-subtracts the pin-time
+          bullets, and force-pushes a clean release PR.
+
+          - Release branch: \`$ref\`
+          - Pin SHA: \`$pin\`
+          - Background: [burin-labs/harn-bump-fleet#39](https://github.com/burin-labs/harn-bump-fleet/issues/39)
+
+          <details><summary>Diff (pin <code>## Unreleased</code> → <code>main</code> <code>## Unreleased</code>)</summary>
+
+          \`\`\`diff
+          $diff_out
+          \`\`\`
+
+          </details>
+          EOF
+              post_check "$sha" failure "CHANGELOG \`## Unreleased\` drift detected" "$summary_file"
+              drift_detected=1
+              echo "::error title=PR #$pr ($ref) — CHANGELOG drift::pin $pin diverged from origin/main; rerun release_harn.harn."
+            fi
+          done < <(jq -c '.[]' targets.json)
+
+          # On pull_request, also fail the workflow's own auto-check so
+          # the PR's overall CI status reflects the drift. On push, only
+          # the posted check_run on the PR head matters — leave this run
+          # green on main to avoid spurious red squares in main's history.
+          if [ "$drift_detected" -eq 1 ] && [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            exit 1
+          fi
