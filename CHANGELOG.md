@@ -68,6 +68,14 @@ condensed series summaries instead of full per-patch history.
   calls now throw a runtime error of the form ``list has no method
   `whatever``` so issues surface at the offending line. *Breaking*
   for any script that relied on the silent-`nil` fallthrough.
+- **`cargo build` self-heals git hook configuration.** The
+  `harn-cli` build script now resets `core.hooksPath` to `.githooks`
+  whenever it drifts (the most common cause of CI surprises being
+  pre-commit / pre-push hooks that *would* have caught a `harn fmt
+  --check` regression but never ran because the user's hook config
+  pointed elsewhere). Set `HARN_DISABLE_AUTO_HOOK_SETUP=1` to opt
+  out. Skipped automatically when not building inside the Harn
+  source tree.
 - **`websocket_connect` retries transient TCP errors during
   handshake.** Connection-reset / broken-pipe / unexpected-EOF on
   the very first attempt — typically caused by the OS recycling an
