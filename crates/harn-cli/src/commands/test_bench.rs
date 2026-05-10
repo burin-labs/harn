@@ -227,6 +227,12 @@ fn finalize_session(
             tape.path.display(),
         ));
     }
+    for leak in &finalize.clock_leaks {
+        outcome.stderr.push_str(&format!(
+            "[testbench] clock leak: {} (count={})\n",
+            leak.capability_id, leak.count,
+        ));
+    }
     outcome
 }
 

@@ -450,6 +450,10 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-vm/src/triggers/registry.rs"
   "crates/harn-vm/src/triggers/scheduler.rs"
   "crates/harn-vm/src/triggers/test_util/clock.rs"
+  # leak_audit IS the runtime audit shim — it intentionally reads the
+  # host wall/monotonic clock and records the call when a mock is
+  # installed. Routing through Clock would defeat the audit's purpose.
+  "crates/harn-vm/src/triggers/test_util/clock_leak.rs"
   "crates/harn-vm/src/triggers/test_util/mod.rs"
   "crates/harn-vm/src/triggers/webhook_intake.rs"
   "crates/harn-vm/src/triggers/worker_queue.rs"

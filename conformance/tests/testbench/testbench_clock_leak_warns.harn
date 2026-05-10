@@ -1,0 +1,18 @@
+/**
+ * Calls `date_iso()` — a stdlib builtin that reads the OS wall clock
+ * directly because it predates the unified `clock_mock`. Under a paused
+ * testbench mock the `clock_mock::leak_audit` shim records the read as
+ * a fidelity hazard, and `testbench_clock_leaks()` surfaces the
+ * recorded set so a script (or operator) can assert which capabilities
+ * bypassed the mock.
+ */
+pipeline test(task) {
+  mock_time(1767225600000)
+  let _stamp = date_iso()
+  let _stamp_again = date_iso()
+  let leaks = testbench_clock_leaks()
+  println(len(leaks) == 1)
+  println(leaks[0].capability == "stdlib/date_iso")
+  println(leaks[0].count == 2)
+  unmock_time()
+}

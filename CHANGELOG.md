@@ -62,6 +62,19 @@ condensed series summaries instead of full per-patch history.
   `llm_handlers_persona_compose` conformance fixture pins the
   end-to-end persona-shaped chain (routing + budget + logging) so the
   cost-moat substrate stays exercised. (#1470)
+- **Testbench clock-leak audit.** New `crate::clock_mock::leak_audit`
+  shim records every `capability_id` that observes the OS wall or
+  monotonic clock while a testbench mock is installed.
+  `TestbenchSession::finalize` now returns a `clock_leaks` vector
+  alongside `fs_diff` / `recorded_subprocesses` / `tape`; `harn
+  test-bench run` prints `[testbench] clock leak: <capability>
+  (count=N)` to stderr for each unique entry; scripts introspect via
+  the new `testbench_clock_leaks()` builtin. Three demonstration call
+  sites (`stdlib/date_iso`, `host_call/process.exec.{started_at,
+  ended_at}`) are migrated to the audited helpers, and the new
+  `conformance/tests/testbench/testbench_clock_leak_warns.harn` case
+  pins the contract. Closes the testbench-mode epic (#1438) and its
+  fidelity-audit follow-up (#1466).
 - **String escape sequences `\r` and `\0`.** Double-quoted string
   literals now recognize `\r` (carriage return) and `\0` (NUL) in
   addition to the existing `\n`, `\t`, `\\`, `\"`, `\$`. Triple-quoted

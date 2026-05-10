@@ -74,6 +74,17 @@ pub mod clock_mock {
         active_mock_clock, advance, clear_overrides, install_override, instant_now, is_mocked,
         now_ms, now_utc, sleep, ClockInstant, ClockOverrideGuard, MockClock,
     };
+
+    /// Runtime audit for capabilities that observe real wall-clock or
+    /// monotonic time while a testbench mock is installed. See the module
+    /// docs for the full design.
+    pub mod leak_audit {
+        #[cfg(test)]
+        pub use crate::triggers::test_util::clock_leak::TEST_LOCK;
+        pub use crate::triggers::test_util::clock_leak::{
+            drain, instant_now, reset, snapshot, wall_now, ClockLeak,
+        };
+    }
 }
 
 pub mod typecheck;
@@ -340,4 +351,5 @@ pub fn reset_thread_local_state() {
     agent_events::reset_all_sinks();
     agent_sessions::reset_session_store();
     mcp_registry::reset();
+    clock_mock::leak_audit::reset();
 }

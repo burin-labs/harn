@@ -47,6 +47,7 @@ pub mod wasi_process;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::clock_mock::leak_audit::{self, ClockLeak};
 use crate::clock_mock::{install_override, ClockOverrideGuard, MockClock};
 use crate::egress::reset_egress_policy_for_host;
 
@@ -303,6 +304,11 @@ struct SavedEgressEnv {
 
 impl TestbenchSession {
     fn install(bench: Testbench) -> Result<Self, TestbenchError> {
+        // Clear the leak audit so the session reports leaks it observed
+        // rather than entries left behind by an earlier session that
+        // never called `finalize` (e.g. a panicking test).
+        leak_audit::reset();
+
         let (clock_guard, started_at_unix_ms) = match bench.clock {
             ClockConfig::Real => (None, None),
             ClockConfig::Paused { starting_at_ms } => (
@@ -497,11 +503,17 @@ impl TestbenchSession {
                 records: tape.records.len(),
             });
         }
+        // Drain the leak audit last so anything emitted while we
+        // serialized other artifacts (e.g. tape persistence reading the
+        // wall clock for timestamps it shouldn't be reading) is still
+        // captured in this session's report.
+        let clock_leaks = leak_audit::drain();
         // The Drop impl undoes mocks regardless of finalize success.
         Ok(TestbenchFinalize {
             fs_diff: diff,
             recorded_subprocesses: recorded,
             tape: emitted_tape,
+            clock_leaks,
         })
     }
 }
@@ -533,6 +545,11 @@ pub struct TestbenchFinalize {
     pub fs_diff: Vec<overlay_fs::DiffEntry>,
     pub recorded_subprocesses: Vec<process_tape::TapeEntry>,
     pub tape: Option<EmittedTape>,
+    /// Capabilities that observed real wall-clock or monotonic time
+    /// during the session. Empty under a hermetic run; non-empty entries
+    /// are fidelity hazards the operator should investigate or migrate
+    /// off of direct host-clock reads.
+    pub clock_leaks: Vec<ClockLeak>,
 }
 
 /// Summary metadata for a unified tape that was emitted at finalize-time.
@@ -564,27 +581,95 @@ impl std::error::Error for TestbenchError {}
 mod tests {
     use super::*;
 
+    /// Tests in this module mutate process-global state (env vars, the
+    /// leak audit registry) and must run one at a time even though
+    /// `cargo test` defaults to parallel execution. We share
+    /// [`leak_audit::TEST_LOCK`] so the audit module's own tests
+    /// serialize with the testbench's tests against the same registry.
+    fn serial<F: FnOnce()>(body: F) {
+        let _guard = leak_audit::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        body();
+    }
+
     #[test]
     fn paused_clock_pins_now_ms_for_session_lifetime() {
-        let bench = Testbench::builder()
-            .paused_clock_at_ms(1_700_000_000_000)
-            .build();
-        let session = bench.activate().expect("activate");
-        assert_eq!(crate::clock_mock::now_ms(), 1_700_000_000_000);
-        crate::clock_mock::advance(std::time::Duration::from_secs(60));
-        assert_eq!(crate::clock_mock::now_ms(), 1_700_000_060_000);
-        drop(session);
-        // After drop the override is gone; no assertion on real time.
-        assert!(!crate::clock_mock::is_mocked());
+        serial(|| {
+            let bench = Testbench::builder()
+                .paused_clock_at_ms(1_700_000_000_000)
+                .build();
+            let session = bench.activate().expect("activate");
+            assert_eq!(crate::clock_mock::now_ms(), 1_700_000_000_000);
+            crate::clock_mock::advance(std::time::Duration::from_secs(60));
+            assert_eq!(crate::clock_mock::now_ms(), 1_700_000_060_000);
+            drop(session);
+            // After drop the override is gone; no assertion on real time.
+            assert!(!crate::clock_mock::is_mocked());
+        });
     }
 
     #[test]
     fn deny_by_default_blocks_egress_until_drop() {
-        // Lock state to avoid leaking env into other tests.
-        let bench = Testbench::builder().deny_network().build();
-        let session = bench.activate().expect("activate");
-        assert_eq!(std::env::var("HARN_EGRESS_DEFAULT").as_deref(), Ok("deny"));
-        drop(session);
-        assert!(std::env::var("HARN_EGRESS_DEFAULT").is_err());
+        serial(|| {
+            let bench = Testbench::builder().deny_network().build();
+            let session = bench.activate().expect("activate");
+            assert_eq!(std::env::var("HARN_EGRESS_DEFAULT").as_deref(), Ok("deny"));
+            drop(session);
+            assert!(std::env::var("HARN_EGRESS_DEFAULT").is_err());
+        });
+    }
+
+    #[test]
+    fn finalize_surfaces_clock_leaks_for_contrived_capability() {
+        serial(|| {
+            let bench = Testbench::builder()
+                .paused_clock_at_ms(1_700_000_000_000)
+                .build();
+            let session = bench.activate().expect("activate");
+
+            // Contrived "leaky" capability: routes through the audit shim
+            // while a paused mock is installed. Production callers (e.g.
+            // `stdlib/date_iso`) follow the exact same pattern.
+            let _ = leak_audit::wall_now("test/contrived_leak");
+            let _ = leak_audit::instant_now("test/contrived_instant");
+            let _ = leak_audit::wall_now("test/contrived_leak");
+
+            let finalize = session.finalize().expect("finalize");
+            let by_id: std::collections::BTreeMap<&str, &ClockLeak> = finalize
+                .clock_leaks
+                .iter()
+                .map(|leak| (leak.capability_id.as_str(), leak))
+                .collect();
+            let wall = by_id
+                .get("test/contrived_leak")
+                .expect("wall leak surfaced");
+            assert_eq!(wall.count, 2);
+            let inst = by_id
+                .get("test/contrived_instant")
+                .expect("instant leak surfaced");
+            assert_eq!(inst.count, 1);
+
+            // Drain semantics: a fresh session sees no carry-over.
+            let next_session = Testbench::builder()
+                .paused_clock_at_ms(1_700_000_000_000)
+                .build()
+                .activate()
+                .expect("activate next");
+            let next = next_session.finalize().expect("finalize next");
+            assert!(next.clock_leaks.is_empty());
+        });
+    }
+
+    #[test]
+    fn audit_quiet_when_no_mock_is_active() {
+        serial(|| {
+            leak_audit::reset();
+            // No `Testbench` activated → no mock clock → no leak entries
+            // even when the helpers are called.
+            let _ = leak_audit::wall_now("test/no_mock");
+            let _ = leak_audit::instant_now("test/no_mock");
+            assert!(leak_audit::snapshot().is_empty());
+        });
     }
 }
