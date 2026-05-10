@@ -1,12 +1,17 @@
 //! Workflow graph manipulation and execution builtins.
 
 mod artifact;
+mod compact;
 mod convert;
 mod guards;
+mod hooks;
+mod host;
+mod inspect;
 mod map;
 mod policy;
 mod register;
 mod stage;
+mod state;
 mod usage;
 
 pub(in crate::stdlib) use self::artifact::load_run_tree;
