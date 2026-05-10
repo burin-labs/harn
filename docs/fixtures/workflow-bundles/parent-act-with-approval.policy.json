@@ -1,0 +1,10 @@
+{
+  "tools": [],
+  "capabilities": {
+    "workspace": ["read_text", "list", "exists"],
+    "connector": ["call"],
+    "process": ["exec"],
+    "llm": ["call"]
+  },
+  "side_effect_level": "process_exec"
+}

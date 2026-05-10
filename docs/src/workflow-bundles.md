@@ -147,3 +147,81 @@ harn run examples/skill-packs/workflow-authoring/eval.harn -- \
 `crates/harn-cli/tests/workflow_authoring_eval.rs` is the CI regression gate.
 It validates every recipe golden and every case's structural assertions, so a
 new case automatically extends the gate.
+
+## Workflow patch proposals
+
+Once a bundle exists, agents can propose **bounded, auditable edits** with a
+workflow patch instead of regenerating the whole bundle. A patch is a flat
+list of operations Harn applies to a copy of the bundle, then re-runs the
+validator and computes a structural diff plus a capability-ceiling delta.
+The patch contract is intentionally small — each op maps directly onto an
+"insert a verifier here" or "narrow this node's tool policy" intent.
+
+| `op` | What it does |
+|---|---|
+| `insert_node` | Inserts a workflow node (`agent`, `action`, `approval`, `notification`, …). |
+| `add_edge` | Adds an edge between two existing nodes. |
+| `upsert_prompt_capsule` | Inserts or replaces a prompt capsule for a node. |
+| `update_node_policy` | Patches `task_label` / `prompt` / `system` / `tools` / `model_policy` / `capability_policy` / `approval_policy` on an existing node. |
+| `update_bundle_policy` | Patches `autonomy_tier` / `tool_policy` / `approval_required` / `retry` / `catchup` at the bundle level. |
+
+```bash
+harn workflow patch validate \
+  --bundle docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json \
+  --patch  docs/fixtures/workflow-bundles/pr-monitor-verifier.patch.json \
+  --parent-ceiling docs/fixtures/workflow-bundles/parent-act-with-approval.policy.json \
+  --json
+
+harn workflow patch apply --bundle ... --patch ... --out ...
+harn workflow patch preview --bundle ... --patch ... --mermaid
+```
+
+Failure modes the validator enforces:
+
+- Empty `operations` list (patches must do something — silent no-ops are
+  rejected).
+- Duplicate `insert_node` ids; unknown endpoints in `add_edge`; duplicate
+  edges; collisions on `upsert_prompt_capsule.node_id`.
+- Any patch that **widens** the parent ceiling along *tools*,
+  *capabilities*, *side-effect level*, *workspace roots*, *connector scopes*,
+  *command gates*, or *autonomy tier*. Each violation lands in the report's
+  `capability_delta.widening` array with a stable `kind` discriminator.
+
+### Safe Harn function tools
+
+`harn workflow function-tools --json` enumerates the allowlisted Harn
+functions an agent may call from inside the patch-authoring loop. Each
+descriptor carries an ACP-aligned `ToolAnnotations` block (kind +
+side-effect level + capability requirements) so a host can wire the tool
+straight into a model surface. The current allowlist is read-only or
+pure-think only:
+
+- `workflow_bundle_validate` / `workflow_bundle_preview` /
+  `workflow_bundle_capability_ceiling` — inspect a bundle on disk.
+- `workflow_patch_validate` — apply + validate a patch in memory and return
+  the report.
+
+Adding a function to the allowlist is a deliberate, reviewed change in
+`crates/harn-vm/src/orchestration/safe_function_tools.rs`. Anything outside
+the list is not exposed to agents.
+
+### Nested invocation ceiling
+
+When a script or host launches another Harn invocation (`harn run`,
+`harn workflow run`, `harn supervisor fire/replay`, a Burin harness),
+Harn projects the target's requested ceiling and rejects launches that
+would widen the parent's. `harn workflow nested-ceiling --bundle <path>
+--parent <policy>` exposes the same scanner so hosts can sanity-check
+before launch:
+
+```bash
+harn workflow nested-ceiling \
+  --bundle docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json \
+  --parent docs/fixtures/workflow-bundles/parent-act-with-approval.policy.json
+```
+
+The scanner also accepts a Harn script source (token-level capability
+projection) and a Burin harness manifest (explicit `capability_ceiling`
+block, falling back to "request everything" if the manifest is silent —
+silence is treated as the most invasive request, so the parent rejects
+rather than rubber-stamps).

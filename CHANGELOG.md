@@ -26,6 +26,28 @@ condensed series summaries instead of full per-patch history.
   `harn update` now accept `--json`. v1 lockfiles migrate transparently
   on the next install. Documented the cross-repo bump workflow in
   `docs/src/package-authoring.md`. (#1428)
+- **Workflow patch proposals + safe Harn function tools.** Agents can now
+  author bounded, auditable changes to a workflow bundle through a flat
+  patch JSON (`insert_node`, `add_edge`, `upsert_prompt_capsule`,
+  `update_node_policy`, `update_bundle_policy`) instead of regenerating
+  the whole bundle. Three new `harn workflow patch
+  {validate,apply,preview}` subcommands apply the patch to a copy,
+  re-run the bundle validator, emit a structural diff, and reject
+  anything that widens the parent capability ceiling along *tools*,
+  *capabilities*, *side-effect level*, *workspace roots*, *connector
+  scopes*, *command gates*, or *autonomy tier*. `harn workflow
+  function-tools` enumerates an allowlist of read-only / pure-think
+  Harn functions an agent may call from inside the patch loop, each
+  carrying an ACP-aligned `ToolAnnotations` block hosts can wire
+  straight into a model surface. `harn workflow nested-ceiling`
+  exposes the same scanner used internally so hosts can reject nested
+  Harn invocations (workflow bundles, Harn scripts, Burin harness
+  manifests) that would widen the active execution policy. The
+  workflow-authoring skill pack and `docs/src/workflow-bundles.md`
+  cover the contract; a new
+  `crates/harn-cli/tests/workflow_patch_cli.rs` gate exercises the
+  validate / apply / preview / function-tools / nested-ceiling surfaces
+  end-to-end. (#1423)
 - **Python and Go protocol bindings.** Extended
   `harn dump-protocol-artifacts` to emit a stdlib-only Python 3.9+ module
   (`spec/protocol-artifacts/python/harn_protocol.py`) and a Go package

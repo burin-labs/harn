@@ -16,6 +16,9 @@ allowed_tools:
   - "Bash(harn workflow validate:*)"
   - "Bash(harn workflow preview:*)"
   - "Bash(harn workflow run:*)"
+  - "Bash(harn workflow patch:*)"
+  - "Bash(harn workflow function-tools:*)"
+  - "Bash(harn workflow nested-ceiling:*)"
   - "Bash(harn check:*)"
   - "Read"
   - "Write"
@@ -168,9 +171,85 @@ gate (`crates/harn-cli/tests/workflow_authoring_eval.rs`) loads every case +
 recipe, asserts the goldens validate / preview / run, and asserts the
 structural assertions hold. Add a case → CI catches drift.
 
+## Workflow patch authoring
+
+When the user wants to **modify** an existing bundle (insert a verifier
+between two stages, add an approval gate, narrow a node's tool policy),
+emit a **workflow patch** instead of rewriting the bundle. Patches are
+auditable JSON: Harn applies them to a copy of the bundle, runs the
+validator, computes a structural diff, and rejects anything that widens
+the parent capability ceiling.
+
+```bash
+harn workflow patch validate \
+    --bundle pr-monitor.bundle.json \
+    --patch  pr-verifier.patch.json \
+    --parent-ceiling /path/to/parent.json --json
+harn workflow patch apply --bundle ... --patch ... --out ... --json
+harn workflow patch preview --bundle ... --patch ... --mermaid
+```
+
+The patch JSON is a flat list of operations:
+
+| `op` | Purpose | Required fields |
+|---|---|---|
+| `insert_node` | Add a workflow node (agent, verifier, approval, notification). | `node_id`, optional `node` body |
+| `add_edge` | Connect two existing nodes. | `from`, `to`, optional `branch`, `label` |
+| `upsert_prompt_capsule` | Insert or replace a prompt capsule for a node. | `capsule_id`, `capsule.{node_id, prompt}` |
+| `update_node_policy` | Patch a node's `task_label` / `prompt` / `system` / `tools` / `model_policy` / `capability_policy` / `approval_policy`. | `node_id`, `policy.<field>` |
+| `update_bundle_policy` | Patch bundle-level `autonomy_tier` / `tool_policy` / `approval_required` / `retry` / `catchup`. | `policy.<field>` |
+
+**Hard rules — the validator enforces them:**
+
+- The patch must declare `schema_version: 1` and a non-empty `id`.
+- An empty `operations` list is rejected (patches must do something).
+- `insert_node` fails on a duplicate id; `add_edge` fails on a duplicate
+  edge or unknown endpoint; `upsert_prompt_capsule` fails when another
+  capsule already targets the same node.
+- A patched bundle that widens any of `tools`, `capabilities`,
+  `side_effect_level`, `workspace_roots`, connector scopes, command
+  gates, or `autonomy_tier` against `--parent-ceiling` is rejected with
+  per-dimension `widening` violations. **Patches never expand
+  permissions.**
+
+Worked example: `recipes/pr-monitor-verifier-patch/patch.json` inserts
+a deterministic verifier and a repair branch into the PR-monitor recipe
+and validates against the canonical fixture.
+
+## Safe Harn function tools
+
+`harn workflow function-tools --json` lists the allowlisted Harn
+functions an agent may call from inside the patch-authoring loop. Every
+descriptor is read-only or pure-think with an ACP-aligned
+`ToolAnnotations` block: hosts can wire them straight into a model's
+tool surface without auditing each one separately. The current
+allowlist:
+
+- `workflow_bundle_validate` — validate a bundle JSON file at a path.
+- `workflow_bundle_preview` — normalized graph + mermaid + editable fields.
+- `workflow_bundle_capability_ceiling` — capability ceiling the bundle would request.
+- `workflow_patch_validate` — apply + validate a patch in memory and return the report.
+
+Adding a function to this list is a deliberate, reviewed change in
+`crates/harn-vm/src/orchestration/safe_function_tools.rs`. The default
+posture is "not exposed."
+
+## Nested invocation ceiling
+
+When a Harn script under an active execution policy launches another
+Harn invocation (`harn run`, `harn workflow run`, `harn supervisor
+fire/replay`, a Burin harness), the parent must scan the target and
+reject anything that asks for more than its own ceiling.
+`harn workflow nested-ceiling --bundle <path> --parent <policy>` exposes
+the same scanner used internally so hosts can sanity-check before
+launching.
+
 ## Pointers
 
 - Bundle contract: [`docs/src/workflow-bundles.md`](../../../docs/src/workflow-bundles.md)
 - Trigger / connector providers: [`docs/llm/harn-triggers-quickref.md`](../../../docs/llm/harn-triggers-quickref.md)
 - Supervisor commands: [`docs/src/workflow-supervisor.md`](../../../docs/src/workflow-supervisor.md)
 - Validator source of truth: [`crates/harn-vm/src/orchestration/workflow_bundle.rs`](../../../crates/harn-vm/src/orchestration/workflow_bundle.rs)
+- Patch contract source: [`crates/harn-vm/src/orchestration/workflow_patch.rs`](../../../crates/harn-vm/src/orchestration/workflow_patch.rs)
+- Safe function-tool allowlist: [`crates/harn-vm/src/orchestration/safe_function_tools.rs`](../../../crates/harn-vm/src/orchestration/safe_function_tools.rs)
+- Nested invocation guard: [`crates/harn-vm/src/orchestration/nested_invocation.rs`](../../../crates/harn-vm/src/orchestration/nested_invocation.rs)

@@ -66,6 +66,18 @@ pub use workflow::*;
 mod workflow_bundle;
 pub use workflow_bundle::*;
 
+mod workflow_patch;
+pub use workflow_patch::*;
+
+mod safe_function_tools;
+pub use safe_function_tools::*;
+
+mod nested_invocation;
+pub use nested_invocation::*;
+
+#[cfg(test)]
+mod workflow_test_fixtures;
+
 mod records;
 pub use records::*;
 

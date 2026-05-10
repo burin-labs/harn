@@ -155,7 +155,11 @@ pub(crate) use trust::{
 pub(crate) use verify::VerifyArgs;
 pub(crate) use viz::VizArgs;
 pub(crate) use watch::WatchArgs;
-pub(crate) use workflow::{WorkflowArgs, WorkflowCommand};
+pub(crate) use workflow::{
+    WorkflowArgs, WorkflowCommand, WorkflowFunctionToolsArgs, WorkflowNestedCeilingArgs,
+    WorkflowPatchApplyArgs, WorkflowPatchCommand, WorkflowPatchPreviewArgs,
+    WorkflowPatchValidateArgs,
+};
 
 use clap::{Parser, Subcommand};
 

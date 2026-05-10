@@ -102,6 +102,49 @@ WorkflowBundle (schema_version: 1). Validate against the rules in
 that prompting guide. Use the recipes/ directory as concrete examples.
 ```
 
+## Workflow patches (modifying an existing bundle)
+
+When the user asks to **modify** a bundle that already exists (insert a
+verifier, narrow a node's tool policy, add an approval gate, add a repair
+branch), respond with a **patch** instead of a fresh bundle. The patch
+envelope mirrors the bundle envelope — three XML-style sections — but the
+JSON inside `<bundle>` is replaced with `<patch>`:
+
+```text
+<patch>
+{
+  "schema_version": 1,
+  "id": "kebab-case-patch-id",
+  "summary": "<one short sentence>",
+  "operations": [ ... ]
+}
+</patch>
+
+<rationale>
+- one bullet per operation
+- ≤ 5 bullets, plain prose
+</rationale>
+
+<verify>
+harn workflow patch validate --bundle in.bundle.json --patch out.patch.json --json
+harn workflow patch preview  --bundle in.bundle.json --patch out.patch.json --mermaid
+harn workflow patch apply    --bundle in.bundle.json --patch out.patch.json --out patched.bundle.json
+</verify>
+```
+
+Hard rules for patches (the validator enforces them):
+
+- `operations` must not be empty (a no-op patch is rejected).
+- `insert_node` must use a fresh `node_id`; `add_edge` endpoints must
+  exist (insert nodes first if needed); `upsert_prompt_capsule.node_id`
+  must already exist *after* prior ops apply.
+- Never raise `policy.autonomy_tier`, `side_effect_level`, the per-node
+  `capability_policy.tools`, or any `capability_policy.capabilities` that
+  the parent ceiling does not already grant. The validator returns a
+  per-dimension `widening` list when this happens — fix the patch by
+  either narrowing the request or redirecting the work to a node the
+  parent already trusts.
+
 ## Why XML, not Markdown fences
 
 XML-style tags are robust against the model accidentally closing a fenced
