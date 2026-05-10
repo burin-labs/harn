@@ -1,0 +1,16 @@
+pipeline default() {
+  // Locks in that `harn fmt` preserves the `->` arrow on zero-arg closure
+  // literals. Pre-fix the formatter silently rewrote `{ -> expr }` to
+  // `{ expr }`, turning a callable closure into an immediately-evaluated
+  // block expression. Both shapes below must survive `harn fmt --check`
+  // (via `make fmt-harn`) and still execute as closures at runtime.
+  let zero = { -> 1 }
+  fn heavy() {
+    return 7
+  }
+  let with_call = { -> heavy() }
+  let one = { x -> x + 1 }
+  println(zero())
+  println(with_call())
+  println(one(2))
+}

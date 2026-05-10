@@ -659,13 +659,13 @@ impl Formatter<'_> {
         if body.len() == 1 && is_simple_expr(&body[0]) {
             let expr = self.format_expr(&body[0], indent);
             if params.is_empty() {
-                format!("{{ {expr} }}")
+                format!("{{ -> {expr} }}")
             } else {
                 format!("{{ {params_str} -> {expr} }}")
             }
         } else {
             let opening = if params.is_empty() {
-                String::from("{")
+                String::from("{ ->")
             } else {
                 format!("{{ {params_str} ->")
             };
