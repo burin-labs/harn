@@ -1,0 +1,143 @@
+// std/config — typed environment-variable readers and model-id parsing.
+//
+// Complements the `env(key)` and `env_or(key, default)` builtins with
+// type-coerced readers (`env_int`, `env_float`, `env_bool`, `env_list`)
+// and the `parse_model_id` / `model_from_env` helpers every LLM-driven
+// Harn script reinvents. All readers fall back transparently when the
+// env var is unset, blank, or malformed for the requested type.
+//
+// Import with: import { env_int, env_bool, model_from_env, parse_model_id } from "std/config"
+/** Result of `parse_model_id`: provider tag, the bare model name, and the raw input. */
+type ModelIdParts = {provider: string, model: string, raw: string}
+
+/** Read an env var as a non-empty string, returning nil when unset/blank. */
+pub fn env_str(key: string) -> any {
+  let raw = env(key)
+  if raw == nil {
+    return nil
+  }
+  if type_of(raw) == "string" && raw == "" {
+    return nil
+  }
+  return to_string(raw)
+}
+
+/** Read an env var as an int, falling back to `default` on missing/unparseable input. */
+pub fn env_int(key: string, default: int) -> int {
+  let raw = env(key)
+  if raw == nil {
+    return default
+  }
+  return to_int(raw) ?? default
+}
+
+/** Read an env var as a float, falling back to `default` on missing/unparseable input. */
+pub fn env_float(key: string, default: float) -> float {
+  let raw = env(key)
+  if raw == nil {
+    return default
+  }
+  return to_float(raw) ?? default
+}
+
+/**
+ * Read an env var as a bool. Recognizes "true/false/yes/no/y/n/1/0"
+ * (case-insensitive) and falls back to `default` when missing or
+ * unparseable.
+ */
+pub fn env_bool(key: string, default: bool) -> bool {
+  let raw = env(key)
+  if raw == nil {
+    return default
+  }
+  let normalized = lowercase(trim(to_string(raw)))
+  if normalized == "" {
+    return default
+  }
+  if normalized == "true" || normalized == "yes" || normalized == "y" || normalized == "1" {
+    return true
+  }
+  if normalized == "false" || normalized == "no" || normalized == "n" || normalized == "0" {
+    return false
+  }
+  return default
+}
+
+/**
+ * Read an env var as a list<string> by splitting on `separator` (default
+ * `,`) and trimming each item. Empty entries are dropped. Returns the
+ * empty list when the env var is unset or blank.
+ */
+pub fn env_list(key: string, separator: string = ",") -> list<string> {
+  let raw = env(key)
+  if raw == nil {
+    return []
+  }
+  let text = to_string(raw)
+  if text == "" {
+    return []
+  }
+  var out = []
+  for part in split(text, separator) {
+    let trimmed = trim(part)
+    if trimmed != "" {
+      out = out + [trimmed]
+    }
+  }
+  return out
+}
+
+/**
+ * Split a model identifier into `{provider, model, raw}`.
+ *
+ *   "ollama:qwen2.5:32b" -> {provider: "ollama", model: "qwen2.5:32b"}
+ *   "local:gpt-oss"      -> {provider: "local",  model: "gpt-oss"}
+ *   "openai/gpt-5"       -> {provider: "openrouter", model: "openai/gpt-5"}
+ *   "claude-opus-4-7"    -> {provider: "auto",   model: "claude-opus-4-7"}
+ *
+ * The "auto" provider is the documented sentinel that lets the runtime
+ * choose based on the model registry.
+ */
+pub fn parse_model_id(id: string) -> ModelIdParts {
+  let raw = id ?? ""
+  if raw == "" {
+    return {provider: "auto", model: "", raw: ""}
+  }
+  for prefix in [
+    "ollama:",
+    "local:",
+    "openrouter:",
+    "openai:",
+    "anthropic:",
+    "google:",
+    "azure:",
+    "groq:",
+    "together:",
+    "fireworks:",
+    "mistral:",
+    "deepseek:",
+    "vertex:",
+  ] {
+    if starts_with(raw, prefix) {
+      let provider = substring(prefix, 0, len(prefix) - 1)
+      return {provider: provider, model: substring(raw, len(prefix)), raw: raw}
+    }
+  }
+  if contains(raw, "/") && !starts_with(raw, "/") {
+    return {provider: "openrouter", model: raw, raw: raw}
+  }
+  return {provider: "auto", model: raw, raw: raw}
+}
+
+/**
+ * Resolve a model id from `env_key`, falling back to `default` when the
+ * env var is unset or empty. The result is suitable for passing directly
+ * to `parse_model_id` or to the `model` option of `llm_call`.
+ */
+pub fn model_from_env(env_key: string, default: string) -> string {
+  let resolved = env_str(env_key)
+  if resolved == nil {
+    return default
+  }
+  return to_string(resolved)
+}

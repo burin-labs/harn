@@ -1,0 +1,195 @@
+// std/poll — option-shaped polling and retry helpers.
+//
+// Complements std/async (which exposes the simpler positional `wait_for` and
+// `retry_predicate_with_backoff` primitives) with three patterns harnesses
+// repeatedly hand-roll:
+//
+//   * `poll_until(check, opts)` — call `check()` on an interval until it
+//     returns a truthy value; return that value (not a Result), or nil on
+//     timeout.
+//   * `wait_for_status(probe, terminal, opts)` — drive a status machine
+//     until `probe()` returns a value in `terminal`; return the final
+//     status payload.
+//   * `retry_with_result(action, opts)` — exponential-backoff a fallible
+//     action that returns Result and report `{ok, value, error, attempts,
+//     elapsed_ms}` so callers don't have to track the bookkeeping.
+//
+// All three honor `mock_time` / `advance_time` because they delegate
+// timing to `now_ms`, `monotonic_ms`, and `sleep_ms` (the unified clock).
+//
+// Import with: import { poll_until, wait_for_status, retry_with_result } from "std/poll"
+/** Polling configuration shared by `poll_until` and `wait_for_status`. */
+type PollOptions = {timeout_ms?: int, interval_ms?: int, max_attempts?: int, initial_delay_ms?: int}
+
+type RetryOptions = {max_attempts?: int, base_ms?: int, cap_ms?: int, multiplier?: float}
+
+type RetryReport = {ok: bool, value: any, error: any, attempts: int, elapsed_ms: int}
+
+fn __poll_options(options) {
+  let opts = options ?? {}
+  let interval = to_int(opts?.interval_ms) ?? 250
+  return {
+    timeout_ms: to_int(opts?.timeout_ms) ?? 30000,
+    interval_ms: if interval > 0 {
+      interval
+    } else {
+      250
+    },
+    max_attempts: to_int(opts?.max_attempts) ?? 0,
+    initial_delay_ms: to_int(opts?.initial_delay_ms) ?? 0,
+  }
+}
+
+/**
+ * Repeatedly invoke `check`. Return the first truthy value it produces, or
+ * nil once `timeout_ms` (default 30 s) elapses or `max_attempts` (when set
+ * and > 0) is exhausted. The first probe runs immediately unless
+ * `initial_delay_ms` is positive.
+ */
+pub fn poll_until(check, options: PollOptions = {}) -> any {
+  let resolved = __poll_options(options)
+  if resolved.initial_delay_ms > 0 {
+    sleep_ms(resolved.initial_delay_ms)
+  }
+  let started = monotonic_ms()
+  var attempts = 0
+  while true {
+    let value = check()
+    attempts = attempts + 1
+    if value {
+      return value
+    }
+    if resolved.max_attempts > 0 && attempts >= resolved.max_attempts {
+      return nil
+    }
+    if monotonic_ms() - started >= resolved.timeout_ms {
+      return nil
+    }
+    sleep_ms(resolved.interval_ms)
+  }
+  return nil
+}
+
+/**
+ * Drive a status machine to completion. `probe` returns the current status
+ * record (any value); polling stops when `extractor(probe_value)` lands in
+ * the `terminal` list. The full probe value (not just the status) is
+ * returned, or nil on timeout / max-attempts exhaustion.
+ *
+ * When `extractor` is nil, the probe value itself is treated as the
+ * status — pass a closure like `{ row -> row?.status }` to drill into a
+ * dict.
+ */
+pub fn wait_for_status(probe, terminal: list<string>, options: PollOptions = {}, extractor = nil) -> any {
+  let resolved = __poll_options(options)
+  let terminal_set = set(terminal ?? [])
+  if resolved.initial_delay_ms > 0 {
+    sleep_ms(resolved.initial_delay_ms)
+  }
+  let started = monotonic_ms()
+  var attempts = 0
+  while true {
+    let row = probe()
+    attempts = attempts + 1
+    let status = if extractor == nil {
+      row
+    } else {
+      extractor(row)
+    }
+    if status != nil && set_contains(terminal_set, to_string(status)) {
+      return row
+    }
+    if resolved.max_attempts > 0 && attempts >= resolved.max_attempts {
+      return nil
+    }
+    if monotonic_ms() - started >= resolved.timeout_ms {
+      return nil
+    }
+    sleep_ms(resolved.interval_ms)
+  }
+  return nil
+}
+
+fn __retry_options(options) {
+  let opts = options ?? {}
+  let max_attempts = to_int(opts?.max_attempts) ?? 5
+  let base = to_int(opts?.base_ms) ?? 200
+  let cap = to_int(opts?.cap_ms) ?? 30000
+  let mult = to_float(opts?.multiplier) ?? 2.0
+  return {
+    max_attempts: if max_attempts > 0 {
+      max_attempts
+    } else {
+      1
+    },
+    base_ms: if base > 0 {
+      base
+    } else {
+      1
+    },
+    cap_ms: if cap > 0 {
+      cap
+    } else {
+      base
+    },
+    multiplier: if mult > 0.0 {
+      mult
+    } else {
+      2.0
+    },
+  }
+}
+
+fn __backoff_delay(base_ms: int, attempt: int, multiplier: float, cap_ms: int) -> int {
+  var delay = to_float(base_ms) ?? 0.0
+  var i = 0
+  while i < attempt {
+    delay = delay * multiplier
+    i = i + 1
+  }
+  let capped = if delay > to_float(cap_ms) {
+    to_float(cap_ms)
+  } else {
+    delay
+  }
+  return to_int(capped) ?? cap_ms
+}
+
+/**
+ * Run a fallible action with exponential backoff. `action` must return a
+ * Result (i.e. its body wraps `try { … }` or returns Ok/Err). Each
+ * non-success retries after `base_ms * multiplier^attempt` ms, capped at
+ * `cap_ms`. Returns a structured RetryReport so callers can log or
+ * propagate without re-wrapping.
+ */
+pub fn retry_with_result(action, options: RetryOptions = {}) -> RetryReport {
+  let resolved = __retry_options(options)
+  let started = monotonic_ms()
+  var attempt = 0
+  var last_error = nil
+  while attempt < resolved.max_attempts {
+    let outcome = action(attempt)
+    if is_ok(outcome) {
+      return {
+        ok: true,
+        value: unwrap(outcome),
+        error: nil,
+        attempts: attempt + 1,
+        elapsed_ms: monotonic_ms() - started,
+      }
+    }
+    last_error = unwrap_err(outcome)
+    attempt = attempt + 1
+    if attempt < resolved.max_attempts {
+      let delay = __backoff_delay(resolved.base_ms, attempt - 1, resolved.multiplier, resolved.cap_ms)
+      sleep_ms(delay)
+    }
+  }
+  return {
+    ok: false,
+    value: nil,
+    error: last_error,
+    attempts: resolved.max_attempts,
+    elapsed_ms: monotonic_ms() - started,
+  }
+}

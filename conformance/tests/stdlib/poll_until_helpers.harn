@@ -1,0 +1,68 @@
+// Verifies std/poll's poll_until / wait_for_status / retry_with_result
+// behave correctly under mock_time. Probes use store_set/store_get so
+// closure mutations survive across calls (Harn closures capture by
+// value).
+import { poll_until, retry_with_result, wait_for_status } from "std/poll"
+
+pipeline default() {
+  mock_time(1700000000000)
+  store_set("probe_counter", 0)
+  let value = poll_until(
+    fn() {
+      let n = store_get("probe_counter") ?? 0 + 1
+      store_set("probe_counter", n)
+      if n < 3 {
+        return nil
+      }
+      return "ready"
+    },
+    {timeout_ms: 60000, interval_ms: 100},
+  )
+  println(value)
+  println(store_get("probe_counter"))
+  store_set("status_counter", 0)
+  let row = wait_for_status(
+    fn() {
+      let n = store_get("status_counter") ?? 0 + 1
+      store_set("status_counter", n)
+      if n == 1 {
+        return {status: "queued"}
+      }
+      if n == 2 {
+        return {status: "running"}
+      }
+      return {status: "completed", url: "https://x"}
+    },
+    ["completed", "failed"],
+    {timeout_ms: 60000, interval_ms: 50},
+    fn(row) { return row?.status },
+  )
+  println(row.status)
+  println(row.url)
+  println(store_get("status_counter"))
+  let timed_out = poll_until(fn() { return nil }, {timeout_ms: 200, interval_ms: 50})
+  println(timed_out == nil)
+  store_set("retry_counter", 0)
+  let retry_report = retry_with_result(
+    fn(attempt) {
+      let n = store_get("retry_counter") ?? 0 + 1
+      store_set("retry_counter", n)
+      if n < 3 {
+        return Err("transient")
+      }
+      return Ok({attempt: attempt})
+    },
+    {max_attempts: 5, base_ms: 10, multiplier: 2.0, cap_ms: 100},
+  )
+  println(retry_report.ok)
+  println(retry_report.attempts)
+  println(retry_report.value.attempt)
+  let exhausted = retry_with_result(fn(attempt) { return Err("permanent") }, {max_attempts: 2, base_ms: 5})
+  println(exhausted.ok)
+  println(exhausted.attempts)
+  println(exhausted.error)
+  store_delete("probe_counter")
+  store_delete("status_counter")
+  store_delete("retry_counter")
+  unmock_time()
+}

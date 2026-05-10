@@ -234,3 +234,86 @@ pub fn schema_retry_nudge_for(schema, hint) {
   }
   return join(lines, "\n")
 }
+
+/**
+ * One-shot structured-output helper that bundles schema retries, an
+ * automatic repair pass, judge-friendly defaults, and case-insensitive
+ * key normalization on the result.
+ *
+ * Replaces the recurring 80-120 LOC structured-output dance in judges
+ * and analyzers. Returns the canonical envelope from
+ * `llm_call_structured_result` augmented with `value` (alias for
+ * lowercase-key-normalized `data`) and `ok` already populated. Callers
+ * dispatch on `result.ok` and read structured fields off `result.value`.
+ *
+ * Defaults applied when the corresponding option is unset:
+ *   temperature      -> 0.0
+ *   schema_retries   -> 2
+ *   repair.enabled   -> true
+ *   repair.max_tokens-> 600
+ *   repair.temperature -> 0.0
+ *   schema_retry_nudge -> derived via `schema_retry_nudge_for`
+ */
+pub fn safe_structured_call(prompt, schema, options) {
+  let user_options = if type_of(options) == "dict" {
+    options
+  } else {
+    {}
+  }
+  let resolved = __apply_judge_defaults(schema, user_options)
+  let envelope = llm_call_structured_result(prompt, schema, resolved)
+  return __augment_envelope(envelope)
+}
+
+fn __apply_judge_defaults(schema, options) {
+  var resolved = options
+  if resolved?.temperature == nil {
+    resolved = resolved + {temperature: 0.0}
+  }
+  if resolved?.schema_retries == nil {
+    resolved = resolved + {schema_retries: 2}
+  }
+  if resolved?.schema_retry_nudge == nil {
+    resolved = resolved + {schema_retry_nudge: schema_retry_nudge_for(schema, nil)}
+  }
+  let user_repair = if type_of(resolved?.repair) == "dict" {
+    resolved.repair
+  } else {
+    {}
+  }
+  var repair = user_repair
+  if repair?.enabled == nil {
+    repair = repair + {enabled: true}
+  }
+  if repair?.max_tokens == nil {
+    repair = repair + {max_tokens: 600}
+  }
+  if repair?.temperature == nil {
+    repair = repair + {temperature: 0.0}
+  }
+  return resolved + {repair: repair}
+}
+
+fn __augment_envelope(envelope) {
+  if type_of(envelope) != "dict" {
+    return {ok: false, status: "exception", value: {}, error: envelope}
+  }
+  let ok_flag = envelope?.ok ?? false
+  let data = if type_of(envelope?.data) == "dict" {
+    envelope.data
+  } else {
+    {}
+  }
+  let normalized = with_case_insensitive_keys(data)
+  let status = if ok_flag {
+    "ok"
+  } else {
+    let category = envelope?.error_category
+    if category != nil {
+      to_string(category)
+    } else {
+      "error"
+    }
+  }
+  return envelope + {value: normalized, status: status}
+}

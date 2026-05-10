@@ -1,0 +1,36 @@
+// Verifies std/jsonl read/parse/write/append/fold over JSON-lines streams,
+// including blank-line skipping, malformed-line tolerance, max_records,
+// and round-tripping a list to disk.
+import { append_jsonl, fold_jsonl, parse_jsonl, read_jsonl, write_jsonl } from "std/jsonl"
+
+pipeline default() {
+  let body = "{\"a\":1}\n\n{\"b\":2}\n  \n{\"c\":3}\n"
+  let parsed = parse_jsonl(body)
+  println(len(parsed))
+  println(parsed[0].a)
+  println(parsed[1].b)
+  println(parsed[2].c)
+  let limited = parse_jsonl(body, {max_records: 2})
+  println(len(limited))
+  let lenient = parse_jsonl("{\"ok\":1}\nNOT JSON\n{\"ok\":2}\n")
+  println(len(lenient))
+  let path = path_join(temp_dir(), "harn-jsonl-roundtrip-" + uuid() + ".jsonl")
+  let written = write_jsonl(path, [{x: 1}, {x: 2}, {x: 3}])
+  println(written)
+  let reread = read_jsonl(path)
+  println(len(reread))
+  println(reread[2].x)
+  append_jsonl(path, {x: 4})
+  let after_append = read_jsonl(path)
+  println(len(after_append))
+  println(after_append[3].x)
+  let total = fold_jsonl(
+    body,
+    0,
+    fn(acc, record, index) {
+      let value = record?.a ?? record?.b ?? record?.c ?? 0
+      return acc + value
+    },
+  )
+  println(total)
+}

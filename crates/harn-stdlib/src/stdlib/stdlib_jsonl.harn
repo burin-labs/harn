@@ -1,0 +1,153 @@
+// std/jsonl — JSON-lines stream helpers (read/parse/write/append).
+//
+// Replaces the recurring "read_file → split('\n') → trim → skip blanks
+// → json_parse with try/is_ok" dance every harness writes when consuming
+// transcript / event-log files. All readers default to lenient mode
+// (skip parse errors) so a single malformed line doesn't poison the
+// run; flip `strict: true` to surface them instead.
+//
+// Import with: import { read_jsonl, parse_jsonl, write_jsonl, append_jsonl } from "std/jsonl"
+/** Lenient-by-default options for the JSONL readers. */
+type ReadJsonlOptions = {strict?: bool, max_records?: int, on_error?: any}
+
+fn __read_options(options) {
+  let opts = options ?? {}
+  return {
+    strict: opts?.strict ?? false,
+    max_records: to_int(opts?.max_records) ?? 0,
+    on_error: opts?.on_error ?? nil,
+  }
+}
+
+fn __parse_line(text: string, opts, out_in: list, dropped_in: int) -> dict {
+  let trimmed = trim(text)
+  if trimmed == "" {
+    return {out: out_in, dropped: dropped_in, halt: false}
+  }
+  let parsed = try {
+    json_parse(trimmed)
+  }
+  if is_ok(parsed) {
+    return {out: out_in + [unwrap(parsed)], dropped: dropped_in, halt: false}
+  }
+  if opts.strict {
+    throw {error: "json_parse_failed", line: trimmed, reason: unwrap_err(parsed)}
+  }
+  if opts.on_error != nil {
+    opts.on_error(trimmed, unwrap_err(parsed))
+  }
+  return {out: out_in, dropped: dropped_in + 1, halt: false}
+}
+
+/**
+ * Parse a JSONL string into list<dict>. Blank lines are skipped; malformed
+ * lines are dropped silently unless `strict: true`. When `max_records > 0`,
+ * parsing stops after that many successes.
+ */
+pub fn parse_jsonl(text: string, options: ReadJsonlOptions = {}) -> list {
+  let opts = __read_options(options)
+  let body = text ?? ""
+  if body == "" {
+    return []
+  }
+  var out = []
+  var dropped = 0
+  for line in split(body, "\n") {
+    if opts.max_records > 0 && len(out) >= opts.max_records {
+      break
+    }
+    let outcome = __parse_line(line, opts, out, dropped)
+    out = outcome.out
+    dropped = outcome.dropped
+  }
+  return out
+}
+
+/**
+ * Read a JSONL file from disk and return list<dict>. Missing files yield
+ * the empty list (use `file_exists` first if you need to distinguish
+ * absent from empty). Pass `strict: true` to surface parse errors.
+ */
+pub fn read_jsonl(path: string, options: ReadJsonlOptions = {}) -> list {
+  if !file_exists(path) {
+    return []
+  }
+  let raw = try {
+    read_file(path)
+  }
+  if !is_ok(raw) {
+    if (options ?? {}).strict {
+      throw {error: "read_failed", path: path, reason: unwrap_err(raw)}
+    }
+    return []
+  }
+  return parse_jsonl(unwrap(raw), options)
+}
+
+fn __serialize(items: list) -> string {
+  var lines = []
+  for item in items ?? [] {
+    lines = lines + [json_stringify(item)]
+  }
+  return join(lines, "\n") + "\n"
+}
+
+/**
+ * Write a list of items to `path` as JSON-lines. The file is fully
+ * replaced. Returns the count of items written.
+ */
+pub fn write_jsonl(path: string, items: list) -> int {
+  let body = __serialize(items)
+  write_file(path, body)
+  return len(items ?? [])
+}
+
+/**
+ * Append a single item to `path` as a JSONL record. Creates the file if
+ * absent. Returns the byte count appended (newline included).
+ */
+pub fn append_jsonl(path: string, item) -> int {
+  let line = json_stringify(item) + "\n"
+  append_file(path, line)
+  return len(line)
+}
+
+/**
+ * Stream-fold over JSONL content. `reducer` is invoked as
+ * `reducer(state, record, index)` for each successfully parsed record;
+ * the final state is returned. Replaces the bespoke `for event in events
+ * { state = fold(state, event) }` loops harness authors hand-write.
+ */
+pub fn fold_jsonl(text: string, initial, reducer, options: ReadJsonlOptions = {}) -> any {
+  let opts = __read_options(options)
+  var state = initial
+  var index = 0
+  let body = text ?? ""
+  if body == "" {
+    return state
+  }
+  for line in split(body, "\n") {
+    let trimmed = trim(line)
+    if trimmed == "" {
+      continue
+    }
+    if opts.max_records > 0 && index >= opts.max_records {
+      break
+    }
+    let parsed = try {
+      json_parse(trimmed)
+    }
+    if is_ok(parsed) {
+      state = reducer(state, unwrap(parsed), index)
+      index = index + 1
+      continue
+    }
+    if opts.strict {
+      throw {error: "json_parse_failed", line: trimmed, reason: unwrap_err(parsed)}
+    }
+    if opts.on_error != nil {
+      opts.on_error(trimmed, unwrap_err(parsed))
+    }
+  }
+  return state
+}

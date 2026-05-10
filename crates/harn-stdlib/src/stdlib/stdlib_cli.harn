@@ -1,0 +1,351 @@
+// std/cli — declarative CLI argument parsing.
+//
+// Replaces the recurring "while i < len(args) { ... if a == \"--flag\" }"
+// dance with a typed, spec-driven parser. Each spec entry becomes a key
+// on the returned dict — flags resolve to bool, options to string/int/
+// float/bool/list, and positional entries to their captured values.
+//
+// Reserved keys on the result:
+//   _positional: list<string> — positional args not bound to a spec entry
+//   _extras:     list<string> — unrecognized --flags (for forwarding)
+//   _raw:        list<string> — the original argv slice
+//   _help:       bool         — true when --help / -h was seen
+//   _errors:     list<string> — collected validation errors
+//
+// Example:
+//   import { parse_args } from "std/cli"
+//   let parsed = parse_args(argv, [
+//     {kind: "flag", name: "dry_run", flags: ["--dry-run"]},
+//     {kind: "option", name: "model", flags: ["--model", "-m"], default: "auto"},
+//     {kind: "option", name: "max", flags: ["--max"], parse: "int", default: 4},
+//     {kind: "positional", name: "target", required: false},
+//   ])
+/** Spec entry consumed by `parse_args`. `kind` selects flag/option/positional. */
+type ArgSpecEntry = {
+  kind: string,
+  name: string,
+  flags?: list<string>,
+  parse?: string,
+  default?: any,
+  required?: bool,
+  multi?: bool,
+  help?: string,
+  separator?: string,
+}
+
+fn __spec_validate(spec: list) -> list<string> {
+  var errors = []
+  var seen_names = {}
+  for entry in spec ?? [] {
+    if type_of(entry) != "dict" {
+      errors = errors + ["std/cli: each spec entry must be a dict"]
+      continue
+    }
+    let kind = entry?.kind
+    if kind != "flag" && kind != "option" && kind != "positional" {
+      errors = errors + ["std/cli: kind must be 'flag', 'option', or 'positional'"]
+      continue
+    }
+    let name = entry?.name
+    if type_of(name) != "string" || name == "" {
+      errors = errors + ["std/cli: every spec entry needs a non-empty 'name'"]
+      continue
+    }
+    if seen_names[name] != nil {
+      errors = errors + ["std/cli: duplicate spec name '" + name + "'"]
+    }
+    seen_names = seen_names + {[name]: true}
+    if kind != "positional" {
+      let flags = entry?.flags ?? []
+      if type_of(flags) != "list" || len(flags) == 0 {
+        errors = errors + ["std/cli: '" + name + "' (" + kind + ") must declare at least one flag"]
+      }
+    }
+  }
+  return errors
+}
+
+fn __initial_value(entry) {
+  if entry.kind == "flag" {
+    return entry?.default ?? false
+  }
+  if entry.kind == "option" && entry?.multi {
+    return entry?.default ?? []
+  }
+  return entry?.default
+}
+
+fn __parse_typed(value: string, parse_kind: string, separator: string) -> any {
+  if parse_kind == "" || parse_kind == "string" {
+    return value
+  }
+  if parse_kind == "int" {
+    return to_int(value)
+  }
+  if parse_kind == "float" {
+    return to_float(value)
+  }
+  if parse_kind == "bool" {
+    let normalized = lowercase(trim(value))
+    if normalized == "true" || normalized == "yes" || normalized == "y" || normalized == "1" {
+      return true
+    }
+    if normalized == "false" || normalized == "no" || normalized == "n" || normalized == "0" {
+      return false
+    }
+    return nil
+  }
+  if parse_kind == "list" {
+    var out = []
+    for piece in split(value, separator) {
+      let trimmed = trim(piece)
+      if trimmed != "" {
+        out = out + [trimmed]
+      }
+    }
+    return out
+  }
+  return value
+}
+
+fn __index_flags(spec: list) -> dict {
+  var index = {}
+  for entry in spec ?? [] {
+    if entry.kind == "positional" {
+      continue
+    }
+    for flag in entry?.flags ?? [] {
+      index = index + {[flag]: entry}
+    }
+  }
+  return index
+}
+
+fn __positional_entries(spec: list) -> list {
+  var out = []
+  for entry in spec ?? [] {
+    if entry.kind == "positional" {
+      out = out + [entry]
+    }
+  }
+  return out
+}
+
+fn __consume_value(args: list, cursor: int, entry, errors_in) -> dict {
+  let next = cursor + 1
+  var errors = errors_in
+  if next >= len(args) {
+    errors = errors + ["std/cli: '" + entry.name + "' requires a value"]
+    return {value: entry?.default, cursor: next, errors: errors}
+  }
+  let raw = args[next]
+  let parsed = __parse_typed(raw, entry?.parse ?? "string", entry?.separator ?? ",")
+  if parsed == nil && entry?.parse != "string" && entry?.parse != nil {
+    errors = errors
+      + ["std/cli: '" + entry.name + "' could not parse '" + raw + "' as " + entry?.parse ?? "string"]
+  }
+  return {value: parsed, cursor: next, errors: errors}
+}
+
+fn __apply_long_eq(arg: string, flag_index, current, errors_in) -> dict {
+  let eq_idx = arg.index_of("=")
+  if eq_idx < 0 {
+    return {matched: false, current: current, errors: errors_in}
+  }
+  let key = substring(arg, 0, eq_idx)
+  let raw_value = substring(arg, eq_idx + 1)
+  let entry = flag_index[key]
+  if entry == nil {
+    return {matched: false, current: current, errors: errors_in}
+  }
+  if entry.kind == "flag" {
+    let v = __parse_typed(raw_value, "bool", ",")
+    let resolved = if v == nil {
+      true
+    } else {
+      v
+    }
+    return {matched: true, current: current + {[entry.name]: resolved}, errors: errors_in}
+  }
+  let parsed = __parse_typed(raw_value, entry?.parse ?? "string", entry?.separator ?? ",")
+  var errors = errors_in
+  if parsed == nil && entry?.parse != "string" && entry?.parse != nil {
+    errors = errors
+      + [
+      "std/cli: '" + entry.name + "' could not parse '" + raw_value + "' as "
+        + entry?.parse ?? "string",
+    ]
+  }
+  if entry?.multi {
+    let prior = current[entry.name] ?? []
+    return {matched: true, current: current + {[entry.name]: prior + [parsed]}, errors: errors}
+  }
+  return {matched: true, current: current + {[entry.name]: parsed}, errors: errors}
+}
+
+fn __step_long_eq(arg, flag_index, state) {
+  let outcome = __apply_long_eq(arg, flag_index, state.current, state.errors)
+  if outcome.matched {
+    return state + {current: outcome.current, errors: outcome.errors, advance: 1}
+  }
+  return state + {extras: state.extras + [arg], advance: 1}
+}
+
+fn __step_dash_arg(arg, raw_argv, flag_index, cursor, state) {
+  let entry = flag_index[arg]
+  if entry == nil {
+    return state + {extras: state.extras + [arg], advance: 1}
+  }
+  if entry.kind == "flag" {
+    return state + {current: state.current + {[entry.name]: true}, advance: 1}
+  }
+  let captured = __consume_value(raw_argv, cursor, entry, state.errors)
+  let resolved = if entry?.multi {
+    let prior = state.current[entry.name] ?? []
+    state.current + {[entry.name]: prior + [captured.value]}
+  } else {
+    state.current + {[entry.name]: captured.value}
+  }
+  return state + {current: resolved, errors: captured.errors, advance: captured.cursor - cursor + 1}
+}
+
+fn __step_positional(arg, positional_specs, state) {
+  if state.positional_cursor < len(positional_specs) {
+    let pspec = positional_specs[state.positional_cursor]
+    let parsed = __parse_typed(arg, pspec?.parse ?? "string", pspec?.separator ?? ",")
+    return state
+      + {
+      current: state.current + {[pspec.name]: parsed},
+      positional_cursor: state.positional_cursor + 1,
+      advance: 1,
+    }
+  }
+  return state + {positional: state.positional + [arg], advance: 1}
+}
+
+fn __dispatch(arg, raw_argv, flag_index, positional_specs, cursor, state) {
+  if !state.terminated && arg == "--" {
+    return state + {terminated: true, advance: 1}
+  }
+  if !state.terminated && (arg == "--help" || arg == "-h") {
+    return state + {help: true, advance: 1}
+  }
+  if !state.terminated && starts_with(arg, "--") && contains(arg, "=") {
+    return __step_long_eq(arg, flag_index, state)
+  }
+  if !state.terminated && (starts_with(arg, "--") || starts_with(arg, "-")) {
+    return __step_dash_arg(arg, raw_argv, flag_index, cursor, state)
+  }
+  return __step_positional(arg, positional_specs, state)
+}
+
+/**
+ * Parse `argv` against `spec`. `spec` is a list of ArgSpecEntry dicts —
+ * each contributes one named key to the returned dict. See module
+ * comment for the reserved `_positional` / `_extras` / `_help` /
+ * `_errors` keys.
+ *
+ * Recognized syntaxes:
+ *   --flag                  (boolean true)
+ *   --opt VALUE             (next argv slot is the value)
+ *   --opt=VALUE             (inline value)
+ *   --                      (terminates flag parsing; rest is positional)
+ *   --help / -h             (sets `_help` to true, parsing continues)
+ */
+pub fn parse_args(argv: list<string>, spec: list) -> dict {
+  let validation = __spec_validate(spec)
+  var current = {}
+  for entry in spec ?? [] {
+    current = current + {[entry.name]: __initial_value(entry)}
+  }
+  let flag_index = __index_flags(spec)
+  let positional_specs = __positional_entries(spec)
+  let raw_argv = argv ?? []
+  var state = {
+    current: current,
+    positional: [],
+    extras: [],
+    errors: validation,
+    help: false,
+    positional_cursor: 0,
+    terminated: false,
+    advance: 0,
+  }
+  var i = 0
+  while i < len(raw_argv) {
+    state = __dispatch(raw_argv[i], raw_argv, flag_index, positional_specs, i, state)
+    let step = if state.advance > 0 {
+      state.advance
+    } else {
+      1
+    }
+    i = i + step
+  }
+  let resolved = state.current
+  var final_errors = state.errors
+  for pspec in positional_specs {
+    if pspec?.required && resolved[pspec.name] == nil {
+      final_errors = final_errors + ["std/cli: positional '" + pspec.name + "' is required"]
+    }
+  }
+  for entry in spec ?? [] {
+    if entry.kind == "option" && entry?.required && resolved[entry.name] == nil {
+      final_errors = final_errors + ["std/cli: option '" + entry.name + "' is required"]
+    }
+  }
+  return resolved
+    + {
+    _positional: state.positional,
+    _extras: state.extras,
+    _raw: raw_argv,
+    _help: state.help,
+    _errors: final_errors,
+  }
+}
+
+/**
+ * Render a one-line help summary derived from the spec. Useful for
+ * `--help` handlers that don't need full man-page fidelity. Each entry
+ * contributes one indented line in the form `  <flags>  — <help>`.
+ */
+pub fn help_text(spec: list, program: string = "harn run script.harn") -> string {
+  var lines = ["Usage: " + program + " [options] [positional]"]
+  for entry in spec ?? [] {
+    let help = entry?.help ?? ""
+    if entry.kind == "positional" {
+      let req = if entry?.required {
+        ""
+      } else {
+        " (optional)"
+      }
+      lines = lines
+        + [
+        "  <" + entry.name + ">" + req
+          + if help == "" {
+          ""
+        } else {
+          "  — " + help
+        },
+      ]
+    } else {
+      let flags = entry?.flags ?? []
+      let display = join(flags, ", ")
+      let parse = entry?.parse ?? "string"
+      let trailing = if entry.kind == "flag" {
+        ""
+      } else {
+        " <" + parse + ">"
+      }
+      lines = lines
+        + [
+        "  " + display + trailing
+          + if help == "" {
+          ""
+        } else {
+          "  — " + help
+        },
+      ]
+    }
+  }
+  return join(lines, "\n")
+}
