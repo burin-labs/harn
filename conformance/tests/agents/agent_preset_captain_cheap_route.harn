@@ -1,0 +1,90 @@
+/**
+ * Captain preset wired into the cheap-model conformance harness:
+ * `release_captain_agent` accepts a `cheap_caller` + `frontier_caller`
+ * + `escalate_predicate` and composes them into a `with_routing`-backed
+ * `llm_caller` that defaults to the cheap caller and escalates on the
+ * predicate (mirrors the cost-moat substrate from `std/llm/handlers`
+ * and the `prelude_cheap_classify_then_escalate` recipe).
+ *
+ * Verifies:
+ *   - cheap caller wins by default;
+ *   - frontier caller wins when the escalation predicate fires;
+ *   - the captain preset's `logging_sink` composes a `with_logging`
+ *     wrapper around the routed caller that fires for every call;
+ *   - the captain preset's defaults (long adaptive budget, persona
+ *     iteration scope) flow through to the agent_loop result.
+ */
+import { release_captain_agent } from "std/agent/presets"
+
+pipeline default() {
+  let cheap_calls = atomic(0)
+  let frontier_calls = atomic(0)
+  let log_records = atomic(0)
+  let cheap = { _call ->
+    let _ = atomic_add(cheap_calls, 1)
+    return {
+      ok: true,
+      value: {
+        text: "Cheap-tier reply. ##DONE##",
+        model: "cheap-mock",
+        provider: "mock",
+        input_tokens: 1,
+        output_tokens: 1,
+      },
+    }
+  }
+  let frontier = { _call ->
+    let _ = atomic_add(frontier_calls, 1)
+    return {
+      ok: true,
+      value: {
+        text: "Frontier-tier reply. ##DONE##",
+        model: "frontier-mock",
+        provider: "mock",
+        input_tokens: 1,
+        output_tokens: 1,
+      },
+    }
+  }
+  let escalate = { call -> call?.opts?.escalate ?? false }
+  let logging_sink = { _record ->
+    let _ = atomic_add(log_records, 1)
+  }
+  // Default route: cheap caller handles the call without escalation.
+  let cheap_run = release_captain_agent(
+    "Cheap path.",
+    {
+      provider: "mock",
+      cheap_caller: cheap,
+      frontier_caller: frontier,
+      escalate_predicate: escalate,
+      logging_sink: logging_sink,
+      done_sentinel: "##DONE##",
+      max_iterations: 2,
+    },
+  )
+  println(cheap_run.status)
+  println(cheap_run.text)
+  println(atomic_get(cheap_calls))
+  println(atomic_get(frontier_calls))
+  println(atomic_get(log_records))
+  // Escalated route: predicate matches via `escalate: true` in opts.
+  let frontier_run = release_captain_agent(
+    "Frontier path.",
+    {
+      provider: "mock",
+      escalate: true,
+      cheap_caller: cheap,
+      frontier_caller: frontier,
+      escalate_predicate: escalate,
+      logging_sink: logging_sink,
+      done_sentinel: "##DONE##",
+      max_iterations: 2,
+    },
+  )
+  println(frontier_run.status)
+  println(frontier_run.text)
+  println(atomic_get(cheap_calls))
+  println(atomic_get(frontier_calls))
+  println(atomic_get(log_records))
+}

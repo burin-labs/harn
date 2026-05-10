@@ -1,12 +1,30 @@
 // @harn-entrypoint-category agent.stdlib
 //
-// Generic role presets and adaptive iteration budget sugar built on top of
-// `agent_loop`. Harness authors should be able to say "audit", "repair",
-// "summary", or "verify" and get sensible defaults for completion behavior,
-// iteration budgeting, and provider-specific reasoning configuration —
-// without hand-tuning `max_iterations`, `max_nudges`, `done_sentinel`, or
-// `thinking` for every script. All defaults remain caller-overridable.
+// Generic role and captain-shaped presets for `agent_loop`. Harness
+// authors say "audit", "repair", "summary", "verify" for the generic
+// roles, or "merge_captain", "review_captain", "oncall_captain",
+// "release_captain" for opinionated captain templates. The presets bundle
+// completion behavior, iteration budgeting, provider-specific reasoning
+// configuration, the LLM handler stack from `std/llm/handlers`, and the
+// tool middleware stack from `std/llm/tool_middleware` so durable
+// personas declare their service contracts by name instead of
+// re-deriving the knobs at every call site. All defaults remain
+// caller-overridable.
 import { agent_loop } from "std/agent/loop"
+import { compose, default_llm_caller, with_logging, with_routing } from "std/llm/handlers"
+import {
+  compose_tool_callers,
+  with_audit_log,
+  with_consent,
+  with_dry_run,
+  with_handoff_artifact,
+  with_rate_limit,
+  with_telemetry,
+} from "std/llm/tool_middleware"
+
+let __GENERIC_KINDS = ["audit", "repair", "summary", "verify"]
+
+let __CAPTAIN_KINDS = ["merge_captain", "review_captain", "oncall_captain", "release_captain"]
 
 fn __dict_or_empty(value) {
   if value == nil {
@@ -22,6 +40,10 @@ fn __has_key(opts, key) {
   return contains(opts.keys(), key)
 }
 
+fn __is_captain(kind) {
+  return contains(__CAPTAIN_KINDS, kind)
+}
+
 fn __preset_kind(value) {
   if value == nil {
     throw "agent_preset(kind, options?): kind is required"
@@ -30,8 +52,11 @@ fn __preset_kind(value) {
     throw "agent_preset(kind, options?): kind must be a string; got " + type_of(value)
   }
   let kind = lowercase(trim(value))
-  if kind != "audit" && kind != "repair" && kind != "summary" && kind != "verify" {
-    throw "agent_preset: kind must be one of audit, repair, summary, verify; got " + value
+  if !contains(__GENERIC_KINDS, kind) && !contains(__CAPTAIN_KINDS, kind) {
+    throw "agent_preset: kind must be one of "
+      + join(__GENERIC_KINDS + __CAPTAIN_KINDS, ", ")
+      + "; got "
+      + value
   }
   return kind
 }
@@ -93,9 +118,9 @@ fn __thinking_choice_for_kind(kind, caps) {
     }
     return nil
   }
-  // audit + repair: prefer adaptive thinking when offered, else medium
-  // reasoning effort. Fall back to nothing when neither is available so we
-  // don't break local/Ollama-style providers.
+  // audit + repair + every captain: prefer adaptive thinking when
+  // offered, else medium reasoning effort. Fall back to nothing when
+  // neither is available so we don't break local/Ollama-style providers.
   if __caps_supports(caps, "adaptive") {
     return {mode: "adaptive"}
   }
@@ -126,6 +151,20 @@ fn __default_budget_for_kind(kind) {
   if kind == "verify" {
     return {mode: "adaptive", initial: 1, max: 5, extend_by: 1}
   }
+  if kind == "merge_captain" {
+    // Merge sweeps span repair turns, validation, and approval cycles
+    // — long-running by design.
+    return {mode: "adaptive", initial: 8, max: 60, extend_by: 4}
+  }
+  if kind == "review_captain" {
+    return {mode: "adaptive", initial: 6, max: 30, extend_by: 3}
+  }
+  if kind == "oncall_captain" {
+    return {mode: "adaptive", initial: 6, max: 24, extend_by: 3}
+  }
+  if kind == "release_captain" {
+    return {mode: "adaptive", initial: 8, max: 40, extend_by: 4}
+  }
   return {mode: "fixed", initial: 50, max: 50, extend_by: 0}
 }
 
@@ -133,8 +172,8 @@ fn __resolve_iteration_budget(kind, opts) {
   if __has_key(opts, "iteration_budget") {
     let raw = opts.iteration_budget
     if type_of(raw) == "string" {
-      // Sugar: `iteration_budget: "adaptive"` keeps the kind's defaults but
-      // forces adaptive mode.
+      // Sugar: `iteration_budget: "adaptive"` keeps the kind's defaults
+      // but forces adaptive mode.
       let defaults = __default_budget_for_kind(kind)
       return defaults + {mode: raw}
     }
@@ -156,6 +195,11 @@ fn __turn_policy_for_kind(kind, opts) {
   if kind == "verify" {
     return {allow_done_sentinel: false, max_prose_chars: 12000}
   }
+  // Captains can emit longer per-turn rationales — sweep summaries,
+  // approval rationale, release notes — bump the cap accordingly.
+  if __is_captain(kind) {
+    return {allow_done_sentinel: false, max_prose_chars: 60000}
+  }
   return {allow_done_sentinel: false, max_prose_chars: 30000}
 }
 
@@ -176,7 +220,11 @@ fn __tool_using_defaults(kind) {
   let max_nudges = if kind == "audit" {
     1
   } else {
-    2
+    if __is_captain(kind) {
+      3
+    } else {
+      2
+    }
   }
   return {
     profile: profile,
@@ -225,12 +273,191 @@ fn __apply_kind_defaults(kind, raw_opts) {
   return defaults + raw_opts
 }
 
+// -------------------------------------------------------------------------------------------------
+
+// Captain composition: build the tool-middleware + LLM-handler stacks
+// each captain ships by default. Layers are opt-in: every captain only
+// adds a layer when the caller has supplied the matching dependency
+// (sink, callable, rate-limit cap, etc.). Captains stay a no-op
+// behavior shim if the caller doesn't provide any layer inputs, which
+// keeps the preset useful as a pure budget/profile bundle as well.
+
+// -------------------------------------------------------------------------------------------------
+
+fn __captain_consent_default(kind) {
+  if kind == "merge_captain" {
+    // Approve read-only annotated tools without prompting; require an
+    // explicit consent callable for everything that mutates state.
+    return { call ->
+      let hints = call?.annotations ?? {}
+      let kind_label = to_string(hints?.kind ?? "")
+      if kind_label == "read" || kind_label == "search" || kind_label == "fetch"
+        || kind_label == "think" {
+        return {decision: "approved", decided_by: "merge_captain.read_default"}
+      }
+      return {
+        decision: "denied",
+        reason: "merge_captain requires explicit `consent` for write tools",
+        decided_by: "merge_captain.write_default",
+      }
+    }
+  }
+  return nil
+}
+
+fn __captain_rate_limit_default(kind) {
+  if kind == "oncall_captain" {
+    return {max_calls: 50, message: "oncall_captain rate-limit reached"}
+  }
+  return nil
+}
+
 /**
- * agent_preset returns normalized agent_loop options for a generic role.
+ * Resolve a captain layer's value, honoring the convention that an
+ * explicit `false` (or `nil`) opts the caller out of that layer
+ * entirely. If the caller passed nothing for `key`, returns the
+ * supplied `default_value`.
+ */
+fn __captain_layer_value(opts, key, default_value) {
+  if !__has_key(opts, key) {
+    return default_value
+  }
+  let supplied = opts[key]
+  if supplied == nil || (type_of(supplied) == "bool" && !supplied) {
+    return nil
+  }
+  return supplied
+}
+
+fn __captain_tool_layers(kind, opts) {
+  var layers = []
+  let audit_sink = __captain_layer_value(opts, "audit_sink", nil)
+  if audit_sink != nil {
+    layers = layers.push(with_audit_log(audit_sink))
+  }
+  let telemetry_sink = __captain_layer_value(opts, "telemetry_sink", nil)
+  if telemetry_sink != nil {
+    layers = layers.push(with_telemetry(telemetry_sink))
+  }
+  if kind == "merge_captain" {
+    let consent_fn = __captain_layer_value(opts, "consent", __captain_consent_default(kind))
+    if consent_fn != nil {
+      layers = layers.push(with_consent(consent_fn))
+    }
+  }
+  if kind == "oncall_captain" {
+    let rate_limit = __captain_layer_value(opts, "rate_limit", __captain_rate_limit_default(kind))
+    if rate_limit != nil {
+      layers = layers.push(with_rate_limit(rate_limit))
+    }
+  }
+  if kind == "release_captain" {
+    let dry_value = __captain_layer_value(opts, "dry_run", nil)
+    if dry_value != nil {
+      let dry = if type_of(dry_value) == "dict" {
+        dry_value
+      } else {
+        {message: "release_captain preview"}
+      }
+      layers = layers.push(with_dry_run(dry))
+    }
+  }
+  let handoff_sink = __captain_layer_value(opts, "handoff_sink", nil)
+  if handoff_sink != nil {
+    layers = layers
+      .push(with_handoff_artifact({sink: handoff_sink, source: opts?.persona ?? kind}))
+  }
+  return layers
+}
+
+fn __apply_captain_tool_caller(opts, kind) {
+  if !__is_captain(kind) {
+    return opts
+  }
+  if __has_key(opts, "tool_caller") {
+    return opts
+  }
+  let layers = __captain_tool_layers(kind, opts)
+  if len(layers) == 0 {
+    return opts
+  }
+  return opts + {tool_caller: compose_tool_callers(layers)}
+}
+
+fn __captain_handler_layers(opts) {
+  var layers = []
+  let logging_sink = opts?.logging_sink
+  if logging_sink != nil {
+    let logging_opts = if type_of(opts?.logging_options) == "dict" {
+      opts.logging_options + {sink: logging_sink}
+    } else {
+      {sink: logging_sink}
+    }
+    layers = layers.push(with_logging(logging_opts))
+  }
+  return layers
+}
+
+fn __apply_captain_llm_caller(opts, kind) {
+  if !__is_captain(kind) {
+    return opts
+  }
+  if __has_key(opts, "llm_caller") {
+    return opts
+  }
+  let cheap = opts?.cheap_caller
+  let frontier = opts?.frontier_caller
+  let escalate = opts?.escalate_predicate
+  let logging_layers = __captain_handler_layers(opts)
+  if cheap == nil && len(logging_layers) == 0 {
+    return opts
+  }
+  let base = if cheap != nil {
+    let routes = if frontier != nil && escalate != nil {
+      [{name: "frontier", when: escalate, caller: frontier}]
+    } else {
+      []
+    }
+    with_routing({default: cheap, routes: routes})
+  } else {
+    default_llm_caller()
+  }
+  let composed = if len(logging_layers) > 0 {
+    let wrap = compose(logging_layers)
+    wrap(base)
+  } else {
+    base
+  }
+  return opts + {llm_caller: composed}
+}
+
+/**
+ * agent_preset returns normalized agent_loop options for a generic role
+ * or a captain-shaped persona template.
  *
- * `kind` is one of "audit", "repair", "summary", "verify". The returned
- * dict is a plain `agent_loop` options dict — callers can spread it into
- * `agent_loop(...)` directly, or merge further overrides on top.
+ * `kind` is one of:
+ *   - generic:  "audit", "repair", "summary", "verify"
+ *   - captain:  "merge_captain", "review_captain", "oncall_captain",
+ *               "release_captain"
+ *
+ * The returned dict is a plain `agent_loop` options dict — callers can
+ * spread it into `agent_loop(...)` directly, or merge further overrides
+ * on top. Captain presets additionally compose:
+ *   - a `tool_caller` middleware stack from any of `audit_sink`,
+ *     `telemetry_sink`, `consent`, `rate_limit`, `dry_run`,
+ *     `handoff_sink` the caller supplied;
+ *   - an `llm_caller` handler stack from `cheap_caller` +
+ *     `frontier_caller` + `escalate_predicate` (cheap-default with
+ *     frontier escalation per the cost-moat substrate) and an optional
+ *     `logging_sink` for receipts.
+ *
+ * Layers default to the captain's documented persona shape (e.g.
+ * `oncall_captain` defaults `rate_limit` to `{max_calls: 50}`,
+ * `merge_captain` defaults `consent` to "auto-approve read tools, deny
+ * writes without explicit prompt"). Passing an explicit `false` (or
+ * `nil`) for that key opts the caller out of the layer entirely;
+ * passing `tool_caller`/`llm_caller` directly bypasses captain
+ * composition outright.
  */
 pub fn agent_preset(kind, options = nil) {
   let resolved_kind = __preset_kind(kind)
@@ -239,6 +466,8 @@ pub fn agent_preset(kind, options = nil) {
   opts = __apply_iteration_budget(opts, resolved_kind)
   opts = __apply_turn_policy(opts, resolved_kind)
   opts = __apply_thinking(opts, resolved_kind)
+  opts = __apply_captain_tool_caller(opts, resolved_kind)
+  opts = __apply_captain_llm_caller(opts, resolved_kind)
   return opts + {_preset_kind: resolved_kind}
 }
 
@@ -247,8 +476,8 @@ pub fn agent_preset(kind, options = nil) {
  * embedding directly under `agent_loop` options.
  *
  * `kind_or_options` can be:
- *   - a role kind ("audit"/"repair"/"summary"/"verify"): returns that
- *     role's default adaptive (or fixed) budget,
+ *   - a preset kind (any generic or captain kind): returns that kind's
+ *     default adaptive (or fixed) budget,
  *   - the string "adaptive" or "fixed": returns a generic shape,
  *   - a dict: returns the same shape with role-aware defaults filled in
  *     (when `kind` is provided in the second argument).
@@ -308,5 +537,47 @@ pub fn summary_agent(prompt, options = nil) {
  */
 pub fn verify_agent(prompt, options = nil) {
   let opts = agent_preset("verify", options)
+  return agent_loop(prompt, opts?.system, opts)
+}
+
+/**
+ * merge_captain_agent runs the Merge Captain persona shape: a long
+ * adaptive budget, HITL `with_consent` gating that defaults to
+ * "approve reads, deny unconfigured writes", and the captain handler
+ * stack when the caller supplies cheap/frontier callers.
+ */
+pub fn merge_captain_agent(prompt, options = nil) {
+  let opts = agent_preset("merge_captain", options)
+  return agent_loop(prompt, opts?.system, opts)
+}
+
+/**
+ * review_captain_agent runs the Review Captain persona shape: a
+ * verifier profile with a medium adaptive budget, plus the captain
+ * handler stack for risk-aware escalation.
+ */
+pub fn review_captain_agent(prompt, options = nil) {
+  let opts = agent_preset("review_captain", options)
+  return agent_loop(prompt, opts?.system, opts)
+}
+
+/**
+ * oncall_captain_agent runs the Oncall Captain persona shape: a
+ * tool-using loop with a default `with_rate_limit({max_calls: 50})`
+ * cap and a medium adaptive budget so a runaway alert loop can't fan
+ * out unbounded.
+ */
+pub fn oncall_captain_agent(prompt, options = nil) {
+  let opts = agent_preset("oncall_captain", options)
+  return agent_loop(prompt, opts?.system, opts)
+}
+
+/**
+ * release_captain_agent runs the Release Captain persona shape: a long
+ * checkpointed adaptive budget. Pass `dry_run: true` (or a config dict)
+ * to layer `with_dry_run` over the tool stack for shadow runs.
+ */
+pub fn release_captain_agent(prompt, options = nil) {
+  let opts = agent_preset("release_captain", options)
   return agent_loop(prompt, opts?.system, opts)
 }

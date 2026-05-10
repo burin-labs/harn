@@ -35,6 +35,42 @@ condensed series summaries instead of full per-patch history.
   now actually caches — previously it was a passthrough — and shares
   one cache key with the direct-call form. Docs at
   [`docs/src/stdlib/cache.md`](docs/src/stdlib/cache.md).
+- **`std/agent/presets` captain preset pack and active
+  `require_successful_tools` gate.** Closes #1472. The four captain
+  presets — `merge_captain`, `review_captain`, `oncall_captain`,
+  `release_captain` — package the persona-shaped service contracts
+  adopters were re-deriving by hand: a long-enough adaptive iteration
+  budget, the cheap-default + frontier-escalation `with_routing`
+  scaffolding, and the per-captain governance defaults (`merge_captain`
+  ships a default `with_consent` that auto-approves tools annotated
+  `read`/`search`/`fetch`/`think` and denies everything else;
+  `oncall_captain` ships a default `with_rate_limit({max_calls: 50})`
+  cap; `release_captain` accepts an opt-in `with_dry_run` shadow-run
+  layer). Each captain composes the
+  [`std/llm/handlers`](src/stdlib/llm-handlers.md) handler stack and
+  the [`std/llm/tool_middleware`](src/stdlib/tool-middleware.md)
+  middleware stack from caller-supplied `audit_sink` /
+  `telemetry_sink` / `consent` / `rate_limit` / `handoff_sink` /
+  `cheap_caller` / `frontier_caller` / `escalate_predicate` /
+  `logging_sink` options, so persona manifests (#460) reference
+  contracts by name instead of duplicating wiring. Each captain ships
+  a corresponding `*_captain_agent(prompt, options?)` wrapper that
+  spreads the preset directly into `agent_loop`.
+  `require_successful_tools` is now an active gate that returns a
+  structured `error_envelope` (consumable by harn-cloud receipts) and
+  emits a `tool_gap` friction event onto the friction sink so
+  context-pack suggestions and dashboards pick it up alongside
+  natively-emitted events. The agent_loop tool envelope now carries
+  `annotations` (verbatim from the tool entry) so `with_consent` and
+  other middleware can policy-gate by tool kind without crawling
+  `schema.annotations`. Five new conformance tests under
+  `conformance/tests/agents/`: `agent_preset_captains`,
+  `agent_preset_captain_cheap_route`,
+  `agent_loop_require_successful_tools_friction`, and the existing
+  `agent_loop_adaptive_budget` plus a new
+  `agent_loop_adaptive_budget_mock_time` (proves the budget extension
+  decisions don't quietly observe wall-clock time). Documented in
+  `docs/src/llm/agent_loop.md`. (#1472)
 
 ## v0.8.6
 
