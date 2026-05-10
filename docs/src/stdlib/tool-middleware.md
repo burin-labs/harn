@@ -148,6 +148,13 @@ tagged `status: "dry_run"`. Useful for previewing a tool sequence
 without side-effects. Options: `only` (whitelist) and `except`
 (blacklist).
 
+This is the userspace seam for **crystallization shadow runs**: when
+`shadow_replay_bundle` (orchestration/crystallize) re-executes a
+captured workflow to confirm a candidate's side-effect signature
+hasn't drifted, wrap the tool caller in `with_dry_run({except:
+[...known-pure-tools]})` so destructive ops are neutralized while
+read-only ones still surface real results.
+
 ### `with_redaction(redactor) -> caller`
 
 Applied twice: once on inbound args, once on outbound result.
@@ -177,6 +184,32 @@ can map directly to OpenTelemetry spans.
 Generates a user-facing one-liner via `format_fn(call, result) -> string`,
 populating `audit.summary` (the ACP/OpenAI convention slot).
 
+### `with_handoff_artifact(opts?) -> caller`
+
+When a tool's result carries a handoff payload (under `__handoff` /
+`handoff` by default, or a custom-detected key), normalizes it through
+`handoff(...)` and surfaces the typed record on `audit.handoff`. The
+optional `sink(record, call)` callback fires once per emitted handoff
+for side-effecting persistence. Pairs with `std/handoffs` for the
+typed handoff schema.
+
+Options: `sink` (callback), `detect` (custom locator),
+`keys` (extra result keys to inspect, default `["__handoff", "handoff"]`),
+`source` (override `source_persona` if the tool didn't set one),
+`strict` (throw on malformed payloads, default `false`).
+
+### `with_timeout(opts) -> caller`
+
+Caps wall-clock time per tool call. Calls inside the budget pass
+through with `audit.layers[…].status == "ok"`. Calls that breach the
+budget surface `error_category: "timeout"` and `status: "timeout"` on
+the layer log. The middleware does *not* cancel the in-flight dispatch
+(hard cancellation belongs in `agent_loop({deadline_ms})`); it
+observes the breach so upstream layers can react.
+
+Options: `max_ms` (required, non-negative int), `per_tool`
+(`{tool_name: override_max_ms}`), `message` (override error message).
+
 ## Composing
 
 `compose_tool_callers([outer, ..., inner])` returns one caller that
@@ -191,6 +224,58 @@ let caller = compose_tool_callers([
   with_required_reason().caller,
 ])
 ```
+
+## Captain recipe — full governance stack
+
+The persona platform's captains (`merge_captain`, `review_captain`,
+`oncall_captain`) all want the same substrate: every tool call yields
+a structured audit record, destructive ops gate on consent, the loop
+caps at a tool budget, and handoff payloads surface as typed records
+on the receipts ledger. One stack covers all of it.
+
+```harn,ignore
+import {
+  compose_tool_callers,
+  with_audit_log,
+  with_consent,
+  with_dry_run,
+  with_handoff_artifact,
+  with_idempotency,
+  with_rate_limit,
+  with_redaction,
+  with_required_reason,
+  with_summary,
+  with_telemetry,
+} from "std/llm/tool_middleware"
+
+let reason_mw = with_required_reason()
+
+let captain_tool_caller = compose_tool_callers([
+  with_audit_log(receipts_sink),               // every dispatch → audit ledger
+  with_telemetry(otel_sink),                   // gen_ai.tool.* spans
+  with_summary({ call, _r -> describe(call) }), // user-facing one-liner
+  with_consent(persona.autonomy_policy),       // act_with_approval gate
+  reason_mw.caller,                            // require `reason` arg
+  with_redaction(unified_redaction_policy),    // strip secrets
+  with_handoff_artifact({sink: handoff_emitter}), // typed handoff records
+  with_idempotency(per_tool_idempotency_keyer),
+  with_rate_limit({max_calls: persona.tool_budget}),
+  with_dry_run({only: persona.shadow_tools}),  // crystallization shadow runs
+])
+
+let registry = tools_use_middleware(my_registry, reason_mw.schema_transform)
+
+agent_loop(task, system, {
+  tools: registry,
+  tool_caller: captain_tool_caller,
+})
+```
+
+Order matters: the leftmost (outermost) wrappers see every call,
+including those short-circuited by inner layers, so put audit and
+telemetry first. The required-reason / consent / redaction layers go
+in the middle, and the rate-limit / dry-run gates are innermost so the
+audit log sees what the runtime actually attempted.
 
 ## Gotchas
 
@@ -218,6 +303,18 @@ let caller = compose_tool_callers([
 5. **The `tool_call_audit` AgentEvent is fired only when middleware
    sets `result.audit`.** No middleware → no event. This keeps the
    wire stream clean for hosts that don't subscribe.
+6. **`with_required_reason({strip: true})` + schema_transform + agent_loop.**
+   The runtime's `validate_tool_args` runs *after* the middleware strips
+   `reason`, so combining the schema decorator (which marks `reason`
+   required) with `strip: true` will reject every call with a
+   "missing required parameter: reason" error. Either:
+   - Use `strip: true` *without* `schema_transform` — the model is told
+     about `reason` via the system prompt or live-call instructions, and
+     the natural tool schemas don't list it (the middleware strips it
+     before the handler runs). This is the pattern used by the bundled
+     conformance tests.
+   - Or use `schema_transform` with `strip: false` — `reason` flows
+     through to the handler, which is responsible for ignoring it.
 
 ## Wire format
 

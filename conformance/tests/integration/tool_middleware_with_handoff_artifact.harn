@@ -1,0 +1,98 @@
+/**
+ * with_handoff_artifact — when a tool returns a handoff payload, the
+ * middleware normalizes it through `handoff()` and surfaces the typed
+ * record on `audit.handoff`. The optional sink is invoked exactly once
+ * per emitted handoff. Tools whose results don't carry a handoff are
+ * passed through untouched.
+ */
+import { with_handoff_artifact } from "std/llm/tool_middleware"
+
+let captured = atomic(0)
+
+fn next_with_result(payload) {
+  return { call -> return {
+    ok: true,
+    status: "ok",
+    tool_name: call.tool_name,
+    tool_call_id: call.call_id,
+    arguments: call.tool_args,
+    result: payload,
+    rendered_result: "",
+    observation: "",
+    error: nil,
+    error_category: nil,
+    executor: "harn",
+  } }
+}
+
+fn envelope(name) {
+  return {
+    tool_name: name,
+    tool_args: {},
+    call_id: "c-" + name,
+    declared_executor: "harn",
+    schema: nil,
+    description: "",
+    turn: {iteration: 0, session_id: ""},
+  }
+}
+
+fn full_handoff_payload() {
+  return {
+    source_persona: "merge_captain",
+    target_persona_or_human: {kind: "persona", id: "review_captain", label: "review_captain"},
+    task: "Review the PR before landing",
+    reason: "CI red on rust suite",
+    requested_capabilities: ["review"],
+  }
+}
+
+pipeline default() {
+  // (1) Tool returns `{__handoff: <full handoff>}` — middleware emits the
+  // typed handoff record on audit.handoff and fires the sink.
+  let mw = with_handoff_artifact(
+    {
+      sink: { _record, _call ->
+        let _ = atomic_add(captured, 1)
+      },
+    },
+  )
+  let r1 = mw(envelope("escalate"), next_with_result({__handoff: full_handoff_payload()}))
+  println(r1.ok)
+  println(r1.audit.kind)
+  println(r1.audit.handoff.source_persona)
+  println(r1.audit.handoff.target_persona_or_human.id)
+  println(r1.audit.handoff.task)
+  println(atomic_get(captured))
+  // (2) Tool returned a plain result — no handoff emission, no sink fire.
+  let r2 = mw(envelope("read_file"), next_with_result("contents"))
+  println(r2.ok)
+  println(r2.audit?.handoff == nil)
+  println(atomic_get(captured))
+  // (3) custom detect closure: pull the handoff out of an unconventional
+  // result key.
+  let mw2 = with_handoff_artifact(
+    {
+      detect: { _call, result ->
+        let payload = result?.result
+        if type_of(payload) == "dict" && payload?.escalation != nil {
+          return payload.escalation
+        }
+        return nil
+      },
+    },
+  )
+  let r3 = mw2(envelope("rollup"), next_with_result({escalation: full_handoff_payload()}))
+  println(r3.audit.handoff.target_persona_or_human.id)
+  println(r3.audit.handoff.source_persona)
+  // (4) source override populates source_persona when the payload omits it.
+  let mw3 = with_handoff_artifact({source: "ship_captain"})
+  let abbreviated = {
+    target_persona_or_human: {kind: "human", id: "lead-on-call"},
+    task: "Resolve incident",
+    reason: "Rollback pending",
+  }
+  let r4 = mw3(envelope("escalate"), next_with_result({__handoff: abbreviated}))
+  println(r4.audit.handoff.source_persona)
+  println(r4.audit.handoff.target_persona_or_human.kind)
+}
