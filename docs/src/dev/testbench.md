@@ -172,8 +172,12 @@ development calls for it.
 
 See also:
 
+- `docs/src/dev/tape-format.md` for the unified event tape schema and
+  the fidelity oracle that compares two tapes.
 - `docs/src/dev/testing.md` for approved test-pattern guidance.
 - `crates/harn-vm/src/testbench/` for the Rust source of every
   composable axis.
 - Issue [#1440](https://github.com/burin-labs/harn/issues/1440) for the
   composition primitive's design rationale.
+- Issue [#1441](https://github.com/burin-labs/harn/issues/1441) for the
+  recording/replay tape format and fidelity oracle.

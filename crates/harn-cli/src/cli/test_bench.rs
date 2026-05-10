@@ -15,6 +15,10 @@ pub(crate) enum TestBenchCommand {
     /// Replay a previously recorded subprocess tape against a script
     /// and assert the run produces a byte-identical tape.
     Replay(TestBenchReplayArgs),
+    /// Score replay fidelity. Pass two recorded tapes to diff them, or
+    /// pass `--against <tape> <script>` to re-run the script and compare
+    /// the new tape against the recorded one.
+    Fidelity(TestBenchFidelityArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -81,6 +85,12 @@ pub(crate) struct TestBenchRunArgs {
     /// path. Requires `--fs-overlay`.
     #[arg(long = "emit-diff", value_name = "PATH", requires = "fs_overlay")]
     pub emit_diff: Option<String>,
+    /// Emit a unified event tape (clock reads, sleeps, LLM calls, FS
+    /// writes, subprocess spawns) to `PATH`. Large payloads spill to a
+    /// content-addressed sidecar at `PATH.cas/`. Documented in
+    /// `docs/src/dev/tape-format.md`.
+    #[arg(long = "emit-tape", value_name = "PATH")]
+    pub emit_tape: Option<String>,
     /// Positional script arguments. Pass after `--`:
     /// `harn test-bench run script.harn -- a b c`.
     #[arg(last = true)]
@@ -106,6 +116,47 @@ pub(crate) struct TestBenchReplayArgs {
     /// Filesystem overlay root for replay (matches the run-side flag).
     #[arg(long = "fs-overlay", value_name = "DIR")]
     pub fs_overlay: Option<String>,
+    /// Emit a fresh unified event tape during replay so a fidelity diff
+    /// against the recorded tape is one command away.
+    #[arg(long = "emit-tape", value_name = "PATH")]
+    pub emit_tape: Option<String>,
+    #[arg(last = true)]
+    pub argv: Vec<String>,
+}
+
+#[derive(Debug, Args, Clone)]
+pub(crate) struct TestBenchFidelityArgs {
+    /// Two-tape diff form: pass the recorded tape here and the replay
+    /// tape as the second positional. Re-run-and-diff form: pass the
+    /// recorded tape via `--against` and the .harn script here.
+    pub primary: String,
+    /// Replay tape to diff against `primary`. Required unless
+    /// `--against` is set.
+    pub replay: Option<String>,
+    /// Recorded tape to re-run a script against. When set, `primary`
+    /// is treated as the .harn script path and the runner re-executes
+    /// it under testbench replay before computing fidelity.
+    #[arg(long = "against", value_name = "PATH")]
+    pub against: Option<String>,
+    /// `byte-identical` (default), `semantic`, or `outcome`. See
+    /// `docs/src/dev/tape-format.md` for the per-mode semantics.
+    #[arg(long = "mode", default_value = "byte-identical", value_name = "MODE")]
+    pub mode: String,
+    /// Write the structured fidelity report (JSON) to this path.
+    /// Defaults to stdout.
+    #[arg(long = "report", value_name = "PATH")]
+    pub report: Option<String>,
+    /// Filesystem overlay root used when re-running the script under
+    /// `--against`. Ignored without `--against`.
+    #[arg(long = "fs-overlay", value_name = "DIR")]
+    pub fs_overlay: Option<String>,
+    /// Pin the mock clock to this UNIX-epoch millisecond value when
+    /// re-running under `--against`. Defaults to the recorded tape's
+    /// `started_at_unix_ms`.
+    #[arg(long = "start-at", value_name = "UNIX_MS")]
+    pub start_at_ms: Option<i64>,
+    /// Positional script arguments forwarded to the replayed script
+    /// under `--against`. Pass after `--`.
     #[arg(last = true)]
     pub argv: Vec<String>,
 }

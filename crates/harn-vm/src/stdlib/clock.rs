@@ -13,6 +13,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::clock_mock;
+use crate::testbench::tape::{self as tape, ClockSource, TapeRecordKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -40,9 +41,11 @@ fn real_monotonic_ms() -> i64 {
 /// Current wall-clock time in milliseconds since UNIX_EPOCH.
 /// Honors the active mock if one is installed.
 pub fn now_wall_ms() -> i64 {
-    clock_mock::active_mock_clock()
+    let value = clock_mock::active_mock_clock()
         .map(|c| c.now_wall_ms())
-        .unwrap_or_else(real_wall_ms)
+        .unwrap_or_else(real_wall_ms);
+    record_clock_read(ClockSource::Wall, value);
+    value
 }
 
 /// Current wall-clock time in seconds (with fractional part).
@@ -53,9 +56,15 @@ pub fn now_wall_seconds() -> f64 {
 /// Monotonic milliseconds. Honors the active mock; otherwise returns
 /// elapsed millis since process start.
 pub fn now_monotonic_ms() -> i64 {
-    clock_mock::active_mock_clock()
+    let value = clock_mock::active_mock_clock()
         .map(|c| c.now_monotonic_ms())
-        .unwrap_or_else(real_monotonic_ms)
+        .unwrap_or_else(real_monotonic_ms);
+    record_clock_read(ClockSource::Monotonic, value);
+    value
+}
+
+fn record_clock_read(source: ClockSource, value_ms: i64) {
+    tape::with_active_recorder(|_recorder| Some(TapeRecordKind::ClockRead { source, value_ms }));
 }
 
 /// Whether a clock mock is currently active.
@@ -70,6 +79,11 @@ pub fn advance(ms: i64) {
         return;
     }
     clock_mock::advance(Duration::from_millis(ms as u64));
+    tape::with_active_recorder(|_recorder| {
+        Some(TapeRecordKind::ClockSleep {
+            duration_ms: ms as u64,
+        })
+    });
 }
 
 fn push_mock(wall_ms: i64) {

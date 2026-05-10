@@ -15,10 +15,12 @@ use std::thread;
 
 use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
 use harn_cli::tests::common::{cwd_lock, env_lock};
+use harn_vm::testbench::fidelity::{compare, FidelityMode};
 use harn_vm::testbench::overlay_fs::{DiffKind, OverlayFs};
 use harn_vm::testbench::process_tape::{
     install_process_tape, ProcessTape, ProcessTapeMode, TapeEntry,
 };
+use harn_vm::testbench::tape::{EventTape, TapeRecordKind};
 use harn_vm::testbench::Testbench;
 use tempfile::TempDir;
 
@@ -64,7 +66,7 @@ fn run_under_testbench(
         std::env::set_current_dir(&cwd).expect("set cwd to test workspace");
 
         let bench = configure();
-        let _session = bench.activate().expect("activate testbench");
+        let session = bench.activate().expect("activate testbench");
 
         let outcome = execute_run(
             &script.to_string_lossy(),
@@ -77,6 +79,13 @@ fn run_under_testbench(
             RunProfileOptions::default(),
         )
         .await;
+
+        // Flush any recorded artifacts (process tape, unified tape) the
+        // run produced. `finalize` is the single mutator that persists;
+        // leaving the session to drop on its own is fine for axes that
+        // only need teardown, but tests asserting on emitted files must
+        // call this explicitly.
+        let _ = session.finalize();
 
         if let Some(prev) = original_cwd {
             let _ = std::env::set_current_dir(prev);
@@ -292,4 +301,152 @@ fn process_tape_persist_and_load_round_trip() {
     .expect("replay should succeed");
     assert!(String::from_utf8_lossy(&output.stdout).contains("hello-tape"));
     assert!(replay_tape.fully_consumed());
+}
+
+#[test]
+fn unified_tape_byte_identical_round_trip() {
+    // Acceptance criterion #1 from #1441: emit a tape, replay it, score
+    // byte-identical fidelity. Same script under the same paused clock
+    // produces a tape that byte-matches itself.
+    let temp = TempDir::new().unwrap();
+    let script = write_file(
+        temp.path(),
+        "tape.harn",
+        r#"
+pipeline default() {
+  let start = now_ms()
+  sleep(50)
+  write_file("snapshot.txt", "checkpoint at ${now_ms() - start}ms")
+}
+"#,
+    );
+
+    let workspace_a = temp.path().to_path_buf();
+    let workspace_b = temp.path().to_path_buf();
+    let script_clone = script.clone();
+    let tape_a = temp.path().join("a.tape");
+    let tape_b = temp.path().join("b.tape");
+    let tape_a_for_a = tape_a.clone();
+    let tape_b_for_b = tape_b.clone();
+
+    let outcome_a = run_under_testbench(workspace_a.clone(), script.clone(), move || {
+        Testbench::builder()
+            .paused_clock_at_ms(1_700_000_000_000)
+            .fs_overlay(workspace_a)
+            .emit_tape_for(
+                tape_a_for_a,
+                Some(script_clone.to_string_lossy().into_owned()),
+                Vec::new(),
+            )
+            .build()
+    });
+    assert_eq!(outcome_a.exit_code, 0, "stderr: {}", outcome_a.stderr);
+
+    let script_clone_b = script.clone();
+    let outcome_b = run_under_testbench(workspace_b.clone(), script.clone(), move || {
+        Testbench::builder()
+            .paused_clock_at_ms(1_700_000_000_000)
+            .fs_overlay(workspace_b)
+            .emit_tape_for(
+                tape_b_for_b,
+                Some(script_clone_b.to_string_lossy().into_owned()),
+                Vec::new(),
+            )
+            .build()
+    });
+    assert_eq!(outcome_b.exit_code, 0, "stderr: {}", outcome_b.stderr);
+
+    let recorded = EventTape::load(&tape_a).expect("load tape a");
+    let replay = EventTape::load(&tape_b).expect("load tape b");
+    assert!(
+        !recorded.records.is_empty(),
+        "tape captured nothing: {:?}",
+        recorded.records
+    );
+
+    let report = compare(&recorded, &replay, FidelityMode::ByteIdentical);
+    assert!(
+        report.is_byte_identical(),
+        "byte-identical replay diverged: {report:?}"
+    );
+    assert_eq!(report.score, 1.0);
+}
+
+#[test]
+fn unified_tape_flags_unpinned_clock_divergence() {
+    // Acceptance criterion #5: deliberately introduce a wall-clock read
+    // in a script and confirm the tape captures it AND the oracle flags
+    // the divergence between two runs that observed different times.
+    let temp = TempDir::new().unwrap();
+    let script = write_file(
+        temp.path(),
+        "drifty.harn",
+        r#"
+pipeline default() {
+  println("now=${now_ms()}")
+}
+"#,
+    );
+
+    let workspace_a = temp.path().to_path_buf();
+    let workspace_b = temp.path().to_path_buf();
+    let script_clone_a = script.clone();
+    let script_clone_b = script.clone();
+    let tape_a = temp.path().join("drift_a.tape");
+    let tape_b = temp.path().join("drift_b.tape");
+    let tape_a_for_a = tape_a.clone();
+    let tape_b_for_b = tape_b.clone();
+
+    // Run twice with *different* pinned clocks so the recorded
+    // ClockRead values diverge across the two tapes.
+    let outcome_a = run_under_testbench(workspace_a.clone(), script.clone(), move || {
+        Testbench::builder()
+            .paused_clock_at_ms(1_700_000_000_000)
+            .emit_tape_for(
+                tape_a_for_a,
+                Some(script_clone_a.to_string_lossy().into_owned()),
+                Vec::new(),
+            )
+            .build()
+    });
+    assert_eq!(outcome_a.exit_code, 0, "stderr: {}", outcome_a.stderr);
+
+    let outcome_b = run_under_testbench(workspace_b.clone(), script.clone(), move || {
+        Testbench::builder()
+            .paused_clock_at_ms(1_700_000_999_999)
+            .emit_tape_for(
+                tape_b_for_b,
+                Some(script_clone_b.to_string_lossy().into_owned()),
+                Vec::new(),
+            )
+            .build()
+    });
+    assert_eq!(outcome_b.exit_code, 0, "stderr: {}", outcome_b.stderr);
+
+    let tape_a_loaded = EventTape::load(&tape_a).expect("load drift_a");
+    let tape_b_loaded = EventTape::load(&tape_b).expect("load drift_b");
+
+    // The tapes must contain a ClockRead — proves capture.
+    assert!(
+        tape_a_loaded
+            .records
+            .iter()
+            .any(|r| matches!(r.kind, TapeRecordKind::ClockRead { .. })),
+        "drift_a tape missing ClockRead record"
+    );
+
+    // The oracle must flag the divergence under byte-identical mode.
+    let report = compare(&tape_a_loaded, &tape_b_loaded, FidelityMode::ByteIdentical);
+    assert!(
+        !report.is_byte_identical(),
+        "oracle failed to flag clock drift: {report:?}"
+    );
+    assert!(
+        report
+            .divergences
+            .iter()
+            .any(|d| d.category == "clock_read_value"),
+        "expected a clock_read_value divergence, got: {:?}",
+        report.divergences
+    );
 }

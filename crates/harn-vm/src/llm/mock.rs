@@ -425,6 +425,7 @@ fn try_match_cli_mock(match_text: &str) -> Option<Result<LlmResult, VmError>> {
 }
 
 pub(crate) fn record_cli_llm_result(result: &LlmResult) {
+    record_unified_tape_llm_call(result);
     if !CLI_LLM_MOCK_MODE.with(|mode| *mode.borrow() == CliLlmMockMode::Record) {
         return;
     }
@@ -447,6 +448,45 @@ pub(crate) fn record_cli_llm_result(result: &LlmResult) {
             logprobs: result.logprobs.clone(),
             error: None,
         });
+    });
+}
+
+/// Append an `LlmCall` record to the unified-tape recorder when one is
+/// active. The request digest is built from the most recently recorded
+/// `LlmMockCall` so the same hashing surface used for fixture matching
+/// drives the fidelity oracle's request comparison; falls back to a
+/// hash of the response text alone when no matching call is on record
+/// (e.g. when `record_llm_mock_call` was bypassed).
+fn record_unified_tape_llm_call(result: &LlmResult) {
+    if crate::testbench::tape::active_recorder().is_none() {
+        return;
+    }
+    let response_json = serde_json::to_vec(result).unwrap_or_else(|_| Vec::new());
+    let request_digest = LLM_MOCK_CALLS
+        .with(|calls| calls.borrow().last().cloned())
+        .map(|call| {
+            let serialized = serde_json::to_vec(&serde_json::json!({
+                "messages": call.messages,
+                "system": call.system,
+                "tools": call.tools,
+                "tool_choice": call.tool_choice,
+                "thinking": call.thinking,
+                "model": result.model,
+            }))
+            .unwrap_or_default();
+            crate::testbench::tape::content_hash(&serialized)
+        })
+        .unwrap_or_else(|| {
+            // Fall back to hashing the response — keeps fidelity comparable
+            // across runs even when the request surface wasn't captured.
+            crate::testbench::tape::content_hash(result.text.as_bytes())
+        });
+    crate::testbench::tape::with_active_recorder(|recorder| {
+        let response = recorder.payload_from_bytes(response_json);
+        Some(crate::testbench::tape::TapeRecordKind::LlmCall {
+            request_digest,
+            response,
+        })
     });
 }
 
