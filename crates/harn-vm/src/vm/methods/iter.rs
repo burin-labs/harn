@@ -400,7 +400,7 @@ impl crate::vm::Vm {
                     }
                 }
             }
-            _ => Ok(VmValue::Nil),
+            _ => Err(VmError::Runtime(format!("iter has no method `{method}`"))),
         }
     }
 }

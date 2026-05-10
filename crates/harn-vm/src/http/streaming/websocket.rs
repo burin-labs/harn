@@ -660,12 +660,7 @@ pub(super) async fn vm_websocket_connect(
         DEFAULT_TIMEOUT_MS as i64,
     )
     .max(0) as u64;
-    let request = websocket_client_request(url, options)?;
-    let connect = tokio_tungstenite::connect_async(request);
-    let (socket, _) = tokio::time::timeout(Duration::from_millis(timeout_ms), connect)
-        .await
-        .map_err(|_| vm_error(format!("websocket_connect: timed out after {timeout_ms}ms")))?
-        .map_err(|error| vm_error(format!("websocket_connect: failed: {error}")))?;
+    let socket = connect_with_retry(url, options, timeout_ms).await?;
     let handle = WebSocketHandle {
         kind: WebSocketHandleKind::Real(Rc::new(tokio::sync::Mutex::new(socket))),
         url: url.to_string(),
@@ -684,6 +679,73 @@ pub(super) async fn vm_websocket_connect(
         Ok(())
     })?;
     Ok(VmValue::String(Rc::from(id)))
+}
+
+/// Connect with bounded retries on transient TCP-level failures.
+///
+/// Connection-reset / broken-pipe / EOF on the very first byte usually
+/// means the OS recycled an ephemeral port that was still in TIME_WAIT
+/// (or another transient kernel race). Retrying within the user's
+/// timeout budget self-heals these without blaming the script.
+///
+/// Permanent failures (DNS, refused, TLS, protocol) bypass the retry.
+async fn connect_with_retry(
+    url: &str,
+    options: &BTreeMap<String, VmValue>,
+    timeout_ms: u64,
+) -> Result<
+    tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    VmError,
+> {
+    use std::time::Instant;
+
+    const MAX_ATTEMPTS: u32 = 3;
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let mut last_error: Option<String> = None;
+    for attempt in 0..MAX_ATTEMPTS {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .unwrap_or_default();
+        if remaining.is_zero() {
+            break;
+        }
+        let request = websocket_client_request(url, options)?;
+        let connect = tokio_tungstenite::connect_async(request);
+        match tokio::time::timeout(remaining, connect).await {
+            Err(_) => {
+                last_error = Some(format!("timed out after {timeout_ms}ms"));
+                break;
+            }
+            Ok(Ok((socket, _))) => return Ok(socket),
+            Ok(Err(error)) => {
+                let message = format!("{error}");
+                if attempt + 1 < MAX_ATTEMPTS && is_transient_connect_error(&message) {
+                    last_error = Some(message);
+                    continue;
+                }
+                return Err(vm_error(format!("websocket_connect: failed: {error}")));
+            }
+        }
+    }
+    Err(vm_error(format!(
+        "websocket_connect: failed: {}",
+        last_error.unwrap_or_else(|| "unknown error".to_string())
+    )))
+}
+
+/// Match TCP / IO errors that commonly appear during socket setup
+/// races against a freshly-bound listener. Substring matching is
+/// safe here because the underlying error formatter from `tungstenite`
+/// embeds these phrases verbatim.
+fn is_transient_connect_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("connection reset")
+        || lower.contains("broken pipe")
+        || lower.contains("connection aborted")
+        || lower.contains("unexpected eof")
+        || lower.contains("os error 54") // ECONNRESET on macOS
 }
 
 fn websocket_message_from_vm(

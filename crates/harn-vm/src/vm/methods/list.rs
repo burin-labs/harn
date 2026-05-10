@@ -450,7 +450,21 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::Dict(Rc::new(counts)))
             }
-            _ => Ok(VmValue::Nil),
+            // Iter-style sinks behave as identities/conversions when
+            // the receiver is already eager. Lets `xs.filter(...).to_list()`
+            // work uniformly whether `filter` returned an `iter` or a
+            // `list`.
+            "to_list" => Ok(VmValue::List(Rc::clone(items))),
+            "to_set" => {
+                let mut out: Vec<VmValue> = Vec::with_capacity(items.len());
+                for v in items.iter() {
+                    if !out.iter().any(|x| values_equal(x, v)) {
+                        out.push(v.clone());
+                    }
+                }
+                Ok(VmValue::Set(Rc::new(out)))
+            }
+            _ => Err(VmError::Runtime(format!("list has no method `{method}`"))),
         }
     }
 }

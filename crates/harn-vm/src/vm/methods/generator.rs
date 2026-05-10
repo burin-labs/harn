@@ -40,7 +40,9 @@ impl crate::vm::Vm {
                     }
                 }
             }
-            _ => Ok(VmValue::Nil),
+            _ => Err(VmError::Runtime(format!(
+                "Generator has no method `{method}`"
+            ))),
         }
     }
 
@@ -80,7 +82,9 @@ impl crate::vm::Vm {
                     }
                 }
             }
-            _ => Ok(VmValue::Nil),
+            _ => Err(VmError::Runtime(format!(
+                "Stream has no method `{method}`"
+            ))),
         }
     }
 }

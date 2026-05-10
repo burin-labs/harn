@@ -1,5 +1,6 @@
 mod formatter;
 mod helpers;
+mod trailing_comma;
 #[cfg(test)]
 mod tests;
 
@@ -9,6 +10,9 @@ use harn_lexer::{Lexer, TokenKind};
 use harn_parser::Parser;
 
 pub(crate) use formatter::{Comment, Formatter};
+pub use trailing_comma::{
+    apply_trailing_comma_fixes, trailing_comma_issues, TrailingCommaIssue, TrailingCommaKind,
+};
 
 /// `FmtOptions::separator_width` value that resolves section-header bars from
 /// `line_width` minus the current indent.
@@ -89,6 +93,12 @@ pub fn format_source_opts(source: &str, opts: &FmtOptions) -> Result<String, Str
     );
     fmt.format_program(&program);
     let formatted = fmt.finish();
+    // Token-based surface-format pass: catches any trailing-comma cases
+    // the AST formatter did not normalize (e.g. the original layout was
+    // preserved verbatim because the formatter's wrap heuristic happened
+    // to keep it). Without this pass `harn fmt` would leave behind
+    // diagnostics that `harn lint --fix` is willing to repair.
+    let formatted = apply_trailing_comma_fixes(&formatted);
     Ok(match shebang {
         Some(line) => {
             let trailing = if line.ends_with('\n') { "" } else { "\n" };
