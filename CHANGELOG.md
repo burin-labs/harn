@@ -6,6 +6,27 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Persona supervision-runtime hooks (#1480).** `harn_vm::personas`
+  now exposes a `PersonaSupervisionSink` mirroring the harn-cloud
+  multiplexed `persona/update` feed for the runtime-sourced
+  `update_kind`s. The runtime emits typed `queue_position` events on
+  every enqueue/drain transition, `receipt` events at the tail of
+  every `run_for_envelope` call, and `repair_worker_status` events
+  through a new `report_repair_worker_status` entry point that is
+  append-only and idempotent on `(repair_worker_id, lifecycle)`. A
+  typed `restore_persona_checkpoint` entry point acks supervision-API
+  restore requests by emitting a `Checkpoint(action: RestoreAcked)`
+  envelope carrying the resume coordinates the runtime actually
+  resumed from (`run_id`, `lease_id`, `last_run_ms`,
+  `queued_work_keys`). All emissions accept `now_ms` from the caller,
+  so wiring through `harn_clock::RecordedClock` produces
+  byte-identical sink sequences across replays — locked in by a new
+  determinism test in `crates/harn-vm/src/personas.rs`.
+
 ## v0.8.7
 
 ### Fixed
