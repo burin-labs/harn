@@ -1,4 +1,4 @@
-<!-- Generated from spec/HARN_SPEC.md by scripts/sync_language_spec.sh -->
+<!-- Generated from spec/HARN_SPEC.md by scripts/sync_language_spec.harn -->
 
 # Harn language specification
 
@@ -17,7 +17,7 @@ that perform I/O, LLM calls, and tool execution.
 
 This file is the canonical language specification. The hosted docs page
 `docs/src/language-spec.md` is generated from it by
-`scripts/sync_language_spec.sh`.
+`scripts/sync_language_spec.harn`.
 
 ## Lexical rules
 
@@ -163,7 +163,7 @@ let two_weeks = 2w     // 1209600000
 
 ```javascript
 string_literal ::= '"' (char | escape | interpolation)* '"'
-escape         ::= '\' ('n' | 't' | '\\' | '"' | '$')
+escape         ::= '\' ('n' | 'r' | 't' | '0' | '\\' | '"' | '$')
 interpolation  ::= '${' expression '}'
 ```
 
@@ -173,9 +173,9 @@ If the string contains at least one `${...}` interpolation, it produces an
 `interpolatedString` token containing a list of segments (literal text and expression
 source strings). Otherwise it produces a plain `stringLiteral` token.
 
-Escape sequences: `\n` (newline), `\t` (tab), `\\` (backslash), `\"` (double quote),
-`\$` (dollar sign). Any other character after `\` produces a literal backslash
-followed by that character.
+Escape sequences: `\n` (newline), `\r` (carriage return), `\t` (tab), `\0` (NUL),
+`\\` (backslash), `\"` (double quote), `\$` (dollar sign). Any other character
+after `\` produces a literal backslash followed by that character.
 
 #### Raw string literals
 

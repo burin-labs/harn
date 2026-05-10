@@ -81,7 +81,7 @@ jobs:
         id: bump
         run: |
           set +e
-          BUMP="$(python3 scripts/detect_bump_type.py)"
+          BUMP="$(cargo run --quiet --bin harn -- run scripts/detect_bump_type.harn)"
           rc=$?
           set -e
           if [[ $rc -eq 2 ]]; then
@@ -90,7 +90,7 @@ jobs:
             exit 0
           fi
           if [[ $rc -ne 0 ]]; then
-            echo "::error::detect_bump_type.py failed with exit code $rc"
+            echo "::error::detect_bump_type.harn failed with exit code $rc"
             exit $rc
           fi
           echo "type=$BUMP" >> "$GITHUB_OUTPUT"

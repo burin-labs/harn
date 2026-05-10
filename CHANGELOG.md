@@ -10,6 +10,22 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **String escape sequences `\r` and `\0`.** Double-quoted string
+  literals now recognize `\r` (carriage return) and `\0` (NUL) in
+  addition to the existing `\n`, `\t`, `\\`, `\"`, `\$`. Triple-quoted
+  multiline strings remain literal. The formatter emits `\r` / `\0`
+  back out for those bytes when re-rendering string literals so
+  round-trips stay readable. Spec updated in
+  `spec/HARN_SPEC.md#single-line-strings`.
+- **Repo automation scripts ported to Harn.** Five one-off
+  Python/Bash scripts (`check_xfail_count`, `compare_generated_text`,
+  `sync_language_spec`, `detect_bump_type`, `check_openapi_snapshot`)
+  are now `.harn` files under `scripts/`, with companion
+  `@test`-pipeline coverage in `scripts/tests/`. Wired into a new
+  `make test-harn-scripts` target and into `make all`; the existing
+  pre-commit `harn fmt` / `harn lint` stanza now covers `scripts/`
+  too, so these scripts stay typecheck-clean and warning-free as
+  they evolve.
 - **Package manager maturity: provenance, outdated, audit, and
   generated-artifact contract checks.** Bumped `harn.lock` to version 2
   with top-level `generator_version` / `protocol_artifact_version` and

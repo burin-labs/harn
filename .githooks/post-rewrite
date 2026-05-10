@@ -40,14 +40,17 @@ rewrites=$(cat) || exit 0
 [ -n "$rewrites" ] || exit 0
 
 # `spec/HARN_SPEC.md` → `docs/src/language-spec.md` is the only mirror
-# pair we know how to regenerate cheaply (no cargo build). Other generated
-# files (`docs/theme/harn-keywords.js` from the live stdlib) need a Rust
-# build; we leave those to the pre-commit hook + CI.
+# pair we cheaply regenerate here. The sync logic itself is a `.harn`
+# script invoked through the workspace's debug harn binary; we
+# fast-path skip the regen if the binary isn't built yet, so a clean
+# checkout doesn't pay a Rust build cost during a rebase.
 spec_path="spec/HARN_SPEC.md"
 mirror_path="docs/src/language-spec.md"
-sync_script="scripts/sync_language_spec.sh"
+sync_script="scripts/sync_language_spec.harn"
+harn_bin="target/debug/harn"
 
-[ -x "$sync_script" ] || exit 0
+[ -f "$sync_script" ] || exit 0
+[ -x "$harn_bin" ] || exit 0
 
 # How many of the rewritten commits touched the spec?
 spec_touching_news=$(echo "$rewrites" | awk '{print $2}' | while read -r sha; do
@@ -63,7 +66,7 @@ count=$(printf '%s\n' "$spec_touching_news" | grep -c .)
 last_sha=$(git rev-parse HEAD 2>/dev/null) || exit 0
 last_touched=$(printf '%s\n' "$spec_touching_news" | tail -n 1)
 
-"$sync_script" >/dev/null 2>&1 || exit 0
+"$harn_bin" run "$sync_script" >/dev/null 2>&1 || exit 0
 
 if git diff --quiet --exit-code -- "$mirror_path"; then
   exit 0

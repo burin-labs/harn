@@ -1,0 +1,30 @@
+// Tests for scripts/check_xfail_count.harn — exercise the helper
+// functions on synthetic inputs (no filesystem dependency).
+import "../check_xfail_count.harn"
+
+@test
+pipeline test_count_substring_basic(task) {
+  assert_eq(count_substring("abcabcabc", "abc"), 3)
+}
+
+@test
+pipeline test_count_substring_zero_matches(task) {
+  assert_eq(count_substring("hello world", "@xfail:"), 0)
+}
+
+@test
+pipeline test_count_substring_empty_needle_is_zero(task) {
+  assert_eq(count_substring("anything", ""), 0)
+}
+
+@test
+pipeline test_count_substring_overlapping_not_double_counted(task) {
+  // split() boundaries don't overlap, which matches `grep -o`'s behavior.
+  assert_eq(count_substring("aaaa", "aa"), 2)
+}
+
+@test
+pipeline test_count_substring_at_boundaries(task) {
+  assert_eq(count_substring("@xfail: at start", "@xfail:"), 1)
+  assert_eq(count_substring("trailing @xfail:", "@xfail:"), 1)
+}

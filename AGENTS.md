@@ -82,7 +82,7 @@ This repository implements Harn, a programming language and runtime for orchestr
 ## Generated Files And Sync Rules
 
 - Edit `spec/HARN_SPEC.md`, not `docs/src/language-spec.md`; regenerate with
-  `./scripts/sync_language_spec.sh`.
+  `make sync-language-spec` (which runs `scripts/sync_language_spec.harn`).
 - Do not hand-edit `docs/theme/harn-keywords.js`; regenerate it with `make gen-highlight`.
 - Do not hand-edit `spec/protocol-artifacts/*` (excluding `*_test.go`); regenerate Harn
   protocol contracts with `make gen-protocol-artifacts`, verify drift with

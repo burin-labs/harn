@@ -1,0 +1,95 @@
+// Tests for scripts/detect_bump_type.harn — exercise the pure
+// version-parsing/comparison helpers without touching Cargo.toml or
+// CHANGELOG.md.
+import "../detect_bump_type.harn"
+
+@test
+pipeline test_parse_valid_semver(task) {
+  assert_eq(parse("1.2.3"), [1, 2, 3])
+  assert_eq(parse("0.0.0"), [0, 0, 0])
+  assert_eq(parse("10.20.30"), [10, 20, 30])
+}
+
+@test
+pipeline test_parse_rejects_non_triple(task) {
+  let r1 = try {
+    parse("1.2")
+  } catch (_) {
+    "caught"
+  }
+  assert_eq(r1, "caught")
+  let r2 = try {
+    parse("1.2.3.4")
+  } catch (_) {
+    "caught"
+  }
+  assert_eq(r2, "caught")
+}
+
+@test
+pipeline test_parse_rejects_non_numeric(task) {
+  let r = try {
+    parse("1.x.3")
+  } catch (_) {
+    "caught"
+  }
+  assert_eq(r, "caught")
+}
+
+@test
+pipeline test_detect_patch(task) {
+  assert_eq(detect("0.8.4", "0.8.5"), "patch")
+  assert_eq(detect("1.0.0", "1.0.1"), "patch")
+}
+
+@test
+pipeline test_detect_minor(task) {
+  assert_eq(detect("0.8.4", "0.9.0"), "minor")
+  assert_eq(detect("1.5.7", "1.6.0"), "minor")
+}
+
+@test
+pipeline test_detect_major(task) {
+  assert_eq(detect("0.8.4", "1.0.0"), "major")
+  assert_eq(detect("2.3.4", "3.0.0"), "major")
+}
+
+@test
+pipeline test_detect_rejects_skipped_versions(task) {
+  let r = try {
+    detect("0.8.4", "0.8.6")
+  } catch (_) {
+    "caught"
+  }
+  assert_eq(r, "caught")
+}
+
+@test
+pipeline test_detect_rejects_non_zero_minor_on_major(task) {
+  let r = try {
+    detect("1.0.0", "2.1.0")
+  } catch (_) {
+    "caught"
+  }
+  assert_eq(r, "caught")
+}
+
+@test
+pipeline test_detect_rejects_non_zero_patch_on_minor(task) {
+  let r = try {
+    detect("1.0.0", "1.1.5")
+  } catch (_) {
+    "caught"
+  }
+  assert_eq(r, "caught")
+}
+
+@test
+pipeline test_detect_rejects_downgrade(task) {
+  let r = try {
+    detect("1.2.3", "1.2.2")
+  } catch (_) {
+    "caught"
+  }
+  assert_eq(r, "caught")
+}

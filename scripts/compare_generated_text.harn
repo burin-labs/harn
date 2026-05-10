@@ -1,0 +1,23 @@
+// Compare generated text files while ignoring platform line endings.
+// Usage: harn run scripts/compare_generated_text.harn -- <committed> <generated>
+/**
+ * Normalize Windows/Mac line endings to LF so generated-text equality
+ * survives a checkout with `core.autocrlf=true`.
+ */
+pub fn normalize(text: string) -> string {
+  return text.replace("\r\n", "\n").replace("\r", "\n")
+}
+
+pipeline main(task) {
+  if argv.count != 2 {
+    eprintln("usage: compare_generated_text.harn <committed> <generated>")
+    return 2
+  }
+  let committed = read_file(argv[0])
+  let generated = read_file(argv[1])
+  return if normalize(committed) == normalize(generated) {
+    0
+  } else {
+    1
+  }
+}
