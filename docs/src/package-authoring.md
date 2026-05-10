@@ -124,3 +124,71 @@ harn package pack
 `harn publish --dry-run` runs the same publish-readiness checks and reports the
 registry target that would receive the submission. Real registry submission is
 reserved for the registry/index workflow.
+
+## Lockfile provenance
+
+`harn.lock` is the executable record of what was resolved and why. Every
+write captures:
+
+- `version`, `generator_version`, and `protocol_artifact_version` at the
+  top level so downstream automation can detect when the lock was produced
+  by an older Harn line.
+- Per-entry `source`, `commit`, and `content_hash` for git/registry deps,
+  plus `package_version`, `harn_compat`, and a separate `manifest_digest`
+  taken from the resolved package's `harn.toml`.
+- A `[package.registry]` table for entries originally added via
+  `harn add @scope/name@version`, preserving the registry source, package
+  name, and requested version so `harn package outdated` can compare
+  against the registry's latest release without re-reading the manifest.
+
+Path dependencies remain live-linked; their lockfile entry records the
+resolved `path+file://` URI plus the same `package_version` and
+`manifest_digest` so `harn package audit` flags drift without rebuilding.
+
+## Maturing the package surface
+
+Once a manifest and lockfile are in place, three commands cover the
+day-to-day automation surface:
+
+- `harn package outdated` — surface registry version bumps and (with
+  `--remote`) git branch HEAD drift. JSON output matches the report
+  struct documented in
+  [`cli-reference.md`](cli-reference.md#harn-package-outdated).
+- `harn package audit` — verify provenance, compatibility, and content
+  integrity in one pass. `--json` returns a stable `code` per finding so
+  CI can fail on specific issues (yanked registry pins, content-hash
+  tampering, broken `harn` ranges) without parsing prose.
+- `harn package artifacts check` — compare a vendored copy of the
+  protocol artifact manifest (e.g. `spec/protocol-artifacts/manifest.json`
+  in your repo) against the running Harn. The exit code is non-zero on
+  drift, so a downstream that vendors generated TypeScript or Swift
+  bindings can fail CI when those bindings would change after a Harn bump.
+
+## Cross-repo bump workflow
+
+When Harn cuts a new release, downstream package authors and host
+integrators (Burin Code, Harn Cloud, third-party connectors) need a
+consistent way to land the bump. The recommended sequence:
+
+1. **Refresh the running Harn binary** in the downstream repo
+   (`fetch-harn`, `make setup`, or whatever the local script is).
+2. **Re-resolve dependencies** with `harn install` so `harn.lock`
+   rewrites in v2 with the current `generator_version` and
+   `protocol_artifact_version`.
+3. **Audit** with `harn package audit --json`. If any package declares a
+   `harn` range that excludes the new line, contact the package owner or
+   pin to a previous tag.
+4. **Check vendored protocol bindings** with
+   `harn package artifacts check path/to/vendored/manifest.json`. If it
+   reports drift, regenerate the bindings (`make gen-protocol-artifacts`
+   inside the downstream repo, or `harn package artifacts manifest
+   --output …` to refresh the vendored copy).
+5. **Surface registry updates** with `harn package outdated --json` and
+   bump dependency versions intentionally; `harn update <alias>` keeps
+   each upgrade in its own commit.
+
+Steps 2–4 are a single CI job for hosts that vendor Harn artifacts:
+`harn install --frozen --json`, then `harn package audit --json`, then
+`harn package artifacts check`. The `--json` output is stable across
+Harn lines, so the same automation script runs against multiple Harn
+versions during a staged rollout.

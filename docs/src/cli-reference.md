@@ -1349,12 +1349,14 @@ harn install
 harn install --frozen
 harn install --locked --offline
 harn install --refetch my-lib
+harn install --json
 ```
 
 `--locked` is a CI-oriented alias for `--frozen`: Harn fails if
 `harn.toml` and `harn.lock` disagree. `--offline` also implies locked
 behavior and fails instead of fetching when a locked git package is
-missing from the shared cache.
+missing from the shared cache. `--json` emits a structured install
+summary suitable for Burin Code and Harn Cloud automation.
 
 ## harn lock
 
@@ -1372,7 +1374,10 @@ Refresh one dependency (or all of them) and update `harn.lock`.
 ```bash
 harn update my-lib
 harn update --all
+harn update --all --json
 ```
+
+`--json` emits a structured update summary, mirroring `harn install`.
 
 ## harn remove
 
@@ -1424,6 +1429,68 @@ harn package cache clean --all
 `harn.lock`; `--materialized` also checks `.harn/packages/`. `clean`
 removes cache entries not referenced by the current lockfile, while
 `--all` clears all cached git package entries.
+
+## harn package outdated
+
+Compare the resolved entries in `harn.lock` against newer registry
+versions or upstream branch HEADs.
+
+```bash
+harn package outdated
+harn package outdated --remote
+harn package outdated --json
+```
+
+Registry-attributed dependencies (added via `harn add @scope/name@version`)
+are checked against the configured registry index; pass `--registry`
+to override or `--refresh` to bypass any local cache. Plain git
+dependencies report `skipped` unless `--remote` is set, in which case
+Harn shells out to `git ls-remote` to detect branch HEAD drift. Path
+dependencies always report `skipped` because they live-link.
+
+## harn package audit
+
+Audit `harn.lock` provenance, package compatibility, and supply-chain
+integrity in one pass.
+
+```bash
+harn package audit
+harn package audit --json
+harn package audit --skip-materialized
+```
+
+The audit verifies that:
+
+- The lock generator/protocol-artifact versions match the running Harn.
+- Each entry carries provenance (`package_version`, `manifest_digest`).
+- Resolved packages still satisfy their `harn` compatibility range.
+- Cached and materialized git packages still hash to the lockfile entry.
+- The materialized package's `harn.toml` digest still matches the lock.
+- Registry-attributed entries have not been yanked from the index.
+- Publishable manifests are not pinned to path dependencies.
+
+Each finding has a stable `code` (`lockfile-stale`, `harn-compat-violation`,
+`yanked-registry-version`, etc.) so downstream automation can route
+specific failure modes without parsing the human report.
+
+## harn package artifacts
+
+Inspect or verify the published Harn protocol-artifact contract.
+
+```bash
+harn package artifacts manifest
+harn package artifacts manifest --output vendor/manifest.json
+harn package artifacts check vendor/manifest.json
+harn package artifacts check vendor/manifest.json --json
+```
+
+`manifest` prints (or writes) the protocol-artifact manifest the running
+Harn binary would emit — the same JSON that `make gen-protocol-artifacts`
+ships under `spec/protocol-artifacts/manifest.json`. `check` compares a
+vendored copy of that manifest against the running Harn and reports any
+drift. Hosts that vendor Harn protocol bindings (Burin Code, Harn Cloud,
+custom integrators) call `check` from CI to detect when a Harn bump
+would require regenerating their bindings.
 
 ## harn version
 

@@ -21,7 +21,7 @@ const HARN_CACHE_DIR_ENV: &str = "HARN_CACHE_DIR";
 const HARN_PACKAGE_REGISTRY_ENV: &str = "HARN_PACKAGE_REGISTRY";
 const DEFAULT_PACKAGE_REGISTRY_URL: &str = "https://packages.harnlang.com/index.toml";
 const CACHE_METADATA_VERSION: u32 = 1;
-const LOCK_FILE_VERSION: u32 = 1;
+const LOCK_FILE_VERSION: u32 = 2;
 const REGISTRY_INDEX_VERSION: u32 = 1;
 const PKG_DIR: &str = ".harn/packages";
 const MANIFEST: &str = "harn.toml";
@@ -32,6 +32,7 @@ pub(crate) mod errors;
 mod extensions;
 mod lockfile;
 mod manifest;
+mod maturity;
 mod package_ops;
 mod registry;
 mod skills;
@@ -49,6 +50,11 @@ pub use lockfile::{
     remove_package, update_packages,
 };
 pub use manifest::*;
+pub use maturity::{
+    artifacts_check, artifacts_manifest, audit_packages, outdated_packages, ArtifactDriftReport,
+    AuditCode, AuditFinding, AuditReport, AuditSeverity, OutdatedEntry, OutdatedReport,
+    OutdatedStatus,
+};
 pub use package_ops::*;
 pub(crate) use registry::*;
 pub use registry::{

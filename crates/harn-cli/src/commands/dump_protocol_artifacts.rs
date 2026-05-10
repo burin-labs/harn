@@ -201,6 +201,15 @@ fn generate_artifacts() -> Result<Vec<Artifact>, String> {
 
 const PYTHON_INIT_STUB: &str = "from .harn_protocol import *  # noqa: F401,F403\n";
 
+/// Render the protocol-artifact manifest the running Harn would write.
+///
+/// Re-exposed via `harn package artifacts manifest` so downstream automation
+/// (Burin Code, Harn Cloud) can compare against vendored copies without
+/// shelling out to `dump-protocol-artifacts`.
+pub(crate) fn manifest_json() -> Result<String, String> {
+    generate_manifest()
+}
+
 fn generate_manifest() -> Result<String, String> {
     let schemas = SCHEMA_COPIES
         .iter()
