@@ -63,8 +63,8 @@ receipts. The metrics dict carries `{compute_ms}` on misses and (by
 default) `{model_calls_avoided: 1}` on hits — pass `options.estimate`
 to enrich the hit receipts with `tokens_saved` and `latency_saved_ms`.
 
-When `options.session_id` is set, `with_cache` emits `cache.hit` and
-`cache.miss` events on the agent event tape. The tape is the
+When `options.session_id` is set, `with_cache` emits `cache_hit` and
+`cache_miss` events on the agent event tape. The tape is the
 record/replay surface for crystallization shadow runs and persona value
 ledgers — cached calls show up there as durable receipts instead of
 ghosting through unobserved.
@@ -143,7 +143,7 @@ let fixture = with_cache("trace:" + trace_id, fn() {
 ```
 
 Because the session_id is set, the shadow run's tape captures the
-`cache.hit` events for every replay — the crystallization receipts and
+`cache_hit` events for every replay — the crystallization receipts and
 persona value ledger read them back to show "model calls avoided" in
 the demo from the [Moat Addendum: Workflow Crystallization](https://www.notion.so/34a7d224c63281fcbc13cf390981b01b).
 
@@ -152,7 +152,7 @@ the demo from the [Moat Addendum: Workflow Crystallization](https://www.notion.s
 Cached calls are deterministic. The cache key is a sha256 of the
 canonical-JSON-sorted identity for the call, and the cached value is
 the verbatim envelope from the original miss. Replaying a recorded
-tape that contains `cache.hit` events does not touch the underlying
+tape that contains `cache_hit` events does not touch the underlying
 model or filesystem — the cached value is returned byte-identical.
 TTL expiry honors the unified clock (`mock_time` / `advance_time`), so
 testbench fixtures can reproduce expiry windows without wall-clock

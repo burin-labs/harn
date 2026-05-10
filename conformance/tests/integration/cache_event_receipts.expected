@@ -1,0 +1,8 @@
+direct_emit_ok=true
+first.text=answer
+byte_identical=true
+mock_calls=1
+hits=2
+misses=1
+hit.tokens_saved=18
+hit.model_calls_avoided=1

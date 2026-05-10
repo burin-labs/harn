@@ -1,0 +1,72 @@
+/**
+ * Cache cost-moat receipts on the agent event tape.
+ *
+ * Verifies the ledger story end-to-end:
+ *  - `agent_emit_event(session_id, "cache_hit"|"cache_miss", payload)`
+ *    is accepted by the host. Pre-fix the event names weren't
+ *    registered as `AgentEvent` variants and the wrapper's `try`
+ *    around `agent_emit_event` silently swallowed the rejection.
+ *  - The direct-call `with_cache(prompt, system, opts)` form emits
+ *    the same `cache_hit` / `cache_miss` receipts as the caller-
+ *    wrapper form when `opts.session_id` is set.
+ *  - Receipts carry `model_calls_avoided` and `tokens_saved`
+ *    derived from the cached LLM envelope's `usage`. (latency_saved_ms
+ *    is only populated when the cached envelope includes a `latency_ms`
+ *    field; llm_call does not currently surface one.)
+ */
+import { agent_emit_event } from "std/agent/state"
+import { cache_clear, mem_cache } from "std/cache"
+import { with_cache } from "std/llm/handlers"
+
+pipeline default() {
+  let session_id = "cache-event-receipts-" + uuid()
+  let hits = atomic(0)
+  let misses = atomic(0)
+  let last_hit_tokens = atomic(0)
+  let last_hit_calls_avoided = atomic(0)
+  agent_subscribe(
+    session_id,
+    { ev ->
+      if ev?.type == "cache_hit" {
+        let _ = atomic_add(hits, 1)
+        let _ = atomic_set(last_hit_tokens, to_int(ev?.payload?.metrics?.tokens_saved ?? 0))
+        let _ = atomic_set(last_hit_calls_avoided, to_int(ev?.payload?.metrics?.model_calls_avoided ?? 0))
+      }
+      if ev?.type == "cache_miss" {
+        let _ = atomic_add(misses, 1)
+      }
+    },
+  )
+  // Direct host emit: pre-fix this returned an "unsupported event type"
+  // error that the wrapper silently swallowed. With cache_hit / cache_miss
+  // registered as canonical AgentEvent variants, the call succeeds.
+  let direct = try {
+    agent_emit_event(
+      session_id,
+      "cache_hit",
+      {key: "direct", backend: "mem", namespace: "ns", metrics: {model_calls_avoided: 1}},
+    )
+  }
+  println("direct_emit_ok=" + to_string(!is_err(direct)))
+  // Direct-call form: a miss + hit pair should land on the tape with
+  // the cost-moat receipts derived from the cached LLM envelope. The
+  // mock surfaces `input_tokens` + `output_tokens` at the top level
+  // (the LLM result then exposes them through `usage` for the metric
+  // reader).
+  llm_mock_clear()
+  llm_mock({text: "answer", input_tokens: 11, output_tokens: 7, model: "m", provider: "p"})
+  llm_mock({text: "would-recompute", model: "m", provider: "p"})
+  let store = mem_cache({namespace: "cache-event-receipts-direct-" + uuid()})
+  cache_clear({store: store})
+  let opts = {provider: "p", model: "m", stream: false, store: store, session_id: session_id}
+  let first = with_cache("hello", "sys", opts)
+  let second = with_cache("hello", "sys", opts)
+  println("first.text=" + first.text)
+  println("byte_identical=" + to_string(json_stringify(first) == json_stringify(second)))
+  println("mock_calls=" + to_string(len(llm_mock_calls())))
+  // hits counter started at 1 from the direct emit above, so we expect 2.
+  println("hits=" + to_string(atomic_get(hits)))
+  println("misses=" + to_string(atomic_get(misses)))
+  println("hit.tokens_saved=" + to_string(atomic_get(last_hit_tokens)))
+  println("hit.model_calls_avoided=" + to_string(atomic_get(last_hit_calls_avoided)))
+}

@@ -135,7 +135,7 @@ fn __cache_store_dict(backend, path, opts) -> dict {
  *                     site (most callers should set these on the store
  *                     constructor instead).
  *   - session_id    : optional string. When set, cache hits and misses emit
- *                     `cache.hit` / `cache.miss` events on the agent event
+ *                     `cache_hit` / `cache_miss` events on the agent event
  *                     tape (replay-deterministic; testbench can pin them).
  *   - estimate      : optional dict with cost-moat receipts shown on hit:
  *                     {model_calls_avoided?: int, tokens_saved?: int,
@@ -168,7 +168,7 @@ pub fn with_cache_envelope(key: string, compute, options = nil) -> dict {
     if session_id != "" {
       __with_cache_emit(
         session_id,
-        "cache.hit",
+        "cache_hit",
         {key: key, backend: cached?.backend ?? "", namespace: cached?.namespace ?? "", metrics: metrics},
       )
     }
@@ -181,7 +181,7 @@ pub fn with_cache_envelope(key: string, compute, options = nil) -> dict {
   if session_id != "" {
     __with_cache_emit(
       session_id,
-      "cache.miss",
+      "cache_miss",
       {
         key: key,
         backend: cached?.backend ?? "",

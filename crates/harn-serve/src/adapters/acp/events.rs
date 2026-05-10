@@ -808,6 +808,20 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::CacheHit {
+                session_id,
+                payload,
+                ..
+            } => {
+                self.emit_agent_event_ext("cache_hit", session_id, payload.clone());
+            }
+            AgentEvent::CacheMiss {
+                session_id,
+                payload,
+                ..
+            } => {
+                self.emit_agent_event_ext("cache_miss", session_id, payload.clone());
+            }
         }
     }
 }

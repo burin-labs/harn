@@ -7,7 +7,7 @@
  *
  *  - first call hits the underlying mock; second call hits the cache
  *  - replayed value is byte-identical to the recorded value (json eq)
- *  - cache.hit / cache.miss events appear on the agent event tape
+ *  - cache_hit / cache_miss events appear on the agent event tape
  *    in deterministic order with the right metric receipts
  *  - tools-bearing calls bypass the cache (skip_when default)
  */
@@ -18,10 +18,28 @@ pipeline default() {
   let store = mem_cache({namespace: "with-cache-caller-" + uuid()})
   cache_clear({store: store})
   let caller = with_cache(default_llm_caller(), {store: store, ttl: "1h"})
+  let session_id = "with-cache-caller-session-" + uuid()
+  let hits = atomic(0)
+  let misses = atomic(0)
+  let last_hit_tokens = atomic(0)
+  agent_subscribe(
+    session_id,
+    { ev ->
+      if ev?.type == "cache_hit" {
+        let _ = atomic_add(hits, 1)
+        let _ = atomic_set(last_hit_tokens, to_int(ev?.payload?.metrics?.tokens_saved ?? 0))
+      }
+      if ev?.type == "cache_miss" {
+        let _ = atomic_add(misses, 1)
+      }
+    },
+  )
   llm_mock_clear()
-  llm_mock({text: "answer", usage: {input_tokens: 11, output_tokens: 7}, model: "m", provider: "p"})
+  // The mock surfaces input_tokens/output_tokens at the top level; the
+  // LLM result wraps them into `usage` so the cache receipt reader sees
+  // the right `tokens_saved` figure on hits.
+  llm_mock({text: "answer", input_tokens: 11, output_tokens: 7, model: "m", provider: "p"})
   llm_mock({text: "fresh-if-uncached", model: "m", provider: "p"})
-  let session_id = "with-cache-caller-session"
   let opts = {provider: "p", model: "m", stream: false}
   let call_one = {
     prompt: "hello",
@@ -39,4 +57,7 @@ pipeline default() {
   let tool_call = call_one + {opts: opts + {tools: []}}
   let _ = caller(tool_call)
   println("after_tool_call_mock_calls=" + to_string(len(llm_mock_calls())))
+  println("misses=" + to_string(atomic_get(misses)))
+  println("hits=" + to_string(atomic_get(hits)))
+  println("hit.tokens_saved=" + to_string(atomic_get(last_hit_tokens)))
 }

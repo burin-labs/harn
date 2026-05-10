@@ -26,14 +26,15 @@ condensed series summaries instead of full per-patch history.
   from the unified clock (`mock_time` / `advance_time` honored), so
   testbench fixtures can reproduce expiry windows without wall-clock
   flakiness. When `options.session_id` is set, `with_cache` emits
-  `cache.hit` / `cache.miss` events on the agent event tape with
-  cost-moat receipts (`model_calls_avoided`, `tokens_saved` from
-  `usage.input_tokens` + `usage.output_tokens`, `latency_saved_ms`
-  from `latency_ms`) for the persona value ledger
-  (harn-cloud#58) and crystallization receipts. The
-  `with_cache(next, opts?)` middleware form in `std/llm/handlers`
-  now actually caches — previously it was a passthrough — and shares
-  one cache key with the direct-call form. Docs at
+  `cache_hit` / `cache_miss` events on the agent event tape (now
+  registered as first-class `AgentEvent` variants so ACP and closure
+  subscribers see them) with cost-moat receipts
+  (`model_calls_avoided`, `tokens_saved` from `usage.input_tokens` +
+  `usage.output_tokens`, `latency_saved_ms` from `latency_ms`) for the
+  persona value ledger (harn-cloud#58) and crystallization receipts.
+  Both the `with_cache(next, opts?)` middleware form and the direct
+  `with_cache(prompt, system, opts)` form in `std/llm/handlers` cache
+  and emit receipts; they share one cache key. Docs at
   [`docs/src/stdlib/cache.md`](docs/src/stdlib/cache.md).
 
 ## v0.8.6

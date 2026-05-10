@@ -2216,10 +2216,10 @@ Common options: `namespace`, `ttl` (string like `"10m"`) or `ttl_seconds`,
 it into `compose([...])` to deduplicate identical `(prompt, system, opts)`
 LLM calls. Tool-bearing calls bypass the cache by default.
 
-On a cache hit with `options.session_id` set, the wrapper emits
-`cache.hit` + receipts (`model_calls_avoided`, `tokens_saved`,
-`latency_saved_ms`) on the agent event tape. The persona value ledger
-and crystallization receipts read these back.
+On a cache hit with `options.session_id` set, both the caller-wrapper
+and direct-call forms emit `cache_hit` + receipts (`model_calls_avoided`,
+`tokens_saved`, `latency_saved_ms`) on the agent event tape. The persona
+value ledger and crystallization receipts read these back.
 
 Full reference: [`docs/src/stdlib/cache.md`](https://harnlang.com/docs/stdlib/cache.html).
 
