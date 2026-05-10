@@ -316,6 +316,160 @@ while IFS= read -r file; do
 done < "$HARN_TEST_FILES_TMP"
 
 # ---------------------------------------------------------------------------
+# Non-test wall-clock reads (#1439)
+#
+# Runtime code that reads `SystemTime::now()`, `OffsetDateTime::now_utc()`,
+# `Instant::now()`, or `chrono::Utc::now()` directly cannot be virtualised by
+# the testbench `Clock` substrate (`harn_clock::Clock`). New runtime code
+# should accept an `Arc<dyn Clock>` and read time through it, leaving the
+# direct host-clock APIs to `RealClock` impls and known-good logging /
+# observability sites.
+#
+# The allowlist below freezes the file inventory as of #1439. Existing files
+# may keep their direct reads (tracked as gradual cleanup), but adding new
+# files with direct reads requires either (a) routing time through a `Clock`
+# or (b) appending the file to the allowlist with a one-line justification.
+# ---------------------------------------------------------------------------
+
+echo "--- Non-test wall-clock reads (harn-vm/harn-cli runtime) ---"
+
+# Files allowed to read host time directly. Each entry is a runtime site
+# where the host wall clock is the *source of truth* — observability
+# timestamps, OAuth/JWT claim issuance, retry-after parsing, real-time
+# logging, etc. — or where Clock injection is tracked as gradual cleanup
+# under the testbench epic (#1438). Drop entries as call sites migrate to
+# `Arc<dyn Clock>`.
+NON_TEST_WALL_CLOCK_ALLOWLIST=(
+  "crates/harn-cli/src/commands/agents_conformance.rs"
+  "crates/harn-cli/src/commands/bench.rs"
+  "crates/harn-cli/src/commands/connect.rs"
+  "crates/harn-cli/src/commands/connector.rs"
+  "crates/harn-cli/src/commands/explain.rs"
+  "crates/harn-cli/src/commands/flow.rs"
+  "crates/harn-cli/src/commands/mcp/mod.rs"
+  "crates/harn-cli/src/commands/mcp/oauth_resource.rs"
+  "crates/harn-cli/src/commands/mcp/serve.rs"
+  "crates/harn-cli/src/commands/orchestrator/common.rs"
+  "crates/harn-cli/src/commands/orchestrator/harness.rs"
+  "crates/harn-cli/src/commands/orchestrator/inspect_data.rs"
+  "crates/harn-cli/src/commands/orchestrator/listener/acp_hub.rs"
+  "crates/harn-cli/src/commands/orchestrator/listener/routes.rs"
+  "crates/harn-cli/src/commands/orchestrator/listener/routes/ingest.rs"
+  "crates/harn-cli/src/commands/orchestrator/queue.rs"
+  "crates/harn-cli/src/commands/orchestrator/reload.rs"
+  "crates/harn-cli/src/commands/orchestrator/stats.rs"
+  "crates/harn-cli/src/commands/orchestrator/supervisor_state.rs"
+  "crates/harn-cli/src/commands/portal/dlq.rs"
+  "crates/harn-cli/src/commands/portal/run_analysis.rs"
+  "crates/harn-cli/src/commands/portal/util.rs"
+  "crates/harn-cli/src/commands/run.rs"
+  "crates/harn-cli/src/commands/supervisor.rs"
+  "crates/harn-cli/src/commands/test.rs"
+  "crates/harn-cli/src/commands/trigger/ops.rs"
+  "crates/harn-cli/src/commands/trigger/replay.rs"
+  "crates/harn-cli/src/package/registry.rs"
+  "crates/harn-cli/src/skill_provenance.rs"
+  "crates/harn-cli/src/test_runner.rs"
+  "crates/harn-vm/src/a2a/mod.rs"
+  "crates/harn-vm/src/agent_events.rs"
+  "crates/harn-vm/src/agent_sessions.rs"
+  "crates/harn-vm/src/connectors/a2a_push/mod.rs"
+  "crates/harn-vm/src/connectors/harn_module.rs"
+  "crates/harn-vm/src/connectors/shared.rs"
+  "crates/harn-vm/src/corrections/mod.rs"
+  "crates/harn-vm/src/event_log/mod.rs"
+  "crates/harn-vm/src/flow/atom.rs"
+  "crates/harn-vm/src/flow/fixer.rs"
+  "crates/harn-vm/src/flow/predicates/executor.rs"
+  "crates/harn-vm/src/http/client.rs"
+  "crates/harn-vm/src/http/streaming/websocket.rs"
+  "crates/harn-vm/src/llm/agent_observe.rs"
+  "crates/harn-vm/src/llm/agent_runtime.rs"
+  "crates/harn-vm/src/llm/api/partial_tool_args.rs"
+  "crates/harn-vm/src/llm/api/transport.rs"
+  "crates/harn-vm/src/llm/autonomy_budget.rs"
+  "crates/harn-vm/src/llm/cache.rs"
+  "crates/harn-vm/src/llm/mod.rs"
+  "crates/harn-vm/src/llm/model_test.rs"
+  "crates/harn-vm/src/llm/providers/vertex.rs"
+  "crates/harn-vm/src/llm/rate_limit.rs"
+  "crates/harn-vm/src/llm/stream.rs"
+  "crates/harn-vm/src/mcp_card.rs"
+  "crates/harn-vm/src/mcp_registry.rs"
+  "crates/harn-vm/src/metadata.rs"
+  "crates/harn-vm/src/orchestration/command_policy.rs"
+  "crates/harn-vm/src/orchestration/merge_captain_iteration.rs"
+  "crates/harn-vm/src/orchestration/mod.rs"
+  "crates/harn-vm/src/orchestration/playground/fake_server.rs"
+  "crates/harn-vm/src/orchestration/playground/step.rs"
+  "crates/harn-vm/src/personas.rs"
+  "crates/harn-vm/src/provenance/mod.rs"
+  "crates/harn-vm/src/sessions/mod.rs"
+  "crates/harn-vm/src/stdlib/agent_state.rs"
+  # stdlib/clock.rs is itself the canonical wall-clock reader for Harn
+  # scripts; the SystemTime::now reads are the fallback when no mock is
+  # active. Routing through Clock would create a cycle.
+  "crates/harn-vm/src/stdlib/clock.rs"
+  "crates/harn-vm/src/stdlib/agent_state/backend.rs"
+  "crates/harn-vm/src/stdlib/agents_daemon.rs"
+  "crates/harn-vm/src/stdlib/agents_workers/execution.rs"
+  "crates/harn-vm/src/stdlib/concurrency.rs"
+  "crates/harn-vm/src/stdlib/cookies.rs"
+  "crates/harn-vm/src/stdlib/fs.rs"
+  "crates/harn-vm/src/stdlib/hitl.rs"
+  "crates/harn-vm/src/stdlib/host.rs"
+  "crates/harn-vm/src/stdlib/logging.rs"
+  "crates/harn-vm/src/stdlib/long_running.rs"
+  "crates/harn-vm/src/stdlib/memory.rs"
+  "crates/harn-vm/src/stdlib/monitors.rs"
+  "crates/harn-vm/src/stdlib/process.rs"
+  "crates/harn-vm/src/stdlib/supervisor.rs"
+  "crates/harn-vm/src/stdlib/tracing.rs"
+  "crates/harn-vm/src/stdlib/triggers_stdlib.rs"
+  "crates/harn-vm/src/stdlib/waitpoint.rs"
+  "crates/harn-vm/src/stdlib/waitpoints.rs"
+  "crates/harn-vm/src/stdlib/workflow_messages.rs"
+  "crates/harn-vm/src/synchronization.rs"
+  "crates/harn-vm/src/tenant.rs"
+  "crates/harn-vm/src/tracing.rs"
+  "crates/harn-vm/src/triggers/dispatcher/circuits.rs"
+  "crates/harn-vm/src/triggers/dispatcher/mod.rs"
+  "crates/harn-vm/src/triggers/dispatcher/predicate_eval.rs"
+  "crates/harn-vm/src/triggers/event.rs"
+  "crates/harn-vm/src/triggers/inbox.rs"
+  "crates/harn-vm/src/triggers/registry.rs"
+  "crates/harn-vm/src/triggers/scheduler.rs"
+  "crates/harn-vm/src/triggers/test_util/clock.rs"
+  "crates/harn-vm/src/triggers/test_util/mod.rs"
+  "crates/harn-vm/src/triggers/webhook_intake.rs"
+  "crates/harn-vm/src/triggers/worker_queue.rs"
+  "crates/harn-vm/src/trust_graph.rs"
+  "crates/harn-vm/src/vm/execution.rs"
+  "crates/harn-vm/src/vm/iter.rs"
+  "crates/harn-vm/src/vm/ops/parallel.rs"
+  "crates/harn-vm/src/waitpoints.rs"
+)
+
+NON_TEST_RUNTIME_FILES_TMP="$(mktemp)"
+trap 'rm -f "$TEST_FILES_TMP" "$HARN_TEST_FILES_TMP" "$NON_TEST_RUNTIME_FILES_TMP"' EXIT
+{
+  find crates/harn-vm/src crates/harn-cli/src -type f -name "*.rs" \
+    ! -path "*/tests/*" \
+    ! -name "tests.rs" \
+    ! -name "tests_*.rs"
+} | sort -u > "$NON_TEST_RUNTIME_FILES_TMP"
+
+while IFS= read -r file; do
+  in_allowlist "$file" NON_TEST_WALL_CLOCK_ALLOWLIST && continue
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    echo "  $hit"
+    echo "    hint: route time reads through an injected harn_clock::Clock; if the host wall clock is the source of truth (observability, JWT claim, retry-after, etc.), append this file to NON_TEST_WALL_CLOCK_ALLOWLIST in scripts/lint_test_patterns.sh with a one-line justification."
+    violations=$((violations + 1))
+  done < <(grep -n -E 'SystemTime::now\(\)|chrono::Utc::now\(\)|chrono::Local::now\(\)|Instant::now\(\)|OffsetDateTime::now_utc\(\)' "$file" 2>/dev/null || true)
+done < "$NON_TEST_RUNTIME_FILES_TMP"
+
+# ---------------------------------------------------------------------------
 echo
 if (( violations > 0 )); then
   echo "FAIL: $violations wall-clock pattern violation(s) found in test files."

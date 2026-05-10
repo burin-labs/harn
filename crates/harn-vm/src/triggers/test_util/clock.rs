@@ -1,4 +1,5 @@
-//! Single source of truth for clock mocking across the VM.
+//! Single source of truth for clock mocking across the VM, built on the
+//! unified [`harn_clock::Clock`] trait.
 //!
 //! This module owns the thread-local "mock clock" stack consulted by
 //! every time-sensitive subsystem: stdlib `now_ms` / `monotonic_ms` /
@@ -9,17 +10,16 @@
 //!
 //! The lives-in-`triggers/` path is historical — the abstraction is now
 //! crate-wide and re-exported as `harn_vm::clock_mock` for callers
-//! outside the trigger subsystem.
+//! outside the trigger subsystem. New runtime code that needs an
+//! injectable clock should accept `Arc<dyn harn_clock::Clock>` directly.
 
 use std::cell::RefCell;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration as StdDuration, Instant};
 
 use async_trait::async_trait;
+use harn_clock::Clock;
 use time::OffsetDateTime;
-use tokio::sync::Notify;
-
-use crate::connectors::cron::scheduler::Clock;
 
 thread_local! {
     static MOCK_CLOCK_STACK: RefCell<Vec<Arc<MockClock>>> = const { RefCell::new(Vec::new()) };
@@ -30,6 +30,9 @@ fn process_start() -> &'static Instant {
     PROCESS_START.get_or_init(Instant::now)
 }
 
+/// Monotonic instant snapshot with millisecond resolution. Compares cheaply,
+/// serialises by value, and abstracts whether it came from a paused clock or
+/// the real OS monotonic source.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClockInstant(StdDuration);
 
@@ -53,19 +56,22 @@ impl Drop for ClockOverrideGuard {
     }
 }
 
+/// Test-facing wrapper around [`harn_clock::PausedClock`].
+///
+/// Provides the sync ergonomics (`set_sync`, `advance_std_sync`) that
+/// stdlib builtins call without a runtime, plus async aliases (`set`,
+/// `advance`, `advance_std`, `advance_ticks`) that the trigger/cron tests
+/// were written against. Implements [`harn_clock::Clock`] so it can also
+/// be handed directly to consumers that take `Arc<dyn Clock>`.
 #[derive(Debug)]
 pub struct MockClock {
-    now: Mutex<OffsetDateTime>,
-    monotonic: Mutex<StdDuration>,
-    notify: Notify,
+    inner: Arc<harn_clock::PausedClock>,
 }
 
 impl MockClock {
     pub fn new(now: OffsetDateTime) -> Arc<Self> {
         Arc::new(Self {
-            now: Mutex::new(now),
-            monotonic: Mutex::new(StdDuration::ZERO),
-            notify: Notify::new(),
+            inner: harn_clock::PausedClock::new(now),
         })
     }
 
@@ -78,94 +84,70 @@ impl MockClock {
     }
 
     pub fn monotonic_now(&self) -> ClockInstant {
-        ClockInstant(
-            *self
-                .monotonic
-                .lock()
-                .expect("mock clock monotonic mutex poisoned"),
-        )
+        ClockInstant(StdDuration::from_millis(
+            self.inner.monotonic_ms().max(0) as u64
+        ))
     }
 
     /// Wall clock in millis since `UNIX_EPOCH`.
     pub fn now_wall_ms(&self) -> i64 {
-        self.now().unix_timestamp_nanos() as i64 / 1_000_000
+        self.now_utc().unix_timestamp_nanos() as i64 / 1_000_000
     }
 
     /// Monotonic millis since this clock was created.
     pub fn now_monotonic_ms(&self) -> i64 {
-        self.monotonic_now().as_millis() as i64
+        self.inner.monotonic_ms()
     }
 
-    /// Synchronous form of [`set`]. Notifying waiters is itself a sync
-    /// operation, so we expose this to callers (stdlib builtins, sync
-    /// test helpers) that cannot await.
+    /// Pin the wall clock to `now` (sync). Sleepers waiting for a deadline
+    /// that has now passed are released.
     pub fn set_sync(&self, now: OffsetDateTime) {
-        let mut wall = self.now.lock().expect("mock clock mutex poisoned");
-        let previous = *wall;
-        *wall = now;
-        drop(wall);
-
-        if now > previous {
-            let delta = now - previous;
-            if let Ok(delta) = TryInto::<StdDuration>::try_into(delta) {
-                let mut monotonic = self
-                    .monotonic
-                    .lock()
-                    .expect("mock clock monotonic mutex poisoned");
-                *monotonic += delta;
-            }
-        }
-
-        self.notify.notify_waiters();
+        self.inner.set(now);
     }
 
-    /// Synchronous form of [`advance_std`].
+    /// Advance the clock by `duration` (sync).
     pub fn advance_std_sync(&self, duration: StdDuration) {
-        if duration.is_zero() {
-            self.notify.notify_waiters();
-            return;
-        }
-        let delta =
-            time::Duration::try_from(duration).expect("std duration should fit in time::Duration");
-        let next = *self.now.lock().expect("mock clock mutex poisoned") + delta;
-        self.set_sync(next);
+        self.inner.advance(duration);
     }
 
+    /// Async alias for [`set_sync`]. Kept so existing trigger/cron tests
+    /// (which were written under the old async API) continue to compile.
     pub async fn set(&self, now: OffsetDateTime) {
-        self.set_sync(now);
+        self.inner.set(now);
     }
 
+    /// Advance by a `time::Duration`. Negative values are clamped to zero.
     pub async fn advance(&self, duration: time::Duration) {
-        let Ok(delta) = TryInto::<StdDuration>::try_into(duration) else {
-            return;
-        };
-        self.advance_std_sync(delta);
+        self.inner.advance_time(duration);
     }
 
+    /// Advance by a `std::time::Duration`.
     pub async fn advance_std(&self, duration: StdDuration) {
-        self.advance_std_sync(duration);
+        self.inner.advance(duration);
     }
 
+    /// Step `ticks` times by `tick`, notifying sleepers between every step.
     pub async fn advance_ticks(&self, ticks: u32, tick: StdDuration) {
-        for _ in 0..ticks {
-            self.advance_std_sync(tick);
-        }
+        self.inner.advance_ticks(ticks, tick);
     }
 }
 
 #[async_trait]
 impl Clock for MockClock {
-    fn now(&self) -> OffsetDateTime {
-        *self.now.lock().expect("mock clock mutex poisoned")
+    fn now_utc(&self) -> OffsetDateTime {
+        self.inner.now_utc()
     }
 
-    async fn sleep_until(&self, deadline: OffsetDateTime) {
-        loop {
-            if *self.now.lock().expect("mock clock mutex poisoned") >= deadline {
-                return;
-            }
-            self.notify.notified().await;
-        }
+    fn monotonic_ms(&self) -> i64 {
+        self.inner.monotonic_ms()
+    }
+
+    async fn sleep(&self, duration: StdDuration) {
+        self.inner.sleep(duration).await;
+    }
+
+    async fn sleep_until_utc(&self, deadline: OffsetDateTime) {
+        self.inner.sleep_until_utc(deadline).await;
     }
 }
 
@@ -195,7 +177,7 @@ pub fn clear_overrides() {
 
 pub fn now_utc() -> OffsetDateTime {
     active_mock_clock()
-        .map(|clock| clock.now())
+        .map(|clock| clock.now_utc())
         .unwrap_or_else(OffsetDateTime::now_utc)
 }
 
@@ -234,8 +216,7 @@ pub async fn sleep(duration: StdDuration) {
         return;
     }
     if let Some(mock) = active_mock_clock() {
-        let next = mock.now() + time::Duration::try_from(duration).unwrap_or_default();
-        mock.sleep_until(next).await;
+        mock.sleep(duration).await;
         return;
     }
     tokio::time::sleep(duration).await;

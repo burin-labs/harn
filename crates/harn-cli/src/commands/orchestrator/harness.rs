@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use harn_vm::clock::{Clock, RealClock};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use time::format_description::well_known::Rfc3339;
@@ -93,6 +94,9 @@ pub struct OrchestratorConfig {
     /// When `Some`, installs an observability tracing subscriber.  Tests
     /// should leave this `None` to avoid conflicts with the test runtime.
     pub log_format: Option<harn_vm::observability::otel::LogFormat>,
+    /// Time + sleep substrate. Defaults to [`RealClock`]; tests inject
+    /// [`harn_vm::clock::PausedClock`] via [`OrchestratorConfig::with_clock`].
+    pub clock: Arc<dyn Clock>,
 }
 
 impl OrchestratorConfig {
@@ -113,7 +117,17 @@ impl OrchestratorConfig {
             drain: DrainConfig::default(),
             pump: PumpConfig::default(),
             log_format: None,
+            clock: RealClock::arc(),
         }
+    }
+
+    /// Inject a custom [`Clock`]. Production callers leave the default
+    /// [`RealClock`]; harness-driven tests pass a
+    /// [`harn_vm::clock::PausedClock`] so cron and the dispatcher run on
+    /// virtual time.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 }
 
@@ -476,6 +490,7 @@ async fn orchestrator_lifecycle(
         secret_provider.clone(),
         metrics_registry.clone(),
         &extensions.provider_connectors,
+        config.clock.clone(),
     )
     .await?;
     let route_configs = attach_route_connectors(
@@ -758,6 +773,7 @@ async fn orchestrator_lifecycle(
         secret_provider: &secret_provider,
         metrics_registry: &metrics_registry,
         mcp_service: mcp_service.as_ref(),
+        clock: config.clock.clone(),
         reload_rx: &mut reload_rx,
     };
 
@@ -1734,6 +1750,7 @@ struct RuntimeCtx<'a> {
     secret_provider: &'a Arc<dyn harn_vm::secrets::SecretProvider>,
     metrics_registry: &'a Arc<harn_vm::MetricsRegistry>,
     mcp_service: Option<&'a Arc<crate::commands::mcp::serve::McpOrchestratorService>>,
+    clock: Arc<dyn Clock>,
     #[cfg_attr(not(unix), allow(dead_code))]
     reload_rx: &'a mut mpsc::UnboundedReceiver<AdminReloadRequest>,
 }
@@ -1852,6 +1869,7 @@ async fn reload_manifest(
             ctx.secret_provider.clone(),
             ctx.metrics_registry.clone(),
             &extensions.provider_connectors,
+            ctx.clock.clone(),
         )
         .await?;
         runtime.activations = runtime
@@ -2043,6 +2061,7 @@ async fn initialize_connectors(
     secrets: Arc<dyn harn_vm::secrets::SecretProvider>,
     metrics: Arc<harn_vm::MetricsRegistry>,
     provider_overrides: &[ResolvedProviderConnectorConfig],
+    clock: Arc<dyn Clock>,
 ) -> Result<ConnectorRuntime, OrchestratorError> {
     let mut registry = harn_vm::ConnectorRegistry::default();
     let mut trigger_registry = harn_vm::TriggerRegistry::default();
@@ -2089,7 +2108,7 @@ async fn initialize_connectors(
                 )
                 .into());
             }
-            let connector = connector_for(&provider, kinds);
+            let connector = connector_for(&provider, kinds, clock.clone());
             registry
                 .register(connector)
                 .map_err(|error| error.to_string())?;
@@ -2190,9 +2209,10 @@ fn a2a_push_connector_config(
 fn connector_for(
     provider: &harn_vm::ProviderId,
     kinds: BTreeSet<String>,
+    clock: Arc<dyn Clock>,
 ) -> Box<dyn harn_vm::Connector> {
     match provider.as_str() {
-        "cron" => Box::new(harn_vm::CronConnector::new()),
+        "cron" => Box::new(harn_vm::CronConnector::with_clock(clock)),
         _ => Box::new(PlaceholderConnector::new(provider.clone(), kinds)),
     }
 }

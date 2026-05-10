@@ -19,6 +19,7 @@ otel = [
 ]
 
 [dependencies]
+harn-clock = { path = "../harn-clock", version = "0.8" }
 harn-lexer = { path = "../harn-lexer", version = "0.8" }
 harn-modules = { path = "../harn-modules", version = "0.8" }
 harn-parser = { path = "../harn-parser", version = "0.8" }

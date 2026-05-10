@@ -3762,7 +3762,7 @@ fn tenant_id(event: &TriggerEvent) -> Option<&str> {
 }
 
 fn current_unix_ms() -> i64 {
-    unix_ms(time::OffsetDateTime::now_utc())
+    unix_ms(crate::triggers::test_util::clock::now_utc())
 }
 
 fn unix_ms(timestamp: time::OffsetDateTime) -> i64 {
@@ -3873,13 +3873,13 @@ fn maybe_fail_before_outbox() {
 }
 
 fn now_rfc3339() -> String {
-    time::OffsetDateTime::now_utc()
+    crate::triggers::test_util::clock::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
 fn next_budget_reset_rfc3339(binding: &TriggerBinding) -> String {
-    let now = time::OffsetDateTime::now_utc();
+    let now = crate::triggers::test_util::clock::now_utc();
     let reset = if binding.hourly_cost_usd.is_some() {
         let next_hour = (now.unix_timestamp() / 3_600 + 1) * 3_600;
         time::OffsetDateTime::from_unix_timestamp(next_hour).unwrap_or(now)
@@ -3893,7 +3893,7 @@ fn next_budget_reset_rfc3339(binding: &TriggerBinding) -> String {
 }
 
 fn now_unix_ms() -> i64 {
-    (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
+    (crate::triggers::test_util::clock::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
 }
 
 fn cancelled_dispatch_outcome(
