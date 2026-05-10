@@ -1,0 +1,30 @@
+/**
+ * Process-tool smoke: spawns one short-lived child through the
+ * std/command runner, asserts it succeeds, and prints a deterministic
+ * marker. Uses platform-appropriate argv (cmd.exe on Windows, /bin/sh
+ * elsewhere) per the host-boundary rule that the runtime, not the
+ * script, picks the shell. Mirrors the conformance pattern in
+ * conformance/tests/stdlib/command_step_basic.harn.
+ */
+import { command_run } from "std/command"
+
+fn echo_argv(text) {
+  if platform() == "windows" {
+    return ["cmd", "/C", "echo " + text]
+  }
+  return ["printf", "%s", text]
+}
+
+pipeline default() {
+  let result = command_run(echo_argv("smoke"), {capture: {max_inline_bytes: 64}})
+  if !result.success {
+    throw "process smoke failed: success=${result.success} exit_code=${result.exit_code} stderr=${result.stderr}"
+  }
+  if result.exit_code != 0 {
+    throw "process smoke failed: non-zero exit_code ${result.exit_code}"
+  }
+  if !contains(result.stdout, "smoke") {
+    throw "process smoke failed: stdout did not contain expected marker (got ${result.stdout})"
+  }
+  println("process ok on " + platform())
+}

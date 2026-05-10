@@ -4,3 +4,8 @@ docs/src/language-spec.md merge=harn-generated eol=lf
 docs/llm/harn-triggers-quickref.md eol=lf
 docs/src/provider-matrix.md eol=lf
 docs/src/connectors/parity-matrix.md eol=lf
+# Release smoke fixtures must keep LF line endings on every platform so the
+# smoke driver can byte-compare stdout across the macOS/Linux/Windows matrix.
+tests/smoke/*.harn eol=lf
+tests/smoke/harn.toml eol=lf
+scripts/release_smoke.sh eol=lf

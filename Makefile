@@ -1,4 +1,4 @@
-.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast conformance protocol-conformance replay-oracle bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec lint-test-patterns check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression
+.PHONY: setup install-hooks configure-merge-drivers build build-release check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast conformance protocol-conformance replay-oracle bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec lint-test-patterns check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -164,6 +164,22 @@ fmt-check:
 
 release-gate:
 	./scripts/release_gate.sh audit
+
+# Local reproduction of the release-smoke CI matrix. Builds a release
+# `harn` binary for the host platform and runs the cross-platform smoke
+# driver against it. CI runs this on macOS, Linux, and Windows; locally
+# you only get the host platform, but the driver still exercises every
+# user-visible capability and prints a per-step status summary.
+release-smoke:
+	cargo build --release -p harn-cli --bin harn
+	./scripts/release_smoke.sh
+
+# Faster `release-smoke` variant that reuses the debug `harn` binary.
+# Used by the parallel audit lanes in release_gate.sh because the warm
+# prebuild already populated target/debug; rebuilding release would
+# fight the cargo lock with rust-audit's clippy + nextest.
+smoke-audit:
+	HARN_BINARY=target/debug/harn$(if $(filter Windows_NT,$(OS)),.exe,) ./scripts/release_smoke.sh
 
 # Build-verify the portal frontend (TypeScript type check + Vite bundle).
 # Requires npm dependencies: run `make setup` or `cd crates/harn-cli/portal && npm install`.

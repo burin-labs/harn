@@ -1,0 +1,10 @@
+/**
+ * Library export for the harn-release-smoke package. Imported indirectly
+ * by `harn package check` against tests/smoke/harn.toml so the smoke
+ * matrix exercises manifest parsing and export resolution on every
+ * platform.
+ * Deterministic identifier returned by smoke imports.
+ */
+pub fn smoke_marker() {
+  return "harn-release-smoke ok"
+}

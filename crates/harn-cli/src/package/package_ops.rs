@@ -586,10 +586,50 @@ pub(crate) fn extract_api_symbols(source: &str) -> Vec<PackageApiSymbol> {
     });
     let mut docs: Vec<String> = Vec::new();
     let mut symbols = Vec::new();
+    let mut in_block_doc = false;
     for line in source.lines() {
         let trimmed = line.trim();
+        if in_block_doc {
+            // Collect content between /** and */, stripping the conventional
+            // ` * ` continuation marker so docs render the same regardless of
+            // which form (`///` or `/** */`) authors picked.
+            let (content, closes) = match trimmed.split_once("*/") {
+                Some((before, _)) => (before, true),
+                None => (trimmed, false),
+            };
+            let stripped = content
+                .strip_prefix("* ")
+                .or_else(|| content.strip_prefix('*'))
+                .unwrap_or(content)
+                .trim();
+            if !stripped.is_empty() {
+                docs.push(stripped.to_string());
+            }
+            if closes {
+                in_block_doc = false;
+            }
+            continue;
+        }
         if let Some(doc) = trimmed.strip_prefix("///") {
             docs.push(doc.trim().to_string());
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("/**") {
+            // `/** … */` on a single line collapses to one doc line; the
+            // multi-line opener `/**` (with no `*/` on the same line) flips
+            // the block-doc flag so subsequent lines are absorbed above.
+            if let Some((inner, _)) = rest.split_once("*/") {
+                let stripped = inner.trim();
+                if !stripped.is_empty() {
+                    docs.push(stripped.to_string());
+                }
+            } else {
+                let stripped = rest.trim();
+                if !stripped.is_empty() {
+                    docs.push(stripped.to_string());
+                }
+                in_block_doc = true;
+            }
             continue;
         }
         if trimmed.is_empty() {
@@ -900,6 +940,33 @@ mod tests {
 
         assert!(messages.contains("unsupported Harn version range"));
         assert!(messages.contains("path dependencies are not publishable"));
+    }
+
+    #[test]
+    fn extract_api_symbols_recognizes_block_doc_comments() {
+        // `/** … */` (the canonical HarnDoc form preferred by the linter)
+        // and `///` lines must produce the same `docs` body so package
+        // check, package docs, and the missing-doc warning agree on what
+        // counts as documented.
+        let single = extract_api_symbols("/** Block doc. */\npub fn one() {}\n");
+        assert_eq!(single.len(), 1);
+        assert_eq!(single[0].docs.as_deref(), Some("Block doc."));
+
+        let multi =
+            extract_api_symbols("/**\n * First line.\n * Second line.\n */\npub fn two() {}\n");
+        assert_eq!(multi.len(), 1);
+        assert_eq!(multi[0].docs.as_deref(), Some("First line.\nSecond line."));
+
+        let triple = extract_api_symbols("/// Slash doc.\npub fn three() {}\n");
+        assert_eq!(triple.len(), 1);
+        assert_eq!(triple[0].docs.as_deref(), Some("Slash doc."));
+
+        // A non-doc, non-empty intermediate line clears the pending
+        // doc buffer so an unrelated comment three lines up does not
+        // accidentally bind to the declaration.
+        let detached = extract_api_symbols("/** Detached. */\nlet x = 1\npub fn four() {}\n");
+        assert_eq!(detached.len(), 1);
+        assert!(detached[0].docs.is_none());
     }
 
     #[test]
