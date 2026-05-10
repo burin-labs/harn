@@ -1,0 +1,45 @@
+[package]
+name = "harn-bitbucket-connector"
+version = "0.1.0"
+repository = "https://github.com/burin-labs/harn-bitbucket-connector"
+
+[[providers]]
+id = "bitbucket"
+connector = { harn = "./lib.harn" }
+capabilities = ["webhook", "rate_limit", "pagination"]
+
+[providers.setup]
+auth_type = "api-key"
+flow = "api-key"
+required_secrets = ["bitbucket/api-token", "bitbucket/webhook-secret"]
+setup_command = ["harn", "connect", "bitbucket"]
+validation_command = ["harn", "connect", "status", "--connector", "bitbucket", "--json"]
+
+[[providers.setup.health_checks]]
+id = "credentials"
+kind = "command"
+command = ["harn", "connect", "status", "--connector", "bitbucket", "--json"]
+
+[providers.setup.recovery]
+missing_auth = "Store bitbucket/api-token and bitbucket/webhook-secret before enabling Bitbucket bindings."
+expired_credentials = "Rotate bitbucket/api-token, then rerun the Bitbucket connection validation."
+revoked_credentials = "Replace bitbucket/api-token with an active Bitbucket app password or access token."
+missing_scopes = "Grant repository and pull request scopes required by the configured Bitbucket workflows."
+inaccessible_resource = "Confirm the token can access the target Bitbucket workspace and repository."
+transient_provider_outage = "Retry after Bitbucket API and webhook delivery endpoints are healthy."
+
+[connector_contract]
+version = 1
+
+[[connector_contract.fixtures]]
+provider = "bitbucket"
+name = "pullrequest created webhook"
+kind = "webhook"
+headers = { "X-Event-Key" = "pullrequest:created", "X-Hook-UUID" = "delivery-bb-1", "content-type" = "application/json" }
+body_json = { actor = { display_name = "Ada" }, repository = { full_name = "acme/widgets" }, pullrequest = { id = 42, title = "Improve widgets" } }
+expect_type = "event"
+expect_kind = "pullrequest:created"
+expect_dedupe_key = "delivery-bb-1"
+expect_signature_state = "verified"
+expect_payload_contains = { provider = "bitbucket", raw = { pullrequest = { id = 42, title = "Improve widgets" }, repository = { full_name = "acme/widgets" } } }
+expect_event_count = 1
