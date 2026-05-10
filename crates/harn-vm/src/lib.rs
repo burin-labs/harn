@@ -38,6 +38,7 @@ pub mod profile;
 pub mod provenance;
 pub mod receipts;
 pub mod record_filter;
+pub mod redact;
 pub mod runtime_context;
 pub mod runtime_paths;
 pub mod schema;
@@ -140,8 +141,8 @@ pub use provenance::{
     ReceiptBuildOptions, ReceiptVerificationReport,
 };
 pub use receipts::{
-    Receipt, ReceiptSink, ReceiptStatus, ReceiptValidationError, RedactionClass, RECEIPT_SCHEMA_ID,
-    RECEIPT_SCHEMA_JSON, RECEIPT_SCHEMA_VERSION,
+    Receipt, ReceiptSink, ReceiptStatus, ReceiptValidationError, RedactingReceiptSink,
+    RedactionClass, RECEIPT_SCHEMA_ID, RECEIPT_SCHEMA_JSON, RECEIPT_SCHEMA_VERSION,
 };
 pub use record_filter::{normalize_record_filter_expression, CompiledRecordFilter};
 pub use schema::json_to_vm_value;
@@ -314,6 +315,7 @@ pub fn reset_thread_local_state() {
     orchestration::clear_runtime_hooks();
     orchestration::clear_execution_policy_stacks();
     orchestration::clear_command_policies();
+    redact::clear_policy_stack();
     triggers::clear_dispatcher_state();
     triggers::clear_trigger_registry();
     events::reset_event_sinks();

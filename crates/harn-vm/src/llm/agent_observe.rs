@@ -255,13 +255,15 @@ pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
 /// produce invalid JSON that downstream readers (and tests) silently
 /// drop.
 pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) {
-    append_llm_transcript_event_log(entry);
+    let mut redacted = entry.clone();
+    crate::redact::current_policy().redact_json_in_place(&mut redacted);
+    append_llm_transcript_event_log(&redacted);
     let Some(dir) = current_transcript_dir() else {
         return;
     };
     let _ = std::fs::create_dir_all(&dir);
     let path = format!("{dir}/llm_transcript.jsonl");
-    let Ok(line) = serde_json::to_string(&entry) else {
+    let Ok(line) = serde_json::to_string(&redacted) else {
         return;
     };
     static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

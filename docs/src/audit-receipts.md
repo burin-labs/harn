@@ -28,7 +28,11 @@ The v1 envelope includes:
 Digest fields are content-addressed references, not raw payload storage. Keep
 secret-bearing inputs, outputs, and tool arguments out of the receipt body; put
 their hash in the digest field and store restricted material behind the
-appropriate host-controlled artifact path.
+appropriate host-controlled artifact path. Hosts that opt into the unified
+redaction policy can wrap their existing `ReceiptSink` with
+`RedactingReceiptSink` to scrub auth headers, URLs with credentials, and
+known secret patterns from `model_calls[]`, `tool_calls[]`, and `metadata`
+before persistence — see [Redaction policy](./redaction.md).
 
 ## Rust Usage
 

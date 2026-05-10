@@ -614,49 +614,8 @@ fn normalize_host(host: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn is_sensitive_url_param(name: &str) -> bool {
-    let normalized = name.to_ascii_lowercase();
-    normalized == "api_key"
-        || normalized == "apikey"
-        || normalized == "access_token"
-        || normalized == "refresh_token"
-        || normalized == "id_token"
-        || normalized == "client_secret"
-        || normalized == "password"
-        || normalized == "secret"
-        || normalized == "token"
-        || normalized.ends_with("_token")
-        || normalized.ends_with("_secret")
-}
-
 fn redact_sensitive_url(url: &str) -> String {
-    let Ok(mut parsed) = Url::parse(url) else {
-        return url.to_string();
-    };
-    let mut redacted_any = false;
-    let pairs: Vec<(String, String)> = parsed
-        .query_pairs()
-        .map(|(key, value)| {
-            let value = if is_sensitive_url_param(&key) {
-                redacted_any = true;
-                "[redacted]".to_string()
-            } else {
-                value.into_owned()
-            };
-            (key.into_owned(), value)
-        })
-        .collect();
-    if !redacted_any {
-        return url.to_string();
-    }
-    parsed.set_query(None);
-    {
-        let mut query = parsed.query_pairs_mut();
-        for (key, value) in pairs {
-            query.append_pair(&key, &value);
-        }
-    }
-    parsed.to_string()
+    crate::redact::current_policy().redact_url(url)
 }
 
 fn vm_error(message: impl Into<String>) -> VmError {

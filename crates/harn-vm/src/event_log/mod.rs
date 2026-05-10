@@ -139,6 +139,16 @@ impl LogEvent {
         self.headers = headers;
         self
     }
+
+    /// Apply the unified redaction policy to this event's headers and
+    /// payload. Backends are intentionally left unaware of redaction —
+    /// emitters that need scrubbed events call this before append, and
+    /// readers that materialize events for display can apply the policy
+    /// again as defense in depth.
+    pub fn redact_in_place(&mut self, policy: &crate::redact::RedactionPolicy) {
+        self.headers = policy.redact_headers(&self.headers);
+        policy.redact_json_in_place(&mut self.payload);
+    }
 }
 
 /// Serialized event payload form for large read paths.

@@ -6,9 +6,9 @@ use serde_json::Value as JsonValue;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+#[cfg(test)]
+use crate::redact::REDACTED_HEADER_VALUE;
 use crate::triggers::test_util::clock;
-
-const REDACTED_HEADER_VALUE: &str = "[redacted]";
 
 fn serialize_optional_bytes_b64<S>(
     value: &Option<Vec<u8>>,
@@ -902,99 +902,19 @@ impl TriggerEvent {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HeaderRedactionPolicy {
-    safe_exact_names: BTreeSet<String>,
-}
-
-impl HeaderRedactionPolicy {
-    pub fn with_safe_header(mut self, name: impl Into<String>) -> Self {
-        self.safe_exact_names
-            .insert(name.into().to_ascii_lowercase());
-        self
-    }
-
-    fn should_keep(&self, name: &str) -> bool {
-        let lower = name.to_ascii_lowercase();
-        if self.safe_exact_names.contains(lower.as_str()) {
-            return true;
-        }
-        matches!(
-            lower.as_str(),
-            "user-agent"
-                | "request-id"
-                | "x-request-id"
-                | "x-correlation-id"
-                | "content-type"
-                | "content-length"
-                | "x-github-event"
-                | "x-github-delivery"
-                | "x-github-hook-id"
-                | "x-hub-signature-256"
-                | "x-slack-request-timestamp"
-                | "x-slack-signature"
-                | "x-linear-signature"
-                | "x-notion-signature"
-                | "x-a2a-signature"
-                | "x-a2a-delivery"
-        ) || lower.ends_with("-event")
-            || lower.ends_with("-delivery")
-            || lower.contains("timestamp")
-            || lower.contains("request-id")
-    }
-
-    fn should_redact(&self, name: &str) -> bool {
-        let lower = name.to_ascii_lowercase();
-        if self.should_keep(lower.as_str()) {
-            return false;
-        }
-        lower.contains("authorization")
-            || lower.contains("cookie")
-            || lower.contains("secret")
-            || lower.contains("token")
-            || lower.contains("key")
-    }
-}
-
-impl Default for HeaderRedactionPolicy {
-    fn default() -> Self {
-        Self {
-            safe_exact_names: BTreeSet::from([
-                "content-length".to_string(),
-                "content-type".to_string(),
-                "request-id".to_string(),
-                "user-agent".to_string(),
-                "x-a2a-delivery".to_string(),
-                "x-a2a-signature".to_string(),
-                "x-correlation-id".to_string(),
-                "x-github-delivery".to_string(),
-                "x-github-event".to_string(),
-                "x-github-hook-id".to_string(),
-                "x-hub-signature-256".to_string(),
-                "x-linear-signature".to_string(),
-                "x-notion-signature".to_string(),
-                "x-request-id".to_string(),
-                "x-slack-request-timestamp".to_string(),
-                "x-slack-signature".to_string(),
-            ]),
-        }
-    }
-}
+/// Backwards-compatible alias for the unified [`crate::redact::RedactionPolicy`].
+///
+/// Trigger ingest paths historically only had access to a header-only
+/// policy, so this alias keeps the call-site name stable while the
+/// underlying type is now the broader policy that also covers URLs,
+/// JSON fields, and free-form strings.
+pub type HeaderRedactionPolicy = crate::redact::RedactionPolicy;
 
 pub fn redact_headers(
     headers: &BTreeMap<String, String>,
     policy: &HeaderRedactionPolicy,
 ) -> BTreeMap<String, String> {
-    headers
-        .iter()
-        .map(|(name, value)| {
-            if policy.should_redact(name) {
-                (name.clone(), REDACTED_HEADER_VALUE.to_string())
-            } else {
-                (name.clone(), value.clone())
-            }
-        })
-        .collect()
+    policy.redact_headers(headers)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
