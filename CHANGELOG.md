@@ -33,6 +33,35 @@ condensed series summaries instead of full per-patch history.
   plus four `harn-cli` integration tests under
   `tests/test_bench_cli.rs::annotations`. Documented in
   `docs/src/dev/annotation-tape-format.md`. (#1474)
+- **`std/llm/handlers` cost-moat handlers — `with_repair`,
+  `with_coerce`, `with_timeout`, `with_routing`.** Closes the persona
+  platform's "cost moat substrate" gap from #1470: the four handlers
+  let any caller compose cheap-model-by-default with frontier
+  escalation (`with_routing`), per-call deadlines that honor the
+  unified clock and forward `timeout_ms` to providers
+  (`with_timeout`), one-shot schema-validation repair with a
+  deterministic corrective nudge (`with_repair`), and uniform
+  case-insensitive key normalization on the success envelope
+  (`with_coerce`). `safe_structured_call`'s structured-output dance is
+  now documented as the canonical preset equivalent to
+  `compose([with_coerce({})])(structured_caller)`, with judge-friendly
+  defaults baked in. Each handler ships with a conformance gate under
+  `conformance/tests/integration/llm_handlers_with_*` that exercises
+  the success and edge-case paths without reaching for a live
+  provider; the persona-shaped composition is documented in
+  `docs/src/stdlib/llm-handlers.md` and the quickref. (#1470)
+- **Partial-application form for `(next, opts)` handler middleware.**
+  `with_retry`, `with_logging`, `with_budget`, `with_circuit_breaker`,
+  `with_repair`, `with_coerce`, and `with_timeout` now accept either
+  `with_X(next, opts)` (direct) or `with_X(opts)` (curried — returns a
+  wrapper for `compose`). The auto-currying makes the canonical
+  `compose([with_logging({...}), with_retry({...})])(base)` pattern
+  documented in the quickref and llm-handlers reference actually work
+  — previously the opts dict was silently bound as `next` and the
+  composition failed at first invocation. A new
+  `llm_handlers_persona_compose` conformance fixture pins the
+  end-to-end persona-shaped chain (routing + budget + logging) so the
+  cost-moat substrate stays exercised. (#1470)
 - **String escape sequences `\r` and `\0`.** Double-quoted string
   literals now recognize `\r` (carriage return) and `\0` (NUL) in
   addition to the existing `\n`, `\t`, `\\`, `\"`, `\$`. Triple-quoted

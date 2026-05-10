@@ -1937,6 +1937,7 @@ Nine opinionated modules wrap common LLM patterns:
 - `std/llm/handlers` — composable middleware: `default_llm_caller`,
   `with_retry`, `with_fallback`, `with_shadow`, `with_prompt_rewrite`,
   `with_logging`, `with_budget`, `with_cache`, `with_circuit_breaker`,
+  `with_repair`, `with_coerce`, `with_timeout`, `with_routing`,
   `compose([...])`.
 - `std/llm/tool_middleware` — composable middleware around tool execution
   (parallel to handlers, but for tools): `default_tool_caller`,
@@ -2083,6 +2084,25 @@ where `call = {prompt, system, opts, turn: {iteration, session_id, attempt}}`.
 **Off-by-one in retry semantics:** `llm_retries: 3` historically meant
 4 total attempts; `with_retry`'s `max_attempts: N` means N total
 attempts. To migrate `llm_retries: K`, pass `max_attempts: K + 1`.
+
+**Persona-shaped chain (cost moat substrate):** the canonical compose
+for a durable persona is cheap-by-default with frontier escalation,
+deterministic budget enforcement, and receipt-grade structured logs.
+`with_routing` is a **base** caller (it picks cheap vs. frontier);
+budget and logging compose over it.
+
+```harn,ignore
+let router = with_routing({
+  default: cheap,                                // fast inexpensive model
+  routes: [{name: "frontier",
+            when: { call -> call?.opts?.escalate ?? false },
+            caller: strong}],                    // longer retries + fallback
+})
+let persona_caller = compose([
+  with_logging({sink: receipts_sink}),
+  with_budget({max_total_tokens: 250000, max_calls: 200}),
+])(router)
+```
 
 Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/docs/stdlib/llm-handlers.html).
 

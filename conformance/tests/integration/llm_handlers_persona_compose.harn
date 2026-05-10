@@ -1,0 +1,57 @@
+// Conformance test for the persona-shaped handler stack from
+// docs/src/stdlib/llm-handlers.md — with_routing as the base caller,
+// with_budget + with_logging composed over it. Verifies that:
+//   1. cheap-by-default escalates to frontier when the predicate fires;
+//   2. with_budget short-circuits once max_calls is exceeded;
+//   3. with_logging fires its sink for every call (including budget exhaustion).
+import { compose, with_budget, with_logging, with_routing } from "std/llm/handlers"
+
+pipeline run() {
+  let cheap_calls = atomic(0)
+  let frontier_calls = atomic(0)
+  let log_records = atomic(0)
+  let cheap = { _call ->
+    let _ = atomic_add(cheap_calls, 1)
+    return {
+      ok: true,
+      value: {text: "cheap", model: "mock", provider: "mock", input_tokens: 1, output_tokens: 1},
+    }
+  }
+  let frontier = { _call ->
+    let _ = atomic_add(frontier_calls, 1)
+    return {
+      ok: true,
+      value: {text: "frontier", model: "mock", provider: "mock", input_tokens: 1, output_tokens: 1},
+    }
+  }
+  let router = with_routing(
+    {
+      default: cheap,
+      routes: [{name: "frontier", when: { call -> call?.opts?.escalate ?? false }, caller: frontier}],
+    },
+  )
+  let sink = { _record ->
+    let _ = atomic_add(log_records, 1)
+  }
+  let middleware = compose(
+    [with_logging({level: "info", sink: sink}), with_budget({max_calls: 2, on_exceed: "short_circuit"})],
+  )
+  let persona = middleware(router)
+  // First call — under budget, default route.
+  let env1 = persona({prompt: "p1", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  println(env1.value.text)
+  println(env1.route_name)
+  // Second call — escalates to frontier.
+  let env2 = persona(
+    {prompt: "p2", system: "", opts: {escalate: true}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
+  println(env2.value.text)
+  println(env2.route_name)
+  // Third call — budget exhausted.
+  let env3 = persona({prompt: "p3", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  println(env3.ok)
+  println(env3.status)
+  println(atomic_get(cheap_calls))
+  println(atomic_get(frontier_calls))
+  println(atomic_get(log_records))
+}

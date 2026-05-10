@@ -86,9 +86,20 @@ These bit the implementing agents and will bite users:
 
 ## `std/llm/handlers` — composable middleware
 
-Higher-order functions returning a caller. Each `with_*` takes `next`
-(a caller) plus an options dict and returns a new caller. Telemetry
-goes via `agent_emit_event` when `call.turn.session_id` is non-empty.
+Higher-order functions returning a caller. Each `(next, opts)`
+middleware (`with_retry`, `with_logging`, `with_budget`,
+`with_circuit_breaker`, `with_repair`, `with_coerce`, `with_timeout`)
+supports two interchangeable call shapes:
+
+```harn,ignore
+with_retry(next, opts)   // direct: returns a caller
+with_retry(opts)         // curried: returns fn(next) -> caller, drops into compose
+```
+
+Compose with `compose([with_logging({...}), with_retry({...})])(base)`
+or wrap explicitly with `with_retry(default_llm_caller(), {...})`.
+Telemetry goes via `agent_emit_event` when `call.turn.session_id` is
+non-empty.
 
 | Function | Signature | Description |
 |---|---|---|
@@ -101,6 +112,10 @@ goes via `agent_emit_event` when `call.turn.session_id` is non-empty.
 | `with_budget(next, opts?)` | `(caller, dict?) -> caller` | Per-instance accumulator for `max_total_tokens` / `max_input_tokens` / `max_output_tokens` / `max_calls`. Counters are `atomic` so they survive Harn's by-value closure capture. `on_exceed ∈ {"throw","short_circuit"}` (default `"short_circuit"` → `{ok: false, status: "budget_exhausted"}`). Cost accounting is silently skipped when `pricing_per_1k_for(...)` is unavailable. |
 | `with_cache(next, opts?)` | `(caller, dict?) -> caller` | Stub today. Forward-compatible API: future runtime support will key on sha256 of canonical-json over semantic fields, default LRU(256) + TTL(10 min), `skip_when` defaulting to "skip if `opts.tools != nil`". |
 | `with_circuit_breaker(next, opts)` | `(caller, dict) -> caller` | Thin wrapper over `std/async.circuit_call`. Required `opts.name`. On open: `{ok: false, status: "circuit_open"}`. |
+| `with_repair(next, opts?)` | `(caller, dict?) -> caller` | One-shot repair pass on `schema_validation` failures. Appends a corrective nudge (deterministic by default; override via `opts.strategy: string \| closure`) and re-asks `next` once with `max_tokens: 600` and `temperature: 0.0`. Tags the second envelope `repair_attempted: true`. Other statuses pass through unchanged. |
+| `with_coerce(next, opts?)` | `(caller, dict?) -> caller` | Normalize successful envelopes for downstream consumers. Recursively lowercases keys on `value.data` (`opts.lower_keys`, default true) so callers can read fields case-insensitively without per-site `dict_get_ci` dances. Optional `opts.on_text_json: true` parses JSON-shaped `value.text` into `value.data`. Failure envelopes pass through. |
+| `with_timeout(next, opts)` | `(caller, dict\|int) -> caller` | Soft, clock-aware deadline. Forwards `opts.ms` (or `opts.seconds`) to `call.opts.timeout_ms` so providers can cancel mid-flight, then post-checks elapsed time via `now_ms()`. Successes that overran convert to `{ok: false, status: "timeout", error: {timeout_ms, elapsed_ms}}`; slow failures relabel to `timeout` (set `opts.relabel_failures: false` to keep the original status). Honors the unified clock — mockable in tests. |
+| `with_routing(opts)` | `(dict) -> caller` | Pre-call routing: pick a caller before the request goes out. Required `opts.default`; optional `opts.routes: list of {when: closure(call) -> bool, caller, name?}`. First matching route wins; emits `llm_routing_decision` so receipts can audit cheap-vs-frontier escalation per call. Differs from `with_fallback`, which is post-failure. |
 | `compose(wrappers)` | `(list<fn(caller) -> caller>) -> fn(caller) -> caller` | Right-to-left application: `compose([a, b, c])(base) == a(b(c(base)))`. Equivalently, the leftmost wrapper is the outermost. |
 
 ### Minimal example
@@ -118,6 +133,67 @@ let result = agent_loop(task, system, {
   llm_caller: caller,
 })
 ```
+
+### Persona-shaped example: cost moat substrate
+
+The full handler stack is the **cost moat substrate** for the
+[Opinionated Harn Stack](../personas.md): cheap-model-by-default with
+frontier escalation only on ambiguity, deterministic budget enforcement
+per persona, and receipt-grade structured logs for every model call.
+
+```harn,ignore
+import {
+  default_llm_caller, with_retry, with_logging, with_budget,
+  with_routing, with_fallback, with_circuit_breaker, compose,
+} from "std/llm/handlers"
+
+// Cheap default: a fast / inexpensive model on a tight retry budget.
+let cheap = with_circuit_breaker(
+  with_retry(default_llm_caller(), {max_attempts: 2}),
+  {threshold: 5, reset_ms: 30000},
+)
+
+// Frontier escalation: a stronger model with longer retries + a fallback
+// to a second strong model if the first provider trips a circuit.
+let frontier = with_circuit_breaker(
+  with_fallback([
+    with_retry(default_llm_caller(), {max_attempts: 3}),
+    with_retry(default_llm_caller(), {max_attempts: 2}),
+  ]),
+  {threshold: 5, reset_ms: 30000},
+)
+
+let receipts_sink = { record ->
+  // Forward to harn-cloud receipts / Burin Code transcript / etc.
+  agent_emit_event("ops.receipts", "llm_call_log", record)
+}
+
+// with_routing is a base caller (it owns the call, not a wrapper around
+// `next`); the budget + logging middleware compose over it.
+let router = with_routing({
+  default: cheap,
+  routes: [
+    {name: "frontier",
+     when: { call -> call?.opts?.task_kind == "judge" || (call?.opts?.escalate ?? false) },
+     caller: frontier},
+  ],
+})
+
+let persona_caller = compose([
+  with_logging({level: "info", sink: receipts_sink}),
+  with_budget({max_total_tokens: 250000, max_calls: 200}),
+])(router)
+
+agent_loop(task, system, {
+  loop_until_done: true,
+  llm_caller: persona_caller,
+})
+```
+
+`with_routing` chooses cheap-vs-frontier **before** the request goes
+out (so cost stays predictable); `with_budget` enforces the persona's
+USD/token cap deterministically; `with_logging`'s `sink` emits receipt
+records consumed by harn-cloud's ops console.
 
 ### Error / envelope semantics
 
