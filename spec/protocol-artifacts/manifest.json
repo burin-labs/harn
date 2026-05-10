@@ -161,7 +161,7 @@
       "rawInputPartial"
     ]
   },
-  "artifactVersion": "0.8.6",
+  "artifactVersion": "0.8.7",
   "bindings": {
     "go": {
       "artifact": "go/harnprotocol/harnprotocol.go",
