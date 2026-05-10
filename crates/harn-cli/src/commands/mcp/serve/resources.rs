@@ -3,11 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use futures::StreamExt;
 use serde_json::{json, Value as JsonValue};
 
-use harn_vm::event_log::{LogEvent, Topic};
+use harn_vm::event_log::{EventLog, LogEvent, Topic};
 
 use crate::commands::orchestrator::common::{
-    load_local_runtime, read_topic, trigger_inspect_dlq, TRIGGER_ATTEMPTS_TOPIC,
-    TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_OUTBOX_TOPIC,
+    load_local_runtime, read_topic, trigger_inspect_dlq, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC,
+    TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_OUTBOX_TOPIC,
 };
 
 use super::types::{
@@ -545,4 +545,3 @@ pub(super) fn resource_updated_notification(uri: &str) -> JsonValue {
         "params": { "uri": uri },
     })
 }
-

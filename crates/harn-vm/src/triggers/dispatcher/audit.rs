@@ -1,22 +1,21 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 
-use crate::event_log::LogEvent;
+use crate::event_log::{EventLog, LogEvent};
 use crate::orchestration::{RunActionGraphEdgeRecord, RunActionGraphNodeRecord};
 use crate::triggers::registry::TriggerBinding;
 use crate::trust_graph::{append_trust_record, AutonomyTier, TrustOutcome, TrustRecord};
 
 use super::types::{
-    DispatchAttemptRecord, DispatchError, DispatchSkipStage, Dispatcher, DEFAULT_AUTONOMY_BUDGET_REVIEWER,
+    DispatchAttemptRecord, DispatchError, DispatchSkipStage, Dispatcher,
+    DEFAULT_AUTONOMY_BUDGET_REVIEWER,
 };
 use super::uri::DispatchUri;
 use super::util::{
     dispatch_error_from_vm_error, event_headers, next_budget_reset_rfc3339, topic_for_event,
 };
 use super::TriggerEvent;
-use super::{
-    TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_OUTBOX_TOPIC,
-};
+use super::{TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_OUTBOX_TOPIC};
 
 impl Dispatcher {
     #[allow(clippy::too_many_arguments)]

@@ -10,10 +10,10 @@ use harn_vm::mcp_protocol;
 use harn_vm::{append_secret_scan_audit, secret_scan_content, SecretFinding};
 
 use crate::commands::orchestrator::common::{
-    load_local_runtime, read_topic, synthetic_event_for_binding, trigger_fire,
-    trigger_inspect_dlq, trigger_list, trigger_replay, TRIGGER_ATTEMPTS_TOPIC,
-    TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC,
-    TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OUTBOX_TOPIC,
+    load_local_runtime, read_topic, synthetic_event_for_binding, trigger_fire, trigger_inspect_dlq,
+    trigger_list, trigger_replay, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC,
+    TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC,
+    TRIGGER_OUTBOX_TOPIC,
 };
 use crate::commands::orchestrator::inspect_data::collect_orchestrator_inspect_data;
 
@@ -24,8 +24,9 @@ use super::types::{
     TriggerFireRequest, TriggerListEntry, TriggerReplayRequest, TrustQueryRequest,
 };
 use super::util::{
-    handler_json, inject_trace_headers, merge_json_object, now_rfc3339, parse_trust_query_timestamp,
-    preview_events, report_milestone, trigger_kind_name, trigger_replay_steering_from_request,
+    handler_json, inject_trace_headers, merge_json_object, now_rfc3339,
+    parse_trust_query_timestamp, preview_events, report_milestone, trigger_kind_name,
+    trigger_replay_steering_from_request,
 };
 use super::{DEFAULT_TASK_TTL_MS, MAX_TASK_TTL_MS};
 
@@ -612,10 +613,7 @@ impl McpOrchestratorService {
         Ok(record.clone())
     }
 
-    pub(super) async fn tool_secret_scan(
-        &self,
-        arguments: JsonValue,
-    ) -> Result<JsonValue, String> {
+    pub(super) async fn tool_secret_scan(&self, arguments: JsonValue) -> Result<JsonValue, String> {
         let request: SecretScanRequest =
             serde_json::from_value(arguments).map_err(|error| error.to_string())?;
         let findings: Vec<SecretFinding> = secret_scan_content(&request.content);
@@ -805,10 +803,7 @@ impl McpOrchestratorService {
         serde_json::to_value(payload).map_err(|error| error.to_string())
     }
 
-    pub(super) async fn tool_trust_query(
-        &self,
-        arguments: JsonValue,
-    ) -> Result<JsonValue, String> {
+    pub(super) async fn tool_trust_query(&self, arguments: JsonValue) -> Result<JsonValue, String> {
         let request: TrustQueryRequest =
             serde_json::from_value(arguments).map_err(|error| error.to_string())?;
         let filters = harn_vm::TrustQueryFilters {

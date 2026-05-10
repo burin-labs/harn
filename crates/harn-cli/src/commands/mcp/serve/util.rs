@@ -161,9 +161,7 @@ pub(super) fn merge_json_object(target: &mut JsonValue, patch: JsonValue) {
     }
 }
 
-pub(super) fn normalized_headers(
-    headers: &axum::http::HeaderMap,
-) -> BTreeMap<String, String> {
+pub(super) fn normalized_headers(headers: &axum::http::HeaderMap) -> BTreeMap<String, String> {
     headers
         .iter()
         .filter_map(|(name, value)| {

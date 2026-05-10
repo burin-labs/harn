@@ -3,9 +3,10 @@ use std::time::Duration;
 
 use crate::orchestration::{
     append_action_graph_update, RunActionGraphEdgeRecord, RunActionGraphNodeRecord,
-    RunObservabilityRecord, ACTION_GRAPH_EDGE_KIND_A2A_DISPATCH, ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE,
-    ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH, ACTION_GRAPH_NODE_KIND_A2A_HOP,
-    ACTION_GRAPH_NODE_KIND_DISPATCH, ACTION_GRAPH_NODE_KIND_WORKER_ENQUEUE,
+    RunObservabilityRecord, ACTION_GRAPH_EDGE_KIND_A2A_DISPATCH,
+    ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE, ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH,
+    ACTION_GRAPH_NODE_KIND_A2A_HOP, ACTION_GRAPH_NODE_KIND_DISPATCH,
+    ACTION_GRAPH_NODE_KIND_WORKER_ENQUEUE,
 };
 use crate::triggers::registry::TriggerBinding;
 
@@ -115,9 +116,7 @@ pub(super) fn dispatch_entry_edge_kind(route: &DispatchUri, has_predicate: bool)
     }
 }
 
-pub(super) fn signature_status_label(
-    status: &crate::triggers::SignatureStatus,
-) -> &'static str {
+pub(super) fn signature_status_label(status: &crate::triggers::SignatureStatus) -> &'static str {
     match status {
         crate::triggers::SignatureStatus::Verified => "verified",
         crate::triggers::SignatureStatus::Unsigned => "unsigned",
@@ -125,9 +124,7 @@ pub(super) fn signature_status_label(
     }
 }
 
-pub(super) fn trigger_node_metadata(
-    event: &TriggerEvent,
-) -> BTreeMap<String, serde_json::Value> {
+pub(super) fn trigger_node_metadata(event: &TriggerEvent) -> BTreeMap<String, serde_json::Value> {
     let mut metadata = BTreeMap::new();
     metadata.insert(
         "provider".to_string(),
@@ -145,9 +142,7 @@ pub(super) fn trigger_node_metadata(
     metadata
 }
 
-pub(super) fn trigger_event_persona_metadata(
-    event: &TriggerEvent,
-) -> BTreeMap<String, String> {
+pub(super) fn trigger_event_persona_metadata(event: &TriggerEvent) -> BTreeMap<String, String> {
     let mut metadata = BTreeMap::new();
     metadata.insert("trigger_event_id".to_string(), event.id.0.clone());
     metadata.insert("event_id".to_string(), event.id.0.clone());
