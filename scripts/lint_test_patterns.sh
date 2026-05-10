@@ -166,8 +166,11 @@ trap 'rm -f "$TEST_FILES_TMP" "$HARN_TEST_FILES_TMP"' EXIT
 {
   # crates/**/tests/**/*.rs — any depth under a tests/ directory
   find crates -type f -name "*.rs" -path "*/tests/*"
-  # crates/**/src/**/tests.rs and tests_*.rs — inline test modules
-  find crates -type f \( -name "tests.rs" -o -name "tests_*.rs" \) -path "*/src/*"
+  # crates/**/src/**/tests.rs, tests_*.rs, *_tests.rs — inline + sibling
+  # test modules (tests.rs is the classic name; the underscore variants
+  # accommodate both leading-`tests_` and trailing-`_tests` conventions
+  # the codebase has accumulated).
+  find crates -type f \( -name "tests.rs" -o -name "tests_*.rs" -o -name "*_tests.rs" \) -path "*/src/*"
 } | sort -u > "$TEST_FILES_TMP"
 
 find conformance/tests -type f -name "*.harn" | sort -u > "$HARN_TEST_FILES_TMP"
@@ -348,9 +351,11 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-cli/src/commands/flow.rs"
   "crates/harn-cli/src/commands/mcp/mod.rs"
   "crates/harn-cli/src/commands/mcp/oauth_resource.rs"
-  "crates/harn-cli/src/commands/mcp/serve.rs"
+  "crates/harn-cli/src/commands/mcp/serve/util.rs"
   "crates/harn-cli/src/commands/orchestrator/common.rs"
-  "crates/harn-cli/src/commands/orchestrator/harness.rs"
+  "crates/harn-cli/src/commands/orchestrator/harness/audit.rs"
+  "crates/harn-cli/src/commands/orchestrator/harness/pumps.rs"
+  "crates/harn-cli/src/commands/orchestrator/harness/shutdown.rs"
   "crates/harn-cli/src/commands/orchestrator/inspect_data.rs"
   "crates/harn-cli/src/commands/orchestrator/listener/acp_hub.rs"
   "crates/harn-cli/src/commands/orchestrator/listener/routes.rs"
@@ -456,7 +461,8 @@ trap 'rm -f "$TEST_FILES_TMP" "$HARN_TEST_FILES_TMP" "$NON_TEST_RUNTIME_FILES_TM
   find crates/harn-vm/src crates/harn-cli/src -type f -name "*.rs" \
     ! -path "*/tests/*" \
     ! -name "tests.rs" \
-    ! -name "tests_*.rs"
+    ! -name "tests_*.rs" \
+    ! -name "*_tests.rs"
 } | sort -u > "$NON_TEST_RUNTIME_FILES_TMP"
 
 while IFS= read -r file; do
