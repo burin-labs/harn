@@ -21,8 +21,9 @@ use std::{env, fs, process, thread};
 
 use cli::{
     Cli, Command, CompletionShell, MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs,
-    PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PersonaCommand, RunsCommand,
-    ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
+    PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PersonaCommand,
+    PersonaSupervisionCommand, RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand,
+    SkillTrustCommand, SkillsCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -984,6 +985,20 @@ async fn async_main() {
                     process::exit(1);
                 }
             }
+            PersonaCommand::Supervision(supervision) => match supervision.command {
+                PersonaSupervisionCommand::Tail(tail) => {
+                    if let Err(error) = commands::persona_supervision::run_tail(
+                        args.manifest.as_deref(),
+                        &args.state_dir,
+                        &tail,
+                    )
+                    .await
+                    {
+                        eprintln!("error: {error}");
+                        process::exit(1);
+                    }
+                }
+            },
         },
         Command::ModelInfo(args) => {
             if !print_model_info(&args).await {

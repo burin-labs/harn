@@ -21,6 +21,7 @@ pub mod orchestrator;
 pub mod persona;
 pub mod persona_doctor;
 pub mod persona_scaffold;
+pub mod persona_supervision;
 pub mod playground;
 pub(crate) mod portal;
 pub(crate) mod protocol_conformance;

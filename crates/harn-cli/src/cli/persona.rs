@@ -47,6 +47,8 @@ pub(crate) enum PersonaCommand {
     Trigger(PersonaTriggerArgs),
     /// Record an expensive-work budget receipt for a persona.
     Spend(PersonaSpendArgs),
+    /// Stream the local universal persona supervision feed.
+    Supervision(PersonaSupervisionArgs),
 }
 
 #[derive(Debug, Args)]
@@ -212,4 +214,38 @@ pub(crate) struct PersonaSpendArgs {
     /// Emit stable JSON.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PersonaSupervisionArgs {
+    #[command(subcommand)]
+    pub command: PersonaSupervisionCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum PersonaSupervisionCommand {
+    /// Emit local persona/update frames as newline-delimited JSON.
+    Tail(PersonaSupervisionTailArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PersonaSupervisionTailArgs {
+    /// Persona name to stream. When omitted, streams every persona in the local state directory.
+    #[arg(long)]
+    pub persona: Option<String>,
+    /// Replay events strictly after this event-log cursor.
+    #[arg(long, value_name = "N")]
+    pub since_event_id: Option<u64>,
+    /// RFC3339 timestamp accepted for deterministic harness parity.
+    #[arg(long, value_name = "RFC3339")]
+    pub at: Option<String>,
+    /// Keep waiting for new events after the current backlog drains.
+    #[arg(long)]
+    pub follow: bool,
+    /// Accepted for host symmetry; output is always newline-delimited JSON.
+    #[arg(long)]
+    pub json: bool,
+    /// Maximum number of emitted supervision frames.
+    #[arg(long, value_name = "N")]
+    pub limit: Option<usize>,
 }

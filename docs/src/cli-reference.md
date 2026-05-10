@@ -245,13 +245,20 @@ harn persona --manifest examples/personas/harn.toml trigger merge_captain \
 harn persona --manifest examples/personas/harn.toml pause merge_captain
 harn persona --manifest examples/personas/harn.toml resume merge_captain
 harn persona --manifest examples/personas/harn.toml disable merge_captain
+harn persona --manifest examples/personas/harn.toml supervision tail --json
+harn persona --manifest examples/personas/harn.toml supervision tail \
+  --persona merge_captain --since-event-id 42 --follow --limit 200 --json
 ```
 
 | Flag | Description |
 |---|---|
 | `--manifest <path>` | Use an explicit `harn.toml` path or directory containing one |
 | `--state-dir <dir>` | Store persona runtime events under a durable EventLog base directory, default `.harn/personas` |
-| `--json` | Emit stable JSON for list, inspect, status, controls, trigger, tick, and budget receipts |
+| `--json` | Emit stable JSON for list, inspect, status, controls, trigger, tick, and budget receipts. `supervision tail` always emits NDJSON frames and accepts `--json` for host symmetry |
+| `--persona <name>` | Filter `supervision tail` to one persona; omitted streams every persona in the local state directory |
+| `--since-event-id <N>` | Replay `supervision tail` frames with `event_id > N` |
+| `--follow` | Keep `supervision tail` open and stream new appended frames |
+| `--limit <N>` | Cap emitted `supervision tail` frames |
 
 `harn persona` validates the manifest before printing. It rejects missing entry
 workflows, unknown capabilities, invalid budget fields, invalid schedules, and
@@ -262,6 +269,10 @@ Runtime commands append event-sourced lifecycle records to
 `resume` drains queued events once under a lease, and `disable` records later
 events as dead-lettered. `tick`, `trigger`, and `spend` enforce per-persona
 daily, hourly, run, and token budgets before recording expensive-work receipts.
+`supervision tail` projects those records into hosted-compatible
+`persona/update` NDJSON frames with `event_id`, `persona_id`, `persona_kind`,
+optional `persona_version`, `actor`, `update_kind`, `occurred_at`, and
+`payload`.
 
 ## harn fmt
 

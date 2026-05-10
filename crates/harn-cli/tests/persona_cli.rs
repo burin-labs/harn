@@ -7,11 +7,16 @@
 //! and asserts on the returned struct/JSON value rather than parsing
 //! subprocess stdout.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
+use std::process::Stdio;
+use std::time::Duration;
 
-use harn_cli::commands::{persona, persona_doctor, persona_scaffold};
+use harn_cli::commands::{persona, persona_doctor, persona_scaffold, persona_supervision};
+use harn_vm::event_log::EventLog as _;
 use tempfile::TempDir;
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 fn write_manifest(body: &str) -> TempDir {
     let temp = TempDir::new().unwrap();
@@ -68,6 +73,25 @@ capabilities = ["interaction.ask"]
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
 "#
+}
+
+fn versioned_manifest() -> String {
+    valid_manifest()
+        .replacen(
+            "name = \"merge_captain\"",
+            "name = \"merge_captain\"\nversion = \"1.4.0\"",
+            1,
+        )
+        .replacen(
+            "name = \"review_captain\"",
+            "name = \"review_captain\"\nversion = \"1.1.0\"",
+            1,
+        )
+        .replacen(
+            "name = \"oncall_captain\"",
+            "name = \"oncall_captain\"\nversion = \"0.9.1\"",
+            1,
+        )
 }
 
 #[test]
@@ -512,6 +536,264 @@ async fn persona_pause_resume_disable_trigger_controls_are_durable() {
     .await
     .expect("trigger while disabled");
     assert_eq!(receipt.status, "dead_lettered");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn persona_supervision_tail_projects_multiplexed_ndjson_contract() {
+    let temp = write_manifest(&versioned_manifest());
+    let manifest = manifest_path(&temp);
+    let state_dir = temp.path().join(".harn-personas-test");
+
+    let _ = persona::pause_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        Some("2026-05-10T14:00:00Z"),
+    )
+    .await
+    .expect("pause merge captain");
+    let _ = persona::trigger_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        "github",
+        "pull_request",
+        &[
+            "repository=burin-labs/harn".to_string(),
+            "number=1490".to_string(),
+        ],
+        Some("2026-05-10T14:00:01Z"),
+        0.0,
+        0,
+    )
+    .await
+    .expect("queue github work");
+    let _ = persona::trigger_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        "handoff",
+        "review",
+        &[
+            "dedupe_key=handoff-1490".to_string(),
+            "handoff_id=handoff-1490".to_string(),
+            "handoff_kind=review_request".to_string(),
+            "source_persona=oncall_captain".to_string(),
+            "task=Review issue 1490 tail output".to_string(),
+        ],
+        Some("2026-05-10T14:00:02Z"),
+        0.0,
+        0,
+    )
+    .await
+    .expect("queue handoff");
+    let _ = persona::resume_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        Some("2026-05-10T14:00:03Z"),
+    )
+    .await
+    .expect("resume merge captain");
+    let _ = persona::tick_payload(
+        Some(&manifest),
+        &state_dir,
+        "oncall_captain",
+        Some("2026-05-10T14:00:04Z"),
+        0.0,
+        0,
+    )
+    .await
+    .expect("tick oncall captain");
+
+    let log = harn_vm::event_log::install_default_for_base_dir(&state_dir)
+        .expect("open persona event log");
+    let merge_binding = harn_vm::PersonaRuntimeBinding {
+        name: "merge_captain".to_string(),
+        template_ref: Some("merge_captain@1.4.0".to_string()),
+        entry_workflow: "workflows/merge.harn#run".to_string(),
+        schedules: Vec::new(),
+        triggers: Vec::new(),
+        budget: harn_vm::PersonaBudgetPolicy::default(),
+    };
+    let _ = harn_vm::report_repair_worker_status(
+        &log,
+        &merge_binding,
+        harn_vm::PersonaRepairWorkerStatusUpdate {
+            persona_id: String::new(),
+            template_ref: None,
+            repair_worker_id: "rw_1490".to_string(),
+            lifecycle: harn_vm::PersonaRepairWorkerLifecycle::Running,
+            work_key: Some("github:burin-labs/harn:pr:1490".to_string()),
+            lease_id: Some("persona_lease_1490".to_string()),
+            scratchpad_url: Some("file:///tmp/rw_1490".to_string()),
+            last_heartbeat_ms: 0,
+            occurred_at_ms: 0,
+        },
+        harn_vm::parse_persona_ms("2026-05-10T14:00:05Z").expect("timestamp"),
+    )
+    .await
+    .expect("repair worker status");
+    let _ = harn_vm::restore_persona_checkpoint(
+        &log,
+        &merge_binding,
+        harn_vm::PersonaCheckpointRestoreRequest {
+            checkpoint_id: "cp_1490".to_string(),
+            work_key: Some("github:burin-labs/harn:pr:1490".to_string()),
+            resumed_from: None,
+        },
+        harn_vm::parse_persona_ms("2026-05-10T14:00:06Z").expect("timestamp"),
+    )
+    .await
+    .expect("checkpoint restore ack");
+    log.flush().await.expect("flush supervision events");
+
+    let frames = persona_supervision::tail_payload(
+        Some(&manifest),
+        &state_dir,
+        &persona_supervision::PersonaSupervisionTailOptions::default(),
+    )
+    .await
+    .expect("tail supervision frames");
+    assert!(
+        frames
+            .windows(2)
+            .all(|pair| pair[0].event_id < pair[1].event_id),
+        "tail cursors must be strictly increasing: {frames:?}"
+    );
+
+    let kinds: BTreeSet<_> = frames
+        .iter()
+        .map(|frame| frame.update_kind.as_str())
+        .collect();
+    for expected in [
+        "control",
+        "queue_position",
+        "repair_worker_status",
+        "handoff",
+        "checkpoint",
+        "receipt",
+    ] {
+        assert!(
+            kinds.contains(expected),
+            "expected update_kind={expected}; saw {kinds:?}"
+        );
+    }
+    assert!(frames.iter().any(|frame| {
+        frame.persona_id == "merge_captain"
+            && frame.persona_kind == "merge_captain"
+            && frame.persona_version.as_deref() == Some("1.4.0")
+    }));
+    assert!(frames.iter().any(|frame| {
+        frame.persona_id == "oncall_captain"
+            && frame.persona_kind == "oncall_captain"
+            && frame.persona_version.as_deref() == Some("0.9.1")
+            && frame.update_kind == "receipt"
+    }));
+    assert!(frames.iter().any(|frame| {
+        frame.persona_id == "merge_captain"
+            && frame.update_kind == "repair_worker_status"
+            && frame.payload["lifecycle"] == "running"
+            && frame.payload["repair_worker_id"] == "rw_1490"
+    }));
+
+    let cursor = frames.last().expect("at least one frame").event_id;
+    let resumed = persona_supervision::tail_payload(
+        Some(&manifest),
+        &state_dir,
+        &persona_supervision::PersonaSupervisionTailOptions {
+            since_event_id: Some(cursor),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("tail after cursor");
+    assert!(
+        resumed.is_empty(),
+        "strict cursor replay yielded duplicates"
+    );
+
+    let limited = persona_supervision::tail_payload(
+        Some(&manifest),
+        &state_dir,
+        &persona_supervision::PersonaSupervisionTailOptions {
+            limit: Some(2),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("limited tail");
+    assert_eq!(limited.len(), 2);
+
+    let oncall = persona_supervision::tail_payload(
+        Some(&manifest),
+        &state_dir,
+        &persona_supervision::PersonaSupervisionTailOptions {
+            persona: Some("oncall_captain".to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("filtered tail");
+    assert!(!oncall.is_empty());
+    assert!(oncall
+        .iter()
+        .all(|frame| frame.persona_id == "oncall_captain"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn persona_supervision_tail_follow_streams_new_events() {
+    let temp = write_manifest(valid_manifest());
+    let manifest = manifest_path(&temp);
+    let state_dir = temp.path().join(".harn-personas-test");
+
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_harn"))
+        .arg("persona")
+        .arg("--manifest")
+        .arg(&manifest)
+        .arg("--state-dir")
+        .arg(&state_dir)
+        .arg("supervision")
+        .arg("tail")
+        .arg("--persona")
+        .arg("merge_captain")
+        .arg("--follow")
+        .arg("--limit")
+        .arg("1")
+        .arg("--json")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn harn persona supervision tail");
+    let stdout = child.stdout.take().expect("tail stdout");
+    let mut lines = BufReader::new(stdout).lines();
+
+    let _ = persona::tick_payload(
+        Some(&manifest),
+        &state_dir,
+        "merge_captain",
+        Some("2026-05-10T15:00:00Z"),
+        0.0,
+        0,
+    )
+    .await
+    .expect("append followed event");
+
+    let line = tokio::time::timeout(Duration::from_secs(5), lines.next_line())
+        .await
+        .expect("tail produced a line before timeout")
+        .expect("read tail line")
+        .expect("tail line");
+    let frame: serde_json::Value = serde_json::from_str(&line).expect("tail line JSON");
+    assert_eq!(frame["persona_id"], "merge_captain");
+    assert_eq!(frame["update_kind"], "receipt");
+    assert_eq!(frame["payload"]["status"], "completed");
+
+    let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
+        .await
+        .expect("tail exited after limit")
+        .expect("wait for tail");
+    assert!(status.success(), "tail exited with {status}");
 }
 
 #[tokio::test(flavor = "current_thread")]

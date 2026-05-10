@@ -495,13 +495,7 @@ fn load_catalog_or_exit(manifest: Option<&Path>) -> ResolvedPersonaManifest {
 }
 
 fn load_catalog_result(manifest: Option<&Path>) -> Result<ResolvedPersonaManifest, String> {
-    load_catalog_validation(manifest).map_err(|errors| {
-        errors
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n")
-    })
+    load_catalog_validation(manifest).map_err(|errors| validation_errors_to_string(&errors))
 }
 
 fn load_catalog_validation(
@@ -522,6 +516,14 @@ fn load_catalog_validation(
         }]),
         Err(errors) => Err(errors),
     }
+}
+
+fn validation_errors_to_string(errors: &[PersonaValidationError]) -> String {
+    errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn runtime_binding_or_err(
@@ -571,7 +573,7 @@ fn persona_template_ref(persona: &PersonaManifestEntry) -> Option<String> {
         })
 }
 
-fn open_persona_log(state_dir: &Path) -> Result<Arc<AnyEventLog>, String> {
+pub(super) fn open_persona_log(state_dir: &Path) -> Result<Arc<AnyEventLog>, String> {
     let state_dir = absolutize_from_cwd(state_dir)?;
     std::fs::create_dir_all(&state_dir).map_err(|error| {
         format!(
@@ -592,7 +594,7 @@ fn absolutize_from_cwd(path: &Path) -> Result<PathBuf, String> {
         .map_err(|error| format!("failed to read current directory: {error}"))
 }
 
-fn timestamp_arg(value: Option<&str>) -> Result<i64, String> {
+pub(super) fn timestamp_arg(value: Option<&str>) -> Result<i64, String> {
     match value {
         Some(value) => harn_vm::parse_persona_ms(value),
         None => Ok(harn_vm::persona_now_ms()),
