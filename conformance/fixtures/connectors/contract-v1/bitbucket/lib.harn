@@ -1,0 +1,42 @@
+pub fn provider_id() {
+  return "bitbucket"
+}
+
+pub fn kinds() {
+  return ["webhook"]
+}
+
+pub fn payload_schema() {
+  return {
+    harn_schema_name: "BitbucketEventPayload",
+    json_schema: {type: "object", additionalProperties: true},
+  }
+}
+
+pub fn init(ctx) {
+  if !ctx.capabilities.metrics_inc {
+    throw "metrics_inc capability missing"
+  }
+}
+
+pub fn activate(bindings) {
+  metrics_inc("bitbucket_contract_activations", len(bindings))
+}
+
+fn header(headers, name) {
+  return headers[name] ?? headers[lowercase(name)] ?? ""
+}
+
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json ?? json_parse(raw.body_text)
+  let event = header(raw.headers, "X-Event-Key")
+  let delivery = header(raw.headers, "X-Hook-UUID")
+  return {
+    type: "event",
+    event: {kind: event, dedupe_key: delivery, payload: body, signature_status: {state: "verified"}},
+  }
+}
+
+pub fn call(method, _args) {
+  throw "method_not_found:" + method
+}
