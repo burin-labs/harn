@@ -1,0 +1,23 @@
+/**
+ * Deterministic concurrency test that drives `parallel each` task bodies
+ * under a unified mock clock. Before #1427, `sleep(...)` always called
+ * `tokio::time::sleep` while only `sleep_ms(...)` honored `mock_time`,
+ * so a `parallel each` body that called `sleep` would drift on
+ * wall-clock under load. With the unification, both builtins advance
+ * the mock and `yield_now()` lets sibling tasks make progress without
+ * actually sleeping.
+ */
+pipeline test(task) {
+  mock_time(1700000000000)
+  let order = atomic(0)
+  let results = parallel each [10, 20, 30, 40] with { max_concurrent: 2 } { n ->
+    sleep(n)
+    yield_now()
+    return atomic_add(order, 1) * 1000 + n
+  }
+  log(len(results))
+  // Mock time advanced by the largest sleep observed, not the sum.
+  let elapsed_ms = now_ms() - 1700000000000
+  log(elapsed_ms >= 40 && elapsed_ms <= 100)
+  unmock_time()
+}

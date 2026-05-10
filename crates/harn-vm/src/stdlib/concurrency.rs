@@ -861,28 +861,48 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
     vm.register_async_builtin("sleep", |args| async move {
         let ms = match args.first() {
             Some(VmValue::Duration(ms)) => (*ms).max(0) as u64,
-            Some(VmValue::Int(n)) => *n as u64,
+            Some(VmValue::Int(n)) => (*n).max(0) as u64,
             _ => 0,
         };
-        if ms > 0 {
-            let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(ms));
-            tokio::pin!(sleep);
-            if let Some(vm) = crate::vm::clone_async_builtin_child_vm() {
-                let mut poll = tokio::time::interval(Duration::from_millis(10));
-                loop {
-                    tokio::select! {
-                        _ = &mut sleep => break,
-                        _ = poll.tick() => {
-                            if vm.is_cancel_requested() {
-                                return Err(cancelled_vm_error());
-                            }
+        if ms == 0 {
+            return Ok(VmValue::Nil);
+        }
+        // Honor the unified test clock mock: when a script (or surrounding
+        // Rust test) has installed `mock_time(...)`, `sleep(...)` advances
+        // the mock instead of suspending the runtime. This converges with
+        // `sleep_ms` and lets conformance tests that exercise concurrency
+        // primitives drive deterministic timing without wall-clock flake.
+        if crate::stdlib::clock::is_mocked() {
+            crate::stdlib::clock::advance(ms as i64);
+            return Ok(VmValue::Nil);
+        }
+        let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(ms));
+        tokio::pin!(sleep);
+        if let Some(vm) = crate::vm::clone_async_builtin_child_vm() {
+            let mut poll = tokio::time::interval(Duration::from_millis(10));
+            loop {
+                tokio::select! {
+                    _ = &mut sleep => break,
+                    _ = poll.tick() => {
+                        if vm.is_cancel_requested() {
+                            return Err(cancelled_vm_error());
                         }
                     }
                 }
-            } else {
-                sleep.await;
             }
+        } else {
+            sleep.await;
         }
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_async_builtin("yield_now", |_args| async move {
+        // Cooperative scheduling primitive — gives other tasks a chance to
+        // make progress without inserting a wall-clock sleep. Pairs with
+        // `mock_time(...)` for deterministic concurrency tests where the
+        // surrounding `parallel each` / channel orchestration just needs
+        // one more poll, not actual time advancement.
+        tokio::task::yield_now().await;
         Ok(VmValue::Nil)
     });
 

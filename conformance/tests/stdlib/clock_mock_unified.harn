@@ -1,0 +1,37 @@
+/**
+ * Verifies that `mock_time` unifies all stdlib timing primitives:
+ *   - `sleep(...)` advances the mock instead of suspending the runtime
+ *   - `sleep_ms(...)` advances the mock
+ *   - `now_ms()` / `monotonic_ms()` / `timestamp()` / `elapsed()` all
+ *     read from the same mocked source of truth
+ *   - `yield_now()` is a no-op for time but lets sibling tasks poll
+ *
+ * Before unification, `sleep` always called `tokio::time::sleep` while
+ * only `sleep_ms` honored the mock — leaving conformance fixtures with
+ * two different timing models depending on which builtin they used.
+ */
+pipeline test(task) {
+  mock_time(1700000000000)
+  let start_wall = now_ms()
+  let start_mono = monotonic_ms()
+  let start_ts = timestamp()
+  let start_elapsed = elapsed()
+  // sleep with an integer (ms) argument advances the mock.
+  sleep(50)
+  // sleep with a duration literal also advances the mock.
+  sleep(125ms)
+  // yield_now does not advance time but is async.
+  yield_now()
+  let end_wall = now_ms()
+  let end_mono = monotonic_ms()
+  let end_ts = timestamp()
+  let end_elapsed = elapsed()
+  log(end_wall - start_wall)
+  log(end_mono - start_mono)
+  // timestamp() returns float seconds; assert it advanced by the same
+  // 175 ms (within fp rounding) rather than logging a flaky derived ms.
+  let ts_delta_ms = end_ts * 1000.0 - start_ts * 1000.0
+  log(ts_delta_ms > 174.0 && ts_delta_ms < 176.0)
+  log(end_elapsed - start_elapsed)
+  unmock_time()
+}

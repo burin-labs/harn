@@ -71,6 +71,45 @@ CONFORMANCE_HELPER_ALLOWLIST=(
   "conformance/tests/_common.harn"
 )
 
+# Conformance fixtures that are allowed to call `sleep(<literal>)` /
+# `time.sleep(<literal>)` because they exercise real subprocess I/O,
+# real socket-bound servers, or genuine wall-clock-driven scheduler
+# behavior that cannot be expressed under `mock_time(...)`. New
+# fixtures should drive timing through `mock_time(...)` /
+# `advance_time(...)` and `yield_now()` from the unified test clock
+# (see docs/src/dev/testing.md). Add an entry here only when there is
+# no deterministic alternative — and prefer shrinking this list over
+# growing it.
+CONFORMANCE_REAL_TIME_ALLOWLIST=(
+  "conformance/tests/_common.harn"
+  "conformance/tests/agents/daemon_stdlib_wrappers.harn"
+  "conformance/tests/agents/worker_retriggerable.harn"
+  "conformance/tests/agents/workflow_messages.harn"
+  "conformance/tests/concurrency/deadline_catch.harn"
+  "conformance/tests/concurrency/parallel_each_as_stream.harn"
+  "conformance/tests/concurrency/parallel_max_concurrent.harn"
+  "conformance/tests/concurrency/parallel_race.harn"
+  "conformance/tests/concurrency/rwlock_channel_select.harn"
+  "conformance/tests/concurrency/select_basic.harn"
+  "conformance/tests/concurrency/supervisor_circuit_open.harn"
+  "conformance/tests/concurrency/supervisor_graceful_stop.harn"
+  "conformance/tests/concurrency/supervisor_one_for_one.harn"
+  "conformance/tests/concurrency/supervisor_restart_cap.harn"
+  "conformance/tests/concurrency/supervisor_restart_window.harn"
+  "conformance/tests/integration/agent_loop_mcp_http_elicit.harn"
+  "conformance/tests/integration/agent_loop_mcp_servers.harn"
+  "conformance/tests/integration/orchestrator_hot_reload_add.harn"
+  "conformance/tests/integration/orchestrator_hot_reload_modify_inflight.harn"
+  "conformance/tests/integration/orchestrator_hot_reload_remove.harn"
+  "conformance/tests/integration/orchestrator_pump_drain_lifecycle.harn"
+  "conformance/tests/integration/orchestrator_recover_stranded_envelopes.harn"
+  "conformance/tests/integration/orchestrator_worker_claim_expiry_requeue.harn"
+  "conformance/tests/runtime/http_proxy_passthrough.harn"
+  "conformance/tests/stdlib/hitl_pending.harn"
+  "conformance/tests/stdlib/waitpoint_fan_out.harn"
+  "conformance/tests/stdlib/waitpoints_fan_out.harn"
+)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -251,6 +290,29 @@ while IFS= read -r file; do
     echo "    hint: Bind test servers to port 0 and read the selected port from the readiness log."
     violations=$((violations + 1))
   done < <(grep -n "random_int(20000, 45000)" "$file" 2>/dev/null || true)
+done < "$HARN_TEST_FILES_TMP"
+
+echo "--- conformance sleep with fixed literal duration ---"
+# Fixtures that drive timing via `mock_time(...)` / `advance_time(...)`
+# auto-deflake their `sleep(...)` calls (the unified test clock advances
+# instantly). Anything else relies on wall-clock and should either move
+# to that pattern or be added to CONFORMANCE_REAL_TIME_ALLOWLIST with
+# justification.
+while IFS= read -r file; do
+  in_allowlist "$file" CONFORMANCE_REAL_TIME_ALLOWLIST && continue
+  # Files that install a clock mock are exempt because `sleep(...)` and
+  # `sleep_ms(...)` advance the mock instead of suspending the runtime.
+  if grep -q "^[[:space:]]*mock_time(" "$file" 2>/dev/null; then
+    continue
+  fi
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    echo "  $hit"
+    echo "    hint: Wrap timing-sensitive logic in mock_time(...)/unmock_time(),"
+    echo "          or add the fixture to CONFORMANCE_REAL_TIME_ALLOWLIST in"
+    echo "          scripts/lint_test_patterns.sh with reviewer justification."
+    violations=$((violations + 1))
+  done < <(grep -n -E "(^|[^_a-zA-Z])(sleep|time\.sleep)\([0-9]" "$file" 2>/dev/null || true)
 done < "$HARN_TEST_FILES_TMP"
 
 # ---------------------------------------------------------------------------
