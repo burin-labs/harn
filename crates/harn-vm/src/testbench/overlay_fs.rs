@@ -18,6 +18,8 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::testbench::tape::{self, TapeRecordKind};
+
 /// One change in the overlay's write layer relative to the underlying
 /// tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -428,39 +430,103 @@ pub fn active_overlay() -> Option<Arc<OverlayFs>> {
 
 /// Helpers for fs builtins. Each helper falls through to `std::fs` when
 /// no overlay is active, keeping the testbench opt-in.
+///
+/// Every successful read/write/delete also pushes a [`TapeRecordKind`]
+/// into the active unified-tape recorder when one is installed, so the
+/// fidelity oracle can compare FS effects across runs even when the
+/// per-axis overlay diff is identical (the order in which writes land
+/// also matters for replay determinism).
 pub mod helpers {
     use super::*;
 
+    fn record_file_read(path: &Path, bytes: &[u8]) {
+        // Skip the hash + path stringification when no recorder is
+        // installed — the fast path is the production path.
+        if tape::active_recorder().is_none() {
+            return;
+        }
+        let path_str = path.to_string_lossy().into_owned();
+        let len = bytes.len() as u64;
+        let hash = tape::content_hash(bytes);
+        tape::with_active_recorder(|_recorder| {
+            Some(TapeRecordKind::FileRead {
+                path: path_str,
+                content_hash: hash,
+                len_bytes: len,
+            })
+        });
+    }
+
+    fn record_file_write(path: &Path, bytes: &[u8]) {
+        if tape::active_recorder().is_none() {
+            return;
+        }
+        let path_str = path.to_string_lossy().into_owned();
+        let len = bytes.len() as u64;
+        let hash = tape::content_hash(bytes);
+        tape::with_active_recorder(|_recorder| {
+            Some(TapeRecordKind::FileWrite {
+                path: path_str,
+                content_hash: hash,
+                len_bytes: len,
+            })
+        });
+    }
+
+    fn record_file_delete(path: &Path) {
+        if tape::active_recorder().is_none() {
+            return;
+        }
+        let path_str = path.to_string_lossy().into_owned();
+        tape::with_active_recorder(|_recorder| Some(TapeRecordKind::FileDelete { path: path_str }));
+    }
+
     pub fn read(path: &Path) -> std::io::Result<Vec<u8>> {
-        match active_overlay() {
+        let result = match active_overlay() {
             Some(overlay) => overlay.read(path),
             None => std::fs::read(path),
+        };
+        if let Ok(bytes) = result.as_ref() {
+            record_file_read(path, bytes);
         }
+        result
     }
 
     pub fn read_to_string(path: &Path) -> std::io::Result<String> {
-        match active_overlay() {
+        let result = match active_overlay() {
             Some(overlay) => overlay.read_to_string(path),
             None => std::fs::read_to_string(path),
+        };
+        if let Ok(text) = result.as_ref() {
+            record_file_read(path, text.as_bytes());
         }
+        result
     }
 
     pub fn write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
-        match active_overlay() {
+        let result = match active_overlay() {
             Some(overlay) => overlay.write(path, contents),
             None => std::fs::write(path, contents),
+        };
+        if result.is_ok() {
+            record_file_write(path, contents);
         }
+        result
     }
 
     pub fn append(path: &Path, contents: &[u8]) -> std::io::Result<()> {
-        match active_overlay() {
+        let result = match active_overlay() {
             Some(overlay) => overlay.append(path, contents),
             None => std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(path)
                 .and_then(|mut file| std::io::Write::write_all(&mut file, contents)),
+        };
+        if result.is_ok() {
+            record_file_write(path, contents);
         }
+        result
     }
 
     pub fn exists(path: &Path) -> bool {
@@ -471,10 +537,14 @@ pub mod helpers {
     }
 
     pub fn remove_file(path: &Path) -> std::io::Result<()> {
-        match active_overlay() {
+        let result = match active_overlay() {
             Some(overlay) => overlay.remove_file(path),
             None => std::fs::remove_file(path),
+        };
+        if result.is_ok() {
+            record_file_delete(path);
         }
+        result
     }
 
     pub fn create_dir_all(path: &Path) -> std::io::Result<()> {

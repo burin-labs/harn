@@ -36,8 +36,10 @@
 //! the destination. The deny pass routes through [`crate::egress`], the
 //! same policy engine production uses.
 
+pub mod fidelity;
 pub mod overlay_fs;
 pub mod process_tape;
+pub mod tape;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -47,6 +49,7 @@ use crate::egress::reset_egress_policy_for_host;
 
 use overlay_fs::{install_overlay, OverlayFs, OverlayFsGuard};
 use process_tape::{install_process_tape, ProcessTape, ProcessTapeGuard, ProcessTapeMode};
+use tape::{install_recorder, TapeHeader, TapeRecorder, TapeRecorderGuard};
 
 /// Declarative configuration for [`Testbench::activate`]. Every axis is
 /// optional so callers can compose only the surfaces they need.
@@ -57,6 +60,7 @@ pub struct Testbench {
     pub filesystem: FilesystemConfig,
     pub subprocess: SubprocessConfig,
     pub network: NetworkConfig,
+    pub tape: TapeConfig,
 }
 
 /// Configures the unified mock clock. Defaults to the runtime's real
@@ -130,6 +134,27 @@ pub enum NetworkConfig {
     },
 }
 
+/// Unified-tape configuration. Recording is opt-in: `Off` (the default)
+/// installs nothing and pays nothing in production; `Emit { path }`
+/// installs a [`tape::TapeRecorder`] consulted by every host-capability
+/// axis, then persists the result to `path` (plus `path.cas/` for large
+/// payloads) when [`TestbenchSession::finalize`] runs.
+#[derive(Debug, Default, Clone)]
+pub enum TapeConfig {
+    #[default]
+    Off,
+    Emit {
+        path: PathBuf,
+        /// Argv forwarded to the script after `--`. Captured in the tape
+        /// header so two tapes that differ only in argv are
+        /// distinguishable.
+        argv: Vec<String>,
+        /// Path to the `.harn` script. Informational only; used to
+        /// populate the tape header so consumers can attribute records.
+        script_path: Option<String>,
+    },
+}
+
 impl Testbench {
     /// Convenience: construct a builder.
     pub fn builder() -> TestbenchBuilder {
@@ -198,6 +223,29 @@ impl TestbenchBuilder {
         self
     }
 
+    pub fn emit_tape(mut self, path: impl Into<PathBuf>) -> Self {
+        self.bench.tape = TapeConfig::Emit {
+            path: path.into(),
+            argv: Vec::new(),
+            script_path: None,
+        };
+        self
+    }
+
+    pub fn emit_tape_for(
+        mut self,
+        path: impl Into<PathBuf>,
+        script_path: Option<String>,
+        argv: Vec<String>,
+    ) -> Self {
+        self.bench.tape = TapeConfig::Emit {
+            path: path.into(),
+            argv,
+            script_path,
+        };
+        self
+    }
+
     pub fn build(self) -> Testbench {
         self.bench
     }
@@ -210,8 +258,14 @@ pub struct TestbenchSession {
     _clock: Option<ClockOverrideGuard>,
     _process: Option<ProcessTapeGuard>,
     _overlay: Option<OverlayFsGuard>,
+    _recorder: Option<TapeRecorderGuard>,
     process_tape: Option<Arc<ProcessTape>>,
     overlay: Option<Arc<OverlayFs>>,
+    recorder: Option<Arc<TapeRecorder>>,
+    tape_path: Option<PathBuf>,
+    tape_started_at_unix_ms: Option<i64>,
+    tape_script_path: Option<String>,
+    tape_argv: Vec<String>,
     subprocess_mode: ProcessTapeMode,
     subprocess_tape_path: Option<PathBuf>,
     /// Saved env state (`HARN_EGRESS_DEFAULT`, `_ALLOW`, `_DENY`) for
@@ -229,11 +283,12 @@ struct SavedEgressEnv {
 
 impl TestbenchSession {
     fn install(bench: Testbench) -> Result<Self, TestbenchError> {
-        let clock_guard = match bench.clock {
-            ClockConfig::Real => None,
-            ClockConfig::Paused { starting_at_ms } => {
-                Some(install_override(MockClock::at_wall_ms(starting_at_ms)))
-            }
+        let (clock_guard, started_at_unix_ms) = match bench.clock {
+            ClockConfig::Real => (None, None),
+            ClockConfig::Paused { starting_at_ms } => (
+                Some(install_override(MockClock::at_wall_ms(starting_at_ms))),
+                Some(starting_at_ms),
+            ),
         };
 
         // LLM state is *not* installed here — the caller owns the
@@ -299,12 +354,37 @@ impl TestbenchSession {
             }
         };
 
+        let (recorder, recorder_guard, tape_path, tape_argv, tape_script_path) = match bench.tape {
+            TapeConfig::Off => (None, None, None, Vec::new(), None),
+            TapeConfig::Emit {
+                path,
+                argv,
+                script_path,
+            } => {
+                let recorder = Arc::new(TapeRecorder::new());
+                let guard = install_recorder(Arc::clone(&recorder));
+                (
+                    Some(Arc::clone(&recorder)),
+                    Some(guard),
+                    Some(path),
+                    argv,
+                    script_path,
+                )
+            }
+        };
+
         Ok(Self {
             _clock: clock_guard,
             _process: process_guard,
             _overlay: overlay_guard,
+            _recorder: recorder_guard,
             process_tape,
             overlay,
+            recorder,
+            tape_path,
+            tape_started_at_unix_ms: started_at_unix_ms,
+            tape_script_path,
+            tape_argv,
             subprocess_mode,
             subprocess_tape_path,
             saved_egress_env,
@@ -332,6 +412,11 @@ impl TestbenchSession {
         self.process_tape.as_ref()
     }
 
+    /// Reference to the active tape recorder (if any).
+    pub fn tape_recorder(&self) -> Option<&Arc<TapeRecorder>> {
+        self.recorder.as_ref()
+    }
+
     /// Persist the recorded subprocess tape (if recording) and return
     /// the filesystem diff (if an overlay is active). Tearing down the
     /// session via [`Drop`] will not persist; call this explicitly to
@@ -356,10 +441,25 @@ impl TestbenchSession {
         } else {
             Vec::new()
         };
+        let mut emitted_tape = None;
+        if let (Some(recorder), Some(path)) = (self.recorder.as_ref(), self.tape_path.as_ref()) {
+            let header = TapeHeader::current(
+                self.tape_started_at_unix_ms,
+                self.tape_script_path.clone(),
+                self.tape_argv.clone(),
+            );
+            let tape = recorder.snapshot(header);
+            tape.persist(path).map_err(TestbenchError::Tape)?;
+            emitted_tape = Some(EmittedTape {
+                path: path.clone(),
+                records: tape.records.len(),
+            });
+        }
         // The Drop impl undoes mocks regardless of finalize success.
         Ok(TestbenchFinalize {
             fs_diff: diff,
             recorded_subprocesses: recorded,
+            tape: emitted_tape,
         })
     }
 }
@@ -390,18 +490,28 @@ fn restore_env(key: &str, prior: Option<String>) {
 pub struct TestbenchFinalize {
     pub fs_diff: Vec<overlay_fs::DiffEntry>,
     pub recorded_subprocesses: Vec<process_tape::TapeEntry>,
+    pub tape: Option<EmittedTape>,
+}
+
+/// Summary metadata for a unified tape that was emitted at finalize-time.
+#[derive(Debug, Clone)]
+pub struct EmittedTape {
+    pub path: PathBuf,
+    pub records: usize,
 }
 
 /// Errors surfaced when activating or finalizing a testbench session.
 #[derive(Debug)]
 pub enum TestbenchError {
     Subprocess(String),
+    Tape(String),
 }
 
 impl std::fmt::Display for TestbenchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Subprocess(msg) => write!(f, "testbench subprocess: {msg}"),
+            Self::Tape(msg) => write!(f, "testbench tape: {msg}"),
         }
     }
 }

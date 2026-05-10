@@ -29,6 +29,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::clock_mock;
+use crate::testbench::tape::{self, TapeRecordKind};
 
 /// Whether the active tape is recording new entries or replaying an
 /// existing tape.
@@ -223,10 +224,27 @@ pub fn intercept_spawn(
             if entry.duration_ms > 0 {
                 clock_mock::advance(Duration::from_millis(entry.duration_ms));
             }
+            record_unified_spawn(&entry);
             Ok(synthesize_output(&entry))
         }
         Err(err) => Err(err),
     })
+}
+
+fn record_unified_spawn(entry: &TapeEntry) {
+    tape::with_active_recorder(|recorder| {
+        let stdout_payload = recorder.payload_from_bytes(entry.stdout.as_bytes().to_vec());
+        let stderr_payload = recorder.payload_from_bytes(entry.stderr.as_bytes().to_vec());
+        Some(TapeRecordKind::ProcessSpawn {
+            program: entry.program.clone(),
+            args: entry.args.clone(),
+            cwd: entry.cwd.clone(),
+            exit_code: entry.exit_code,
+            duration_ms: entry.duration_ms,
+            stdout_payload,
+            stderr_payload,
+        })
+    });
 }
 
 /// Begin recording a subprocess invocation. Returns `Some(span)` when a
@@ -278,6 +296,7 @@ impl RecordingSpan {
             exit_code: output.status.code().unwrap_or(-1),
             duration_ms: duration.as_millis().min(u64::MAX as u128) as u64,
         };
+        record_unified_spawn(&entry);
         self.tape.record_entry(entry);
     }
 }

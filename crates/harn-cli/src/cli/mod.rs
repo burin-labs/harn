@@ -140,7 +140,7 @@ pub(crate) use supervisor::{
 };
 pub(crate) use test::TestArgs;
 pub(crate) use test_bench::{
-    TestBenchArgs, TestBenchCommand, TestBenchReplayArgs, TestBenchRunArgs,
+    TestBenchArgs, TestBenchCommand, TestBenchFidelityArgs, TestBenchReplayArgs, TestBenchRunArgs,
 };
 pub(crate) use trace::{TraceArgs, TraceCommand, TraceImportArgs};
 pub(crate) use trigger::{TriggerArgs, TriggerCancelArgs, TriggerCommand, TriggerReplayArgs};
