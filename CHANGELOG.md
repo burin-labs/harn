@@ -8,6 +8,19 @@ condensed series summaries instead of full per-patch history.
 
 ## Unreleased
 
+### Fixed
+
+- **Preserve `->` arrow on zero-arg closure literals in `harn fmt`.**
+  The formatter was silently rewriting `{ -> expr }` into `{ expr }`,
+  which changes meaning from "closure that returns expr" to "block
+  expression evaluated immediately." Any call site like `f()` then
+  failed at runtime because `f` was no longer callable. The fix emits
+  `->` for closure literals regardless of whether the parameter list
+  is empty, in both the inline and multi-line code paths. Locked in
+  by new round-trip tests in `crates/harn-fmt` and the conformance
+  fixture
+  `conformance/tests/fmt/zero_arg_closure_arrow_preserved.harn`.
+
 ### Added
 
 - **`std/cache` levels up to a cost-moat substrate (#1473).** The

@@ -41,6 +41,57 @@ fn test_roundtrip_closure() {
 }
 
 #[test]
+fn test_roundtrip_zero_arg_closure_simple() {
+    let source = "pipeline default(task) { let f = { -> 1 }\nlog(f()) }";
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains("{ -> 1 }"),
+        "zero-arg closure lost its arrow:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_roundtrip_zero_arg_closure_with_call() {
+    let source =
+        "pipeline default(task) { fn compute() { return 1 }\nlet f = { -> compute() }\nlog(f()) }";
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains("{ -> compute() }"),
+        "zero-arg closure lost its arrow:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_roundtrip_zero_arg_closure_as_arg() {
+    let source = "pipeline default(task) { fn heavy() { return 1 }\nfn with_cache(k, f, opts) { return f() }\nlet c = with_cache(\"k\", { -> heavy() }, {}) }";
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains("{ -> heavy() }"),
+        "zero-arg closure lost its arrow:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_roundtrip_zero_arg_closure_multiline() {
+    let source = r#"pipeline default(task) {
+  let f = { ->
+    let x = 1
+    x + 1
+  }
+  log(f())
+}"#;
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains("{ ->"),
+        "multi-line zero-arg closure lost its arrow:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_roundtrip_if_else() {
     assert_roundtrip("pipeline default(task) { if true { log(1) } else { log(2) } }");
 }
