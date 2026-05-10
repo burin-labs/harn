@@ -36,6 +36,7 @@
 //! the destination. The deny pass routes through [`crate::egress`], the
 //! same policy engine production uses.
 
+pub mod annotations;
 pub mod fidelity;
 pub mod overlay_fs;
 pub mod process_tape;

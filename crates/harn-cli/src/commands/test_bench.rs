@@ -26,6 +26,9 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::thread;
 
+use harn_vm::testbench::annotations::{
+    annotations_for_record, validate_against_tape, AnnotationKind, AnnotationTape,
+};
 use harn_vm::testbench::fidelity::{compare, FidelityMode, FidelityReport};
 use harn_vm::testbench::overlay_fs::{render_unified_diff, DiffEntry, DiffKind};
 use harn_vm::testbench::tape::EventTape;
@@ -34,7 +37,10 @@ use harn_vm::testbench::{
     Testbench,
 };
 
-use crate::cli::{TestBenchCommand, TestBenchFidelityArgs, TestBenchReplayArgs, TestBenchRunArgs};
+use crate::cli::{
+    TestBenchCommand, TestBenchExportAnnotationsArgs, TestBenchFidelityArgs, TestBenchReplayArgs,
+    TestBenchRunArgs, TestBenchValidateAnnotationsArgs,
+};
 use crate::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
 use crate::CLI_RUNTIME_STACK_SIZE;
 
@@ -57,6 +63,8 @@ pub(crate) async fn run(command: TestBenchCommand) {
         TestBenchCommand::Run(args) => run_args(args).await,
         TestBenchCommand::Replay(args) => replay_args(args).await,
         TestBenchCommand::Fidelity(args) => fidelity_args(args).await,
+        TestBenchCommand::ValidateAnnotations(args) => validate_annotations_args(args),
+        TestBenchCommand::ExportAnnotations(args) => export_annotations_args(args),
     };
     flush_outcome(outcome);
 }
@@ -223,6 +231,36 @@ fn finalize_session(
 }
 
 async fn replay_args(args: TestBenchReplayArgs) -> RunOutcome {
+    // Load + pre-validate annotations before running so a malformed
+    // sidecar fails fast and the run output stays focused on the script.
+    let annotations_loaded = match args.annotations.as_deref() {
+        None => None,
+        Some(path) => match AnnotationTape::load(Path::new(path)) {
+            Ok(tape) => Some((path.to_string(), tape)),
+            Err(error) => {
+                return error_outcome(format!("load annotations {path}: {error}"));
+            }
+        },
+    };
+
+    // Surfacing annotations during replay requires the emitted tape so
+    // we can resolve `event_id` → record. When the caller did not ask
+    // for `--emit-tape`, allocate a temp file and persist the tape
+    // there for the duration of the call.
+    let tape_temp = if annotations_loaded.is_some() && args.emit_tape.is_none() {
+        match tempfile::tempdir() {
+            Ok(dir) => Some(dir),
+            Err(error) => return error_outcome(format!("tempdir for replay tape: {error}")),
+        }
+    } else {
+        None
+    };
+    let emit_tape_path = match (&args.emit_tape, tape_temp.as_ref()) {
+        (Some(path), _) => Some(path.clone()),
+        (None, Some(dir)) => Some(dir.path().join("run.tape").to_string_lossy().into_owned()),
+        (None, None) => None,
+    };
+
     let derived = TestBenchRunArgs {
         file: args.file.clone(),
         start_at_ms: args.start_at_ms,
@@ -236,11 +274,209 @@ async fn replay_args(args: TestBenchReplayArgs) -> RunOutcome {
         network: "deny".to_string(),
         allow_host: Vec::new(),
         emit_diff: None,
-        emit_tape: args.emit_tape.clone(),
+        emit_tape: emit_tape_path.clone(),
         runtime: "paused-tokio".to_string(),
         argv: args.argv.clone(),
     };
-    run_args(derived).await
+    let mut outcome = run_args(derived).await;
+
+    if let (Some((annotations_path, annotations)), Some(tape_path)) =
+        (annotations_loaded, emit_tape_path)
+    {
+        match EventTape::load(Path::new(&tape_path)) {
+            Ok(tape) => {
+                let report = validate_against_tape(&annotations, &tape);
+                outcome.stderr.push_str(&render_annotations_block(
+                    &annotations_path,
+                    &annotations,
+                    &tape,
+                ));
+                if !report.is_ok() {
+                    outcome.stderr.push_str(&format!(
+                        "[testbench] annotations validation failed with {} problem(s); see `harn test-bench validate-annotations` for the structured report.\n",
+                        report.problems.len()
+                    ));
+                    outcome.exit_code = outcome.exit_code.max(2);
+                }
+            }
+            Err(error) => {
+                outcome.stderr.push_str(&format!(
+                    "warning: failed to load tape for annotation surfacing: {error}\n"
+                ));
+            }
+        }
+    }
+    outcome
+}
+
+/// Render a "[annotations]" stderr block grouping every annotation by
+/// the tape event it targets. Output is deterministic (sorted by `seq`)
+/// so it diffs cleanly across reruns.
+fn render_annotations_block(
+    annotations_path: &str,
+    annotations: &AnnotationTape,
+    tape: &EventTape,
+) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "[annotations] loaded {} annotation(s) from {annotations_path}\n",
+        annotations.annotations.len()
+    ));
+    let mut sorted_records: Vec<_> = tape.records.iter().collect();
+    sorted_records.sort_by_key(|record| record.seq);
+    for record in sorted_records {
+        let matches = annotations_for_record(annotations, record);
+        if matches.is_empty() {
+            continue;
+        }
+        out.push_str(&format!(
+            "  event seq={} virtual_time_ms={} kind={}\n",
+            record.seq,
+            record.virtual_time_ms,
+            record.kind.label(),
+        ));
+        for annotation in matches {
+            let label = annotation.kind.as_str();
+            let evidence = annotation
+                .evidence
+                .as_deref()
+                .unwrap_or("(no evidence)")
+                .lines()
+                .next()
+                .unwrap_or("(no evidence)");
+            let id = if annotation.id.is_empty() {
+                "(no id)".to_string()
+            } else {
+                annotation.id.clone()
+            };
+            out.push_str(&format!("    [{label}] {id}: {evidence}\n"));
+        }
+    }
+    out
+}
+
+fn validate_annotations_args(args: TestBenchValidateAnnotationsArgs) -> RunOutcome {
+    let tape = match EventTape::load(Path::new(&args.tape)) {
+        Ok(tape) => tape,
+        Err(error) => return error_outcome(format!("load tape {}: {error}", args.tape)),
+    };
+    let annotations = match AnnotationTape::load(Path::new(&args.annotations)) {
+        Ok(tape) => tape,
+        Err(error) => {
+            return error_outcome(format!("load annotations {}: {error}", args.annotations));
+        }
+    };
+    let report = validate_against_tape(&annotations, &tape);
+    let json = match serde_json::to_string_pretty(&report) {
+        Ok(json) => json,
+        Err(error) => return error_outcome(format!("serialize validation report: {error}")),
+    };
+    let mut outcome = RunOutcome::default();
+    if let Some(path) = args.report.as_deref() {
+        if let Err(error) = persist_text(&json, Path::new(path)) {
+            return error_outcome(format!("write validation report: {error}"));
+        }
+        outcome.stderr.push_str(&format!(
+            "[testbench] annotations validation: checked={} problems={} ({})\n",
+            report.annotations_checked,
+            report.problems.len(),
+            path,
+        ));
+    } else {
+        outcome.stdout.push_str(&json);
+        outcome.stdout.push('\n');
+    }
+    if !report.is_ok() {
+        outcome.exit_code = 2;
+    }
+    outcome
+}
+
+fn export_annotations_args(args: TestBenchExportAnnotationsArgs) -> RunOutcome {
+    let annotations = match AnnotationTape::load(Path::new(&args.annotations)) {
+        Ok(tape) => tape,
+        Err(error) => {
+            return error_outcome(format!("load annotations {}: {error}", args.annotations));
+        }
+    };
+
+    let kinds: Vec<AnnotationKind> = if args.kind.is_empty() {
+        Vec::new()
+    } else {
+        let mut parsed = Vec::with_capacity(args.kind.len());
+        for raw in &args.kind {
+            match AnnotationKind::parse_cli(raw) {
+                Ok(kind) => parsed.push(kind),
+                Err(error) => return error_outcome(error),
+            }
+        }
+        parsed
+    };
+
+    let selected: Vec<_> = annotations
+        .annotations
+        .iter()
+        .filter(|annotation| kinds.is_empty() || kinds.contains(&annotation.kind))
+        .collect();
+
+    let body = match args.format.as_str() {
+        "jsonl" | "" => {
+            let mut out = String::new();
+            for annotation in &selected {
+                match serde_json::to_string(annotation) {
+                    Ok(line) => {
+                        out.push_str(&line);
+                        out.push('\n');
+                    }
+                    Err(error) => {
+                        return error_outcome(format!("serialize annotation: {error}"));
+                    }
+                }
+            }
+            out
+        }
+        "friction" => {
+            let mut out = String::new();
+            for annotation in &selected {
+                if let Some(event) = harn_vm::testbench::annotations::annotation_to_friction_event(
+                    annotation,
+                    &annotations.header,
+                ) {
+                    match serde_json::to_string(&event) {
+                        Ok(line) => {
+                            out.push_str(&line);
+                            out.push('\n');
+                        }
+                        Err(error) => {
+                            return error_outcome(format!("serialize friction event: {error}"));
+                        }
+                    }
+                }
+            }
+            out
+        }
+        other => {
+            return error_outcome(format!(
+                "--format must be `jsonl` or `friction`, got `{other}`"
+            ));
+        }
+    };
+
+    let mut outcome = RunOutcome::default();
+    if let Some(path) = args.output.as_deref() {
+        if let Err(error) = persist_text(&body, Path::new(path)) {
+            return error_outcome(format!("write export: {error}"));
+        }
+        outcome.stderr.push_str(&format!(
+            "[testbench] exported {} annotation(s) to {} (format={})\n",
+            selected.len(),
+            path,
+            args.format,
+        ));
+    } else {
+        outcome.stdout.push_str(&body);
+    }
+    outcome
 }
 
 async fn fidelity_args(args: TestBenchFidelityArgs) -> RunOutcome {
@@ -340,13 +576,17 @@ fn report_exit_code(report: &FidelityReport) -> i32 {
 }
 
 fn persist_fidelity_report(json: &str, path: &Path) -> Result<(), String> {
+    persist_text(json, path)
+}
+
+fn persist_text(body: &str, path: &Path) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)
                 .map_err(|error| format!("mkdir {}: {error}", parent.display()))?;
         }
     }
-    fs::write(path, json).map_err(|error| format!("write {}: {error}", path.display()))
+    fs::write(path, body).map_err(|error| format!("write {}: {error}", path.display()))
 }
 
 fn build_testbench(args: &TestBenchRunArgs) -> Result<Testbench, String> {

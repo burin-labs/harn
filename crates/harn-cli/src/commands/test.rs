@@ -165,8 +165,10 @@ fn conformance_llm_mock_mode(harn_file: &Path) -> CliLlmMockMode {
 ///
 /// Sidecars are optional files adjacent to the `.harn` test:
 /// - `<name>.process-tape.json` → subprocess replay tape
-/// - `<name>.fs-overlay/`       → filesystem overlay root
-/// - `<name>.testbench-tape`    → expected event tape for fidelity check
+/// - `<name>.fs-overlay/` → filesystem overlay root
+/// - `<name>.testbench-tape` → expected event tape for fidelity check
+/// - `<name>.annotations.jsonl` → annotation sidecar; runner validates
+///   against the emitted event tape
 ///
 /// When any sidecar is present the runner also activates a paused clock
 /// (pinned at `CONFORMANCE_TESTBENCH_START_MS`) so clock-advancing
@@ -175,11 +177,15 @@ struct TestbenchSidecarConfig {
     process_tape: Option<PathBuf>,
     fs_overlay: Option<PathBuf>,
     expected_tape: Option<PathBuf>,
+    annotations: Option<PathBuf>,
 }
 
 impl TestbenchSidecarConfig {
     fn is_empty(&self) -> bool {
-        self.process_tape.is_none() && self.fs_overlay.is_none() && self.expected_tape.is_none()
+        self.process_tape.is_none()
+            && self.fs_overlay.is_none()
+            && self.expected_tape.is_none()
+            && self.annotations.is_none()
     }
 }
 
@@ -187,10 +193,12 @@ fn conformance_testbench_config(harn_file: &Path) -> TestbenchSidecarConfig {
     let process_tape = harn_file.with_extension("process-tape.json");
     let fs_overlay = harn_file.with_extension("fs-overlay");
     let expected_tape = harn_file.with_extension("testbench-tape");
+    let annotations = harn_file.with_extension("annotations.jsonl");
     TestbenchSidecarConfig {
         process_tape: process_tape.is_file().then_some(process_tape),
         fs_overlay: fs_overlay.is_dir().then_some(fs_overlay),
         expected_tape: expected_tape.is_file().then_some(expected_tape),
+        annotations: annotations.is_file().then_some(annotations),
     }
 }
 
@@ -226,7 +234,7 @@ async fn execute_conformance_source(
     // Activate testbench axes for any present sidecars. A paused clock is
     // included whenever any sidecar is active so subprocess duration_ms and
     // overlay timestamps stay deterministic.
-    let tape_temp_dir = if testbench.expected_tape.is_some() {
+    let tape_temp_dir = if testbench.expected_tape.is_some() || testbench.annotations.is_some() {
         Some(tempfile::tempdir().map_err(|e| format!("tempdir for tape: {e}"))?)
     } else {
         None
@@ -290,39 +298,79 @@ async fn execute_conformance_source(
     }
 
     // Post-run tape fidelity check: compare emitted tape to the expected fixture.
-    let fidelity_error: Option<String> =
-        if let (Some(tape_path), Some(expected_path)) = (&tape_path, &testbench.expected_tape) {
+    let mut sidecar_errors: Vec<String> = Vec::new();
+    let actual_tape = match (&tape_path, &testbench.expected_tape) {
+        (Some(tape_path), Some(expected_path)) => {
             use harn_vm::testbench::fidelity::{compare, FidelityMode};
             use harn_vm::testbench::tape::EventTape;
             match (EventTape::load(tape_path), EventTape::load(expected_path)) {
                 (Ok(actual), Ok(expected)) => {
                     let report = compare(&expected, &actual, FidelityMode::ByteIdentical);
                     if !report.is_byte_identical() {
-                        Some(format!(
+                        sidecar_errors.push(format!(
                             "tape fidelity: {} divergence(s) vs {}",
                             report.divergences.len(),
                             expected_path.display()
-                        ))
-                    } else {
-                        None
+                        ));
                     }
+                    Some(actual)
                 }
-                (Err(e), _) => Some(format!("load emitted tape: {e}")),
-                (_, Err(e)) => Some(format!(
-                    "load expected tape {}: {e}",
-                    expected_path.display()
-                )),
+                (Err(e), _) => {
+                    sidecar_errors.push(format!("load emitted tape: {e}"));
+                    None
+                }
+                (_, Err(e)) => {
+                    sidecar_errors.push(format!(
+                        "load expected tape {}: {e}",
+                        expected_path.display()
+                    ));
+                    None
+                }
             }
-        } else {
-            None
-        };
+        }
+        (Some(tape_path), None) => {
+            use harn_vm::testbench::tape::EventTape;
+            match EventTape::load(tape_path) {
+                Ok(tape) => Some(tape),
+                Err(e) => {
+                    sidecar_errors.push(format!("load emitted tape: {e}"));
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
+    if let (Some(annotations_path), Some(actual)) = (&testbench.annotations, actual_tape.as_ref()) {
+        use harn_vm::testbench::annotations::{validate_against_tape, AnnotationTape};
+        match AnnotationTape::load(annotations_path) {
+            Ok(annotations) => {
+                let report = validate_against_tape(&annotations, actual);
+                if !report.is_ok() {
+                    sidecar_errors.push(format!(
+                        "annotations: {} problem(s) in {}",
+                        report.problems.len(),
+                        annotations_path.display()
+                    ));
+                }
+            }
+            Err(e) => sidecar_errors.push(format!(
+                "load annotations {}: {e}",
+                annotations_path.display()
+            )),
+        }
+    }
+    let sidecar_error: Option<String> = if sidecar_errors.is_empty() {
+        None
+    } else {
+        Some(sidecar_errors.join("; "))
+    };
 
     let execution = match result {
-        // Surface the script error first when both happen — fidelity
-        // divergence is usually a downstream symptom of a script failure.
-        Ok(inner_result) => match (inner_result, fidelity_error) {
+        // Surface the script error first when both happen — sidecar
+        // divergences are usually a downstream symptom of a script failure.
+        Ok(inner_result) => match (inner_result, sidecar_error) {
             (Err(error), _) => ConformanceExecution::Completed(Err(error)),
-            (Ok(_), Some(fidelity_err)) => ConformanceExecution::Completed(Err(fidelity_err)),
+            (Ok(_), Some(sidecar_err)) => ConformanceExecution::Completed(Err(sidecar_err)),
             (Ok(output), None) => ConformanceExecution::Completed(Ok(output)),
         },
         Err(_) => ConformanceExecution::TimedOut,

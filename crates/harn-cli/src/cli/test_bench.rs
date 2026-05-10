@@ -19,6 +19,15 @@ pub(crate) enum TestBenchCommand {
     /// pass `--against <tape> <script>` to re-run the script and compare
     /// the new tape against the recorded one.
     Fidelity(TestBenchFidelityArgs),
+    /// Validate an annotation sidecar (`<tape>.annotations.jsonl`)
+    /// against its target tape. Surfaces schema errors, unknown
+    /// `event_id` references, and digest drift between tape and
+    /// annotations.
+    ValidateAnnotations(TestBenchValidateAnnotationsArgs),
+    /// Export annotations filtered by kind. Feeds friction roll-ups,
+    /// crystallization candidate detection, and persona eval rubrics
+    /// from the same JSONL.
+    ExportAnnotations(TestBenchExportAnnotationsArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -145,6 +154,13 @@ pub(crate) struct TestBenchReplayArgs {
     /// against the recorded tape is one command away.
     #[arg(long = "emit-tape", value_name = "PATH")]
     pub emit_tape: Option<String>,
+    /// Annotation sidecar (`<tape>.annotations.jsonl`) to surface during
+    /// replay. The runner validates the file against the recorded tape
+    /// before replay starts and prints each annotation alongside its
+    /// referenced event in the run-summary block. Documented in
+    /// `docs/src/dev/annotation-tape-format.md`.
+    #[arg(long = "annotations", value_name = "PATH")]
+    pub annotations: Option<String>,
     #[arg(last = true)]
     pub argv: Vec<String>,
 }
@@ -184,4 +200,41 @@ pub(crate) struct TestBenchFidelityArgs {
     /// under `--against`. Pass after `--`.
     #[arg(last = true)]
     pub argv: Vec<String>,
+}
+
+#[derive(Debug, Args, Clone)]
+pub(crate) struct TestBenchValidateAnnotationsArgs {
+    /// Tape the annotations target. Used to check `event_id` references
+    /// and the optional `tape_content_hash` digest in the annotation
+    /// header.
+    #[arg(long = "tape", value_name = "PATH")]
+    pub tape: String,
+    /// Annotation sidecar (`<tape>.annotations.jsonl`) to validate.
+    pub annotations: String,
+    /// Write the structured validation report (JSON) here. Defaults to
+    /// stdout. Either way, the command exits non-zero (status `2`) when
+    /// any problems are found.
+    #[arg(long = "report", value_name = "PATH")]
+    pub report: Option<String>,
+}
+
+#[derive(Debug, Args, Clone)]
+pub(crate) struct TestBenchExportAnnotationsArgs {
+    /// Annotation sidecar to read.
+    pub annotations: String,
+    /// Annotation kind to filter on. One of: `correct`, `incorrect`,
+    /// `alternative`, `note`, `marker`, `mute`, `hypothesis`,
+    /// `friction`, `crystallize_here`. Repeatable; multiple kinds union
+    /// the result.
+    #[arg(long = "kind", value_name = "KIND")]
+    pub kind: Vec<String>,
+    /// Output format. `jsonl` (default) emits one annotation per line —
+    /// drop-in input for downstream pipelines. `friction` re-emits
+    /// matching annotations as `FrictionEvent` JSON for the friction
+    /// roll-up consumer (see `crates/harn-vm/src/orchestration/friction.rs`).
+    #[arg(long = "format", default_value = "jsonl", value_name = "FORMAT")]
+    pub format: String,
+    /// Write the export to this file. Defaults to stdout.
+    #[arg(long = "output", value_name = "PATH")]
+    pub output: Option<String>,
 }

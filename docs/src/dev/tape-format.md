@@ -193,6 +193,8 @@ record kinds. The following are tracked separately:
 
 - [Testbench mode](testbench.md) — the composition primitive that
   installs the tape recorder.
+- [Annotation tape format](annotation-tape-format.md) — sidecar that
+  attaches structured human judgment to tape events.
 - [Testing](testing.md) — approved deterministic test patterns.
 - [Issue #1441](https://github.com/burin-labs/harn/issues/1441) —
   design rationale for the unified tape and fidelity oracle.
