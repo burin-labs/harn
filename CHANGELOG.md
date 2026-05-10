@@ -65,9 +65,9 @@ condensed series summaries instead of full per-patch history.
   set, string, generator, stream, iter, plus the outer dispatch)
   used to bottom out in `Ok(VmValue::Nil)`, which made typos in
   method names fail silently far from the call site. Unknown method
-  calls now throw `<type> has no method \`X\`` so issues surface at
-  the offending line. *Breaking* for any script that relied on the
-  silent-`nil` fallthrough.
+  calls now throw a runtime error of the form ``list has no method
+  `whatever``` so issues surface at the offending line. *Breaking*
+  for any script that relied on the silent-`nil` fallthrough.
 - **`websocket_connect` retries transient TCP errors during
   handshake.** Connection-reset / broken-pipe / unexpected-EOF on
   the very first attempt — typically caused by the OS recycling an

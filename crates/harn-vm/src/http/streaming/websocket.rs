@@ -694,9 +694,7 @@ async fn connect_with_retry(
     options: &BTreeMap<String, VmValue>,
     timeout_ms: u64,
 ) -> Result<
-    tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     VmError,
 > {
     use std::time::Instant;

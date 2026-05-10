@@ -82,9 +82,7 @@ impl crate::vm::Vm {
                     }
                 }
             }
-            _ => Err(VmError::Runtime(format!(
-                "Stream has no method `{method}`"
-            ))),
+            _ => Err(VmError::Runtime(format!("Stream has no method `{method}`"))),
         }
     }
 }

@@ -1,8 +1,8 @@
 mod formatter;
 mod helpers;
-mod trailing_comma;
 #[cfg(test)]
 mod tests;
+mod trailing_comma;
 
 use std::collections::BTreeMap;
 

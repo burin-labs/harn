@@ -68,10 +68,8 @@ pub fn trailing_comma_issues(source: &str) -> Vec<TrailingCommaIssue> {
         return Vec::new();
     };
     let pairs = build_bracket_pairs(source, &tokens);
-    let pair_by_close: HashMap<usize, BracketPair> = pairs
-        .iter()
-        .map(|p| (p.close_byte, p.clone()))
-        .collect();
+    let pair_by_close: HashMap<usize, BracketPair> =
+        pairs.iter().map(|p| (p.close_byte, p.clone())).collect();
 
     let eligible_opens = collect_eligible_opens(&program, &pair_by_close, &pairs);
     let mut issues = Vec::new();
@@ -94,9 +92,7 @@ fn lex_and_parse(source: &str) -> Option<(Vec<Token>, Vec<SNode>)> {
         .filter(|t| {
             !matches!(
                 t.kind,
-                TokenKind::LineComment { .. }
-                    | TokenKind::BlockComment { .. }
-                    | TokenKind::Newline
+                TokenKind::LineComment { .. } | TokenKind::BlockComment { .. } | TokenKind::Newline
             )
         })
         .cloned()
@@ -184,9 +180,9 @@ fn build_bracket_pairs(source: &str, tokens: &[Token]) -> Vec<BracketPair> {
     let mut pairs = Vec::new();
     for tok in tokens {
         match &tok.kind {
-            TokenKind::LineComment { .. }
-            | TokenKind::BlockComment { .. }
-            | TokenKind::Newline => continue,
+            TokenKind::LineComment { .. } | TokenKind::BlockComment { .. } | TokenKind::Newline => {
+                continue
+            }
             TokenKind::LParen => stack.push(OpenFrame {
                 kind: BracketKind::Paren,
                 open_byte: tok.span.start,
@@ -432,10 +428,7 @@ mod tests {
     #[test]
     fn handles_selective_import() {
         let src = "import {\n  alpha,\n  beta\n} from \"std/io\"\n";
-        assert_eq!(
-            fix(src),
-            "import {\n  alpha,\n  beta,\n} from \"std/io\"\n"
-        );
+        assert_eq!(fix(src), "import {\n  alpha,\n  beta,\n} from \"std/io\"\n");
     }
 
     #[test]

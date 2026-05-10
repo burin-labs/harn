@@ -108,9 +108,7 @@ impl crate::vm::Vm {
             "lower" | "to_lower" => Ok(VmValue::String(Rc::from(s.to_lowercase().as_str()))),
             "upper" | "to_upper" => Ok(VmValue::String(Rc::from(s.to_uppercase().as_str()))),
             "len" => Ok(VmValue::Int(s.chars().count() as i64)),
-            _ => Err(VmError::Runtime(format!(
-                "string has no method `{method}`"
-            ))),
+            _ => Err(VmError::Runtime(format!("string has no method `{method}`"))),
         }
     }
 }
