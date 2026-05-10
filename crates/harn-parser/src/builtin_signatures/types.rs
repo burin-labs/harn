@@ -181,6 +181,52 @@ impl Ty {
 }
 
 impl BuiltinSignature {
+    /// Non-generic, fixed-arity builtin: no type parameters, no rest, no
+    /// where-clause bounds. Covers ~70% of the registry; lets each call
+    /// site stay on a single logical line.
+    pub const fn simple(name: &'static str, params: &'static [Param], returns: Ty) -> Self {
+        Self {
+            name,
+            params,
+            returns,
+            type_params: &[],
+            has_rest: false,
+            where_clauses: &[],
+        }
+    }
+
+    /// Non-generic builtin whose final parameter is variadic (rest).
+    /// Equivalent to [`Self::simple`] with `has_rest: true`.
+    pub const fn variadic(name: &'static str, params: &'static [Param], returns: Ty) -> Self {
+        Self {
+            name,
+            params,
+            returns,
+            type_params: &[],
+            has_rest: true,
+            where_clauses: &[],
+        }
+    }
+
+    /// Generic, fixed-arity builtin: declares type parameters, no rest,
+    /// no where-clause bounds. Use the struct literal directly when both
+    /// generics and where-clauses or rest are needed.
+    pub const fn generic(
+        name: &'static str,
+        type_params: &'static [&'static str],
+        params: &'static [Param],
+        returns: Ty,
+    ) -> Self {
+        Self {
+            name,
+            params,
+            returns,
+            type_params,
+            has_rest: false,
+            where_clauses: &[],
+        }
+    }
+
     /// Number of required parameters (those without defaults).
     pub fn required_params(&self) -> usize {
         self.params.iter().filter(|p| !p.optional).count()
