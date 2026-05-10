@@ -1,0 +1,14 @@
+{
+  "repo": "burin-labs/burin-code",
+  "pr_number": 235,
+  "head_sha": "0123456789abcdef",
+  "base_sha": "fedcba9876543210",
+  "diff": "diff --git a/Sources/BurinCore/Personas/ReviewCaptainHost.swift b/Sources/BurinCore/Personas/ReviewCaptainHost.swift\nnew file mode 100644\n--- /dev/null\n+++ b/Sources/BurinCore/Personas/ReviewCaptainHost.swift\n@@\n+import Foundation\n+\n+public struct ReviewCaptainRequest: Codable {\n+    public let repo: String\n+    public let prNumber: Int\n+    public let diff: String\n+}\n",
+  "changed_files": [
+    "Sources/BurinCore/Personas/ReviewCaptainHost.swift",
+    "Tests/BurinCoreTests/Personas/ReviewCaptainHostTests.swift"
+  ],
+  "max_rounds": 1,
+  "dry_run": true,
+  "rubric_preset": "code"
+}

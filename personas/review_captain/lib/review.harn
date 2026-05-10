@@ -1,0 +1,80 @@
+import { build_review_receipt, envelope_for_dry_run } from "receipt"
+// Single-PR review orchestration.
+//
+// The persona wires this entry point from `manifest.harn#run`. It owns
+// the order of operations: secret_scan → risk classification → optional
+// `self_review` LLM rounds → receipt construction. Pulled out so the
+// tests in `tests/review_test.harn` can drive each stage without
+// shelling out to LLMs.
+import { classify_risky_paths, infer_missing_tests } from "risk"
+
+/**
+ * review_pr(request, policy, opts) is the deterministic entry point
+ * the persona dispatches to. `opts` lets callers (and tests) override
+ * the LLM hook so smoke runs and unit tests stay hermetic.
+ */
+pub fn review_pr(request, policy, opts) {
+  let normalized = _normalize_request(request)
+  let active_policy = _active_policy(policy)
+  let resolved_opts = opts ?? {}
+  let llm_hook = resolved_opts.llm_hook
+  let secret_findings = _scan_secrets(normalized.diff)
+  let risky = classify_risky_paths(normalized.changed_files, active_policy.risky_paths)
+  let missing_tests = infer_missing_tests(normalized.changed_files, active_policy.test_globs)
+  if normalized.dry_run || normalized.diff == "" {
+    return envelope_for_dry_run(normalized, secret_findings, missing_tests, risky.hits)
+  }
+  let llm_result = _run_llm(llm_hook, normalized)
+  return build_review_receipt(
+    {
+      request: normalized,
+      secret_findings: secret_findings,
+      llm_findings: llm_result.findings,
+      llm_summary: llm_result.summary,
+      llm_rounds: llm_result.rounds,
+      risky_hits: risky.hits,
+      missing_tests: missing_tests,
+      llm_skipped_reason: llm_result.skipped_reason,
+    },
+  )
+}
+
+fn _normalize_request(raw) {
+  let request = raw ?? {}
+  return {
+    repo: request.repo ?? "",
+    pr_number: request.pr_number ?? 0,
+    head_sha: request.head_sha ?? "",
+    base_sha: request.base_sha ?? "",
+    diff: request.diff ?? "",
+    changed_files: request.changed_files ?? [],
+    max_rounds: request.max_rounds ?? 1,
+    dry_run: request.dry_run ?? false,
+    rubric_preset: request.rubric_preset ?? "code",
+  }
+}
+
+fn _active_policy(policy) {
+  let policy_or_default = policy ?? {}
+  return {risky_paths: policy_or_default.risky_paths ?? [], test_globs: policy_or_default.test_globs ?? []}
+}
+
+fn _scan_secrets(diff) {
+  if diff == "" {
+    return []
+  }
+  return secret_scan(diff)
+}
+
+fn _run_llm(hook, request) {
+  if hook != nil {
+    return hook(request)
+  }
+  let llm = self_review(request.diff, request.rubric_preset, request.max_rounds)
+  return {
+    findings: llm.findings ?? [],
+    summary: llm.summary ?? "",
+    rounds: len(llm.rounds ?? []),
+    skipped_reason: nil,
+  }
+}

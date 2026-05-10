@@ -1,0 +1,145 @@
+// Receipt envelope for review_captain runs.
+//
+// The envelope is the contract between the persona and Burin's
+// host-side `ReviewCaptainHost`. Burin reads the JSON Wire format off
+// stdout, decodes it into a strongly-typed `ReviewCaptainResult`, and
+// uses it to render PR diff comments / append to PR bodies / gate
+// auto-merge. Keep the schema additive: only ever extend, never rename
+// or remove fields without bumping the persona version.
+/** build_review_receipt assembles the durable receipt for one PR. */
+pub fn build_review_receipt(args) {
+  let request = args.request ?? {}
+  let secret_findings = args.secret_findings ?? []
+  let llm_findings = args.llm_findings ?? []
+  let llm_summary = args.llm_summary ?? ""
+  let llm_rounds = args.llm_rounds ?? 0
+  let risky_hits = args.risky_hits ?? []
+  let missing_tests = args.missing_tests ?? []
+  let llm_skipped_reason = args.llm_skipped_reason
+  let secret_review_findings = _findings_from_secrets(secret_findings)
+  let combined_findings = _dedupe(secret_review_findings + llm_findings)
+  let blocking = _has_blocking(combined_findings)
+  let verdict = if blocking {
+    "blocking"
+  } else {
+    if len(combined_findings) > 0 || len(missing_tests) > 0 || len(risky_hits) > 0 {
+      "needs_follow_up"
+    } else {
+      "approve"
+    }
+  }
+  let summary = _summary(combined_findings, llm_summary, blocking, missing_tests, risky_hits)
+  return {
+    persona: "review_captain",
+    kind: "review_receipt",
+    schema_version: 1,
+    repo: request.repo ?? "",
+    pr_number: request.pr_number ?? 0,
+    head_sha: request.head_sha ?? "",
+    base_sha: request.base_sha ?? "",
+    verdict: verdict,
+    blocking: blocking,
+    summary: summary,
+    findings: combined_findings,
+    secret_scan_findings: secret_findings,
+    risky_paths: risky_hits,
+    missing_tests: missing_tests,
+    rounds: llm_rounds,
+    self_review_skipped_reason: llm_skipped_reason,
+    handoff: if blocking {
+      "merge_captain"
+    } else {
+      nil
+    },
+  }
+}
+
+/**
+ * envelope_for_dry_run(request) returns the canned receipt used when
+ * dry_run=true skips the LLM stage but other deterministic stages
+ * still ran. The request payload still flows through so consumers see
+ * repo / PR identity.
+ */
+pub fn envelope_for_dry_run(request, secret_findings, missing_tests, risky_hits) {
+  return build_review_receipt(
+    {
+      request: request,
+      secret_findings: secret_findings,
+      llm_findings: [],
+      llm_summary: "",
+      llm_rounds: 0,
+      risky_hits: risky_hits,
+      missing_tests: missing_tests,
+      llm_skipped_reason: "dry_run",
+    },
+  )
+}
+
+fn _findings_from_secrets(secret_findings) {
+  var findings = []
+  for finding in secret_findings {
+    findings = findings
+      + [
+      {
+        id: "secret:${finding.detector ?? finding.title ?? "unknown"}:${finding.fingerprint ?? to_string(finding.line ?? 0)}",
+        severity: "blocking",
+        category: "secret",
+        title: finding.title ?? "Secret detected",
+        detail: "Secret-like value detected in diff (${finding.detector ?? "scanner"}).",
+        suggestion: "Rotate the credential and replace the literal with an environment variable or vaulted secret.",
+        file: nil,
+        line_start: finding.line,
+        line_end: finding.line,
+        source: "secret_scan",
+      },
+    ]
+  }
+  return findings
+}
+
+fn _dedupe(findings) {
+  var seen_ids = []
+  var deduped = []
+  for finding in findings {
+    let id = finding.id ?? ""
+    if id != "" && !_contains_string(seen_ids, id) {
+      seen_ids = seen_ids + [id]
+      deduped = deduped + [finding]
+    } else if id == "" {
+      deduped = deduped + [finding]
+    }
+  }
+  return deduped
+}
+
+fn _contains_string(haystack, needle) {
+  for entry in haystack {
+    if entry == needle {
+      return true
+    }
+  }
+  return false
+}
+
+fn _has_blocking(findings) {
+  for finding in findings {
+    if finding.severity ?? "" == "blocking" {
+      return true
+    }
+  }
+  return false
+}
+
+fn _summary(findings, llm_summary, blocking, missing_tests, risky_hits) {
+  if blocking {
+    return "review_captain blocked the PR: ${to_string(len(findings))} blocking finding(s)."
+  }
+  if len(findings) == 0 && len(missing_tests) == 0 && len(risky_hits) == 0 {
+    if llm_summary != "" {
+      return llm_summary
+    }
+    return "review_captain found no blocking issues."
+  }
+  let warn_count = len(findings)
+  return "review_captain flagged ${to_string(warn_count)} finding(s); ${to_string(len(risky_hits))} risky path(s); ${to_string(len(missing_tests))} file(s) without companion tests."
+}
