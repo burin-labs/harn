@@ -1,39 +1,42 @@
 name: Publish release
 
-# Fires whenever main has tag drift — i.e. Cargo.toml's workspace version
-# is ahead of the latest `vX.Y.Z` git tag. Runs ./scripts/release_ship.sh
-# --finalize, which dry-run publishes, tags, publishes to crates.io, and
-# creates/updates the GitHub release. The tag push (under the
-# harn-release-bot App identity) cascades to build-release-binaries.yml
-# for binary tarballs + multi-arch container.
+# Fires on three triggers:
 #
-# In the consolidated release flow, the human's "Release vX.Y.Z" PR
-# carries both the changelog content AND the Cargo.toml bump. Once it
-# lands, this workflow detects the resulting tag drift and ships
-# vX.Y.Z without a second PR.
+#   1. push to a `vX.Y.Z` tag — the canonical "tag is truth" path. The
+#      bump-fleet `release_harn.harn` harness pushes the tag at the
+#      pinned release commit BEFORE the Release PR merges; this trigger
+#      ships crates.io and the GitHub release from that exact commit,
+#      independent of whatever lands on main between PR-open and merge.
+#      The tag push (under the harn-release-bot App identity) also
+#      cascades to build-release-binaries.yml for tarballs + container.
+#
+#   2. push to main — legacy/recovery drift path. If Cargo.toml's
+#      workspace version is ahead of the latest `vX.Y.Z` tag the
+#      workflow tags HEAD and publishes from there. Under the new
+#      tag-first flow this trigger usually no-ops (the tag was pushed
+#      pre-merge so post-merge main's Cargo.toml already matches the
+#      tag); it remains as the safety net for releases authored without
+#      release_harn.harn (or for an old client that doesn't push tags).
+#
+#   3. workflow_dispatch — manual recovery for the partial-failure case
+#      (tag pushed but crates.io publish was incomplete). With no
+#      drift, dispatch checks out the existing release tag so crates.io,
+#      release notes, and the git tag stay tied to the same commit.
+#      release_ship.sh's per-crate publish skips already-published
+#      crates so manual re-fire is idempotent.
+#
+# Runs ./scripts/release_ship.sh --finalize, which dry-run publishes,
+# tags (no-op if already at HEAD), publishes to crates.io, and
+# creates/updates the GitHub release.
 #
 # Audit is skipped by default (RELEASE_FINALIZE_REAUDIT=0): the
 # merge-queue CI of the just-landed Release PR ran the same gates a
 # few minutes ago. Set the env var or pass `--reaudit` (workflow input
 # `reaudit: true`) to opt back in for paranoid local runs.
-#
-# Tag-drift detection (vs. the older "head commit starts with 'Bump
-# version to '" trigger) means this workflow auto-recovers when an
-# earlier finalize run failed BEFORE pushing the tag. Any subsequent
-# push to main will see drift still present and re-run publish. Once
-# the latest tag matches Cargo.toml's workspace version, drift goes
-# away and push-triggered runs no-op.
-#
-# workflow_dispatch is the recovery path for the one residual case:
-# failure AFTER tag push but BEFORE crates.io publish completed (drift
-# is gone but publish state is partial). Manual recovery checks out the
-# existing release tag when there is no drift, so crates.io, release
-# notes, and the git tag all stay tied to the same commit even if main
-# has moved on. release_ship.sh's per-crate fallback skips
-# already-published, so manual re-fire is idempotent.
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       bootstrap_new_crates:
@@ -93,11 +96,37 @@ jobs:
 
       - name: Compare Cargo.toml workspace version to latest vX.Y.Z tag
         id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           CARGO_VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
           LATEST_TAG="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)"
           LATEST_VERSION="${LATEST_TAG#v}"
+
+          # Tag-push trigger ("tag is truth"). The release harness pushed
+          # vX.Y.Z at the pinned commit before the Release PR merged.
+          # Skip drift detection — we know what we're publishing — and
+          # check out the tag in the publish job.
+          if [[ "$EVENT_NAME" == "push" && "$REF_TYPE" == "tag" ]]; then
+            if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Tag push for non-vX.Y.Z tag: $REF_NAME"
+              exit 1
+            fi
+            PUBLISH_REF="$REF_NAME"
+            DRIFT=true
+            echo "::notice::Tag push: publishing from $PUBLISH_REF (skipping drift detection)."
+            {
+              echo "drift=$DRIFT"
+              echo "cargo_version=${REF_NAME#v}"
+              echo "latest_tag=$REF_NAME"
+              echo "publish_ref=$PUBLISH_REF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           if [[ -z "$LATEST_TAG" ]]; then
             DRIFT=true
             echo "::notice::No vX.Y.Z tags exist yet; treating Cargo.toml=$CARGO_VERSION as drift (first release)."
@@ -109,7 +138,7 @@ jobs:
             echo "::notice::Cargo.toml=$CARGO_VERSION matches latest tag $LATEST_TAG → no-op."
           fi
           PUBLISH_REF=main
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "$DRIFT" == "false" && -n "$LATEST_TAG" ]]; then
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "$DRIFT" == "false" && -n "$LATEST_TAG" ]]; then
             PUBLISH_REF="$LATEST_TAG"
             echo "::notice::Manual recovery has no tag drift; publishing from existing tag $LATEST_TAG instead of current main."
           fi

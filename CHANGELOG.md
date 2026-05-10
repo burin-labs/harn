@@ -55,6 +55,19 @@ condensed series summaries instead of full per-patch history.
   [docs/src/dev/platform-compatibility.md](docs/src/dev/platform-compatibility.md)
   with a per-capability support matrix and rationale for the
   Windows-deferred features (POSIX-signal drain, `unveil`/`pledge`).
+- **Tag-first publish trigger.** `publish-release.yml` now also fires
+  on `push: tags: ['v*']`, in addition to the existing `push: main`
+  drift trigger. Detect-drift recognizes the tag-push event and sets
+  `publish_ref=$tag, drift=true` so the publish job checks out the
+  tagged commit (detached) and ships from there. Lets the bump-fleet
+  `release_harn.harn` harness push `vX.Y.Z` at a pinned commit BEFORE
+  the Release PR merges — what gets shipped to crates.io and the
+  GitHub release is anchored to that exact commit, and commits that
+  land on `main` between PR-open and merge cannot leak into the
+  published artifact. The `push: main` drift trigger remains as the
+  legacy/recovery path for releases authored without the harness;
+  workflow_dispatch with no drift still recovers from an existing
+  tag.
 
 ### Fixed
 
