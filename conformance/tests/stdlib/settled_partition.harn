@@ -2,49 +2,40 @@
 // and tally a list of Result values produced by `parallel settle` (or
 // any other code path that emits Ok/Err).
 import {
-  partition,
-  oks,
-  errs,
-  count_oks,
   count_errs,
-  map_settled,
-  tally_by,
+  count_oks,
   enumerate_settled,
+  errs,
+  map_settled,
+  oks,
+  partition,
   summary,
+  tally_by,
 } from "std/settled"
 
 pipeline default() {
   let results = [Ok({status: "pass"}), Err("bad-input"), Ok({status: "fail"}), Err("timeout"), Ok({status: "pass"})]
-
   let parts = partition(results)
   println(parts.ok_count)
   println(parts.err_count)
   println(len(parts.oks))
   println(len(parts.errs))
-
   println(len(oks(results)))
   println(len(errs(results)))
   println(count_oks(results))
   println(count_errs(results))
-
   let summarized = summary(results)
   println(summarized.total)
   println(summarized.any_failed)
   println(summarized.all_ok)
-
   let mapped = map_settled(
     results,
-    fn(value, idx) {
-      return "ok#" + to_string(idx) + ":" + value.status
-    },
-    fn(error, idx) {
-      return "err#" + to_string(idx) + ":" + to_string(error)
-    },
+    fn(value, idx) { return "ok#" + to_string(idx) + ":" + value.status },
+    fn(error, idx) { return "err#" + to_string(idx) + ":" + to_string(error) },
   )
   for row in mapped {
     println(row)
   }
-
   let by_status = tally_by(
     results,
     fn(payload, was_ok) {
@@ -57,7 +48,6 @@ pipeline default() {
   println(by_status?.pass)
   println(by_status?.fail)
   println(by_status?.error)
-
   let rows = enumerate_settled(results)
   println(rows[0].ok)
   println(rows[1].ok)

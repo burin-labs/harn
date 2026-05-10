@@ -3,14 +3,14 @@
 // int/float/bool fallbacks, nested case-insensitive lookup, and "first
 // non-nil / first present" reductions.
 import {
-  to_string_lossy,
-  to_string_list,
-  to_int_or,
-  to_float_or,
-  to_bool_or,
   dict_path_ci,
   first_non_nil,
   first_present,
+  to_bool_or,
+  to_float_or,
+  to_int_or,
+  to_string_list,
+  to_string_lossy,
 } from "std/coerce"
 
 pipeline default() {
@@ -18,27 +18,22 @@ pipeline default() {
   println(to_string_lossy("hi"))
   println(to_string_lossy(["a", "b", "c"]))
   println(to_string_lossy({k: 1}))
-
   println(to_string_list(nil))
   println(to_string_list(""))
   println(to_string_list("solo"))
   println(to_string_list([1, "two", 3.0]))
-
   println(to_int_or("42", -1))
   println(to_int_or("not-a-number", -1))
   println(to_float_or("1.5", -1.0))
   println(to_float_or(nil, -1.0))
-
   println(to_bool_or("YES", false))
   println(to_bool_or("0", true))
   println(to_bool_or("", true))
   println(to_bool_or(0, true))
   println(to_bool_or([1], false))
-
   let nested = {Outer: {INNER: {Final: "ok"}}}
   println(dict_path_ci(nested, ["outer", "inner", "final"]))
   println(dict_path_ci(nested, ["outer", "missing"]) == nil)
-
   println(first_non_nil([nil, nil, "first", "second"]))
   println(first_non_nil([], "fallback"))
   println(first_present([nil, "", [], "real"]))

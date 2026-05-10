@@ -7,10 +7,7 @@ pipeline test(task) {
   let schema = {
     type: "object",
     required: ["verdict", "bullets"],
-    properties: {
-      verdict: {type: "string"},
-      bullets: {type: "array", items: {type: "string"}},
-    },
+    properties: {verdict: {type: "string"}, bullets: {type: "array", items: {type: "string"}}},
   }
   let envelope = safe_structured_call(
     "Grade this output.",
