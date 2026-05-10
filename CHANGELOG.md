@@ -35,6 +35,11 @@ condensed series summaries instead of full per-patch history.
   now actually caches — previously it was a passthrough — and shares
   one cache key with the direct-call form. Docs at
   [`docs/src/stdlib/cache.md`](docs/src/stdlib/cache.md).
+
+## v0.8.6
+
+### Added
+
 - **Annotation tape format for `harn test-bench`.** A new sidecar
   format (`<tape>.annotations.jsonl`) attaches structured human
   judgment — `correct`, `incorrect`, `alternative`, `note`, `marker`,
