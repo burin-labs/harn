@@ -1441,6 +1441,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("unmock_time", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::simple("testbench_is_active", &[], TY_BOOL),
     BuiltinSignature::simple("testbench_fs_diff", &[], TY_LIST),
+    BuiltinSignature::simple("testbench_clock_leaks", &[], TY_LIST),
     BuiltinSignature::variadic("walk_dir", &[Param::new("args", TY_ANY)], TY_LIST),
     BuiltinSignature::variadic("move_file", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::variadic("read_lines", &[Param::new("args", TY_ANY)], TY_LIST),

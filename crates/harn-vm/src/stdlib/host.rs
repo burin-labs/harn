@@ -12,6 +12,15 @@ use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::clone_async_builtin_child_vm;
 use crate::vm::{Vm, VmBuiltinArity};
 
+/// Audited wrapper for `chrono::Utc::now().to_rfc3339()`. Routes through
+/// the testbench leak audit so a paused-clock session can surface every
+/// host capability that observed real wall-clock time.
+fn audited_utc_now_rfc3339(capability_id: &'static str) -> String {
+    let dt: chrono::DateTime<chrono::Utc> =
+        crate::clock_mock::leak_audit::wall_now(capability_id).into();
+    dt.to_rfc3339()
+}
+
 const HOST_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("host_mock", host_mock_builtin)
         .signature("host_mock(capability, op, response_or_config, params?)")
@@ -694,8 +703,8 @@ async fn dispatch_process_exec_after_policy(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
-    let started_at = chrono::Utc::now().to_rfc3339();
-    let started = Instant::now();
+    let started_at = audited_utc_now_rfc3339("host_call/process.exec.started_at");
+    let started = crate::clock_mock::leak_audit::instant_now("host_call/process.exec.started");
     let child = cmd
         .spawn()
         .map_err(|e| VmError::Runtime(format!("host_call process.exec: {e}")))?;
@@ -810,7 +819,9 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     );
     result.insert(
         "ended_at".to_string(),
-        VmValue::String(Rc::from(chrono::Utc::now().to_rfc3339())),
+        VmValue::String(Rc::from(audited_utc_now_rfc3339(
+            "host_call/process.exec.ended_at",
+        ))),
     );
     result.insert(
         "duration_ms".to_string(),

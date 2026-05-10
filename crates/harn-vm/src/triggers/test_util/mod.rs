@@ -41,6 +41,7 @@ use crate::triggers::{
 use self::timing::TEST_DEFAULT_TIMEOUT;
 
 pub mod clock;
+pub mod clock_leak;
 pub mod timing;
 
 pub const TRIGGER_TEST_FIXTURES: &[&str] = &[

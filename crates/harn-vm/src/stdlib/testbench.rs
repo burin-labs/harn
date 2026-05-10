@@ -49,4 +49,27 @@ pub(crate) fn register_testbench_builtins(vm: &mut Vm) {
             .collect();
         Ok(VmValue::List(Rc::new(entries)))
     });
+
+    // Snapshot of the leak audit registry so a script can assert that a
+    // capability either *did* or *did not* observe real wall-clock time
+    // during the run. Returns `[{capability, count}]` in the order each
+    // capability first surfaced. The list survives `finalize()` only
+    // until the next session installs (which calls `leak_audit::reset`),
+    // so scripts typically read it just before they end.
+    vm.register_builtin("testbench_clock_leaks", |_args, _out| {
+        let leaks = crate::clock_mock::leak_audit::snapshot();
+        let entries: Vec<VmValue> = leaks
+            .into_iter()
+            .map(|leak| {
+                let mut d = BTreeMap::new();
+                d.insert(
+                    "capability".to_string(),
+                    VmValue::String(Rc::from(leak.capability_id)),
+                );
+                d.insert("count".to_string(), VmValue::Int(leak.count as i64));
+                VmValue::Dict(Rc::new(d))
+            })
+            .collect();
+        Ok(VmValue::List(Rc::new(entries)))
+    });
 }

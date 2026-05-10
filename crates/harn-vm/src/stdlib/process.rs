@@ -232,8 +232,16 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("date_iso", |_args, _out| {
+        // `date_iso` reads the OS wall clock directly (it predates the
+        // unified `clock_mock`). Routing through `leak_audit::wall_now`
+        // keeps the production behavior unchanged but surfaces the call
+        // in `testbench_clock_leaks()` whenever a script invokes it
+        // under a paused testbench session, so fidelity hazards are
+        // visible instead of silently corrupting tapes.
+        let now = crate::clock_mock::leak_audit::wall_now("stdlib/date_iso");
+        let dt: chrono::DateTime<chrono::Utc> = now.into();
         Ok(VmValue::String(Rc::from(
-            chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         )))
     });
 

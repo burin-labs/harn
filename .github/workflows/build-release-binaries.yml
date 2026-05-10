@@ -214,6 +214,8 @@ jobs:
             -s -k "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
           # Prepend the temp keychain to the user search list so codesign
           # finds the imported identity. Preserve the existing entries.
+          # shellcheck disable=SC2046  # word splitting is intentional —
+          # each existing keychain path becomes its own `-s` argument.
           security list-keychains -d user -s "$KEYCHAIN" \
             $(security list-keychains -d user | tr -d '"')
           rm -f "$CERT_FILE"
