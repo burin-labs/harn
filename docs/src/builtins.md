@@ -798,6 +798,11 @@ if !session.ok {
 
 ## Date/Time
 
+For civil-time workflows, import `std/calendar`. It provides ISO week and
+quarter helpers, start/end-of-period boundaries, DST-explicit local datetime
+construction, supported country/timezone metadata, and business-calendar
+helpers such as `add_business_days` and `next_business_day`.
+
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `date_now()` | none | dict | Current UTC datetime as dict with `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `timestamp`, and `iso8601` fields |

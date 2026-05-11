@@ -180,7 +180,7 @@ fn require_dict<'a>(
     }
 }
 
-fn vm_error(message: impl Into<String>) -> VmError {
+pub(crate) fn vm_error(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::String(Rc::from(message.into())))
 }
 
@@ -226,7 +226,7 @@ fn zoned_datetime_dict(dt: DateTime<Tz>) -> BTreeMap<String, VmValue> {
     result
 }
 
-fn parse_timezone(raw: &str, builtin: &str) -> Result<Tz, VmError> {
+pub(crate) fn parse_timezone(raw: &str, builtin: &str) -> Result<Tz, VmError> {
     raw.parse::<Tz>()
         .map_err(|_| vm_error(format!("{builtin}: unknown timezone '{raw}'")))
 }
@@ -313,7 +313,10 @@ fn validate_component_ranges(
     Ok(())
 }
 
-fn datetime_from_arg(value: Option<&VmValue>, builtin: &str) -> Result<DateTime<Utc>, VmError> {
+pub(crate) fn datetime_from_arg(
+    value: Option<&VmValue>,
+    builtin: &str,
+) -> Result<DateTime<Utc>, VmError> {
     let value = value.ok_or_else(|| vm_error(format!("{builtin}: missing timestamp argument")))?;
     match value {
         VmValue::Dict(map) => datetime_from_arg(map.get("timestamp"), builtin),
@@ -343,7 +346,7 @@ fn datetime_from_float(seconds: f64, builtin: &str) -> Result<DateTime<Utc>, VmE
         .ok_or_else(|| vm_error(format!("{builtin}: timestamp out of range")))
 }
 
-fn timestamp_value(dt: DateTime<Utc>) -> VmValue {
+pub(crate) fn timestamp_value(dt: DateTime<Utc>) -> VmValue {
     if dt.timestamp_subsec_nanos() == 0 {
         VmValue::Int(dt.timestamp())
     } else {

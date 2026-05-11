@@ -7,6 +7,7 @@ mod agents_daemon;
 pub(crate) mod assemble;
 pub mod asset_paths;
 mod bytes;
+mod calendar;
 pub(crate) mod clock;
 mod collections;
 mod command_policy;
@@ -88,6 +89,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     strings::register_string_builtins(vm);
     json::register_json_builtins(vm);
     datetime::register_datetime_builtins(vm);
+    calendar::register_calendar_builtins(vm);
     regex::register_regex_builtins(vm);
     bytes::register_bytes_builtins(vm);
     compression::register_compression_builtins(vm);
