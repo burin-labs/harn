@@ -359,6 +359,13 @@ Imports starting with `std/` load embedded stdlib modules:
 - `import "std/artifact/web"` — safe helpers for small generated HTML/CSS/JS
   artifacts (web_artifact_extract, web_artifact_text_fallback,
   web_artifact_validate, web_artifact_apply_patch)
+- `import "std/ui_resource"` — MCP Apps-compatible `ui://` resource envelopes,
+  text/structured fallbacks, host capability negotiation, and message
+  envelopes (ui_resource, ui_tool_meta, ui_tool_meta_to_mcp,
+  ui_text_fallback, ui_structured_fallback, ui_tool_result,
+  ui_tool_result_validate, ui_host_capabilities, ui_host_supports_apps,
+  ui_select_for_host, ui_tool_call_envelope, ui_context_update_envelope,
+  ui_resource_csp_header, ui_resource_sandbox_attr)
 - `import "std/collections"` — collection utilities (filter_nil, store_stale,
   store_refresh)
 - `import "std/async"` — polling and retry helpers (wait_for, retry_until,

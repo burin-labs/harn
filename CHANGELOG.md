@@ -6,6 +6,27 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **MCP Apps-compatible UI resource envelopes (#1505).** Added
+  `std/ui_resource` for declaring `ui://` resources, tool-meta blocks, text
+  and structured fallbacks, host capability negotiation, and the JSON-RPC
+  `tools/call` / `context/update` message envelopes hosts proxy through
+  `postMessage`. Resources validate through `std/artifact/web` (with
+  `allow_host_bridge: true` by default since MCP Apps use `parent.postMessage`
+  by contract) and ship with a CSP/sandbox dict that `ui_resource_csp_header`
+  and `ui_resource_sandbox_attr` project into host headers/attrs.
+  `ui_tool_result` always carries a non-empty text fallback so plain-text
+  hosts still get useful output, and `ui_select_for_host` picks
+  `ui_resource`, `structured_fallback`, or `text_fallback` based on host
+  capability advertisements (MCP, OpenAI Apps SDK, or bare flags).
+  `std/artifact/web` gained an `allow_host_bridge` option so the same safety
+  rules apply to general artifacts while UI resources can keep their
+  postMessage-based bridge. Examples ship under `examples/ui_resource/` for
+  a dashboard widget and a multi-step review form.
+
 ## v0.8.10
 
 ### Added

@@ -1953,6 +1953,54 @@ for event in feed.events {
 - Non-navigation action intents must set `requires_approval: true`; hosts own
   write execution for dismiss, snooze, and convert-to-task actions.
 
+### MCP Apps UI resource stdlib
+
+Use `std/ui_resource` to package interactive widgets as `ui://` resources for
+MCP Apps hosts while keeping text/structured fallbacks first-class:
+
+```harn
+import { ui_resource, ui_select_for_host, ui_structured_fallback, ui_tool_result } from "std/ui_resource"
+
+let resource = ui_resource(
+  "ui://harn-dashboard/kpis@v1",
+  "Weekly KPIs",
+  weekly_kpi_html,
+  {permissions: ["tools/call"], capabilities: ["tools/call", "context/read"]},
+)
+let result = ui_tool_result(resource, {structured_fallback: ui_structured_fallback({signups: 42, churn: 3})})
+let rendered = ui_select_for_host(result, host_capabilities)
+```
+
+- `ui_resource(uri, name, html, options?)` produces `harn.ui_resource.v1`
+  with `mime_type: "text/html;profile=mcp-app"`, a content hash, CSP/sandbox
+  policy, and an embedded `std/artifact/web` validation summary.
+  `allow_host_bridge: true` is the default so `parent.postMessage` to the
+  host counts as an expected MCP Apps bridge call rather than a finding.
+- `ui_tool_meta(resource, options?)` returns a `_meta.ui` block;
+  `ui_tool_meta_to_mcp(meta)` serializes it into the MCP `resourceUri` /
+  `visibility` / `initialView` shape MCP Apps hosts read from `tools/list`.
+- `ui_tool_result(resource, options?)` wraps the resource with a mandatory
+  text fallback (default: `web_artifact_text_fallback` of the HTML) and an
+  optional structured fallback. Invalid resources are stripped automatically
+  unless the caller passes `allow_invalid_resource: true`.
+- `ui_select_for_host(result, capabilities?)` picks `ui_resource`,
+  `structured_fallback`, or `text_fallback` from the same envelope based on
+  host capability advertisements. `ui_host_capabilities` accepts the MCP
+  `client_capabilities.apps`, OpenAI Apps SDK `ui.apps`, or bare `{apps:
+  true}` shapes.
+- `ui_tool_call_envelope(name, params?, options?)` and
+  `ui_context_update_envelope(key, value, options?)` build the JSON-RPC
+  envelopes a sandboxed iframe sends through `window.parent.postMessage`.
+- `ui_resource_csp_header(csp)` and `ui_resource_sandbox_attr(csp)` project
+  the resource's CSP into header and sandbox attribute strings hosts can
+  apply directly.
+- `ui_tool_result_validate(result)` enforces schema versions, the text
+  fallback contract, and refuses to ship a resource whose HTML failed
+  validation.
+
+Examples: `examples/ui_resource/dashboard-widget.harn`,
+`examples/ui_resource/review-form.harn`.
+
 Workflow stages pick up a session id from `model_policy.session_id`;
 two stages sharing an id share their conversation automatically. The
 pre-0.7 `transcript_policy` dict (with `mode: "reset" | "fork"`) was

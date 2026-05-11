@@ -1,0 +1,78 @@
+/*
+ * Dashboard widget example for std/ui_resource.
+ *
+ * Demonstrates the smallest useful end-to-end shape: a vanilla-JS dashboard
+ * tile packaged as a `ui://` resource, an `_meta.ui` tool-declaration block,
+ * and a text/structured fallback for hosts that do not advertise MCP Apps
+ * support.
+ */
+import {
+  ui_resource,
+  ui_select_for_host,
+  ui_structured_fallback,
+  ui_tool_meta,
+  ui_tool_meta_to_mcp,
+  ui_tool_result,
+  ui_tool_result_validate,
+} from "std/ui_resource"
+
+fn render_dashboard_html(metrics) {
+  return "<!doctype html><html><head><style>"
+    + ".tile { font: 14px system-ui; padding: 16px; }"
+    + ".tile h1 { margin: 0 0 8px 0; font-size: 18px; }"
+    + ".tile pre { background: #f5f5f5; padding: 8px; }"
+    + "</style></head><body><main class=\"tile\"><h1>Weekly KPIs</h1>"
+    + "<pre>signups="
+    + to_string(metrics.signups)
+    + " churn="
+    + to_string(metrics.churn)
+    + " mrr="
+    + to_string(metrics.mrr)
+    + "</pre>"
+    + "<button id=\"refresh\">Refresh</button>"
+    + "<script>"
+    + "const initial = (typeof window !== 'undefined' && window.openInitialData) || {};"
+    + "document.getElementById('refresh').addEventListener('click', () => {"
+    + "  const id = 'refresh-' + Date.now();"
+    + "  const call = { jsonrpc: '2.0', id, method: 'tools/call',"
+    + "                 params: { name: 'dashboard.refresh', arguments: { window: '7d' } } };"
+    + "  window.parent && window.parent.postMessage(call, '*');"
+    + "});"
+    + "</script></main></body></html>"
+}
+
+pipeline default() {
+  let metrics = {signups: 42, churn: 3, mrr: 18400}
+  let resource = ui_resource(
+    "ui://harn-examples/kpi-tile@v1",
+    "Weekly KPI tile",
+    render_dashboard_html(metrics),
+    {
+      description: "Sparse weekly KPI tile with a host-mediated refresh button",
+      permissions: ["tools/call"],
+      capabilities: ["tools/call", "context/read"],
+      version: "2026-05-11",
+      validation: {allow_network: false},
+    },
+  )
+  let meta = ui_tool_meta(resource, {visibility: "app_only", initial_view: {window: "7d", focus: "signups"}})
+  let mcp_meta = ui_tool_meta_to_mcp(meta)
+  println("ui_resource.uri=" + resource.uri)
+  println("ui_resource.validation.ok=" + to_string(resource.validation.ok))
+  println("ui_resource.size_bytes=" + to_string(resource.size_bytes))
+  println("mcp_meta.resourceUri=" + mcp_meta.ui.resourceUri)
+  println("mcp_meta.visibility=" + mcp_meta.ui.visibility)
+  let result = ui_tool_result(
+    resource,
+    {structured_fallback: ui_structured_fallback(metrics, {text: "signups=42 churn=3 mrr=18400"})},
+  )
+  ui_tool_result_validate(result)
+  for host in [
+    {label: "mcp-apps host", caps: {apps: true, profiles: ["mcp-app"]}},
+    {label: "openai apps host", caps: {ui: {apps: true, profiles: ["mcp-app"]}}},
+    {label: "plain-text host", caps: {apps: false}},
+  ] {
+    let rendered = ui_select_for_host(result, host.caps)
+    println(host.label + " -> selected=" + rendered.selected)
+  }
+}

@@ -79,7 +79,7 @@ code or inside any pipeline.
 
 `import "std/..."` is only needed for the Harn-written helper modules
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
-`std/path`, `std/edit`, `std/artifact/web`, `std/cache`,
+`std/path`, `std/edit`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
 `std/llm/handlers`, `std/llm/budget`, `std/llm/prompts`, `std/vision`,
 `std/context`, `std/agent_state`, `std/agents`, `std/agent/user`,
 `std/runtime`, `std/command`, `std/git`, `std/review`,
@@ -107,6 +107,7 @@ import "std/connectors/shared"
 import "std/context"
 import "std/edit"
 import "std/artifact/web"
+import "std/ui_resource"
 import "std/experiments"
 import "std/git"
 import "std/json"
@@ -215,6 +216,35 @@ Safe helpers for small generated HTML/CSS/JS artifacts:
 Validation rejects unclosed core tags, obvious network calls or external
 resources, forbidden host bridge calls, dangerous navigation, and inline
 secret-like values via `secret_scan`. It does not parse or execute HTML.
+Pass `{allow_host_bridge: true}` when the artifact is intentionally an
+MCP Apps UI resource that uses `parent.postMessage` to talk to the host;
+`std/ui_resource` sets this by default.
+
+### std/ui_resource
+
+MCP Apps-compatible UI resource envelopes with text and structured fallbacks:
+
+| Function | Description |
+|---|---|
+| `ui_resource(uri, name, html, options?)` | Build a `harn.ui_resource.v1` envelope, validate HTML through `std/artifact/web`, and capture a content hash, size, requested permissions, and a CSP/sandbox policy |
+| `ui_tool_meta(resource, options?)` | Build a `_meta.ui` tool-declaration block (`harn.ui_tool_meta.v1`) with visibility, initial view, and permission/capability lists |
+| `ui_tool_meta_to_mcp(meta)` | Serialize a tool-meta into the MCP Apps `_meta.ui` dict (`resourceUri`, `visibility`, etc.) for direct inclusion in `tools/list` payloads |
+| `ui_text_fallback(content)` / `ui_structured_fallback(data, options?)` | Build text and structured fallback envelopes for hosts without UI support |
+| `ui_tool_result(resource, options?)` | Wrap a resource with mandatory text and optional structured fallbacks, defaulting the text to a `web_artifact_text_fallback` projection |
+| `ui_select_for_host(result, capabilities?)` | Choose between `ui_resource`, `structured_fallback`, and `text_fallback` for a host based on advertised MCP Apps capability |
+| `ui_host_supports_apps(capabilities?)` / `ui_host_capabilities(input?)` | Detect whether an MCP, MCP Apps, or OpenAI Apps SDK host advertises support for the `mcp-app` profile |
+| `ui_tool_call_envelope(name, params?, options?)` | Build the host→guest JSON-RPC `tools/call` envelope a sandboxed iframe receives over `postMessage` |
+| `ui_context_update_envelope(key, value, options?)` | Build the guest→host JSON-RPC `context/update` envelope used to update model-visible context |
+| `ui_resource_csp_header(csp)` / `ui_resource_sandbox_attr(csp)` | Project the resource CSP into header value and `<iframe sandbox>` attribute strings |
+| `ui_tool_result_validate(result)` | Reject tool results that are missing required fields or ship a UI resource whose HTML failed validation |
+
+Tool results always carry a non-empty text fallback so plain-text hosts
+still see useful output. UI resources fail closed: `ui_tool_result` omits
+`ui_resource` whenever validation finds errors (network calls, dangerous
+navigation, embedded secrets, etc.) unless the caller opts in with
+`allow_invalid_resource: true` for preview-only use. See
+[examples/ui_resource](https://github.com/burin-labs/harn/tree/main/examples/ui_resource)
+for a dashboard widget and a multi-step review form.
 
 ### std/llm/budget
 
