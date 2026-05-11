@@ -1925,6 +1925,34 @@ let handle = trigger_register({
   it replays the recorded trigger event through today’s dispatcher/runtime
   state rather than a sandboxed drift-detecting environment.
 
+### Triage inbox stdlib
+
+Use `std/triage` to turn Slack, Notion, GitHub, or generic connector payloads
+into host-renderable inbox cards while retaining raw provider payloads for
+audit:
+
+```harn
+import { triage_start_my_day } from "std/triage"
+
+let connector_events = []
+let feed = triage_start_my_day(connector_events, {emit: true})
+for event in feed.events {
+  println(event.summary)
+}
+```
+
+- `triage_normalize(input, options?)` returns `harn.triage_event.v1` with
+  `source_url`, normalized actors, card copy, action intents, privacy flags,
+  a stable `dedupe_key`, and separate `raw_payload`.
+- `triage_dedupe_key(provider, source_kind, source_url, source_id?)` hashes
+  source provenance, not transport delivery ids.
+- `triage_dedupe_events(events)` keeps first-seen order while dropping
+  duplicate triage keys.
+- `triage_emit(input, options?)` validates the envelope and appends
+  `kind = "triage_event"` to `triage.inbox.events` by default.
+- Non-navigation action intents must set `requires_approval: true`; hosts own
+  write execution for dismiss, snooze, and convert-to-task actions.
+
 Workflow stages pick up a session id from `model_policy.session_id`;
 two stages sharing an id share their conversation automatically. The
 pre-0.7 `transcript_policy` dict (with `mode: "reset" | "fork"`) was

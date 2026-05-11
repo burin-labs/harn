@@ -1,0 +1,667 @@
+import { filter_nil } from "std/collections"
+
+/**
+ * std/triage - normalized dashboard inbox envelopes for connector-derived
+ * events.
+ *
+ * The normalized card fields are intentionally separate from `raw_payload` so
+ * hosts can render inbox items without depending on provider-specific webhook
+ * shapes while receipts keep the original source material available for audit.
+ */
+type TriagePriority = "p0" | "p1" | "p2" | "p3" | "p4" | string
+
+type TriageUrgency = "critical" | "high" | "normal" | "low" | string
+
+type TriageActor = {kind: string, id: string, display_name?: string, url?: string}
+
+type TriageRelatedRef = {kind: string, label?: string, url: string}
+
+type TriagePrivacy = {
+  redacted: bool,
+  raw_payload_retained: bool,
+  contains_sensitive: bool,
+  flags: list<string>,
+}
+
+type TriageActionIntent = {
+  kind: string,
+  label: string,
+  target: dict,
+  effect: string,
+  requires_approval: bool,
+  default_duration?: string,
+}
+
+type TriageEvent = {
+  schema: "harn.triage_event.v1",
+  id: string,
+  provider: string,
+  source_kind: string,
+  source_id: string,
+  source_url: string,
+  source_timestamp?: string,
+  received_at?: string,
+  actors: list<TriageActor>,
+  summary: string,
+  why_it_matters: string,
+  proposed_action: string,
+  urgency: TriageUrgency,
+  priority: TriagePriority,
+  confidence: float,
+  related_refs: list<TriageRelatedRef>,
+  dedupe_key: string,
+  privacy: TriagePrivacy,
+  action_intents: list<TriageActionIntent>,
+  raw_payload: dict,
+}
+
+type TriageEmitReceipt = {
+  schema: "harn.triage_event_emit_receipt.v1",
+  topic: string,
+  kind: "triage_event",
+  event_log_id: int,
+  event: TriageEvent,
+}
+
+let TRIAGE_EVENT_SCHEMA = "harn.triage_event.v1"
+
+let TRIAGE_EVENT_KIND = "triage_event"
+
+let TRIAGE_EVENT_TOPIC = "triage.inbox.events"
+
+fn __triage_text(value) {
+  if value == nil {
+    return ""
+  }
+  return trim(to_string(value))
+}
+
+fn __triage_first(values) {
+  for value in values {
+    let text = __triage_text(value)
+    if text != "" {
+      return text
+    }
+  }
+  return nil
+}
+
+fn __triage_compact(text, limit = 120) {
+  let value = __triage_text(text)
+  if len(value) <= limit {
+    return value
+  }
+  if limit <= 3 {
+    return substring(value, 0, limit)
+  }
+  return substring(value, 0, limit - 3) + "..."
+}
+
+fn __triage_payload(input) {
+  return input?.provider_payload ?? input?.raw_payload ?? input?.payload ?? input?.raw ?? input ?? {}
+}
+
+fn __triage_provider(input, payload, options) {
+  let provider = __triage_first([options?.provider, input?.provider, payload?.provider])
+  if provider == nil {
+    throw "std/triage: provider is required"
+  }
+  return lowercase(provider)
+}
+
+fn __triage_source_kind(input, payload, options) {
+  return __triage_first(
+    [
+      options?.source_kind,
+      input?.source_kind,
+      input?.kind,
+      payload?.source_kind,
+      payload?.event,
+      payload?.type,
+    ],
+  )
+    ?? "item"
+}
+
+fn __triage_github_source_url(payload) {
+  return __triage_first(
+    [
+      payload?.issue?.html_url,
+      payload?.pull_request?.html_url,
+      payload?.comment?.html_url,
+      payload?.review?.html_url,
+      payload?.workflow_run?.html_url,
+      payload?.check_run?.html_url,
+      payload?.deployment_status?.target_url,
+      payload?.commit_status?.target_url,
+      payload?.repository?.html_url,
+      payload?.repo?.html_url,
+      payload?.raw?.html_url,
+    ],
+  )
+}
+
+fn __triage_slack_source_url(input, payload) {
+  let explicit = __triage_first(
+    [
+      input?.source_url,
+      payload?.source_url,
+      payload?.permalink,
+      payload?.message_url,
+      payload?.raw?.permalink,
+    ],
+  )
+  if explicit != nil {
+    return explicit
+  }
+  let team = __triage_first([payload?.team_id, input?.team_id])
+  let channel = __triage_first([payload?.channel, payload?.channel_id, input?.channel, input?.channel_id])
+  let ts = __triage_first([payload?.ts, payload?.thread_ts, payload?.event_ts, input?.ts])
+  if channel != nil && ts != nil {
+    var link = "slack://channel?id=" + url_encode(channel) + "&message=" + url_encode(ts)
+    if team != nil {
+      link = link + "&team=" + url_encode(team)
+    }
+    return link
+  }
+  return nil
+}
+
+fn __triage_notion_source_url(payload) {
+  let explicit = __triage_first(
+    [
+      payload?.source_url,
+      payload?.url,
+      payload?.public_url,
+      payload?.after?.url,
+      payload?.polled?.after?.url,
+      payload?.raw?.url,
+      payload?.raw?.public_url,
+    ],
+  )
+  if explicit != nil {
+    return explicit
+  }
+  let entity_id = __triage_first([payload?.entity_id, payload?.polled?.entity_id, payload?.source_id])
+  if entity_id != nil {
+    return "https://www.notion.so/" + replace(entity_id, "-", "")
+  }
+  return nil
+}
+
+fn __triage_source_url(provider, input, payload, options) {
+  let explicit = __triage_first([options?.source_url, input?.source_url, input?.url, input?.deep_link])
+  if explicit != nil {
+    return explicit
+  }
+  if provider == "github" {
+    return __triage_github_source_url(payload)
+  }
+  if provider == "slack" {
+    return __triage_slack_source_url(input, payload)
+  }
+  if provider == "notion" {
+    return __triage_notion_source_url(payload)
+  }
+  return __triage_first([payload?.source_url, payload?.url, payload?.html_url])
+}
+
+fn __triage_source_id(provider, source_url, input, payload, options) {
+  let explicit = __triage_first([options?.source_id, input?.source_id, payload?.source_id, payload?.id])
+  if explicit != nil {
+    return explicit
+  }
+  if provider == "github" {
+    return __triage_first(
+      [
+        payload?.comment?.node_id,
+        payload?.comment?.id,
+        payload?.issue?.node_id,
+        payload?.issue?.id,
+        payload?.pull_request?.node_id,
+        payload?.pull_request?.id,
+        payload?.workflow_run?.id,
+        payload?.check_run?.id,
+      ],
+    )
+      ?? source_url
+  }
+  if provider == "slack" {
+    let channel = __triage_first([payload?.channel, payload?.channel_id, input?.channel, input?.channel_id])
+    let ts = __triage_first([payload?.ts, payload?.thread_ts, payload?.event_ts, input?.ts])
+    if channel != nil && ts != nil {
+      return channel + ":" + ts
+    }
+    let event_id = __triage_first([payload?.event_id, input?.event_id])
+    if event_id != nil {
+      return event_id
+    }
+  }
+  if provider == "notion" {
+    return __triage_first([payload?.entity_id, payload?.polled?.entity_id])
+      ?? source_url
+  }
+  return source_url
+}
+
+/** Build the stable triage-event dedupe key from provider-neutral source data. */
+pub fn triage_dedupe_key(provider, source_kind, source_url, source_id = nil) {
+  let seed = lowercase(__triage_text(provider))
+    + "\n"
+    + lowercase(__triage_text(source_kind))
+    + "\n"
+    + __triage_text(source_url)
+    + "\n"
+    + __triage_text(source_id ?? source_url)
+  return "triage:" + lowercase(__triage_text(provider)) + ":" + substring(sha256(seed), 0, 32)
+}
+
+fn __triage_actor(kind, id, display_name = nil, url = nil) {
+  return filter_nil({kind: kind, id: id, display_name: display_name, url: url})
+}
+
+fn __triage_push_actor(actors, kind, id, display_name = nil, url = nil) {
+  let actor_id = __triage_text(id)
+  if actor_id == "" {
+    return actors
+  }
+  return actors.push(__triage_actor(kind, actor_id, display_name ?? actor_id, url))
+}
+
+fn __triage_github_actors(payload) {
+  var actors = []
+  actors = __triage_push_actor(
+    actors,
+    "user",
+    payload?.sender?.login,
+    payload?.sender?.login,
+    payload?.sender?.html_url,
+  )
+  actors = __triage_push_actor(
+    actors,
+    "user",
+    payload?.issue?.user?.login,
+    payload?.issue?.user?.login,
+    payload?.issue?.user?.html_url,
+  )
+  actors = __triage_push_actor(
+    actors,
+    "user",
+    payload?.pull_request?.user?.login,
+    payload?.pull_request?.user?.login,
+    payload?.pull_request?.user?.html_url,
+  )
+  actors = __triage_push_actor(
+    actors,
+    "user",
+    payload?.comment?.user?.login,
+    payload?.comment?.user?.login,
+    payload?.comment?.user?.html_url,
+  )
+  actors = __triage_push_actor(
+    actors,
+    "user",
+    payload?.review?.user?.login,
+    payload?.review?.user?.login,
+    payload?.review?.user?.html_url,
+  )
+  return actors
+}
+
+fn __triage_slack_actors(payload) {
+  var actors = []
+  actors = __triage_push_actor(actors, "user", payload?.user ?? payload?.user_id)
+  actors = __triage_push_actor(actors, "user", payload?.item_user)
+  return actors
+}
+
+fn __triage_notion_user_id(user) {
+  return __triage_first([user?.id, user?.name, user?.email])
+}
+
+fn __triage_notion_actors(payload) {
+  var actors = []
+  actors = __triage_push_actor(
+    actors,
+    "user",
+    __triage_notion_user_id(payload?.created_by),
+    payload?.created_by?.name ?? payload?.created_by?.email,
+  )
+  actors = __triage_push_actor(
+    actors,
+    "user",
+    __triage_notion_user_id(payload?.last_edited_by),
+    payload?.last_edited_by?.name ?? payload?.last_edited_by?.email,
+  )
+  actors = __triage_push_actor(
+    actors,
+    "user",
+    __triage_notion_user_id(payload?.raw?.user),
+    payload?.raw?.user?.name ?? payload?.raw?.user?.email,
+  )
+  return actors
+}
+
+fn __triage_actors(provider, input, payload, options) {
+  if options?.actors != nil {
+    return options.actors
+  }
+  if input?.actors != nil {
+    return input.actors
+  }
+  if provider == "github" {
+    return __triage_github_actors(payload)
+  }
+  if provider == "slack" {
+    return __triage_slack_actors(payload)
+  }
+  if provider == "notion" {
+    return __triage_notion_actors(payload)
+  }
+  return []
+}
+
+fn __triage_github_summary(payload, source_kind) {
+  let repo = __triage_first(
+    [payload?.repository?.full_name, payload?.repo?.full_name, payload?.repository?.name],
+  )
+  let prefix = repo != nil ? repo + ": " : ""
+  if payload?.issue != nil {
+    return prefix + "Issue #" + __triage_text(payload.issue.number) + ": "
+      + __triage_compact(payload.issue.title, 96)
+  }
+  if payload?.pull_request != nil {
+    return prefix + "PR #" + __triage_text(payload.pull_request.number) + ": "
+      + __triage_compact(payload.pull_request.title, 96)
+  }
+  if payload?.comment != nil {
+    return prefix + "Comment: " + __triage_compact(payload.comment.body, 96)
+  }
+  if payload?.workflow_run != nil {
+    return prefix + "Workflow " + __triage_text(payload.workflow_run.name ?? source_kind) + " "
+      + __triage_text(payload.workflow_run.conclusion ?? payload.workflow_run.status)
+  }
+  return prefix + "GitHub " + source_kind
+}
+
+fn __triage_slack_summary(payload) {
+  let channel = __triage_first([payload?.channel_name, payload?.channel, payload?.channel_id])
+  let text = __triage_compact(payload?.text ?? payload?.raw?.text ?? "Slack event", 110)
+  if channel != nil {
+    return "Slack " + channel + ": " + text
+  }
+  return "Slack: " + text
+}
+
+fn __triage_notion_title(value) {
+  if value == nil {
+    return nil
+  }
+  if type_of(value) == "string" {
+    return value
+  }
+  return __triage_first(
+    [
+      value?.title,
+      value?.name,
+      value?.properties?.title?.title?[0]?.plain_text,
+      value?.properties?.Name?.title?[0]?.plain_text,
+    ],
+  )
+}
+
+fn __triage_notion_summary(payload, source_kind) {
+  let title = __triage_notion_title(payload?.after)
+    ?? __triage_notion_title(payload?.polled?.after)
+    ?? __triage_notion_title(payload?.raw)
+    ?? __triage_text(payload?.entity_id)
+  return "Notion " + source_kind + ": " + __triage_compact(title, 110)
+}
+
+fn __triage_summary(provider, source_kind, input, payload, options) {
+  let explicit = __triage_first([options?.summary, input?.summary])
+  if explicit != nil {
+    return explicit
+  }
+  if provider == "github" {
+    return __triage_github_summary(payload, source_kind)
+  }
+  if provider == "slack" {
+    return __triage_slack_summary(payload)
+  }
+  if provider == "notion" {
+    return __triage_notion_summary(payload, source_kind)
+  }
+  return provider + " " + source_kind
+}
+
+fn __triage_default_why(provider) {
+  if provider == "github" {
+    return "Repository activity may need review or follow-up."
+  }
+  if provider == "slack" {
+    return "A workspace conversation may need a response or task capture."
+  }
+  if provider == "notion" {
+    return "Workspace content changed and may affect planning or execution."
+  }
+  return "Connector activity may need review."
+}
+
+fn __triage_default_action(provider) {
+  if provider == "github" {
+    return "Open the GitHub item and decide whether to respond."
+  }
+  if provider == "slack" {
+    return "Open the Slack thread and decide whether to reply or convert it."
+  }
+  if provider == "notion" {
+    return "Open the Notion source and review the change."
+  }
+  return "Open the source item and decide the next action."
+}
+
+fn __triage_source_timestamp(input, payload, options) {
+  return __triage_first(
+    [
+      options?.source_timestamp,
+      input?.source_timestamp,
+      input?.occurred_at,
+      payload?.source_timestamp,
+      payload?.event_ts,
+      payload?.ts,
+      payload?.created_at,
+      payload?.updated_at,
+      payload?.issue?.updated_at,
+      payload?.pull_request?.updated_at,
+      payload?.comment?.created_at,
+      payload?.review?.submitted_at,
+      payload?.polled?.high_water_mark,
+      payload?.after?.last_edited_time,
+      payload?.polled?.after?.last_edited_time,
+    ],
+  )
+}
+
+fn __triage_related_refs(source_url, input, payload, options) {
+  if options?.related_refs != nil {
+    return options.related_refs
+  }
+  if input?.related_refs != nil {
+    return input.related_refs
+  }
+  var refs = [{kind: "source", label: "Source", url: source_url}]
+  let repo_url = __triage_first([payload?.repository?.html_url, payload?.repo?.html_url])
+  if repo_url != nil && repo_url != source_url {
+    refs = refs
+      .push(
+      {
+        kind: "repository",
+        label: payload?.repository?.full_name ?? payload?.repo?.full_name,
+        url: repo_url,
+      },
+    )
+  }
+  return refs
+}
+
+fn __triage_privacy(input, options) {
+  let privacy = input?.privacy ?? {}
+  return {
+    redacted: options?.redacted ?? privacy?.redacted ?? false,
+    raw_payload_retained: options?.raw_payload_retained ?? privacy?.raw_payload_retained ?? true,
+    contains_sensitive: options?.contains_sensitive ?? privacy?.contains_sensitive ?? false,
+    flags: options?.privacy_flags ?? privacy?.flags ?? [],
+  }
+}
+
+fn __triage_default_action_intents(dedupe_key, source_url) {
+  let target = {dedupe_key: dedupe_key, source_url: source_url}
+  return [
+    {
+      kind: "open_source",
+      label: "Open source",
+      target: target,
+      effect: "navigation",
+      requires_approval: false,
+    },
+    {
+      kind: "dismiss",
+      label: "Dismiss",
+      target: target,
+      effect: "host_inbox_state",
+      requires_approval: true,
+    },
+    {
+      kind: "snooze",
+      label: "Snooze",
+      target: target,
+      effect: "host_inbox_state",
+      requires_approval: true,
+      default_duration: "PT4H",
+    },
+    {
+      kind: "convert_to_task",
+      label: "Convert to task",
+      target: target,
+      effect: "host_task_write",
+      requires_approval: true,
+    },
+  ]
+}
+
+/** Validate that a normalized triage event has mandatory provenance and gated write intents. */
+pub fn triage_validate(event: TriageEvent) -> TriageEvent {
+  if event.schema != TRIAGE_EVENT_SCHEMA {
+    throw "std/triage: unsupported schema " + __triage_text(event.schema)
+  }
+  for key in ["provider", "source_kind", "source_url", "dedupe_key", "summary", "proposed_action"] {
+    if __triage_text(event[key]) == "" {
+      throw "std/triage: " + key + " is required"
+    }
+  }
+  for intent in event.action_intents ?? [] {
+    let effect = __triage_text(intent.effect)
+    if effect != "navigation" && !(intent.requires_approval ?? false) {
+      throw "std/triage: write action intent `" + __triage_text(intent.kind) + "` must require approval"
+    }
+  }
+  return event
+}
+
+/** Normalize a provider payload or TriggerEvent into the portable triage envelope. */
+pub fn triage_normalize(input, options = nil) -> TriageEvent {
+  let opts = options ?? {}
+  let payload = __triage_payload(input)
+  let provider = __triage_provider(input, payload, opts)
+  let source_kind = __triage_source_kind(input, payload, opts)
+  let source_url = __triage_source_url(provider, input, payload, opts)
+  if __triage_text(source_url) == "" {
+    throw "std/triage: source_url is required"
+  }
+  let source_id = __triage_source_id(provider, source_url, input, payload, opts)
+  let dedupe_key = opts.dedupe_key ?? input?.triage_dedupe_key
+    ?? triage_dedupe_key(provider, source_kind, source_url, source_id)
+  let summary = __triage_summary(provider, source_kind, input, payload, opts)
+  let event = {
+    schema: TRIAGE_EVENT_SCHEMA,
+    id: opts.id ?? input?.triage_event_id ?? ("triage_evt_" + substring(sha256(dedupe_key), 0, 24)),
+    provider: provider,
+    source_kind: source_kind,
+    source_id: source_id,
+    source_url: source_url,
+    source_timestamp: __triage_source_timestamp(input, payload, opts),
+    received_at: opts.received_at ?? input?.received_at,
+    actors: __triage_actors(provider, input, payload, opts),
+    summary: summary,
+    why_it_matters: opts.why_it_matters ?? input?.why_it_matters ?? __triage_default_why(provider),
+    proposed_action: opts.proposed_action ?? input?.proposed_action ?? __triage_default_action(provider),
+    urgency: opts.urgency ?? input?.urgency ?? "normal",
+    priority: opts.priority ?? input?.priority ?? "p3",
+    confidence: opts.confidence ?? input?.confidence ?? 0.85,
+    related_refs: __triage_related_refs(source_url, input, payload, opts),
+    dedupe_key: dedupe_key,
+    privacy: __triage_privacy(input, opts),
+    action_intents: opts.action_intents ?? input?.action_intents
+      ?? __triage_default_action_intents(dedupe_key, source_url),
+    raw_payload: payload,
+  }
+  return triage_validate(event)
+}
+
+/** Drop duplicate triage events by stable `dedupe_key`, preserving first-seen order. */
+pub fn triage_dedupe_events(events: list) -> list<TriageEvent> {
+  var seen = {}
+  var out = []
+  for item in events {
+    let event = item?.schema == TRIAGE_EVENT_SCHEMA ? item : triage_normalize(item)
+    if seen[event.dedupe_key] == nil {
+      seen[event.dedupe_key] = true
+      out = out.push(event)
+    }
+  }
+  return out
+}
+
+/** Emit a normalized triage event to the EventLog and return an audit receipt. */
+pub fn triage_emit(input, options = nil) -> TriageEmitReceipt {
+  let opts = options ?? {}
+  let event = input?.schema == TRIAGE_EVENT_SCHEMA ? triage_validate(input) : triage_normalize(input, opts)
+  let topic = opts.topic ?? TRIAGE_EVENT_TOPIC
+  let event_log_id = event_log
+    .emit(
+    topic,
+    TRIAGE_EVENT_KIND,
+    event,
+    {schema: TRIAGE_EVENT_SCHEMA, provider: event.provider, dedupe_key: event.dedupe_key},
+  )
+  return {
+    schema: "harn.triage_event_emit_receipt.v1",
+    topic: topic,
+    kind: TRIAGE_EVENT_KIND,
+    event_log_id: event_log_id,
+    event: event,
+  }
+}
+
+/**
+ * Build a small Start My Day feed from connector fixtures. Pass `{emit: true}`
+ * to also serialize each unique event to the EventLog.
+ */
+pub fn triage_start_my_day(inputs: list, options = nil) {
+  let opts = options ?? {}
+  let events = triage_dedupe_events(inputs)
+  var receipts = []
+  if opts.emit ?? false {
+    for event in events {
+      receipts = receipts.push(triage_emit(event, {topic: opts.topic ?? TRIAGE_EVENT_TOPIC}))
+    }
+  }
+  return {
+    schema: "harn.start_my_day.triage_feed.v1",
+    generated_at: opts.generated_at,
+    title: opts.title ?? "Start My Day",
+    events: events,
+    receipts: receipts,
+  }
+}

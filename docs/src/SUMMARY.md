@@ -112,6 +112,7 @@
 - [Connector parity matrix](./connectors/parity-matrix.md)
 - [Connector catalog](./connectors/catalog.md)
 - [Connector testkit](./connectors/testkit.md)
+- [Triage inbox envelopes](./connectors/triage-inbox.md)
 - [Cron connector](./connectors/cron.md)
 - [GitHub App connector](./connectors/github.md)
 - [Linear connector](./connectors/linear.md)
