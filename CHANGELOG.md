@@ -26,6 +26,30 @@ condensed series summaries instead of full per-patch history.
   rules apply to general artifacts while UI resources can keep their
   postMessage-based bridge. Examples ship under `examples/ui_resource/` for
   a dashboard widget and a multi-step review form.
+- **Provider catalog refresh workflow and drift report (#1497).** Added
+  `scripts/update_provider_catalog.harn`, a Harn-native workflow that
+  collects model availability, pricing, and capability signals from
+  provider sources, normalizes them with explicit provenance, and emits
+  a markdown drift report + a TOML candidate patch under
+  `.harn-runs/provider_catalog/`. The workflow never mutates shipped
+  catalogs. New pure-logic library `scripts/provider_catalog_refresh.harn`
+  handles observation merging (provider-owned beats aggregator-owned),
+  drift detection against `llm_provider_catalog()`, and report
+  rendering. Source adapters live in
+  `scripts/provider_catalog_sources.harn` with three canonical shapes:
+  `html_pricing_table_adapter` for keyless HTML pricing pages,
+  `json_api_adapter` for public JSON APIs, and `key_required_adapter`
+  that records `status: "skipped"` (instead of silently looking like a
+  removal) when no API key is present. The bundled `--check` mode
+  replays bundled HTTP fixtures and verifies the rendered report and
+  candidate patch against committed goldens under
+  `scripts/provider_catalog_fixtures/`. New
+  `make check-provider-catalog-drift` runs the gate from `make all`.
+  Coverage: 14 `@test` pipelines in
+  `scripts/tests/provider_catalog_refresh_test.harn` cover the
+  pure-logic helpers and every adapter shape (HTML, JSON, skipped
+  key-required, key-required-with-key, conflicting observation,
+  context-window-only change, fetch error).
 
 ## v0.8.10
 

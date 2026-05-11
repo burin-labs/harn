@@ -1,0 +1,286 @@
+// Source adapters for the provider catalog refresh workflow.
+//
+// Each adapter is a function with the signature:
+//   adapter(env: dict) -> {run: dict, observations: list<dict>}
+//
+// `env` is supplied by the entry script and carries:
+//   - observed_at, fetched_at: deterministic timestamps the workflow stamps onto every observation.
+//   - secrets: dict of env var name -> string, populated only when --live runs.
+//   - http_options: optional dict forwarded to `web_fetch` so callers can swap timeouts/proxy in tests.
+//
+// The `run` dict is the per-source row the markdown report renders.
+// `observations` is a list of records built via `observation(...)`
+// (defined in `scripts/provider_catalog_refresh.harn`).
+//
+// The HTML / JSON / key-required helpers below are the canonical "happy
+// path" adapter shapes; project repos can supply their own adapters
+// using the same contract.
+import { web_fetch, web_parse_html } from "std/web"
+import "./provider_catalog_refresh.harn"
+
+fn __row_value(row, index) {
+  if index == nil {
+    return nil
+  }
+  return row[index]
+}
+
+fn __mtok_from_string(text) {
+  if text == nil {
+    return nil
+  }
+  let stripped = regex_replace("[^0-9.]", "", to_string(text))
+  if stripped == "" {
+    return nil
+  }
+  return to_float(stripped)
+}
+
+fn __context_window_from_string(text) {
+  if text == nil {
+    return nil
+  }
+  let stripped = regex_replace("[^0-9]", "", to_string(text))
+  if stripped == "" {
+    return nil
+  }
+  return to_int(stripped)
+}
+
+fn __build_run(id, kind, source_owner, url, status, options) {
+  return {
+    id: id,
+    kind: kind,
+    source_owner: source_owner,
+    url: url,
+    status: status,
+    reason: options?.reason,
+    requires_key: options?.requires_key ?? false,
+    key_envs: options?.key_envs ?? [],
+    fetched_at: options?.fetched_at,
+    not_modified: options?.not_modified ?? false,
+  }
+}
+
+fn __fetch_failure_run(id, kind, source_owner, url, response) {
+  return __build_run(
+    id,
+    kind,
+    source_owner,
+    url,
+    "error",
+    {reason: "fetch failed with status " + to_string(response?.status ?? 0)},
+  )
+}
+
+/**
+ * Adapter: HTML pricing/capability table.
+ *
+ * Walks the first table on the page, mapping columns by `column_map`
+ * to observation fields. Provider-owned by default. `env.http_options`
+ * is forwarded to `web_fetch` so callers can supply custom headers,
+ * timeouts, or `previous` envelopes for conditional re-fetches.
+ *
+ * config keys:
+ *   id, provider, source_url, table_index?, column_map (dict),
+ *   header_match?, confidence (default "high"), terms_notes?.
+ */
+pub fn html_pricing_table_adapter(env, config) {
+  let url = config.source_url
+  let response = web_fetch(url, env?.http_options ?? {})
+  if !response.ok {
+    return {run: __fetch_failure_run(config.id, "html", "provider", url, response), observations: []}
+  }
+  let parsed = web_parse_html(response.body, response.final_url)
+  let tables = parsed?.tables ?? []
+  let table_index = config?.table_index ?? 0
+  let table = tables[table_index]
+  if table == nil {
+    return {
+      run: __build_run(
+        config.id,
+        "html",
+        "provider",
+        url,
+        "error",
+        {reason: "no table at index " + to_string(table_index)},
+      ),
+      observations: [],
+    }
+  }
+  let column_map = config.column_map
+  let headers = table?.headers ?? []
+  var indices = {}
+  var idx = 0
+  while idx < len(headers) {
+    let header = lowercase(trim(to_string(headers[idx])))
+    for entry in column_map {
+      let target = trim(lowercase(to_string(entry.header)))
+      if header == target {
+        indices = indices + {[entry.field]: idx}
+      }
+    }
+    idx = idx + 1
+  }
+  let model_idx = indices?.model_id
+  if model_idx == nil {
+    return {
+      run: __build_run(config.id, "html", "provider", url, "error", {reason: "table missing model_id column"}),
+      observations: [],
+    }
+  }
+  var observations = []
+  for row in table?.rows ?? [] {
+    let model_id = trim(to_string(row[model_idx] ?? ""))
+    if model_id == "" {
+      continue
+    }
+    let pricing_input = __mtok_from_string(__row_value(row, indices?.input_per_mtok))
+    let pricing_output = __mtok_from_string(__row_value(row, indices?.output_per_mtok))
+    let cache_read = __mtok_from_string(__row_value(row, indices?.cache_read_per_mtok))
+    let cache_write = __mtok_from_string(__row_value(row, indices?.cache_write_per_mtok))
+    let context = __context_window_from_string(__row_value(row, indices?.context_window))
+    var pricing = {}
+    if pricing_input != nil {
+      pricing = pricing + {input_per_mtok: pricing_input}
+    }
+    if pricing_output != nil {
+      pricing = pricing + {output_per_mtok: pricing_output}
+    }
+    if cache_read != nil {
+      pricing = pricing + {cache_read_per_mtok: cache_read}
+    }
+    if cache_write != nil {
+      pricing = pricing + {cache_write_per_mtok: cache_write}
+    }
+    let pricing_value = if len(pricing) == 0 {
+      nil
+    } else {
+      pricing
+    }
+    let provenance = {
+      source_url: url,
+      source_kind: "html",
+      source_owner: "provider",
+      observed_at: env.observed_at,
+      fetched_at: response.fetched_at,
+      confidence: config?.confidence ?? "high",
+      requires_key: false,
+      terms_notes: config?.terms_notes,
+    }
+    let obs = observation(
+      config.provider,
+      model_id,
+      {context_window: context, pricing: pricing_value},
+      provenance,
+    )
+    observations = observations + [obs]
+  }
+  return {
+    run: __build_run(
+      config.id,
+      "html",
+      "provider",
+      url,
+      "ok",
+      {fetched_at: response.fetched_at, not_modified: response?.not_modified ?? false},
+    ),
+    observations: observations,
+  }
+}
+
+/**
+ * Adapter: JSON API (public). Reads a list of model records from
+ * `response.body` (assumed JSON) and maps each entry through `mapper`
+ * to a normalized observation.
+ *
+ * config keys:
+ *   id, provider, source_url, mapper, source_owner ("aggregator" or
+ *   "provider"), confidence (default "high"), terms_notes?.
+ */
+pub fn json_api_adapter(env, config) {
+  let url = config.source_url
+  let response = web_fetch(url, env?.http_options ?? {})
+  if !response.ok {
+    return {
+      run: __fetch_failure_run(config.id, "json", config?.source_owner ?? "aggregator", url, response),
+      observations: [],
+    }
+  }
+  let payload = json_parse(response.body ?? "")
+  let entries = config.mapper(payload)
+  let provenance_base = {
+    source_url: url,
+    source_kind: "json",
+    source_owner: config?.source_owner ?? "aggregator",
+    observed_at: env.observed_at,
+    fetched_at: response.fetched_at,
+    confidence: config?.confidence ?? "high",
+    requires_key: false,
+    terms_notes: config?.terms_notes,
+  }
+  var observations = []
+  for entry in entries {
+    if entry?.model_id == nil || entry.model_id == "" {
+      continue
+    }
+    let provider = entry?.provider ?? config.provider
+    let obs = observation(
+      provider,
+      entry.model_id,
+      {
+        name: entry?.name,
+        context_window: entry?.context_window,
+        pricing: entry?.pricing,
+        capabilities: entry?.capabilities,
+      },
+      provenance_base + {notes: entry?.notes},
+    )
+    observations = observations + [obs]
+  }
+  return {
+    run: __build_run(
+      config.id,
+      "json",
+      config?.source_owner ?? "aggregator",
+      url,
+      "ok",
+      {fetched_at: response.fetched_at, not_modified: response?.not_modified ?? false},
+    ),
+    observations: observations,
+  }
+}
+
+/**
+ * Adapter wrapper: gate a key-required source on the presence of an
+ * env var. When the var is missing the adapter returns `status:
+ * "skipped"` with the env name(s) recorded so the markdown report
+ * surfaces the gap instead of silently treating the source as a
+ * removal.
+ */
+pub fn key_required_adapter(env, config) {
+  let key_envs = config.key_envs ?? []
+  var available = false
+  let secrets = env?.secrets ?? {}
+  for name in key_envs {
+    if secrets[name] != nil && secrets[name] != "" {
+      available = true
+    }
+  }
+  if !available {
+    return {
+      run: __build_run(
+        config.id,
+        config?.kind ?? "json",
+        config?.source_owner ?? "provider",
+        config?.source_url,
+        "skipped",
+        {requires_key: true, key_envs: key_envs, reason: "no API key in env (" + join(key_envs, ", ") + ")"},
+      ),
+      observations: [],
+    }
+  }
+  let result = config.adapter(env)
+  let augmented = result.run + {requires_key: true, key_envs: key_envs}
+  return {run: augmented, observations: result.observations}
+}

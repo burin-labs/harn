@@ -22,8 +22,14 @@
     ".worktrees",
     ".burin",
     ".claude",
+    ".harn-runs",
     "docs/src/SUMMARY.md",
     "conformance/tests/**/.harn/**/*.md",
+    // Generated drift report fixture for the provider catalog refresh
+    // workflow. Adapter run rows can exceed 120 cols when a URL and a
+    // skip reason both fit on one line; keep the report rendering
+    // straight-line readable rather than wrapping.
+    "scripts/provider_catalog_fixtures/expected_drift_report.md",
     // qmode experiment writes synthetic profile bullets here during eval runs;
     // these are not docs and shouldn't be linted as such.
     "experiments/**/.harn/**/*.md",

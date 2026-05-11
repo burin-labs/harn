@@ -1,0 +1,627 @@
+// Pure-logic helpers for the provider catalog refresh workflow.
+//
+// This file holds the bits that don't reach the network: observation
+// normalization, drift detection against `llm_provider_catalog()`, the
+// markdown report writer, and the candidate TOML patch writer. Source
+// adapters (Anthropic/OpenAI HTML, OpenRouter JSON, key-required APIs)
+// live in `scripts/provider_catalog_sources.harn` so they can be
+// exercised separately under `http_mock`.
+//
+// The companion entry script `scripts/update_provider_catalog.harn`
+// runs a configured set of adapters, hands the observations here, and
+// emits a markdown drift report plus a candidate TOML fragment under
+// `.harn-runs/provider_catalog/`. It never mutates shipped catalogs.
+let CONFIDENCE_RANK = {high: 3, medium: 2, low: 1}
+
+let PRICING_KEYS = ["input_per_mtok", "output_per_mtok", "cache_read_per_mtok", "cache_write_per_mtok"]
+
+let CAPABILITY_KEYS = [
+  "native_tools",
+  "tool_search",
+  "prompt_caching",
+  "vision_supported",
+  "audio_supported",
+  "pdf_supported",
+  "files_api_supported",
+  "reasoning_effort_supported",
+  "interleaved_thinking_supported",
+  "thinking_modes",
+]
+
+let PRICING_EPSILON = 0.0001
+
+fn __confidence_rank(value) {
+  return CONFIDENCE_RANK[value] ?? 0
+}
+
+/**
+ * Build the observation record adapters emit. `pricing` and
+ * `capabilities` are optional dicts (nil when the source did not
+ * report a value). Each call carries explicit provenance so the
+ * downstream report can attribute every claim back to a source.
+ */
+pub fn observation(provider: string, model_id: string, fields: dict, provenance: dict) -> dict {
+  return {
+    provider: provider,
+    model_id: model_id,
+    name: fields?.name,
+    context_window: fields?.context_window,
+    pricing: fields?.pricing,
+    capabilities: fields?.capabilities,
+    source: provenance.source_url,
+    source_kind: provenance?.source_kind ?? "html",
+    source_owner: provenance?.source_owner ?? "provider",
+    observed_at: provenance.observed_at,
+    fetched_at: provenance?.fetched_at,
+    confidence: provenance?.confidence ?? "high",
+    requires_key: provenance?.requires_key ?? false,
+    terms_notes: provenance?.terms_notes,
+    notes: provenance?.notes,
+  }
+}
+
+fn __observation_key(obs) {
+  return obs.provider + ":" + obs.model_id
+}
+
+fn __merge_field(base, incoming, key, base_owner, incoming_owner) {
+  let incoming_value = incoming[key]
+  if incoming_value == nil {
+    return {value: base[key], conflict: nil}
+  }
+  let base_value = base[key]
+  if base_value == nil {
+    return {value: incoming_value, conflict: nil}
+  }
+  if base_value == incoming_value {
+    return {value: base_value, conflict: nil}
+  }
+  if base_owner == "provider" && incoming_owner != "provider" {
+    return {value: base_value, conflict: {key: key, kept: base_value, dropped: incoming_value}}
+  }
+  if incoming_owner == "provider" && base_owner != "provider" {
+    return {value: incoming_value, conflict: {key: key, kept: incoming_value, dropped: base_value}}
+  }
+  return {value: incoming_value, conflict: {key: key, kept: incoming_value, dropped: base_value}}
+}
+
+fn __merge_keyed(base_obs, incoming_obs, field, keys_list) {
+  let base = base_obs[field] ?? {}
+  let incoming = incoming_obs[field] ?? {}
+  if len(base) == 0 && len(incoming) == 0 {
+    return {value: nil, conflicts: []}
+  }
+  var merged = {}
+  var conflicts = []
+  for key in keys_list {
+    let outcome = __merge_field(base, incoming, key, base_obs.source_owner, incoming_obs.source_owner)
+    if outcome.value != nil {
+      merged = merged + {[key]: outcome.value}
+    }
+    if outcome.conflict != nil {
+      conflicts = conflicts + [outcome.conflict + {field: field + "." + key}]
+    }
+  }
+  return {
+    value: if len(merged) == 0 {
+      nil
+    } else {
+      merged
+    },
+    conflicts: conflicts,
+  }
+}
+
+fn __pick_primary(existing, incoming) {
+  let prefer_existing = existing.source_owner == "provider" && incoming.source_owner != "provider"
+  let prefer_incoming = incoming.source_owner == "provider" && existing.source_owner != "provider"
+  if prefer_existing {
+    return {primary: existing, secondary: incoming}
+  }
+  if prefer_incoming {
+    return {primary: incoming, secondary: existing}
+  }
+  if __confidence_rank(incoming.confidence) > __confidence_rank(existing.confidence) {
+    return {primary: incoming, secondary: existing}
+  }
+  return {primary: existing, secondary: incoming}
+}
+
+fn __source_entry(obs) {
+  return {
+    source_url: obs.source,
+    source_kind: obs.source_kind,
+    source_owner: obs.source_owner,
+    confidence: obs.confidence,
+    observed_at: obs.observed_at,
+    fetched_at: obs.fetched_at,
+    requires_key: obs.requires_key,
+  }
+}
+
+fn __merge_observations(base, incoming) {
+  let pricing_outcome = __merge_keyed(base, incoming, "pricing", PRICING_KEYS)
+  let capabilities_outcome = __merge_keyed(base, incoming, "capabilities", CAPABILITY_KEYS)
+  let name_outcome = __merge_field(base, incoming, "name", base.source_owner, incoming.source_owner)
+  let context_outcome = __merge_field(base, incoming, "context_window", base.source_owner, incoming.source_owner)
+  let picked = __pick_primary(base, incoming)
+  let primary = picked.primary
+  let secondary = picked.secondary
+  let prior_sources = primary?.sources ?? [__source_entry(primary)]
+  let new_sources = prior_sources + [__source_entry(secondary)]
+  let merged = primary
+    + {
+    name: name_outcome.value,
+    context_window: context_outcome.value,
+    pricing: pricing_outcome.value,
+    capabilities: capabilities_outcome.value,
+    sources: new_sources,
+  }
+  var conflicts = pricing_outcome.conflicts + capabilities_outcome.conflicts
+  if name_outcome.conflict != nil {
+    conflicts = conflicts + [name_outcome.conflict + {field: "name"}]
+  }
+  if context_outcome.conflict != nil {
+    conflicts = conflicts + [context_outcome.conflict + {field: "context_window"}]
+  }
+  return {observation: merged, conflicts: conflicts}
+}
+
+/**
+ * Reduce raw observations into one canonical record per (provider,
+ * model). Provider-owned sources win for conflicting numeric and
+ * capability claims; aggregator-owned sources fill gaps. Returns a
+ * list sorted by provider then model_id plus a conflict log used by
+ * the markdown report.
+ */
+pub fn normalize_observations(raw: list<dict>) -> dict {
+  var grouped: dict = {}
+  var order: list<string> = []
+  var conflicts: list<dict> = []
+  for obs in raw {
+    let key = __observation_key(obs)
+    if grouped[key] == nil {
+      grouped = grouped + {[key]: obs}
+      order = order + [key]
+    } else {
+      let outcome = __merge_observations(grouped[key], obs)
+      grouped = grouped + {[key]: outcome.observation}
+      for c in outcome.conflicts {
+        conflicts = conflicts + [c + {provider: obs.provider, model_id: obs.model_id}]
+      }
+    }
+  }
+  let sorted_keys = order.sort_by({ k -> k })
+  var canonical: list<dict> = []
+  for k in sorted_keys {
+    canonical = canonical + [grouped[k]]
+  }
+  return {observations: canonical, conflicts: conflicts}
+}
+
+fn __catalog_model_by_id(catalog) {
+  var by_id: dict = {}
+  for model in catalog?.models ?? [] {
+    by_id = by_id + {[model.id]: model}
+  }
+  return by_id
+}
+
+fn __abs_diff(left, right) {
+  let diff = left - right
+  if diff < 0 {
+    return 0 - diff
+  }
+  return diff
+}
+
+fn __pricing_change(catalog_pricing, observed_pricing) {
+  var changes: list<dict> = []
+  for key in PRICING_KEYS {
+    let cat = catalog_pricing?[key]
+    let obs = observed_pricing?[key]
+    if cat == nil && obs == nil {
+      continue
+    }
+    if cat == nil {
+      changes = changes + [{key: key, from: nil, to: obs}]
+    } else if obs == nil {
+      changes = changes + [{key: key, from: cat, to: nil}]
+    } else if __abs_diff(cat, obs) > PRICING_EPSILON {
+      changes = changes + [{key: key, from: cat, to: obs}]
+    }
+  }
+  return changes
+}
+
+fn __dict_to_pairs(value) -> list<dict> {
+  if type_of(value) != "dict" {
+    return []
+  }
+  var pairs: list<dict> = []
+  for k in keys(value) {
+    pairs = pairs + [{key: k, value: value[k]}]
+  }
+  return pairs.sort_by({ pair -> pair.key })
+}
+
+fn __values_equal(left, right) {
+  let lt = type_of(left)
+  let rt = type_of(right)
+  if lt != rt {
+    return false
+  }
+  if lt == "list" {
+    if len(left) != len(right) {
+      return false
+    }
+    var i = 0
+    while i < len(left) {
+      if !__values_equal(left[i], right[i]) {
+        return false
+      }
+      i = i + 1
+    }
+    return true
+  }
+  if lt == "dict" {
+    return __values_equal(__dict_to_pairs(left), __dict_to_pairs(right))
+  }
+  return left == right
+}
+
+fn __capability_changes(catalog_caps, observed_caps) {
+  // The catalog model entries expose `capabilities` as a tag list,
+  // while the observation dict carries the capability matrix shape
+  // (native_tools, prompt_caching, ...). Comparison is only meaningful
+  // when both sides agree on shape; otherwise the workflow reports
+  // capability changes as part of the per-observation render and
+  // leaves the diff empty here.
+  if type_of(catalog_caps) != "dict" || type_of(observed_caps) != "dict" {
+    return []
+  }
+  var changes: list<dict> = []
+  for key in CAPABILITY_KEYS {
+    let cat = catalog_caps?[key]
+    let obs = observed_caps?[key]
+    if cat == nil && obs == nil {
+      continue
+    }
+    if !__values_equal(cat, obs) {
+      changes = changes + [{key: key, from: cat, to: obs}]
+    }
+  }
+  return changes
+}
+
+fn __observed_providers(observations) {
+  var providers: dict = {}
+  for obs in observations {
+    providers = providers + {[obs.provider]: true}
+  }
+  return providers
+}
+
+/**
+ * Compare `observations` to the live `llm_provider_catalog()` snapshot
+ * (or any catalog dict in the same shape). Returns the drift in a
+ * shape that's easy to render: added/removed/changed models, with
+ * sub-categorized changes (pricing, context window, capabilities)
+ * plus low-confidence and key-required diagnostics.
+ */
+pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
+  let by_id = __catalog_model_by_id(catalog)
+  var added: list<dict> = []
+  var changed: list<dict> = []
+  var seen: dict = {}
+  var unknown_pricing: list<dict> = []
+  var low_confidence: list<dict> = []
+  var requires_key: list<dict> = []
+  for obs in observations {
+    seen = seen + {[obs.model_id]: true}
+    if __confidence_rank(obs.confidence) < __confidence_rank("high") {
+      low_confidence = low_confidence + [obs]
+    }
+    if obs.requires_key {
+      requires_key = requires_key + [obs]
+    }
+    if obs.pricing == nil {
+      unknown_pricing = unknown_pricing + [obs]
+    }
+    if by_id[obs.model_id] == nil {
+      added = added + [obs]
+    } else {
+      let cat = by_id[obs.model_id]
+      let pricing_changes = __pricing_change(cat.pricing, obs.pricing)
+      let capability_changes = __capability_changes(cat?.capabilities, obs?.capabilities)
+      var ctx_change: dict? = nil
+      if obs.context_window != nil && obs.context_window != cat.context_window {
+        ctx_change = {from: cat.context_window, to: obs.context_window}
+      }
+      if len(pricing_changes) > 0 || len(capability_changes) > 0 || ctx_change != nil {
+        let entry = {
+          observation: obs,
+          catalog: cat,
+          pricing_changes: pricing_changes,
+          capability_changes: capability_changes,
+          context_window_change: ctx_change,
+        }
+        changed = changed + [entry]
+      }
+    }
+  }
+  // Removals are restricted to providers the run actually observed,
+  // otherwise a missing API key would look like a removal.
+  let observed_providers = __observed_providers(observations)
+  var removed: list<dict> = []
+  for model in catalog?.models ?? [] {
+    if !seen[model.id] && observed_providers[model.provider] {
+      removed = removed + [model]
+    }
+  }
+  return {
+    added: added,
+    removed: removed,
+    changed: changed,
+    unknown_pricing: unknown_pricing,
+    low_confidence: low_confidence,
+    requires_key: requires_key,
+  }
+}
+
+fn __format_currency(value) -> string {
+  if value == nil {
+    return "—"
+  }
+  return "$" + to_string(round(value * 1000) / 1000.0)
+}
+
+fn __format_change_line(change) -> string {
+  return "  - " + change.key + ": " + __format_currency(change.from) + " → "
+    + __format_currency(change.to)
+}
+
+fn __format_capability_change(change) -> string {
+  let from_text = if change.from == nil {
+    "—"
+  } else {
+    json_stringify(change.from)
+  }
+  let to_text = if change.to == nil {
+    "—"
+  } else {
+    json_stringify(change.to)
+  }
+  return "  - " + change.key + ": " + from_text + " → " + to_text
+}
+
+fn __sources_summary(adapter_runs) -> list<string> {
+  var lines: list<string> = []
+  for run in adapter_runs {
+    let badge = if run.status == "ok" {
+      "✓"
+    } else {
+      if run.status == "skipped" {
+        "⊘"
+      } else {
+        "✗"
+      }
+    }
+    var line = "- " + badge + " " + run.id + " (" + run.kind + ", " + run.source_owner + ")"
+    if run.url != nil {
+      line = line + " — " + run.url
+    }
+    line = line + " — status: " + run.status
+    if run.reason != nil {
+      line = line + " — " + run.reason
+    } else if run.requires_key {
+      // Only annotate "requires env" when the reason field didn't already
+      // surface the gating env names (the skipped path puts them there).
+      line = line + " — requires env: " + join(run.key_envs ?? [], ", ")
+    }
+    lines = lines + [line]
+  }
+  return lines
+}
+
+fn __section(title, lines) -> list<string> {
+  if len(lines) == 0 {
+    return ["## " + title, "", "_None._", ""]
+  }
+  return ["## " + title, ""] + lines + [""]
+}
+
+fn __added_lines(added) -> list<string> {
+  var lines: list<string> = []
+  for obs in added {
+    let pricing = obs.pricing ?? {}
+    let price_summary = if pricing?.input_per_mtok != nil || pricing?.output_per_mtok != nil {
+      " — in " + __format_currency(pricing?.input_per_mtok) + " / out "
+        + __format_currency(pricing?.output_per_mtok)
+    } else {
+      ""
+    }
+    let context_text = if obs.context_window != nil {
+      " — ctx " + to_string(obs.context_window)
+    } else {
+      ""
+    }
+    lines = lines + ["- `" + obs.model_id + "` (" + obs.provider + ")" + context_text + price_summary]
+    lines = lines
+      + ["  source: " + obs.source + " (" + obs.source_kind + ", confidence: " + obs.confidence + ")"]
+  }
+  return lines
+}
+
+fn __removed_lines(removed) -> list<string> {
+  var lines: list<string> = []
+  for model in removed {
+    lines = lines + ["- `" + model.id + "` (" + model.provider + ")"]
+  }
+  return lines
+}
+
+fn __changed_lines(changed) -> list<string> {
+  var lines: list<string> = []
+  for c in changed {
+    let obs = c.observation
+    lines = lines + ["- `" + obs.model_id + "` (" + obs.provider + ")"]
+    lines = lines
+      + ["  source: " + obs.source + " (" + obs.source_kind + ", confidence: " + obs.confidence + ")"]
+    if c.context_window_change != nil {
+      lines = lines
+        + [
+        "  - context_window: " + to_string(c.context_window_change.from) + " → "
+          + to_string(c.context_window_change.to),
+      ]
+    }
+    for pc in c.pricing_changes {
+      lines = lines + [__format_change_line(pc)]
+    }
+    for cap in c.capability_changes {
+      lines = lines + [__format_capability_change(cap)]
+    }
+  }
+  return lines
+}
+
+fn __obs_summary_lines(items, label) -> list<string> {
+  var lines: list<string> = []
+  for obs in items {
+    lines = lines + ["- `" + obs.model_id + "` (" + obs.provider + ") — " + label + ": " + obs.source]
+  }
+  return lines
+}
+
+fn __conflict_lines(conflicts) -> list<string> {
+  var lines: list<string> = []
+  for c in conflicts {
+    let kept_text = json_stringify(c.kept)
+    let dropped_text = json_stringify(c.dropped)
+    lines = lines
+      + [
+      "- `" + c.model_id + "` (" + c.provider + ") `" + c.field + "`: kept " + kept_text
+        + " (provider-owned) over "
+        + dropped_text,
+    ]
+  }
+  return lines
+}
+
+/**
+ * Render the markdown drift report. Includes adapter run status,
+ * added/removed/changed models with provenance, the merge-conflict
+ * log, and unknown-pricing/low-confidence/key-required diagnostics so
+ * none of those quietly hide behind defaults.
+ */
+pub fn render_markdown_report(
+  drift: dict,
+  conflicts: list<dict>,
+  adapter_runs: list<dict>,
+  meta: dict,
+) -> string {
+  let header = [
+    "# Provider catalog refresh — drift report",
+    "",
+    "_Generated by `scripts/update_provider_catalog.harn` at " + meta?.generated_at ?? "?" + "._",
+    "",
+    "Run mode: **" + meta?.run_mode ?? "fixtures" + "**.",
+    "",
+    "Adapter runs reflect what actually fetched — skipped sources never silently downgrade drift.",
+    "",
+  ]
+  let sources_section = ["## Adapter runs", ""] + __sources_summary(adapter_runs) + [""]
+  let parts = header
+    + sources_section
+    + __section("Added models", __added_lines(drift.added))
+    + __section("Removed models", __removed_lines(drift.removed))
+    + __section("Changed models", __changed_lines(drift.changed))
+    + __section("Cross-source conflicts (provider-owned wins)", __conflict_lines(conflicts))
+    + __section("Unknown pricing", __obs_summary_lines(drift.unknown_pricing, "source"))
+    + __section("Low-confidence observations", __obs_summary_lines(drift.low_confidence, "source"))
+    + __section("Key-required observations", __obs_summary_lines(drift.requires_key, "source"))
+    + [
+    "---",
+    "",
+    "Review the candidate patch under `.harn-runs/provider_catalog/candidate.toml` before merging.",
+    "",
+  ]
+  return join(parts, "\n")
+}
+
+fn __toml_escape(value) -> string {
+  return value.replace("\\", "\\\\").replace("\"", "\\\"")
+}
+
+fn __toml_string(value) -> string {
+  return "\"" + __toml_escape(to_string(value)) + "\""
+}
+
+fn __toml_list_of_strings(items) -> string {
+  if len(items) == 0 {
+    return "[]"
+  }
+  var rendered: list<string> = []
+  for item in items {
+    rendered = rendered + [__toml_string(item)]
+  }
+  return "[" + join(rendered, ", ") + "]"
+}
+
+fn __format_model_section(obs) -> list<string> {
+  let id_text = __toml_string(obs.model_id)
+  var lines: list<string> = ["[models." + id_text + "]"]
+  if obs.name != nil {
+    lines = lines + ["name = " + __toml_string(obs.name)]
+  }
+  lines = lines + ["provider = " + __toml_string(obs.provider)]
+  if obs.context_window != nil {
+    lines = lines + ["context_window = " + to_string(obs.context_window)]
+  }
+  let caps = obs.capabilities ?? {}
+  let cap_names = caps?.tool_search ?? []
+  if len(cap_names) > 0 {
+    lines = lines + ["capabilities = " + __toml_list_of_strings(cap_names)]
+  }
+  if obs.pricing != nil {
+    lines = lines + ["", "[models." + id_text + ".pricing]"]
+    for key in PRICING_KEYS {
+      let value = obs.pricing?[key]
+      if value != nil {
+        lines = lines + [key + " = " + to_string(value)]
+      }
+    }
+  }
+  lines = lines + [""]
+  return lines
+}
+
+/**
+ * Render a candidate TOML fragment for the proposed catalog patch.
+ *
+ * Emits only the added + changed rows so the patch is focused on
+ * actionable updates; unchanged observations are visible in the drift
+ * report's adapter-run summary instead. Output is review-ready, never
+ * auto-applied; reviewers diff this against
+ * `crates/harn-vm/src/llm_config.rs` / `harn.toml` before landing.
+ */
+pub fn render_candidate_toml(drift: dict, meta: dict) -> string {
+  var lines = [
+    "# Candidate provider catalog patch",
+    "# Generated at " + meta?.generated_at ?? "?" + " by scripts/update_provider_catalog.harn.",
+    "# Run mode: " + meta?.run_mode ?? "fixtures" + ".",
+    "# This file is a review aid — diff against canonical sources before landing.",
+    "",
+  ]
+  for obs in drift.added {
+    lines = lines + ["# added"] + __format_model_section(obs)
+  }
+  for entry in drift.changed {
+    lines = lines + ["# changed (was: " + entry.catalog.id + ")"]
+      + __format_model_section(entry.observation)
+  }
+  if len(drift.added) == 0 && len(drift.changed) == 0 {
+    lines = lines + ["# No additions or changes detected.", ""]
+  }
+  return join(lines, "\n")
+}

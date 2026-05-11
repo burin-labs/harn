@@ -1,0 +1,46 @@
+# Candidate provider catalog patch
+# Generated at 2026-05-11T00:00:00Z by scripts/update_provider_catalog.harn.
+# Run mode: fixtures.
+# This file is a review aid — diff against canonical sources before landing.
+
+# added
+[models."claude-haiku-5-20260601"]
+provider = "anthropic"
+context_window = 250000
+
+[models."claude-haiku-5-20260601".pricing]
+input_per_mtok = 0.5
+output_per_mtok = 2.5
+cache_read_per_mtok = 0.05
+cache_write_per_mtok = 0.625
+
+# added
+[models."x-ai/grok-4-fast"]
+name = "Grok 4 Fast"
+provider = "x-ai"
+context_window = 131072
+
+[models."x-ai/grok-4-fast".pricing]
+input_per_mtok = 0.2
+output_per_mtok = 0.8
+
+# changed (was: claude-opus-4-7-20260301)
+[models."claude-opus-4-7-20260301"]
+provider = "anthropic"
+context_window = 200000
+
+[models."claude-opus-4-7-20260301".pricing]
+input_per_mtok = 20.0
+output_per_mtok = 100.0
+cache_read_per_mtok = 2.0
+cache_write_per_mtok = 25.0
+
+# changed (was: gpt-4o)
+[models."gpt-4o"]
+provider = "openai"
+context_window = 200000
+
+[models."gpt-4o".pricing]
+input_per_mtok = 2.5
+output_per_mtok = 10.0
+cache_read_per_mtok = 1.25
