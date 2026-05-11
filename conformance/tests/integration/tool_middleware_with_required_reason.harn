@@ -4,7 +4,8 @@
  * 1. Calls without `reason` are short-circuited with status `schema_violation`.
  * 2. Calls with `reason` strip it from the args passed to `next` and surface
  *    it on `audit.summary`.
- * 3. The paired schema_transform makes `reason` a required parameter.
+ * 3. The paired schema_transform makes `reason` a required parameter by default.
+ * 4. Schema-required mode can be relaxed for forgiving native-provider surfaces.
  */
 import { with_required_reason } from "std/llm/tool_middleware"
 
@@ -64,6 +65,7 @@ pipeline default() {
   let entry = mw.schema_transform(tools.tools[0])
   println(contains(entry.parameters.properties.keys(), "reason"))
   println(contains(entry.parameters.required, "reason"))
+  println(entry.parameters.properties.reason.required)
   println(entry.parameters.properties.reason.description)
   // (4) custom field name + audit_key.
   let mw2 = with_required_reason({field: "intent", audit_key: "rationale"})
@@ -71,4 +73,16 @@ pipeline default() {
   println(r3.ok)
   println(r3.audit.rationale)
   println(contains(r3.arguments.keys(), "intent"))
+  // (5) tolerant native-provider surfaces can advertise `reason` without
+  // marking it required. Missing reasons still flow through the audit layer,
+  // but original args are preserved when `strip: false`.
+  let mw3 = with_required_reason({on_missing: "fill_blank", strip: false, schema_required: false})
+  let entry3 = mw3.schema_transform(tools.tools[0])
+  println(contains(entry3.parameters.properties.keys(), "reason"))
+  println(contains(entry3.parameters.required, "reason"))
+  println(entry3.parameters.properties.reason.required)
+  let r4 = mw3.caller(envelope("read", {path: "/tmp/y"}), next)
+  println(r4.ok)
+  println(r4.audit.summary)
+  println(r4.arguments.path)
 }

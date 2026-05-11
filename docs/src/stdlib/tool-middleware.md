@@ -114,13 +114,20 @@ their own right.
 ### `with_required_reason(opts?) -> {schema_transform, caller}`
 
 The originating use case. Returns a paired schema decorator + execution
-caller. Forces every tool call to provide a non-empty `reason` (or a
-custom-named field), strips it before delegating to `next`, and surfaces
-it on `audit.summary`.
+caller. By default it forces every tool call to provide a non-empty
+`reason` (or a custom-named field), strips it before delegating to
+`next`, and surfaces it on `audit.summary`.
 
 Options: `field` (default `"reason"`), `description`, `strip` (bool,
 default true), `audit_key` (default `"summary"`), `min_length` (default
-1), `on_missing` (`"reject"` (default) or `"fill_blank"`).
+1), `on_missing` (`"reject"` (default) or `"fill_blank"`), and
+`schema_required` (bool, default true).
+
+Set `schema_required: false` with `on_missing: "fill_blank"` when a host
+wants the audit field advertised but cannot trust provider-native tool
+schema enforcement. This keeps the real tool arguments intact even when
+the model omits the synthetic `reason` field, while still recording
+`"(no reason given)"` in the audit summary.
 
 ```harn,ignore
 let mw = with_required_reason()

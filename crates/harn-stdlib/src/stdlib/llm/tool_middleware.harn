@@ -321,6 +321,7 @@ pub fn compose_tool_callers(wrappers) {
  *   audit_key:     string   // where to store on `audit` (default "summary")
  *   min_length:    int      // reject calls shorter than this (default 1)
  *   on_missing:    string   // "reject" | "fill_blank" (default "reject")
+ *   schema_required: bool   // mark the reason field required in the tool schema (default true)
  *
  * Apply with:
  *
@@ -336,8 +337,9 @@ pub fn with_required_reason(opts = nil) {
   let audit_key = to_string(cfg?.audit_key ?? "summary")
   let min_length = cfg?.min_length ?? 1
   let on_missing = to_string(cfg?.on_missing ?? "reject")
-  let schema_fragment = {type: "string", description: description}
-  let schema_transform = { entry -> return tool_inject_param(entry, field, schema_fragment, {required: true}) }
+  let schema_required = cfg?.schema_required ?? true
+  let schema_fragment = {type: "string", description: description, required: schema_required}
+  let schema_transform = { entry -> return tool_inject_param(entry, field, schema_fragment, {required: schema_required}) }
   let caller = { call, next ->
     let raw = call.tool_args?[field]
     let value = if type_of(raw) == "string" {
@@ -929,7 +931,7 @@ pub fn with_timeout(opts) {
   let per_tool = __tool_mw_dict(cfg?.per_tool)
   let message = to_string(cfg?.message ?? "tool call exceeded time budget")
   return { call, next ->
-    let limit = if per_tool?[call.tool_name] != nil {
+    let limit = if per_tool[call.tool_name] != nil {
       per_tool[call.tool_name]
     } else {
       default_ms
