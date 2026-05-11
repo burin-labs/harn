@@ -564,9 +564,10 @@ fn sqlite_get(
             return Ok(None);
         }
     };
+    let last_accessed_ms = next_access_ms_for(options, now_ms);
     tx.execute(
         "UPDATE cache_entries SET last_accessed_ms = ?3 WHERE namespace = ?1 AND cache_key = ?2",
-        params![&options.namespace, key, now_ms],
+        params![&options.namespace, key, last_accessed_ms],
     )
     .map_err(sqlite_error)?;
     tx.commit().map_err(sqlite_error)?;
@@ -581,7 +582,8 @@ fn sqlite_put(
 ) -> Result<(), VmError> {
     let mut conn = sqlite_connection(&options.path)?;
     let tx = conn.transaction().map_err(sqlite_error)?;
-    let record = CacheRecord::new(key, value, now_ms, options.ttl_seconds);
+    let mut record = CacheRecord::new(key, value, now_ms, options.ttl_seconds);
+    record.last_accessed_ms = next_access_ms_for(options, now_ms);
     let value_json = serde_json::to_string(&record.value).map_err(|error| {
         VmError::Runtime(format!("cache sqlite: failed to encode value: {error}"))
     })?;
@@ -688,7 +690,7 @@ fn fs_get(
         let _ = std::fs::remove_file(path);
         return Ok(None);
     }
-    record.last_accessed_ms = now_ms;
+    record.last_accessed_ms = next_access_ms_for(options, now_ms);
     write_fs_record(&path, &record)?;
     Ok(Some(record.value))
 }
@@ -700,7 +702,8 @@ fn fs_put(
     now_ms: i64,
 ) -> Result<(), VmError> {
     let path = fs_key_path(options, key);
-    let record = CacheRecord::new(key, value, now_ms, options.ttl_seconds);
+    let mut record = CacheRecord::new(key, value, now_ms, options.ttl_seconds);
+    record.last_accessed_ms = next_access_ms_for(options, now_ms);
     write_fs_record(&path, &record)?;
     fs_evict(options, now_ms)
 }
@@ -802,6 +805,31 @@ fn canonicalize_json_value(value: &serde_json::Value) -> serde_json::Value {
         }
         other => other.clone(),
     }
+}
+
+thread_local! {
+    static ACCESS_CLOCK: RefCell<BTreeMap<String, i64>> =
+        const { RefCell::new(BTreeMap::new()) };
+}
+
+fn access_clock_key(options: &CacheOptions) -> String {
+    format!(
+        "{}:{}:{}",
+        options.backend.name(),
+        options.namespace,
+        options.path.display()
+    )
+}
+
+fn next_access_ms_for(options: &CacheOptions, now_ms: i64) -> i64 {
+    let key = access_clock_key(options);
+    ACCESS_CLOCK.with(|clock| {
+        let mut clock = clock.borrow_mut();
+        let previous = clock.get(&key).copied().unwrap_or(i64::MIN);
+        let next = now_ms.max(previous.saturating_add(1));
+        clock.insert(key, next);
+        next
+    })
 }
 
 // -------------------------------------------------------------------------
@@ -938,6 +966,7 @@ fn reset_metrics_for(options: &CacheOptions) {
 pub fn reset_in_process_cache_state() {
     MEM_STORE.with(|store| store.borrow_mut().clear());
     METRICS.with(|metrics| metrics.borrow_mut().by_namespace.clear());
+    ACCESS_CLOCK.with(|clock| clock.borrow_mut().clear());
 }
 
 #[cfg(test)]

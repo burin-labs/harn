@@ -201,6 +201,14 @@ Budget checks run before schedule and trigger work records. Per-persona
 `daily_usd`, `hourly_usd`, `run_usd`, and `max_tokens` caps block expensive
 work and append a structured budget-exhaustion event with a receipt id.
 
+`harn persona supervision tail` projects `persona.runtime.events` into the
+hosted supervision feed shape as newline-delimited JSON. It accepts
+`--persona <name>` to narrow the multiplexed stream, `--since-event-id <N>` for
+strict greater-than cursor replay, `--limit <N>` for cheap poll loops, and
+`--follow` to wait for new appends. Each line carries `event_id`, `persona_id`,
+`persona_kind`, optional `persona_version`, `actor`, `update_kind`,
+`occurred_at`, and `payload`, matching the hosted `persona/update` frame body.
+
 External trigger metadata is normalized for common continuous-persona sources:
 GitHub PRs and check runs, Linear issues, Slack messages, and generic webhooks.
 For example, GitHub PR metadata with `repository=burin-labs/harn` and

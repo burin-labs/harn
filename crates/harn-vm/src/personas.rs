@@ -265,6 +265,44 @@ pub enum PersonaSupervisionEvent {
     Checkpoint(PersonaCheckpointUpdate),
 }
 
+impl PersonaSupervisionEvent {
+    pub fn update_kind(&self) -> &'static str {
+        match self {
+            Self::QueuePosition(_) => "queue_position",
+            Self::RepairWorkerStatus(_) => "repair_worker_status",
+            Self::Receipt(_) => "receipt",
+            Self::Checkpoint(_) => "checkpoint",
+        }
+    }
+
+    pub fn persona_id(&self) -> &str {
+        match self {
+            Self::QueuePosition(update) => &update.persona_id,
+            Self::RepairWorkerStatus(update) => &update.persona_id,
+            Self::Receipt(update) => &update.persona_id,
+            Self::Checkpoint(update) => &update.persona_id,
+        }
+    }
+
+    pub fn template_ref(&self) -> Option<&str> {
+        match self {
+            Self::QueuePosition(update) => update.template_ref.as_deref(),
+            Self::RepairWorkerStatus(update) => update.template_ref.as_deref(),
+            Self::Receipt(update) => update.template_ref.as_deref(),
+            Self::Checkpoint(update) => update.template_ref.as_deref(),
+        }
+    }
+
+    pub fn occurred_at_ms(&self) -> i64 {
+        match self {
+            Self::QueuePosition(update) => update.occurred_at_ms,
+            Self::RepairWorkerStatus(update) => update.occurred_at_ms,
+            Self::Receipt(update) => update.occurred_at_ms,
+            Self::Checkpoint(update) => update.occurred_at_ms,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PersonaQueuePositionUpdate {
     pub persona_id: String,
@@ -804,7 +842,12 @@ pub async fn report_repair_worker_status(
         status.occurred_at_ms,
     )
     .await?;
-    emit_persona_supervision_sink_event(&PersonaSupervisionEvent::RepairWorkerStatus(status));
+    record_persona_supervision_event(
+        log,
+        &binding.name,
+        PersonaSupervisionEvent::RepairWorkerStatus(status),
+    )
+    .await?;
     Ok(true)
 }
 
@@ -867,7 +910,12 @@ pub async fn restore_persona_checkpoint(
         now_ms,
     )
     .await?;
-    emit_persona_supervision_sink_event(&PersonaSupervisionEvent::Checkpoint(update.clone()));
+    record_persona_supervision_event(
+        log,
+        &binding.name,
+        PersonaSupervisionEvent::Checkpoint(update.clone()),
+    )
+    .await?;
     Ok(PersonaCheckpointRestoreOutcome {
         acked: true,
         update,
@@ -945,8 +993,8 @@ async fn run_for_envelope(
     let pre_queue = queue_snapshot(log, binding, now_ms).await?;
     let receipt = run_for_envelope_inner(log, binding, envelope, cost, now_ms).await?;
     let post_queue = queue_snapshot(log, binding, now_ms).await?;
-    emit_queue_position_supervision(binding, &pre_queue, &post_queue, now_ms);
-    emit_receipt_supervision(binding, &receipt, now_ms);
+    emit_queue_position_supervision(log, binding, &pre_queue, &post_queue, now_ms).await?;
+    emit_receipt_supervision(log, binding, &receipt, now_ms).await?;
     Ok(receipt)
 }
 
@@ -1645,6 +1693,25 @@ fn emit_persona_supervision_sink_event(event: &PersonaSupervisionEvent) {
     }
 }
 
+async fn record_persona_supervision_event(
+    log: &Arc<AnyEventLog>,
+    persona: &str,
+    event: PersonaSupervisionEvent,
+) -> Result<(), String> {
+    let update_kind = event.update_kind();
+    let occurred_at_ms = event.occurred_at_ms();
+    append_persona_event(
+        log,
+        persona,
+        &format!("persona.supervision.{update_kind}"),
+        serde_json::to_value(&event).map_err(|error| error.to_string())?,
+        occurred_at_ms,
+    )
+    .await?;
+    emit_persona_supervision_sink_event(&event);
+    Ok(())
+}
+
 #[derive(Clone, Debug)]
 struct QueueEntry {
     work_key: String,
@@ -1667,12 +1734,13 @@ async fn queue_snapshot(
         .collect())
 }
 
-fn emit_queue_position_supervision(
+async fn emit_queue_position_supervision(
+    log: &Arc<AnyEventLog>,
     binding: &PersonaRuntimeBinding,
     before: &[QueueEntry],
     after: &[QueueEntry],
     now_ms: i64,
-) {
+) -> Result<(), String> {
     use std::collections::HashSet;
     let before_keys: HashSet<&str> = before.iter().map(|e| e.work_key.as_str()).collect();
     let after_keys: HashSet<&str> = after.iter().map(|e| e.work_key.as_str()).collect();
@@ -1680,8 +1748,10 @@ fn emit_queue_position_supervision(
 
     for (index, entry) in after.iter().enumerate() {
         if !before_keys.contains(entry.work_key.as_str()) {
-            emit_persona_supervision_sink_event(&PersonaSupervisionEvent::QueuePosition(
-                PersonaQueuePositionUpdate {
+            record_persona_supervision_event(
+                log,
+                &binding.name,
+                PersonaSupervisionEvent::QueuePosition(PersonaQueuePositionUpdate {
                     persona_id: binding.name.clone(),
                     template_ref: binding.template_ref.clone(),
                     work_key: entry.work_key.clone(),
@@ -1689,14 +1759,17 @@ fn emit_queue_position_supervision(
                     position: (index + 1) as i64,
                     queued_at_ms: entry.queued_at_ms,
                     occurred_at_ms: now_ms,
-                },
-            ));
+                }),
+            )
+            .await?;
         }
     }
     for entry in before {
         if !after_keys.contains(entry.work_key.as_str()) {
-            emit_persona_supervision_sink_event(&PersonaSupervisionEvent::QueuePosition(
-                PersonaQueuePositionUpdate {
+            record_persona_supervision_event(
+                log,
+                &binding.name,
+                PersonaSupervisionEvent::QueuePosition(PersonaQueuePositionUpdate {
                     persona_id: binding.name.clone(),
                     template_ref: binding.template_ref.clone(),
                     work_key: entry.work_key.clone(),
@@ -1704,23 +1777,31 @@ fn emit_queue_position_supervision(
                     position: 0,
                     queued_at_ms: entry.queued_at_ms,
                     occurred_at_ms: now_ms,
-                },
-            ));
+                }),
+            )
+            .await?;
         }
     }
+    Ok(())
 }
 
-fn emit_receipt_supervision(
+async fn emit_receipt_supervision(
+    log: &Arc<AnyEventLog>,
     binding: &PersonaRuntimeBinding,
     receipt: &PersonaRunReceipt,
     now_ms: i64,
-) {
-    emit_persona_supervision_sink_event(&PersonaSupervisionEvent::Receipt(PersonaReceiptUpdate {
-        persona_id: binding.name.clone(),
-        template_ref: binding.template_ref.clone(),
-        receipt: receipt.clone(),
-        occurred_at_ms: now_ms,
-    }));
+) -> Result<(), String> {
+    record_persona_supervision_event(
+        log,
+        &binding.name,
+        PersonaSupervisionEvent::Receipt(PersonaReceiptUpdate {
+            persona_id: binding.name.clone(),
+            template_ref: binding.template_ref.clone(),
+            receipt: receipt.clone(),
+            occurred_at_ms: now_ms,
+        }),
+    )
+    .await
 }
 
 fn run_value_metadata(
@@ -2360,6 +2441,24 @@ mod tests {
             assert_eq!(event.persona_id, binding.name);
             assert_eq!(event.template_ref.as_deref(), Some("software_factory@v0"));
         }
+        let persisted_kinds: Vec<_> = read_persona_events(&log, &binding.name)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(_, event)| event.kind)
+            .collect();
+        assert!(
+            persisted_kinds
+                .iter()
+                .any(|kind| kind == "persona.supervision.queue_position"),
+            "queue_position supervision events should be durable: {persisted_kinds:?}"
+        );
+        assert!(
+            persisted_kinds
+                .iter()
+                .any(|kind| kind == "persona.supervision.receipt"),
+            "receipt supervision events should be durable: {persisted_kinds:?}"
+        );
     }
 
     #[tokio::test]
