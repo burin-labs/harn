@@ -46,6 +46,78 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::optional("options", TY_DICT_OR_NIL)],
         TY_NIL,
     ),
+    BuiltinSignature::variadic("__calendar_add", &[Param::new("args", TY_ANY)], TY_NUMBER),
+    BuiltinSignature::variadic(
+        "__calendar_add_business_days",
+        &[Param::new("args", TY_ANY)],
+        TY_NUMBER,
+    ),
+    BuiltinSignature::variadic(
+        "__calendar_boundary",
+        &[Param::new("args", TY_ANY)],
+        TY_NUMBER,
+    ),
+    BuiltinSignature::variadic(
+        "__calendar_business_days_between",
+        &[Param::new("args", TY_ANY)],
+        TY_INT,
+    ),
+    BuiltinSignature::variadic(
+        "__calendar_business_window",
+        &[Param::new("args", TY_ANY)],
+        TY_DICT,
+    ),
+    BuiltinSignature::variadic(
+        "__calendar_countries",
+        &[Param::new("args", TY_ANY)],
+        TY_LIST,
+    ),
+    BuiltinSignature::variadic(
+        "__calendar_country_info",
+        &[Param::new("args", TY_ANY)],
+        TY_ANY,
+    ),
+    BuiltinSignature::variadic(
+        "__calendar_date_range",
+        &[Param::new("args", TY_ANY)],
+        TY_LIST,
+    ),
+    BuiltinSignature::variadic(
+        "__calendar_from_local",
+        &[Param::new("args", TY_ANY)],
+        TY_NUMBER,
+    ),
+    BuiltinSignature::variadic(
+        "__calendar_holidays",
+        &[Param::new("args", TY_ANY)],
+        TY_LIST,
+    ),
+    BuiltinSignature::variadic(
+        "__calendar_is_business_day",
+        &[Param::new("args", TY_ANY)],
+        TY_BOOL,
+    ),
+    BuiltinSignature::variadic(
+        "__calendar_is_holiday",
+        &[Param::new("args", TY_ANY)],
+        TY_BOOL,
+    ),
+    BuiltinSignature::variadic(
+        "__calendar_next_business_day",
+        &[Param::new("args", TY_ANY)],
+        TY_NUMBER,
+    ),
+    BuiltinSignature::variadic(
+        "__calendar_next_weekday",
+        &[Param::new("args", TY_ANY)],
+        TY_NUMBER,
+    ),
+    BuiltinSignature::variadic("__calendar_parts", &[Param::new("args", TY_ANY)], TY_DICT),
+    BuiltinSignature::variadic(
+        "__calendar_supported_holiday_calendars",
+        &[Param::new("args", TY_ANY)],
+        TY_LIST,
+    ),
     BuiltinSignature::simple("__dict_filter_nil", &[Param::new("d", TY_DICT)], TY_DICT),
     BuiltinSignature::simple(
         "__dict_merge",

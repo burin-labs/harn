@@ -1,0 +1,17 @@
+import {
+  countries,
+  country_info,
+  country_timezones,
+  default_timezone_for_country,
+} from "std/calendar"
+
+pipeline default() {
+  let us = country_info("us")
+  println(us.name)
+  println(us.default_timezone == nil)
+  println(country_timezones("US")[0])
+  println(default_timezone_for_country("GB"))
+  println(default_timezone_for_country("US") == nil)
+  println(country_info("ZZ") == nil)
+  println(countries().find({ country -> country.code == "JP" }).currency_code)
+}

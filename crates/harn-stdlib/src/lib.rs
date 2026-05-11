@@ -142,6 +142,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_config.harn"),
     },
     StdlibSource {
+        module: "calendar",
+        source: include_str!("stdlib/stdlib_calendar.harn"),
+    },
+    StdlibSource {
         module: "agents",
         source: include_str!("stdlib/stdlib_agents.harn"),
     },

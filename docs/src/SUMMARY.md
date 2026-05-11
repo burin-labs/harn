@@ -42,6 +42,7 @@
 - [Long-running tools](./long-running-tools.md)
 - [Tool surface validation](./tool-surface-validation.md)
 - [Cache stdlib](./stdlib/cache.md)
+- [Calendar stdlib](./stdlib/calendar.md)
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Current session builtin](./stdlib/agent_session_current_id.md)
 - [Monitor stdlib](./stdlib/monitors.md)
