@@ -946,7 +946,7 @@ pipeline summarize() {
 | `websocket_server_close(server)` | server: string or dict | bool | Stop a WebSocket server handle |
 
 `http_get/post/put/patch/delete/request/session_request` return
-`{status: int, headers: dict, body: string, ok: bool}`.
+`{status: int, headers: dict, body: string, ok: bool, final_url: string}`.
 `http_download` returns `{bytes_written, status, headers, ok}`.
 Options: `timeout_ms` (alias `timeout`, both in ms), `total_timeout_ms`,
 `connect_timeout_ms`, `read_timeout_ms`, `retry: {max, backoff_ms}`,
@@ -1002,6 +1002,54 @@ returned handle can be inspected with `http_stream_info`, drained with
 repeated `http_stream_read(stream, max_bytes)`, and closed explicitly with
 `http_stream_close`. Reads return `bytes`; once the stream is exhausted they
 return `nil`.
+
+### std/web
+
+Import deterministic web-source helpers with `import { ... } from "std/web"`.
+They reuse the normal Harn HTTP stack, so egress policy, proxies, TLS options,
+sessions, retries, and `http_mock` apply exactly as they do for
+`http_request`. Sensitive request headers and query params remain governed by
+the HTTP mock redaction rules; `std/web` adds source provenance but does not
+log response bodies by itself.
+
+| Function | Args | Returns | Description |
+|---|---|---|---|
+| `web_fetch(url, options?)` | url: string, options: dict | dict | Fetch a source and return `{ok, status, body, headers, content_type, etag, last_modified, fetched_at, cache_status, source_url, final_url, not_modified}` |
+| `web_parse_html(html, source_url?)` | html: string, source_url: string or nil | dict | Extract `{title, meta, canonical_url, links, tables, json_ld, text}` from deterministic HTTP-fetched HTML |
+| `web_resolve_url(base_url, href)` | base_url: string, href: string | string or nil | Resolve a relative URL reference against a source URL |
+| `web_origin_url(url, path?)` | url: string, path: string | string | Return the URL origin with a replacement path and no query or fragment. Relative paths are rooted at `/` |
+| `robots_allowed(url, user_agent?, options?)` | url: string, user_agent: string, options: dict | bool | Check robots.txt using mocked or real HTTP. Missing/non-2xx robots files allow by default |
+| `sitemap_urls(base_url, options?)` | base_url: string, options: dict | list of strings | Discover URLs from robots-advertised sitemaps or `/sitemap.xml` |
+| `html_title/html_meta/html_links/html_tables/html_json_ld/html_text` | html: string, source_url?: string | value | Convenience projections over `web_parse_html` |
+
+`web_fetch` accepts normal `http_request` options directly, or an explicit
+`http_options` dict. Passing `store` from `std/cache` enables recurring
+conditional fetches: cached `ETag` and `Last-Modified` values become
+`If-None-Match` and `If-Modified-Since` request headers, and a 304 response
+returns the cached body with `cache_status: "not_modified"`. Pass `previous`
+to use a prior envelope without a cache store, `cache_key` to override the
+cache key, `conditional: false` to suppress conditional headers, and
+`fetched_at` to pin deterministic fixture timestamps. The default cache key is
+method plus the effective request URL after `query` options are applied, so
+distinct query variants do not share a cached envelope.
+
+`robots_allowed` implements a deterministic robots subset for source-ingest
+workflows: exact user-agent groups take precedence over wildcard groups,
+multiple matching groups at the same specificity are combined, and
+Allow/Disallow decisions use longest-prefix matching with Allow winning ties.
+
+```harn
+import { mem_cache } from "std/cache"
+import { web_fetch, web_parse_html, robots_allowed, sitemap_urls } from "std/web"
+
+let store = mem_cache({namespace: "weekly-doc-monitor"})
+let page = web_fetch("https://docs.example.com/models", {store: store})
+if page.cache_status != "not_modified" && robots_allowed(page.final_url) {
+  let parsed = web_parse_html(page.body, page.final_url)
+  println(parsed.title)
+  println(sitemap_urls(page.final_url))
+}
+```
 
 HTTP server TLS helper builtins only describe listener/security policy. Runtime
 hosts such as `harn serve` consume the same modes: `plain` for deliberate

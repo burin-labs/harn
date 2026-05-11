@@ -115,11 +115,20 @@ pub(super) fn clear_http_streams() {
     HTTP_STREAMS.with(|streams| streams.borrow_mut().clear());
 }
 
-fn build_http_response(status: i64, headers: BTreeMap<String, VmValue>, body: String) -> VmValue {
+fn build_http_response(
+    status: i64,
+    headers: BTreeMap<String, VmValue>,
+    body: String,
+    final_url: &str,
+) -> VmValue {
     let mut result = BTreeMap::new();
     result.insert("status".to_string(), VmValue::Int(status));
     result.insert("headers".to_string(), VmValue::Dict(Rc::new(headers)));
     result.insert("body".to_string(), VmValue::String(Rc::from(body)));
+    result.insert(
+        "final_url".to_string(),
+        VmValue::String(Rc::from(final_url)),
+    );
     result.insert(
         "ok".to_string(),
         VmValue::Bool((200..300).contains(&(status as u16))),
@@ -1008,6 +1017,7 @@ async fn vm_execute_http_request_with_client(
                 mock_response.status,
                 mock_response.headers,
                 mock_response.body,
+                &final_url,
             ));
         }
 
@@ -1042,11 +1052,17 @@ async fn vm_execute_http_request_with_client(
 
                 let resp_headers = response_headers(response.headers());
 
+                let response_url = response.url().to_string();
                 let body_text = response
                     .text()
                     .await
                     .map_err(|e| vm_error(format!("http: failed to read response body: {e}")))?;
-                return Ok(build_http_response(status as i64, resp_headers, body_text));
+                return Ok(build_http_response(
+                    status as i64,
+                    resp_headers,
+                    body_text,
+                    &response_url,
+                ));
             }
             Err(e) => {
                 if should_retry_transport(config, &parts.method, &e, attempt) {

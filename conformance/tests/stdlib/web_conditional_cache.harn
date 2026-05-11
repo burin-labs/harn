@@ -1,0 +1,78 @@
+import { mem_cache } from "std/cache"
+import { web_fetch } from "std/web"
+
+pipeline test(task) {
+  http_mock_clear()
+  http_mock(
+    "GET",
+    "https://example.com/catalog",
+    {
+      responses: [
+        {
+          status: 200,
+          headers: {etag: "\"catalog-v1\"", "last-modified": "Mon, 11 May 2026 00:00:00 GMT"},
+          body: "fresh",
+        },
+        {status: 304, headers: {etag: "\"catalog-v1\""}, body: ""},
+      ],
+    },
+  )
+  http_mock(
+    "GET",
+    "https://example.com/item?id=1",
+    {
+      responses: [
+        {status: 200, headers: {etag: "\"item-1\""}, body: "one"},
+        {status: 304, headers: {etag: "\"item-1\""}, body: ""},
+      ],
+    },
+  )
+  http_mock(
+    "GET",
+    "https://example.com/item?id=2",
+    {status: 200, headers: {etag: "\"item-2\""}, body: "two"},
+  )
+  let store = mem_cache({namespace: "web-conditional-cache"})
+  let first = web_fetch(
+    "https://example.com/catalog",
+    {
+      store: store,
+      http_options: {headers: {Accept: "text/html"}},
+      headers: {"X-Source": "fixture"},
+      fetched_at: "t1",
+    },
+  )
+  let second = web_fetch(
+    "https://example.com/catalog",
+    {
+      store: store,
+      http_options: {headers: {Accept: "text/html"}},
+      headers: {"X-Source": "fixture"},
+      fetched_at: "t2",
+    },
+  )
+  assert_eq(first.cache_status, "miss")
+  assert_eq(second.cache_status, "not_modified")
+  assert_eq(second.status, 304)
+  assert_eq(second.ok, true)
+  assert_eq(second.body, "fresh")
+  assert_eq(second.etag, "\"catalog-v1\"")
+  assert_eq(second.fetched_at, "t2")
+  let calls = http_mock_calls({redact_sensitive: false})
+  assert_eq(calls[1].headers.accept, "text/html")
+  assert_eq(calls[1].headers["x-source"], "fixture")
+  assert_eq(calls[1].headers["if-none-match"], "\"catalog-v1\"")
+  assert_eq(calls[1].headers["if-modified-since"], "Mon, 11 May 2026 00:00:00 GMT")
+  let item_one = web_fetch("https://example.com/item", {store: store, query: {id: 1}})
+  let item_two = web_fetch("https://example.com/item", {store: store, query: {id: 2}})
+  let item_one_again = web_fetch("https://example.com/item", {store: store, query: {id: 1}})
+  assert_eq(item_one.body, "one")
+  assert_eq(item_two.cache_status, "miss")
+  assert_eq(item_two.body, "two")
+  assert_eq(item_one_again.cache_status, "not_modified")
+  assert_eq(item_one_again.body, "one")
+  let query_calls = http_mock_calls({redact_sensitive: false})
+  assert_eq(query_calls[3].url, "https://example.com/item?id=2")
+  assert_eq(query_calls[3].headers["if-none-match"], nil)
+  println("web_conditional_cache_ok")
+}

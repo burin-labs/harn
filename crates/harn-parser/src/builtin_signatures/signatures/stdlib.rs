@@ -121,6 +121,30 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         Ty::Union(&[TY_DICT, TY_LIST]),
     ),
+    BuiltinSignature::simple(
+        "__web_extract_html",
+        &[
+            Param::new("html", TY_STRING),
+            Param::optional("source_url", TY_STRING_OR_NIL),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "__web_origin_url",
+        &[
+            Param::new("url", TY_STRING),
+            Param::optional("path", TY_STRING),
+        ],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "__web_resolve_url",
+        &[
+            Param::new("base_url", TY_STRING),
+            Param::new("href", TY_STRING),
+        ],
+        TY_STRING_OR_NIL,
+    ),
     BuiltinSignature::simple("abs", &[Param::new("value", TY_NUMBER)], TY_NUMBER),
     BuiltinSignature::simple("acos", &[Param::new("value", TY_NUMBER)], TY_FLOAT),
     BuiltinSignature::simple("addr_of", &[Param::new("value", TY_ANY)], TY_STRING),

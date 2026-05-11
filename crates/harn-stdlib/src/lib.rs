@@ -62,6 +62,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_tools.harn"),
     },
     StdlibSource {
+        module: "web",
+        source: include_str!("stdlib/stdlib_web.harn"),
+    },
+    StdlibSource {
         module: "graphql",
         source: include_str!("stdlib/stdlib_graphql.harn"),
     },
