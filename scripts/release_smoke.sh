@@ -56,11 +56,31 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 
 FAILED=0
 
+windows_taskkill() {
+  local timeout_seconds=5
+  taskkill "$@" >/dev/null 2>&1 &
+  local taskkill_pid=$!
+  local elapsed=0
+  while kill -0 "$taskkill_pid" 2>/dev/null; do
+    if [[ "$elapsed" -ge "$timeout_seconds" ]]; then
+      kill "$taskkill_pid" 2>/dev/null || true
+      echo "release-smoke ($PLATFORM): taskkill did not exit after ${timeout_seconds}s"
+      return 1
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  wait "$taskkill_pid" 2>/dev/null || true
+}
+
 terminate_pid_tree() {
   local pid="$1"
   if [[ "$PLATFORM" == "windows" ]]; then
-    taskkill //F //T //PID "$pid" >/dev/null 2>&1 || true
+    # Git Bash process IDs and native Windows process IDs do not always
+    # describe the same tree. Try both cleanup paths, but keep taskkill
+    # bounded so timeout handling cannot consume the whole Actions step.
     kill "$pid" 2>/dev/null || true
+    windows_taskkill //F //T //PID "$pid" || true
     sleep 1
     kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
   else
