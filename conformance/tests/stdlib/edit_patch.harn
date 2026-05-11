@@ -1,0 +1,53 @@
+import {
+  edit_apply_old_new_patch,
+  edit_splice_lines,
+  edit_validate_changed_regions,
+} from "std/edit"
+
+pipeline default() {
+  let exact = edit_apply_old_new_patch("alpha\n  color: red;\nomega\n", "color: red;", "color: blue;")
+  println(exact.ok)
+  println(exact.match_kind)
+  println(exact.start_line)
+  println(exact.changed_regions[0].start_line)
+  println(exact.before_sha256.starts_with("sha256:"))
+  let ambiguous = edit_apply_old_new_patch("x\nx\n", "x", "y")
+  println(ambiguous.ok)
+  println(ambiguous.error_code)
+  println(ambiguous.candidate_count)
+  let whitespace_only = edit_apply_old_new_patch("let x = 1\n", "let x = 1", "let   x = 1")
+  println(whitespace_only.ok)
+  println(whitespace_only.error_code)
+  let structural = edit_apply_old_new_patch(
+    "function f() {\n  return 1\n}\n",
+    "function f(){\nreturn 1\n}",
+    "function f() {\n  return 2\n}",
+    {match: "structural"},
+  )
+  println(structural.ok)
+  println(structural.match_kind)
+  println(structural.patched.contains("return 2"))
+  let lazy = edit_apply_old_new_patch("a\nb\nc", "b", "... unchanged ...")
+  println(lazy.ok)
+  println(lazy.error_code)
+  let spliced = edit_splice_lines("a\nb\nc", 1, 2, "B")
+  println(spliced.ok)
+  println(spliced.patched)
+  let inserted = edit_splice_lines("a\nc", 1, 1, "b")
+  println(inserted.ok)
+  println(inserted.patched)
+  let deleted = edit_splice_lines("a\nb\nc", 1, 2, "")
+  println(deleted.ok)
+  println(deleted.patched)
+  let line_delete = edit_apply_old_new_patch("a\n  b\nc", "b", "", {match: "line"})
+  println(line_delete.ok)
+  println(line_delete.patched)
+  let region_report = edit_validate_changed_regions("a\nb\nc", "a\nB\nc", [{start_line: 1, end_line: 1}])
+  println(region_report.ok)
+  let multi_region_report = edit_validate_changed_regions(
+    "a\nb\nc\nd",
+    "A\nb\nC\nd",
+    [{start_line: 0, end_line: 0}, {start_line: 2, end_line: 2}],
+  )
+  println(multi_region_report.ok)
+}

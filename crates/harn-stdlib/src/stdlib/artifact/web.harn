@@ -1,0 +1,461 @@
+/*
+ * std/artifact/web - safe helpers for small HTML/CSS/JS artifacts.
+ */
+import { edit_apply_old_new_patch, edit_validate_changed_regions } from "std/edit"
+
+fn __web_sha256(text) {
+  return "sha256:" + sha256(text ?? "")
+}
+
+fn __web_matches(pattern, text) {
+  return regex_match(pattern, text ?? "") ?? []
+}
+
+fn __web_tag_fragments(html, tag) {
+  let pattern = "(?is)<" + tag + "\\b([^>]*)>(.*?)</" + tag + ">"
+  var fragments = []
+  var index = 0
+  for capture in regex_captures(pattern, html ?? "") {
+    fragments = fragments
+      + [
+      {
+        index: index,
+        tag: tag,
+        attributes: capture.groups[0] ?? "",
+        content: capture.groups[1] ?? "",
+        raw: capture.match,
+      },
+    ]
+    index = index + 1
+  }
+  return fragments
+}
+
+fn __web_tag_balance_errors(html, tag) {
+  let opens = len(__web_matches("(?is)<" + tag + "\\b", html))
+  let closes = len(__web_matches("(?is)</" + tag + ">", html))
+  if opens > closes {
+    return [
+      {
+        severity: "error",
+        code: "unclosed_" + tag + "_tag",
+        message: "artifact contains an unclosed <" + tag + "> tag",
+        fragment: tag,
+      },
+    ]
+  }
+  if closes > opens {
+    return [
+      {
+        severity: "error",
+        code: "unmatched_" + tag + "_close_tag",
+        message: "artifact contains an unmatched </" + tag + "> tag",
+        fragment: tag,
+      },
+    ]
+  }
+  return []
+}
+
+fn __web_unique_codes(items) {
+  var codes = []
+  for item in items ?? [] {
+    if item?.code != nil && !codes.contains(item.code) {
+      codes = codes + [item.code]
+    }
+  }
+  return codes
+}
+
+fn __web_error(code, message, fragment = nil, matches = nil) {
+  return {severity: "error", code: code, message: message, fragment: fragment, matches: matches ?? []}
+}
+
+fn __web_warning(code, message, fragment = nil) {
+  return {severity: "warning", code: code, message: message, fragment: fragment}
+}
+
+fn __web_pattern_errors(text, patterns) {
+  var errors = []
+  for pattern in patterns {
+    let matches = __web_matches(pattern.regex, text)
+    if len(matches) > 0 {
+      errors = errors + [__web_error(pattern.code, pattern.message, pattern.fragment, matches)]
+    }
+  }
+  return errors
+}
+
+fn __web_fragment_pattern_errors(fragments, patterns) {
+  var errors = []
+  for fragment in fragments ?? [] {
+    for pattern in patterns {
+      let matches = __web_matches(pattern.regex, fragment.content)
+      if len(matches) > 0 {
+        errors = errors
+          + [
+          __web_error(
+            pattern.code,
+            pattern.message,
+            fragment.tag + "[" + to_string(fragment.index) + "]",
+            matches,
+          ),
+        ]
+      }
+    }
+  }
+  return errors
+}
+
+fn __web_secret_errors(html) {
+  var errors = []
+  for finding in secret_scan(html ?? "") {
+    let title = finding?.title ?? finding?.detector ?? "secret"
+    errors = errors
+      + [
+      {
+        severity: "error",
+        code: "inline_secret",
+        message: "artifact contains a secret-like value: " + title,
+        fragment: "document",
+        finding: finding,
+      },
+    ]
+  }
+  return errors
+}
+
+fn __web_fragment_kind(html, old_text) {
+  let extracted = web_artifact_extract(html)
+  for style in extracted.styles {
+    if contains(style.content, old_text ?? "") {
+      return "style"
+    }
+  }
+  for script in extracted.scripts {
+    if contains(script.content, old_text ?? "") {
+      return "script"
+    }
+  }
+  if contains(extracted.body, old_text ?? "") {
+    return "body"
+  }
+  return "html"
+}
+
+fn __web_annotate_regions(regions, kind) {
+  return (regions ?? []).map({ region -> region.merge({kind: kind}) })
+}
+
+/** Extract script, style, and body fragments from a small HTML artifact. */
+pub fn web_artifact_extract(html) {
+  let source = html ?? ""
+  let scripts = __web_tag_fragments(source, "script")
+  let styles = __web_tag_fragments(source, "style")
+  let body_captures = regex_captures("(?is)<body\\b([^>]*)>(.*?)</body>", source)
+  let body_attributes = if len(body_captures) > 0 {
+    body_captures[0].groups[0] ?? ""
+  } else {
+    ""
+  }
+  let body = if len(body_captures) > 0 {
+    body_captures[0].groups[1] ?? ""
+  } else {
+    source
+  }
+  let errors = __web_tag_balance_errors(source, "script")
+    + __web_tag_balance_errors(source, "style")
+    + __web_tag_balance_errors(source, "body")
+  return {
+    scripts: scripts,
+    styles: styles,
+    body: body,
+    body_attributes: body_attributes,
+    errors: errors,
+    warnings: [],
+    provenance: {module: "std/artifact/web", helper: "web_artifact_extract", source_sha256: __web_sha256(source)},
+  }
+}
+
+/** Create a plain-text fallback for hosts that cannot render the artifact. */
+pub fn web_artifact_text_fallback(html, options = nil) {
+  let without_scripts = regex_replace("(?is)<script\\b[^>]*>.*?</script>", " ", html ?? "")
+  let without_styles = regex_replace("(?is)<style\\b[^>]*>.*?</style>", " ", without_scripts)
+  let without_head = regex_replace("(?is)<head\\b[^>]*>.*?</head>", " ", without_styles)
+  let without_tags = regex_replace("(?is)<[^>]+>", " ", without_head)
+  let decoded = without_tags
+    .replace("&nbsp;", " ")
+    .replace("&amp;", "&")
+    .replace("&lt;", "<")
+    .replace(
+    "&gt;",
+    ">",
+  )
+    .replace(
+    "&quot;",
+    "\"",
+  )
+    .replace(
+    "&#39;",
+    "'",
+  )
+  let fallback = trim(regex_replace("\\s+", " ", decoded))
+  let max_chars = options?.max_chars ?? nil
+  if max_chars != nil && len(fallback) > max_chars {
+    return substring(fallback, 0, max_chars)
+  }
+  return fallback
+}
+
+/**
+ * Validate a small HTML/CSS/JS artifact for host approval UIs.
+ *
+ * The report is machine-readable and includes fragment summaries, warnings,
+ * errors, stable hashes, and a text fallback.
+ */
+pub fn web_artifact_validate(html, options = nil) {
+  let source = html ?? ""
+  let opts = options ?? {}
+  let extracted = web_artifact_extract(source)
+  var errors = extracted.errors
+  var warnings = extracted.warnings
+  if len(trim(source)) == 0 {
+    errors = errors + [__web_error("empty_artifact", "artifact HTML must not be empty", "document")]
+  }
+  if !(opts?.allow_network ?? false) {
+    errors = errors
+      + __web_fragment_pattern_errors(
+      extracted.scripts,
+      [
+        {
+          code: "network_call",
+          fragment: "script",
+          regex: "\\bfetch\\s*\\(",
+          message: "artifact contains a fetch() network call",
+        },
+        {
+          code: "network_call",
+          fragment: "script",
+          regex: "\\bXMLHttpRequest\\b",
+          message: "artifact contains an XMLHttpRequest network call",
+        },
+        {
+          code: "network_call",
+          fragment: "script",
+          regex: "\\bnavigator\\.sendBeacon\\s*\\(",
+          message: "artifact contains a sendBeacon network call",
+        },
+        {
+          code: "network_call",
+          fragment: "script",
+          regex: "\\bWebSocket\\s*\\(",
+          message: "artifact contains a WebSocket network call",
+        },
+        {
+          code: "network_call",
+          fragment: "script",
+          regex: "\\bEventSource\\s*\\(",
+          message: "artifact contains an EventSource network call",
+        },
+        {
+          code: "network_call",
+          fragment: "script",
+          regex: "\\bimport\\s*\\(",
+          message: "artifact contains dynamic import()",
+        },
+      ],
+    )
+    errors = errors
+      + __web_pattern_errors(
+      source,
+      [
+        {
+          code: "network_call",
+          fragment: "html",
+          regex: "(?is)<(?:script|link|img|iframe)\\b[^>]*(?:src|href)\\s*=\\s*['\"]?(?:https?://|//)",
+          message: "artifact references an external network resource",
+        },
+      ],
+    )
+    errors = errors
+      + __web_fragment_pattern_errors(
+      extracted.styles,
+      [
+        {
+          code: "network_call",
+          fragment: "style",
+          regex: "(?is)url\\(\\s*['\"]?(?:https?://|//)",
+          message: "artifact CSS references an external network resource",
+        },
+        {
+          code: "network_call",
+          fragment: "style",
+          regex: "(?is)@import\\s+(?:url\\()?\\s*['\"]?(?:https?://|//)",
+          message: "artifact CSS imports an external network resource",
+        },
+      ],
+    )
+  }
+  errors = errors
+    + __web_fragment_pattern_errors(
+    extracted.scripts,
+    [
+      {
+        code: "host_bridge_call",
+        fragment: "script",
+        regex: "\\bwindow\\.parent\\b",
+        message: "artifact reaches across the iframe parent boundary",
+      },
+      {
+        code: "host_bridge_call",
+        fragment: "script",
+        regex: "\\bparent\\.postMessage\\s*\\(",
+        message: "artifact calls parent.postMessage",
+      },
+      {
+        code: "host_bridge_call",
+        fragment: "script",
+        regex: "\\bacquireVsCodeApi\\s*\\(",
+        message: "artifact calls a host bridge API",
+      },
+      {
+        code: "host_bridge_call",
+        fragment: "script",
+        regex: "\\bwindow\\.webkit\\.messageHandlers\\b",
+        message: "artifact calls a native WebKit message handler",
+      },
+      {
+        code: "host_bridge_call",
+        fragment: "script",
+        regex: "\\b(hostBridge|harnHost)\\b",
+        message: "artifact calls a forbidden host bridge object",
+      },
+    ],
+  )
+  errors = errors
+    + __web_fragment_pattern_errors(
+    extracted.scripts,
+    [
+      {
+        code: "dangerous_navigation",
+        fragment: "script",
+        regex: "\\blocation\\.(href|assign|replace)\\b",
+        message: "artifact mutates browser location",
+      },
+      {
+        code: "dangerous_navigation",
+        fragment: "script",
+        regex: "\\bwindow\\.open\\s*\\(",
+        message: "artifact opens a new browsing context",
+      },
+      {
+        code: "dangerous_navigation",
+        fragment: "script",
+        regex: "\\btop\\.location\\b",
+        message: "artifact navigates the top-level browsing context",
+      },
+    ],
+  )
+  errors = errors
+    + __web_pattern_errors(
+    source,
+    [
+      {
+        code: "dangerous_navigation",
+        fragment: "html",
+        regex: "(?is)<meta\\b[^>]*http-equiv\\s*=\\s*['\"]?refresh",
+        message: "artifact contains a meta refresh navigation",
+      },
+    ],
+  )
+  errors = errors + __web_secret_errors(source)
+  if len(extracted.scripts) == 0 {
+    warnings = warnings + [__web_warning("no_script_fragment", "artifact has no <script> fragment", "script")]
+  }
+  if len(extracted.styles) == 0 {
+    warnings = warnings + [__web_warning("no_style_fragment", "artifact has no <style> fragment", "style")]
+  }
+  let error_codes = __web_unique_codes(errors)
+  let warning_codes = __web_unique_codes(warnings)
+  return {
+    ok: len(errors) == 0,
+    source_sha256: __web_sha256(source),
+    fragments: {
+      scripts: extracted.scripts,
+      styles: extracted.styles,
+      body: extracted.body,
+      body_attributes: extracted.body_attributes,
+    },
+    errors: errors,
+    warnings: warnings,
+    error_codes: error_codes,
+    warning_codes: warning_codes,
+    text_fallback: web_artifact_text_fallback(source, opts?.fallback ?? {}),
+    provenance: {module: "std/artifact/web", helper: "web_artifact_validate", source_sha256: __web_sha256(source)},
+  }
+}
+
+/** Apply an old/new patch to an artifact, then validate the resulting HTML. */
+pub fn web_artifact_apply_patch(html, old_text, new_text, options = nil) {
+  let source = html ?? ""
+  let opts = options ?? {}
+  let patch_opts = opts?.patch ?? opts
+  let patch = edit_apply_old_new_patch(source, old_text ?? "", new_text ?? "", patch_opts)
+  if !(patch?.ok ?? false) {
+    let error = __web_error(patch.error_code, patch.message, "patch")
+    return {
+      ok: false,
+      patched: source,
+      patch: patch,
+      changed_regions: [],
+      validation: nil,
+      errors: [error],
+      warnings: [],
+      error_codes: [patch.error_code],
+      warning_codes: [],
+      text_fallback: web_artifact_text_fallback(source, opts?.fallback ?? {}),
+      provenance: {
+        module: "std/artifact/web",
+        helper: "web_artifact_apply_patch",
+        before_sha256: __web_sha256(source),
+        after_sha256: __web_sha256(source),
+        caller: opts?.provenance,
+      },
+    }
+  }
+  let validation = web_artifact_validate(patch.patched, opts?.validation ?? opts)
+  let expected = patch.expected_region.merge({kind: __web_fragment_kind(source, old_text ?? "")})
+  let region_report = edit_validate_changed_regions(source, patch.patched, [expected], {provenance: opts?.provenance})
+  var errors = validation.errors
+  if !region_report.ok {
+    errors = errors + region_report.errors
+  }
+  let warnings = validation.warnings + patch.warnings + region_report.warnings
+  let changed_regions = __web_annotate_regions(patch.changed_regions, expected.kind)
+  let before_hash = __web_sha256(source)
+  let after_hash = __web_sha256(patch.patched)
+  return {
+    ok: patch.ok && validation.ok && region_report.ok,
+    patched: patch.patched,
+    html: patch.patched,
+    patch: patch,
+    validation: validation,
+    region_validation: region_report,
+    changed_regions: changed_regions,
+    errors: errors,
+    warnings: warnings,
+    error_codes: __web_unique_codes(errors),
+    warning_codes: __web_unique_codes(warnings),
+    text_fallback: validation.text_fallback,
+    before_sha256: before_hash,
+    after_sha256: after_hash,
+    provenance: {
+      module: "std/artifact/web",
+      helper: "web_artifact_apply_patch",
+      before_sha256: before_hash,
+      after_sha256: after_hash,
+      changed_regions: changed_regions,
+      caller: opts?.provenance,
+    },
+  }
+}
