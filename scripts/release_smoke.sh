@@ -37,6 +37,12 @@ if [[ ! -x "$HARN" ]]; then
   exit 1
 fi
 
+STEP_TIMEOUT_SECONDS="${HARN_RELEASE_SMOKE_STEP_TIMEOUT_SECONDS:-120}"
+if [[ ! "$STEP_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "::error::release-smoke: HARN_RELEASE_SMOKE_STEP_TIMEOUT_SECONDS must be a positive integer, got '$STEP_TIMEOUT_SECONDS'"
+  exit 1
+fi
+
 # Disable real LLM dispatch even though every fixture uses
 # `provider: "mock"`. A misrouted call would otherwise pull on the
 # host-credential path and obscure the smoke failure mode.
@@ -50,6 +56,38 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 
 FAILED=0
 
+terminate_pid_tree() {
+  local pid="$1"
+  if [[ "$PLATFORM" == "windows" ]]; then
+    taskkill //F //T //PID "$pid" >/dev/null 2>&1 || true
+  else
+    kill "$pid" 2>/dev/null || true
+    sleep 2
+    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+  fi
+}
+
+run_with_timeout() {
+  local timeout_seconds="$1"
+  shift
+  "$@" &
+  local cmd_pid=$!
+  local elapsed=0
+  while kill -0 "$cmd_pid" 2>/dev/null; do
+    if [[ "$elapsed" -ge "$timeout_seconds" ]]; then
+      echo "release-smoke ($PLATFORM): command exceeded ${timeout_seconds}s; terminating"
+      terminate_pid_tree "$cmd_pid"
+      wait "$cmd_pid" 2>/dev/null || true
+      return 124
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  local rc=0
+  wait "$cmd_pid" || rc=$?
+  return "$rc"
+}
+
 # Run one labelled step. stdout streams to the log group; on failure
 # we emit a `::error::` annotation so the PR summary points at the
 # specific (platform, capability) regression instead of just "smoke
@@ -60,11 +98,18 @@ run_step() {
   local label="$1"
   shift
   echo "::group::[$PLATFORM] $label"
+  local start_seconds=$SECONDS
   local rc=0
-  "$@" || rc=$?
+  run_with_timeout "$STEP_TIMEOUT_SECONDS" "$@" || rc=$?
+  local elapsed_seconds=$((SECONDS - start_seconds))
+  echo "release-smoke ($PLATFORM): $label finished in ${elapsed_seconds}s"
   echo "::endgroup::"
   if [[ "$rc" -ne 0 ]]; then
-    echo "::error::release-smoke ($PLATFORM): $label failed (exit $rc)"
+    if [[ "$rc" -eq 124 ]]; then
+      echo "::error::release-smoke ($PLATFORM): $label timed out after ${STEP_TIMEOUT_SECONDS}s"
+    else
+      echo "::error::release-smoke ($PLATFORM): $label failed (exit $rc)"
+    fi
     FAILED=1
   fi
 }

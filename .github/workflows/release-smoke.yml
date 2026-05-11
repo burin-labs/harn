@@ -78,9 +78,16 @@ jobs:
           cache-on-failure: true
       - name: Build release harn binary
         shell: bash
+        env:
+          # Match build-release-binaries.yml. Fat LTO makes this smoke gate
+          # spend most of its wall time in a link step that is not meaningfully
+          # cacheable, while published release binaries already use thin LTO.
+          CARGO_PROFILE_RELEASE_LTO: thin
         run: cargo build --release -p harn-cli --bin harn
       - name: Run release smoke
         shell: bash
+        timeout-minutes: 10
         env:
           HARN_BINARY: ${{ matrix.harn_binary }}
+          HARN_RELEASE_SMOKE_STEP_TIMEOUT_SECONDS: "120"
         run: ./scripts/release_smoke.sh
