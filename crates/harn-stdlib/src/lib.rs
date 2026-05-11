@@ -378,6 +378,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_personas_prelude.harn"),
     },
     StdlibSource {
+        module: "personas/bulletins",
+        source: include_str!("stdlib/stdlib_personas_bulletins.harn"),
+    },
+    StdlibSource {
         module: "connectors/shared",
         source: include_str!("stdlib/stdlib_connectors_shared.harn"),
     },
@@ -845,6 +849,7 @@ mod tests {
             "llm/ensemble",
             "llm/rerank",
             "personas/prelude",
+            "personas/bulletins",
             "agent/host_tools",
             "agent/user",
             "llm/optimize",

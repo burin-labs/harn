@@ -178,6 +178,15 @@ defaults, safe, prompts, catalog).
   verifier-then-actor gates, bounded loops, cheap-classifier escalation,
   circuit-broken parallel sweeps, audit receipt wrappers, and approval gates
   give durable personas reusable control flow without host-specific glue.
+- Transparent profile bulletin proposals via
+  `import "std/personas/bulletins"`: `bulletin_propose` builds typed
+  `harn.profile_bulletin.v1` envelopes with stable id, scope, evidence,
+  source, privacy, and TTL fields; `bulletin_emit` always writes proposals
+  to `personas.bulletins.proposed`, and `bulletin_accept` / `bulletin_reject`
+  / `bulletin_expire` / `bulletin_supersede` emit
+  `harn.profile_bulletin_decision.v1` audit records so hosts (Burin local,
+  Harn Cloud) can review persona context instead of accepting silent prompt
+  mutation.
 - Delegated worker lifecycle builtins via `spawn_agent(...)`, `send_input(...)`,
   `resume_agent(...)`, `wait_agent(...)`, `close_agent(...)`, and `list_agents()`,
   with child run lineage, persisted worker snapshots, and host-visible worker

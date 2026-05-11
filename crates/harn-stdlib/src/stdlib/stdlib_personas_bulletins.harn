@@ -1,0 +1,651 @@
+import { filter_nil } from "std/collections"
+
+/**
+ * std/personas/bulletins — transparent profile bulletin proposals.
+ *
+ * Persona-shaped agents propose durable facts about a user, project, team, or
+ * task as typed `harn.profile_bulletin.v1` records. Proposals never silently
+ * enter prompt context as durable fact; hosts own the review/persistence
+ * decision and record a separate `harn.profile_bulletin_decision.v1` envelope
+ * for each accept, reject, expire, or supersede outcome.
+ *
+ * The same envelope is consumable by Burin local review surfaces and Harn
+ * Cloud sync without per-host translation. Receipts retain the proposal and
+ * decision history so replay tooling can audit how persona context evolved.
+ */
+type BulletinScope = "user" | "project" | "workspace" | "task" | "team" | "session" | "global" | string
+
+type BulletinStatus = "proposed" | "accepted" | "rejected" | "expired" | "superseded" | string
+
+type BulletinSync = "local_only" | "host_default" | "tenant" | "shared" | string
+
+type BulletinDecisionAction = "accept" | "reject" | "expire" | "supersede" | string
+
+type BulletinEvidence = {kind: string, ref: string, label?: string, excerpt?: string}
+
+type BulletinSource = {
+  agent?: string,
+  workflow?: string,
+  persona?: string,
+  run_id?: string,
+  task?: string,
+}
+
+type BulletinPrivacy = {
+  sync: BulletinSync,
+  redacted: bool,
+  contains_sensitive: bool,
+  redaction_hints: list<string>,
+  flags: list<string>,
+}
+
+type ProfileBulletin = {
+  schema: "harn.profile_bulletin.v1",
+  id: string,
+  scope: BulletinScope,
+  scope_key: string,
+  subject: string,
+  persona?: string,
+  context_key?: string,
+  assertion: string,
+  status: BulletinStatus,
+  confidence: float,
+  evidence: list<BulletinEvidence>,
+  source: BulletinSource,
+  privacy: BulletinPrivacy,
+  proposed_at: string,
+  expires_at?: string,
+  review_after?: string,
+  supersedes: list<string>,
+}
+
+type ProfileBulletinDecision = {
+  schema: "harn.profile_bulletin_decision.v1",
+  bulletin_id: string,
+  action: BulletinDecisionAction,
+  status: BulletinStatus,
+  decided_at: string,
+  decided_by: string,
+  rationale?: string,
+  supersedes: list<string>,
+}
+
+type BulletinProposeReceipt = {
+  schema: "harn.profile_bulletin_emit_receipt.v1",
+  topic: string,
+  kind: "profile_bulletin_proposed",
+  event_log_id: int,
+  bulletin: ProfileBulletin,
+}
+
+type BulletinDecisionReceipt = {
+  schema: "harn.profile_bulletin_decision_receipt.v1",
+  topic: string,
+  kind: "profile_bulletin_decision",
+  event_log_id: int,
+  decision: ProfileBulletinDecision,
+}
+
+type BulletinPartition = {
+  proposed: list<ProfileBulletin>,
+  accepted: list<ProfileBulletin>,
+  rejected: list<ProfileBulletin>,
+  expired: list<ProfileBulletin>,
+  superseded: list<ProfileBulletin>,
+}
+
+let BULLETIN_SCHEMA = "harn.profile_bulletin.v1"
+
+let BULLETIN_DECISION_SCHEMA = "harn.profile_bulletin_decision.v1"
+
+let BULLETIN_PROPOSED_KIND = "profile_bulletin_proposed"
+
+let BULLETIN_DECISION_KIND = "profile_bulletin_decision"
+
+let BULLETIN_PROPOSAL_TOPIC = "personas.bulletins.proposed"
+
+let BULLETIN_DECISION_TOPIC = "personas.bulletins.decisions"
+
+let BULLETIN_VALID_SCOPES = ["user", "project", "workspace", "task", "team", "session", "global"]
+
+let BULLETIN_VALID_STATUSES = ["proposed", "accepted", "rejected", "expired", "superseded"]
+
+let BULLETIN_VALID_ACTIONS = ["accept", "reject", "expire", "supersede"]
+
+let BULLETIN_VALID_SYNC = ["local_only", "host_default", "tenant", "shared"]
+
+fn __bulletin_text(value) {
+  if value == nil {
+    return ""
+  }
+  return trim(to_string(value))
+}
+
+fn __bulletin_first(values) {
+  for value in values {
+    let text = __bulletin_text(value)
+    if text != "" {
+      return text
+    }
+  }
+  return nil
+}
+
+fn __bulletin_confidence(value) -> float {
+  if value == nil {
+    return 0.5
+  }
+  let kind = type_of(value)
+  if kind != "int" && kind != "float" {
+    throw "std/personas/bulletins: confidence must be a number"
+  }
+  return value + 0.0
+}
+
+fn __bulletin_list(value) {
+  if value == nil {
+    return []
+  }
+  if type_of(value) != "list" {
+    throw "std/personas/bulletins: expected a list value"
+  }
+  return value
+}
+
+fn __bulletin_in(needle, allowed) -> bool {
+  for candidate in allowed {
+    if candidate == needle {
+      return true
+    }
+  }
+  return false
+}
+
+fn __bulletin_string_list(value) -> list<string> {
+  let raw = __bulletin_list(value)
+  var out = []
+  for entry in raw {
+    let text = __bulletin_text(entry)
+    if text != "" {
+      out = out.push(text)
+    }
+  }
+  return out
+}
+
+fn __bulletin_evidence_entry(entry) -> BulletinEvidence {
+  if entry == nil {
+    throw "std/personas/bulletins: evidence entries must not be nil"
+  }
+  if type_of(entry) != "dict" {
+    throw "std/personas/bulletins: evidence entries must be dicts"
+  }
+  let kind = __bulletin_text(entry?.kind)
+  let ref = __bulletin_text(entry?.ref)
+  if kind == "" {
+    throw "std/personas/bulletins: evidence.kind is required"
+  }
+  if ref == "" {
+    throw "std/personas/bulletins: evidence.ref is required"
+  }
+  let label = __bulletin_first([entry?.label])
+  let excerpt = __bulletin_first([entry?.excerpt])
+  return filter_nil({kind: kind, ref: ref, label: label, excerpt: excerpt})
+}
+
+fn __bulletin_evidence(value) -> list<BulletinEvidence> {
+  let raw = __bulletin_list(value)
+  var out = []
+  for entry in raw {
+    out = out.push(__bulletin_evidence_entry(entry))
+  }
+  return out
+}
+
+fn __bulletin_source(value) -> BulletinSource {
+  if value == nil {
+    return {}
+  }
+  if type_of(value) != "dict" {
+    throw "std/personas/bulletins: source must be a dict"
+  }
+  return filter_nil(
+    {
+      agent: __bulletin_first([value?.agent]),
+      workflow: __bulletin_first([value?.workflow]),
+      persona: __bulletin_first([value?.persona]),
+      run_id: __bulletin_first([value?.run_id, value?.run]),
+      task: __bulletin_first([value?.task]),
+    },
+  )
+}
+
+fn __bulletin_privacy(value) -> BulletinPrivacy {
+  let raw = value ?? {}
+  if type_of(raw) != "dict" {
+    throw "std/personas/bulletins: privacy must be a dict"
+  }
+  let sync = __bulletin_text(raw?.sync)
+  let resolved_sync = if sync == "" {
+    "host_default"
+  } else {
+    if !__bulletin_in(sync, BULLETIN_VALID_SYNC) {
+      throw "std/personas/bulletins: unknown privacy.sync `" + sync + "`"
+    }
+    sync
+  }
+  return {
+    sync: resolved_sync,
+    redacted: raw?.redacted ?? false,
+    contains_sensitive: raw?.contains_sensitive ?? false,
+    redaction_hints: __bulletin_string_list(raw?.redaction_hints),
+    flags: __bulletin_string_list(raw?.flags),
+  }
+}
+
+/** Build the stable bulletin id from scope, scope_key, subject, persona, and assertion. */
+pub fn bulletin_id(scope, scope_key, subject, assertion, persona = nil) -> string {
+  let seed = lowercase(__bulletin_text(scope))
+    + "\n"
+    + __bulletin_text(scope_key)
+    + "\n"
+    + __bulletin_text(subject)
+    + "\n"
+    + __bulletin_text(persona)
+    + "\n"
+    + __bulletin_text(assertion)
+  return "bulletin_" + substring(sha256(seed), 0, 32)
+}
+
+fn __bulletin_resolve_scope(value) -> string {
+  let scope = lowercase(__bulletin_text(value))
+  if scope == "" {
+    throw "std/personas/bulletins: scope is required"
+  }
+  if !__bulletin_in(scope, BULLETIN_VALID_SCOPES) {
+    throw "std/personas/bulletins: unknown scope `" + scope + "`"
+  }
+  return scope
+}
+
+fn __bulletin_resolve_status(value) -> string {
+  let status = lowercase(__bulletin_text(value))
+  if status == "" {
+    return "proposed"
+  }
+  if !__bulletin_in(status, BULLETIN_VALID_STATUSES) {
+    throw "std/personas/bulletins: unknown status `" + status + "`"
+  }
+  return status
+}
+
+fn __bulletin_resolve_action(value) -> string {
+  let action = lowercase(__bulletin_text(value))
+  if action == "" {
+    throw "std/personas/bulletins: decision action is required"
+  }
+  if !__bulletin_in(action, BULLETIN_VALID_ACTIONS) {
+    throw "std/personas/bulletins: unknown decision action `" + action + "`"
+  }
+  return action
+}
+
+fn __bulletin_status_for_action(action) -> string {
+  if action == "accept" {
+    return "accepted"
+  }
+  if action == "reject" {
+    return "rejected"
+  }
+  if action == "expire" {
+    return "expired"
+  }
+  return "superseded"
+}
+
+/** Validate that a bulletin envelope has the required fields and shapes. */
+pub fn bulletin_validate(bulletin: ProfileBulletin) -> ProfileBulletin {
+  if bulletin.schema != BULLETIN_SCHEMA {
+    throw "std/personas/bulletins: unsupported schema " + __bulletin_text(bulletin.schema)
+  }
+  for key in ["id", "scope", "scope_key", "subject", "assertion", "status", "proposed_at"] {
+    if __bulletin_text(bulletin[key]) == "" {
+      throw "std/personas/bulletins: " + key + " is required"
+    }
+  }
+  let _ = __bulletin_resolve_scope(bulletin.scope)
+  let _ = __bulletin_resolve_status(bulletin.status)
+  let confidence = bulletin.confidence
+  if confidence == nil {
+    throw "std/personas/bulletins: confidence is required"
+  }
+  let kind = type_of(confidence)
+  if kind != "int" && kind != "float" {
+    throw "std/personas/bulletins: confidence must be a number"
+  }
+  if confidence < 0.0 || confidence > 1.0 {
+    throw "std/personas/bulletins: confidence must be in [0, 1]"
+  }
+  return bulletin
+}
+
+/**
+ * Build a `harn.profile_bulletin.v1` proposal. Proposals default to
+ * `status = "proposed"` so they never silently enter durable context.
+ */
+pub fn bulletin_propose(input, options = nil) -> ProfileBulletin {
+  if input == nil || type_of(input) != "dict" {
+    throw "std/personas/bulletins: bulletin_propose requires a dict input"
+  }
+  let opts = options ?? {}
+  let scope = __bulletin_resolve_scope(opts?.scope ?? input?.scope)
+  let scope_key = __bulletin_text(opts?.scope_key ?? input?.scope_key)
+  if scope_key == "" {
+    throw "std/personas/bulletins: scope_key is required"
+  }
+  let subject = __bulletin_text(opts?.subject ?? input?.subject)
+  if subject == "" {
+    throw "std/personas/bulletins: subject is required"
+  }
+  let assertion = __bulletin_text(opts?.assertion ?? input?.assertion)
+  if assertion == "" {
+    throw "std/personas/bulletins: assertion is required"
+  }
+  let persona = __bulletin_first([opts?.persona, input?.persona])
+  let context_key = __bulletin_first([opts?.context_key, input?.context_key])
+  let status = __bulletin_resolve_status(opts?.status ?? input?.status ?? "proposed")
+  let confidence = __bulletin_confidence(opts?.confidence ?? input?.confidence ?? 0.5)
+  let evidence = __bulletin_evidence(opts?.evidence ?? input?.evidence)
+  let source = __bulletin_source(opts?.source ?? input?.source)
+  let privacy = __bulletin_privacy(opts?.privacy ?? input?.privacy)
+  let proposed_at = __bulletin_first([opts?.proposed_at, input?.proposed_at]) ?? date_now_iso()
+  let expires_at = __bulletin_first([opts?.expires_at, input?.expires_at])
+  let review_after = __bulletin_first([opts?.review_after, input?.review_after])
+  let supersedes = __bulletin_string_list(opts?.supersedes ?? input?.supersedes)
+  let id = __bulletin_first([opts?.id, input?.id])
+    ?? bulletin_id(scope, scope_key, subject, assertion, persona)
+  let bulletin = {
+    schema: BULLETIN_SCHEMA,
+    id: id,
+    scope: scope,
+    scope_key: scope_key,
+    subject: subject,
+    persona: persona,
+    context_key: context_key,
+    assertion: assertion,
+    status: status,
+    confidence: confidence,
+    evidence: evidence,
+    source: source,
+    privacy: privacy,
+    proposed_at: proposed_at,
+    expires_at: expires_at,
+    review_after: review_after,
+    supersedes: supersedes,
+  }
+  return bulletin_validate(filter_nil(bulletin))
+}
+
+/** Drop duplicate proposals by stable bulletin id, preserving first-seen order. */
+pub fn bulletin_dedupe(bulletins: list) -> list<ProfileBulletin> {
+  var seen = {}
+  var out = []
+  for entry in bulletins {
+    let bulletin = entry?.schema == BULLETIN_SCHEMA ? entry : bulletin_propose(entry)
+    if seen[bulletin.id] == nil {
+      seen[bulletin.id] = true
+      out = out.push(bulletin)
+    }
+  }
+  return out
+}
+
+/**
+ * Emit a bulletin proposal to the EventLog and return an audit receipt.
+ *
+ * Hosts read the proposal topic to surface bulletins for review. The emit is
+ * always status `proposed`: callers that want to record an already-accepted
+ * decision should use `bulletin_emit_decision`.
+ */
+pub fn bulletin_emit(input, options = nil) -> BulletinProposeReceipt {
+  let opts = options ?? {}
+  let raw = input?.schema == BULLETIN_SCHEMA ? bulletin_validate(input) : bulletin_propose(input, opts)
+  let bulletin = raw + {status: "proposed"}
+  let topic = opts?.topic ?? BULLETIN_PROPOSAL_TOPIC
+  let event_log_id = event_log
+    .emit(
+    topic,
+    BULLETIN_PROPOSED_KIND,
+    bulletin,
+    {
+      schema: BULLETIN_SCHEMA,
+      bulletin_id: bulletin.id,
+      scope: bulletin.scope,
+      scope_key: bulletin.scope_key,
+    },
+  )
+  return {
+    schema: "harn.profile_bulletin_emit_receipt.v1",
+    topic: topic,
+    kind: BULLETIN_PROPOSED_KIND,
+    event_log_id: event_log_id,
+    bulletin: bulletin,
+  }
+}
+
+/** Build a typed decision envelope without writing to the EventLog. */
+pub fn bulletin_decide(bulletin: ProfileBulletin, action, options = nil) -> ProfileBulletinDecision {
+  let opts = options ?? {}
+  let resolved_action = __bulletin_resolve_action(action)
+  let status = __bulletin_status_for_action(resolved_action)
+  let decided_at = __bulletin_first([opts?.decided_at]) ?? date_now_iso()
+  let decided_by = __bulletin_text(opts?.decided_by)
+  let resolved_by = decided_by == "" ? "host" : decided_by
+  let rationale = __bulletin_first([opts?.rationale])
+  let supersedes_input = if resolved_action == "supersede" {
+    __bulletin_string_list(opts?.supersedes ?? bulletin?.supersedes)
+  } else {
+    []
+  }
+  if resolved_action == "supersede" && len(supersedes_input) == 0 {
+    throw "std/personas/bulletins: supersede decisions must list at least one prior bulletin id"
+  }
+  let decision = {
+    schema: BULLETIN_DECISION_SCHEMA,
+    bulletin_id: __bulletin_text(bulletin?.id),
+    action: resolved_action,
+    status: status,
+    decided_at: decided_at,
+    decided_by: resolved_by,
+    rationale: rationale,
+    supersedes: supersedes_input,
+  }
+  if decision.bulletin_id == "" {
+    throw "std/personas/bulletins: decision requires a bulletin_id"
+  }
+  return filter_nil(decision)
+}
+
+/** Emit a decision envelope to the EventLog and return an audit receipt. */
+pub fn bulletin_emit_decision(decision: ProfileBulletinDecision, options = nil) -> BulletinDecisionReceipt {
+  let opts = options ?? {}
+  if decision.schema != BULLETIN_DECISION_SCHEMA {
+    throw "std/personas/bulletins: unsupported decision schema " + __bulletin_text(decision.schema)
+  }
+  if __bulletin_text(decision.bulletin_id) == "" {
+    throw "std/personas/bulletins: decision bulletin_id is required"
+  }
+  let topic = opts?.topic ?? BULLETIN_DECISION_TOPIC
+  let event_log_id = event_log
+    .emit(
+    topic,
+    BULLETIN_DECISION_KIND,
+    decision,
+    {schema: BULLETIN_DECISION_SCHEMA, bulletin_id: decision.bulletin_id, action: decision.action},
+  )
+  return {
+    schema: "harn.profile_bulletin_decision_receipt.v1",
+    topic: topic,
+    kind: BULLETIN_DECISION_KIND,
+    event_log_id: event_log_id,
+    decision: decision,
+  }
+}
+
+/** Shorthand: build and emit an accept decision for a bulletin. */
+pub fn bulletin_accept(bulletin: ProfileBulletin, options = nil) -> BulletinDecisionReceipt {
+  return bulletin_emit_decision(bulletin_decide(bulletin, "accept", options), options)
+}
+
+/** Shorthand: build and emit a reject decision. Rationale should be supplied. */
+pub fn bulletin_reject(bulletin: ProfileBulletin, options = nil) -> BulletinDecisionReceipt {
+  return bulletin_emit_decision(bulletin_decide(bulletin, "reject", options), options)
+}
+
+/** Shorthand: build and emit an expire decision (TTL elapsed or out of date). */
+pub fn bulletin_expire(bulletin: ProfileBulletin, options = nil) -> BulletinDecisionReceipt {
+  return bulletin_emit_decision(bulletin_decide(bulletin, "expire", options), options)
+}
+
+/** Shorthand: supersede prior bulletin ids with this proposal. */
+pub fn bulletin_supersede(bulletin: ProfileBulletin, supersedes: list<string>, options = nil) -> BulletinDecisionReceipt {
+  let merged = options ?? {} + {supersedes: supersedes}
+  return bulletin_emit_decision(bulletin_decide(bulletin, "supersede", merged), merged)
+}
+
+fn __bulletin_decision_index(decisions) {
+  var index = {}
+  for raw in __bulletin_list(decisions) {
+    if raw?.schema != BULLETIN_DECISION_SCHEMA {
+      continue
+    }
+    let id = __bulletin_text(raw?.bulletin_id)
+    if id == "" {
+      continue
+    }
+    let existing = index[id]
+    if existing == nil || __bulletin_text(raw?.decided_at) >= __bulletin_text(existing?.decided_at) {
+      index = index + {[id]: raw}
+    }
+  }
+  return index
+}
+
+/**
+ * Apply the latest decision per bulletin id and return bulletins with their
+ * effective `status` field updated. Bulletins without a recorded decision keep
+ * their original status (typically `proposed`).
+ */
+pub fn bulletin_apply_decisions(bulletins: list, decisions: list) -> list<ProfileBulletin> {
+  let index = __bulletin_decision_index(decisions)
+  var out = []
+  for bulletin in __bulletin_list(bulletins) {
+    let decision = index[bulletin?.id]
+    if decision == nil {
+      out = out.push(bulletin)
+    } else {
+      out = out.push(bulletin + {status: decision.status})
+    }
+  }
+  return out
+}
+
+/** Partition bulletins by their effective status. */
+pub fn bulletin_partition(bulletins: list) -> BulletinPartition {
+  var proposed = []
+  var accepted = []
+  var rejected = []
+  var expired = []
+  var superseded = []
+  for bulletin in __bulletin_list(bulletins) {
+    let status = __bulletin_resolve_status(bulletin?.status)
+    if status == "accepted" {
+      accepted = accepted.push(bulletin)
+    } else if status == "rejected" {
+      rejected = rejected.push(bulletin)
+    } else if status == "expired" {
+      expired = expired.push(bulletin)
+    } else if status == "superseded" {
+      superseded = superseded.push(bulletin)
+    } else {
+      proposed = proposed.push(bulletin)
+    }
+  }
+  return {
+    proposed: proposed,
+    accepted: accepted,
+    rejected: rejected,
+    expired: expired,
+    superseded: superseded,
+  }
+}
+
+fn __bulletin_expired_now(bulletin, now_iso) -> bool {
+  let expires = __bulletin_text(bulletin?.expires_at)
+  if expires == "" {
+    return false
+  }
+  return expires <= now_iso
+}
+
+/**
+ * Return only bulletins that are still active for prompt context — accepted
+ * status and not past `expires_at`. Proposals are excluded so they never
+ * become durable fact without an accept decision.
+ */
+pub fn bulletin_active(bulletins: list, now = nil) -> list<ProfileBulletin> {
+  let now_iso = __bulletin_text(now) == "" ? date_now_iso() : __bulletin_text(now)
+  var out = []
+  for bulletin in __bulletin_list(bulletins) {
+    let status = __bulletin_resolve_status(bulletin?.status)
+    if status == "accepted" && !__bulletin_expired_now(bulletin, now_iso) {
+      out = out.push(bulletin)
+    }
+  }
+  return out
+}
+
+fn __bulletin_render_line(bulletin) -> string {
+  let confidence_pct = round(bulletin.confidence * 100.0)
+  let subject = __bulletin_text(bulletin?.subject)
+  let prefix = subject == "" ? "" : subject + ": "
+  return "- " + prefix + __bulletin_text(bulletin.assertion)
+    + " [conf "
+    + to_string(confidence_pct)
+    + "%]"
+}
+
+/**
+ * Render bulletins as a prompt-ready block that visibly distinguishes accepted
+ * facts from proposed ones. Proposals are listed under a "Proposed (pending
+ * review)" heading so models cannot confuse them with durable, host-reviewed
+ * fact. Pass `{include_proposed: false}` to drop proposals entirely.
+ */
+pub fn bulletin_render_for_prompt(bulletins: list, options = nil) -> string {
+  let opts = options ?? {}
+  let now = __bulletin_text(opts?.now)
+  let active_only = opts?.active_only ?? true
+  let include_proposed = opts?.include_proposed ?? true
+  let parts = bulletin_partition(bulletins)
+  let accepted_pool = if active_only {
+    bulletin_active(parts.accepted, now == "" ? nil : now)
+  } else {
+    parts.accepted
+  }
+  var sections = []
+  if len(accepted_pool) > 0 {
+    var lines = ["Accepted facts:"]
+    for bulletin in accepted_pool {
+      lines = lines.push(__bulletin_render_line(bulletin))
+    }
+    sections = sections.push(join(lines, "\n"))
+  }
+  if include_proposed && len(parts.proposed) > 0 {
+    var lines = ["Proposed (pending review — do not treat as fact):"]
+    for bulletin in parts.proposed {
+      lines = lines.push(__bulletin_render_line(bulletin))
+    }
+    sections = sections.push(join(lines, "\n"))
+  }
+  return join(sections, "\n\n")
+}

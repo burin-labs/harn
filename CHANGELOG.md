@@ -50,6 +50,19 @@ condensed series summaries instead of full per-patch history.
   pure-logic helpers and every adapter shape (HTML, JSON, skipped
   key-required, key-required-with-key, conflicting observation,
   context-window-only change, fetch error).
+- **Transparent profile bulletin schema and tool contract (#1506).** Added
+  `std/personas/bulletins` with the `harn.profile_bulletin.v1` envelope for
+  durable persona/user/project/team facts. Proposals carry stable id, scope,
+  scope key, subject, persona, context key, assertion, status, confidence,
+  structured evidence, source provenance, privacy/sync flags, and optional
+  TTL/review timestamps. `bulletin_emit` always writes status `proposed` to
+  `personas.bulletins.proposed`; hosts emit `harn.profile_bulletin_decision.v1`
+  envelopes (`accept`, `reject`, `expire`, `supersede`) on
+  `personas.bulletins.decisions` so review history is replayable.
+  `bulletin_apply_decisions`, `bulletin_partition`, and `bulletin_active` keep
+  prompt context derived from accepted, non-expired bulletins; the
+  `bulletin_render_for_prompt` renderer visibly separates accepted facts from
+  pending proposals so models cannot confuse them.
 
 ## v0.8.10
 

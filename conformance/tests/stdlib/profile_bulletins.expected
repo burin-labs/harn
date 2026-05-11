@@ -1,0 +1,42 @@
+harn.profile_bulletin.v1
+proposed
+user
+0.92
+local_only
+2
+true
+true
+harn.profile_bulletin_emit_receipt.v1
+profile_bulletin_proposed
+proposed
+profile_bulletin_proposed
+harn.profile_bulletin.v1
+user
+accept
+accepted
+user
+profile_bulletin_decision
+accept
+accepted
+1
+0
+0
+Accepted facts:
+- kenneth: prefers concise responses without trailing summaries [conf 92%]
+
+Proposed (pending review — do not treat as fact):
+- kenneth: uses gh to look up repo URLs rather than guessing [conf 80%]
+Accepted facts:
+- kenneth: prefers concise responses without trailing summaries [conf 92%]
+2
+supersede
+true
+true
+rejected
+expired
+true
+true
+true
+true
+true
+true
