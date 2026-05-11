@@ -1,0 +1,129 @@
+import {
+  ui_context_update_envelope,
+  ui_host_capabilities,
+  ui_host_supports_apps,
+  ui_resource,
+  ui_resource_csp_header,
+  ui_resource_sandbox_attr,
+  ui_select_for_host,
+  ui_structured_fallback,
+  ui_tool_call_envelope,
+  ui_tool_meta,
+  ui_tool_meta_to_mcp,
+  ui_tool_result,
+  ui_tool_result_validate,
+} from "std/ui_resource"
+
+pipeline default() {
+  let dashboard_html = "<!doctype html><html><head><style>.tile { padding: 12px; }</style></head><body><main><h1>KPIs</h1><pre>signups=42 churn=3</pre><script>const initial = window.openInitialData; const summary = document.getElementById('summary');</script></main></body></html>"
+  let resource = ui_resource(
+    "ui://harn-dashboard/kpis@v1",
+    "KPIs dashboard",
+    dashboard_html,
+    {
+      description: "Weekly KPI tiles",
+      permissions: ["tools/call", "context/update"],
+      capabilities: ["tools/call", "context/update", "context/read"],
+      version: "2026-05-11",
+      meta: {owner: "growth-team"},
+    },
+  )
+  println(resource.schema)
+  println(resource.mime_type)
+  println(resource.profile)
+  println(resource.contents_encoding)
+  println(resource.uri)
+  println(resource.validation.ok)
+  println(resource.content_sha256.starts_with("sha256:"))
+  println(len(resource.permissions))
+  let meta = ui_tool_meta(resource, {visibility: "app_only", initial_view: {tab: "signups"}})
+  let mcp_meta = ui_tool_meta_to_mcp(meta)
+  println(meta.schema)
+  println(mcp_meta.ui.resourceUri)
+  println(mcp_meta.ui.visibility)
+  println(mcp_meta.ui.initialView.tab)
+  let csp_header = ui_resource_csp_header(resource.csp)
+  println(csp_header.contains("default-src 'self'"))
+  println(csp_header.contains("connect-src 'none'"))
+  let sandbox_attr = ui_resource_sandbox_attr(resource.csp)
+  println(sandbox_attr)
+  let result = ui_tool_result(
+    resource,
+    {structured_fallback: ui_structured_fallback({signups: 42, churn: 3}, {text: "signups=42 churn=3"})},
+  )
+  println(result.schema)
+  println(result.text_fallback.content.contains("KPIs"))
+  println(result.text_fallback.content.contains("signups=42 churn=3"))
+  println(result.structured_fallback.data.signups)
+  println(result.structured_fallback.text)
+  let validated = ui_tool_result_validate(result)
+  println(validated.selected)
+  let supporting = ui_select_for_host(result, {apps: true, profiles: ["mcp-app"]})
+  println(supporting.selected)
+  println(supporting.ui_resource.uri)
+  let plain = ui_select_for_host(result, {apps: false})
+  println(plain.selected)
+  println(plain.ui_resource == nil)
+  println(plain.text_fallback.content.contains("KPIs"))
+  let openai_caps = ui_host_supports_apps({ui: {apps: true, profiles: ["mcp-app"]}})
+  let no_apps = ui_host_supports_apps({apps: false})
+  let mcp_caps = ui_host_supports_apps({apps: {enabled: true, profiles: ["mcp-app", "openai-app"]}})
+  let custom_only = ui_host_supports_apps({apps: true, profiles: ["custom-app"]})
+  let null_caps = ui_host_supports_apps(nil)
+  let normalized = ui_host_capabilities({apps: {enabled: true, profiles: ["mcp-app"], bridges: ["postMessage"]}})
+  println(openai_caps)
+  println(no_apps)
+  println(mcp_caps)
+  println(custom_only)
+  println(null_caps)
+  println(normalized.profiles)
+  println(normalized.bridges)
+  let call = ui_tool_call_envelope("dashboard.refresh", {window: "7d"}, {id: "call-1"})
+  println(call.jsonrpc)
+  println(call.method)
+  println(call.params.name)
+  println(call.params.arguments.window)
+  let ctx_update = ui_context_update_envelope("selection", {tile: "signups"}, {id: "ctx-1"})
+  println(ctx_update.method)
+  println(ctx_update.params.key)
+  println(ctx_update.params.model_visible)
+  let bad_uri = try {
+    ui_resource("http://example/widget", "Bad", "<html></html>")
+  }
+  println(is_err(bad_uri))
+  let invalid_html = ui_resource(
+    "ui://harn-dashboard/unsafe@v1",
+    "Unsafe widget",
+    "<html><body><script>fetch('https://evil.example')</script></body></html>",
+  )
+  println(invalid_html.validation.ok)
+  println(invalid_html.validation.error_codes.contains("network_call"))
+  let unsafe_result = ui_tool_result(
+    invalid_html,
+    {
+      text_fallback: "Widget blocked: contains an unapproved network call",
+      structured_fallback: ui_structured_fallback({status: "blocked"}, {text: "Widget validation failed"}),
+    },
+  )
+  println(unsafe_result.ui_resource == nil)
+  println(unsafe_result.validation.error_codes.contains("network_call"))
+  let unsafe_selected = ui_select_for_host(unsafe_result, {apps: true, profiles: ["mcp-app"]})
+  println(unsafe_selected.selected)
+  let allow_invalid = ui_tool_result(
+    invalid_html,
+    {
+      text_fallback: "Preview only — widget failed validation",
+      allow_invalid_resource: true,
+      structured_fallback: ui_structured_fallback({status: "preview"}, {text: "Preview only"}),
+    },
+  )
+  println(allow_invalid.ui_resource != nil)
+  let validation_should_throw = try {
+    ui_tool_result_validate(allow_invalid)
+  }
+  println(is_err(validation_should_throw))
+  let empty_fallback = try {
+    ui_tool_result(resource, {text_fallback: ""})
+  }
+  println(is_err(empty_fallback))
+}

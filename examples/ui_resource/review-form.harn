@@ -1,0 +1,137 @@
+/*
+ * Multi-step review form example for std/ui_resource.
+ *
+ * Shows how to package a multi-step review form as a `ui://` resource with a
+ * typed tool-call path for submitting decisions, a context-update path for
+ * keeping the model in sync as the reviewer moves through steps, and
+ * structured/text fallbacks for hosts that cannot render the iframe.
+ */
+import {
+  ui_context_update_envelope,
+  ui_resource,
+  ui_select_for_host,
+  ui_structured_fallback,
+  ui_tool_call_envelope,
+  ui_tool_meta_to_mcp,
+  ui_tool_result,
+  ui_tool_result_validate,
+} from "std/ui_resource"
+
+fn render_review_html(item) {
+  return "<!doctype html><html><head><style>"
+    + ".form { font: 14px system-ui; max-width: 480px; padding: 16px; }"
+    + ".step { display: none; } .step.active { display: block; }"
+    + "button[disabled] { opacity: 0.5; }"
+    + "</style></head><body><form class=\"form\" id=\"review\">"
+    + "<h1>Review: "
+    + item.title
+    + "</h1>"
+    + "<section class=\"step active\" data-step=\"1\">"
+    + "<label>Summary</label><textarea id=\"summary\"></textarea>"
+    + "<button type=\"button\" id=\"next-1\">Next</button></section>"
+    + "<section class=\"step\" data-step=\"2\">"
+    + "<label>Decision</label>"
+    + "<select id=\"decision\"><option>approve</option><option>request_changes</option><option>reject</option></select>"
+    + "<button type=\"button\" id=\"next-2\">Next</button></section>"
+    + "<section class=\"step\" data-step=\"3\">"
+    + "<label>Confidence</label>"
+    + "<input id=\"confidence\" type=\"range\" min=\"0\" max=\"1\" step=\"0.05\" value=\"0.8\" />"
+    + "<button type=\"submit\" id=\"submit\">Submit review</button></section>"
+    + "</form><script>"
+    + "let step = 1;"
+    + "function show(n) {"
+    + "  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));"
+    + "  document.querySelector('.step[data-step=\"' + n + '\"]').classList.add('active');"
+    + "  step = n;"
+    + "}"
+    + "function notify(method, params) {"
+    + "  const envelope = { jsonrpc: '2.0', id: method + '-' + Date.now(), method, params };"
+    + "  window.parent && window.parent.postMessage(envelope, '*');"
+    + "}"
+    + "document.getElementById('next-1').addEventListener('click', () => {"
+    + "  notify('context/update', { key: 'review.summary',"
+    + "                             value: document.getElementById('summary').value,"
+    + "                             model_visible: true });"
+    + "  show(2);"
+    + "});"
+    + "document.getElementById('next-2').addEventListener('click', () => {"
+    + "  notify('context/update', { key: 'review.decision',"
+    + "                             value: document.getElementById('decision').value,"
+    + "                             model_visible: true });"
+    + "  show(3);"
+    + "});"
+    + "document.getElementById('review').addEventListener('submit', (event) => {"
+    + "  event.preventDefault();"
+    + "  notify('tools/call', { name: 'review.submit', arguments: {"
+    + "    summary: document.getElementById('summary').value,"
+    + "    decision: document.getElementById('decision').value,"
+    + "    confidence: parseFloat(document.getElementById('confidence').value) } });"
+    + "});"
+    + "</script></body></html>"
+}
+
+pipeline default() {
+  let item = {id: "PR-512", title: "Switch billing webhooks to v2 signature"}
+  let resource = ui_resource(
+    "ui://harn-examples/review-form@v1",
+    "Review form",
+    render_review_html(item),
+    {
+      description: "Three-step review form with summary, decision, and confidence inputs",
+      permissions: ["tools/call", "context/update"],
+      capabilities: ["tools/call", "context/update"],
+      version: "2026-05-11",
+      csp: {
+        default_src: ["'self'"],
+        script_src: ["'self'", "'unsafe-inline'"],
+        style_src: ["'self'", "'unsafe-inline'"],
+        img_src: ["'self'", "data:"],
+        connect_src: ["'none'"],
+        frame_ancestors: ["'self'"],
+        sandbox: ["allow-scripts", "allow-forms"],
+      },
+    },
+  )
+  let result = ui_tool_result(
+    resource,
+    {
+      tool_meta_options: {visibility: "model_visible", initial_view: {step: 1, item_id: item.id}},
+      structured_fallback: ui_structured_fallback(
+        {
+          item_id: item.id,
+          steps: [
+            {name: "summary", prompt: "Write a one-line summary"},
+            {name: "decision", prompt: "Pick approve / request_changes / reject"},
+            {name: "confidence", prompt: "Rate confidence 0.0-1.0"},
+          ],
+          submit_tool: "review.submit",
+        },
+        {text: "Review PR-512 in three steps and submit via review.submit."},
+      ),
+    },
+  )
+  ui_tool_result_validate(result)
+  let mcp_meta = ui_tool_meta_to_mcp(result.meta)
+  println("resource.uri=" + resource.uri)
+  println("resource.permissions=" + to_string(resource.permissions))
+  println("resource.validation.ok=" + to_string(resource.validation.ok))
+  println("meta.visibility=" + mcp_meta.ui.visibility)
+  println("meta.resourceUri=" + mcp_meta.ui.resourceUri)
+  let apps_host = ui_select_for_host(result, {apps: true, profiles: ["mcp-app"]})
+  let text_host = ui_select_for_host(result, nil)
+  println("apps_host.selected=" + apps_host.selected)
+  println("text_host.selected=" + text_host.selected)
+  println("text_host.fallback=" + text_host.text_fallback.content)
+  // Document the message envelopes the iframe emits — useful when wiring a
+  // host bridge or writing host tests.
+  let demo_call = ui_tool_call_envelope(
+    "review.submit",
+    {summary: "Signature library swap is mechanical", decision: "approve", confidence: 0.85},
+    {id: "submit-1"},
+  )
+  let demo_ctx = ui_context_update_envelope("review.summary", "Signature library swap is mechanical", {id: "ctx-1"})
+  println("submit.method=" + demo_call.method)
+  println("submit.params.name=" + demo_call.params.name)
+  println("ctx.method=" + demo_ctx.method)
+  println("ctx.params.model_visible=" + to_string(demo_ctx.params.model_visible))
+}

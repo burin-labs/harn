@@ -44,6 +44,15 @@ pipeline default() {
   let broken = web_artifact_validate("<html><body><script>alert(1)</body></html>")
   println(broken.ok)
   println(broken.error_codes.contains("unclosed_script_tag"))
+  let bridge_default = web_artifact_validate(
+    "<html><body><script>window.parent.postMessage({}, '*');</script></body></html>",
+  )
+  let bridge_opt_in = web_artifact_validate(
+    "<html><body><script>window.parent.postMessage({}, '*');</script></body></html>",
+    {allow_host_bridge: true},
+  )
+  println(bridge_default.error_codes.contains("host_bridge_call"))
+  println(bridge_opt_in.error_codes.contains("host_bridge_call"))
   let fallback = web_artifact_text_fallback(good)
   println(fallback.contains("Hello"))
   println(!fallback.contains("const count"))

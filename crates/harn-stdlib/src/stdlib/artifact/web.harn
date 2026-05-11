@@ -296,42 +296,44 @@ pub fn web_artifact_validate(html, options = nil) {
       ],
     )
   }
-  errors = errors
-    + __web_fragment_pattern_errors(
-    extracted.scripts,
-    [
-      {
-        code: "host_bridge_call",
-        fragment: "script",
-        regex: "\\bwindow\\.parent\\b",
-        message: "artifact reaches across the iframe parent boundary",
-      },
-      {
-        code: "host_bridge_call",
-        fragment: "script",
-        regex: "\\bparent\\.postMessage\\s*\\(",
-        message: "artifact calls parent.postMessage",
-      },
-      {
-        code: "host_bridge_call",
-        fragment: "script",
-        regex: "\\bacquireVsCodeApi\\s*\\(",
-        message: "artifact calls a host bridge API",
-      },
-      {
-        code: "host_bridge_call",
-        fragment: "script",
-        regex: "\\bwindow\\.webkit\\.messageHandlers\\b",
-        message: "artifact calls a native WebKit message handler",
-      },
-      {
-        code: "host_bridge_call",
-        fragment: "script",
-        regex: "\\b(hostBridge|harnHost)\\b",
-        message: "artifact calls a forbidden host bridge object",
-      },
-    ],
-  )
+  if !(opts?.allow_host_bridge ?? false) {
+    errors = errors
+      + __web_fragment_pattern_errors(
+      extracted.scripts,
+      [
+        {
+          code: "host_bridge_call",
+          fragment: "script",
+          regex: "\\bwindow\\.parent\\b",
+          message: "artifact reaches across the iframe parent boundary",
+        },
+        {
+          code: "host_bridge_call",
+          fragment: "script",
+          regex: "\\bparent\\.postMessage\\s*\\(",
+          message: "artifact calls parent.postMessage",
+        },
+        {
+          code: "host_bridge_call",
+          fragment: "script",
+          regex: "\\bacquireVsCodeApi\\s*\\(",
+          message: "artifact calls a host bridge API",
+        },
+        {
+          code: "host_bridge_call",
+          fragment: "script",
+          regex: "\\bwindow\\.webkit\\.messageHandlers\\b",
+          message: "artifact calls a native WebKit message handler",
+        },
+        {
+          code: "host_bridge_call",
+          fragment: "script",
+          regex: "\\b(hostBridge|harnHost)\\b",
+          message: "artifact calls a forbidden host bridge object",
+        },
+      ],
+    )
+  }
   errors = errors
     + __web_fragment_pattern_errors(
     extracted.scripts,
