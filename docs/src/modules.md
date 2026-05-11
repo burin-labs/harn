@@ -85,7 +85,7 @@ described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/runtime`, `std/command`, `std/git`, `std/review`,
 `std/experiments`,
 `std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
-`std/worktree`, `std/checkpoint`, `std/personas/prelude`,
+`std/triage`, `std/worktree`, `std/checkpoint`, `std/personas/prelude`,
 `std/connectors/shared`, and provider-specific `std/connectors/...` modules).
 These add layered
 utilities on top of the core builtins; the core builtins themselves are
@@ -119,6 +119,7 @@ import "std/personas/prelude"
 import "std/prompt_library"
 import "std/review"
 import "std/text"
+import "std/triage"
 import "std/vision"
 ```
 
@@ -144,6 +145,18 @@ Connector package helpers for common provider plumbing:
 | `oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, options?)` | Refresh an OAuth2 access token with form-encoded `grant_type=refresh_token` |
 | `rate_limit_token_bucket(state?, config?, now_ms?)` | Pure token-bucket transition for package-local quota decisions |
 | `paginate_cursor(initial_url, fetch_fn, cursor_path, options?)` | Collect cursor-paginated pages from a package-supplied fetch closure |
+
+### std/triage
+
+Normalize connector-derived inbox items into host-renderable dashboard cards:
+
+| Function | Description |
+|---|---|
+| `triage_normalize(input, options?)` | Convert a TriggerEvent or provider payload into `harn.triage_event.v1`, preserving provider raw payload separately |
+| `triage_dedupe_key(provider, source_kind, source_url, source_id?)` | Build a stable dedupe key from provider-neutral source provenance |
+| `triage_dedupe_events(events)` | Drop duplicate triage events by stable dedupe key |
+| `triage_emit(input, options?)` | Validate and append a triage event to the EventLog, returning an emit receipt |
+| `triage_start_my_day(inputs, options?)` | Build a deduped Start My Day feed and optionally emit each event |
 
 ### std/monitors
 

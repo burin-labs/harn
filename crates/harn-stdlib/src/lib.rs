@@ -362,6 +362,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_triggers.harn"),
     },
     StdlibSource {
+        module: "triage",
+        source: include_str!("stdlib/stdlib_triage.harn"),
+    },
+    StdlibSource {
         module: "handoffs",
         source: include_str!("stdlib/stdlib_handoffs.harn"),
     },
@@ -847,6 +851,7 @@ mod tests {
             "connectors/linear",
             "connectors/notion",
             "connectors/slack",
+            "triage",
         ] {
             assert!(
                 get_stdlib_source(module).is_some(),

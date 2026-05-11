@@ -1,0 +1,23 @@
+{
+  "provider": "slack",
+  "kind": "message",
+  "received_at": "2026-05-11T03:26:00Z",
+  "occurred_at": "1746933960.000200",
+  "dedupe_key": "slack-event-Ev1507",
+  "provider_payload": {
+    "provider": "slack",
+    "event": "message",
+    "event_id": "Ev1507",
+    "team_id": "TSTARTDAY",
+    "channel_id": "CINBOX",
+    "channel": "CINBOX",
+    "user_id": "UWORKFLOW",
+    "user": "UWORKFLOW",
+    "text": "Can we add the dashboard inbox envelope before the morning review?",
+    "ts": "1746933960.000200",
+    "thread_ts": "1746933960.000200",
+    "raw": {
+      "event_id": "Ev1507"
+    }
+  }
+}
