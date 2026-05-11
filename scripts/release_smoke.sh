@@ -60,11 +60,34 @@ terminate_pid_tree() {
   local pid="$1"
   if [[ "$PLATFORM" == "windows" ]]; then
     taskkill //F //T //PID "$pid" >/dev/null 2>&1 || true
+    # Git Bash may report an MSYS job PID for native Windows processes.
+    # `taskkill` handles the Win32 tree when the PID maps cleanly; the
+    # kill fallbacks release the MSYS job handle so `wait` cannot hang
+    # after a forceful Windows teardown.
+    kill -f "$pid" >/dev/null 2>&1 || true
+    kill -TERM "$pid" >/dev/null 2>&1 || true
+    sleep 1
+    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" >/dev/null 2>&1 || true
   else
     kill "$pid" 2>/dev/null || true
     sleep 2
     kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
   fi
+}
+
+wait_for_pid_exit() {
+  local pid="$1"
+  local timeout_seconds="$2"
+  local elapsed=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [[ "$elapsed" -ge "$timeout_seconds" ]]; then
+      return 1
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  wait "$pid" 2>/dev/null || true
+  return 0
 }
 
 run_with_timeout() {
@@ -77,7 +100,7 @@ run_with_timeout() {
     if [[ "$elapsed" -ge "$timeout_seconds" ]]; then
       echo "release-smoke ($PLATFORM): command exceeded ${timeout_seconds}s; terminating"
       terminate_pid_tree "$cmd_pid"
-      wait "$cmd_pid" 2>/dev/null || true
+      wait_for_pid_exit "$cmd_pid" 10 || true
       return 124
     fi
     sleep 1
@@ -151,14 +174,11 @@ smoke_watch_boot() {
     fi
     sleep 0.5
   done
-  if [[ "$PLATFORM" == "windows" ]]; then
-    # Git Bash translates `kill` to a Cygwin signal that harn.exe does
-    # not catch; taskkill is the portable forceful shutdown.
-    taskkill //F //PID "$watch_pid" >/dev/null 2>&1 || true
-  else
-    kill "$watch_pid" 2>/dev/null || true
+  terminate_pid_tree "$watch_pid"
+  if ! wait_for_pid_exit "$watch_pid" 10; then
+    echo "harn watch did not exit after forced teardown on $PLATFORM"
+    return 1
   fi
-  wait "$watch_pid" 2>/dev/null || true
   if [[ "$ready" -ne 1 ]]; then
     echo "harn watch did not reach the ready state on $PLATFORM"
     echo "--- watch log ---"
