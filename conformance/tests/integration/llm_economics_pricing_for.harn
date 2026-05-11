@@ -1,0 +1,23 @@
+// std/llm/economics.pricing_for: catalog hit returns full pricing dict
+// including cache rates; provider-only fallback drops cache rates; unknown
+// commercial pricing returns nil (no silent zero).
+import { pricing_for } from "std/llm/economics"
+
+pipeline default() {
+  let sonnet = pricing_for("anthropic", "claude-sonnet-4-20250514")
+  println("catalog source=" + sonnet.source)
+  println("input=" + to_string(sonnet.input_per_mtok))
+  println("output=" + to_string(sonnet.output_per_mtok))
+  println("cache_read=" + to_string(sonnet.cache_read_per_mtok))
+  println("cache_write=" + to_string(sonnet.cache_write_per_mtok))
+  let provider_only = pricing_for("openai", "some-bespoke-openai-deployment")
+  println("provider source=" + provider_only.source)
+  println("provider input=" + to_string(provider_only.input_per_mtok))
+  println("provider cache_read=" + to_string(provider_only.cache_read_per_mtok))
+  let unknown = pricing_for("nonexistent_provider", "ghost-model")
+  println("unknown nil=" + to_string(unknown == nil))
+  // Convenient single-arg form: model id only, provider inferred.
+  let single = pricing_for("gpt-4o")
+  println("single source=" + single.source)
+  println("single provider=" + single.provider)
+}

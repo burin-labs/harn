@@ -1954,6 +1954,12 @@ Nine opinionated modules wrap common LLM patterns:
   meta-prompt rewrite with a `DIFF:` summary trailer.
 - `std/llm/budget` — `estimate_text_tokens`, `context_window_for`,
   `recommend_max_output_tokens`, `budget_summary`, `fits_in_context`.
+- `std/llm/economics` — `pricing_for(provider?, model)`,
+  `estimate_call_cost`, `estimate_session_cost`, `compare_model_costs`,
+  `cache_break_even`, `volume_cost`, `format_usd`. Unknown pricing
+  surfaces as `pricing_known: false` / `cost_usd: nil` rather than $0;
+  only providers explicitly configured to $0 (ollama, local, llamacpp,
+  mlx, vllm, tgi) report cost=$0 with pricing_known=true.
 - `std/llm/defaults` — `pack_for(opts)` and convenience wrappers
   (`pack_chat`, `pack_agent`, `pack_refine`, `pack_judge`,
   `pack_summarize`, `pack_code`, `pack_json`). Calibrated for

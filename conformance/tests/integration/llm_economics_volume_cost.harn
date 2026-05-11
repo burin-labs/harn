@@ -1,0 +1,37 @@
+// volume_cost: multiplies per-call cost by calls_per_period * periods,
+// and surfaces unknown pricing rather than zeroing the projection.
+import { format_usd, volume_cost } from "std/llm/economics"
+
+pipeline default() {
+  // gpt-4o-mini: 0.15/0.60 per MTok. Per-call: 1000*0.15/1e6 + 200*0.60/1e6
+  //   = 0.00015 + 0.00012 = 0.00027.
+  // 10_000 calls/day * 30 days = 300_000 calls. Total = $81.
+  let row = volume_cost(
+    {
+      provider: "openai",
+      model: "gpt-4o-mini",
+      input_tokens: 1000,
+      output_tokens: 200,
+      calls_per_period: 10000,
+      periods: 30,
+    },
+  )
+  println("pricing_known=" + to_string(row.pricing_known))
+  println("total_calls=" + to_string(row.total_calls))
+  println("per_call=" + format_usd(row.cost_per_call))
+  println("per_period=" + format_usd(row.cost_per_period))
+  println("total=" + format_usd(row.total_cost))
+  // Unknown pricing keeps shape but reports nils.
+  let unknown = volume_cost(
+    {
+      provider: "nonexistent_provider",
+      model: "ghost-model",
+      input_tokens: 1000,
+      output_tokens: 200,
+      calls_per_period: 100,
+    },
+  )
+  println("unknown_known=" + to_string(unknown.pricing_known))
+  println("unknown_total_nil=" + to_string(unknown.total_cost == nil))
+  println("unknown_total_calls=" + to_string(unknown.total_calls))
+}

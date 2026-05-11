@@ -1,0 +1,38 @@
+// compare_model_costs sorts candidates ascending by projected cost and
+// trails unknown-pricing entries so they cannot accidentally win as
+// "cheapest" via silent zero pricing.
+import { compare_model_costs } from "std/llm/economics"
+
+pipeline default() {
+  let ranked = compare_model_costs(
+    [
+      "claude-sonnet-4-20250514",
+      "gpt-4o",
+      "gpt-4o-mini",
+      {provider: "nonexistent_provider", model: "ghost-model"},
+    ],
+    {input_tokens: 1000, output_tokens: 200},
+  )
+  // A model under a non-existent provider has no catalog row and no
+  // provider-level economics, so pricing is genuinely unknown.
+  for entry in ranked {
+    println(
+      entry.model
+        + " known="
+        + to_string(entry.pricing_known)
+        + " cost="
+        + to_string(entry.cost_usd),
+    )
+  }
+  // Dict candidate form with explicit provider override and `calls` multiplier.
+  let scaled = compare_model_costs(
+    [
+      {provider: "anthropic", model: "claude-sonnet-4-20250514"},
+      {provider: "openai", model: "gpt-4o-mini"},
+    ],
+    {input_tokens: 1000, output_tokens: 200, calls: 10},
+  )
+  println("scaled calls=" + to_string(scaled[0].calls))
+  // gpt-4o-mini should be cheaper than claude-sonnet-4.
+  println("scaled cheapest=" + scaled[0].model)
+}

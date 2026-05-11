@@ -166,6 +166,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/llm/budget.harn"),
     },
     StdlibSource {
+        module: "llm/economics",
+        source: include_str!("stdlib/llm/economics.harn"),
+    },
+    StdlibSource {
         module: "llm/prompts",
         source: include_str!("stdlib/llm/prompts.harn"),
     },

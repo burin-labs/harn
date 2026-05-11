@@ -343,71 +343,64 @@ pub(crate) fn check_llm_preflight_budget(
     Ok(projection)
 }
 
-/// Pricing per million tokens (input, output) in USD, as of early 2026.
-fn model_pricing_per_million(model: &str) -> Option<(f64, f64)> {
-    match model {
-        // Anthropic
-        m if m.contains("claude-3-5-haiku") || m.contains("claude-haiku-4") => Some((0.80, 4.00)),
-        m if m.contains("claude-3-5-sonnet") || m.contains("claude-sonnet-4") => {
-            Some((3.00, 15.00))
+/// Resolved pricing for a (provider, model) pair, expressed per 1k tokens.
+/// The `source` discriminates how the rate was found so callers (CLI cost
+/// explanation, economics helpers, `cost_route` summaries) can report it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PricingDetail {
+    pub input_per_1k: f64,
+    pub output_per_1k: f64,
+    pub cache_read_per_1k: Option<f64>,
+    pub cache_write_per_1k: Option<f64>,
+    pub source: PricingSource,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PricingSource {
+    /// Exact model entry in the catalog (configured `[llm.models.<id>]`).
+    CatalogModel,
+    /// Provider-level catalog economics (`[llm.providers.<name>]`).
+    ProviderEconomics,
+}
+
+impl PricingSource {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            PricingSource::CatalogModel => "catalog_model",
+            PricingSource::ProviderEconomics => "provider_economics",
         }
-        m if m.contains("claude-3-opus") || m.contains("claude-opus-4") => Some((15.00, 75.00)),
-        // OpenAI
-        m if m.contains("gpt-4o-mini") => Some((0.15, 0.60)),
-        m if m.contains("gpt-4o") => Some((2.50, 10.00)),
-        m if m.contains("gpt-4-turbo") => Some((10.00, 30.00)),
-        m if m.contains("o1-mini") => Some((3.00, 12.00)),
-        m if m.contains("o1") || m.contains("o3") => Some((15.00, 60.00)),
-        // Meta / open source (typical hosted pricing)
-        m if m.contains("llama") && m.contains("70b") => Some((0.59, 0.79)),
-        m if m.contains("llama") && m.contains("8b") => Some((0.05, 0.08)),
-        // Mistral
-        m if m.contains("mistral-large") => Some((2.00, 6.00)),
-        m if m.contains("mistral-small") => Some((0.20, 0.60)),
-        // Google Gemini
-        m if m.contains("gemini-2") && m.contains("flash") => Some((0.10, 0.40)),
-        m if m.contains("gemini-2") && m.contains("pro") => Some((1.25, 5.00)),
+    }
+}
+
+/// Resolve full pricing detail for a (provider, model) pair. Prefers the
+/// exact-id catalog entry, then falls back to provider-level economics.
+/// Returns `None` for unknown pricing — callers must decide whether to
+/// surface that explicitly or coerce to 0.0.
+pub(crate) fn pricing_detail_for(provider: &str, model: &str) -> Option<PricingDetail> {
+    if let Some(pricing) = crate::llm_config::model_pricing_per_mtok(model) {
+        return Some(PricingDetail {
+            input_per_1k: pricing.input_per_mtok / 1000.0,
+            output_per_1k: pricing.output_per_mtok / 1000.0,
+            cache_read_per_1k: pricing.cache_read_per_mtok.map(|rate| rate / 1000.0),
+            cache_write_per_1k: pricing.cache_write_per_mtok.map(|rate| rate / 1000.0),
+            source: PricingSource::CatalogModel,
+        });
+    }
+    let (input, output, _) = crate::llm_config::provider_economics(provider);
+    match (input, output) {
+        (Some(input_per_1k), Some(output_per_1k)) => Some(PricingDetail {
+            input_per_1k,
+            output_per_1k,
+            cache_read_per_1k: None,
+            cache_write_per_1k: None,
+            source: PricingSource::ProviderEconomics,
+        }),
         _ => None,
     }
 }
 
-/// Pricing per 1k tokens (input, output) in USD.
-pub(crate) fn model_pricing_per_1k(model: &str) -> Option<(f64, f64)> {
-    crate::llm_config::model_pricing_per_mtok(model)
-        .map(|pricing| {
-            (
-                pricing.input_per_mtok / 1000.0,
-                pricing.output_per_mtok / 1000.0,
-            )
-        })
-        .or_else(|| {
-            model_pricing_per_million(model)
-                .map(|(input, output)| (input / 1000.0, output / 1000.0))
-        })
-}
-
 pub(crate) fn pricing_per_1k_for(provider: &str, model: &str) -> Option<(f64, f64)> {
-    model_pricing_per_1k(model).or_else(|| crate::llm_config::pricing_per_1k_for(provider, model))
-}
-
-fn model_cache_pricing_per_1k(model: &str) -> Option<(f64, Option<f64>, Option<f64>)> {
-    crate::llm_config::model_pricing_per_mtok(model).map(|pricing| {
-        (
-            pricing.input_per_mtok / 1000.0,
-            pricing.cache_read_per_mtok.map(|rate| rate / 1000.0),
-            pricing.cache_write_per_mtok.map(|rate| rate / 1000.0),
-        )
-    })
-}
-
-fn cache_pricing_per_1k_for(
-    provider: &str,
-    model: &str,
-) -> Option<(f64, Option<f64>, Option<f64>)> {
-    model_cache_pricing_per_1k(model).or_else(|| {
-        crate::llm_config::pricing_per_1k_for(provider, model)
-            .map(|(input_rate, _output_rate)| (input_rate, None, None))
-    })
+    pricing_detail_for(provider, model).map(|p| (p.input_per_1k, p.output_per_1k))
 }
 
 pub(crate) fn latency_p50_ms_for(provider: &str) -> Option<u64> {
@@ -415,30 +408,34 @@ pub(crate) fn latency_p50_ms_for(provider: &str) -> Option<u64> {
     latency
 }
 
-/// Calculate cost for a given model and token counts.
+/// Calculate cost for a given model and token counts using the exact-id
+/// catalog pricing entry. Returns 0.0 when the model has no catalog entry,
+/// even if the inferred provider has provider-level economics — callers that
+/// know the provider should use `calculate_cost_for_provider` instead so
+/// they pick up provider economics, and `pricing_detail_for` when they need
+/// to surface unknown pricing explicitly.
 pub fn calculate_cost(model: &str, input_tokens: i64, output_tokens: i64) -> f64 {
-    match model_pricing_per_1k(model) {
-        Some((input_rate, output_rate)) => {
-            (input_tokens as f64 * input_rate + output_tokens as f64 * output_rate) / 1000.0
-        }
-        None => 0.0,
-    }
+    let Some(pricing) = crate::llm_config::model_pricing_per_mtok(model) else {
+        return 0.0;
+    };
+    (input_tokens as f64 * pricing.input_per_mtok + output_tokens as f64 * pricing.output_per_mtok)
+        / 1_000_000.0
 }
 
-/// Calculate cost using model-specific pricing first, then provider catalog
-/// economics when the model is not in the static table.
+/// Calculate cost using catalog model pricing first, then provider catalog
+/// economics when the model has no exact catalog entry. Returns 0.0 when
+/// pricing is unknown (use `pricing_detail_for` to distinguish unknown).
 pub fn calculate_cost_for_provider(
     provider: &str,
     model: &str,
     input_tokens: i64,
     output_tokens: i64,
 ) -> f64 {
-    match pricing_per_1k_for(provider, model) {
-        Some((input_rate, output_rate)) => {
-            (input_tokens as f64 * input_rate + output_tokens as f64 * output_rate) / 1000.0
-        }
-        None => 0.0,
-    }
+    let Some(detail) = pricing_detail_for(provider, model) else {
+        return 0.0;
+    };
+    (input_tokens as f64 * detail.input_per_1k + output_tokens as f64 * detail.output_per_1k)
+        / 1000.0
 }
 
 pub(crate) fn cache_hit_ratio(
@@ -468,17 +465,16 @@ pub(crate) fn cache_savings_usd_for_provider(
     cache_read_tokens: i64,
     cache_write_tokens: i64,
 ) -> f64 {
-    let Some((input_rate, cache_read_rate, cache_write_rate)) =
-        cache_pricing_per_1k_for(provider, model)
-    else {
+    let Some(detail) = pricing_detail_for(provider, model) else {
         return 0.0;
     };
-    let cache_read_savings = cache_read_tokens.max(0) as f64
-        * (input_rate - cache_read_rate.unwrap_or(input_rate))
-        / 1000.0;
-    let cache_write_savings = cache_write_tokens.max(0) as f64
-        * (input_rate - cache_write_rate.unwrap_or(input_rate))
-        / 1000.0;
+    let input_rate = detail.input_per_1k;
+    let cache_read_rate = detail.cache_read_per_1k.unwrap_or(input_rate);
+    let cache_write_rate = detail.cache_write_per_1k.unwrap_or(input_rate);
+    let cache_read_savings =
+        cache_read_tokens.max(0) as f64 * (input_rate - cache_read_rate) / 1000.0;
+    let cache_write_savings =
+        cache_write_tokens.max(0) as f64 * (input_rate - cache_write_rate) / 1000.0;
     cache_read_savings + cache_write_savings
 }
 
@@ -530,6 +526,44 @@ pub(crate) fn register_cost_builtins(vm: &mut Vm) {
         let cost = calculate_cost(&model, input_tokens, output_tokens);
         Ok(VmValue::Float(cost))
     });
+
+    vm.register_builtin_with_metadata(
+        VmBuiltinMetadata::sync_static("llm_pricing")
+            .signature_static("llm_pricing(model_or_dict, model?)")
+            .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+            .category_static("llm.economics")
+            .doc_static(
+                "Return catalog pricing for a model: \
+                {input_per_mtok, output_per_mtok, cache_read_per_mtok, cache_write_per_mtok, \
+                provider, model, source} or nil if the model has no priced entry.",
+            ),
+        llm_pricing_builtin,
+    );
+
+    vm.register_builtin_with_metadata(
+        VmBuiltinMetadata::sync_static("llm_format_usd")
+            .signature_static("llm_format_usd(amount, options?)")
+            .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+            .category_static("llm.economics")
+            .doc_static(
+                "Format a USD amount as a string. Default precision auto-scales: 6 decimals \
+                under $1, 4 decimals under $100, 2 decimals otherwise; pass {precision: N} to override.",
+            ),
+        llm_format_usd_builtin,
+    );
+
+    vm.register_builtin_with_metadata(
+        VmBuiltinMetadata::sync_static("llm_compare_costs")
+            .signature_static("llm_compare_costs(candidates, opts)")
+            .arity(VmBuiltinArity::Exact(2))
+            .category_static("llm.economics")
+            .doc_static(
+                "Project a per-call cost across a list of {provider?, model} candidates given \
+                {input_tokens, output_tokens, cache_read_tokens?, cache_write_tokens?, calls?}. \
+                Returns a list sorted ascending by projected cost (unknown pricing trails).",
+            ),
+        llm_compare_costs_builtin,
+    );
 
     vm.register_builtin("llm_session_cost", |_args, _out| {
         let (total_input, total_output, _duration, call_count) = super::trace::peek_trace_summary();
@@ -607,6 +641,298 @@ pub(crate) fn register_cost_builtins(vm: &mut Vm) {
     );
 }
 
+fn pricing_detail_to_vm_value(provider: &str, model: &str, detail: &PricingDetail) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert(
+        "provider".to_string(),
+        VmValue::String(Rc::from(provider.to_string())),
+    );
+    dict.insert(
+        "model".to_string(),
+        VmValue::String(Rc::from(model.to_string())),
+    );
+    dict.insert(
+        "input_per_mtok".to_string(),
+        VmValue::Float(detail.input_per_1k * 1000.0),
+    );
+    dict.insert(
+        "output_per_mtok".to_string(),
+        VmValue::Float(detail.output_per_1k * 1000.0),
+    );
+    dict.insert(
+        "cache_read_per_mtok".to_string(),
+        detail
+            .cache_read_per_1k
+            .map(|rate| VmValue::Float(rate * 1000.0))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "cache_write_per_mtok".to_string(),
+        detail
+            .cache_write_per_1k
+            .map(|rate| VmValue::Float(rate * 1000.0))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "source".to_string(),
+        VmValue::String(Rc::from(detail.source.as_str())),
+    );
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn resolve_pricing_args(args: &[VmValue]) -> (String, String) {
+    if let Some(VmValue::Dict(dict)) = args.first() {
+        let provider = dict
+            .get("provider")
+            .map(|value| value.display())
+            .unwrap_or_default();
+        let model = dict
+            .get("model")
+            .map(|value| value.display())
+            .unwrap_or_default();
+        if !provider.is_empty() && !model.is_empty() {
+            return (provider, model);
+        }
+        if !model.is_empty() {
+            let resolved = crate::llm_config::resolve_model_info(&model);
+            return (resolved.provider, resolved.id);
+        }
+    }
+    let first = args.first().map(|a| a.display()).unwrap_or_default();
+    let second = args.get(1).map(|a| a.display()).unwrap_or_default();
+    match (first.is_empty(), second.is_empty()) {
+        (false, false) => (first, second),
+        (false, true) => {
+            let resolved = crate::llm_config::resolve_model_info(&first);
+            (resolved.provider, resolved.id)
+        }
+        _ => (String::new(), String::new()),
+    }
+}
+
+fn llm_pricing_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let (provider, model) = resolve_pricing_args(args);
+    if model.trim().is_empty() {
+        return Err(VmError::Runtime(
+            "llm_pricing: model is required".to_string(),
+        ));
+    }
+    Ok(pricing_detail_for(&provider, &model)
+        .map(|detail| pricing_detail_to_vm_value(&provider, &model, &detail))
+        .unwrap_or(VmValue::Nil))
+}
+
+fn llm_format_usd_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let amount = match args.first() {
+        Some(VmValue::Float(value)) => *value,
+        Some(VmValue::Int(value)) => *value as f64,
+        Some(VmValue::Nil) | None => 0.0,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "llm_format_usd: amount must be a number (got {})",
+                other.type_name(),
+            )))
+        }
+    };
+    let options = args.get(1).and_then(|v| v.as_dict());
+    let explicit_precision = options
+        .and_then(|opts| opts.get("precision"))
+        .and_then(|value| match value {
+            VmValue::Int(n) if *n >= 0 => Some(*n as usize),
+            VmValue::Float(f) if f.is_finite() && *f >= 0.0 => Some(*f as usize),
+            _ => None,
+        });
+    let sign_always = options
+        .and_then(|opts| opts.get("sign"))
+        .and_then(|value| match value {
+            VmValue::Bool(b) => Some(*b),
+            _ => None,
+        })
+        .unwrap_or(false);
+    let formatted = format_usd_amount(amount, explicit_precision, sign_always);
+    Ok(VmValue::String(Rc::from(formatted)))
+}
+
+fn format_usd_amount(amount: f64, precision: Option<usize>, sign_always: bool) -> String {
+    if !amount.is_finite() {
+        return "$NaN".to_string();
+    }
+    let precision = precision.unwrap_or_else(|| {
+        let abs = amount.abs();
+        if abs == 0.0 || abs >= 100.0 {
+            2
+        } else if abs >= 1.0 {
+            4
+        } else {
+            6
+        }
+    });
+    let sign = if amount < 0.0 {
+        "-"
+    } else if sign_always {
+        "+"
+    } else {
+        ""
+    };
+    // Defer rounding to the libc formatter so that values like 81.0 that
+    // arrive as 80.999… don't split into "$80." + "1.0000".
+    let rounded = format!("{:.*}", precision, amount.abs());
+    let (whole_str, frac_part) = match rounded.find('.') {
+        Some(idx) => (&rounded[..idx], &rounded[idx + 1..]),
+        None => (rounded.as_str(), ""),
+    };
+    let mut grouped = String::new();
+    for (idx, ch) in whole_str.chars().enumerate() {
+        if idx > 0 && (whole_str.len() - idx) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(ch);
+    }
+    if precision == 0 || frac_part.is_empty() {
+        format!("{sign}${grouped}")
+    } else {
+        format!("{sign}${grouped}.{frac_part}")
+    }
+}
+
+fn llm_compare_costs_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let candidates = match args.first() {
+        Some(VmValue::List(items)) => items.clone(),
+        _ => {
+            return Err(VmError::Runtime(
+                "llm_compare_costs: candidates must be a list".to_string(),
+            ))
+        }
+    };
+    let opts = match args.get(1) {
+        Some(VmValue::Dict(dict)) => dict.clone(),
+        _ => {
+            return Err(VmError::Runtime(
+                "llm_compare_costs: options dict is required".to_string(),
+            ))
+        }
+    };
+    let input_tokens = opts
+        .get("input_tokens")
+        .and_then(|v| v.as_int())
+        .unwrap_or(0)
+        .max(0);
+    let output_tokens = opts
+        .get("output_tokens")
+        .and_then(|v| v.as_int())
+        .unwrap_or(0)
+        .max(0);
+    let cache_read_tokens = opts
+        .get("cache_read_tokens")
+        .and_then(|v| v.as_int())
+        .unwrap_or(0)
+        .max(0);
+    let cache_write_tokens = opts
+        .get("cache_write_tokens")
+        .and_then(|v| v.as_int())
+        .unwrap_or(0)
+        .max(0);
+    let calls = opts
+        .get("calls")
+        .and_then(|v| v.as_int())
+        .unwrap_or(1)
+        .max(1);
+
+    let mut rows: Vec<(Option<f64>, VmValue)> = Vec::with_capacity(candidates.len());
+    for candidate in candidates.iter() {
+        let (provider, model) = match candidate {
+            VmValue::Dict(dict) => {
+                let provider = dict
+                    .get("provider")
+                    .map(|v| v.display())
+                    .unwrap_or_default();
+                let model = dict.get("model").map(|v| v.display()).unwrap_or_default();
+                if model.is_empty() {
+                    return Err(VmError::Runtime(
+                        "llm_compare_costs: each candidate dict must include `model`".to_string(),
+                    ));
+                }
+                if provider.is_empty() {
+                    let resolved = crate::llm_config::resolve_model_info(&model);
+                    (resolved.provider, resolved.id)
+                } else {
+                    (provider, model)
+                }
+            }
+            VmValue::String(s) => {
+                let resolved = crate::llm_config::resolve_model_info(s);
+                (resolved.provider, resolved.id)
+            }
+            _ => {
+                return Err(VmError::Runtime(format!(
+                    "llm_compare_costs: candidates must be strings or dicts (got {})",
+                    candidate.type_name(),
+                )))
+            }
+        };
+        let detail = pricing_detail_for(&provider, &model);
+        let projection = detail.map(|d| {
+            project_call_cost(
+                &d,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+            ) * calls as f64
+        });
+        let mut row = BTreeMap::new();
+        row.insert(
+            "provider".to_string(),
+            VmValue::String(Rc::from(provider.clone())),
+        );
+        row.insert(
+            "model".to_string(),
+            VmValue::String(Rc::from(model.clone())),
+        );
+        row.insert(
+            "pricing".to_string(),
+            detail
+                .as_ref()
+                .map(|d| pricing_detail_to_vm_value(&provider, &model, d))
+                .unwrap_or(VmValue::Nil),
+        );
+        row.insert(
+            "cost_usd".to_string(),
+            projection.map(VmValue::Float).unwrap_or(VmValue::Nil),
+        );
+        row.insert("calls".to_string(), VmValue::Int(calls));
+        row.insert("pricing_known".to_string(), VmValue::Bool(detail.is_some()));
+        rows.push((projection, VmValue::Dict(Rc::new(row))));
+    }
+
+    rows.sort_by(|left, right| match (left.0, right.0) {
+        (Some(a), Some(b)) => a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+    Ok(VmValue::List(Rc::new(
+        rows.into_iter().map(|(_, value)| value).collect(),
+    )))
+}
+
+pub(crate) fn project_call_cost(
+    detail: &PricingDetail,
+    input_tokens: i64,
+    output_tokens: i64,
+    cache_read_tokens: i64,
+    cache_write_tokens: i64,
+) -> f64 {
+    let cache_read_rate = detail.cache_read_per_1k.unwrap_or(detail.input_per_1k);
+    let cache_write_rate = detail.cache_write_per_1k.unwrap_or(detail.input_per_1k);
+    let billable_input = (input_tokens - cache_read_tokens - cache_write_tokens).max(0);
+    (billable_input as f64 * detail.input_per_1k
+        + output_tokens as f64 * detail.output_per_1k
+        + cache_read_tokens as f64 * cache_read_rate
+        + cache_write_tokens as f64 * cache_write_rate)
+        / 1000.0
+}
+
 fn tokenizer_info_to_vm_value(model: &str, info: super::token_count::TokenizerInfo) -> VmValue {
     let mut result = BTreeMap::new();
     result.insert("model".to_string(), VmValue::String(Rc::from(model)));
@@ -637,7 +963,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn calculate_cost_uses_catalog_pricing_before_static_fallback() {
+    fn calculate_cost_uses_catalog_model_pricing() {
         let _guard = crate::llm::env_lock().lock().unwrap();
         let mut overlay = crate::llm_config::ProvidersConfig::default();
         overlay.models.insert(
@@ -663,6 +989,78 @@ mod tests {
         assert!((cost - 0.03).abs() < f64::EPSILON);
 
         crate::llm_config::clear_user_overrides();
+    }
+
+    #[test]
+    fn calculate_cost_is_zero_for_unknown_model() {
+        let _guard = crate::llm::env_lock().lock().unwrap();
+        crate::llm_config::clear_user_overrides();
+        assert_eq!(
+            calculate_cost("definitely-unpriced-model", 1_000, 1_000),
+            0.0
+        );
+    }
+
+    #[test]
+    fn calculate_cost_for_provider_falls_back_to_provider_economics() {
+        let _guard = crate::llm::env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        crate::llm_config::clear_user_overrides();
+        let cost =
+            calculate_cost_for_provider("openai", "some-bespoke-openai-deployment", 1_000, 1_000);
+        let (input_per_1k, output_per_1k, _) = crate::llm_config::provider_economics("openai");
+        let expected =
+            (1_000.0 * input_per_1k.unwrap() + 1_000.0 * output_per_1k.unwrap()) / 1_000.0;
+        assert!(
+            (cost - expected).abs() < 1e-9,
+            "cost={cost}, expected={expected}"
+        );
+    }
+
+    #[test]
+    fn pricing_detail_reports_source() {
+        let _guard = crate::llm::env_lock().lock().unwrap();
+        crate::llm_config::clear_user_overrides();
+        let exact = pricing_detail_for("anthropic", "claude-sonnet-4-20250514").unwrap();
+        assert_eq!(exact.source, PricingSource::CatalogModel);
+        assert!(exact.cache_read_per_1k.is_some());
+
+        let provider_only = pricing_detail_for("openai", "some-bespoke-openai-deployment").unwrap();
+        assert_eq!(provider_only.source, PricingSource::ProviderEconomics);
+        assert!(provider_only.cache_read_per_1k.is_none());
+
+        assert!(pricing_detail_for("local", "no-such-local-model").is_some()); // local has 0/0
+        assert!(pricing_detail_for("nonexistent_provider", "ghost-model").is_none());
+    }
+
+    #[test]
+    fn format_usd_amount_auto_precision_and_grouping() {
+        assert_eq!(format_usd_amount(0.000_045, None, false), "$0.000045");
+        assert_eq!(format_usd_amount(1.234_5, None, false), "$1.2345");
+        assert_eq!(format_usd_amount(1234.5, None, false), "$1,234.50");
+        assert_eq!(format_usd_amount(-1234.5, None, false), "-$1,234.50");
+        assert_eq!(format_usd_amount(1234.5, None, true), "+$1,234.50");
+        assert_eq!(format_usd_amount(0.123_456_789, Some(2), false), "$0.12");
+        assert_eq!(format_usd_amount(1.0, Some(0), false), "$1");
+    }
+
+    #[test]
+    fn format_usd_handles_fractional_carry_into_whole() {
+        // 0.00027 * 300_000 produces 80.999… in IEEE-754; the formatter
+        // must round-then-render rather than splitting the rounded fraction
+        // back into a separate component (regression: "$80.1.0000").
+        let amount = 0.000_27_f64 * 300_000.0;
+        assert!((amount - 81.0).abs() < 1e-6);
+        assert_eq!(format_usd_amount(amount, None, false), "$81.0000");
+    }
+
+    #[test]
+    fn project_call_cost_excludes_cached_input_from_full_rate() {
+        let detail = pricing_detail_for("anthropic", "claude-sonnet-4-20250514").unwrap();
+        let with_cache = project_call_cost(&detail, 10_000, 500, 8_000, 0);
+        let no_cache = project_call_cost(&detail, 10_000, 500, 0, 0);
+        assert!(with_cache < no_cache);
     }
 
     #[test]

@@ -1,0 +1,388 @@
+/**
+ * @harn-entrypoint-category llm.stdlib
+ *
+ * std/llm/economics — first-class cost / pricing helpers. Wraps the Rust
+ * builtins `llm_pricing`, `llm_compare_costs`, and `llm_format_usd`, and
+ * adds usage-oriented projections (call cost, session cost, cache
+ * break-even, monthly volume) so scripts and dashboards do not need to
+ * hand-roll the math.
+ *
+ * Pricing data comes from the model catalog (configured `[llm.models.*]`)
+ * or provider economics (`[llm.providers.*]`). Models with no priced entry
+ * surface as `pricing_known: false` rather than silently becoming $0; the
+ * only exceptions are providers explicitly marked free in the catalog
+ * (rates set to 0 in `[llm.providers.<name>]`, e.g. `ollama`, `local`,
+ * `llamacpp`, `mlx`, `vllm`, `tgi`).
+ */
+fn __coerce_to_str(value) {
+  if value == nil {
+    return ""
+  }
+  return to_string(value)
+}
+
+fn __ensure_dict(opts, label) {
+  if type_of(opts) != "dict" {
+    throw label + ": opts must be a dict"
+  }
+  return opts
+}
+
+fn __resolve_pricing_selector(provider, model) {
+  // Three call shapes:
+  //   pricing_for(model_id)            → provider inferred from catalog
+  //   pricing_for({provider, model})   → explicit dict
+  //   pricing_for(provider, model_id)  → both explicit
+  if model == nil {
+    if type_of(provider) == "dict" {
+      return llm_pricing(provider)
+    }
+    let provider_str = __coerce_to_str(provider)
+    if provider_str == "" {
+      throw "pricing_for: model is required"
+    }
+    return llm_pricing(provider_str)
+  }
+  let model_str = __coerce_to_str(model)
+  if model_str == "" {
+    throw "pricing_for: model is required"
+  }
+  if provider == nil {
+    return llm_pricing(model_str)
+  }
+  return llm_pricing({provider: __coerce_to_str(provider), model: model_str})
+}
+
+fn __int_or(value, fallback) {
+  if value == nil {
+    return fallback
+  }
+  return to_int(value)
+}
+
+fn __cache_read_rate(pricing, input_rate) {
+  if pricing?.cache_read_per_mtok != nil {
+    return pricing.cache_read_per_mtok / 1000000.0
+  }
+  return input_rate
+}
+
+fn __cache_write_rate_or_nil(pricing) {
+  if pricing?.cache_write_per_mtok != nil {
+    return pricing.cache_write_per_mtok / 1000000.0
+  }
+  return nil
+}
+
+fn __billable_input(input_tokens, cache_read_tokens, cache_write_tokens) {
+  let raw = input_tokens - cache_read_tokens - cache_write_tokens
+  if raw < 0 {
+    return 0
+  }
+  return raw
+}
+
+/**
+ * Return pricing for a (provider?, model) pair. Returns a dict with
+ * input_per_mtok, output_per_mtok, cache_read_per_mtok (or nil),
+ * cache_write_per_mtok (or nil), provider, model, source. Returns nil
+ * when the model has no priced entry and the provider has no provider-level
+ * economics — callers should treat that as "unknown".
+ */
+pub fn pricing_for(provider, model = nil) {
+  return __resolve_pricing_selector(provider, model)
+}
+
+/**
+ * Estimate the USD cost of a single call. opts:
+ *   {provider?, model, input_tokens, output_tokens,
+ *    cache_read_tokens?, cache_write_tokens?, calls?}
+ *
+ * Returns a dict with cost_usd, pricing_known, breakdown (per-bucket
+ * dollar amounts), and the resolved pricing. When pricing is unknown the
+ * cost_usd field is nil — branch on `pricing_known`.
+ */
+pub fn estimate_call_cost(opts) {
+  __ensure_dict(opts, "estimate_call_cost")
+  let model = __coerce_to_str(opts?.model)
+  if model == "" {
+    throw "estimate_call_cost: opts.model is required"
+  }
+  let provider = if opts?.provider != nil {
+    __coerce_to_str(opts.provider)
+  } else {
+    nil
+  }
+  let pricing = __resolve_pricing_selector(provider, model)
+  let input_tokens = __int_or(opts?.input_tokens, 0)
+  let output_tokens = __int_or(opts?.output_tokens, 0)
+  let cache_read_tokens = __int_or(opts?.cache_read_tokens, 0)
+  let cache_write_tokens = __int_or(opts?.cache_write_tokens, 0)
+  var calls = __int_or(opts?.calls, 1)
+  if calls < 1 {
+    calls = 1
+  }
+  if pricing == nil {
+    return {
+      pricing_known: false,
+      pricing: nil,
+      cost_usd: nil,
+      per_call_usd: nil,
+      calls: calls,
+      breakdown: nil,
+      provider: provider,
+      model: model,
+    }
+  }
+  let input_rate = pricing.input_per_mtok / 1000000.0
+  let output_rate = pricing.output_per_mtok / 1000000.0
+  let cache_read_rate = __cache_read_rate(pricing, input_rate)
+  let cache_write_rate = __cache_write_rate_or_nil(pricing) ?? input_rate
+  let billable = __billable_input(input_tokens, cache_read_tokens, cache_write_tokens)
+  let per_call = billable * input_rate
+    + output_tokens * output_rate
+    + cache_read_tokens * cache_read_rate
+    + cache_write_tokens * cache_write_rate
+  let total = per_call * calls
+  let breakdown = {
+    input_usd: billable * input_rate * calls,
+    output_usd: output_tokens * output_rate * calls,
+    cache_read_usd: cache_read_tokens * cache_read_rate * calls,
+    cache_write_usd: cache_write_tokens * cache_write_rate * calls,
+  }
+  return {
+    pricing_known: true,
+    pricing: pricing,
+    cost_usd: total,
+    per_call_usd: per_call,
+    calls: calls,
+    breakdown: breakdown,
+    provider: pricing?.provider ?? provider,
+    model: pricing?.model ?? model,
+  }
+}
+
+fn __aggregate_key(provider, model) {
+  let p = if provider == nil {
+    ""
+  } else {
+    to_string(provider)
+  }
+  let m = if model == nil {
+    ""
+  } else {
+    to_string(model)
+  }
+  return p + "|" + m
+}
+
+/**
+ * Aggregate a session of LLM calls into a single envelope. `usage` is a
+ * list of dicts that each look like {provider?, model, input_tokens,
+ * output_tokens, cache_read_tokens?, cache_write_tokens?, calls?}. Returns
+ * {total_cost_usd, known_cost_usd, total_calls, total_tokens,
+ *  unknown_calls, per_model}. `per_model` is sorted descending by cost.
+ */
+pub fn estimate_session_cost(usage) {
+  if type_of(usage) != "list" {
+    throw "estimate_session_cost: usage must be a list of call dicts"
+  }
+  var total = 0.0
+  var known_total = 0.0
+  var total_calls = 0
+  var total_tokens = 0
+  var unknown_calls = 0
+  var aggregated = {}
+  for entry in usage {
+    let row = estimate_call_cost(entry)
+    let calls = row.calls
+    total_calls = total_calls + calls
+    let entry_input = __int_or(entry?.input_tokens, 0)
+    let entry_output = __int_or(entry?.output_tokens, 0)
+    total_tokens = total_tokens + (entry_input + entry_output) * calls
+    if row.pricing_known {
+      total = total + row.cost_usd
+      known_total = known_total + row.cost_usd
+    } else {
+      unknown_calls = unknown_calls + calls
+    }
+    let key = __aggregate_key(row?.provider, row?.model)
+    let prior = aggregated[key]
+      ?? {
+      provider: row?.provider,
+      model: row?.model,
+      calls: 0,
+      cost_usd: 0.0,
+      pricing_known: row.pricing_known,
+    }
+    let row_cost = row.cost_usd ?? 0.0
+    let updated = {
+      provider: prior.provider,
+      model: prior.model,
+      calls: prior.calls + calls,
+      cost_usd: prior.cost_usd + row_cost,
+      pricing_known: prior.pricing_known && row.pricing_known,
+    }
+    aggregated = aggregated + {[key]: updated}
+  }
+  var rows = []
+  for k in aggregated.keys() {
+    rows = rows.push(aggregated[k])
+  }
+  let per_model = rows.sort({ a, b -> b.cost_usd - a.cost_usd })
+  return {
+    total_cost_usd: total,
+    known_cost_usd: known_total,
+    total_calls: total_calls,
+    total_tokens: total_tokens,
+    unknown_calls: unknown_calls,
+    per_model: per_model,
+  }
+}
+
+/**
+ * Compare a list of candidate models for a single call (or a fixed batch of
+ * calls). candidates is a list of model id strings or {provider?, model}
+ * dicts; opts has the same shape as estimate_call_cost minus `model`.
+ * Returns the same shape as `llm_compare_costs`: a list sorted ascending
+ * by projected cost, with unknown-pricing entries at the end.
+ */
+pub fn compare_model_costs(candidates, opts) {
+  __ensure_dict(opts, "compare_model_costs")
+  return llm_compare_costs(candidates, opts)
+}
+
+/**
+ * Compute the prompt-token break-even point for prompt caching: how many
+ * reuses of the same prompt prefix are required before the cache write
+ * cost is amortized by the per-call cache-read savings. opts:
+ *   {provider?, model, prompt_tokens}
+ * Returns {pricing_known, break_even_calls?, write_cost?, savings_per_hit?,
+ *          recommended, reason}.
+ *
+ * `break_even_calls` is nil when there are no savings, 1 when the cache
+ * write is free (no recurring penalty), otherwise the integer number of
+ * cache hits needed before the write pays for itself.
+ */
+pub fn cache_break_even(opts) {
+  __ensure_dict(opts, "cache_break_even")
+  let model = __coerce_to_str(opts?.model)
+  if model == "" {
+    throw "cache_break_even: opts.model is required"
+  }
+  let provider = if opts?.provider != nil {
+    __coerce_to_str(opts.provider)
+  } else {
+    nil
+  }
+  let prompt_tokens = __int_or(opts?.prompt_tokens, 0)
+  if prompt_tokens <= 0 {
+    throw "cache_break_even: opts.prompt_tokens must be > 0"
+  }
+  let pricing = __resolve_pricing_selector(provider, model)
+  if pricing == nil {
+    return {
+      pricing_known: false,
+      break_even_calls: nil,
+      write_cost: nil,
+      savings_per_hit: nil,
+      recommended: false,
+      reason: "unknown_pricing",
+    }
+  }
+  let input_rate = pricing.input_per_mtok / 1000000.0
+  let cache_read_rate = __cache_read_rate(pricing, input_rate)
+  let cache_write_rate = __cache_write_rate_or_nil(pricing)
+  let savings_per_hit = (input_rate - cache_read_rate) * prompt_tokens
+  if savings_per_hit <= 0.0 {
+    return {
+      pricing_known: true,
+      break_even_calls: nil,
+      write_cost: 0.0,
+      savings_per_hit: savings_per_hit,
+      recommended: false,
+      reason: "no_savings",
+    }
+  }
+  if cache_write_rate == nil {
+    return {
+      pricing_known: true,
+      break_even_calls: 1,
+      write_cost: 0.0,
+      savings_per_hit: savings_per_hit,
+      recommended: true,
+      reason: "free_cache_write",
+    }
+  }
+  let write_cost = cache_write_rate * prompt_tokens
+  let break_even_calls = to_int(ceil(write_cost / savings_per_hit))
+  return {
+    pricing_known: true,
+    break_even_calls: break_even_calls,
+    write_cost: write_cost,
+    savings_per_hit: savings_per_hit,
+    recommended: true,
+    reason: "amortizes",
+  }
+}
+
+/**
+ * Project total cost across a recurring call volume. opts:
+ *   {provider?, model, input_tokens, output_tokens, cache_read_tokens?,
+ *    cache_write_tokens?, calls_per_period, periods?}
+ * `periods` defaults to 1. Convenient for daily / monthly volume sums.
+ * Returns {pricing_known, total_calls, periods, calls_per_period,
+ *          cost_per_call?, cost_per_period?, total_cost?, ...}.
+ */
+pub fn volume_cost(opts) {
+  __ensure_dict(opts, "volume_cost")
+  let calls_per_period = __int_or(opts?.calls_per_period, 0)
+  if calls_per_period <= 0 {
+    throw "volume_cost: opts.calls_per_period must be > 0"
+  }
+  var periods = __int_or(opts?.periods, 1)
+  if periods < 1 {
+    periods = 1
+  }
+  let total_calls = calls_per_period * periods
+  let inner = opts + {calls: total_calls}
+  let row = estimate_call_cost(inner)
+  if !row.pricing_known {
+    return {
+      pricing_known: false,
+      total_calls: total_calls,
+      periods: periods,
+      calls_per_period: calls_per_period,
+      cost_per_call: nil,
+      cost_per_period: nil,
+      total_cost: nil,
+      provider: row?.provider,
+      model: row?.model,
+    }
+  }
+  return {
+    pricing_known: true,
+    total_calls: total_calls,
+    periods: periods,
+    calls_per_period: calls_per_period,
+    cost_per_call: row.per_call_usd,
+    cost_per_period: row.per_call_usd * calls_per_period,
+    total_cost: row.cost_usd,
+    breakdown: row.breakdown,
+    provider: row.provider,
+    model: row.model,
+    pricing: row.pricing,
+  }
+}
+
+/**
+ * Format a USD amount as a string. Default precision auto-scales by
+ * magnitude (2 decimals at $100+, 4 below $100, 6 below $1). Pass
+ * {precision: N} or {sign: true} to override.
+ */
+pub fn format_usd(amount, options = nil) {
+  if options == nil {
+    return llm_format_usd(amount)
+  }
+  return llm_format_usd(amount, options)
+}
