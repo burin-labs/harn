@@ -355,6 +355,12 @@ Imports starting with `std/` load embedded stdlib modules:
   filter_test_cells, truncate_head_tail, detect_compile_error, has_got_want,
   format_test_errors, int_to_string, float_to_string, parse_int_or,
   parse_float_or)
+- `import "std/edit"` — pure old/new text patch helpers
+  (edit_apply_old_new_patch, edit_splice_lines, edit_changed_regions,
+  edit_validate_changed_regions)
+- `import "std/artifact/web"` — safe helpers for small generated HTML/CSS/JS
+  artifacts (web_artifact_extract, web_artifact_text_fallback,
+  web_artifact_validate, web_artifact_apply_patch)
 - `import "std/collections"` — collection utilities (filter_nil, store_stale,
   store_refresh)
 - `import "std/async"` — polling and retry helpers (wait_for, retry_until,

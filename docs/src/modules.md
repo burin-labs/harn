@@ -79,8 +79,8 @@ code or inside any pipeline.
 
 `import "std/..."` is only needed for the Harn-written helper modules
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
-`std/path`, `std/cache`, `std/llm/handlers`, `std/llm/budget`,
-`std/llm/prompts`, `std/vision`,
+`std/path`, `std/edit`, `std/artifact/web`, `std/cache`,
+`std/llm/handlers`, `std/llm/budget`, `std/llm/prompts`, `std/vision`,
 `std/context`, `std/agent_state`, `std/agents`, `std/agent/user`,
 `std/runtime`, `std/command`, `std/git`, `std/review`,
 `std/experiments`,
@@ -105,6 +105,8 @@ import "std/cache"
 import "std/collections"
 import "std/connectors/shared"
 import "std/context"
+import "std/edit"
+import "std/artifact/web"
 import "std/experiments"
 import "std/git"
 import "std/json"
@@ -171,6 +173,35 @@ Text processing utilities for LLM output and code analysis:
 | `detect_compile_error(output)` | Check for compile error patterns (SyntaxError, etc.) |
 | `has_got_want(output)` | Check for got/want test failure patterns |
 | `format_test_errors(output)` | Extract error-relevant lines (max 20) |
+
+### std/edit
+
+Pure helpers for agent-authored text patches:
+
+| Function | Description |
+|---|---|
+| `edit_apply_old_new_patch(text, old_text, new_text, options?)` | Apply one anchored old/new patch with exact, line-normalized, and structural matching; returns hashes, match kind, line span, changed regions, errors, warnings, and provenance |
+| `edit_splice_lines(text, start_line, end_line_exclusive, new_text, options?)` | Replace a half-open 0-based line range and return the same patch metadata shape |
+| `edit_changed_regions(before, after)` | Return deterministic line-level changed-region metadata for one contiguous diff |
+| `edit_validate_changed_regions(before, after, expected_regions, options?)` | Verify that all changes fall inside expected 0-based line regions |
+
+Default guardrails reject empty anchors, no-op edits, whitespace-only edits,
+lazy omission placeholders, ambiguous matches, and excessive patch growth.
+
+### std/artifact/web
+
+Safe helpers for small generated HTML/CSS/JS artifacts:
+
+| Function | Description |
+|---|---|
+| `web_artifact_extract(html)` | Extract `<script>`, `<style>`, and body fragments with tag-balance errors and provenance |
+| `web_artifact_text_fallback(html, options?)` | Strip script/style/markup into a compact text fallback for hosts without embedded UI support |
+| `web_artifact_validate(html, options?)` | Return a machine-readable validation report with fragments, warnings, errors, error codes, text fallback, hashes, and provenance |
+| `web_artifact_apply_patch(html, old_text, new_text, options?)` | Compose `std/edit` patching with web artifact validation and changed-region checks |
+
+Validation rejects unclosed core tags, obvious network calls or external
+resources, forbidden host bridge calls, dangerous navigation, and inline
+secret-like values via `secret_scan`. It does not parse or execute HTML.
 
 ### std/llm/budget
 

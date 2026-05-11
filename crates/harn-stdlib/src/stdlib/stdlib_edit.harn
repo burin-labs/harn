@@ -1,0 +1,524 @@
+/*
+ * std/edit - pure helpers for applying and validating agent-authored text patches.
+ */
+fn __edit_sha256(text) {
+  return "sha256:" + sha256(text ?? "")
+}
+
+fn __edit_collapse_ws(text) {
+  return trim(regex_replace("\\s+", " ", text ?? ""))
+}
+
+fn __edit_normalize_line(line) {
+  return __edit_collapse_ws(line)
+}
+
+fn __edit_structural_line(line) {
+  let compact = __edit_collapse_ws(line)
+  return regex_replace("\\s+", "", compact)
+}
+
+fn __edit_signature(text, structural) {
+  var lines = []
+  for line in split(text ?? "", "\n") {
+    let normalized = if structural {
+      __edit_structural_line(line)
+    } else {
+      __edit_normalize_line(line)
+    }
+    if structural && normalized == "" {
+      continue
+    }
+    lines = lines + [normalized]
+  }
+  return join(lines, "\n")
+}
+
+fn __edit_nonblank_count(lines) {
+  var count = 0
+  for line in lines {
+    if __edit_structural_line(line) != "" {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+fn __edit_start_line(prefix) {
+  if prefix == "" {
+    return 0
+  }
+  return len(split(prefix, "\n")) - 1
+}
+
+fn __edit_region(start_line, end_line_exclusive, old_text, new_text, match_kind) {
+  let end_line = if end_line_exclusive > start_line {
+    end_line_exclusive - 1
+  } else {
+    start_line
+  }
+  return {
+    start_line: start_line,
+    end_line: end_line,
+    end_line_exclusive: end_line_exclusive,
+    old_line_count: max(end_line_exclusive - start_line, 0),
+    new_line_count: len(split(new_text ?? "", "\n")),
+    old_sha256: __edit_sha256(old_text),
+    new_sha256: __edit_sha256(new_text),
+    match_kind: match_kind,
+  }
+}
+
+fn __edit_context(prefix, needle, suffix) {
+  let before_lines = split(prefix, "\n")
+  let after_lines = split(suffix, "\n")
+  let before = if len(before_lines) > 2 {
+    join(before_lines[-2:], "\n")
+  } else {
+    prefix
+  }
+  let after = if len(after_lines) > 2 {
+    join(after_lines[:2], "\n")
+  } else {
+    suffix
+  }
+  return trim(before + needle + after)
+}
+
+fn __edit_candidate_contexts(parts, old_text, max_contexts) {
+  var contexts = []
+  var prefix = ""
+  var idx = 0
+  let limit = max_contexts ?? 3
+  while idx < len(parts) - 1 && len(contexts) < limit {
+    prefix = prefix + parts[idx]
+    contexts = contexts
+      + [{start_line: __edit_start_line(prefix), snippet: __edit_context(prefix, old_text, parts[idx + 1])}]
+    prefix = prefix + old_text
+    idx = idx + 1
+  }
+  return contexts
+}
+
+fn __edit_error(code, message, text, old_text, new_text, fields = nil) {
+  let base = {
+    ok: false,
+    changed: false,
+    error_code: code,
+    message: message,
+    patched: text,
+    before_sha256: __edit_sha256(text),
+    after_sha256: __edit_sha256(text),
+    old_sha256: __edit_sha256(old_text),
+    new_sha256: __edit_sha256(new_text),
+    errors: [{code: code, message: message}],
+    warnings: [],
+    changed_regions: [],
+    provenance: {module: "std/edit"},
+  }
+  return base.merge(fields ?? {})
+}
+
+fn __edit_has_lazy_placeholder(new_text) {
+  for line in split(new_text ?? "", "\n") {
+    let t = lowercase(trim(line))
+    if t == "..." || t == "…" || t == "// ..." || t == "# ..." || t == "/* ... */" {
+      return true
+    }
+    if contains(t, "unchanged") || contains(t, "omitted for brevity") || contains(t, "same as before") {
+      return true
+    }
+  }
+  return false
+}
+
+fn __edit_guardrails(old_text, new_text, options) {
+  let opts = options ?? {}
+  if old_text == "" && !(opts?.allow_empty_old_text ?? false) {
+    return {code: "empty_old_text", message: "old_text must not be empty"}
+  }
+  if old_text == new_text && !(opts?.allow_noop ?? false) {
+    return {code: "no_op", message: "patch does not change the selected text"}
+  }
+  if __edit_collapse_ws(old_text) == __edit_collapse_ws(new_text)
+    && old_text != new_text
+    && !(opts?.allow_whitespace_only ?? false) {
+    return {code: "whitespace_only", message: "patch changes only whitespace"}
+  }
+  if __edit_has_lazy_placeholder(new_text) && !(opts?.allow_lazy_placeholders ?? false) {
+    return {code: "lazy_placeholder", message: "patch contains an omission or unchanged-content placeholder"}
+  }
+  let old_len = len(old_text)
+  let new_len = len(new_text)
+  let growth = new_len - old_len
+  let max_growth_bytes = opts?.max_growth_bytes ?? 20000
+  if max_growth_bytes != nil && growth > max_growth_bytes {
+    return {code: "excessive_growth", message: "patch grows selected text by more than max_growth_bytes"}
+  }
+  let max_growth_ratio = opts?.max_growth_ratio ?? 8
+  if max_growth_ratio != nil && growth > 1024 && new_len > old_len * max_growth_ratio {
+    return {code: "excessive_growth", message: "patch grows selected text by more than max_growth_ratio"}
+  }
+  return nil
+}
+
+fn __edit_success(
+  text,
+  patched,
+  old_text,
+  new_text,
+  match_kind,
+  start_line,
+  end_line_exclusive,
+  options,
+) {
+  let before_hash = __edit_sha256(text)
+  let after_hash = __edit_sha256(patched)
+  let expected_region = __edit_region(start_line, end_line_exclusive, old_text, new_text, match_kind)
+  return {
+    ok: true,
+    changed: text != patched,
+    patched: patched,
+    match_kind: match_kind,
+    start_line: expected_region.start_line,
+    end_line: expected_region.end_line,
+    end_line_exclusive: expected_region.end_line_exclusive,
+    expected_region: expected_region,
+    changed_regions: edit_changed_regions(text, patched),
+    before_sha256: before_hash,
+    after_sha256: after_hash,
+    old_sha256: __edit_sha256(old_text),
+    new_sha256: __edit_sha256(new_text),
+    errors: [],
+    warnings: [],
+    provenance: {
+      module: "std/edit",
+      helper: "edit_apply_old_new_patch",
+      match_kind: match_kind,
+      before_sha256: before_hash,
+      after_sha256: after_hash,
+      caller: options?.provenance,
+    },
+  }
+}
+
+fn __edit_splice_raw(text, start_line, end_line_exclusive, new_text) {
+  let lines = split(text ?? "", "\n")
+  var out = []
+  if start_line > 0 {
+    out = out + lines[:start_line]
+  }
+  if new_text ?? "" != "" {
+    out = out + split(new_text ?? "", "\n")
+  }
+  if end_line_exclusive < len(lines) {
+    out = out + lines[end_line_exclusive:]
+  }
+  return join(out, "\n")
+}
+
+fn __edit_line_candidates(text, old_text, structural) {
+  let lines = split(text ?? "", "\n")
+  var candidates = []
+  let target = __edit_signature(old_text, structural)
+  if target == "" {
+    return candidates
+  }
+  if !structural {
+    let width = len(split(old_text ?? "", "\n"))
+    var start = 0
+    while start + width <= len(lines) {
+      let segment = join(lines[start:start + width], "\n")
+      if __edit_signature(segment, false) == target {
+        candidates = candidates + [{start_line: start, end_line_exclusive: start + width, text: segment}]
+      }
+      start = start + 1
+    }
+    return candidates
+  }
+  let target_count = __edit_nonblank_count(split(old_text ?? "", "\n"))
+  var start = 0
+  while start < len(lines) {
+    var end = start
+    var nonblank = 0
+    while end < len(lines) && nonblank < target_count {
+      if __edit_structural_line(lines[end]) != "" {
+        nonblank = nonblank + 1
+      }
+      end = end + 1
+    }
+    if nonblank == target_count {
+      while end < len(lines) && __edit_structural_line(lines[end]) == "" {
+        end = end + 1
+      }
+      let segment = join(lines[start:end], "\n")
+      if __edit_signature(segment, true) == target {
+        candidates = candidates + [{start_line: start, end_line_exclusive: end, text: segment}]
+      }
+    }
+    start = start + 1
+  }
+  return candidates
+}
+
+fn __edit_apply_line_candidate(text, old_text, new_text, match_kind, candidates, options) {
+  if len(candidates) == 0 {
+    return nil
+  }
+  if len(candidates) > 1 {
+    return __edit_error(
+      "ambiguous_match",
+      "old_text matched multiple normalized regions",
+      text,
+      old_text,
+      new_text,
+      {
+        candidate_count: len(candidates),
+        match_kind: match_kind,
+        candidate_contexts: candidates[:min(len(candidates), 3)],
+      },
+    )
+  }
+  let candidate = candidates[0]
+  let patched = __edit_splice_raw(text, candidate.start_line, candidate.end_line_exclusive, new_text)
+  return __edit_success(
+    text,
+    patched,
+    candidate.text,
+    new_text,
+    match_kind,
+    candidate.start_line,
+    candidate.end_line_exclusive,
+    options ?? {},
+  )
+}
+
+/**
+ * Apply one old/new anchored patch to text.
+ *
+ * Returns `{ok, changed, patched, match_kind, start_line, end_line,
+ * before_sha256, after_sha256, changed_regions, errors, warnings, provenance}`.
+ * Matching is exact first by default, then whitespace-normalized line matching,
+ * then structural matching that ignores blank lines and whitespace.
+ */
+pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
+  let source = text ?? ""
+  let old = old_text ?? ""
+  let new = new_text ?? ""
+  let opts = options ?? {}
+  let guardrail = __edit_guardrails(old, new, opts)
+  if guardrail != nil {
+    return __edit_error(guardrail.code, guardrail.message, source, old, new)
+  }
+  let mode = opts?.match ?? "auto"
+  if mode != "line" && mode != "structural" {
+    let parts = split(source, old)
+    if len(parts) == 2 {
+      let start_line = __edit_start_line(parts[0])
+      let end_line_exclusive = start_line + len(split(old, "\n"))
+      return __edit_success(
+        source,
+        parts[0] + new + parts[1],
+        old,
+        new,
+        "exact",
+        start_line,
+        end_line_exclusive,
+        opts,
+      )
+    }
+    if len(parts) > 2 {
+      return __edit_error(
+        "ambiguous_match",
+        "old_text matched multiple exact regions",
+        source,
+        old,
+        new,
+        {
+          candidate_count: len(parts) - 1,
+          candidate_contexts: __edit_candidate_contexts(parts, old, opts?.max_candidate_contexts ?? 3),
+        },
+      )
+    }
+    if mode == "exact" {
+      return __edit_error("no_match", "old_text did not match exactly", source, old, new)
+    }
+  }
+  if mode == "line" || mode == "auto" {
+    let line_result = __edit_apply_line_candidate(
+      source,
+      old,
+      new,
+      "line",
+      __edit_line_candidates(source, old, false),
+      opts,
+    )
+    if line_result != nil {
+      return line_result
+    }
+    if mode == "line" {
+      return __edit_error("no_match", "old_text did not match any normalized line region", source, old, new)
+    }
+  }
+  if mode == "structural" || mode == "auto" {
+    let structural_result = __edit_apply_line_candidate(
+      source,
+      old,
+      new,
+      "structural",
+      __edit_line_candidates(source, old, true),
+      opts,
+    )
+    if structural_result != nil {
+      return structural_result
+    }
+  }
+  return __edit_error("no_match", "old_text did not match any safe patch region", source, old, new)
+}
+
+/** Splice a half-open 0-based line range and return patch metadata. */
+pub fn edit_splice_lines(text, start_line, end_line_exclusive, new_text, options = nil) {
+  let source = text ?? ""
+  let lines = split(source, "\n")
+  let start = start_line ?? 0
+  let end = end_line_exclusive ?? start
+  if start < 0 || end < start || end > len(lines) {
+    return __edit_error(
+      "invalid_line_range",
+      "line range must be 0-based, half-open, and inside the text",
+      source,
+      "",
+      new_text ?? "",
+    )
+  }
+  let old = join(lines[start:end], "\n")
+  let guardrail = __edit_guardrails(old, new_text ?? "", (options ?? {}).merge({allow_empty_old_text: true}))
+  if guardrail != nil {
+    return __edit_error(guardrail.code, guardrail.message, source, old, new_text ?? "")
+  }
+  let patched = __edit_splice_raw(source, start, end, new_text ?? "")
+  return __edit_success(source, patched, old, new_text ?? "", "line_splice", start, end, options ?? {})
+}
+
+fn __edit_find_resync(before_lines, after_lines, before_index, after_index) {
+  let window = 80
+  var distance = 1
+  while distance <= window {
+    var before_delta = 0
+    while before_delta <= distance {
+      let after_delta = distance - before_delta
+      let next_before = before_index + before_delta
+      let next_after = after_index + after_delta
+      if next_before < len(before_lines)
+        && next_after < len(after_lines)
+        && before_lines[next_before] == after_lines[next_after] {
+        return {before_index: next_before, after_index: next_after}
+      }
+      before_delta = before_delta + 1
+    }
+    distance = distance + 1
+  }
+  return {before_index: len(before_lines), after_index: len(after_lines)}
+}
+
+fn __edit_hunk(before_start, after_start, before_end, after_end, next_before, next_after) {
+  return {
+    start_line: min(before_start, after_start),
+    end_line: max(before_end, after_end),
+    end_line_exclusive: max(next_before, next_after),
+    before_start_line: before_start,
+    after_start_line: after_start,
+    before_end_line: before_end,
+    after_end_line: after_end,
+    before_line_count: max(before_end - before_start + 1, 0),
+    after_line_count: max(after_end - after_start + 1, 0),
+  }
+}
+
+/** Return deterministic line-level changed-region metadata. */
+pub fn edit_changed_regions(before, after) {
+  let before_lines = split(before ?? "", "\n")
+  let after_lines = split(after ?? "", "\n")
+  var regions = []
+  var before_index = 0
+  var after_index = 0
+  while before_index < len(before_lines) || after_index < len(after_lines) {
+    if before_index < len(before_lines)
+      && after_index < len(after_lines)
+      && before_lines[before_index] == after_lines[after_index] {
+      before_index = before_index + 1
+      after_index = after_index + 1
+      continue
+    }
+    let before_start = before_index
+    let after_start = after_index
+    let resync = __edit_find_resync(before_lines, after_lines, before_index, after_index)
+    let next_before = resync.before_index
+    let next_after = resync.after_index
+    regions = regions
+      + [__edit_hunk(before_start, after_start, next_before - 1, next_after - 1, next_before, next_after)]
+    before_index = next_before
+    after_index = next_after
+  }
+  return regions
+}
+
+fn __edit_expected_end(region) {
+  if region?.end_line != nil {
+    return region.end_line
+  }
+  if region?.end_line_exclusive != nil {
+    return region.end_line_exclusive - 1
+  }
+  return region?.start_line ?? 0
+}
+
+fn __edit_region_within(actual, expected) {
+  let expected_start = expected?.start_line ?? 0
+  let expected_end = __edit_expected_end(expected)
+  return actual.start_line >= expected_start && actual.end_line <= expected_end
+}
+
+/**
+ * Validate that before/after text differs only inside expected line regions.
+ * Expected regions use inclusive `end_line` or half-open `end_line_exclusive`.
+ */
+pub fn edit_validate_changed_regions(before, after, expected_regions, options = nil) {
+  let actual = edit_changed_regions(before ?? "", after ?? "")
+  let expected = expected_regions ?? []
+  var errors = []
+  for region in actual {
+    var matched = false
+    for expected_region in expected {
+      if __edit_region_within(region, expected_region) {
+        matched = true
+        break
+      }
+    }
+    if !matched {
+      errors = errors
+        + [
+        {
+          code: "unexpected_changed_region",
+          message: "changed region falls outside expected patch range",
+          region: region,
+        },
+      ]
+    }
+  }
+  return {
+    ok: len(errors) == 0,
+    actual_regions: actual,
+    expected_regions: expected,
+    errors: errors,
+    error_codes: errors.map({ error -> error.code }),
+    warnings: [],
+    provenance: {
+      module: "std/edit",
+      helper: "edit_validate_changed_regions",
+      before_sha256: __edit_sha256(before ?? ""),
+      after_sha256: __edit_sha256(after ?? ""),
+      caller: options?.provenance,
+    },
+  }
+}

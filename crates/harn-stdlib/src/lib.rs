@@ -38,6 +38,14 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_text.harn"),
     },
     StdlibSource {
+        module: "edit",
+        source: include_str!("stdlib/stdlib_edit.harn"),
+    },
+    StdlibSource {
+        module: "artifact/web",
+        source: include_str!("stdlib/artifact/web.harn"),
+    },
+    StdlibSource {
         module: "collections",
         source: include_str!("stdlib/stdlib_collections.harn"),
     },
@@ -820,6 +828,8 @@ mod tests {
     fn key_stdlib_modules_resolve() {
         for module in [
             "context",
+            "edit",
+            "artifact/web",
             "command",
             "waitpoint",
             "llm/handlers",

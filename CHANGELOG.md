@@ -31,6 +31,15 @@ condensed series summaries instead of full per-patch history.
   `conformance/tests/integration/llm_economics_*.harn` cover the
   helpers; existing `llm_cost`, budget, and routing behavior is
   unchanged for catalog-known models.
+- **Safe HTML/CSS/JS artifact patching helpers (#1504).** Added `std/edit`
+  for pure old/new text patches with exact, line-normalized, and structural
+  matching, deterministic changed-region metadata, hashes, ambiguity
+  diagnostics, and guardrails for no-op, whitespace-only, lazy-placeholder, and
+  excessive-growth edits. Added `std/artifact/web` on top for small generated
+  HTML artifacts: fragment extraction, validated patch application, text
+  fallbacks, machine-readable reports for host approval UIs, and checks for
+  obvious network calls, external resources, host bridge calls, dangerous
+  navigation, inline secrets, and broken core tags.
 
 ## v0.8.9
 
