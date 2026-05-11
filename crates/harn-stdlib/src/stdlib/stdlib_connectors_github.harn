@@ -40,6 +40,29 @@ type GitHubWaitOptions = {
   max_wait_ms?: int,
 }
 
+type GitHubRepoRef = {owner: string, name: string, full_name: string}
+
+type GitHubAutoMergeResult = {
+  ok: bool,
+  state: string,
+  already_enabled: bool,
+  requested_method: string,
+  merge_method: string?,
+  pull_number: any,
+  url: string?,
+  strategy: string,
+  error: any,
+}
+
+type GitHubClosePrResult = {
+  ok: bool,
+  pull_number: any,
+  state: string,
+  comment_posted: bool,
+  pull_request: any,
+  error: any,
+}
+
 var github_connector_config: GitHubConnectorConfig = {}
 
 /** configure overrides the module-level connector config used by every call. */
@@ -55,6 +78,98 @@ pub fn reset() {
 
 fn __call(method: string, params: dict = {}) {
   return connector_call("github", method, filter_nil(merge(github_connector_config, params)))
+}
+
+/** call dispatches one GitHub connector outbound method. Prefer typed helpers when one exists. */
+pub fn call(method: string, args: dict = {}, options: GitHubCallOptions = {}) {
+  return __call(method, merge(options, args ?? {}))
+}
+
+fn __github_strip_git_suffix(value) {
+  let text = trim(to_string(value ?? ""))
+  if ends_with(text, ".git") {
+    return substring(text, 0, len(text) - len(".git"))
+  }
+  return text
+}
+
+fn __github_slug_match(pattern, text) {
+  let captures = regex_captures(pattern, text)
+  if len(captures) == 0 {
+    return nil
+  }
+  let groups = captures[0].groups
+  if len(groups) < 2 {
+    return nil
+  }
+  let owner = trim(to_string(groups[0]))
+  let repo = __github_strip_git_suffix(groups[1])
+  if owner == "" || repo == "" || contains(owner, "/") || contains(repo, "/") {
+    return nil
+  }
+  return owner + "/" + repo
+}
+
+/** github_slug_from_remote returns `owner/repo` for common GitHub SSH and HTTPS remote URLs. */
+pub fn github_slug_from_remote(url: string) -> string? {
+  let text = trim(to_string(url ?? ""))
+  if text == "" {
+    return nil
+  }
+  let url_slug = __github_slug_match(
+    "^(?:git\\+)?(?:https?|ssh|git)://(?:[^@/]+@)?github\\.com(?::[0-9]+)?/([^/]+)/([^/#?]+)(?:[?#].*)?$",
+    text,
+  )
+  if url_slug != nil {
+    return url_slug
+  }
+  return __github_slug_match("^(?:[^@/]+@)?github\\.com:([^/]+)/([^/#?]+)(?:[?#].*)?$", text)
+}
+
+/** github_repo normalizes an `owner/repo` slug, GitHub remote URL, or owner+repo pair. */
+pub fn github_repo(repo: any, name: string? = nil) -> GitHubRepoRef? {
+  if name != nil {
+    let owner = trim(to_string(repo ?? ""))
+    let repo_name = __github_strip_git_suffix(name)
+    if owner == "" || repo_name == "" {
+      return nil
+    }
+    return {owner: owner, name: repo_name, full_name: owner + "/" + repo_name}
+  }
+  if type_of(repo) == "dict" {
+    let full_name = repo?.full_name
+    if full_name != nil {
+      return github_repo(full_name)
+    }
+    let owner = repo?.owner ?? repo?.owner_login
+    let repo_name = repo?.name ?? repo?.repo
+    if owner != nil && repo_name != nil {
+      return github_repo(owner, repo_name)
+    }
+    return nil
+  }
+  let raw = trim(to_string(repo ?? ""))
+  let slug = if contains(raw, "github.com") || contains(raw, "://") {
+    github_slug_from_remote(raw)
+  } else {
+    raw
+  }
+  if slug == nil || !contains(slug, "/") {
+    return nil
+  }
+  let parts = split(slug, "/")
+  if len(parts) != 2 {
+    return nil
+  }
+  return github_repo(parts[0], parts[1])
+}
+
+fn __github_repo_or_throw(repo, name = nil) {
+  let parsed = github_repo(repo, name)
+  if parsed == nil {
+    throw "std/connectors/github: expected repo as owner/repo, GitHub remote URL, or owner + repo"
+  }
+  return parsed
 }
 
 /** comment posts a comment on a GitHub issue or PR. */
@@ -104,6 +219,261 @@ pub fn create_issue(
 /** api_call is the escape hatch for raw GitHub REST calls. */
 pub fn api_call(path: string, method: string, body: any = nil, options: GitHubCallOptions = {}) {
   return __call("api_call", filter_nil(merge(options, {path: path, method: method, body: body})))
+}
+
+/** workflow_dispatch triggers a workflow_dispatch workflow without shelling out to `gh`. */
+pub fn workflow_dispatch(
+  repo: any,
+  workflow_id: any,
+  ref: string = "main",
+  inputs: dict? = nil,
+  options: GitHubCallOptions = {},
+) {
+  let r = __github_repo_or_throw(repo)
+  return call(
+    "github.actions.workflow_dispatch",
+    {repo: r.full_name, workflow_id: workflow_id, ref: ref, inputs: inputs ?? {}},
+    options,
+  )
+}
+
+/**
+ * workflow_runs lists recent workflow runs, optionally scoped by workflow_id/event/status filters.
+ */
+pub fn workflow_runs(repo: any, options: GitHubCallOptions = {}) {
+  let r = __github_repo_or_throw(repo)
+  return call("github.actions.runs", {repo: r.full_name}, options)
+}
+
+/** workflow_run fetches one Actions workflow run by id. */
+pub fn workflow_run(repo: any, run_id: any, options: GitHubCallOptions = {}) {
+  let r = __github_repo_or_throw(repo)
+  return call("github.actions.run", {repo: r.full_name, run_id: run_id}, options)
+}
+
+/** Package-compatible owner/repo alias for workflow_dispatch. */
+pub fn actions_workflow_dispatch(
+  owner: string,
+  repo: string,
+  workflow_id: any,
+  ref: string = "main",
+  inputs: dict? = nil,
+  options: GitHubCallOptions = {},
+) {
+  return workflow_dispatch(owner + "/" + repo, workflow_id, ref, inputs, options)
+}
+
+/** Package-compatible owner/repo alias for workflow_runs. */
+pub fn actions_workflow_runs(owner: string, repo: string, options: GitHubCallOptions = {}) {
+  return workflow_runs(owner + "/" + repo, options)
+}
+
+/** Package-compatible owner/repo alias for workflow_run. */
+pub fn actions_workflow_run(
+  owner: string,
+  repo: string,
+  run_id: any,
+  options: GitHubCallOptions = {},
+) {
+  return workflow_run(owner + "/" + repo, run_id, options)
+}
+
+/** read_file_at_ref reads a repository file as decoded text at an optional ref. */
+pub fn read_file_at_ref(
+  repo: any,
+  path: string,
+  ref: string? = nil,
+  options: GitHubCallOptions = {},
+) {
+  let r = __github_repo_or_throw(repo)
+  return call("repos.get_text", filter_nil({owner: r.owner, repo: r.name, path: path, ref: ref}), options)
+}
+
+/** Package-compatible owner/repo alias for read_file_at_ref. */
+pub fn repos_get_text(
+  owner: string,
+  repo: string,
+  path: string,
+  ref: string? = nil,
+  options: GitHubCallOptions = {},
+) {
+  return read_file_at_ref(owner + "/" + repo, path, ref, options)
+}
+
+/** latest_release returns a stable latest-release envelope with asset_names. */
+pub fn latest_release(repo: any, options: GitHubCallOptions = {}) {
+  let r = __github_repo_or_throw(repo)
+  return call("github.release.latest", {repo: r.full_name}, options)
+}
+
+/**
+ * release_assets returns a stable asset envelope for a release id, or latest release when omitted.
+ */
+pub fn release_assets(repo: any, release_id: any = nil, options: GitHubCallOptions = {}) {
+  let r = __github_repo_or_throw(repo)
+  return call("github.release.assets", filter_nil({repo: r.full_name, release_id: release_id}), options)
+}
+
+/** repos_get_latest_release fetches the raw GitHub latest-release payload. */
+pub fn repos_get_latest_release(owner: string, repo: string, options: GitHubCallOptions = {}) {
+  return call("repos.get_latest_release", {owner: owner, repo: repo}, options)
+}
+
+/** repos_list_release_assets fetches the raw GitHub release assets payload. */
+pub fn repos_list_release_assets(
+  owner: string,
+  repo: string,
+  release_id: any,
+  options: GitHubCallOptions = {},
+) {
+  return call("repos.list_release_assets", {owner: owner, repo: repo, release_id: release_id}, options)
+}
+
+/** Package-compatible owner/repo alias for latest_release. */
+pub fn github_latest_release(owner: string, repo: string, options: GitHubCallOptions = {}) {
+  return latest_release(owner + "/" + repo, options)
+}
+
+/** Package-compatible owner/repo alias for release_assets. */
+pub fn github_release_assets(
+  owner: string,
+  repo: string,
+  release_id: any = nil,
+  options: GitHubCallOptions = {},
+) {
+  return release_assets(owner + "/" + repo, release_id, options)
+}
+
+/** enable_auto_merge enables GitHub auto-merge and normalizes the result shape. */
+pub fn enable_auto_merge(repo: any, pull_number: any, options: GitHubCallOptions = {}) -> GitHubAutoMergeResult {
+  let r = __github_repo_or_throw(repo)
+  let requested_method = uppercase(to_string(options?.method ?? options?.merge_method ?? "merge"))
+  let result = try {
+    call(
+      "github.pr.enable_auto_merge",
+      {repo: r.full_name, pull_number: pull_number, method: requested_method},
+      options,
+    )
+  }
+  if is_err(result) {
+    return __github_auto_merge_failed(requested_method, pull_number, unwrap_err(result))
+  }
+  return __github_auto_merge_success(unwrap(result), requested_method, pull_number)
+}
+
+/** Package-compatible owner/repo alias for enable_auto_merge. */
+pub fn pulls_enable_auto_merge(
+  owner: string,
+  repo: string,
+  number: any,
+  options: GitHubCallOptions = {},
+) {
+  return enable_auto_merge(owner + "/" + repo, number, options)
+}
+
+/** Package-compatible owner/repo alias for enable_auto_merge. */
+pub fn github_ensure_auto_merge(
+  owner: string,
+  repo: string,
+  pull_number: any,
+  options: GitHubCallOptions = {},
+) {
+  return enable_auto_merge(owner + "/" + repo, pull_number, options)
+}
+
+/**
+ * close_pr closes a pull request through the issues endpoint, optionally after posting a comment.
+ */
+pub fn close_pr(
+  repo: any,
+  pull_number: any,
+  comment: string? = nil,
+  options: GitHubCallOptions = {},
+) -> GitHubClosePrResult {
+  let r = __github_repo_or_throw(repo)
+  var comment_posted = false
+  if comment != nil && trim(to_string(comment)) != "" {
+    let posted = try {
+      call(
+        "issues.create_comment",
+        {owner: r.owner, repo: r.name, issue_number: pull_number, body: to_string(comment)},
+        options,
+      )
+    }
+    if is_err(posted) {
+      return __github_close_pr_envelope(false, pull_number, false, nil, unwrap_err(posted))
+    }
+    comment_posted = true
+  }
+  let updated = try {
+    call(
+      "issues.update",
+      {owner: r.owner, repo: r.name, issue_number: pull_number, state: "closed"},
+      options,
+    )
+  }
+  if is_err(updated) {
+    return __github_close_pr_envelope(false, pull_number, comment_posted, nil, unwrap_err(updated))
+  }
+  return __github_close_pr_envelope(true, pull_number, comment_posted, unwrap(updated), nil)
+}
+
+/** Package-compatible owner/repo alias for close_pr. */
+pub fn github_close_pr(
+  owner: string,
+  repo: string,
+  pull_number: any,
+  comment: string? = nil,
+  options: GitHubCallOptions = {},
+) {
+  return close_pr(owner + "/" + repo, pull_number, comment, options)
+}
+
+fn __github_auto_merge_failed(requested_method, pull_number, error) -> GitHubAutoMergeResult {
+  return {
+    ok: false,
+    state: "failed",
+    already_enabled: false,
+    requested_method: requested_method,
+    merge_method: nil,
+    pull_number: pull_number,
+    url: nil,
+    strategy: "graphql_auto_merge",
+    error: error,
+  }
+}
+
+fn __github_auto_merge_success(result, requested_method, pull_number) -> GitHubAutoMergeResult {
+  let state = result?.state ?? "enabled"
+  let merge_method = result?.requested_method ?? result?.auto_merge?.merge_method
+    ?? result?.pull_request?.autoMergeRequest?.mergeMethod
+    ?? requested_method
+  return {
+    ok: true,
+    state: state,
+    already_enabled: state == "already_enabled",
+    requested_method: requested_method,
+    merge_method: to_string(merge_method),
+    pull_number: pull_number,
+    url: result?.pull_request?.html_url ?? result?.pull_request?.url,
+    strategy: "graphql_auto_merge",
+    error: nil,
+  }
+}
+
+fn __github_close_pr_envelope(ok, pull_number, comment_posted, pull_request, error) -> GitHubClosePrResult {
+  return {
+    ok: ok,
+    pull_number: pull_number,
+    state: if ok {
+      "closed"
+    } else {
+      "open"
+    },
+    comment_posted: comment_posted,
+    pull_request: pull_request,
+    error: error,
+  }
 }
 
 fn __github_event(log_event) {
