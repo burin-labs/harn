@@ -607,6 +607,33 @@ let tools = git_toolbox_tools(nil, {
 })
 ```
 
+### std/connectors/github
+
+Typed facade for the package-backed GitHub connector. Provider-specific HTTP,
+GraphQL, token rotation, and optional `gh` auth fallback live in the
+`harn-github-connector` package; this module keeps scripts on stable Harn helper
+names and normalized result envelopes.
+
+| Function | Description |
+|---|---|
+| `github_slug_from_remote(url)` | Parse common GitHub SSH/HTTPS remote URLs into `owner/repo`, or `nil` when the URL is not GitHub |
+| `github_repo(repo, name?)` | Normalize an `owner/repo` slug, GitHub remote URL, repo dict, or owner+repo pair |
+| `workflow_dispatch(repo, workflow_id, ref?, inputs?, options?)` | Dispatch a `workflow_dispatch` workflow without shelling out |
+| `workflow_runs(repo, options?)` | List repository or workflow-scoped Actions runs |
+| `workflow_run(repo, run_id, options?)` | Fetch one Actions run |
+| `read_file_at_ref(repo, path, ref?, options?)` | Read decoded repository file text at a ref |
+| `latest_release(repo, options?)` | Return a stable latest-release envelope with `tag_name` and `asset_names` |
+| `release_assets(repo, release_id?, options?)` | Return a stable release-assets envelope |
+| `enable_auto_merge(repo, pull_number, options?)` | Enable PR auto-merge and return `{ok, state, strategy, ...}` |
+| `close_pr(repo, pull_number, comment?, options?)` | Optionally comment, then close a PR through the issues endpoint |
+| `api_call(path, method, body?, options?)` | Raw GitHub REST escape hatch when no typed helper exists |
+
+The pure-Harn connector package also exports matching owner/repo helper names
+such as `actions_workflow_dispatch(...)`, `repos_get_text(...)`,
+`github_latest_release(...)`, and `github_close_pr(...)`; the stdlib facade
+includes those aliases so release scripts can move between stdlib and package
+imports without changing call sites.
+
 ### std/review
 
 Typed review helpers that pair with the global `self_review(...)` builtin:

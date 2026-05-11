@@ -106,7 +106,23 @@ pipeline test(task) {
   let github_secret = github_secrets[0]
   assert(github_secret.name == "signing_secret", "github should require signing_secret")
   assert(github_secret.namespace == "github", "github secrets should stay namespaced to github")
-  assert(len(github?.outbound_methods ?? []) == 0, "github should not publish outbound methods yet")
+  let github_methods = github?.outbound_methods ?? []
+  assert(
+    github_methods.any({ method -> method.name == "github.actions.workflow_dispatch" }),
+    "github should publish workflow dispatch",
+  )
+  assert(
+    github_methods.any({ method -> method.name == "github.release.latest" }),
+    "github should publish latest release",
+  )
+  assert(
+    github_methods.any({ method -> method.name == "github.pr.enable_auto_merge" }),
+    "github should publish auto-merge",
+  )
+  assert(
+    github_methods.any({ method -> method.name == "api_call" }),
+    "github should publish api_call",
+  )
   let slack = providers.find({ provider -> provider.provider == "slack" })
   assert(slack?.schema_name == "SlackEventPayload", "slack schema should be cataloged")
   assert(
