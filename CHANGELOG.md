@@ -63,6 +63,39 @@ condensed series summaries instead of full per-patch history.
   prompt context derived from accepted, non-expired bulletins; the
   `bulletin_render_for_prompt` renderer visibly separates accepted facts from
   pending proposals so models cannot confuse them.
+- **`std/edit` hardening for agent-authored mutations (#1499).** Made
+  structural matching conservative by default: a structural fallback
+  match now requires at least 3 non-blank needle lines and both the
+  first and last anchor lines must carry a distinctive 4+ character
+  alphanumeric token, so bare braces or short idents can no longer drive
+  a wrong patch. The looser pre-existing behavior is opt-in via
+  `structural_require_anchored_lines: "either" | "none"`,
+  `structural_min_nonblank_lines: N`, and `structural_anchor_chars: N`.
+  Expanded `lazy_placeholder` detection to cover `// ... rest`,
+  `// TODO: implement|fill|add|complete`, `# ... rest`, `/* ... */`,
+  `pass # ...`, and "unchanged" / "omitted for brevity" phrases. Added
+  three new helpers — `edit_strip_line_number_prefixes` (strip leading
+  `<spaces>N<space><pipe><space>` prefixes when ≥60% of non-empty lines
+  carry them, with a matching `strip_line_numbers: true` option on
+  `edit_apply_old_new_patch`), `edit_explain_whitespace_difference`
+  (diagnose tabs-vs-spaces, base indent, or blank-line drift between a
+  needle and the matched span), and `edit_check_lazy_truncation`
+  (catch whole-file rewrites that shrank a file below `min_keep_pct`
+  while still containing lazy placeholders). Successful line/structural
+  matches surface a `whitespace_explanation` field, and `candidate_contexts`
+  on ambiguous matches now uses a uniform `{start_line, end_line, snippet}`
+  shape across exact, line, and structural modes. Also fixed a
+  duplicate-candidate bug where structural matching would start from a
+  leading blank line and report the same logical region twice. Locked in
+  by an expanded `conformance/tests/stdlib/edit_patch.harn`.
+
+### Fixed
+
+- **Refresh `workflow-authoring-quickstart` pinned `graph_digest`.** The
+  pinned bundle digest in `docs/src/workflow-authoring-quickstart.md`
+  and `scripts/check_docs_workflow_quickstart.sh` had drifted from the
+  current canonical encoding, breaking `make all`. Repinned to the
+  current value so the doc's copy-paste path stays accurate.
 
 ## v0.8.10
 

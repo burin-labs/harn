@@ -200,9 +200,24 @@ Pure helpers for agent-authored text patches:
 | `edit_splice_lines(text, start_line, end_line_exclusive, new_text, options?)` | Replace a half-open 0-based line range and return the same patch metadata shape |
 | `edit_changed_regions(before, after)` | Return deterministic line-level changed-region metadata for one contiguous diff |
 | `edit_validate_changed_regions(before, after, expected_regions, options?)` | Verify that all changes fall inside expected 0-based line regions |
+| `edit_strip_line_number_prefixes(text)` | Remove leading `<spaces>N<space><pipe><space>` line-number prefixes when at least 60% of non-empty lines carry them; useful as preprocessing for `old_text` pasted from a numbered file read |
+| `edit_explain_whitespace_difference(needle, matched)` | Diagnose the dominant whitespace cause (tabs vs spaces, base indent, blank lines) when a fuzzy match was needed |
+| `edit_check_lazy_truncation(old_content, new_content, options?)` | Detect whole-file rewrites that shrank a file below `min_keep_pct` (35%) of its original line count while still containing lazy placeholders |
 
 Default guardrails reject empty anchors, no-op edits, whitespace-only edits,
-lazy omission placeholders, ambiguous matches, and excessive patch growth.
+lazy omission placeholders (including `// TODO: implement`, `// ... rest`,
+`# ...`, `pass # ...`, `/* ... */`, and "unchanged" / "omitted for brevity"
+phrases), ambiguous matches, and excessive patch growth.
+
+Structural matching is conservative by default: the needle must contain at
+least three non-blank lines and both the first and last anchor lines must
+carry a distinctive 4+ character alphanumeric token. Callers can relax this
+with `structural_require_anchored_lines: "either" | "none"`,
+`structural_min_nonblank_lines: N`, or `structural_anchor_chars: N`. Pass
+`strip_line_numbers: true` to apply `edit_strip_line_number_prefixes` to
+`old_text` before matching. Successful line/structural matches surface a
+`whitespace_explanation` field describing the dominant difference between
+the needle and the matched span.
 
 ### std/artifact/web
 
