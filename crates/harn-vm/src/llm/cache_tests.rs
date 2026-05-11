@@ -73,6 +73,54 @@ fn fs_cache_hits_and_evicts_oldest() {
 }
 
 #[test]
+fn fs_cache_evicts_lru_when_operations_share_wall_millisecond() {
+    reset_in_process_cache_state();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let options = CacheOptions {
+        backend: CacheBackend::Fs,
+        namespace: "test".to_string(),
+        path: dir.path().join("fs-cache"),
+        ttl_seconds: 60,
+        max_entries: 2,
+    };
+
+    cache_put_at(&options, "a", serde_json::json!({"value": "a"}), 1_000).unwrap();
+    cache_put_at(&options, "b", serde_json::json!({"value": "b"}), 1_000).unwrap();
+    cache_put_at(&options, "c", serde_json::json!({"value": "c"}), 1_000).unwrap();
+
+    assert_eq!(cache_get_at(&options, "a", 1_000).unwrap(), None);
+    assert_eq!(
+        cache_get_at(&options, "b", 1_000).unwrap(),
+        Some(serde_json::json!({"value": "b"}))
+    );
+    assert_eq!(
+        cache_get_at(&options, "c", 1_000).unwrap(),
+        Some(serde_json::json!({"value": "c"}))
+    );
+}
+
+#[test]
+fn sqlite_cache_evicts_lru_when_operations_share_wall_millisecond() {
+    reset_in_process_cache_state();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let options = sqlite_options(dir.path().join("cache.sqlite"));
+
+    cache_put_at(&options, "a", serde_json::json!({"value": "a"}), 1_000).unwrap();
+    cache_put_at(&options, "b", serde_json::json!({"value": "b"}), 1_000).unwrap();
+    cache_put_at(&options, "c", serde_json::json!({"value": "c"}), 1_000).unwrap();
+
+    assert_eq!(cache_get_at(&options, "a", 1_000).unwrap(), None);
+    assert_eq!(
+        cache_get_at(&options, "b", 1_000).unwrap(),
+        Some(serde_json::json!({"value": "b"}))
+    );
+    assert_eq!(
+        cache_get_at(&options, "c", 1_000).unwrap(),
+        Some(serde_json::json!({"value": "c"}))
+    );
+}
+
+#[test]
 fn corrupt_cache_entries_are_misses() {
     let dir = tempfile::tempdir().expect("tempdir");
     let sqlite = sqlite_options(dir.path().join("cache.sqlite"));
