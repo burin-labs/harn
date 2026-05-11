@@ -267,7 +267,7 @@ impl TypeChecker {
                     };
                     let val_type = self
                         .infer_type(&entry.value, scope)
-                        .unwrap_or(TypeExpr::Named("nil".into()));
+                        .unwrap_or_else(Self::wildcard_type);
                     fields.push(ShapeField {
                         name: key,
                         type_expr: val_type,
