@@ -1,4 +1,6 @@
 /** Test post-branch narrowing when one branch exits early */
+type NarrowDoc = {version: string}
+
 pipeline test(task) {
   fn early_return(x: string?) -> string {
     if x == nil {
@@ -17,7 +19,22 @@ pipeline test(task) {
     // else branch threw, so truthy refinements apply: x is string
     return "safe: ${x}"
   }
+  fn early_throw_shape_return(version: string?) -> NarrowDoc {
+    if version == nil {
+      throw "missing version"
+    }
+    return {version: version}
+  }
+  fn early_throw_untyped_shape_return(raw: dict<string, unknown>) -> NarrowDoc {
+    let version = raw.get("version")
+    if version == nil {
+      throw "missing version"
+    }
+    return {version: version}
+  }
   log(early_return("hello"))
   log(early_return(nil))
   log(early_throw_else("world"))
+  log(early_throw_shape_return("v1").version)
+  log(early_throw_untyped_shape_return({version: "v2"}).version)
 }
