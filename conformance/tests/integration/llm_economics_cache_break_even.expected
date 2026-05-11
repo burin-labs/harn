@@ -1,0 +1,7 @@
+recommended=true
+reason=amortizes
+break_even=2
+savings=0.027
+unknown_recommended=false
+unknown_reason=unknown_pricing
+unknown_break_even_nil=true

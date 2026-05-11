@@ -669,9 +669,9 @@ pub fn provider_has_feature(provider: &str, feature: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Provider-level catalog pricing/latency. Model-specific static pricing in
-/// `llm::cost` still wins when available; this is the adapter-level fallback
-/// used by routing and portal summaries.
+/// Provider-level catalog pricing/latency. Model-specific catalog pricing
+/// wins when available; this is the adapter-level fallback used by routing
+/// and portal summaries when a model has no explicit catalog entry.
 pub fn provider_economics(provider: &str) -> (Option<f64>, Option<f64>, Option<u64>) {
     provider_config(provider)
         .map(|p| (p.cost_per_1k_in, p.cost_per_1k_out, p.latency_p50_ms))
@@ -1655,7 +1655,232 @@ fn default_config() -> ProvidersConfig {
         ),
     ]));
 
+    config.models.extend(canonical_priced_models());
+
     config
+}
+
+/// Canonical hosted-model pricing entries (USD per 1M tokens). Provenance: the
+/// public Anthropic, OpenAI, Google Gemini, and Mistral pricing pages snapshot
+/// at 2026-01. These replace the previous `model_pricing_per_million` Rust
+/// fallback table that lived in `llm/cost.rs` and could silently drift; if a
+/// listed rate changes, edit the literal here so the change shows up in `git
+/// blame`. Users can override or extend the table per environment via
+/// `HARN_PROVIDERS_CONFIG` or `harn.toml`.
+fn canonical_priced_models() -> BTreeMap<String, ModelDef> {
+    let mut out = BTreeMap::new();
+    let anthropic_caps = vec![
+        "tools".to_string(),
+        "streaming".to_string(),
+        "prompt_caching".to_string(),
+        "thinking".to_string(),
+    ];
+    let openai_caps = vec!["tools".to_string(), "streaming".to_string()];
+    let gemini_caps = vec!["tools".to_string(), "streaming".to_string()];
+
+    let mut anthropic = |id: &str,
+                         name: &str,
+                         context_window: u64,
+                         input: f64,
+                         output: f64,
+                         cache_read: Option<f64>,
+                         cache_write: Option<f64>| {
+        out.insert(
+            id.to_string(),
+            ModelDef {
+                name: name.to_string(),
+                provider: "anthropic".to_string(),
+                context_window,
+                runtime_context_window: None,
+                stream_timeout: None,
+                capabilities: anthropic_caps.clone(),
+                pricing: Some(ModelPricing {
+                    input_per_mtok: input,
+                    output_per_mtok: output,
+                    cache_read_per_mtok: cache_read,
+                    cache_write_per_mtok: cache_write,
+                }),
+            },
+        );
+    };
+    anthropic(
+        "claude-3-5-haiku-20241022",
+        "Claude Haiku 3.5",
+        200_000,
+        0.80,
+        4.00,
+        Some(0.08),
+        Some(1.00),
+    );
+    anthropic(
+        "claude-haiku-4-5-20251001",
+        "Claude Haiku 4.5",
+        200_000,
+        1.00,
+        5.00,
+        Some(0.10),
+        Some(1.25),
+    );
+    anthropic(
+        "claude-3-5-sonnet-20240620",
+        "Claude Sonnet 3.5 (2024-06-20)",
+        200_000,
+        3.00,
+        15.00,
+        Some(0.30),
+        Some(3.75),
+    );
+    anthropic(
+        "claude-3-5-sonnet-20241022",
+        "Claude Sonnet 3.5 (2024-10-22)",
+        200_000,
+        3.00,
+        15.00,
+        Some(0.30),
+        Some(3.75),
+    );
+    anthropic(
+        "claude-3-opus-20240229",
+        "Claude Opus 3",
+        200_000,
+        15.00,
+        75.00,
+        Some(1.50),
+        Some(18.75),
+    );
+    anthropic(
+        "claude-opus-4-20250514",
+        "Claude Opus 4",
+        200_000,
+        15.00,
+        75.00,
+        Some(1.50),
+        Some(18.75),
+    );
+    anthropic(
+        "claude-opus-4-1-20250805",
+        "Claude Opus 4.1",
+        200_000,
+        15.00,
+        75.00,
+        Some(1.50),
+        Some(18.75),
+    );
+
+    let mut openai = |id: &str,
+                      name: &str,
+                      context_window: u64,
+                      input: f64,
+                      output: f64,
+                      cache_read: Option<f64>| {
+        out.insert(
+            id.to_string(),
+            ModelDef {
+                name: name.to_string(),
+                provider: "openai".to_string(),
+                context_window,
+                runtime_context_window: None,
+                stream_timeout: None,
+                capabilities: openai_caps.clone(),
+                pricing: Some(ModelPricing {
+                    input_per_mtok: input,
+                    output_per_mtok: output,
+                    cache_read_per_mtok: cache_read,
+                    cache_write_per_mtok: None,
+                }),
+            },
+        );
+    };
+    openai("gpt-4o", "GPT-4o", 128_000, 2.50, 10.00, Some(1.25));
+    openai("gpt-4-turbo", "GPT-4 Turbo", 128_000, 10.00, 30.00, None);
+    openai("o1", "OpenAI o1", 200_000, 15.00, 60.00, Some(7.50));
+    openai(
+        "o1-mini",
+        "OpenAI o1-mini",
+        128_000,
+        3.00,
+        12.00,
+        Some(1.50),
+    );
+    openai("o3", "OpenAI o3", 200_000, 15.00, 60.00, Some(7.50));
+    openai("o3-mini", "OpenAI o3-mini", 200_000, 1.10, 4.40, Some(0.55));
+
+    let mut gemini = |id: &str,
+                      name: &str,
+                      context_window: u64,
+                      input: f64,
+                      output: f64,
+                      cache_read: Option<f64>| {
+        out.insert(
+            id.to_string(),
+            ModelDef {
+                name: name.to_string(),
+                provider: "gemini".to_string(),
+                context_window,
+                runtime_context_window: None,
+                stream_timeout: None,
+                capabilities: gemini_caps.clone(),
+                pricing: Some(ModelPricing {
+                    input_per_mtok: input,
+                    output_per_mtok: output,
+                    cache_read_per_mtok: cache_read,
+                    cache_write_per_mtok: None,
+                }),
+            },
+        );
+    };
+    gemini(
+        "gemini-2.5-flash",
+        "Gemini 2.5 Flash",
+        1_048_576,
+        0.10,
+        0.40,
+        Some(0.025),
+    );
+    gemini(
+        "gemini-2.5-pro",
+        "Gemini 2.5 Pro",
+        2_097_152,
+        1.25,
+        5.00,
+        Some(0.3125),
+    );
+
+    out.insert(
+        "mistral-large-latest".to_string(),
+        ModelDef {
+            name: "Mistral Large".to_string(),
+            provider: "openrouter".to_string(),
+            context_window: 128_000,
+            runtime_context_window: None,
+            stream_timeout: None,
+            capabilities: openai_caps.clone(),
+            pricing: Some(ModelPricing {
+                input_per_mtok: 2.00,
+                output_per_mtok: 6.00,
+                cache_read_per_mtok: None,
+                cache_write_per_mtok: None,
+            }),
+        },
+    );
+    out.insert(
+        "mistral-small-latest".to_string(),
+        ModelDef {
+            name: "Mistral Small".to_string(),
+            provider: "openrouter".to_string(),
+            context_window: 128_000,
+            runtime_context_window: None,
+            stream_timeout: None,
+            capabilities: openai_caps,
+            pricing: Some(ModelPricing {
+                input_per_mtok: 0.20,
+                output_per_mtok: 0.60,
+                cache_read_per_mtok: None,
+                cache_write_per_mtok: None,
+            }),
+        },
+    );
+    out
 }
 
 #[cfg(test)]

@@ -6,6 +6,32 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **`std/llm/economics` first-class cost helpers and explicit unknown
+  pricing.** New stdlib module exposes `pricing_for`,
+  `estimate_call_cost`, `estimate_session_cost`, `compare_model_costs`,
+  `cache_break_even`, `volume_cost`, and `format_usd`, backed by new
+  Rust builtins `llm_pricing`, `llm_compare_costs`, and `llm_format_usd`.
+  The previous `model_pricing_per_million` table in
+  `crates/harn-vm/src/llm/cost.rs` — annotated "as of early 2026" and
+  prone to silent drift — has been removed; its canonical Anthropic /
+  OpenAI / Gemini / Mistral entries are now exact-id catalog rows in
+  `crates/harn-vm/src/llm_config.rs::canonical_priced_models()`,
+  editable in one place under `git blame`. Pricing for unknown
+  commercial models now surfaces as `pricing_known: false` /
+  `cost_usd: nil` instead of silently coercing to $0; only providers
+  explicitly configured with $0 rates (ollama, local, llamacpp, mlx,
+  vllm, tgi) report cost=$0 with pricing_known=true. The CLI cost
+  explainer (`harn run --explain-cost`) already routed through
+  `llm_pricing_per_1k`, so its "unpriced" cell now reflects this
+  stricter truth. New conformance tests under
+  `conformance/tests/integration/llm_economics_*.harn` cover the
+  helpers; existing `llm_cost`, budget, and routing behavior is
+  unchanged for catalog-known models.
+
 ## v0.8.9
 
 ### Fixed

@@ -1,0 +1,21 @@
+// cache_break_even: amortizing path returns integer reuse count; free
+// cache_write returns 1; unpriced model returns recommended=false.
+import { cache_break_even } from "std/llm/economics"
+
+pipeline default() {
+  // Sonnet 4: input 3.00, cache_read 0.30, cache_write 3.75 (per MTok).
+  // For 10000 prompt tokens reused:
+  //   savings_per_hit = (3.00 - 0.30) / 1e6 * 10000 = 0.027
+  //   write_cost = 3.75 / 1e6 * 10000 = 0.0375
+  //   break_even = ceil(0.0375 / 0.027) = 2
+  let row = cache_break_even({provider: "anthropic", model: "claude-sonnet-4-20250514", prompt_tokens: 10000})
+  println("recommended=" + to_string(row.recommended))
+  println("reason=" + row.reason)
+  println("break_even=" + to_string(row.break_even_calls))
+  println("savings=" + to_string(row.savings_per_hit))
+  // Unknown pricing path.
+  let unknown = cache_break_even({provider: "nonexistent_provider", model: "ghost-model", prompt_tokens: 1000})
+  println("unknown_recommended=" + to_string(unknown.recommended))
+  println("unknown_reason=" + unknown.reason)
+  println("unknown_break_even_nil=" + to_string(unknown.break_even_calls == nil))
+}

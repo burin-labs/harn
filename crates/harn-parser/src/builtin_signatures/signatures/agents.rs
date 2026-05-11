@@ -485,6 +485,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT_OR_NIL,
     ),
     BuiltinSignature::simple(
+        "llm_compare_costs",
+        &[
+            Param::new("candidates", TY_LIST),
+            Param::new("opts", TY_DICT),
+        ],
+        TY_LIST,
+    ),
+    BuiltinSignature::simple(
         "llm_cost",
         &[
             Param::new("model", TY_STRING),
@@ -492,6 +500,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::new("output_tokens", TY_INT),
         ],
         TY_FLOAT,
+    ),
+    BuiltinSignature::simple(
+        "llm_format_usd",
+        &[
+            Param::new("amount", Ty::Union(&[TY_FLOAT, TY_INT])),
+            Param::optional("options", TY_DICT),
+        ],
+        TY_STRING,
     ),
     BuiltinSignature::simple(
         "llm_healthcheck",
@@ -541,6 +557,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("options", TY_DICT),
         ],
         TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "llm_pricing",
+        &[
+            Param::new("model_or_dict", Ty::Union(&[TY_STRING, TY_DICT])),
+            Param::optional("model", TY_STRING),
+        ],
+        TY_DICT_OR_NIL,
     ),
     BuiltinSignature::simple("llm_provider_catalog", &[], TY_DICT),
     BuiltinSignature::simple("llm_providers", &[], TY_LIST),

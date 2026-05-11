@@ -1,0 +1,12 @@
+pricing_known=true
+cost=$0.045000
+input=$0.030000
+output=$0.015000
+cached cost=$0.023400
+cached cache_read=$0.002400
+calls=100
+many cost=$0.450000
+unknown_known=false
+unknown_cost_nil=true
+free_known=true
+free_cost=$0.00

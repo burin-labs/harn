@@ -1,0 +1,42 @@
+// estimate_session_cost aggregates a list of call dicts and reports both
+// the priced subtotal and the count of unpriced calls. Calls without a
+// catalog or provider rate are NOT silently coerced to 0; two priced
+// entries sharing a key exercise the aggregation arithmetic that earlier
+// versions broke due to a `+` / `??` precedence pitfall.
+import { estimate_session_cost, format_usd } from "std/llm/economics"
+
+pipeline default() {
+  let summary = estimate_session_cost(
+    [
+      {
+        provider: "anthropic",
+        model: "claude-sonnet-4-20250514",
+        input_tokens: 10000,
+        output_tokens: 1000,
+        calls: 2,
+      },
+      {
+        provider: "anthropic",
+        model: "claude-sonnet-4-20250514",
+        input_tokens: 5000,
+        output_tokens: 500,
+        calls: 1,
+      },
+      {provider: "openai", model: "gpt-4o-mini", input_tokens: 5000, output_tokens: 200, calls: 10},
+      {
+        provider: "nonexistent_provider",
+        model: "ghost-model",
+        input_tokens: 1000,
+        output_tokens: 200,
+        calls: 5,
+      },
+    ],
+  )
+  println("calls=" + to_string(summary.total_calls))
+  println("unknown=" + to_string(summary.unknown_calls))
+  println("total=" + format_usd(summary.total_cost_usd))
+  println("known=" + format_usd(summary.known_cost_usd))
+  println("rows=" + to_string(len(summary.per_model)))
+  println("top=" + summary.per_model[0].model)
+  println("top_calls=" + to_string(summary.per_model[0].calls))
+}

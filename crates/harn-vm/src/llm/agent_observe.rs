@@ -850,7 +850,8 @@ pub(crate) async fn observed_llm_call(
                         &result.provider,
                         &result.model,
                         "succeeded",
-                        super::cost::calculate_cost(
+                        super::cost::calculate_cost_for_provider(
+                            &result.provider,
                             &result.model,
                             result.input_tokens,
                             result.output_tokens,

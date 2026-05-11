@@ -1,0 +1,18 @@
+// format_usd auto-scales precision and supports overrides for precision /
+// explicit sign / grouping above $1000.
+//
+// Expected default precision: 6 decimals under $1, 4 decimals under $100,
+// 2 decimals at $100+. The last case (80.999… → $81.0000) regression-tests
+// against a previous IEEE-754 split that rendered as "$80.1.0000".
+import { format_usd } from "std/llm/economics"
+
+pipeline default() {
+  println(format_usd(0.000045))
+  println(format_usd(1.2345))
+  println(format_usd(1234.5))
+  println(format_usd(-1234.5))
+  println(format_usd(1234.5, {sign: true}))
+  println(format_usd(0.123456789, {precision: 2}))
+  println(format_usd(1.0, {precision: 0}))
+  println(format_usd(0.00027 * 300000))
+}
