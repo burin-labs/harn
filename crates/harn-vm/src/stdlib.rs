@@ -66,6 +66,7 @@ mod url_parse;
 mod vision;
 pub(crate) mod waitpoint;
 mod waitpoints;
+mod web;
 pub mod workflow_messages;
 
 use crate::http::register_http_builtins;
@@ -97,6 +98,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     junit::register_junit_builtins(vm);
     multipart::register_multipart_builtins(vm);
     url_parse::register_url_builtins(vm);
+    web::register_web_builtins(vm);
     cookies::register_cookie_builtins(vm);
     path::register_path_helper_builtins(vm);
     sets::register_set_builtins(vm);

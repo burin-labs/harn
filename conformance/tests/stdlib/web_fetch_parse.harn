@@ -1,0 +1,62 @@
+import { mem_cache } from "std/cache"
+import { web_fetch, web_parse_html } from "std/web"
+
+pipeline test(task) {
+  http_mock_clear()
+  http_mock(
+    "GET",
+    "https://example.com/article",
+    {
+      status: 200,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        etag: "\"v1\"",
+        "last-modified": "Mon, 11 May 2026 00:00:00 GMT",
+      },
+      body: """
+        <html>
+          <head>
+            <title>Example &amp; Research</title>
+            <meta name="description" content="Deterministic source ingest">
+            <meta property="og:type" content="article">
+            <link rel="canonical" href="/article">
+            <script type="application/ld+json">{"@type":"Article","headline":"Example"}</script>
+          </head>
+          <body>
+            <nav><a href="/docs" rel="help">Docs</a></nav>
+            <main>
+              <p>Hello <strong>world</strong>.</p>
+              <table>
+                <caption>Prices</caption>
+                <tr><th>Plan</th><th>USD</th></tr>
+                <tr><td>Pro</td><td>20</td></tr>
+              </table>
+            </main>
+          </body>
+        </html>
+        """,
+    },
+  )
+  let store = mem_cache({namespace: "web-fetch-parse"})
+  let fetched = web_fetch("https://example.com/article", {store: store, fetched_at: "fixture-time"})
+  assert_eq(fetched.status, 200)
+  assert_eq(fetched.cache_status, "miss")
+  assert_eq(fetched.final_url, "https://example.com/article")
+  assert_eq(fetched.content_type, "text/html; charset=utf-8")
+  assert_eq(fetched.etag, "\"v1\"")
+  assert_eq(fetched.last_modified, "Mon, 11 May 2026 00:00:00 GMT")
+  assert_eq(fetched.fetched_at, "fixture-time")
+  let parsed = web_parse_html(fetched.body, fetched.final_url)
+  assert_eq(parsed.title, "Example & Research")
+  assert_eq(parsed.meta.description, "Deterministic source ingest")
+  assert_eq(parsed.meta["og:type"], "article")
+  assert_eq(parsed.canonical_url, "https://example.com/article")
+  assert_eq(parsed.links[0].url, "https://example.com/docs")
+  assert_eq(parsed.links[0].text, "Docs")
+  assert_eq(parsed.tables[0].caption, "Prices")
+  assert_eq(parsed.tables[0].headers, ["Plan", "USD"])
+  assert_eq(parsed.tables[0].rows[0], ["Pro", "20"])
+  assert_eq(parsed.json_ld[0].headline, "Example")
+  assert(contains(parsed.text, "Hello world"))
+  println("web_fetch_parse_ok")
+}

@@ -1,0 +1,74 @@
+import { robots_allowed, sitemap_urls, web_origin_url } from "std/web"
+
+pipeline test(task) {
+  http_mock_clear()
+  http_mock(
+    "GET",
+    "https://example.com/robots.txt",
+    {
+      status: 200,
+      body: """
+        User-agent: *
+        Disallow: /private
+        Allow: /private/public
+        Sitemap: https://example.com/sitemap.xml
+      """,
+    },
+  )
+  http_mock(
+    "GET",
+    "https://example.com/specific-robots.txt",
+    {
+      status: 200,
+      body: """
+        User-agent: *
+        Allow: /private
+
+        User-agent: AuditBot
+        Disallow: /private
+        Allow: /private/public
+      """,
+    },
+  )
+  http_mock(
+    "GET",
+    "https://example.com/sitemap.xml",
+    {
+      status: 200,
+      body: """
+        <urlset>
+          <url><loc>https://example.com/</loc></url>
+          <url><loc>https://example.com/docs</loc></url>
+        </urlset>
+      """,
+    },
+  )
+  assert_eq(robots_allowed("https://example.com/docs"), true)
+  assert_eq(robots_allowed("https://example.com/private/secret"), false)
+  assert_eq(robots_allowed("https://example.com/private/public/page"), true)
+  assert_eq(
+    robots_allowed(
+      "https://example.com/private/secret",
+      "AuditBot",
+      {robots_url: "https://example.com/specific-robots.txt"},
+    ),
+    false,
+  )
+  assert_eq(
+    robots_allowed(
+      "https://example.com/private/secret",
+      "OtherBot",
+      {robots_url: "https://example.com/specific-robots.txt"},
+    ),
+    true,
+  )
+  assert_eq(
+    web_origin_url("https://example.com/path?q=1#frag", "robots.txt"),
+    "https://example.com/robots.txt",
+  )
+  assert_eq(
+    sitemap_urls("https://example.com/docs"),
+    ["https://example.com/", "https://example.com/docs"],
+  )
+  println("web_robots_sitemap_ok")
+}
