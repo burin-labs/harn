@@ -31,8 +31,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use wasmtime::{Caller, Engine, Linker, Module, Store};
-use wasmtime_wasi::pipe::{MemoryInputPipe, MemoryOutputPipe};
-use wasmtime_wasi::preview1::{add_to_linker_sync, WasiP1Ctx};
+use wasmtime_wasi::p1::{add_to_linker_sync, WasiP1Ctx};
+use wasmtime_wasi::p2::pipe::{MemoryInputPipe, MemoryOutputPipe};
 use wasmtime_wasi::{
     DirPerms, FilePerms, HostMonotonicClock, HostWallClock, I32Exit, WasiCtxBuilder,
 };
@@ -158,6 +158,34 @@ pub fn run_wasm_module(
     args: &[String],
     env: &[(String, String)],
 ) -> Result<WasiOutput, String> {
+    let wasm_path = wasm_path.to_path_buf();
+    let args = args.to_vec();
+    let env = env.to_vec();
+    let clock = crate::clock_mock::active_mock_clock();
+    let overlay = active_overlay();
+
+    // The sync WASIp1 shim in wasmtime-wasi uses its own Tokio runtime.
+    // Running it on a fresh host thread keeps it out of Harn's runtime while
+    // sharing the testbench clock and overlay through their Arc-backed guards.
+    let worker = std::thread::Builder::new()
+        .name("harn-wasi".to_string())
+        .spawn(move || {
+            let _clock_guard = clock.map(crate::clock_mock::install_override);
+            let _overlay_guard = overlay.map(crate::testbench::overlay_fs::install_overlay);
+            run_wasm_module_inner(&wasm_path, &args, &env)
+        })
+        .map_err(|e| format!("spawn wasi worker: {e}"))?;
+
+    worker
+        .join()
+        .map_err(|payload| panic_payload_to_string(payload, "wasi worker panicked"))?
+}
+
+fn run_wasm_module_inner(
+    wasm_path: &Path,
+    args: &[String],
+    env: &[(String, String)],
+) -> Result<WasiOutput, String> {
     let started_mono_ms = crate::clock_mock::instant_now().as_millis() as u64;
 
     let wasm_bytes =
@@ -242,9 +270,18 @@ pub fn run_wasm_module(
     })
 }
 
+fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>, fallback: &str) -> String {
+    if let Some(message) = payload.downcast_ref::<&'static str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        fallback.to_string()
+    }
+}
+
 fn build_engine() -> Result<Engine, String> {
-    let mut config = wasmtime::Config::new();
-    config.async_support(false);
+    let config = wasmtime::Config::new();
     Engine::new(&config).map_err(|e| format!("build wasmtime engine: {e}"))
 }
 
@@ -407,7 +444,8 @@ fn range_in_bounds(base: usize, stride: usize, count: usize, mem_len: usize) -> 
 }
 
 fn push_trap_to_stderr(stderr: &mut MemoryOutputPipe, err: &wasmtime::Error) {
-    use wasmtime_wasi::HostOutputStream;
+    use wasmtime_wasi::p2::OutputStream;
+
     let msg = format!("wasi trap: {err}\n");
     let _ = stderr.write(bytes::Bytes::from(msg.into_bytes()));
 }
@@ -615,6 +653,25 @@ mod tests {
         assert_eq!(output.stdout.len(), 8);
         let nanos = u64::from_le_bytes(output.stdout[..8].try_into().unwrap());
         assert_eq!(nanos, start_ms as u64 * 1_000_000);
+    }
+
+    #[test]
+    fn runs_inside_existing_tokio_runtime() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        rt.block_on(async {
+            let start_ms: i64 = 1_767_225_600_000;
+            let _guard = clock_mock::install_override(clock_mock::MockClock::at_wall_ms(start_ms));
+
+            let (_dir, path) = write_temp_wasm(CLOCK_READ_WAT);
+            let output = run_wasm_module(&path, &[], &[]).expect("run wasm");
+            assert_eq!(output.exit_code, 0);
+            let nanos = u64::from_le_bytes(output.stdout[..8].try_into().unwrap());
+            assert_eq!(nanos, start_ms as u64 * 1_000_000);
+        });
     }
 
     #[test]

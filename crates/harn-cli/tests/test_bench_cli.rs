@@ -451,10 +451,9 @@ pipeline default() {
     );
 }
 
-/// Steel thread for #1443: a `WasiToolchain` testbench routes
-/// `command_output` to a WASI-compiled tool, virtualizes its clocks via
-/// the testbench `MockClock`, and surfaces the WASM module's stdout to
-/// the parent.
+/// A `WasiToolchain` testbench routes `command_output` to a WASI-compiled
+/// tool, virtualizes its clocks via the testbench `MockClock`, and surfaces
+/// the WASM module's stdout to the parent.
 #[test]
 fn wasi_toolchain_runs_module_with_virtualized_clock() {
     use harn_vm::process_sandbox::{command_output, ProcessCommandConfig};
