@@ -334,6 +334,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_NIL,
     ),
     BuiltinSignature::simple(
+        "agent_session_seed_from_jsonl",
+        &[
+            Param::new("jsonl_path", TY_STRING),
+            Param::optional("opts", TY_DICT),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "agent_session_snapshot",
         &[Param::new("id", TY_STRING)],
         TY_DICT_OR_NIL,

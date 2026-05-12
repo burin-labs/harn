@@ -6,6 +6,20 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **JSONL-seeded agent sessions (#1546).** Added
+  `agent_session_seed_from_jsonl(path, opts?)` to create a new
+  first-class session from replayable `llm_transcript.jsonl` sidecars.
+  The importer supports exact prompt-visible `message` events and older
+  full request snapshots, with `truncate_to_last`, `drop_tool_calls`,
+  `rename_session`, `validate`, `provider`, and `model` options. Agent
+  loop sidecars now emit redacted `message` records as turns are
+  appended, so future run artifacts can be lifted directly into a new
+  prefix-cache-friendly session.
+
 ## v0.8.11
 
 ### Added

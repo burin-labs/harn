@@ -800,6 +800,13 @@ the loop picks which skill(s) to activate:
   The next `agent_loop` call on the same session rehydrates them
   before iteration-0 matching runs, so sticky re-entry stays hot
   without re-matching from a cold prompt.
+- **JSONL seeding**: `agent_session_seed_from_jsonl(path, opts?)`
+  creates a new session from an `llm_transcript.jsonl` sidecar. It
+  imports exact prompt-visible `message` events or older full request
+  snapshots, optionally checks `provider` / `model`, and supports
+  `truncate_to_last` plus `drop_tool_calls` for oversized histories.
+  Provider-response-only sidecars require `validate: false` because
+  they lack user and tool-result turns.
 
 ### Scoped tools
 

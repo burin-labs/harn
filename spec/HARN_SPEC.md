@@ -1448,6 +1448,13 @@ mailboxes are shared by every task that receives or resolves the handle.
 mailboxes, shared state handles, `agent_state_*`, or host storage for data
 exchange outside the transcript.
 
+`agent_session_seed_from_jsonl(path, opts?)` creates a new session from a
+replayable LLM transcript sidecar. Exact replay uses prompt-visible `message`
+events or full request snapshots; provider-response-only sidecars are
+assistant-response best effort and require `validate: false`. Options include
+`truncate_to_last`, `drop_tool_calls`, `rename_session`, `validate`, `provider`,
+and `model`.
+
 Delegated workers accept `carry.transcript_mode` to define continuation
 semantics across `send_input(...)`, retriggered workers, and resumed snapshots.
 `inherit` carries the completed worker transcript into the next cycle. `fork`
