@@ -366,6 +366,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_triage.harn"),
     },
     StdlibSource {
+        module: "dashboard/jobs",
+        source: include_str!("stdlib/dashboard/jobs.harn"),
+    },
+    StdlibSource {
         module: "ui_resource",
         source: include_str!("stdlib/stdlib_ui_resource.harn"),
     },
@@ -861,6 +865,7 @@ mod tests {
             "connectors/notion",
             "connectors/slack",
             "triage",
+            "dashboard/jobs",
             "ui_resource",
         ] {
             assert!(
