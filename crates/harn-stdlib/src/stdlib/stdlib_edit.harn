@@ -90,11 +90,38 @@ fn __edit_candidate_contexts(parts, old_text, max_contexts) {
   var prefix = ""
   var idx = 0
   let limit = max_contexts ?? 3
+  let needle_lines = max(len(split(old_text ?? "", "\n")), 1)
   while idx < len(parts) - 1 && len(contexts) < limit {
     prefix = prefix + parts[idx]
+    let start_line = __edit_start_line(prefix)
     contexts = contexts
-      + [{start_line: __edit_start_line(prefix), snippet: __edit_context(prefix, old_text, parts[idx + 1])}]
+      + [
+      {
+        start_line: start_line,
+        end_line: start_line + needle_lines - 1,
+        snippet: __edit_context(prefix, old_text, parts[idx + 1]),
+      },
+    ]
     prefix = prefix + old_text
+    idx = idx + 1
+  }
+  return contexts
+}
+
+fn __edit_line_candidate_contexts(text, candidates, max_contexts) {
+  let lines = split(text ?? "", "\n")
+  var contexts = []
+  let limit = max_contexts ?? 3
+  var idx = 0
+  while idx < len(candidates) && len(contexts) < limit {
+    let candidate = candidates[idx]
+    let start_line = candidate.start_line
+    let end_line_exclusive = candidate.end_line_exclusive
+    let prefix_start = max(start_line - 2, 0)
+    let suffix_end = min(end_line_exclusive + 2, len(lines))
+    let snippet = trim(join(lines[prefix_start:suffix_end], "\n"))
+    contexts = contexts
+      + [{start_line: start_line, end_line: end_line_exclusive - 1, snippet: snippet}]
     idx = idx + 1
   }
   return contexts
@@ -119,17 +146,49 @@ fn __edit_error(code, message, text, old_text, new_text, fields = nil) {
   return base.merge(fields ?? {})
 }
 
-fn __edit_has_lazy_placeholder(new_text) {
-  for line in split(new_text ?? "", "\n") {
+fn __edit_lazy_placeholder_patterns() {
+  return [
+    "(?im)^\\s*//\\s*\\.\\.\\.?\\s*(rest|remaining|existing|implementation|code|omit)",
+    "(?im)^\\s*//\\s*TODO:?\\s*(implement|fill|add|complete)",
+    "(?im)^\\s*#\\s*\\.\\.\\.?\\s*(rest|remaining|existing|implementation|code)",
+    "(?im)^\\s*/\\*\\s*\\.\\.\\.?\\s*\\*/\\s*$",
+    "(?im)^\\s*//\\s*\\.\\.\\.\\s*$",
+    "(?im)^\\s*#\\s*\\.\\.\\.\\s*$",
+    "(?im)^\\s*pass\\s*#\\s*\\.\\.\\.",
+  ]
+}
+
+fn __edit_lazy_placeholder_phrases() {
+  return ["unchanged", "omitted for brevity", "same as before", "rest of the file", "remaining code"]
+}
+
+fn __edit_lazy_match_count(text) {
+  let body = text ?? ""
+  if body == "" {
+    return 0
+  }
+  var total = 0
+  for line in split(body, "\n") {
     let t = lowercase(trim(line))
-    if t == "..." || t == "…" || t == "// ..." || t == "# ..." || t == "/* ... */" {
-      return true
-    }
-    if contains(t, "unchanged") || contains(t, "omitted for brevity") || contains(t, "same as before") {
-      return true
+    if t == "..." || t == "…" {
+      total = total + 1
     }
   }
-  return false
+  for pattern in __edit_lazy_placeholder_patterns() {
+    let matches = regex_match(pattern, body) ?? []
+    total = total + len(matches)
+  }
+  let lowered = lowercase(body)
+  for phrase in __edit_lazy_placeholder_phrases() {
+    if contains(lowered, phrase) {
+      total = total + 1
+    }
+  }
+  return total
+}
+
+fn __edit_has_lazy_placeholder(new_text) {
+  return __edit_lazy_match_count(new_text) > 0
 }
 
 fn __edit_guardrails(old_text, new_text, options) {
@@ -217,7 +276,49 @@ fn __edit_splice_raw(text, start_line, end_line_exclusive, new_text) {
   return join(out, "\n")
 }
 
-fn __edit_line_candidates(text, old_text, structural) {
+fn __edit_has_distinctive_token(line, min_chars) {
+  let chars = min_chars ?? 4
+  if chars <= 0 {
+    return true
+  }
+  let tokens = regex_match("[A-Za-z0-9_]+", line ?? "") ?? []
+  for token in tokens {
+    if len(token) >= chars {
+      return true
+    }
+  }
+  return false
+}
+
+fn __edit_structural_anchors_ok(old_text, options) {
+  let opts = options ?? {}
+  let min_lines = opts?.structural_min_nonblank_lines ?? 3
+  let anchor_chars = opts?.structural_anchor_chars ?? 4
+  let anchor_mode = lowercase(opts?.structural_require_anchored_lines ?? "both")
+  let needle_lines = split(old_text ?? "", "\n")
+  var nonblank_lines = []
+  for line in needle_lines {
+    if __edit_structural_line(line) != "" {
+      nonblank_lines = nonblank_lines + [line]
+    }
+  }
+  if len(nonblank_lines) < min_lines {
+    return false
+  }
+  if anchor_mode == "none" || anchor_chars <= 0 {
+    return true
+  }
+  let first = nonblank_lines[0] ?? ""
+  let last = nonblank_lines[len(nonblank_lines) - 1] ?? ""
+  let first_ok = __edit_has_distinctive_token(first, anchor_chars)
+  let last_ok = __edit_has_distinctive_token(last, anchor_chars)
+  if anchor_mode == "either" {
+    return first_ok || last_ok
+  }
+  return first_ok && last_ok
+}
+
+fn __edit_line_candidates(text, old_text, structural, options) {
   let lines = split(text ?? "", "\n")
   var candidates = []
   let target = __edit_signature(old_text, structural)
@@ -236,9 +337,16 @@ fn __edit_line_candidates(text, old_text, structural) {
     }
     return candidates
   }
+  if !__edit_structural_anchors_ok(old_text, options) {
+    return candidates
+  }
   let target_count = __edit_nonblank_count(split(old_text ?? "", "\n"))
   var start = 0
   while start < len(lines) {
+    if __edit_structural_line(lines[start]) == "" {
+      start = start + 1
+      continue
+    }
     var end = start
     var nonblank = 0
     while end < len(lines) && nonblank < target_count {
@@ -265,6 +373,7 @@ fn __edit_apply_line_candidate(text, old_text, new_text, match_kind, candidates,
   if len(candidates) == 0 {
     return nil
   }
+  let opts = options ?? {}
   if len(candidates) > 1 {
     return __edit_error(
       "ambiguous_match",
@@ -275,13 +384,13 @@ fn __edit_apply_line_candidate(text, old_text, new_text, match_kind, candidates,
       {
         candidate_count: len(candidates),
         match_kind: match_kind,
-        candidate_contexts: candidates[:min(len(candidates), 3)],
+        candidate_contexts: __edit_line_candidate_contexts(text, candidates, opts?.max_candidate_contexts),
       },
     )
   }
   let candidate = candidates[0]
   let patched = __edit_splice_raw(text, candidate.start_line, candidate.end_line_exclusive, new_text)
-  return __edit_success(
+  let result = __edit_success(
     text,
     patched,
     candidate.text,
@@ -289,8 +398,12 @@ fn __edit_apply_line_candidate(text, old_text, new_text, match_kind, candidates,
     match_kind,
     candidate.start_line,
     candidate.end_line_exclusive,
-    options ?? {},
+    opts,
   )
+  if match_kind == "structural" || match_kind == "line" {
+    return result.merge({whitespace_explanation: edit_explain_whitespace_difference(old_text, candidate.text)})
+  }
+  return result
 }
 
 /**
@@ -300,12 +413,26 @@ fn __edit_apply_line_candidate(text, old_text, new_text, match_kind, candidates,
  * before_sha256, after_sha256, changed_regions, errors, warnings, provenance}`.
  * Matching is exact first by default, then whitespace-normalized line matching,
  * then structural matching that ignores blank lines and whitespace.
+ *
+ * Structural matches are conservative by default: the needle must contain at
+ * least `structural_min_nonblank_lines` (3) non-blank lines, and both the
+ * first and last non-blank anchor lines must carry a distinctive token of at
+ * least `structural_anchor_chars` (4) alphanumeric characters. Relax with
+ * `structural_require_anchored_lines: "either"` or `"none"` only when callers
+ * have a host-side validator that can re-check the result. Pass
+ * `strip_line_numbers: true` to pre-strip `   N | ` line-number prefixes from
+ * `old_text` when the model pasted them straight from a numbered file read.
  */
 pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
   let source = text ?? ""
-  let old = old_text ?? ""
+  let raw_old = old_text ?? ""
   let new = new_text ?? ""
   let opts = options ?? {}
+  let old = if opts?.strip_line_numbers ?? false {
+    edit_strip_line_number_prefixes(raw_old)
+  } else {
+    raw_old
+  }
   let guardrail = __edit_guardrails(old, new, opts)
   if guardrail != nil {
     return __edit_error(guardrail.code, guardrail.message, source, old, new)
@@ -350,7 +477,7 @@ pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
       old,
       new,
       "line",
-      __edit_line_candidates(source, old, false),
+      __edit_line_candidates(source, old, false, opts),
       opts,
     )
     if line_result != nil {
@@ -366,7 +493,7 @@ pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
       old,
       new,
       "structural",
-      __edit_line_candidates(source, old, true),
+      __edit_line_candidates(source, old, true, opts),
       opts,
     )
     if structural_result != nil {
@@ -477,6 +604,201 @@ fn __edit_region_within(actual, expected) {
   let expected_start = expected?.start_line ?? 0
   let expected_end = __edit_expected_end(expected)
   return actual.start_line >= expected_start && actual.end_line <= expected_end
+}
+
+/**
+ * Strip `   N | ` line-number prefixes from raw text when at least 60% of
+ * non-empty lines carry that shape. Useful preprocessing for old_text strings
+ * that a model pasted verbatim from a numbered file read; otherwise the text
+ * never matches because each anchor line has an extra `42 | ` prefix.
+ *
+ * The 60% threshold is intentional: a file that legitimately contains one or
+ * two `N | …` lines (e.g. a docstring example) is left alone.
+ */
+pub fn edit_strip_line_number_prefixes(text) {
+  let raw = text ?? ""
+  if raw == "" {
+    return raw
+  }
+  let lines = split(raw, "\n")
+  var non_empty_total = 0
+  var matching = 0
+  for line in lines {
+    if trim(line) == "" {
+      continue
+    }
+    non_empty_total = non_empty_total + 1
+    if regex_match("^\\s*\\d+\\s*\\| ", line) {
+      matching = matching + 1
+    }
+  }
+  if non_empty_total == 0 {
+    return raw
+  }
+  if matching * 100 / non_empty_total <= 60 {
+    return raw
+  }
+  var stripped = []
+  for line in lines {
+    stripped = stripped + [regex_replace("^\\s*\\d+\\s*\\| ", "", line)]
+  }
+  return join(stripped, "\n")
+}
+
+fn __edit_count_tab_indent(lines) {
+  var total = 0
+  for line in lines {
+    if (line ?? "").starts_with("\t") {
+      total = total + 1
+    }
+  }
+  return total
+}
+
+fn __edit_count_space_indent(lines) {
+  var total = 0
+  for line in lines {
+    let raw = line ?? ""
+    if raw == "" || raw.starts_with("\t") {
+      continue
+    }
+    if raw.starts_with(" ") {
+      total = total + 1
+    }
+  }
+  return total
+}
+
+fn __edit_min_indent(lines) {
+  var smallest = -1
+  for line in lines {
+    let raw = line ?? ""
+    if trim(raw) == "" {
+      continue
+    }
+    let leading = len(raw) - len(regex_replace("^[ \\t]+", "", raw))
+    if smallest == -1 || leading < smallest {
+      smallest = leading
+    }
+  }
+  return smallest
+}
+
+fn __edit_count_blank_lines(lines) {
+  var total = 0
+  for line in lines {
+    if trim(line ?? "") == "" {
+      total = total + 1
+    }
+  }
+  return total
+}
+
+/**
+ * Diagnose the dominant whitespace discrepancy between an old_text needle and
+ * the actual matched span in the source. Hosts log this on fuzzy/structural
+ * matches so the model can learn from each near-miss.
+ *
+ * Returns a short human-readable sentence such as
+ * `"your old_string used tabs but the file uses spaces"` or
+ * `"your old_string had 1 extra blank line(s) that the file does not"`.
+ * Returns `""` when needle and matched are identical or no dominant cause is
+ * detectable.
+ */
+pub fn edit_explain_whitespace_difference(needle, matched) {
+  let needle_text = needle ?? ""
+  let matched_text = matched ?? ""
+  if needle_text == matched_text {
+    return ""
+  }
+  let needle_lines = split(needle_text, "\n")
+  let matched_lines = split(matched_text, "\n")
+  let needle_tabs = __edit_count_tab_indent(needle_lines)
+  let needle_spaces = __edit_count_space_indent(needle_lines)
+  let matched_tabs = __edit_count_tab_indent(matched_lines)
+  let matched_spaces = __edit_count_space_indent(matched_lines)
+  if needle_tabs > 0 && matched_tabs == 0 && matched_spaces > 0 {
+    return "your old_string used tabs but the file uses spaces"
+  }
+  if needle_spaces > 0 && matched_spaces == 0 && matched_tabs > 0 {
+    return "your old_string used spaces but the file uses tabs"
+  }
+  let needle_min = __edit_min_indent(needle_lines)
+  let matched_min = __edit_min_indent(matched_lines)
+  if needle_min != matched_min && needle_min >= 0 && matched_min >= 0 {
+    return "your old_string's base indent was ${needle_min} but the file's matched block starts at indent ${matched_min}"
+  }
+  let needle_blanks = __edit_count_blank_lines(needle_lines)
+  let matched_blanks = __edit_count_blank_lines(matched_lines)
+  if needle_blanks != matched_blanks {
+    let delta = matched_blanks - needle_blanks
+    if delta > 0 {
+      return "your old_string was missing ${delta} blank line(s) that the file has"
+    }
+    return "your old_string had ${0 - delta} extra blank line(s) that the file does not"
+  }
+  return "minor whitespace formatting (exact cause not pinpointed)"
+}
+
+/**
+ * Detect whether a whole-file edit looks like a lazy truncation: a file with
+ * at least `min_old_lines` (10) lines shrunk below `min_keep_pct` (35%) of
+ * its original line count *and* the new content still contains at least one
+ * lazy placeholder.
+ *
+ * Returns `{ok, lazy, error_code, message, old_lines, new_lines, lazy_hits,
+ * provenance}`. `ok` is true when the edit is sound; false when the
+ * shrinkage + placeholder shape is present. Distinct from
+ * `edit_apply_old_new_patch`'s `lazy_placeholder` guardrail, which fires on
+ * any placeholder in the patch region — this one is for whole-file rewrites
+ * where placeholders by themselves are not a signal.
+ */
+pub fn edit_check_lazy_truncation(old_content, new_content, options = nil) {
+  let opts = options ?? {}
+  let min_old_lines = opts?.min_old_lines ?? 10
+  let min_keep_pct = opts?.min_keep_pct ?? 35
+  let old_text = old_content ?? ""
+  let new_text = new_content ?? ""
+  let old_lines = len(split(old_text, "\n"))
+  let new_lines = len(split(new_text, "\n"))
+  let lazy_hits = __edit_lazy_match_count(new_text)
+  let provenance = {
+    module: "std/edit",
+    helper: "edit_check_lazy_truncation",
+    before_sha256: __edit_sha256(old_text),
+    after_sha256: __edit_sha256(new_text),
+    caller: opts?.provenance,
+  }
+  let neutral = {
+    ok: true,
+    lazy: false,
+    error_code: nil,
+    message: "",
+    old_lines: old_lines,
+    new_lines: new_lines,
+    lazy_hits: lazy_hits,
+    provenance: provenance,
+  }
+  if old_lines < min_old_lines {
+    return neutral
+  }
+  let threshold = old_lines * min_keep_pct / 100
+  if new_lines > threshold {
+    return neutral
+  }
+  if lazy_hits == 0 {
+    return neutral
+  }
+  return {
+    ok: false,
+    lazy: true,
+    error_code: "lazy_truncation",
+    message: "lazy edit: file was truncated from ${old_lines} to ${new_lines} lines with placeholder comments — provide the complete implementation",
+    old_lines: old_lines,
+    new_lines: new_lines,
+    lazy_hits: lazy_hits,
+    provenance: provenance,
+  }
 }
 
 /**

@@ -1,6 +1,9 @@
 import {
   edit_apply_old_new_patch,
+  edit_check_lazy_truncation,
+  edit_explain_whitespace_difference,
   edit_splice_lines,
+  edit_strip_line_number_prefixes,
   edit_validate_changed_regions,
 } from "std/edit"
 
@@ -15,21 +18,49 @@ pipeline default() {
   println(ambiguous.ok)
   println(ambiguous.error_code)
   println(ambiguous.candidate_count)
+  println(ambiguous.candidate_contexts[0].start_line)
+  println(ambiguous.candidate_contexts[0].end_line)
   let whitespace_only = edit_apply_old_new_patch("let x = 1\n", "let x = 1", "let   x = 1")
   println(whitespace_only.ok)
   println(whitespace_only.error_code)
   let structural = edit_apply_old_new_patch(
+    "  fn compute_value() {\n    return one\n    return two\n  }\n  call_compute_value()\n",
+    "fn compute_value(){\nreturn one\nreturn two\n}\ncall_compute_value()",
+    "fn compute_value() {\n  return three\n  return four\n}\ncall_compute_value()",
+    {match: "structural"},
+  )
+  println(structural.ok)
+  println(structural.match_kind)
+  println(structural.patched.contains("return three"))
+  println(structural.whitespace_explanation.contains("indent"))
+  let unsafe_structural = edit_apply_old_new_patch(
     "function f() {\n  return 1\n}\n",
     "function f(){\nreturn 1\n}",
     "function f() {\n  return 2\n}",
     {match: "structural"},
   )
-  println(structural.ok)
-  println(structural.match_kind)
-  println(structural.patched.contains("return 2"))
-  let lazy = edit_apply_old_new_patch("a\nb\nc", "b", "... unchanged ...")
-  println(lazy.ok)
-  println(lazy.error_code)
+  println(unsafe_structural.ok)
+  println(unsafe_structural.error_code)
+  let relaxed_structural = edit_apply_old_new_patch(
+    "function f() {\n  return 1\n}\n",
+    "function f(){\nreturn 1\n}",
+    "function f() {\n  return 2\n}",
+    {match: "structural", structural_require_anchored_lines: "either"},
+  )
+  println(relaxed_structural.ok)
+  println(relaxed_structural.match_kind)
+  let lazy_dots = edit_apply_old_new_patch("a\nb\nc", "b", "... unchanged ...")
+  println(lazy_dots.ok)
+  println(lazy_dots.error_code)
+  let lazy_comment = edit_apply_old_new_patch("alpha\nbody\nomega\n", "body", "kept\n// ... rest of implementation")
+  println(lazy_comment.ok)
+  println(lazy_comment.error_code)
+  let lazy_todo = edit_apply_old_new_patch("alpha\nbody\nomega\n", "body", "kept\n// TODO: implement the rest")
+  println(lazy_todo.ok)
+  println(lazy_todo.error_code)
+  let lazy_pass = edit_apply_old_new_patch("alpha\nbody\nomega\n", "body", "kept_body\npass # ... rest")
+  println(lazy_pass.ok)
+  println(lazy_pass.error_code)
   let spliced = edit_splice_lines("a\nb\nc", 1, 2, "B")
   println(spliced.ok)
   println(spliced.patched)
@@ -42,6 +73,37 @@ pipeline default() {
   let line_delete = edit_apply_old_new_patch("a\n  b\nc", "b", "", {match: "line"})
   println(line_delete.ok)
   println(line_delete.patched)
+  let stripped = edit_strip_line_number_prefixes("   1 | foo\n   2 | bar\n   3 | baz\n")
+  println(stripped)
+  let unstripped = edit_strip_line_number_prefixes("foo\nbar\nbaz\n")
+  println(unstripped)
+  let prefixed_patch = edit_apply_old_new_patch(
+    "foo\nbar\nbaz\n",
+    "   1 | foo\n   2 | bar\n   3 | baz",
+    "FOO\nBAR\nBAZ",
+    {strip_line_numbers: true},
+  )
+  println(prefixed_patch.ok)
+  println(prefixed_patch.patched)
+  let tabs_vs_spaces = edit_explain_whitespace_difference("\tfoo\n\tbar", "  foo\n  bar")
+  println(tabs_vs_spaces)
+  let blank_diff = edit_explain_whitespace_difference("foo\nbar", "foo\n\nbar")
+  println(blank_diff)
+  let identical = edit_explain_whitespace_difference("foo", "foo")
+  println(identical == "")
+  let lazy_truncation = edit_check_lazy_truncation(
+    "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\nq\nr\ns\nt\nu\nv\nw\nx\ny\nz",
+    "a\n// ... rest of file",
+  )
+  println(lazy_truncation.ok)
+  println(lazy_truncation.error_code)
+  let small_file = edit_check_lazy_truncation("one\ntwo\nthree", "// ...")
+  println(small_file.ok)
+  let real_rewrite = edit_check_lazy_truncation(
+    "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\nq\nr\ns\nt\nu\nv\nw\nx\ny\nz",
+    "alpha\nbeta\ngamma\ndelta",
+  )
+  println(real_rewrite.ok)
   let region_report = edit_validate_changed_regions("a\nb\nc", "a\nB\nc", [{start_line: 1, end_line: 1}])
   println(region_report.ok)
   let multi_region_report = edit_validate_changed_regions(
