@@ -6,6 +6,19 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Dashboard job/status envelopes (#1508).** Added `std/jobs` with the
+  canonical `harn.job_event.v1` envelope for scheduled jobs, run
+  queued/progress/result states, approval waits/decisions, DLQ items,
+  receipt links, and replay fixtures. `job_emit` appends validated events to
+  `jobs.status.events` with a `harn.job_event_emit_receipt.v1` EventLog
+  receipt, while `job_fixture_stream` / `job_fixture_feed` and
+  `examples/jobs/fixtures/dashboard_job_events.json` give Burin Home and
+  other hosts static Jobs-dashboard fixture data without a live orchestrator.
+
 ## v0.8.11
 
 ### Added

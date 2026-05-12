@@ -1,0 +1,6 @@
+import { job_fixture_feed } from "std/jobs"
+
+pipeline default() {
+  let feed = job_fixture_feed({title: "Harn Jobs fixture stream"})
+  println(json_stringify(feed))
+}

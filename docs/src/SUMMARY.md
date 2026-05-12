@@ -99,6 +99,7 @@
 - [Webhook intake substrate](./triggers/webhook-intake.md)
 - [Orchestrator](./orchestrator.md)
 - [Hot reload](./orchestrator/hot-reload.md)
+- [Dashboard job/status events](./orchestrator/job-events.md)
 - [Orchestrator DLQ management](./orchestrator/dlq.md)
 - [Orchestrator backpressure](./orchestrator/backpressure.md)
 - [Worker dispatch](./orchestrator/worker-dispatch.md)

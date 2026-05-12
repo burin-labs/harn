@@ -1,0 +1,299 @@
+{
+  "schema": "harn.job_event_fixture_stream.v1",
+  "generated_at": "2026-05-11T09:10:00Z",
+  "title": "Harn Jobs fixture stream",
+  "events": [
+    {
+      "schema": "harn.job_event.v1",
+      "id": "job_evt_fixture_schedule_001",
+      "event_kind": "scheduled_job.created",
+      "status": "scheduled",
+      "source": {
+        "orchestrator": "harn.fixture",
+        "location": "local",
+        "version": "fixture-v1",
+        "clock": {
+          "kind": "fixture",
+          "id": "job-fixture-clock"
+        }
+      },
+      "source_timestamp": "2026-05-11T09:00:00Z",
+      "workspace_id": "workspace_local_demo",
+      "job_id": "job_daily_digest",
+      "run": {},
+      "schedule": {
+        "schedule_id": "schedule_daily_digest",
+        "kind": "cron",
+        "expression": "0 9 * * 1-5",
+        "timezone": "America/New_York",
+        "business_calendar": "US-FEDERAL",
+        "next_fire_at": "2026-05-12T13:00:00Z",
+        "catchup_mode": "skip"
+      },
+      "links": [],
+      "metrics": {},
+      "summary": "Daily digest scheduled",
+      "raw_payload": {}
+    },
+    {
+      "schema": "harn.job_event.v1",
+      "id": "job_evt_fixture_queued_001",
+      "event_kind": "run.queued",
+      "status": "queued",
+      "source": {
+        "orchestrator": "harn.fixture",
+        "location": "local",
+        "version": "fixture-v1"
+      },
+      "source_timestamp": "2026-05-11T09:01:00Z",
+      "workspace_id": "workspace_local_demo",
+      "job_id": "job_daily_digest",
+      "run": {
+        "run_id": "run_daily_digest_001",
+        "workflow_id": "wf_daily_digest",
+        "workflow_name": "Daily Digest"
+      },
+      "queue": {
+        "name": "digest",
+        "depth": 3,
+        "ready": 3,
+        "in_flight": 0,
+        "position": 2
+      },
+      "links": [],
+      "metrics": {},
+      "summary": "Daily digest queued",
+      "raw_payload": {}
+    },
+    {
+      "schema": "harn.job_event.v1",
+      "id": "job_evt_fixture_running_001",
+      "event_kind": "run.progress",
+      "status": "running",
+      "source": {
+        "orchestrator": "harn.fixture",
+        "location": "local",
+        "version": "fixture-v1"
+      },
+      "source_timestamp": "2026-05-11T09:03:30Z",
+      "workspace_id": "workspace_local_demo",
+      "job_id": "job_daily_digest",
+      "run": {
+        "run_id": "run_daily_digest_001",
+        "workflow_id": "wf_daily_digest"
+      },
+      "progress": {
+        "current": 2,
+        "total": 4,
+        "percent": 0.5,
+        "message": "Collecting workspace changes",
+        "stage_id": "collect",
+        "stage_label": "Collect changes"
+      },
+      "links": [],
+      "metrics": {},
+      "summary": "Collecting workspace changes",
+      "raw_payload": {}
+    },
+    {
+      "schema": "harn.job_event.v1",
+      "id": "job_evt_fixture_approval_001",
+      "event_kind": "approval.requested",
+      "status": "waiting_approval",
+      "source": {
+        "orchestrator": "harn.fixture",
+        "location": "local",
+        "version": "fixture-v1"
+      },
+      "source_timestamp": "2026-05-11T09:04:00Z",
+      "workspace_id": "workspace_local_demo",
+      "job_id": "job_release_gate",
+      "run": {
+        "run_id": "run_release_gate_001",
+        "workflow_id": "wf_release_gate"
+      },
+      "approval": {
+        "request_id": "approval_release_gate_001",
+        "state": "requested",
+        "reviewers": ["release-manager"],
+        "quorum": 1,
+        "deadline": "2026-05-11T10:04:00Z",
+        "reason": "Publishing requires human approval."
+      },
+      "links": [],
+      "metrics": {},
+      "summary": "Release publish approval requested",
+      "raw_payload": {}
+    },
+    {
+      "schema": "harn.job_event.v1",
+      "id": "job_evt_fixture_dlq_001",
+      "event_kind": "dlq.created",
+      "status": "dlq",
+      "source": {
+        "orchestrator": "harn.fixture",
+        "location": "local",
+        "version": "fixture-v1"
+      },
+      "source_timestamp": "2026-05-11T09:05:00Z",
+      "workspace_id": "workspace_local_demo",
+      "job_id": "job_github_review",
+      "run": {
+        "run_id": "run_github_review_001",
+        "workflow_id": "wf_github_review"
+      },
+      "dlq": {
+        "entry_id": "dlq_github_review_001",
+        "event_id": "trigger_evt_pr_opened_001",
+        "state": "pending",
+        "error_class": "provider_5xx",
+        "last_error": "GitHub returned 502.",
+        "retry_count": 4,
+        "replay_event_id": "trigger_evt_pr_opened_001"
+      },
+      "links": [],
+      "metrics": {},
+      "summary": "GitHub review moved to DLQ",
+      "raw_payload": {}
+    },
+    {
+      "schema": "harn.job_event.v1",
+      "id": "job_evt_fixture_success_001",
+      "event_kind": "run.succeeded",
+      "status": "succeeded",
+      "source": {
+        "orchestrator": "harn.fixture",
+        "location": "local",
+        "version": "fixture-v1"
+      },
+      "source_timestamp": "2026-05-11T09:07:00Z",
+      "workspace_id": "workspace_local_demo",
+      "job_id": "job_daily_digest",
+      "run": {
+        "run_id": "run_daily_digest_001",
+        "workflow_id": "wf_daily_digest"
+      },
+      "receipt": {
+        "receipt_id": "receipt_daily_digest_001",
+        "path": ".harn-runs/daily-digest/receipt.json",
+        "status": "succeeded"
+      },
+      "result": {
+        "status": "succeeded",
+        "summary": "Digest delivered to #team."
+      },
+      "links": [
+        {
+          "kind": "receipt",
+          "label": "Receipt",
+          "path": ".harn-runs/daily-digest/receipt.json"
+        }
+      ],
+      "metrics": {},
+      "summary": "Daily digest delivered",
+      "raw_payload": {}
+    },
+    {
+      "schema": "harn.job_event.v1",
+      "id": "job_evt_fixture_failure_001",
+      "event_kind": "run.failed",
+      "status": "failed",
+      "source": {
+        "orchestrator": "harn.fixture",
+        "location": "local",
+        "version": "fixture-v1"
+      },
+      "source_timestamp": "2026-05-11T09:08:00Z",
+      "workspace_id": "workspace_local_demo",
+      "job_id": "job_dependency_audit",
+      "run": {
+        "run_id": "run_dependency_audit_001",
+        "workflow_id": "wf_dependency_audit"
+      },
+      "receipt": {
+        "receipt_id": "receipt_dependency_audit_001",
+        "path": ".harn-runs/dependency-audit/receipt.json",
+        "status": "failed"
+      },
+      "result": {
+        "status": "failed",
+        "summary": "Audit failed before remediation.",
+        "error": "lockfile unavailable"
+      },
+      "links": [
+        {
+          "kind": "receipt",
+          "label": "Receipt",
+          "path": ".harn-runs/dependency-audit/receipt.json"
+        }
+      ],
+      "metrics": {},
+      "summary": "Dependency audit failed",
+      "raw_payload": {}
+    },
+    {
+      "schema": "harn.job_event.v1",
+      "id": "job_evt_fixture_receipt_001",
+      "event_kind": "receipt.available",
+      "status": "receipt_available",
+      "source": {
+        "orchestrator": "harn.fixture",
+        "location": "local",
+        "version": "fixture-v1"
+      },
+      "source_timestamp": "2026-05-11T09:09:00Z",
+      "workspace_id": "workspace_local_demo",
+      "job_id": "job_release_gate",
+      "run": {
+        "run_id": "run_release_gate_001"
+      },
+      "receipt": {
+        "receipt_id": "receipt_release_gate_001",
+        "path": ".harn-runs/release-gate/receipt.json",
+        "status": "waiting_approval"
+      },
+      "links": [
+        {
+          "kind": "receipt",
+          "label": "Receipt",
+          "path": ".harn-runs/release-gate/receipt.json"
+        }
+      ],
+      "metrics": {},
+      "summary": "Release gate receipt available",
+      "raw_payload": {}
+    },
+    {
+      "schema": "harn.job_event.v1",
+      "id": "job_evt_fixture_replay_001",
+      "event_kind": "replay_fixture.available",
+      "status": "replay_available",
+      "source": {
+        "orchestrator": "harn.fixture",
+        "location": "local",
+        "version": "fixture-v1"
+      },
+      "source_timestamp": "2026-05-11T09:10:00Z",
+      "workspace_id": "workspace_local_demo",
+      "job_id": "job_github_review",
+      "run": {
+        "run_id": "run_github_review_001"
+      },
+      "replay_fixture": {
+        "fixture_id": "fixture_github_review_dlq_001",
+        "path": "examples/jobs/fixtures/dashboard_job_events.json",
+        "mode": "deterministic"
+      },
+      "links": [
+        {
+          "kind": "replay_fixture",
+          "label": "Replay fixture",
+          "path": "examples/jobs/fixtures/dashboard_job_events.json"
+        }
+      ],
+      "metrics": {},
+      "summary": "GitHub review replay fixture available",
+      "raw_payload": {}
+    }
+  ]
+}

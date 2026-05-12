@@ -85,7 +85,7 @@ described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/runtime`, `std/command`, `std/git`, `std/review`,
 `std/experiments`,
 `std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
-`std/triage`, `std/worktree`, `std/checkpoint`, `std/personas/prelude`,
+`std/triage`, `std/jobs`, `std/worktree`, `std/checkpoint`, `std/personas/prelude`,
 `std/personas/bulletins`,
 `std/connectors/shared`, and provider-specific `std/connectors/...` modules).
 These add layered
@@ -123,6 +123,7 @@ import "std/prompt_library"
 import "std/review"
 import "std/text"
 import "std/triage"
+import "std/jobs"
 import "std/vision"
 ```
 
@@ -160,6 +161,19 @@ Normalize connector-derived inbox items into host-renderable dashboard cards:
 | `triage_dedupe_events(events)` | Drop duplicate triage events by stable dedupe key |
 | `triage_emit(input, options?)` | Validate and append a triage event to the EventLog, returning an emit receipt |
 | `triage_start_my_day(inputs, options?)` | Build a deduped Start My Day feed and optionally emit each event |
+
+### std/jobs
+
+Normalize orchestrator job/status transitions into host-renderable Jobs
+dashboard events:
+
+| Function | Description |
+|---|---|
+| `job_normalize(input, options?)` | Convert local/cloud run, approval, DLQ, receipt, or replay data into `harn.job_event.v1` |
+| `job_validate(event)` | Validate required job event identity fields and approval/DLQ/receipt/replay invariants |
+| `job_emit(input, options?)` | Validate and append a job event to the EventLog, returning an emit receipt |
+| `job_fixture_stream(options?)` | Return deterministic job events for queued, running, approval, DLQ, success, failure, receipt, and replay paths |
+| `job_fixture_feed(options?)` | Wrap the fixture stream in a static dashboard feed object |
 
 ### std/monitors
 

@@ -187,6 +187,11 @@ defaults, safe, prompts, catalog).
   `harn.profile_bulletin_decision.v1` audit records so hosts (Burin local,
   Harn Cloud) can review persona context instead of accepting silent prompt
   mutation.
+- Dashboard job/status envelopes via `import "std/jobs"`:
+  `job_normalize` and `job_emit` produce `harn.job_event.v1` EventLog records
+  for scheduled jobs, queued/running/succeeded/failed runs, approval waits,
+  DLQ entries, receipts, and replay fixtures so local and cloud hosts can
+  render a Jobs view from the same contract.
 - Delegated worker lifecycle builtins via `spawn_agent(...)`, `send_input(...)`,
   `resume_agent(...)`, `wait_agent(...)`, `close_agent(...)`, and `list_agents()`,
   with child run lineage, persisted worker snapshots, and host-visible worker

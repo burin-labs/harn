@@ -1,0 +1,137 @@
+import { job_emit, job_fixture_feed, job_normalize, job_validate } from "std/jobs"
+
+fn fixture(name) {
+  let root = project_root() ?? cwd()
+  return json_parse(read_file(path_join(root, "examples/jobs/fixtures/" + name + ".json")))
+}
+
+pipeline default() {
+  let local_input = {
+    event_kind: "run.queued",
+    source_timestamp: "2026-05-11T09:01:00Z",
+    job_id: "job_daily_digest",
+    run_id: "run_daily_digest_001",
+    workflow_id: "wf_daily_digest",
+    summary: "Daily digest queued",
+    queue: {name: "digest", depth: 3, ready: 3, in_flight: 0, position: 2},
+  }
+  let local = job_normalize(local_input)
+  println(local.schema)
+  println(local.status)
+  println(local.source.orchestrator)
+  println(local.id == job_normalize(local_input).id)
+  println(local.queue.depth)
+  let cloud = job_normalize(
+    {
+      event_kind: "receipt.available",
+      source_timestamp: "2026-05-11T09:09:00Z",
+      job_id: "job_release_gate",
+      run_id: "run_release_gate_001",
+      summary: "Release gate receipt available",
+      receipt: {
+        receipt_id: "receipt_release_gate_001",
+        url: "https://cloud.example.test/workspaces/workspace_burin/receipts/receipt_release_gate_001",
+        status: "waiting_approval",
+      },
+      replay_fixture: {fixture_id: "fixture_release_gate_001", path: "fixtures/release_gate.json"},
+    },
+    {
+      source: {orchestrator: "harn.cloud", location: "cloud", version: "managed-v1"},
+      tenant_id: "tenant_acme",
+      workspace_id: "workspace_burin",
+    },
+  )
+  println(cloud.source.location + ":" + cloud.tenant_id + ":" + cloud.workspace_id)
+  println(cloud.receipt.receipt_id)
+  println(cloud.replay_fixture.path)
+  println(
+    cloud.links.find({ link -> link.kind == "receipt" }).url.starts_with("https://cloud.example.test"),
+  )
+  let raw_receipt = job_normalize(
+    {
+      schema: "harn.receipt.v1",
+      source_timestamp: "2026-05-11T09:09:30Z",
+      job_id: "job_release_gate",
+      run_id: "run_release_gate_001",
+      receipt_id: "receipt_release_gate_002",
+      path: ".harn-runs/release-gate/receipt.json",
+      status: "waiting_approval",
+    },
+  )
+  println(raw_receipt.status + ":" + raw_receipt.receipt.receipt_id)
+  let approval = job_normalize(
+    {
+      event_kind: "approval.requested",
+      source_timestamp: "2026-05-11T09:04:00Z",
+      job_id: "job_release_gate",
+      run_id: "run_release_gate_001",
+      approval: {request_id: "approval_release_gate_001", state: "requested", reviewers: ["release-manager"]},
+    },
+  )
+  println(approval.status + ":" + approval.approval.request_id)
+  let dlq = job_normalize(
+    {
+      event_kind: "dlq.created",
+      source_timestamp: "2026-05-11T09:05:00Z",
+      job_id: "job_github_review",
+      run_id: "run_github_review_001",
+      dlq: {
+        entry_id: "dlq_github_review_001",
+        event_id: "trigger_evt_pr_opened_001",
+        error_class: "provider_5xx",
+        last_error: "GitHub returned 502.",
+      },
+    },
+  )
+  println(dlq.status + ":" + dlq.dlq.error_class)
+  let bad_approval = try {
+    job_normalize(
+      {
+        event_kind: "approval.requested",
+        source_timestamp: "2026-05-11T09:04:00Z",
+        job_id: "job_bad_approval",
+        approval: {state: "requested"},
+      },
+    )
+  }
+  println(is_err(bad_approval))
+  let bad_dlq = try {
+    job_normalize(
+      {
+        event_kind: "dlq.created",
+        source_timestamp: "2026-05-11T09:05:00Z",
+        job_id: "job_bad_dlq",
+        dlq: {error_class: "unknown"},
+      },
+    )
+  }
+  println(is_err(bad_dlq))
+  let bad_kind = try {
+    job_normalize(
+      {event_kind: "run.paused", source_timestamp: "2026-05-11T09:06:00Z", job_id: "job_bad_kind"},
+    )
+  }
+  println(is_err(bad_kind))
+  let feed = job_fixture_feed({title: "Fixture"})
+  println(len(feed.events))
+  println(feed.events[0].event_kind)
+  println(feed.events[3].status + ":" + feed.events[3].approval.request_id)
+  println(feed.events[4].status + ":" + feed.events[4].dlq.entry_id)
+  println(feed.events[5].receipt.receipt_id)
+  println(feed.events[8].replay_fixture.fixture_id)
+  let static_feed = fixture("dashboard_job_events")
+  var valid = 0
+  for event in static_feed.events {
+    job_validate(event)
+    valid = valid + 1
+  }
+  println(static_feed.schema)
+  println(valid)
+  println(static_feed.events.find({ event -> event.event_kind == "receipt.available" }).status)
+  let receipt = job_emit(local, {topic: "jobs.status.test.single"})
+  let stream = event_log.subscribe({topic: "jobs.status.test.single", from_cursor: receipt.event_log_id - 1})
+  let logged = stream.next().value
+  println(logged.kind)
+  println(logged.payload.job_id)
+  println(logged.headers.schema)
+}

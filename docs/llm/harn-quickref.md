@@ -1953,6 +1953,36 @@ for event in feed.events {
 - Non-navigation action intents must set `requires_approval: true`; hosts own
   write execution for dismiss, snooze, and convert-to-task actions.
 
+### Jobs dashboard stdlib
+
+Use `std/jobs` to turn local or cloud orchestrator state into portable Jobs
+dashboard events:
+
+```harn
+import { job_emit, job_normalize } from "std/jobs"
+
+let event = job_normalize({
+  event_kind: "approval.requested",
+  source_timestamp: "2026-05-11T09:04:00Z",
+  job_id: "job_release_gate",
+  run_id: "run_release_gate_001",
+  approval: {request_id: "approval_release_gate_001", reviewers: ["release-manager"]},
+})
+job_emit(event)
+```
+
+- `job_normalize(input, options?)` returns `harn.job_event.v1` with stable
+  event/job/run ids, source orchestrator clock metadata, optional tenant and
+  workspace ids, schedule/queue/progress/result blocks, first-class
+  approval/DLQ state, receipt links, replay fixture links, and raw payload.
+- `job_validate(event)` enforces required identity fields and the approval,
+  DLQ, receipt, replay, and schedule invariants hosts need.
+- `job_emit(input, options?)` appends `kind = "job_event"` to
+  `jobs.status.events` by default.
+- `job_fixture_stream()` / `job_fixture_feed()` provide deterministic static
+  fixture events for queued, running, approval, DLQ, success, failure, receipt,
+  and replay dashboard paths.
+
 ### MCP Apps UI resource stdlib
 
 Use `std/ui_resource` to package interactive widgets as `ui://` resources for

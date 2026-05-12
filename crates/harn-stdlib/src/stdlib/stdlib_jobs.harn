@@ -1,0 +1,758 @@
+import { filter_nil } from "std/collections"
+
+/**
+ * std/jobs - normalized dashboard job/status event envelopes for orchestrator
+ * runs, scheduled workflows, approvals, receipts, replay fixtures, and DLQ
+ * items.
+ */
+type JobEvent = {
+  schema: "harn.job_event.v1",
+  id: string,
+  event_kind: string,
+  status: string,
+  source: dict,
+  source_timestamp: string,
+  tenant_id?: string,
+  workspace_id?: string,
+  job_id: string,
+  run: dict,
+  schedule?: dict,
+  queue?: dict,
+  progress?: dict,
+  approval?: dict,
+  dlq?: dict,
+  receipt?: dict,
+  replay_fixture?: dict,
+  result?: dict,
+  links: list<dict>,
+  metrics: dict,
+  summary: string,
+  raw_payload: dict,
+}
+
+type JobEmitReceipt = {
+  schema: "harn.job_event_emit_receipt.v1",
+  topic: string,
+  kind: "job_event",
+  event_log_id: int,
+  event: JobEvent,
+}
+
+let JOB_EVENT_SCHEMA = "harn.job_event.v1"
+
+let JOB_EVENT_KIND = "job_event"
+
+let JOB_EVENT_TOPIC = "jobs.status.events"
+
+let __JOB_EVENT_KINDS = [
+  "scheduled_job.created",
+  "scheduled_job.updated",
+  "scheduled_job.canceled",
+  "run.queued",
+  "run.started",
+  "run.progress",
+  "run.succeeded",
+  "run.failed",
+  "approval.requested",
+  "approval.approved",
+  "approval.denied",
+  "approval.expired",
+  "dlq.created",
+  "dlq.replayed",
+  "dlq.dismissed",
+  "receipt.available",
+  "replay_fixture.available",
+]
+
+fn __job_text(value) {
+  if value == nil {
+    return ""
+  }
+  return trim(to_string(value))
+}
+
+fn __job_first(values) {
+  for value in values {
+    let text = __job_text(value)
+    if text != "" {
+      return text
+    }
+  }
+  return nil
+}
+
+fn __job_compact(text, limit = 120) {
+  let value = __job_text(text)
+  if len(value) <= limit {
+    return value
+  }
+  if limit <= 3 {
+    return substring(value, 0, limit)
+  }
+  return substring(value, 0, limit - 3) + "..."
+}
+
+fn __job_payload(input) {
+  return input?.raw_payload ?? input?.payload ?? input?.event ?? input ?? {}
+}
+
+fn __job_event_kind(input, payload, options) {
+  let explicit = __job_first([options?.event_kind, input?.event_kind, input?.kind, payload?.event_kind])
+  if explicit != nil {
+    return explicit
+  }
+  if input?.schema == "harn.receipt.v1" || payload?.schema == "harn.receipt.v1" {
+    return "receipt.available"
+  }
+  if input?.fixture_id != nil || input?.replay_fixture != nil || payload?.replay_fixture != nil {
+    return "replay_fixture.available"
+  }
+  if input?.dlq != nil || input?.dlq_entry_id != nil || input?.error_class != nil {
+    return "dlq.created"
+  }
+  if input?.approval != nil || input?.request_id != nil {
+    return "approval.requested"
+  }
+  if input?.status != nil || input?.workflow_id != nil || input?.run_id != nil {
+    let status = __job_text(input?.status ?? payload?.status)
+    if status == "queued" {
+      return "run.queued"
+    }
+    if status == "running" {
+      return "run.started"
+    }
+    if status == "succeeded" || status == "success" {
+      return "run.succeeded"
+    }
+    if status == "failed" || status == "failure" {
+      return "run.failed"
+    }
+  }
+  throw "std/jobs: event_kind is required"
+}
+
+fn __job_status_for_kind(event_kind, input, payload) {
+  if event_kind == "scheduled_job.created" || event_kind == "scheduled_job.updated" {
+    return "scheduled"
+  }
+  if event_kind == "scheduled_job.canceled" {
+    return "canceled"
+  }
+  if event_kind == "run.queued" {
+    return "queued"
+  }
+  if event_kind == "run.started" || event_kind == "run.progress" {
+    return "running"
+  }
+  if event_kind == "run.succeeded" {
+    return "succeeded"
+  }
+  if event_kind == "run.failed" {
+    return "failed"
+  }
+  if event_kind == "approval.requested" {
+    return "waiting_approval"
+  }
+  if event_kind == "approval.approved" {
+    return "running"
+  }
+  if event_kind == "approval.denied" || event_kind == "approval.expired" {
+    return "failed"
+  }
+  if event_kind == "dlq.created" {
+    return "dlq"
+  }
+  if event_kind == "dlq.replayed" {
+    return "queued"
+  }
+  if event_kind == "dlq.dismissed" {
+    return "canceled"
+  }
+  if event_kind == "receipt.available" {
+    return "receipt_available"
+  }
+  if event_kind == "replay_fixture.available" {
+    return "replay_available"
+  }
+  let explicit = __job_first([input?.status, payload?.status])
+  if explicit != nil {
+    if explicit == "success" {
+      return "succeeded"
+    }
+    if explicit == "failure" {
+      return "failed"
+    }
+    return explicit
+  }
+  return "running"
+}
+
+fn __job_source(input, payload, options) {
+  let source = options?.source ?? input?.source ?? payload?.source ?? {}
+  return {
+    orchestrator: __job_first([source?.orchestrator, source?.name, input?.orchestrator, options?.orchestrator])
+      ?? "harn.local",
+    location: __job_first([source?.location, input?.location, options?.location]) ?? "local",
+    version: __job_first([source?.version, input?.source_version, options?.source_version]),
+    clock: options?.source_clock ?? source?.clock ?? input?.source_clock,
+  }
+}
+
+fn __job_timestamp(input, payload, options) {
+  return __job_first(
+    [
+      options?.source_timestamp,
+      input?.source_timestamp,
+      payload?.source_timestamp,
+      input?.occurred_at,
+      payload?.occurred_at,
+      input?.received_at,
+      payload?.received_at,
+      input?.started_at,
+      payload?.started_at,
+      input?.finished_at,
+      payload?.finished_at,
+      input?.completed_at,
+      payload?.completed_at,
+      input?.approved_at,
+      payload?.approved_at,
+      input?.failed_at,
+      payload?.failed_at,
+    ],
+  )
+}
+
+fn __job_run(input, payload, options) {
+  let run = options?.run ?? input?.run ?? payload?.run ?? {}
+  return filter_nil(
+    {
+      run_id: __job_first([options?.run_id, run?.run_id, input?.run_id, payload?.run_id, input?.id]),
+      root_run_id: __job_first([options?.root_run_id, run?.root_run_id, input?.root_run_id, payload?.root_run_id]),
+      parent_run_id: __job_first(
+        [options?.parent_run_id, run?.parent_run_id, input?.parent_run_id, payload?.parent_run_id],
+      ),
+      workflow_id: __job_first([options?.workflow_id, run?.workflow_id, input?.workflow_id, payload?.workflow_id]),
+      workflow_name: __job_first(
+        [options?.workflow_name, run?.workflow_name, input?.workflow_name, payload?.workflow_name],
+      ),
+      trace_id: __job_first([options?.trace_id, run?.trace_id, input?.trace_id, payload?.trace_id]),
+      trigger_event_id: __job_first(
+        [
+          options?.trigger_event_id,
+          run?.trigger_event_id,
+          input?.trigger_event_id,
+          payload?.trigger_event_id,
+        ],
+      ),
+      job_event_id: options?.job_event_id ?? run?.job_event_id ?? input?.job_event_id ?? payload?.job_event_id,
+    },
+  )
+}
+
+fn __job_schedule(input, payload, options) {
+  let schedule = options?.schedule ?? input?.schedule ?? payload?.schedule
+  if schedule == nil {
+    return nil
+  }
+  return filter_nil(
+    {
+      schedule_id: __job_first([schedule?.schedule_id, schedule?.id, input?.schedule_id, options?.schedule_id]),
+      kind: __job_first([schedule?.kind, input?.schedule_kind, options?.schedule_kind]) ?? "cron",
+      expression: __job_first([schedule?.expression, schedule?.cron, schedule?.rrule, input?.schedule]),
+      timezone: __job_first([schedule?.timezone, input?.timezone, options?.timezone]),
+      next_fire_at: __job_first([schedule?.next_fire_at, input?.next_fire_at, options?.next_fire_at]),
+      catchup_mode: __job_first([schedule?.catchup_mode, input?.catchup_mode, options?.catchup_mode]),
+      business_calendar: schedule?.business_calendar ?? schedule?.calendar,
+      raw: schedule?.raw,
+    },
+  )
+}
+
+fn __job_queue(input, payload, options) {
+  let queue = options?.queue ?? input?.queue ?? payload?.queue
+  if queue == nil {
+    return nil
+  }
+  return filter_nil(
+    {
+      name: __job_first([queue?.name, queue?.queue, input?.queue_name, options?.queue_name]),
+      depth: queue?.depth ?? queue?.queue_depth,
+      ready: queue?.ready ?? queue?.ready_jobs,
+      in_flight: queue?.in_flight,
+      position: queue?.position,
+      max_concurrent: queue?.max_concurrent,
+      fairness_key: __job_first([queue?.fairness_key, input?.fairness_key]),
+    },
+  )
+}
+
+fn __job_progress(input, payload, options) {
+  let progress = options?.progress ?? input?.progress ?? payload?.progress
+  if progress == nil {
+    return nil
+  }
+  return filter_nil(
+    {
+      current: progress?.current,
+      total: progress?.total,
+      percent: progress?.percent,
+      message: __job_first([progress?.message, progress?.summary]),
+      stage_id: __job_first([progress?.stage_id, input?.stage_id]),
+      stage_label: __job_first([progress?.stage_label, progress?.label]),
+    },
+  )
+}
+
+fn __job_approval(input, payload, options) {
+  var approval = options?.approval ?? input?.approval ?? payload?.approval
+  if approval == nil && input?.request_id != nil {
+    approval = input
+  }
+  if approval == nil {
+    return nil
+  }
+  return filter_nil(
+    {
+      request_id: __job_first([approval?.request_id, approval?.id]),
+      state: __job_first([approval?.state, approval?.status]) ?? "requested",
+      reviewers: approval?.reviewers ?? approval?.approvers ?? [],
+      quorum: approval?.quorum,
+      deadline: __job_first([approval?.deadline, approval?.expires_at]),
+      reason: __job_first([approval?.reason, approval?.summary]),
+      link: __job_first([approval?.link, approval?.url]),
+    },
+  )
+}
+
+fn __job_dlq(input, payload, options) {
+  var dlq = options?.dlq ?? input?.dlq ?? payload?.dlq
+  if dlq == nil && (input?.dlq_entry_id != nil || input?.error_class != nil) {
+    dlq = input
+  }
+  if dlq == nil {
+    return nil
+  }
+  return filter_nil(
+    {
+      entry_id: __job_first([dlq?.entry_id, dlq?.id, input?.dlq_entry_id]),
+      event_id: __job_first([dlq?.event_id, input?.event_id, payload?.event_id]),
+      state: __job_first([dlq?.state, input?.dlq_state]) ?? "pending",
+      error_class: __job_first([dlq?.error_class, input?.error_class]) ?? "unknown",
+      last_error: __job_first([dlq?.last_error, dlq?.error, input?.last_error, input?.error]),
+      retry_count: dlq?.retry_count ?? len(dlq?.retry_history ?? []),
+      replay_event_id: __job_first([dlq?.replay_event_id, dlq?.replay_of_event_id]),
+    },
+  )
+}
+
+fn __job_receipt(input, payload, options) {
+  var receipt = options?.receipt ?? input?.receipt ?? payload?.receipt
+  if receipt == nil && (input?.schema == "harn.receipt.v1" || payload?.schema == "harn.receipt.v1") {
+    receipt = input?.schema == "harn.receipt.v1" ? input : payload
+  }
+  if receipt == nil {
+    return nil
+  }
+  return filter_nil(
+    {
+      receipt_id: __job_first([receipt?.receipt_id, receipt?.id, options?.receipt_id]),
+      url: __job_first([receipt?.url, receipt?.receipt_url, options?.receipt_url]),
+      path: __job_first([receipt?.path, receipt?.receipt_path, options?.receipt_path]),
+      status: __job_first([receipt?.status, input?.status, payload?.status]),
+      redaction_class: __job_first([receipt?.redaction_class]),
+    },
+  )
+}
+
+fn __job_replay_fixture(input, payload, options) {
+  var fixture = options?.replay_fixture ?? input?.replay_fixture ?? payload?.replay_fixture
+  if fixture == nil && input?.fixture_id != nil {
+    fixture = input
+  }
+  if fixture == nil {
+    return nil
+  }
+  return filter_nil(
+    {
+      fixture_id: __job_first([fixture?.fixture_id, fixture?.id]),
+      url: __job_first([fixture?.url, fixture?.fixture_url]),
+      path: __job_first([fixture?.path, fixture?.fixture_path]),
+      mode: __job_first([fixture?.mode, fixture?.replay_mode]) ?? "deterministic",
+    },
+  )
+}
+
+fn __job_result(input, payload, options, status) {
+  let result = options?.result ?? input?.result ?? payload?.result
+  if result != nil {
+    return result
+  }
+  if status == "succeeded" || status == "failed" || status == "canceled" {
+    return filter_nil(
+      {
+        status: status,
+        summary: __job_first([input?.result_summary, payload?.result_summary, input?.summary]),
+        error: __job_first([input?.error, payload?.error, input?.last_error, payload?.last_error]),
+      },
+    )
+  }
+  return nil
+}
+
+fn __job_default_summary(event_kind, status, job_id, input, payload, approval, dlq, result) {
+  let explicit = __job_first([input?.summary, payload?.summary, result?.summary])
+  if explicit != nil {
+    return explicit
+  }
+  if approval != nil {
+    return "Approval " + __job_text(approval.state) + " for " + job_id
+  }
+  if dlq != nil {
+    return "DLQ " + __job_text(dlq.state) + " for " + job_id
+  }
+  if event_kind == "receipt.available" {
+    return "Receipt available for " + job_id
+  }
+  if event_kind == "replay_fixture.available" {
+    return "Replay fixture available for " + job_id
+  }
+  return __job_compact(replace(event_kind, ".", " ") + " for " + job_id + " (" + status + ")", 140)
+}
+
+fn __job_links(input, payload, receipt, replay_fixture) {
+  var links = input?.links ?? payload?.links ?? []
+  let source_url = __job_first([input?.source_url, payload?.source_url, input?.url, payload?.url])
+  if source_url != nil {
+    links = links.push({kind: "source", label: "Source", url: source_url})
+  }
+  if receipt != nil {
+    if __job_text(receipt.url) != "" {
+      links = links.push({kind: "receipt", label: "Receipt", url: receipt.url})
+    } else if __job_text(receipt.path) != "" {
+      links = links.push({kind: "receipt", label: "Receipt", path: receipt.path})
+    }
+  }
+  if replay_fixture != nil {
+    if __job_text(replay_fixture.url) != "" {
+      links = links.push({kind: "replay_fixture", label: "Replay fixture", url: replay_fixture.url})
+    } else if __job_text(replay_fixture.path) != "" {
+      links = links.push({kind: "replay_fixture", label: "Replay fixture", path: replay_fixture.path})
+    }
+  }
+  return links
+}
+
+fn __job_event_id(source, job_id, run, event_kind, source_timestamp, options, input) {
+  let explicit = __job_first([options?.id, input?.job_event_id, input?.dashboard_event_id])
+  if explicit != nil {
+    return explicit
+  }
+  let seed = source.orchestrator
+    + "\n"
+    + job_id
+    + "\n"
+    + __job_text(run?.run_id)
+    + "\n"
+    + event_kind
+    + "\n"
+    + source_timestamp
+  return "job_evt_" + substring(sha256(seed), 0, 24)
+}
+
+/** Validate the normalized dashboard job event shape. */
+pub fn job_validate(event: JobEvent) -> JobEvent {
+  if event.schema != JOB_EVENT_SCHEMA {
+    throw "std/jobs: unsupported schema " + __job_text(event.schema)
+  }
+  for key in ["id", "event_kind", "status", "source_timestamp", "job_id", "summary"] {
+    if __job_text(event[key]) == "" {
+      throw "std/jobs: " + key + " is required"
+    }
+  }
+  if !__JOB_EVENT_KINDS.contains(event.event_kind) {
+    throw "std/jobs: unsupported event_kind " + __job_text(event.event_kind)
+  }
+  if event.source == nil || __job_text(event.source.orchestrator) == "" {
+    throw "std/jobs: source.orchestrator is required"
+  }
+  if event.event_kind.starts_with("scheduled_job.") && event.schedule == nil {
+    throw "std/jobs: scheduled job events require schedule"
+  }
+  if event.event_kind.starts_with("approval.") && __job_text(event.approval?.request_id) == "" {
+    throw "std/jobs: approval events require approval.request_id"
+  }
+  if event.event_kind.starts_with("dlq.") && __job_text(event.dlq?.entry_id) == "" {
+    throw "std/jobs: DLQ events require dlq.entry_id"
+  }
+  if event.event_kind == "receipt.available" && __job_text(event.receipt?.receipt_id) == "" {
+    throw "std/jobs: receipt.available events require receipt.receipt_id"
+  }
+  if event.event_kind == "replay_fixture.available"
+    && __job_text(event.replay_fixture?.fixture_id) == "" {
+    throw "std/jobs: replay_fixture.available events require replay_fixture.fixture_id"
+  }
+  return event
+}
+
+/** Normalize local or cloud orchestrator data into `harn.job_event.v1`. */
+pub fn job_normalize(input, options = nil) -> JobEvent {
+  let opts = options ?? {}
+  let payload = __job_payload(input)
+  let event_kind = __job_event_kind(input, payload, opts)
+  let status = __job_status_for_kind(event_kind, input, payload)
+  let source = __job_source(input, payload, opts)
+  let source_timestamp = __job_timestamp(input, payload, opts)
+  if __job_text(source_timestamp) == "" {
+    throw "std/jobs: source_timestamp is required"
+  }
+  let run = __job_run(input, payload, opts)
+  let schedule = __job_schedule(input, payload, opts)
+  let queue = __job_queue(input, payload, opts)
+  let progress = __job_progress(input, payload, opts)
+  let approval = __job_approval(input, payload, opts)
+  let dlq = __job_dlq(input, payload, opts)
+  let receipt = __job_receipt(input, payload, opts)
+  let replay_fixture = __job_replay_fixture(input, payload, opts)
+  let result = __job_result(input, payload, opts, status)
+  let job_id = __job_first(
+    [
+      opts.job_id,
+      input?.job_id,
+      payload?.job_id,
+      schedule?.schedule_id,
+      run?.run_id,
+      input?.trigger_id,
+      payload?.trigger_id,
+    ],
+  )
+  if __job_text(job_id) == "" {
+    throw "std/jobs: job_id is required"
+  }
+  let event = filter_nil(
+    {
+      schema: JOB_EVENT_SCHEMA,
+      id: __job_event_id(source, job_id, run, event_kind, source_timestamp, opts, input),
+      event_kind: event_kind,
+      status: status,
+      source: source,
+      source_timestamp: source_timestamp,
+      tenant_id: __job_first([opts.tenant_id, input?.tenant_id, payload?.tenant_id]),
+      workspace_id: __job_first([opts.workspace_id, input?.workspace_id, payload?.workspace_id]),
+      job_id: job_id,
+      run: run,
+      schedule: schedule,
+      queue: queue,
+      progress: progress,
+      approval: approval,
+      dlq: dlq,
+      receipt: receipt,
+      replay_fixture: replay_fixture,
+      result: result,
+      links: __job_links(input, payload, receipt, replay_fixture),
+      metrics: opts.metrics ?? input?.metrics ?? payload?.metrics ?? {},
+      summary: __job_default_summary(event_kind, status, job_id, input, payload, approval, dlq, result),
+      raw_payload: payload,
+    },
+  )
+  return job_validate(event)
+}
+
+/** Emit a normalized job event to the EventLog and return an audit receipt. */
+pub fn job_emit(input, options = nil) -> JobEmitReceipt {
+  let opts = options ?? {}
+  let event = input?.schema == JOB_EVENT_SCHEMA ? job_validate(input) : job_normalize(input, opts)
+  let topic = opts.topic ?? JOB_EVENT_TOPIC
+  let event_log_id = event_log
+    .emit(
+    topic,
+    JOB_EVENT_KIND,
+    event,
+    filter_nil(
+      {
+        schema: JOB_EVENT_SCHEMA,
+        event_kind: event.event_kind,
+        status: event.status,
+        job_id: event.job_id,
+        run_id: event.run?.run_id,
+      },
+    ),
+  )
+  return {
+    schema: "harn.job_event_emit_receipt.v1",
+    topic: topic,
+    kind: JOB_EVENT_KIND,
+    event_log_id: event_log_id,
+    event: event,
+  }
+}
+
+/** Deterministic fixture stream for static Jobs dashboards and tests. */
+pub fn job_fixture_stream(options = nil) -> list<JobEvent> {
+  let opts = options ?? {}
+  let source = opts.source
+    ?? {
+    orchestrator: "harn.fixture",
+    location: "local",
+    version: "fixture-v1",
+    clock: {kind: "fixture", id: "job-fixture-clock"},
+  }
+  return [
+    job_normalize(
+      {
+        event_kind: "scheduled_job.created",
+        source_timestamp: "2026-05-11T09:00:00Z",
+        job_id: "job_daily_digest",
+        summary: "Daily digest scheduled",
+        schedule: {
+          schedule_id: "schedule_daily_digest",
+          kind: "cron",
+          expression: "0 9 * * 1-5",
+          timezone: "America/New_York",
+          business_calendar: "US-FEDERAL",
+          next_fire_at: "2026-05-12T13:00:00Z",
+          catchup_mode: "skip",
+        },
+      },
+      {source: source},
+    ),
+    job_normalize(
+      {
+        event_kind: "run.queued",
+        source_timestamp: "2026-05-11T09:01:00Z",
+        job_id: "job_daily_digest",
+        run_id: "run_daily_digest_001",
+        workflow_id: "wf_daily_digest",
+        workflow_name: "Daily Digest",
+        summary: "Daily digest queued",
+        queue: {name: "digest", depth: 3, ready: 3, in_flight: 0, position: 2},
+      },
+      {source: source, workspace_id: "workspace_local_demo"},
+    ),
+    job_normalize(
+      {
+        event_kind: "run.progress",
+        source_timestamp: "2026-05-11T09:03:30Z",
+        job_id: "job_daily_digest",
+        run_id: "run_daily_digest_001",
+        workflow_id: "wf_daily_digest",
+        summary: "Collecting workspace changes",
+        progress: {current: 2, total: 4, percent: 0.5, stage_id: "collect", stage_label: "Collect changes"},
+      },
+      {source: source, workspace_id: "workspace_local_demo"},
+    ),
+    job_normalize(
+      {
+        event_kind: "approval.requested",
+        source_timestamp: "2026-05-11T09:04:00Z",
+        job_id: "job_release_gate",
+        run_id: "run_release_gate_001",
+        workflow_id: "wf_release_gate",
+        summary: "Release publish approval requested",
+        approval: {
+          request_id: "approval_release_gate_001",
+          state: "requested",
+          reviewers: ["release-manager"],
+          quorum: 1,
+          deadline: "2026-05-11T10:04:00Z",
+          reason: "Publishing requires human approval.",
+        },
+      },
+      {source: source, workspace_id: "workspace_local_demo"},
+    ),
+    job_normalize(
+      {
+        event_kind: "dlq.created",
+        source_timestamp: "2026-05-11T09:05:00Z",
+        job_id: "job_github_review",
+        run_id: "run_github_review_001",
+        workflow_id: "wf_github_review",
+        summary: "GitHub review moved to DLQ",
+        dlq: {
+          entry_id: "dlq_github_review_001",
+          event_id: "trigger_evt_pr_opened_001",
+          state: "pending",
+          error_class: "provider_5xx",
+          last_error: "GitHub returned 502.",
+          retry_count: 4,
+          replay_event_id: "trigger_evt_pr_opened_001",
+        },
+      },
+      {source: source, workspace_id: "workspace_local_demo"},
+    ),
+    job_normalize(
+      {
+        event_kind: "run.succeeded",
+        source_timestamp: "2026-05-11T09:07:00Z",
+        job_id: "job_daily_digest",
+        run_id: "run_daily_digest_001",
+        workflow_id: "wf_daily_digest",
+        summary: "Daily digest delivered",
+        result: {status: "succeeded", summary: "Digest delivered to #team."},
+        receipt: {
+          receipt_id: "receipt_daily_digest_001",
+          path: ".harn-runs/daily-digest/receipt.json",
+          status: "succeeded",
+        },
+      },
+      {source: source, workspace_id: "workspace_local_demo"},
+    ),
+    job_normalize(
+      {
+        event_kind: "run.failed",
+        source_timestamp: "2026-05-11T09:08:00Z",
+        job_id: "job_dependency_audit",
+        run_id: "run_dependency_audit_001",
+        workflow_id: "wf_dependency_audit",
+        summary: "Dependency audit failed",
+        result: {status: "failed", summary: "Audit failed before remediation.", error: "lockfile unavailable"},
+        receipt: {
+          receipt_id: "receipt_dependency_audit_001",
+          path: ".harn-runs/dependency-audit/receipt.json",
+          status: "failed",
+        },
+      },
+      {source: source, workspace_id: "workspace_local_demo"},
+    ),
+    job_normalize(
+      {
+        event_kind: "receipt.available",
+        source_timestamp: "2026-05-11T09:09:00Z",
+        job_id: "job_release_gate",
+        run_id: "run_release_gate_001",
+        summary: "Release gate receipt available",
+        receipt: {
+          receipt_id: "receipt_release_gate_001",
+          path: ".harn-runs/release-gate/receipt.json",
+          status: "waiting_approval",
+        },
+      },
+      {source: source, workspace_id: "workspace_local_demo"},
+    ),
+    job_normalize(
+      {
+        event_kind: "replay_fixture.available",
+        source_timestamp: "2026-05-11T09:10:00Z",
+        job_id: "job_github_review",
+        run_id: "run_github_review_001",
+        summary: "GitHub review replay fixture available",
+        replay_fixture: {
+          fixture_id: "fixture_github_review_dlq_001",
+          path: "examples/jobs/fixtures/dashboard_job_events.json",
+          mode: "deterministic",
+        },
+      },
+      {source: source, workspace_id: "workspace_local_demo"},
+    ),
+  ]
+}
+
+/** Wrap the fixture stream in a small feed object for static dashboard views. */
+pub fn job_fixture_feed(options = nil) {
+  let opts = options ?? {}
+  return {
+    schema: "harn.job_event_fixture_stream.v1",
+    generated_at: opts.generated_at ?? "2026-05-11T09:10:00Z",
+    title: opts.title ?? "Harn Jobs fixture stream",
+    events: job_fixture_stream(opts),
+  }
+}
