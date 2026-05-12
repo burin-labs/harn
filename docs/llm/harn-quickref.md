@@ -215,6 +215,11 @@ in `crates/harn-vm/src/orchestration/playground/manifest.rs`.
 - `is_stdin_tty()`, `is_stdout_tty()`, `is_stderr_tty()` — `bool`,
   uses `std::io::IsTerminal`. Use these to decide between rich
   interactive UI and pipe-friendly output.
+- `std/io` exposes structured interactive helpers: `is_tty(fd?)`,
+  `read_line({prompt?, timeout_ms?, trim?, echo?, raw?})`,
+  `read_password(prompt?, timeout_ms?)`, and `write_stderr(text)`.
+  Structured reads return `{ok, value?, status?, error?}` with statuses
+  `ok`, `eof`, `timeout`, `interrupt`, or `error`.
 - `set_color_mode("auto"|"always"|"never")` controls whether
   `color`/`bold`/`dim` emit ANSI. Auto honors `NO_COLOR` and
   `FORCE_COLOR` env vars and only emits when stdout is a TTY.

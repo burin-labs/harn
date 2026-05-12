@@ -428,6 +428,9 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-vm/src/stdlib/fs.rs"
   "crates/harn-vm/src/stdlib/hitl.rs"
   "crates/harn-vm/src/stdlib/host.rs"
+  # stdlib/io.rs uses host monotonic time to enforce real terminal input
+  # deadlines; VM virtual time cannot decide whether stdin became readable.
+  "crates/harn-vm/src/stdlib/io.rs"
   "crates/harn-vm/src/stdlib/logging.rs"
   "crates/harn-vm/src/stdlib/long_running.rs"
   "crates/harn-vm/src/stdlib/memory.rs"

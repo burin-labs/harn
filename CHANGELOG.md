@@ -19,6 +19,12 @@ condensed series summaries instead of full per-patch history.
   loop sidecars now emit redacted `message` records as turns are
   appended, so future run artifacts can be lifted directly into a new
   prefix-cache-friendly session.
+- **Structured `std/io` terminal input (#1542).** Added `std/io` with
+  `is_tty(fd?)`, structured `read_line({prompt, timeout_ms, trim, echo, raw})`,
+  `read_password`, and `write_stderr`. `read_line` returns explicit
+  `ok`/`eof`/`timeout`/`interrupt`/`error` statuses, writes prompts to stderr
+  with ANSI preserved, supports sub-second Unix timeouts without shelling out
+  to `bash`, and disables terminal echo for password-style prompts.
 
 ## v0.8.11
 

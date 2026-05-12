@@ -1,7 +1,12 @@
 use std::cell::RefCell;
-use std::io::{BufRead, IsTerminal, Read, Write};
+use std::collections::{BTreeMap, VecDeque};
+use std::io::BufRead;
+use std::io::{IsTerminal, Read, Write};
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
+use std::sync::Mutex;
+#[cfg(unix)]
+use std::time::Instant;
 
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -23,15 +28,55 @@ enum ColorMode {
     Never,
 }
 
+#[derive(Clone, Debug)]
+struct ReadLineOptions {
+    prompt: String,
+    timeout_ms: Option<u64>,
+    trim: bool,
+    echo: bool,
+    raw: bool,
+}
+
+impl Default for ReadLineOptions {
+    fn default() -> Self {
+        Self {
+            prompt: String::new(),
+            timeout_ms: None,
+            trim: true,
+            echo: true,
+            raw: false,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ReadLineOutcome {
+    Ok(String),
+    Eof,
+    #[cfg(unix)]
+    Timeout,
+    #[cfg(unix)]
+    Interrupt,
+    Error(String),
+}
+
+enum MockReadLine {
+    Line(String),
+    Eof,
+    Unset,
+}
+
 thread_local! {
     static STDIN_MOCK: RefCell<Option<String>> = const { RefCell::new(None) };
-    static STDIN_LINES: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    static STDIN_LINES: RefCell<Option<VecDeque<String>>> = const { RefCell::new(None) };
     static STDERR_BUFFER: RefCell<String> = const { RefCell::new(String::new()) };
     static STDERR_CAPTURING: RefCell<bool> = const { RefCell::new(false) };
     static STDOUT_PASSTHROUGH: RefCell<bool> = const { RefCell::new(false) };
     static TTY_MOCK: RefCell<TtyMock> = const { RefCell::new(TtyMock { stdin: None, stdout: None, stderr: None }) };
     static COLOR_MODE: RefCell<ColorMode> = const { RefCell::new(ColorMode::Auto) };
 }
+
+static STDIN_READ_LOCK: Mutex<()> = Mutex::new(());
 
 /// Reset all io thread-local state for test isolation.
 pub(crate) fn reset_io_state() {
@@ -69,9 +114,9 @@ fn write_stderr(line: &str) {
     if capturing {
         STDERR_BUFFER.with(|s| s.borrow_mut().push_str(line));
     } else {
-        // Pass through directly; the CLI flushes at end too if anything
-        // accumulated before capture toggled, but normally nothing does.
-        let _ = std::io::stderr().write_all(line.as_bytes());
+        let mut stderr = std::io::stderr().lock();
+        let _ = stderr.write_all(line.as_bytes());
+        let _ = stderr.flush();
     }
 }
 
@@ -98,6 +143,7 @@ fn read_stdin_all_real() -> Option<String> {
     }
 }
 
+#[cfg(not(unix))]
 fn read_stdin_line_real() -> Option<String> {
     let mut buf = String::new();
     if std::io::stdin().lock().read_line(&mut buf).is_ok() {
@@ -118,16 +164,317 @@ fn read_stdin_line_real() -> Option<String> {
     }
 }
 
-fn pop_mock_line() -> Option<String> {
+fn pop_mock_line() -> MockReadLine {
     STDIN_LINES.with(|lines| {
         let mut borrow = lines.borrow_mut();
-        let queue = borrow.as_mut()?;
-        if queue.is_empty() {
-            None
-        } else {
-            Some(queue.remove(0))
+        if let Some(queue) = borrow.as_mut() {
+            return queue
+                .pop_front()
+                .map(MockReadLine::Line)
+                .unwrap_or(MockReadLine::Eof);
         }
+        MockReadLine::Unset
     })
+}
+
+fn read_mock_line() -> MockReadLine {
+    match pop_mock_line() {
+        MockReadLine::Unset => {}
+        other => return other,
+    }
+    let bulk = STDIN_MOCK.with(|s| s.borrow_mut().take());
+    let Some(text) = bulk else {
+        return MockReadLine::Unset;
+    };
+    let mut lines: VecDeque<String> = text.split('\n').map(String::from).collect();
+    // Keep legacy read_line semantics: a final newline terminates the last
+    // line rather than producing one more empty line.
+    if matches!(lines.back(), Some(line) if line.is_empty()) {
+        lines.pop_back();
+    }
+    let first = lines.pop_front();
+    STDIN_LINES.with(|q| *q.borrow_mut() = Some(lines));
+    first.map(MockReadLine::Line).unwrap_or(MockReadLine::Eof)
+}
+
+fn normalize_read_line_value(mut line: String, trim: bool) -> String {
+    if line.ends_with('\r') {
+        line.pop();
+    }
+    if trim {
+        line.trim().to_string()
+    } else {
+        line
+    }
+}
+
+fn vm_string(value: impl Into<String>) -> VmValue {
+    VmValue::String(Rc::from(value.into()))
+}
+
+fn read_line_result(outcome: ReadLineOutcome) -> VmValue {
+    let mut out = BTreeMap::new();
+    match outcome {
+        ReadLineOutcome::Ok(value) => {
+            out.insert("ok".to_string(), VmValue::Bool(true));
+            out.insert("status".to_string(), vm_string("ok"));
+            out.insert("value".to_string(), vm_string(value));
+        }
+        ReadLineOutcome::Eof => {
+            out.insert("ok".to_string(), VmValue::Bool(false));
+            out.insert("status".to_string(), vm_string("eof"));
+        }
+        #[cfg(unix)]
+        ReadLineOutcome::Timeout => {
+            out.insert("ok".to_string(), VmValue::Bool(false));
+            out.insert("status".to_string(), vm_string("timeout"));
+        }
+        #[cfg(unix)]
+        ReadLineOutcome::Interrupt => {
+            out.insert("ok".to_string(), VmValue::Bool(false));
+            out.insert("status".to_string(), vm_string("interrupt"));
+        }
+        ReadLineOutcome::Error(error) => {
+            out.insert("ok".to_string(), VmValue::Bool(false));
+            out.insert("status".to_string(), vm_string("error"));
+            out.insert("error".to_string(), vm_string(error));
+        }
+    }
+    VmValue::Dict(Rc::new(out))
+}
+
+fn read_line_field_bool(
+    dict: &BTreeMap<String, VmValue>,
+    field: &str,
+    default: bool,
+) -> Result<bool, VmError> {
+    match dict.get(field) {
+        None | Some(VmValue::Nil) => Ok(default),
+        Some(VmValue::Bool(value)) => Ok(*value),
+        Some(_) => Err(VmError::Runtime(format!(
+            "std/io.read_line: `{field}` must be a bool"
+        ))),
+    }
+}
+
+fn read_line_field_timeout_ms(dict: &BTreeMap<String, VmValue>) -> Result<Option<u64>, VmError> {
+    match dict.get("timeout_ms") {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::Int(value)) | Some(VmValue::Duration(value)) => {
+            if *value < 0 {
+                return Err(VmError::Runtime(
+                    "std/io.read_line: `timeout_ms` must be non-negative".to_string(),
+                ));
+            }
+            Ok(Some(*value as u64))
+        }
+        Some(_) => Err(VmError::Runtime(
+            "std/io.read_line: `timeout_ms` must be an int, duration, or nil".to_string(),
+        )),
+    }
+}
+
+fn parse_read_line_options(args: &[VmValue]) -> Result<ReadLineOptions, VmError> {
+    if args.len() > 1 {
+        return Err(VmError::Runtime(
+            "std/io.read_line: expected at most one options dict".to_string(),
+        ));
+    }
+    let Some(value) = args.first() else {
+        return Ok(ReadLineOptions::default());
+    };
+    if matches!(value, VmValue::Nil) {
+        return Ok(ReadLineOptions::default());
+    }
+    let VmValue::Dict(dict) = value else {
+        return Err(VmError::Runtime(
+            "std/io.read_line: options must be a dict or nil".to_string(),
+        ));
+    };
+    let prompt = match dict.get("prompt") {
+        None | Some(VmValue::Nil) => String::new(),
+        Some(VmValue::String(value)) => value.to_string(),
+        Some(_) => {
+            return Err(VmError::Runtime(
+                "std/io.read_line: `prompt` must be a string".to_string(),
+            ));
+        }
+    };
+    Ok(ReadLineOptions {
+        prompt,
+        timeout_ms: read_line_field_timeout_ms(dict)?,
+        trim: read_line_field_bool(dict, "trim", true)?,
+        echo: read_line_field_bool(dict, "echo", true)?,
+        raw: read_line_field_bool(dict, "raw", false)?,
+    })
+}
+
+fn read_line_from_mock_or_real(options: &ReadLineOptions) -> ReadLineOutcome {
+    let _lock = match STDIN_READ_LOCK.lock() {
+        Ok(lock) => lock,
+        Err(_) => return ReadLineOutcome::Error("stdin read lock is poisoned".to_string()),
+    };
+    if !options.prompt.is_empty() {
+        write_stderr(&options.prompt);
+    }
+    match read_mock_line() {
+        MockReadLine::Line(line) => {
+            return ReadLineOutcome::Ok(normalize_read_line_value(line, options.trim));
+        }
+        MockReadLine::Eof => return ReadLineOutcome::Eof,
+        MockReadLine::Unset => {}
+    }
+    read_stdin_line_real_with_options(options)
+}
+
+#[cfg(unix)]
+struct TerminalModeGuard {
+    fd: libc::c_int,
+    original: Option<libc::termios>,
+}
+
+#[cfg(unix)]
+impl TerminalModeGuard {
+    fn install(fd: libc::c_int, options: &ReadLineOptions) -> Result<Self, String> {
+        let mut original = std::mem::MaybeUninit::<libc::termios>::uninit();
+        let fd_is_terminal = unsafe { libc::isatty(fd) == 1 };
+        if !fd_is_terminal || (options.echo && !options.raw) {
+            return Ok(Self { fd, original: None });
+        }
+        if unsafe { libc::tcgetattr(fd, original.as_mut_ptr()) } != 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        let original = unsafe { original.assume_init() };
+        let mut updated = original;
+        if !options.echo {
+            updated.c_lflag &= !libc::ECHO;
+        }
+        if options.raw {
+            updated.c_lflag &= !libc::ICANON;
+            updated.c_cc[libc::VMIN] = 0;
+            updated.c_cc[libc::VTIME] = 0;
+        }
+        if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &updated) } != 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        Ok(Self {
+            fd,
+            original: Some(original),
+        })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for TerminalModeGuard {
+    fn drop(&mut self) {
+        if let Some(original) = &self.original {
+            let _ = unsafe { libc::tcsetattr(self.fd, libc::TCSANOW, original) };
+        }
+    }
+}
+
+#[cfg(unix)]
+fn poll_timeout(options: &ReadLineOptions, start: Instant) -> libc::c_int {
+    let Some(timeout_ms) = options.timeout_ms else {
+        return -1;
+    };
+    let elapsed_ms = start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    if elapsed_ms >= timeout_ms {
+        0
+    } else {
+        let remaining = timeout_ms - elapsed_ms;
+        remaining.min(libc::c_int::MAX as u64) as libc::c_int
+    }
+}
+
+#[cfg(unix)]
+fn finish_read_line(bytes: Vec<u8>, trim: bool) -> ReadLineOutcome {
+    match String::from_utf8(bytes) {
+        Ok(line) => ReadLineOutcome::Ok(normalize_read_line_value(line, trim)),
+        Err(_) => ReadLineOutcome::Error("stdin line was not valid UTF-8".to_string()),
+    }
+}
+
+#[cfg(unix)]
+fn read_line_from_fd_unix(fd: libc::c_int, options: &ReadLineOptions) -> ReadLineOutcome {
+    let _terminal_mode = match TerminalModeGuard::install(fd, options) {
+        Ok(guard) => guard,
+        Err(error) => return ReadLineOutcome::Error(error),
+    };
+    let start = Instant::now();
+    let mut bytes = Vec::new();
+    loop {
+        let mut pollfd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let ready = unsafe { libc::poll(&mut pollfd, 1, poll_timeout(options, start)) };
+        if ready == 0 {
+            return ReadLineOutcome::Timeout;
+        }
+        if ready < 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::EINTR) {
+                return ReadLineOutcome::Interrupt;
+            }
+            return ReadLineOutcome::Error(error.to_string());
+        }
+        if pollfd.revents & libc::POLLNVAL != 0 {
+            return ReadLineOutcome::Error("stdin fd is invalid".to_string());
+        }
+        if pollfd.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) == 0 {
+            continue;
+        }
+        let mut byte = [0u8; 1];
+        let read = unsafe { libc::read(fd, byte.as_mut_ptr().cast(), 1) };
+        if read == 0 {
+            return if bytes.is_empty() {
+                ReadLineOutcome::Eof
+            } else {
+                finish_read_line(bytes, options.trim)
+            };
+        }
+        if read < 0 {
+            let error = std::io::Error::last_os_error();
+            match error.raw_os_error() {
+                Some(libc::EINTR) => return ReadLineOutcome::Interrupt,
+                Some(libc::EAGAIN) => continue,
+                _ => return ReadLineOutcome::Error(error.to_string()),
+            }
+        }
+        match byte[0] {
+            b'\n' => return finish_read_line(bytes, options.trim),
+            b'\r' if options.raw => return finish_read_line(bytes, options.trim),
+            0x03 if options.raw => return ReadLineOutcome::Interrupt,
+            0x04 if options.raw && bytes.is_empty() => return ReadLineOutcome::Eof,
+            0x04 if options.raw => return finish_read_line(bytes, options.trim),
+            value => bytes.push(value),
+        }
+    }
+}
+
+#[cfg(unix)]
+fn read_stdin_line_real_with_options(options: &ReadLineOptions) -> ReadLineOutcome {
+    read_line_from_fd_unix(libc::STDIN_FILENO, options)
+}
+
+#[cfg(not(unix))]
+fn read_stdin_line_real_with_options(options: &ReadLineOptions) -> ReadLineOutcome {
+    if !options.echo || options.raw {
+        return ReadLineOutcome::Error(
+            "std/io.read_line echo=false/raw=true is only implemented on Unix hosts".to_string(),
+        );
+    }
+    if options.timeout_ms.is_some() {
+        return ReadLineOutcome::Error(
+            "std/io.read_line timeout_ms is only implemented on Unix hosts".to_string(),
+        );
+    }
+    match read_stdin_line_real() {
+        Some(line) => ReadLineOutcome::Ok(normalize_read_line_value(line, options.trim)),
+        None => ReadLineOutcome::Eof,
+    }
 }
 
 fn is_tty_for(stream: &str) -> bool {
@@ -247,7 +594,7 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
         let mocked = STDIN_MOCK.with(|s| s.borrow_mut().take());
         if let Some(buf) = mocked {
             // After read_stdin, future read_line calls return nil — stdin is consumed.
-            STDIN_LINES.with(|lines| *lines.borrow_mut() = Some(Vec::new()));
+            STDIN_LINES.with(|lines| *lines.borrow_mut() = Some(VecDeque::new()));
             return Ok(VmValue::String(Rc::from(buf)));
         }
         match read_stdin_all_real() {
@@ -257,32 +604,24 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("read_line", |_args, _out| {
-        // Mock case: prefer the line queue, then split the bulk mock if present.
-        if let Some(line) = pop_mock_line() {
-            return Ok(VmValue::String(Rc::from(line)));
+        let options = ReadLineOptions {
+            trim: false,
+            ..ReadLineOptions::default()
+        };
+        match read_line_from_mock_or_real(&options) {
+            ReadLineOutcome::Ok(line) => Ok(VmValue::String(Rc::from(line))),
+            ReadLineOutcome::Eof => Ok(VmValue::Nil),
+            #[cfg(unix)]
+            ReadLineOutcome::Timeout => Ok(VmValue::Nil),
+            #[cfg(unix)]
+            ReadLineOutcome::Interrupt => Ok(VmValue::Nil),
+            ReadLineOutcome::Error(_) => Ok(VmValue::Nil),
         }
-        let bulk = STDIN_MOCK.with(|s| s.borrow_mut().take());
-        if let Some(text) = bulk {
-            let mut lines: Vec<String> = text.split('\n').map(String::from).collect();
-            // The trailing empty element from a final newline is not a line.
-            if matches!(lines.last(), Some(l) if l.is_empty()) {
-                lines.pop();
-            }
-            let first = if lines.is_empty() {
-                None
-            } else {
-                Some(lines.remove(0))
-            };
-            STDIN_LINES.with(|q| *q.borrow_mut() = Some(lines));
-            return Ok(first
-                .map(|s| VmValue::String(Rc::from(s)))
-                .unwrap_or(VmValue::Nil));
-        }
-        // Real stdin path. EOF or read error returns nil.
-        match read_stdin_line_real() {
-            Some(line) => Ok(VmValue::String(Rc::from(line))),
-            None => Ok(VmValue::Nil),
-        }
+    });
+
+    vm.register_builtin("__io_read_line", |args, _out| {
+        let options = parse_read_line_options(args)?;
+        Ok(read_line_result(read_line_from_mock_or_real(&options)))
     });
 
     vm.register_builtin("is_stdin_tty", |_args, _out| {
@@ -585,6 +924,8 @@ mod tests {
         render_progress_bar, render_progress_line, reset_io_state, set_stdout_passthrough,
         spinner_frame, stdout_passthrough_enabled,
     };
+    #[cfg(unix)]
+    use super::{ReadLineOptions, ReadLineOutcome};
 
     #[test]
     fn stdout_passthrough_state_toggles() {
@@ -634,5 +975,58 @@ mod tests {
     #[test]
     fn progress_bar_falls_back_to_empty_bar_for_zero_total() {
         assert_eq!(render_progress_bar(2, 0, 5), "[-----]");
+    }
+
+    #[cfg(unix)]
+    struct FdGuard(libc::c_int);
+
+    #[cfg(unix)]
+    impl Drop for FdGuard {
+        fn drop(&mut self) {
+            let _ = unsafe { libc::close(self.0) };
+        }
+    }
+
+    #[cfg(unix)]
+    fn pipe_pair() -> (FdGuard, FdGuard) {
+        let mut fds = [0; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        (FdGuard(fds[0]), FdGuard(fds[1]))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_line_from_fd_times_out_without_data() {
+        let (read_fd, _write_fd) = pipe_pair();
+        let outcome = super::read_line_from_fd_unix(
+            read_fd.0,
+            &ReadLineOptions {
+                timeout_ms: Some(10),
+                ..ReadLineOptions::default()
+            },
+        );
+
+        assert_eq!(outcome, ReadLineOutcome::Timeout);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_line_from_fd_honors_trim_option() {
+        let (read_fd, write_fd) = pipe_pair();
+        let payload = b"  alpha  \n";
+        assert_eq!(
+            unsafe { libc::write(write_fd.0, payload.as_ptr().cast(), payload.len()) },
+            payload.len() as isize
+        );
+        let outcome = super::read_line_from_fd_unix(
+            read_fd.0,
+            &ReadLineOptions {
+                timeout_ms: Some(100),
+                trim: false,
+                ..ReadLineOptions::default()
+            },
+        );
+
+        assert_eq!(outcome, ReadLineOutcome::Ok("  alpha  ".to_string()));
     }
 }

@@ -1,0 +1,33 @@
+/** std/io - interactive terminal input and stderr helpers. */
+type ReadLineOptions = {prompt?: string, timeout_ms?: int, trim?: bool, echo?: bool, raw?: bool}
+
+type ReadLineResult = {ok: bool, value?: string, status?: string, error?: string}
+
+/** is_tty returns whether fd 0, 1, or 2 is attached to a terminal. */
+pub fn is_tty(fd: int = 0) -> bool {
+  if fd == 0 {
+    return is_stdin_tty()
+  }
+  if fd == 1 {
+    return is_stdout_tty()
+  }
+  if fd == 2 {
+    return is_stderr_tty()
+  }
+  throw "std/io.is_tty: fd must be 0, 1, or 2"
+}
+
+/** read_line reads one line from stdin and reports ok/eof/timeout/interrupt/error. */
+pub fn read_line(opts: ReadLineOptions = {}) -> ReadLineResult {
+  return __io_read_line(opts ?? {})
+}
+
+/** read_password reads one line with terminal echo disabled. */
+pub fn read_password(prompt: string = "", timeout_ms: int? = nil) -> ReadLineResult {
+  return read_line({prompt: prompt, timeout_ms: timeout_ms, echo: false})
+}
+
+/** write_stderr writes text to stderr without appending a newline. */
+pub fn write_stderr(text: string) {
+  eprint(text)
+}
