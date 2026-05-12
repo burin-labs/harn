@@ -31,6 +31,7 @@ url = "2"
 uuid = { version = "1", features = ["v4", "v7"] }
 
 [dev-dependencies]
+filetime = "0.2"
 hex = "0.4"
 jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
 tempfile = "3"

@@ -42,11 +42,11 @@ pub use transport::{run_acp_channel_server, run_acp_server};
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use async_trait::async_trait;
 use harn_vm::agent_events::{clear_session_sinks, register_sink, AgentEventSink};
@@ -131,6 +131,19 @@ impl AcpServerConfig {
     }
 }
 
+/// Cached compiled pipeline. The ACP server re-uses the same pipeline file
+/// across every `session/prompt`; recompiling on each turn was the dominant
+/// per-turn overhead inside the VM (~80ms on auto.harn) before this cache.
+/// Keyed by (path, mtime, target_pipeline_name) — when the file's mtime moves
+/// forward we discard the cache and re-read/re-compile.
+struct CompileCacheEntry {
+    path: PathBuf,
+    mtime: SystemTime,
+    target_pipeline: Option<String>,
+    source: String,
+    chunk: harn_vm::Chunk,
+}
+
 /// ACP server that reads JSON-RPC requests from a transport and writes
 /// responses / notifications back to that same transport.
 pub struct AcpServer {
@@ -154,6 +167,9 @@ pub struct AcpServer {
     session_cancellations: Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
     /// Transport output sink.
     output: AcpOutput,
+    /// Compiled-pipeline cache. One slot — the ACP server runs a single
+    /// pipeline file for its lifetime, so we only ever cache one chunk.
+    compile_cache: Option<CompileCacheEntry>,
 }
 
 impl AcpServer {
@@ -181,7 +197,59 @@ impl AcpServer {
             pending: Arc::new(Mutex::new(HashMap::new())),
             session_cancellations: Arc::new(std::sync::Mutex::new(HashMap::new())),
             output,
+            compile_cache: None,
         }
+    }
+
+    /// Compile `source` for `target_pipeline` (or the default entry point
+    /// when `target_pipeline` is None), reusing the cached chunk when the
+    /// file at `source_path` has the same mtime as the last cache fill and
+    /// the target hasn't changed.
+    ///
+    /// Returns `(chunk, hit)` so the caller can keep its existing compile-
+    /// time telemetry meaningful (hits report ~0 ms).
+    ///
+    /// Inline-mode prompts pass `source_path: None` and never hit cache —
+    /// the source is freshly generated per turn so there's nothing to reuse.
+    fn compile_pipeline_cached(
+        &mut self,
+        source: &str,
+        source_path: Option<&Path>,
+        target_pipeline: Option<&str>,
+    ) -> Result<(harn_vm::Chunk, bool), String> {
+        let target_owned = target_pipeline.map(|s| s.to_string());
+        let cache_key = source_path.and_then(|path| {
+            std::fs::metadata(path)
+                .and_then(|m| m.modified())
+                .ok()
+                .map(|mtime| (path.to_path_buf(), mtime))
+        });
+        if let Some((ref path, mtime)) = cache_key {
+            if let Some(entry) = self.compile_cache.as_ref() {
+                if entry.path == *path
+                    && entry.mtime == mtime
+                    && entry.target_pipeline == target_owned
+                    && entry.source == source
+                {
+                    return Ok((entry.chunk.clone(), true));
+                }
+            }
+        }
+        let chunk = match target_pipeline {
+            Some(name) => harn_vm::compile_source_named(source, name),
+            None => harn_vm::compile_source(source),
+        }
+        .map_err(|e| format!("Compilation error: {e}"))?;
+        if let Some((path, mtime)) = cache_key {
+            self.compile_cache = Some(CompileCacheEntry {
+                path,
+                mtime,
+                target_pipeline: target_owned,
+                source: source.to_string(),
+                chunk: chunk.clone(),
+            });
+        }
+        Ok((chunk, false))
     }
 
     /// Write a complete JSON-RPC message to the current transport.
@@ -637,7 +705,7 @@ impl AcpServer {
         let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
 
         let (source, source_path) = if let Some(ref pipeline_path) = self.pipeline {
-            let full_path = if std::path::Path::new(pipeline_path).is_absolute() {
+            let full_path = if Path::new(pipeline_path).is_absolute() {
                 PathBuf::from(pipeline_path)
             } else {
                 cwd.join(pipeline_path)
@@ -745,23 +813,33 @@ impl AcpServer {
         host_bridge.set_session_id(&bridge.session_id);
 
         let compile_started = Instant::now();
-        let chunk = match target_pipeline.as_deref() {
-            Some(name) => harn_vm::compile_source_named(&source, name),
-            None => harn_vm::compile_source(&source),
-        };
-        let chunk = match chunk {
-            Ok(c) => c,
-            Err(e) => {
-                self.send_prompt_error(&session_id, id, &format!("Compilation error: {e}"));
+        let (chunk, cache_hit) = match self.compile_pipeline_cached(
+            &source,
+            source_path.as_deref(),
+            target_pipeline.as_deref(),
+        ) {
+            Ok(value) => value,
+            Err(message) => {
+                // Drop the error's "Compilation error: " prefix added inside
+                // the helper — the caller used to format it identically.
+                let formatted = message
+                    .strip_prefix("Compilation error: ")
+                    .map(|rest| format!("Compilation error: {rest}"))
+                    .unwrap_or(message);
+                self.send_prompt_error(&session_id, id, &formatted);
                 return;
             }
         };
         let compile_ms = compile_started.elapsed().as_millis() as u64;
         bridge.send_log(
             "info",
-            &format!("ACP_BOOT: compile_ms={compile_ms}"),
+            &format!(
+                "ACP_BOOT: compile_ms={compile_ms} cache={}",
+                if cache_hit { "hit" } else { "miss" }
+            ),
             Some(serde_json::json!({
                 "compile_ms": compile_ms,
+                "compile_cache": if cache_hit { "hit" } else { "miss" },
                 "pipeline": source_path
                     .as_ref()
                     .map(|p| p.display().to_string())
