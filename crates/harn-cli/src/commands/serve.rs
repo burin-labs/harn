@@ -30,6 +30,11 @@ pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
     crate::acp::run_acp_server(
         Some(&args.file),
         build_auth_policy(&args.api_key, args.hmac_secret.as_ref()),
+        args.trace,
+        harn_serve::AcpProfileConfig {
+            text: args.profile.text,
+            json_path: args.profile.json_path.clone(),
+        },
     )
     .await;
     Ok(())

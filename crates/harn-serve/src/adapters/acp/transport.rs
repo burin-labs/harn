@@ -6,6 +6,7 @@ pub async fn run_acp_channel_server(
     mut request_rx: mpsc::UnboundedReceiver<serde_json::Value>,
     response_tx: mpsc::UnboundedSender<String>,
 ) {
+    let profile_enabled = config.profile.is_enabled();
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
@@ -44,10 +45,14 @@ pub async fn run_acp_channel_server(
             }
         })
         .await;
+    if profile_enabled {
+        harn_vm::tracing::set_tracing_enabled(false);
+    }
 }
 
 /// Start the ACP server. Reads JSON-RPC from stdin, writes to stdout.
 pub async fn run_acp_server(config: AcpServerConfig) {
+    let profile_enabled = config.profile.is_enabled();
     let local = tokio::task::LocalSet::new();
 
     local
@@ -107,4 +112,7 @@ pub async fn run_acp_server(config: AcpServerConfig) {
             }
         })
         .await;
+    if profile_enabled {
+        harn_vm::tracing::set_tracing_enabled(false);
+    }
 }

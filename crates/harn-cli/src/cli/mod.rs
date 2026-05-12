@@ -31,6 +31,7 @@ mod package;
 mod persona;
 mod playground;
 mod portal;
+mod profile;
 mod provider;
 mod quickstart;
 mod run;
@@ -116,6 +117,7 @@ pub(crate) use persona::{
 };
 pub(crate) use playground::PlaygroundArgs;
 pub(crate) use portal::PortalArgs;
+pub(crate) use profile::ProfileArgs;
 pub(crate) use provider::{ModelInfoArgs, ProviderCatalogArgs, ProviderReadyArgs};
 pub(crate) use quickstart::QuickstartArgs;
 pub(crate) use run::RunArgs;

@@ -9,6 +9,7 @@ Execute a `.harn` file.
 ```bash
 harn run <file.harn>
 harn run --trace <file.harn>
+harn run --profile --profile-json profile.json <file.harn>
 harn run -e 'println("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
@@ -20,7 +21,9 @@ harn run --attest --receipt-out receipt.json <file.harn>
 
 | Flag | Description |
 |---|---|
-| `--trace` | Print LLM trace summary after execution |
+| `--trace` | Print LLM trace summary after execution. Can also be set with `HARN_TRACE=1` |
+| `--profile` | Print a categorical timing breakdown after execution. Can also be set with `HARN_PROFILE=1` |
+| `--profile-json <path>` | Write the categorical timing breakdown as JSON. Can also be set with `HARN_PROFILE_JSON=<path>` |
 | `--explain-cost` | Print static LLM token/cost estimates without executing the script |
 | `-e <code>` | Evaluate inline code instead of a file |
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
@@ -182,11 +185,16 @@ Benchmark a `.harn` file over repeated runs.
 ```bash
 harn bench main.harn
 harn bench main.harn --iterations 25
+harn bench main.harn --iterations 25 --profile-json bench.json
 ```
 
 `harn bench` parses and compiles the file once, executes it with a fresh VM for
 each iteration, and reports wall time plus aggregated LLM token, call, and cost
-metrics.
+metrics. The wall-time rollup includes min, mean, p50, p95, max, stddev, and
+total. `--profile` prints the aggregate categorical timing rollup; `--profile-json`
+writes a JSON report with `iterations[]`, `mean_ms`, `p50_ms`, `p95_ms`,
+`stddev_ms`, and `rollup`. `HARN_PROFILE=1` and `HARN_PROFILE_JSON=<path>` work
+as environment aliases.
 
 ## harn viz
 
@@ -1245,6 +1253,7 @@ harn serve a2a agent.harn                  # explicit A2A
 harn serve agent.harn                      # legacy A2A shorthand
 harn serve --port 3000 agent.harn          # legacy A2A shorthand with custom port
 harn serve acp agent.harn                  # ACP session server over stdio
+harn serve acp --profile-json /tmp/acp.ndjson agent.harn
 harn serve mcp server.harn                 # exported pub fn -> MCP tools over stdio
 harn serve mcp --transport http server.harn
 ```
@@ -1282,6 +1291,11 @@ notifications, and forwards permission prompts through
 `session/request_permission`. Use `--api-key <key>` / `HARN_SERVE_API_KEY` or
 `--hmac-secret <secret>` / `HARN_SERVE_HMAC_SECRET` to advertise ACP
 `authMethods` and require `authenticate` before protected session methods.
+Use `--profile` / `HARN_PROFILE=1` to print one categorical timing rollup per
+executed `session/prompt`; use `--profile-json <path>` /
+`HARN_PROFILE_JSON=<path>` to append per-turn NDJSON records with
+`turn`, `session_id`, and `rollup`. `--trace` / `HARN_TRACE=1` enables the LLM
+trace summary printed when the stdio server shuts down.
 
 See [MCP and ACP Integration](./mcp-and-acp.md) and
 [Outbound workflow server](./harn-serve.md) for protocol details.

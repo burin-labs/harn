@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 use clap::{Args, Subcommand, ValueEnum};
 
+use super::ProfileArgs;
+
 #[derive(Debug, Args)]
 pub(crate) struct ServeArgs {
     #[command(subcommand)]
@@ -30,6 +32,16 @@ pub(crate) struct ServeAcpArgs {
     /// Shared secret for HMAC authentication through the ACP authenticate method.
     #[arg(long = "hmac-secret", env = "HARN_SERVE_HMAC_SECRET")]
     pub hmac_secret: Option<String>,
+    /// Enable LLM trace summaries on shutdown.
+    #[arg(
+        long = "trace",
+        env = "HARN_TRACE",
+        action = clap::ArgAction::SetTrue,
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
+    pub trace: bool,
+    #[command(flatten)]
+    pub profile: ProfileArgs,
     /// Path to the .harn file to serve.
     pub file: String,
 }

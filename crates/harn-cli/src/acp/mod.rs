@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use harn_serve::{AcpRuntimeConfigurator, AcpServerConfig, AuthPolicy};
+use harn_serve::{AcpProfileConfig, AcpRuntimeConfigurator, AcpServerConfig, AuthPolicy};
 use tokio::sync::mpsc;
 
 struct CliAcpRuntimeConfigurator;
@@ -67,9 +67,23 @@ fn ensure_acp_event_log(pipeline: Option<&str>) {
     }
 }
 
-pub(crate) async fn run_acp_server(pipeline: Option<&str>, auth_policy: AuthPolicy) {
+pub(crate) async fn run_acp_server(
+    pipeline: Option<&str>,
+    auth_policy: AuthPolicy,
+    trace: bool,
+    profile: AcpProfileConfig,
+) {
     ensure_acp_event_log(pipeline);
-    harn_serve::run_acp_server(server_config(pipeline.map(str::to_string), auth_policy)).await;
+    if trace {
+        harn_vm::llm::enable_tracing();
+    }
+    harn_serve::run_acp_server(
+        server_config(pipeline.map(str::to_string), auth_policy).with_profile(profile),
+    )
+    .await;
+    if trace {
+        eprint!("{}", crate::commands::run::render_trace_summary());
+    }
 }
 
 pub(crate) async fn run_acp_channel_server(

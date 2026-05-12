@@ -63,6 +63,8 @@ pub(super) struct Session {
     /// Active session mode id (one of [`modes::MODE_CATALOG`]). Drives
     /// the capability ceiling pushed for the next `session/prompt`.
     pub(super) current_mode_id: String,
+    /// Prompt executions emitted to profile output for this ACP session.
+    pub(super) profile_turn: u64,
 }
 
 pub(super) fn mark_cancelled_session(

@@ -1,21 +1,22 @@
 use clap::Args;
 
+use super::ProfileArgs;
+
 #[derive(Debug, Args)]
 pub(crate) struct RunArgs {
     /// Print the LLM trace summary after execution.
-    #[arg(long)]
+    #[arg(
+        long,
+        env = "HARN_TRACE",
+        action = clap::ArgAction::SetTrue,
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
     pub trace: bool,
-    /// Print a categorical timing breakdown after execution (LLM vs tools
-    /// vs steps vs VM/residual). Implies tracing instrumentation; OK to
-    /// combine with `--trace`.
-    #[arg(long)]
-    pub profile: bool,
+    #[command(flatten)]
+    pub profile: ProfileArgs,
     /// Print static LLM token/cost estimates and do not execute the script.
     #[arg(long = "explain-cost")]
     pub explain_cost: bool,
-    /// Write the profile rollup as JSON to the given path. Implies `--profile`.
-    #[arg(long = "profile-json", value_name = "PATH")]
-    pub profile_json: Option<String>,
     /// Deny specific builtins as a comma-separated list.
     #[arg(long, conflicts_with = "allow")]
     pub deny: Option<String>,

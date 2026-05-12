@@ -167,6 +167,71 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn acp_profile_json_appends_one_line_per_prompt_turn() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let profile_path = dir.path().join("profile.ndjson");
+            let config = AcpServerConfig::new(None).with_profile(AcpProfileConfig {
+                text: false,
+                json_path: Some(profile_path.clone()),
+            });
+            let (request_tx, mut response_rx, server, session_id) =
+                start_acp_channel_session_with_config(config, serde_json::json!(dir.path())).await;
+
+            for id in 2..=3 {
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": session_id.clone(),
+                            "prompt": [{"type": "text", "text": "println(\"profiled\")"}],
+                        },
+                    }))
+                    .expect("send session/prompt");
+
+                let mut saw_completed = false;
+                for _ in 0..16 {
+                    let message = recv_json(&mut response_rx).await;
+                    if message["method"] == "host/capabilities" {
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {},
+                            }))
+                            .expect("send host capabilities response");
+                    }
+                    if message["id"] == id {
+                        assert_eq!(message["result"]["stopReason"], "end_turn");
+                        saw_completed = true;
+                        break;
+                    }
+                }
+                assert!(saw_completed, "prompt should finish successfully");
+            }
+
+            let lines = std::fs::read_to_string(&profile_path).expect("read profile ndjson");
+            let entries = lines
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("json line"))
+                .collect::<Vec<_>>();
+            assert_eq!(entries.len(), 2, "profile output:\n{lines}");
+            assert_eq!(entries[0]["session_id"], session_id);
+            assert_eq!(entries[0]["turn"], 1);
+            assert_eq!(entries[1]["turn"], 2);
+            assert!(entries[0]["rollup"]["by_kind"].is_array());
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn acp_session_prompt_exposes_multimodal_prompt_messages() {
     let local = tokio::task::LocalSet::new();
     local

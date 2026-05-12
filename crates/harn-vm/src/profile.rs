@@ -105,6 +105,27 @@ pub fn build(spans: &[Span]) -> RunProfile {
     }
 }
 
+/// Build one aggregate profile from independent span snapshots.
+///
+/// Each input snapshot can reuse span ids starting at 1. The helper remaps ids
+/// before folding so parent/child relationships do not collide across runs.
+pub fn build_aggregate(span_groups: &[Vec<Span>]) -> RunProfile {
+    let mut merged = Vec::new();
+    let mut next_offset = 0u64;
+    for group in span_groups {
+        let offset = next_offset;
+        let max_id = group.iter().map(|span| span.span_id).max().unwrap_or(0);
+        for span in group {
+            let mut remapped = span.clone();
+            remapped.span_id += offset;
+            remapped.parent_id = remapped.parent_id.map(|id| id + offset);
+            merged.push(remapped);
+        }
+        next_offset += max_id + 1;
+    }
+    build(&merged)
+}
+
 fn is_pipeline_root(spans: &[Span], id: u64) -> bool {
     spans
         .iter()
@@ -461,5 +482,28 @@ mod tests {
         let rendered = render(&RunProfile::default());
         assert!(rendered.contains("Run profile"));
         assert!(rendered.contains("vm/residual"));
+    }
+
+    #[test]
+    fn aggregate_remaps_duplicate_span_ids_across_runs() {
+        let first = vec![
+            span(1, None, SpanKind::Pipeline, "main", 100),
+            span(2, Some(1), SpanKind::LlmCall, "llm_call", 40),
+        ];
+        let second = vec![
+            span(1, None, SpanKind::Pipeline, "main", 200),
+            span(2, Some(1), SpanKind::ToolCall, "tool", 50),
+        ];
+
+        let profile = build_aggregate(&[first, second]);
+
+        assert_eq!(profile.total_wall_ms, 300);
+        assert_eq!(profile.by_kind.len(), 2);
+        assert!(profile.by_kind.iter().any(|bucket| {
+            bucket.kind == "llm_call" && bucket.total_ms == 40 && bucket.count == 1
+        }));
+        assert!(profile.by_kind.iter().any(|bucket| {
+            bucket.kind == "tool_call" && bucket.total_ms == 50 && bucket.count == 1
+        }));
     }
 }
