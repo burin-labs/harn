@@ -4527,13 +4527,14 @@ each integration.
   current host/session.
 - `process.set_default_shell` may be implemented by stateful hosts. Harn's
   standalone fallback stores the selection for the current thread/session.
-- `process.shell_invocation` resolves `{shell_id | shell, command?, login?,
-  interactive?}` into `{program, args, command_arg_index, shell}`.
+- `process.shell_invocation` resolves `{shell_id?, shell?, command?, login?,
+  interactive?}` into `{program, args, command_arg_index, shell}`. When neither
+  `shell_id` nor `shell` is supplied, it uses the selected default shell.
 
-Shell-mode command runners must pass a shell object or a shell ID resolved
-through this capability. `argv` mode remains preferred for programmatic
-execution; shell mode is for user-authored commands and interactive shell
-semantics. The normative schema is
+Shell-mode command runners may pass a shell object or shell ID resolved through
+this capability, and otherwise use the selected default shell. `argv` mode
+remains preferred for programmatic execution; shell mode is for user-authored
+commands and interactive shell semantics. The normative schema is
 `spec/schemas/host-shell-discovery.schema.json`.
 
 ## Workspace manifest (`harn.toml`)

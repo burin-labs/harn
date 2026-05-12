@@ -134,7 +134,7 @@ fn capability_manifest_map() -> BTreeMap<String, VmValue> {
         capability(
             "Process execution.",
             &[
-                op("exec", "Execute a process in argv or explicit shell mode."),
+                op("exec", "Execute a process in argv or shell mode."),
                 op("list_shells", "List shells discovered by the host/session."),
                 op(
                     "get_default_shell",
@@ -146,7 +146,7 @@ fn capability_manifest_map() -> BTreeMap<String, VmValue> {
                 ),
                 op(
                     "shell_invocation",
-                    "Resolve a shell id/object plus login/interactive flags into argv.",
+                    "Resolve shell selection and login/interactive flags into argv.",
                 ),
             ],
         ),

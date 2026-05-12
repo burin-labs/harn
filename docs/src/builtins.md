@@ -1333,12 +1333,14 @@ shell-mode command runners:
 - `process.get_default_shell` returns the selected shell object for the
   current host/session.
 - `process.set_default_shell` selects a shell by `shell_id` for stateful hosts.
-- `process.shell_invocation` resolves `{shell_id | shell, command?, login?,
-  interactive?}` to `{program, args, command_arg_index, shell}`.
+- `process.shell_invocation` resolves `{shell_id?, shell?, command?, login?,
+  interactive?}` to `{program, args, command_arg_index, shell}`. When neither
+  `shell_id` nor `shell` is supplied, it uses the selected default shell.
 
 Programmatic execution should prefer argv mode (`process.exec` with
-`mode: "argv"`). Shell mode is for user-authored commands and must pass a
-shell object or a shell ID discovered through this capability.
+`mode: "argv"`). Shell mode is for user-authored commands; callers can pass a
+shell object or shell ID discovered through this capability, or omit both to use
+the selected default shell.
 
 Prefer `host_call("capability.operation", args)` in shared wrappers and
 host-owned `.harn` modules so capability names stay consistent across the

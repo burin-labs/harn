@@ -582,7 +582,7 @@ Generic host/runtime helpers that are useful across many hosts:
 | `runtime_dry_run()` | Return whether the current run is dry-run only |
 | `runtime_approved_plan()` | Return the host-approved plan text when available |
 | `process_run(argv, options?)` | Execute a process through argv-mode `process.exec`; prefer this for programmatic commands |
-| `process_shell(command, options?)` | Execute an explicit shell command through `process.exec` after resolving the host default shell |
+| `process_shell(command, options?)` | Execute an explicit shell command through `process.exec` using the host default shell unless options provide `shell` or `shell_id` |
 | `process_result_text(result)` | Return stdout, stderr, combined output, or inline output from a command-runner result |
 | `process_result_success(result)` | Return explicit command success when present, otherwise derive success from `status` and `exit_code` |
 | `shell_quote(value)` | Quote a value as one POSIX shell argument for unavoidable shell-mode command composition |
@@ -611,9 +611,9 @@ compact recovery context:
 
 `spec` is either an argv list, such as `["git", "status", "--short"]`, or a
 dict with `argv`, `cwd`, `env`, `env_mode`, `stdin`, `timeout_ms`, `capture`,
-and `max_inline_bytes`. Shell execution is disabled unless the spec explicitly
-sets `{mode: "shell", command: "...", shell_id: ...}` or supplies a host shell
-object.
+and `max_inline_bytes`. Shell execution is enabled only when the spec
+explicitly sets `{mode: "shell", command: "..."}`. Shell mode uses the host
+default shell unless the spec or options provide `shell` or `shell_id`.
 
 Retry and classification stay generic. Harnesses provide domain-specific
 closures instead of teaching stdlib about a release, repository, package

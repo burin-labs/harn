@@ -268,6 +268,29 @@ fn run_command_supports_explicit_shell_mode() {
 }
 
 #[test]
+fn run_command_shell_mode_uses_default_shell_when_omitted() {
+    let default_shell =
+        harn_vm::shells::get_default_shell().expect("test host should expose a default shell");
+    let (spawner, _controller, _guard) =
+        install_mock_with(MockProcessConfig::with_stdout(0, "shell-default\n"));
+
+    let mut req = dict();
+    req.insert("mode".into(), vstr("shell"));
+    req.insert("command".into(), vstr("echo shell-default"));
+
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    assert_eq!(require_str(&resp, "stdout").trim(), "shell-default");
+
+    let captured = spawner.captured();
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].program, default_shell.path);
+    assert_eq!(
+        captured[0].args[default_shell.default_args.len()],
+        "echo shell-default"
+    );
+}
+
+#[test]
 fn run_command_caps_inline_output_and_read_command_output_reads_artifact() {
     let payload = vec![b'x'; 2000];
     let (_spawner, _controller, _guard) =

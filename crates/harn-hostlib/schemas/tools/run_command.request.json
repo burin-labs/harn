@@ -13,7 +13,7 @@
     "command": { "type": "string" },
     "shell_id": {
       "type": "string",
-      "description": "Stable id from process.list_shells / process.get_default_shell."
+      "description": "Stable id from process.list_shells / process.get_default_shell. If omitted in shell mode, the host default shell is used."
     },
     "shell": {
       "type": "object",
@@ -106,11 +106,7 @@
     },
     {
       "properties": { "mode": { "const": "shell" } },
-      "required": ["command"],
-      "anyOf": [
-        { "required": ["shell"] },
-        { "required": ["shell_id"] }
-      ]
+      "required": ["mode", "command"]
     }
   ],
   "additionalProperties": false
