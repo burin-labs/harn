@@ -6,10 +6,24 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.8.12
 
 ### Added
 
+- **Cooperative process signal handlers (#1547).** Added `std/signal`
+  with `on_interrupt`, `off_interrupt`, `interrupted`, and
+  `with_interrupt`. `harn run` now routes SIGINT/SIGTERM/SIGHUP into VM
+  interrupt dispatch with a graceful timeout, second-signal hard exit,
+  and LIFO handler stacking, so long-running harnesses (chat loops,
+  agent supervisors, polling jobs) can opt into clean shutdown without
+  losing the panic-on-stuck escape hatch.
+- **`std/dashboard/jobs` event envelopes (#1508).** Added
+  `std/dashboard/jobs` with typed dashboard job event envelopes,
+  validation, EventLog emission receipts, dedupe, and ordered Jobs view
+  reduction. Local and cloud fixture streams cover runs, approvals,
+  receipts, replay fixtures, and DLQ actions, and the host-facing
+  dashboard contract is documented and wired through stdlib
+  registration / conformance.
 - **`std/tui::select_from` picker (#1544).** Added
   `select_from(items, opts?)` to `std/tui` so harness scripts stop
   hand-rolling fzf detection plus numbered-menu fallbacks. The picker
@@ -50,8 +64,31 @@ condensed series summaries instead of full per-patch history.
   `agent_session_closed` event before evicting the session so timeout and
   interruption closes are visible in event logs.
 
+### Changed
+
+- **`command_run` shell mode defaults to the host shell (#1549).**
+  Shell-mode invocations of `command_run` (and downstream tools like
+  `std/command::command_step`) no longer error when the caller omits
+  both `shell` and `shell_id`. The host now resolves
+  `discover_shells().default_shell_id` automatically (`bash` on macOS /
+  Linux, `pwsh` on Windows). Malformed explicit `shell` / `shell_id`
+  fields still error rather than silently falling back. Simplifies the
+  common `mode: "shell"` call site to a single `command` field.
+- **Wasmtime bumped to 44.0.1 (#1539).** Internal: harn-vm's optional
+  Wasmtime/WASI stack moved from 29 to 44.0.1 with `wasmtime-wasi` on
+  the current p1 feature. Sync WASIp1 modules now run on a dedicated
+  host thread so testbench WASI subprocesses work from inside Harn's
+  Tokio runtime while preserving mock clock and overlay state.
+
 ### Fixed
 
+- **Escaped `${name}` in triple-quoted strings now passes through
+  literally (#1548).** Multi-line / triple-quoted strings used to
+  interpolate `${...}` even when escaped as `\${...}`, breaking any
+  harness that wanted to emit literal shell variable references inside
+  a multi-line script string. The lexer now treats `\${...}` as a
+  literal `${...}` (matching single-line behavior) and preserves
+  non-interpolation escapes like `\$PATH` unchanged.
 - **Tail-call inside `for` loops leaked iterator state across the
   caller.** `return f(...)` from inside a `for x in xs { ... }` body
   is tail-call-optimized, but the new frame was capturing the current
