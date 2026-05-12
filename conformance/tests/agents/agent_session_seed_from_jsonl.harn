@@ -1,0 +1,102 @@
+pipeline main() {
+  let path = path_join(temp_dir(), "harn-seed-" + uuid() + ".jsonl")
+  write_file(
+    path,
+    join(
+      [
+        json_stringify({type: "system_prompt", content: "seed system"}),
+        json_stringify(
+          {type: "provider_call_request", provider: "mock", model: "mock", tool_format: "native"},
+        ),
+        json_stringify({type: "message", message: {role: "user", content: "hello"}}),
+        json_stringify(
+          {
+            type: "message",
+            message: {
+              role: "assistant",
+              content: "checking",
+              tool_calls: [{id: "call_1", name: "lookup", arguments: {query: "state"}}],
+            },
+          },
+        ),
+        json_stringify(
+          {
+            type: "message",
+            message: {role: "tool", name: "lookup", tool_call_id: "call_1", content: "state=ok"},
+          },
+        ),
+        json_stringify({type: "message", message: {role: "assistant", content: "done"}}),
+      ],
+      "\n",
+    )
+      + "\n",
+  )
+  let seeded = agent_session_seed_from_jsonl(
+    path,
+    {
+      rename_session: "seeded-" + uuid(),
+      drop_tool_calls: true,
+      truncate_to_last: 3,
+      provider: "mock",
+      model: "mock",
+    },
+  )
+  println(seeded.ok)
+  println(seeded.turns_loaded)
+  println(seeded.source_format)
+  println(seeded.partial)
+  let snap = agent_session_snapshot(seeded.session_id)
+  println(agent_session_system_prompt(seeded.session_id) != nil)
+  println(agent_session_tool_format(seeded.session_id))
+  println(len(snap.messages))
+  println(snap.messages[0].role)
+  println(snap.messages[1].content)
+  println(snap.messages[1].tool_calls == nil)
+  let legacy_path = path_join(temp_dir(), "harn-legacy-seed-" + uuid() + ".jsonl")
+  write_file(
+    legacy_path,
+    join(
+      [
+        json_stringify(
+          {
+            type: "request",
+            system: "legacy system",
+            provider: "mock",
+            model: "mock",
+            tool_format: "text",
+            messages: [{role: "user", content: "legacy hello"}],
+          },
+        ),
+        json_stringify({type: "response", provider: "mock", model: "mock", text: "legacy done"}),
+      ],
+      "\n",
+    )
+      + "\n",
+  )
+  let legacy = agent_session_seed_from_jsonl(legacy_path)
+  let legacy_snap = agent_session_snapshot(legacy.session_id)
+  println(legacy.ok)
+  println(legacy.source_format)
+  println(len(legacy_snap.messages))
+  println(legacy_snap.messages[1].content)
+  llm_mock_clear()
+  llm_mock({text: "recorded assistant"})
+  let transcript_dir = path_join(temp_dir(), "harn-seed-sidecar-" + uuid())
+  let source_session = agent_session_open()
+  agent_loop(
+    "record this",
+    nil,
+    {
+      provider: "mock",
+      session_id: source_session,
+      max_iterations: 1,
+      llm_transcript_dir: transcript_dir,
+    },
+  )
+  let sidecar = path_join(transcript_dir, "llm_transcript.jsonl")
+  println(contains(read_file(sidecar), "\"type\":\"message\""))
+  let imported = agent_session_seed_from_jsonl(sidecar, {provider: "mock"})
+  println(imported.ok)
+  println(imported.source_format)
+  println(imported.turns_loaded >= 2)
+}

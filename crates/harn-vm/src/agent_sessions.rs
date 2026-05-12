@@ -470,6 +470,7 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
             _ => crate::llm::helpers::transcript_events_from_messages(&messages),
         };
         let new_message = VmValue::Dict(Rc::new(msg_dict));
+        emit_llm_message_event(id, messages.len(), &new_message);
         events.push(crate::llm::helpers::transcript_event_from_message(
             &new_message,
         ));
@@ -480,6 +481,89 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
         state.transcript = VmValue::Dict(Rc::new(next));
         state.last_accessed = Instant::now();
         Ok(())
+    })
+}
+
+fn emit_llm_message_event(session_id: &str, message_index: usize, message: &VmValue) {
+    let mut fields = serde_json::Map::new();
+    fields.insert(
+        "session_id".to_string(),
+        serde_json::Value::String(session_id.to_string()),
+    );
+    fields.insert(
+        "message_index".to_string(),
+        serde_json::json!(message_index),
+    );
+    let message_json = crate::llm::helpers::vm_value_to_json(message);
+    if let Some(role) = message_json.get("role").and_then(|value| value.as_str()) {
+        fields.insert(
+            "role".to_string(),
+            serde_json::Value::String(role.to_string()),
+        );
+    }
+    if let Some(content) = message_json.get("content") {
+        fields.insert("content".to_string(), content.clone());
+    }
+    fields.insert("message".to_string(), message_json);
+    crate::llm::append_observability_sidecar_entry("message", fields);
+}
+
+/// Create a new session from a reconstructed message list.
+///
+/// This is intentionally an all-at-once write instead of repeated
+/// `inject_message` calls: importing a transcript should not re-emit
+/// each historic turn into the active observability sidecar.
+pub fn seed_from_messages(
+    id: Option<String>,
+    messages: &[serde_json::Value],
+    metadata: serde_json::Value,
+    system_prompt: Option<String>,
+    tool_format: Option<String>,
+) -> Result<String, String> {
+    let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    if exists(&resolved) {
+        return Err(format!("agent session '{resolved}' already exists"));
+    }
+    open_or_create(Some(resolved.clone()));
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(&resolved) else {
+            return Err(format!("failed to create agent session '{resolved}'"));
+        };
+        state.tool_format = tool_format.filter(|value| !value.trim().is_empty());
+        state.system_prompt = system_prompt.filter(|value| !value.trim().is_empty());
+
+        let mut metadata = metadata
+            .as_object()
+            .cloned()
+            .unwrap_or_else(serde_json::Map::new);
+        if let Some(tool_format) = state.tool_format.as_ref() {
+            metadata.insert(
+                "tool_format".to_string(),
+                serde_json::Value::String(tool_format.clone()),
+            );
+            metadata.insert(
+                "tool_mode_locked".to_string(),
+                serde_json::Value::Bool(true),
+            );
+        }
+        if let Some(system_prompt) = state.system_prompt.as_ref() {
+            metadata.insert(
+                "system_prompt".to_string(),
+                crate::llm::helpers::system_prompt_metadata(system_prompt),
+            );
+        }
+        let vm_messages = crate::llm::helpers::json_messages_to_vm(messages);
+        state.transcript = crate::llm::helpers::new_transcript_with(
+            Some(resolved.clone()),
+            vm_messages,
+            None,
+            Some(crate::stdlib::json_to_vm_value(&serde_json::Value::Object(
+                metadata,
+            ))),
+        );
+        state.last_accessed = Instant::now();
+        Ok(resolved)
     })
 }
 

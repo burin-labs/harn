@@ -6,6 +6,7 @@
 //! pattern; unknown inputs are hard errors.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use crate::agent_sessions;
@@ -89,6 +90,13 @@ const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("agent_session_inject(id, message)")
         .arity(VmBuiltinArity::Exact(2))
         .doc("Inject one message into an agent session."),
+    SyncBuiltin::new(
+        "agent_session_seed_from_jsonl",
+        agent_session_seed_from_jsonl_builtin,
+    )
+    .signature("agent_session_seed_from_jsonl(jsonl_path, opts?)")
+    .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+    .doc("Seed a new agent session from an LLM transcript JSONL sidecar."),
 ];
 
 const AGENT_SESSION_ASYNC_PRIMITIVES: &[AsyncBuiltin] =
@@ -144,6 +152,78 @@ fn arg_int_required(
     args.get(idx)
         .and_then(VmValue::as_int)
         .ok_or_else(|| err(format!("{fn_name}: `{arg_name}` must be an int")))
+}
+
+fn arg_bool_opt(
+    opts: &BTreeMap<String, VmValue>,
+    fn_name: &str,
+    arg_name: &str,
+    default: bool,
+) -> Result<bool, VmError> {
+    match opts.get(arg_name) {
+        None | Some(VmValue::Nil) => Ok(default),
+        Some(VmValue::Bool(value)) => Ok(*value),
+        _ => Err(err(format!("{fn_name}: `{arg_name}` must be a bool"))),
+    }
+}
+
+fn opt_string(
+    opts: &BTreeMap<String, VmValue>,
+    fn_name: &str,
+    arg_name: &str,
+) -> Result<Option<String>, VmError> {
+    match opts.get(arg_name) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(value)) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed.to_string()))
+            }
+        }
+        _ => Err(err(format!(
+            "{fn_name}: `{arg_name}` must be a string or nil"
+        ))),
+    }
+}
+
+fn opt_usize(
+    opts: &BTreeMap<String, VmValue>,
+    fn_name: &str,
+    arg_name: &str,
+) -> Result<Option<usize>, VmError> {
+    match opts.get(arg_name) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(value) => {
+            let Some(raw) = value.as_int() else {
+                return Err(err(format!("{fn_name}: `{arg_name}` must be an int")));
+            };
+            if raw < 0 {
+                return Err(err(format!("{fn_name}: `{arg_name}` must be >= 0")));
+            }
+            Ok(Some(raw as usize))
+        }
+    }
+}
+
+fn opts_dict_arg(
+    args: &[VmValue],
+    idx: usize,
+    fn_name: &str,
+) -> Result<BTreeMap<String, VmValue>, VmError> {
+    match args.get(idx) {
+        None | Some(VmValue::Nil) => Ok(BTreeMap::new()),
+        Some(VmValue::Dict(opts)) => Ok(opts.as_ref().clone()),
+        _ => Err(err(format!("{fn_name}: `opts` must be a dict or nil"))),
+    }
+}
+
+fn seed_result_error(message: impl Into<String>) -> VmValue {
+    crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "ok": false,
+        "error": message.into(),
+    }))
 }
 
 fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -340,6 +420,90 @@ fn agent_session_inject_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         .ok_or_else(|| err("agent_session_inject: `message` required"))?;
     agent_sessions::inject_message(&id, message).map_err(err)?;
     Ok(VmValue::Nil)
+}
+
+const SEED_FROM_JSONL_OPT_KEYS: &[&str] = &[
+    "truncate_to_last",
+    "drop_tool_calls",
+    "rename_session",
+    "validate",
+    "provider",
+    "model",
+];
+
+fn agent_session_seed_from_jsonl_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let path = arg_string_required(args, 0, "agent_session_seed_from_jsonl", "jsonl_path")?;
+    let opts = opts_dict_arg(args, 1, "agent_session_seed_from_jsonl")?;
+    for key in opts.keys() {
+        if !SEED_FROM_JSONL_OPT_KEYS.contains(&key.as_str()) {
+            let expected = SEED_FROM_JSONL_OPT_KEYS.join(", ");
+            return Err(err(format!(
+                "agent_session_seed_from_jsonl: unknown option key '{key}' (expected one of: {expected})"
+            )));
+        }
+    }
+
+    let seed_options = crate::llm::transcript_seed::SeedOptions {
+        truncate_to_last: opt_usize(&opts, "agent_session_seed_from_jsonl", "truncate_to_last")?,
+        drop_tool_calls: arg_bool_opt(
+            &opts,
+            "agent_session_seed_from_jsonl",
+            "drop_tool_calls",
+            false,
+        )?,
+        validate: arg_bool_opt(&opts, "agent_session_seed_from_jsonl", "validate", true)?,
+        target_provider: opt_string(&opts, "agent_session_seed_from_jsonl", "provider")?,
+        target_model: opt_string(&opts, "agent_session_seed_from_jsonl", "model")?,
+    };
+    let rename_session = opt_string(&opts, "agent_session_seed_from_jsonl", "rename_session")?;
+    let path_buf = PathBuf::from(&path);
+    let seeded = match crate::llm::transcript_seed::load_seeded_transcript_from_jsonl(
+        &path_buf,
+        &seed_options,
+    ) {
+        Ok(seeded) => seeded,
+        Err(message) => return Ok(seed_result_error(message)),
+    };
+
+    let metadata = serde_json::json!({
+        "seeded_from_jsonl": {
+            "path": path,
+            "source_records": seeded.record_count,
+            "source_format": seeded.source_format.as_str(),
+            "partial": seeded.partial,
+            "truncated": seeded.truncated,
+            "provider": seeded.provider.clone(),
+            "model": seeded.model.clone(),
+            "tool_format": seeded.tool_format.clone(),
+        }
+    });
+    let session_id = match agent_sessions::seed_from_messages(
+        rename_session,
+        &seeded.messages,
+        metadata,
+        seeded.system_prompt.clone(),
+        seeded.tool_format.clone(),
+    ) {
+        Ok(session_id) => session_id,
+        Err(message) => return Ok(seed_result_error(message)),
+    };
+    Ok(crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "ok": true,
+        "session_id": session_id,
+        "turns_loaded": seeded.messages.len(),
+        "messages_loaded": seeded.messages.len(),
+        "source_records": seeded.record_count,
+        "source_format": seeded.source_format.as_str(),
+        "partial": seeded.partial,
+        "truncated": seeded.truncated,
+        "provider": seeded.provider,
+        "model": seeded.model,
+        "tool_format": seeded.tool_format,
+        "error": serde_json::Value::Null,
+    })))
 }
 
 async fn agent_session_compact_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {

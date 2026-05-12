@@ -41,6 +41,7 @@ pub(crate) mod structural_experiments;
 pub(crate) mod structured_envelope;
 mod token_count;
 mod tool_search_score;
+pub(crate) mod transcript_seed;
 mod transcript_stats;
 
 use std::sync::OnceLock;

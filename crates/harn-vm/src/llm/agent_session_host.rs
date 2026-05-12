@@ -228,12 +228,6 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
             .map_err(VmError::Runtime)?;
     }
 
-    let user_msg = serde_json::json!({
-        "role": "user",
-        "content": initial_user_content(&opts_map, &message),
-    });
-    let _ = crate::agent_sessions::inject_message(&resolved, json_to_vm(&user_msg));
-
     let max_iterations = opt_int(&opts_map, "max_iterations").unwrap_or(50).max(1);
     let max_verify_attempts = opt_int(&opts_map, "max_verify_attempts")
         .unwrap_or(20)
@@ -255,11 +249,17 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         crate::agent_sessions::claim_tool_format(&resolved, &tool_format)
             .map_err(VmError::Runtime)?;
     }
+
     let llm_transcript_dir = opt_str(&opts_map, "llm_transcript_dir").unwrap_or_default();
     let pushed_transcript_dir = !llm_transcript_dir.is_empty();
     if pushed_transcript_dir {
         super::agent_observe::push_llm_transcript_dir(&llm_transcript_dir);
     }
+    let user_msg = serde_json::json!({
+        "role": "user",
+        "content": initial_user_content(&opts_map, &message),
+    });
+    let _ = crate::agent_sessions::inject_message(&resolved, json_to_vm(&user_msg));
 
     let session = AgentHostSession {
         session_id: resolved.clone(),

@@ -72,6 +72,7 @@ the "one-shot" call shape.
 | `agent_session_trim(id, keep_last)` | `int` | Retains last `keep_last` messages. Returns kept count. |
 | `agent_session_compact(id, opts)` | `int` | Runs the LLM/truncate/observation-mask/custom compactor. Unknown keys in `opts` error. |
 | `agent_session_inject(id, message)` | `nil` | Appends a `{role, content, …}` message. Missing `role` errors. |
+| `agent_session_seed_from_jsonl(jsonl_path, opts?)` | `dict` | Creates a new session from a replayable `llm_transcript.jsonl` sidecar. |
 | `agent_session_close(id)` | `nil` | Evicts immediately. |
 
 ### `agent_session_compact` options
@@ -92,6 +93,46 @@ Use `compact_strategy: "custom"` with `custom_compactor` to replace the
 compaction scheme completely. `mask_callback` and `compress_callback` customize
 the built-in observation-mask path without changing the rest of the session
 lifecycle.
+
+### `agent_session_seed_from_jsonl`
+
+`agent_session_seed_from_jsonl(path, opts?)` imports prompt-visible history
+from an LLM transcript sidecar and creates a new session preloaded with those
+messages:
+
+```harn
+let seeded = agent_session_seed_from_jsonl(
+  ".harn-runs/audit/agent-llm/llm_transcript.jsonl",
+  {truncate_to_last: 40, rename_session: "audit-recovery"},
+)
+
+if seeded.ok {
+  agent_loop("Continue from the failed release step.", nil, {
+    session_id: seeded.session_id,
+    provider: seeded.provider,
+  })
+}
+```
+
+Options:
+
+- `truncate_to_last` (int): keep only the last N reconstructed messages.
+- `drop_tool_calls` (bool, default `false`): remove assistant tool-call payloads
+  and tool-result messages, leaving only user/assistant text.
+- `rename_session` (string): requested id for the new session; errors if it
+  already exists.
+- `validate` (bool, default `true`): require an exact replay source. Sidecars
+  that contain only provider responses are rejected because user/tool-result
+  turns cannot be reconstructed from them.
+- `provider` / `model` (string): optional guardrails. When set, validation
+  checks the transcript's recorded request provider/model before seeding.
+
+The result shape is `{ok, session_id?, turns_loaded?, messages_loaded?,
+source_records?, source_format?, partial?, truncated?, provider?, model?,
+tool_format?, error?}`. `source_format` is `message_events`,
+`request_snapshots`, or `provider_responses_only`; the last is available only
+with `validate: false` and is assistant-response best effort, not prefix-cache
+equivalent replay.
 
 ## Storage model
 
