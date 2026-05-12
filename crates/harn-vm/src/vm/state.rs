@@ -35,6 +35,15 @@ pub(crate) struct LocalSlot {
     pub(crate) synced: bool,
 }
 
+#[derive(Clone)]
+pub(crate) struct InterruptHandler {
+    pub(crate) handle: i64,
+    pub(crate) signals: Vec<String>,
+    pub(crate) once: bool,
+    pub(crate) graceful_timeout_ms: Option<u64>,
+    pub(crate) handler: VmValue,
+}
+
 /// Call frame for function execution.
 pub(crate) struct CallFrame {
     pub(crate) chunk: ChunkRef,
@@ -208,11 +217,19 @@ pub struct Vm {
     pub(crate) denied_builtins: Rc<HashSet<String>>,
     /// Cancellation token for cooperative graceful shutdown (set by parent).
     pub(crate) cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    pub(crate) interrupt_signal_token: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
     /// Remaining instruction-boundary checks before a requested host
     /// cancellation is forcefully raised. This gives `is_cancelled()` loops a
     /// deterministic chance to return cleanly without letting non-cooperative
     /// CPU-bound code run forever.
     pub(crate) cancel_grace_instructions_remaining: Option<usize>,
+    /// User-visible interrupt handlers registered through `std/signal`.
+    pub(crate) interrupt_handlers: Vec<InterruptHandler>,
+    pub(crate) next_interrupt_handle: i64,
+    pub(crate) pending_interrupt_signal: Option<String>,
+    pub(crate) interrupted: bool,
+    pub(crate) dispatching_interrupt: bool,
+    pub(crate) interrupt_handler_deadline: Option<Instant>,
     /// Captured stack trace from the most recent error (fn_name, line, col).
     pub(crate) error_stack_trace: Vec<(String, usize, usize, Option<String>)>,
     /// Yield channel sender for generator execution. When set, `Op::Yield`
@@ -418,7 +435,14 @@ impl Vm {
             bridge: None,
             denied_builtins: Rc::new(HashSet::new()),
             cancel_token: None,
+            interrupt_signal_token: None,
             cancel_grace_instructions_remaining: None,
+            interrupt_handlers: Vec::new(),
+            next_interrupt_handle: 1,
+            pending_interrupt_signal: None,
+            interrupted: false,
+            dispatching_interrupt: false,
+            interrupt_handler_deadline: None,
             error_stack_trace: Vec::new(),
             yield_sender: None,
             project_root: None,
@@ -511,7 +535,14 @@ impl Vm {
             bridge: self.bridge.clone(),
             denied_builtins: Rc::clone(&self.denied_builtins),
             cancel_token: self.cancel_token.clone(),
+            interrupt_signal_token: self.interrupt_signal_token.clone(),
             cancel_grace_instructions_remaining: None,
+            interrupt_handlers: Vec::new(),
+            next_interrupt_handle: 1,
+            pending_interrupt_signal: None,
+            interrupted: self.interrupted,
+            dispatching_interrupt: false,
+            interrupt_handler_deadline: None,
             error_stack_trace: Vec::new(),
             yield_sender: None,
             project_root: self.project_root.clone(),

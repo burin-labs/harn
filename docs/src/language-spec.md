@@ -373,6 +373,8 @@ Imports starting with `std/` load embedded stdlib modules:
   store_refresh)
 - `import "std/async"` — polling and retry helpers (wait_for, retry_until,
   retry_predicate_with_backoff, circuit_call)
+- `import "std/signal"` — cooperative process interruption helpers
+  (on_interrupt, off_interrupt, interrupted, with_interrupt)
 - `import "std/vision"` — deterministic OCR helpers (`ocr(image, options?)`)
 - `import "std/io"` — terminal IO helpers (is_tty, read_line,
   read_password, write_stderr)
@@ -1384,6 +1386,34 @@ parent's runtime context snapshot and cancellation token. The VM checks
 cancellation between bytecode instructions and while awaiting interruptible
 async operations, so CPU-bound Harn loops and blocked async calls both unwind.
 When a VM exits, any un-awaited spawned tasks it owns are cancelled and aborted.
+
+### std/signal
+
+```harn
+import "std/signal"
+
+let registration = on_interrupt({ ->
+  agent_session_close(session, {status: "interrupted"})
+}, {signals: ["SIGINT", "SIGTERM"], once: true})
+
+defer { off_interrupt(registration) }
+```
+
+`std/signal` exposes cooperative process interruption for scripts run by
+`harn run`. `on_interrupt(handler, options?)` registers a callable for
+`SIGINT`, `SIGTERM`, or `SIGHUP`; matching handlers run in LIFO order at the
+next VM interrupt checkpoint. The default is `{signals: ["SIGINT"], once:
+true}`. `graceful_timeout_ms` bounds handler execution at VM interrupt
+checkpoints; an expired handler throws `kind:interrupted:handler_timeout`.
+`off_interrupt(handle)` removes a handler, and `interrupted()` remains true
+after the VM has observed an interrupt so tight loops can poll and return
+through normal `defer` cleanup. `with_interrupt(handler, body, options?)`
+registers a handler for the dynamic extent of `body` and always unregisters it
+before returning or rethrowing.
+
+If no matching handler is registered, process interruption falls back to normal
+VM cancellation. A second process signal terminates `harn run` immediately so a
+wedged handler cannot trap the operator.
 
 ### deadline
 

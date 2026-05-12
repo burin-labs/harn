@@ -4,6 +4,7 @@ mod debug;
 mod dispatch;
 mod execution;
 mod format;
+mod interrupts;
 pub mod iter;
 mod methods;
 mod modules;
@@ -27,5 +28,6 @@ pub use modules::resolve_module_import_path;
 pub use state::Vm;
 
 pub(crate) use state::{
-    CallFrame, ExceptionHandler, IterState, LocalSlot, ScopeSpan, VmBuiltinDispatch, VmBuiltinEntry,
+    CallFrame, ExceptionHandler, InterruptHandler, IterState, LocalSlot, ScopeSpan,
+    VmBuiltinDispatch, VmBuiltinEntry,
 };

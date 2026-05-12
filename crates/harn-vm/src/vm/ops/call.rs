@@ -488,6 +488,49 @@ impl super::super::Vm {
             return Ok(true);
         }
 
+        if name == "__signal_on_interrupt" {
+            crate::typecheck::validate_builtin_call(name, args, None)?;
+            let handler = args.first().cloned().ok_or_else(|| {
+                VmError::Runtime("__signal_on_interrupt: handler is required".to_string())
+            })?;
+            let result = self.register_interrupt_handler(handler, args.get(1))?;
+            self.stack.push(result);
+            return Ok(true);
+        }
+
+        if name == "__signal_off_interrupt" {
+            crate::typecheck::validate_builtin_call(name, args, None)?;
+            let handle = args.first().ok_or_else(|| {
+                VmError::Runtime("__signal_off_interrupt: handle is required".to_string())
+            })?;
+            self.unregister_interrupt_handler(handle)?;
+            self.stack.push(VmValue::Nil);
+            return Ok(true);
+        }
+
+        if name == "__signal_interrupted" {
+            crate::typecheck::validate_builtin_call(name, args, None)?;
+            self.stack.push(VmValue::Bool(self.interrupted()));
+            return Ok(true);
+        }
+
+        if name == "__signal_raise" {
+            crate::typecheck::validate_builtin_call(name, args, None)?;
+            let signal = match args.first() {
+                Some(VmValue::String(signal)) => signal.to_string(),
+                Some(other) => {
+                    return Err(VmError::TypeError(format!(
+                        "__signal_raise: signal must be string, got {}",
+                        other.type_name()
+                    )))
+                }
+                None => "SIGINT".to_string(),
+            };
+            self.signal_interrupt(&signal)?;
+            self.stack.push(VmValue::Nil);
+            return Ok(true);
+        }
+
         Ok(false)
     }
 
@@ -694,8 +737,7 @@ impl super::super::Vm {
         } else {
             match callee {
                 VmValue::String(name) => {
-                    let result = self.call_named_builtin(&name, args).await?;
-                    self.stack.push(result);
+                    self.call_named_value(&name, args, None).await?;
                 }
                 _ => {
                     return Err(VmError::TypeError(format!(

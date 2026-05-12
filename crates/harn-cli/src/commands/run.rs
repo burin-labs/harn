@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use harn_parser::DiagnosticSeverity;
 use harn_vm::event_log::EventLog;
@@ -241,6 +241,24 @@ impl RunProfileOptions {
     }
 }
 
+#[derive(Clone)]
+pub struct RunInterruptTokens {
+    pub cancel_token: Arc<AtomicBool>,
+    pub signal_token: Arc<Mutex<Option<String>>>,
+}
+
+struct ExecuteRunInputs<'a> {
+    path: &'a str,
+    trace: bool,
+    denied_builtins: HashSet<String>,
+    script_argv: Vec<String>,
+    skill_dirs_raw: Vec<String>,
+    llm_mock_mode: CliLlmMockMode,
+    attestation: Option<RunAttestationOptions>,
+    profile: RunProfileOptions,
+    interrupt_tokens: Option<RunInterruptTokens>,
+}
+
 /// Captured outcome of an in-process `execute_run` invocation. Tests use this
 /// instead of spawning the `harn` binary; the binary entry point translates
 /// it into real stdout/stderr writes + `process::exit`.
@@ -341,10 +359,10 @@ pub(crate) async fn run_file_with_skill_dirs(
     profile: RunProfileOptions,
 ) {
     // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
-    let cancelled = install_signal_shutdown_handler();
+    let interrupt_tokens = install_signal_shutdown_handler();
 
     let _stdout_passthrough = StdoutPassthroughGuard::enable();
-    let outcome = execute_run(
+    let outcome = execute_run_inner(ExecuteRunInputs {
         path,
         trace,
         denied_builtins,
@@ -353,7 +371,8 @@ pub(crate) async fn run_file_with_skill_dirs(
         llm_mock_mode,
         attestation,
         profile,
-    )
+        interrupt_tokens: Some(interrupt_tokens.clone()),
+    })
     .await;
 
     // `harn run` streams normal program stdout during execution. Any stdout
@@ -366,7 +385,7 @@ pub(crate) async fn run_file_with_skill_dirs(
     }
 
     let mut exit_code = outcome.exit_code;
-    if exit_code != 0 && cancelled.load(Ordering::SeqCst) {
+    if exit_code != 0 && interrupt_tokens.cancel_token.load(Ordering::SeqCst) {
         exit_code = 124;
     }
     if exit_code != 0 {
@@ -424,33 +443,58 @@ impl Drop for StdoutPassthroughGuard {
     }
 }
 
-fn install_signal_shutdown_handler() -> Arc<AtomicBool> {
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let cancelled_clone = cancelled.clone();
+fn install_signal_shutdown_handler() -> RunInterruptTokens {
+    let tokens = RunInterruptTokens {
+        cancel_token: Arc::new(AtomicBool::new(false)),
+        signal_token: Arc::new(Mutex::new(None)),
+    };
+    let tokens_clone = tokens.clone();
     tokio::spawn(async move {
         #[cfg(unix)]
         {
             use tokio::signal::unix::{signal, SignalKind};
             let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler");
             let mut sigint = signal(SignalKind::interrupt()).expect("SIGINT handler");
-            tokio::select! {
-                _ = sigterm.recv() => {},
-                _ = sigint.recv() => {},
+            let mut sighup = signal(SignalKind::hangup()).expect("SIGHUP handler");
+            let mut seen_signal = false;
+            loop {
+                let signal_name = tokio::select! {
+                    _ = sigterm.recv() => "SIGTERM",
+                    _ = sigint.recv() => "SIGINT",
+                    _ = sighup.recv() => "SIGHUP",
+                };
+                if seen_signal {
+                    eprintln!("[harn] second signal received, terminating");
+                    process::exit(124);
+                }
+                seen_signal = true;
+                request_vm_interrupt(&tokens_clone, signal_name);
+                eprintln!("[harn] signal received, interrupting VM...");
             }
-            cancelled_clone.store(true, Ordering::SeqCst);
-            eprintln!("[harn] signal received, flushing state...");
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            process::exit(124);
         }
         #[cfg(not(unix))]
         {
-            let _ = tokio::signal::ctrl_c().await;
-            cancelled_clone.store(true, Ordering::SeqCst);
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            process::exit(124);
+            let mut seen_signal = false;
+            loop {
+                let _ = tokio::signal::ctrl_c().await;
+                if seen_signal {
+                    eprintln!("[harn] second signal received, terminating");
+                    process::exit(124);
+                }
+                seen_signal = true;
+                request_vm_interrupt(&tokens_clone, "SIGINT");
+                eprintln!("[harn] signal received, interrupting VM...");
+            }
         }
     });
-    cancelled
+    tokens
+}
+
+fn request_vm_interrupt(tokens: &RunInterruptTokens, signal_name: &str) {
+    if let Ok(mut signal) = tokens.signal_token.lock() {
+        *signal = Some(signal_name.to_string());
+    }
+    tokens.cancel_token.store(true, Ordering::SeqCst);
 }
 
 /// In-process equivalent of `run_file_with_skill_dirs`. Returns the captured
@@ -468,6 +512,33 @@ pub async fn execute_run(
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
 ) -> RunOutcome {
+    execute_run_inner(ExecuteRunInputs {
+        path,
+        trace,
+        denied_builtins,
+        script_argv,
+        skill_dirs_raw,
+        llm_mock_mode,
+        attestation,
+        profile,
+        interrupt_tokens: None,
+    })
+    .await
+}
+
+async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
+    let ExecuteRunInputs {
+        path,
+        trace,
+        denied_builtins,
+        script_argv,
+        skill_dirs_raw,
+        llm_mock_mode,
+        attestation,
+        profile,
+        interrupt_tokens,
+    } = inputs;
+
     let mut stderr = String::new();
     let mut stdout = String::new();
 
@@ -518,6 +589,10 @@ pub async fn execute_run(
     }
 
     let mut vm = harn_vm::Vm::new();
+    if let Some(interrupt_tokens) = interrupt_tokens {
+        vm.install_interrupt_signal_token(interrupt_tokens.signal_token);
+        vm.install_cancel_token(interrupt_tokens.cancel_token);
+    }
     harn_vm::register_vm_stdlib(&mut vm);
     crate::install_default_hostlib(&mut vm);
     let source_parent = std::path::Path::new(path)

@@ -165,6 +165,25 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_STRING,
     ),
+    BuiltinSignature::simple("__signal_interrupted", &[], TY_BOOL),
+    BuiltinSignature::simple(
+        "__signal_off_interrupt",
+        &[Param::new("handle", TY_ANY)],
+        TY_NIL,
+    ),
+    BuiltinSignature::simple(
+        "__signal_on_interrupt",
+        &[
+            Param::new("handler", TY_CLOSURE),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "__signal_raise",
+        &[Param::optional("signal", TY_STRING)],
+        TY_NIL,
+    ),
     BuiltinSignature::simple(
         "__waitpoint_cancel",
         &[

@@ -233,6 +233,16 @@ impl Vm {
         self.cancel_grace_instructions_remaining = None;
     }
 
+    /// Install a host signal token paired with the cancellation token. Hosts set
+    /// it to `SIGINT`, `SIGTERM`, or `SIGHUP` before flipping cancellation so
+    /// `std/signal` handlers can match the actual process signal.
+    pub fn install_interrupt_signal_token(
+        &mut self,
+        token: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    ) {
+        self.interrupt_signal_token = Some(token);
+    }
+
     /// Signal cooperative cancellation on this VM — the step loop
     /// unwinds on its next instruction check. Lazily allocates a
     /// fresh token when none is installed so hosts don't need to
@@ -349,14 +359,14 @@ impl Vm {
     /// cleanup ops emitted at line 0 after branch/loop exits — keeps
     /// the debugger aligned with what's actually going to run.
     pub async fn step_execute(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
-        // Cooperative cancellation (#108): the DAP adapter flips the
-        // shared flag when the IDE presses the Stop pill. Check here
-        // before any instruction work so the loop unwinds promptly
-        // on the next tick.
+        // Cooperative cancellation and std/signal interrupts are both
+        // observed before instruction work so debug stepping exits promptly.
+        if let Some(err) = self.pending_scope_interrupt().await {
+            return Err(err);
+        }
         if self.is_cancel_requested() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "kind:cancelled:VM cancelled by host",
-            ))));
+            self.cancel_spawned_tasks();
+            return Err(Self::cancelled_error());
         }
         let current_line = self.upcoming_line();
         let line_changed = current_line != self.last_line && current_line > 0;

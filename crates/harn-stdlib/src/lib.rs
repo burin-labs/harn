@@ -110,6 +110,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_command.harn"),
     },
     StdlibSource {
+        module: "signal",
+        source: include_str!("stdlib/stdlib_signal.harn"),
+    },
+    StdlibSource {
         module: "review",
         source: include_str!("stdlib/stdlib_review.harn"),
     },
@@ -940,6 +944,22 @@ mod tests {
             !exports.contains("retry_with_backoff"),
             "std/async should not retain the old retry_with_backoff export"
         );
+    }
+
+    #[test]
+    fn signal_stdlib_module_exports_interrupt_helpers() {
+        let exports = public_functions_for_module("signal")
+            .into_iter()
+            .map(|function| function.name)
+            .collect::<BTreeSet<_>>();
+        for name in [
+            "on_interrupt",
+            "off_interrupt",
+            "interrupted",
+            "with_interrupt",
+        ] {
+            assert!(exports.contains(name), "std/signal should export {name}");
+        }
     }
 
     #[test]

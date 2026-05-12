@@ -462,6 +462,9 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-vm/src/triggers/worker_queue.rs"
   "crates/harn-vm/src/trust_graph.rs"
   "crates/harn-vm/src/vm/execution.rs"
+  # std/signal interrupt handler deadlines share the VM's existing monotonic
+  # deadline mechanism until the broader Clock-injection cleanup reaches vm/.
+  "crates/harn-vm/src/vm/interrupts.rs"
   "crates/harn-vm/src/vm/iter.rs"
   "crates/harn-vm/src/vm/ops/parallel.rs"
   "crates/harn-vm/src/waitpoints.rs"
