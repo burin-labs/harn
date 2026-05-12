@@ -664,11 +664,12 @@ let step = command_step("verify package", ["cargo", "test", "-p", "harn-vm"], {
 
 ### std/tui
 
-Terminal presentation helpers for interactive scripts:
+Terminal presentation and picker helpers for interactive scripts:
 
 | Function | Description |
 |---|---|
 | `page(opts)` | Show a text or markdown artifact through `$PAGER` when stdout is a TTY; otherwise print the full artifact and footer. Returns `{ok, paged, error?}` |
+| `select_from(items, opts?)` | Show a picker over `items` and return `{ok, value, status}`. Auto-detects `fzf` then `gum choose` and falls back to a numbered `read_line` menu when neither is available or stdout is not a TTY |
 | `terminal_width(default_width?)` | Return the current terminal width, falling back to `default_width` or 80 |
 | `rule(char?, width?)` | Return `char` repeated to `width`, or to the terminal width when width is omitted |
 | `clear()` | Write the ANSI clear-screen sequence to stdout |
@@ -689,6 +690,45 @@ let result = page({
 })
 if !result.ok {
   eprintln(result.error ?? "pager failed")
+}
+```
+
+`select_from` accepts:
+
+- `prompt` — header shown above the menu / passed to fzf's `--prompt`.
+- `display` — `fn(item) -> string` rendering each row. Default reads
+  `label` / `title` / `name` / `headline` on dicts and falls through
+  to `to_string`.
+- `preview` — `fn(item) -> string` rendered into fzf's preview pane.
+  The numbered fallback ignores it.
+- `multi` — `true` returns a list of items; `false` (default) returns
+  one. Numbered fallback accepts comma-separated 1-based indices.
+- `default_index` — 0-based index to use when the operator hits Enter
+  on an empty line. The numbered menu marks it with a leading `*`.
+- `cancel_value` — value returned in `value` when the operator
+  cancels (Ctrl+C, Esc, `q`, `/exit`). Defaults to `nil`.
+- `prefer_external` — `"auto"` (default), `"fzf"`, `"gum"`, or
+  `"none"`. Use `"none"` in scripted tests to force the numbered
+  fallback so `mock_stdin` drives the run.
+- `header` — extra banner shown above the menu / passed via
+  `--header`.
+
+Return shape: `{ok: bool, value: any | list<any>, status: string,
+error?: string}`. `status` is `"selected"`, `"cancelled"`, `"eof"`,
+or `"error"`. On errors the `error` field carries a one-line message
+describing what went wrong; the value is `opts.cancel_value` (or
+`nil`).
+
+```harn,ignore
+import { select_from } from "std/tui"
+
+let runs = [
+  {id: "r-001", label: "r-001 — 2 PRs queued"},
+  {id: "r-002", label: "r-002 — verification flake"},
+]
+let pick = select_from(runs, {prompt: "Pick a run", default_index: 0})
+if pick.ok {
+  println("operator chose " + pick.value.id)
 }
 ```
 

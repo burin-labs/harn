@@ -240,6 +240,12 @@ let result = page({title: "Audit", body: markdown, format: "markdown"})
 falls back to full print output when stdout is not interactive or the pager is
 missing, and returns `{ok, paged, error?}`.
 
+For interactive pickers, the same module exports
+`select_from(items, opts?)` so harness scripts stop hand-rolling
+`fzf` / `gum choose` detection. It returns `{ok, value, status}`,
+auto-detects fzf then gum then falls back to a numbered `read_line`
+menu, and honors `mock_stdin` under `prefer_external: "none"`.
+
 ## Time, sleep, monotonic clock
 
 - `now_ms()` — wall-clock millis since UNIX_EPOCH (`int`).

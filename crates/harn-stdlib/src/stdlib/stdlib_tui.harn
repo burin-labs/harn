@@ -1,4 +1,17 @@
-/** std/tui - terminal presentation helpers for interactive scripts. */
+// std/tui — terminal presentation helpers for interactive scripts.
+//
+// Two complementary surfaces:
+//   * `page` / `terminal_width` / `rule` / `clear` for rendering long
+//     artifacts and chrome.
+//   * `select_from(items, opts?)` for harness-style pickers. Auto-
+//     detects `fzf` and `gum choose` at runtime and falls back to a
+//     numbered `read_line` menu when neither is available, so callers
+//     stop branching on which binary happens to be installed. The
+//     fallback is testable end-to-end with `mock_stdin` / `mock_tty`;
+//     external backends require the controlling terminal so tests
+//     should pass `prefer_external: "none"` to skip the probes.
+import { command_run } from "std/command"
+
 type PageFormat = "text" | "markdown"
 
 type PageOptions = {
@@ -10,6 +23,18 @@ type PageOptions = {
 }
 
 type PageResult = {ok: bool, paged: bool, error?: string}
+
+/** Optional dict passed to `select_from`. */
+type SelectFromOptions = {
+  prompt?: string,
+  display?: any,
+  preview?: any,
+  multi?: bool,
+  default_index?: int,
+  cancel_value?: any,
+  prefer_external?: string,
+  header?: string,
+}
 
 /** page shows a text or markdown artifact through a pager when stdout is interactive. */
 pub fn page(opts: PageOptions) -> PageResult {
@@ -38,4 +63,418 @@ pub fn rule(char = "─", width = nil) -> string {
 /** clear writes the ANSI clear-screen sequence to stdout. */
 pub fn clear() {
   __tui_clear()
+}
+
+let __TUI_CANCEL_TOKENS = ["q", "quit", "/quit", "exit", "/exit", "/cancel"]
+
+let __TUI_LINE_SEP = "\t"
+
+fn __tui_is_callable(value) -> bool {
+  let kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __tui_to_string(value) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return to_string(value)
+}
+
+fn __tui_default_display(item) -> string {
+  if type_of(item) == "dict" {
+    for key in ["label", "title", "name", "headline"] {
+      if item[key] != nil {
+        return __tui_to_string(item[key])
+      }
+    }
+  }
+  return __tui_to_string(item)
+}
+
+fn __tui_sanitize(text: string) -> string {
+  // Backends are line-and-tab-delimited; collapse embedded \r/\n/\t so
+  // each item maps to exactly one row with no field-separator surprises.
+  let no_cr = replace(text, "\r", " ")
+  let no_lf = replace(no_cr, "\n", " ")
+  return replace(no_lf, __TUI_LINE_SEP, " ")
+}
+
+fn __tui_render_label(item, display_fn) -> string {
+  let raw = if display_fn != nil && __tui_is_callable(display_fn) {
+    display_fn(item)
+  } else {
+    __tui_default_display(item)
+  }
+  return __tui_sanitize(__tui_to_string(raw))
+}
+
+fn __tui_render_preview(item, preview_fn) -> string {
+  if preview_fn == nil || !__tui_is_callable(preview_fn) {
+    return ""
+  }
+  let raw = preview_fn(item)
+  if raw == nil {
+    return ""
+  }
+  return __tui_to_string(raw)
+}
+
+fn __tui_result(ok, value, status) -> dict {
+  return {ok: ok, value: value, status: status}
+}
+
+fn __tui_cancelled(opts) -> dict {
+  return __tui_result(false, opts?.cancel_value, "cancelled")
+}
+
+fn __tui_eof(opts) -> dict {
+  return __tui_result(false, opts?.cancel_value, "eof")
+}
+
+fn __tui_error(opts, message: string) -> dict {
+  return {ok: false, value: opts?.cancel_value, status: "error", error: message}
+}
+
+fn __tui_probe(binary: string) -> bool {
+  let probed = try {
+    command_run({argv: [binary, "--version"]}, {capture: {max_inline_bytes: 256}})
+  }
+  if !is_ok(probed) {
+    return false
+  }
+  let result = unwrap(probed)
+  return result?.exit_code == 0
+}
+
+fn __tui_pick_backend(prefer: string) -> string {
+  if prefer == "fzf" || prefer == "gum" || prefer == "none" {
+    return prefer
+  }
+  // "auto": only consider external pickers when stdout is a real
+  // terminal — they draw their UI over /dev/tty and can't render into
+  // captured pipes. Tests can force a backend via `prefer_external`.
+  if !is_stdout_tty() {
+    return "numbered"
+  }
+  if __tui_probe("fzf") {
+    return "fzf"
+  }
+  if __tui_probe("gum") {
+    return "gum"
+  }
+  return "numbered"
+}
+
+fn __tui_parse_index(token: string, len_items: int) -> any {
+  let trimmed = trim(token)
+  if trimmed == "" {
+    return nil
+  }
+  let parsed = to_int(trimmed)
+  if parsed == nil {
+    return nil
+  }
+  // Numbered display is 1-based to humans; map back to a 0-based index.
+  let zero_based = parsed - 1
+  if zero_based < 0 || zero_based >= len_items {
+    return nil
+  }
+  return zero_based
+}
+
+fn __tui_parse_multi(line: string, len_items: int) -> any {
+  var selected = []
+  var seen = {}
+  for piece in split(line, ",") {
+    let idx = __tui_parse_index(piece, len_items)
+    if idx == nil {
+      return nil
+    }
+    if seen[to_string(idx)] == nil {
+      seen = seen + {[to_string(idx)]: true}
+      selected = selected + [idx]
+    }
+  }
+  if len(selected) == 0 {
+    return nil
+  }
+  return selected
+}
+
+fn __tui_print_menu(items, labels: list<string>, opts) {
+  let prompt = opts?.prompt ?? "Select"
+  let header = opts?.header
+  if header != nil && trim(__tui_to_string(header)) != "" {
+    println(__tui_to_string(header))
+  }
+  var idx = 0
+  for label in labels {
+    let human = idx + 1
+    let marker = if opts?.default_index == idx {
+      " *"
+    } else {
+      "  "
+    }
+    println(to_string(human) + ")" + marker + label)
+    idx = idx + 1
+  }
+  let multi = opts?.multi ?? false
+  let hint = if multi {
+    " (comma-separated; blank=cancel; q to exit)"
+  } else {
+    " (1-" + to_string(len(items)) + "; q to exit)"
+  }
+  print(__tui_to_string(prompt) + hint + "> ")
+}
+
+fn __tui_numbered_pick(items, labels, opts) -> dict {
+  __tui_print_menu(items, labels, opts)
+  let line_raw = read_line()
+  if line_raw == nil {
+    return __tui_eof(opts)
+  }
+  let line = trim(line_raw)
+  if contains(__TUI_CANCEL_TOKENS, lowercase(line)) {
+    return __tui_cancelled(opts)
+  }
+  let multi = opts?.multi ?? false
+  if line == "" {
+    if opts?.default_index != nil && opts.default_index >= 0 && opts.default_index < len(items) {
+      let chosen = items[opts.default_index]
+      let value = if multi {
+        [chosen]
+      } else {
+        chosen
+      }
+      return __tui_result(true, value, "selected")
+    }
+    return __tui_cancelled(opts)
+  }
+  if multi {
+    let indices = __tui_parse_multi(line, len(items))
+    if indices == nil {
+      return __tui_error(opts, "invalid selection: " + line_raw)
+    }
+    var picked = []
+    for i in indices {
+      picked = picked + [items[i]]
+    }
+    return __tui_result(true, picked, "selected")
+  }
+  let idx = __tui_parse_index(line, len(items))
+  if idx == nil {
+    return __tui_error(opts, "invalid selection: " + line_raw)
+  }
+  return __tui_result(true, items[idx], "selected")
+}
+
+fn __tui_join_stdin(labels: list<string>) -> string {
+  var lines = []
+  var idx = 0
+  for label in labels {
+    // Encode rows as "<idx>\t<label>" so we can recover the original
+    // item after fzf prints the chosen line back. fzf treats this as a
+    // single column when `--with-nth=2..` is set.
+    lines = lines + [to_string(idx) + __TUI_LINE_SEP + label]
+    idx = idx + 1
+  }
+  return join(lines, "\n") + "\n"
+}
+
+fn __tui_preview_setup(items, preview_fn) -> dict {
+  if preview_fn == nil || !__tui_is_callable(preview_fn) {
+    return {dir: nil, args: []}
+  }
+  let dir = temp_dir() + "/harn-tui-" + uuid_v7()
+  mkdir(dir)
+  var idx = 0
+  for item in items {
+    write_file(dir + "/" + to_string(idx) + ".txt", __tui_render_preview(item, preview_fn))
+    idx = idx + 1
+  }
+  // fzf evaluates `--preview` through the host shell — `cmd.exe` on
+  // Windows, `sh` elsewhere — so the read command has to match.
+  let reader = if platform() == "windows" {
+    "type"
+  } else {
+    "cat"
+  }
+  return {dir: dir, args: ["--preview", reader + " " + dir + "/{1}.txt"]}
+}
+
+fn __tui_preview_cleanup(dir) {
+  if dir == nil {
+    return
+  }
+  let _ = try {
+    delete_file(dir)
+  }
+}
+
+fn __tui_lookup_by_index(items, label_line: string) -> any {
+  let parts = split(label_line, __TUI_LINE_SEP)
+  if len(parts) < 1 {
+    return nil
+  }
+  let idx = to_int(trim(parts[0]))
+  if idx == nil || idx < 0 || idx >= len(items) {
+    return nil
+  }
+  return items[idx]
+}
+
+fn __tui_fzf_decode(items, body: string, multi: bool, opts) -> dict {
+  let lines = split(body, "\n")
+  if multi {
+    var picked = []
+    for raw in lines {
+      let item = __tui_lookup_by_index(items, raw)
+      if item != nil {
+        picked = picked + [item]
+      }
+    }
+    if len(picked) == 0 {
+      return __tui_cancelled(opts)
+    }
+    return __tui_result(true, picked, "selected")
+  }
+  let chosen = __tui_lookup_by_index(items, lines[0])
+  if chosen == nil {
+    return __tui_error(opts, "fzf returned unparseable selection: " + lines[0])
+  }
+  return __tui_result(true, chosen, "selected")
+}
+
+fn __tui_fzf_pick(items, labels, opts) -> dict {
+  let stdin = __tui_join_stdin(labels)
+  let prompt = __tui_to_string(opts?.prompt ?? "Select> ")
+  let header = opts?.header
+  let multi = opts?.multi ?? false
+  var argv = [
+    "fzf",
+    "--ansi",
+    "--no-sort",
+    "--delimiter=" + __TUI_LINE_SEP,
+    "--with-nth=2..",
+    "--prompt=" + prompt,
+  ]
+  if header != nil && trim(__tui_to_string(header)) != "" {
+    argv = argv + ["--header=" + __tui_to_string(header)]
+  }
+  if multi {
+    argv = argv + ["-m"]
+  }
+  let preview = __tui_preview_setup(items, opts?.preview)
+  argv = argv + preview.args
+  let result = command_run({argv: argv}, {stdin: stdin, capture: {max_inline_bytes: 1048576}})
+  __tui_preview_cleanup(preview.dir)
+  if result.exit_code == 130 {
+    return __tui_cancelled(opts)
+  }
+  if !result.success {
+    return __tui_error(opts, "fzf exited with code " + to_string(result.exit_code))
+  }
+  let body = trim(result.stdout ?? "")
+  if body == "" {
+    return __tui_cancelled(opts)
+  }
+  return __tui_fzf_decode(items, body, multi, opts)
+}
+
+fn __tui_gum_pick(items, labels, opts) -> dict {
+  let stdin = join(labels, "\n") + "\n"
+  let header = __tui_to_string(opts?.header ?? opts?.prompt ?? "Select")
+  var argv = ["gum", "choose", "--header", header]
+  if opts?.multi ?? false {
+    argv = argv + ["--no-limit"]
+  }
+  let result = command_run({argv: argv}, {stdin: stdin, capture: {max_inline_bytes: 1048576}})
+  if !result.success {
+    return __tui_cancelled(opts)
+  }
+  let body = trim(result.stdout ?? "")
+  if body == "" {
+    return __tui_cancelled(opts)
+  }
+  let chosen_labels = split(body, "\n")
+  // gum echoes the label back unchanged; map labels → items by position
+  // so duplicate labels still resolve deterministically (first match).
+  var label_index = {}
+  var i = 0
+  for label in labels {
+    if label_index[label] == nil {
+      label_index = label_index + {[label]: i}
+    }
+    i = i + 1
+  }
+  if opts?.multi ?? false {
+    var picked = []
+    for raw in chosen_labels {
+      let idx = label_index[raw]
+      if idx != nil {
+        picked = picked + [items[idx]]
+      }
+    }
+    if len(picked) == 0 {
+      return __tui_cancelled(opts)
+    }
+    return __tui_result(true, picked, "selected")
+  }
+  let idx = label_index[chosen_labels[0]]
+  if idx == nil {
+    return __tui_error(opts, "gum returned unknown label: " + chosen_labels[0])
+  }
+  return __tui_result(true, items[idx], "selected")
+}
+
+/**
+ * Present `items` as a picker and return `{ok, value, status}`.
+ *
+ * `value` is the chosen item (or list of items when `multi: true`).
+ * `status` is `"selected"`, `"cancelled"`, `"eof"`, or `"error"`. On a
+ * non-selected outcome, `value` is `opts.cancel_value` (defaults to
+ * `nil`); on `"error"`, an `error` string field is also present.
+ *
+ * `display` and `preview` are optional `fn(item) -> string` callbacks.
+ * The default `display` walks `label` / `title` / `name` / `headline`
+ * on dicts and falls back to `to_string(item)`.
+ *
+ * `prefer_external` accepts `"auto"` (default), `"fzf"`, `"gum"`, or
+ * `"none"`. `"auto"` probes fzf then gum then falls back to the
+ * numbered menu (and short-circuits to numbered when stdout is not a
+ * TTY, so harness tests with `mock_stdin` keep working).
+ */
+pub fn select_from(items: list, opts: SelectFromOptions = {}) -> dict {
+  let options = opts ?? {}
+  if type_of(items) != "list" || len(items) == 0 {
+    return __tui_error(options, "select_from: items must be a non-empty list")
+  }
+  let prefer = __tui_to_string(options?.prefer_external ?? "auto")
+  if prefer != "auto" && prefer != "fzf" && prefer != "gum" && prefer != "none" {
+    return __tui_error(options, "select_from: prefer_external must be auto/fzf/gum/none (got " + prefer + ")")
+  }
+  let display_fn = options.display
+  if display_fn != nil && !__tui_is_callable(display_fn) {
+    return __tui_error(options, "select_from: display must be a function")
+  }
+  if options.preview != nil && !__tui_is_callable(options.preview) {
+    return __tui_error(options, "select_from: preview must be a function")
+  }
+  var labels = []
+  for item in items {
+    labels = labels + [__tui_render_label(item, display_fn)]
+  }
+  let backend = if prefer == "none" {
+    "numbered"
+  } else {
+    __tui_pick_backend(prefer)
+  }
+  if backend == "fzf" {
+    return __tui_fzf_pick(items, labels, options)
+  }
+  if backend == "gum" {
+    return __tui_gum_pick(items, labels, options)
+  }
+  return __tui_numbered_pick(items, labels, options)
 }

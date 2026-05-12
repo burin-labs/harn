@@ -10,6 +10,16 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **`std/tui::select_from` picker (#1544).** Added
+  `select_from(items, opts?)` to `std/tui` so harness scripts stop
+  hand-rolling fzf detection plus numbered-menu fallbacks. The picker
+  auto-detects `fzf` then `gum choose` at runtime, falls back to a
+  numbered `read_line` menu (which `mock_stdin` can drive in tests),
+  and always returns a stable `{ok, value, status}` envelope. Supports
+  `multi: true`, `default_index`, `cancel_value`, per-item `display`
+  and `preview` callbacks, and
+  `prefer_external: "auto" | "fzf" | "gum" | "none"` for forcing a
+  backend.
 - **JSONL-seeded agent sessions (#1546).** Added
   `agent_session_seed_from_jsonl(path, opts?)` to create a new
   first-class session from replayable `llm_transcript.jsonl` sidecars.
@@ -39,6 +49,17 @@ condensed series summaries instead of full per-patch history.
   loop, and `agent_session_close(id, status?)` records an
   `agent_session_closed` event before evicting the session so timeout and
   interruption closes are visible in event logs.
+
+### Fixed
+
+- **Tail-call inside `for` loops leaked iterator state across the
+  caller.** `return f(...)` from inside a `for x in xs { ... }` body
+  is tail-call-optimized, but the new frame was capturing the current
+  iterator depth instead of the popped frame's depth. The caller's
+  outer iterator then iterated against the inner loop's leaked state,
+  producing extra phantom items. The tail-called frame now inherits
+  the popped frame's `saved_iterator_depth` and the iterator stack is
+  truncated to match.
 
 ## v0.8.11
 
