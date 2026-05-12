@@ -364,6 +364,10 @@ fn test_parses_serve_acp() {
         "alpha,beta",
         "--hmac-secret",
         "shared",
+        "--trace",
+        "--profile",
+        "--profile-json",
+        "profiles/acp.ndjson",
         "agent.harn",
     ]);
 
@@ -375,6 +379,12 @@ fn test_parses_serve_acp() {
     };
     assert_eq!(serve.api_key, vec!["alpha".to_string(), "beta".to_string()]);
     assert_eq!(serve.hmac_secret.as_deref(), Some("shared"));
+    assert!(serve.trace);
+    assert!(serve.profile.text);
+    assert_eq!(
+        serve.profile.json_path.as_deref(),
+        Some(std::path::Path::new("profiles/acp.ndjson"))
+    );
     assert_eq!(serve.file, "agent.harn");
 }
 
@@ -1735,13 +1745,90 @@ fn test_parses_viz_args() {
 
 #[test]
 fn test_parses_bench_args() {
-    let cli = Cli::parse_from(["harn", "bench", "main.harn", "--iterations", "25"]);
+    let cli = Cli::parse_from([
+        "harn",
+        "bench",
+        "main.harn",
+        "--iterations",
+        "25",
+        "--profile",
+        "--profile-json",
+        "bench.json",
+    ]);
 
     let Command::Bench(args) = cli.command.unwrap() else {
         panic!("expected bench command");
     };
     assert_eq!(args.file, "main.harn");
     assert_eq!(args.iterations, 25);
+    assert!(args.profile.text);
+    assert_eq!(
+        args.profile.json_path.as_deref(),
+        Some(std::path::Path::new("bench.json"))
+    );
+}
+
+#[test]
+fn test_profile_env_aliases_apply_to_supported_commands() {
+    let _env = crate::tests::common::env_lock::lock_env().blocking_lock();
+    struct EnvRestore {
+        saved: [(&'static str, Option<String>); 3],
+    }
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (name, value) in self.saved.iter() {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+    let _restore = EnvRestore {
+        saved: [
+            ("HARN_PROFILE", std::env::var("HARN_PROFILE").ok()),
+            ("HARN_PROFILE_JSON", std::env::var("HARN_PROFILE_JSON").ok()),
+            ("HARN_TRACE", std::env::var("HARN_TRACE").ok()),
+        ],
+    };
+    std::env::set_var("HARN_PROFILE", "1");
+    std::env::set_var("HARN_PROFILE_JSON", "env-profile.json");
+    std::env::set_var("HARN_TRACE", "1");
+
+    let run = Cli::parse_from(["harn", "run", "main.harn"]);
+    let Command::Run(run_args) = run.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(run_args.trace);
+    assert!(run_args.profile.text);
+    assert_eq!(
+        run_args.profile.json_path.as_deref(),
+        Some(std::path::Path::new("env-profile.json"))
+    );
+
+    let bench = Cli::parse_from(["harn", "bench", "main.harn"]);
+    let Command::Bench(bench_args) = bench.command.unwrap() else {
+        panic!("expected bench command");
+    };
+    assert!(bench_args.profile.text);
+    assert_eq!(
+        bench_args.profile.json_path.as_deref(),
+        Some(std::path::Path::new("env-profile.json"))
+    );
+
+    let serve = Cli::parse_from(["harn", "serve", "acp", "agent.harn"]);
+    let Command::Serve(serve_args) = serve.command.unwrap() else {
+        panic!("expected serve command");
+    };
+    let crate::cli::ServeCommand::Acp(acp_args) = serve_args.command else {
+        panic!("expected serve acp");
+    };
+    assert!(acp_args.trace);
+    assert!(acp_args.profile.text);
+    assert_eq!(
+        acp_args.profile.json_path.as_deref(),
+        Some(std::path::Path::new("env-profile.json"))
+    );
 }
 
 #[test]

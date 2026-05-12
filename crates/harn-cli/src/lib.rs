@@ -151,10 +151,7 @@ async fn async_main() {
                 receipt_out: args.receipt_out.as_ref().map(PathBuf::from),
                 agent_id: args.attest_agent.clone(),
             });
-            let profile_options = commands::run::RunProfileOptions {
-                text: args.profile,
-                json_path: args.profile_json.as_ref().map(PathBuf::from),
-            };
+            let profile_options = run_profile_options(&args.profile);
 
             match (args.eval.as_deref(), args.file.as_deref()) {
                 (Some(code), None) => {
@@ -754,7 +751,14 @@ async fn async_main() {
             )
         }
         Command::Repl => commands::repl::run_repl().await,
-        Command::Bench(args) => commands::bench::run_bench(&args.file, args.iterations).await,
+        Command::Bench(args) => {
+            commands::bench::run_bench(
+                &args.file,
+                args.iterations,
+                run_profile_options(&args.profile),
+            )
+            .await
+        }
         Command::TestBench(args) => commands::test_bench::run(args.command).await,
         Command::Viz(args) => commands::viz::run_viz(&args.file, args.output.as_deref()),
         Command::Install(args) => package::install_packages(
@@ -1034,6 +1038,13 @@ async fn async_main() {
         Command::DumpProtocolArtifacts(args) => {
             commands::dump_protocol_artifacts::run(&args.output_dir, args.check);
         }
+    }
+}
+
+fn run_profile_options(args: &cli::ProfileArgs) -> commands::run::RunProfileOptions {
+    commands::run::RunProfileOptions {
+        text: args.text,
+        json_path: args.json_path.clone(),
     }
 }
 

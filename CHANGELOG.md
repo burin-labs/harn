@@ -10,6 +10,12 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Profiling for ACP and benchmark workflows (#1559).** `harn serve acp` now
+  supports `--profile`, `--profile-json`, and `--trace`, with
+  `HARN_PROFILE`, `HARN_PROFILE_JSON`, and `HARN_TRACE` aliases. ACP profile
+  JSON is appended as one NDJSON object per prompt turn. `harn bench` now shares
+  the profile flags, reports p50/p95/stddev wall-time stats, and can write a
+  JSON benchmark report with per-iteration profile rollups.
 - **`std/tui::select_from` picker (#1544).** Added
   `select_from(items, opts?)` to `std/tui` so harness scripts stop
   hand-rolling fzf detection plus numbered-menu fallbacks. The picker

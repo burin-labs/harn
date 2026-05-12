@@ -41,6 +41,7 @@ use sessions::{
 pub use transport::{run_acp_channel_server, run_acp_server};
 
 use std::collections::{BTreeMap, HashMap};
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -66,6 +67,37 @@ use io::send_json_response;
 
 const ACP_AUTH_REQUIRED_CODE: i64 = -32000;
 
+fn append_profile_json_line(
+    path: &std::path::Path,
+    session_id: &str,
+    turn: u64,
+    rollup: &harn_vm::profile::RunProfile,
+) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "failed to create profile directory {}: {error}",
+                    parent.display()
+                )
+            })?;
+        }
+    }
+    let line = serde_json::to_string(&serde_json::json!({
+        "turn": turn,
+        "session_id": session_id,
+        "rollup": rollup,
+    }))
+    .map_err(|error| format!("failed to serialize profile: {error}"))?;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
+    writeln!(file, "{line}")
+        .map_err(|error| format!("failed to append {}: {error}", path.display()))
+}
+
 #[async_trait(?Send)]
 pub trait AcpRuntimeConfigurator: Send + Sync {
     async fn configure(
@@ -83,6 +115,18 @@ pub struct NoopAcpRuntimeConfigurator;
 #[async_trait(?Send)]
 impl AcpRuntimeConfigurator for NoopAcpRuntimeConfigurator {}
 
+#[derive(Clone, Default)]
+pub struct AcpProfileConfig {
+    pub text: bool,
+    pub json_path: Option<PathBuf>,
+}
+
+impl AcpProfileConfig {
+    pub fn is_enabled(&self) -> bool {
+        self.text || self.json_path.is_some()
+    }
+}
+
 #[derive(Clone)]
 pub struct AcpServerConfig {
     pub pipeline: Option<String>,
@@ -90,6 +134,7 @@ pub struct AcpServerConfig {
     pub runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
     pub llm_config_overrides: Option<harn_vm::llm_config::ProvidersConfig>,
     pub llm_capability_overrides: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
+    pub profile: AcpProfileConfig,
 }
 
 impl AcpServerConfig {
@@ -100,6 +145,7 @@ impl AcpServerConfig {
             runtime_configurator: Arc::new(NoopAcpRuntimeConfigurator),
             llm_config_overrides: None,
             llm_capability_overrides: None,
+            profile: AcpProfileConfig::default(),
         }
     }
 
@@ -127,6 +173,11 @@ impl AcpServerConfig {
     ) -> Self {
         self.llm_config_overrides = llm_config;
         self.llm_capability_overrides = llm_capabilities;
+        self
+    }
+
+    pub fn with_profile(mut self, profile: AcpProfileConfig) -> Self {
+        self.profile = profile;
         self
     }
 }
@@ -170,6 +221,8 @@ pub struct AcpServer {
     /// Compiled-pipeline cache. One slot — the ACP server runs a single
     /// pipeline file for its lifetime, so we only ever cache one chunk.
     compile_cache: Option<CompileCacheEntry>,
+    /// Per-turn profile emission settings.
+    profile: AcpProfileConfig,
 }
 
 impl AcpServer {
@@ -198,6 +251,7 @@ impl AcpServer {
             session_cancellations: Arc::new(std::sync::Mutex::new(HashMap::new())),
             output,
             compile_cache: None,
+            profile: config.profile,
         }
     }
 
@@ -462,6 +516,7 @@ impl AcpServer {
                 info,
                 advertised_commands: Vec::new(),
                 current_mode_id: modes::DEFAULT_MODE_ID.to_string(),
+                profile_turn: 0,
             },
         );
         harn_vm::agent_sessions::open_or_create(Some(session_id));
@@ -555,6 +610,35 @@ impl AcpServer {
                 "update": update,
             }),
         );
+    }
+
+    fn begin_profile_turn(&mut self, session_id: &str) -> u64 {
+        if !self.profile.is_enabled() {
+            return 0;
+        }
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return 0;
+        };
+        session.profile_turn += 1;
+        harn_vm::tracing::set_tracing_enabled(true);
+        session.profile_turn
+    }
+
+    fn finish_profile_turn(&self, session_id: &str, turn: u64) {
+        if turn == 0 || !self.profile.is_enabled() {
+            return;
+        }
+        let spans = harn_vm::tracing::take_spans();
+        let rollup = harn_vm::profile::build(&spans);
+        if self.profile.text {
+            eprintln!("[harn] ACP profile session={session_id} turn={turn}");
+            eprint!("{}", harn_vm::profile::render(&rollup));
+        }
+        if let Some(path) = self.profile.json_path.as_ref() {
+            if let Err(error) = append_profile_json_line(path, session_id, turn, &rollup) {
+                eprintln!("warning: failed to write ACP profile: {error}");
+            }
+        }
     }
 
     fn handle_session_fork(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
@@ -651,6 +735,7 @@ impl AcpServer {
                 info: info.clone(),
                 advertised_commands: Vec::new(),
                 current_mode_id: parent_mode_id.clone(),
+                profile_turn: 0,
             },
         );
         self.emit_session_info_update(&new_session_id, &info);
@@ -850,6 +935,7 @@ impl AcpServer {
             session.host_bridge = Some(host_bridge.clone());
         }
 
+        let profile_turn = self.begin_profile_turn(&session_id);
         let id_owned = id.clone();
         let send_output = self.output.clone();
         let _mode_guard = modes::ModePolicyGuard::enter(&current_mode_id);
@@ -868,6 +954,7 @@ impl AcpServer {
             self.runtime_configurator.clone(),
         )
         .await;
+        self.finish_profile_turn(&session_id, profile_turn);
         drop(_mode_guard);
         if let Some(session) = self.sessions.get_mut(&session_id) {
             session.host_bridge = None;

@@ -353,6 +353,8 @@ pub fn reset_thread_local_state() {
     triggers::clear_dispatcher_state();
     triggers::clear_trigger_registry();
     events::reset_event_sinks();
+    tracing::set_tracing_enabled(false);
+    tracing::reset_tracing();
     agent_events::reset_all_sinks();
     agent_sessions::reset_session_store();
     mcp_registry::reset();

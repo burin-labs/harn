@@ -1020,7 +1020,7 @@ pub(crate) async fn connect_mcp_servers(
     }
 }
 
-fn render_trace_summary() -> String {
+pub(crate) fn render_trace_summary() -> String {
     use std::fmt::Write;
     let entries = harn_vm::llm::take_trace();
     if entries.is_empty() {
