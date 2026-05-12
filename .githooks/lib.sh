@@ -17,6 +17,40 @@ hook_paths_match() {
   [ -s "$file_list" ] && grep -Eq "$pattern" "$file_list"
 }
 
+# Resolve the workspace target dir, matching the logic in
+# scripts/sign_local_macos.sh. Used by hook_run_harn to find the
+# freshly-built `harn` binary after `cargo build`.
+hook_target_dir() {
+  if [ -n "${HARN_DEV_TARGET_DIR:-}" ]; then
+    printf '%s\n' "$HARN_DEV_TARGET_DIR"
+    return
+  fi
+  if [ -f .cargo/config.toml ]; then
+    awk -F'"' '
+      /^\[build\][[:space:]]*$/ { in_build = 1; next }
+      /^\[/ { in_build = 0 }
+      in_build && /^[[:space:]]*target-dir[[:space:]]*=/ { print $2; exit }
+    ' .cargo/config.toml
+  fi
+}
+
+# Build the workspace `harn` binary and re-apply the local codesign so
+# the freshly re-linked binary keeps its ad-hoc signature — otherwise
+# Gatekeeper shows a multi-second "Verifying 'harn'..." popup the first
+# time the hook execs it. Echoes the path to the signed binary on
+# stdout so hooks can invoke it directly (or via `xargs`); progress
+# output is routed to stderr so command substitution stays clean.
+# Idempotent; safe to call once per hook invocation.
+hook_ensure_harn() {
+  cargo build --quiet --bin harn >&2
+  if [ "$(uname)" = "Darwin" ] && [ -x "scripts/sign_local_macos.sh" ]; then
+    HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh >&2
+  fi
+  target_dir=$(hook_target_dir)
+  target_dir=${target_dir:-target}
+  printf '%s\n' "$target_dir/debug/harn"
+}
+
 hook_write_staged_files() {
   git diff --cached --name-only --diff-filter=ACMR > "$1"
 }

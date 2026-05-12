@@ -66,6 +66,15 @@ count=$(printf '%s\n' "$spec_touching_news" | grep -c .)
 last_sha=$(git rev-parse HEAD 2>/dev/null) || exit 0
 last_touched=$(printf '%s\n' "$spec_touching_news" | tail -n 1)
 
+# Re-apply the local codesign before launching. A pre-commit pass on
+# another commit during this rebase may have re-linked the binary and
+# stripped its ad-hoc signature; without re-signing, macOS blocks for
+# several seconds on a Gatekeeper "Verifying 'harn'..." popup before
+# the silent regen can complete.
+if [ "$(uname)" = "Darwin" ] && [ -x "scripts/sign_local_macos.sh" ]; then
+  HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh >/dev/null 2>&1 || true
+fi
+
 "$harn_bin" run "$sync_script" >/dev/null 2>&1 || exit 0
 
 if git diff --quiet --exit-code -- "$mirror_path"; then

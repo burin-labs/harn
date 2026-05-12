@@ -70,17 +70,24 @@ fi
 
 if hook_paths_match "$changed" "$HOOK_HARN_PATTERN"; then
   hook_write_harn_format_files "$changed" "$harn_format_files"
+  hook_write_harn_lint_files "$changed" "$harn_lint_files"
+  if [ -s "$harn_format_files" ] || [ -s "$harn_lint_files" ]; then
+    # Build + re-codesign once so the freshly-relinked binary keeps its
+    # ad-hoc signature across both xargs batches; without this, every
+    # cargo-run invocation would strip the signature and trip
+    # Gatekeeper's "Verifying 'harn'..." popup.
+    harn_bin=$(hook_ensure_harn)
+  fi
   if [ -s "$harn_format_files" ]; then
     echo "=== Pre-push: checking affected Harn formatting ==="
-    xargs -0 cargo run --quiet --bin harn -- fmt --check < "$harn_format_files"
+    xargs -0 "$harn_bin" fmt --check < "$harn_format_files"
   else
     echo "=== Pre-push: skipping Harn format check (no format-supported Harn files) ==="
   fi
 
-  hook_write_harn_lint_files "$changed" "$harn_lint_files"
   if [ -s "$harn_lint_files" ]; then
     echo "=== Pre-push: linting affected Harn files ==="
-    xargs -0 cargo run --quiet --bin harn -- lint < "$harn_lint_files"
+    xargs -0 "$harn_bin" lint < "$harn_lint_files"
   else
     echo "=== Pre-push: skipping Harn lint (no lint-supported Harn files) ==="
   fi
