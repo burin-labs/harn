@@ -1,0 +1,17 @@
+{
+  "environment": "cloud",
+  "runtime": "harn-cloud",
+  "source_clock": "harn-cloud",
+  "tenant_id": "tenant-acme",
+  "workspace_id": "workspace-prod",
+  "job_id": "cloud-triage-feed",
+  "workflow_id": "workflow://cloud/start-my-day",
+  "managed_run_id": "cloud-run-42",
+  "queue": "managed.workflow.default",
+  "queue_depth": 4,
+  "priority": "p1",
+  "source_timestamp": "2026-05-11T15:00:10Z",
+  "status_url": "https://cloud.harn.dev/workspaces/workspace-prod/runs/cloud-run-42",
+  "title": "Managed triage feed",
+  "summary": "Cloud managed run is processing the shared triage feed."
+}

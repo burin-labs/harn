@@ -1,0 +1,194 @@
+{
+  "events": [
+    {
+      "kind": "scheduled_job.created",
+      "environment": "local",
+      "runtime": "harn",
+      "tenant_id": "local",
+      "workspace_id": "burin-local",
+      "job_id": "daily-digest",
+      "workflow_id": "workflow://local/start-my-day",
+      "trigger_id": "cron-daily-digest",
+      "binding_id": "cron-daily-digest:v1",
+      "queue": "workflow.default",
+      "queue_depth": 1,
+      "source_timestamp": "2026-05-11T14:00:00Z",
+      "source_url": "harn://local/jobs/daily-digest",
+      "title": "Start My Day digest",
+      "summary": "Scheduled daily digest workflow is registered."
+    },
+    {
+      "kind": "run.queued",
+      "environment": "local",
+      "runtime": "harn",
+      "tenant_id": "local",
+      "workspace_id": "burin-local",
+      "job_id": "daily-digest",
+      "workflow_id": "workflow://local/start-my-day",
+      "trigger_id": "cron-daily-digest",
+      "binding_id": "cron-daily-digest:v1",
+      "run_id": "run-local-digest-001",
+      "event_id": "trigger_evt_digest_001",
+      "queue": "workflow.default",
+      "queue_depth": 2,
+      "source_timestamp": "2026-05-11T14:01:00Z",
+      "summary": "Digest run queued behind one active job."
+    },
+    {
+      "kind": "run.started",
+      "environment": "local",
+      "runtime": "harn",
+      "tenant_id": "local",
+      "workspace_id": "burin-local",
+      "job_id": "daily-digest",
+      "workflow_id": "workflow://local/start-my-day",
+      "run_id": "run-local-digest-001",
+      "queue": "workflow.default",
+      "queue_depth": 1,
+      "source_timestamp": "2026-05-11T14:01:10Z",
+      "summary": "Digest run started."
+    },
+    {
+      "kind": "approval.requested",
+      "environment": "local",
+      "runtime": "harn",
+      "tenant_id": "local",
+      "workspace_id": "burin-local",
+      "job_id": "daily-digest",
+      "workflow_id": "workflow://local/start-my-day",
+      "run_id": "run-local-digest-001",
+      "source_timestamp": "2026-05-11T14:01:20Z",
+      "summary": "Digest wants to send a Slack follow-up.",
+      "approval": {
+        "request_id": "approval-digest-send-slack",
+        "status": "requested",
+        "requested_at": "2026-05-11T14:01:20Z",
+        "summary": "Send the drafted Slack follow-up."
+      }
+    },
+    {
+      "kind": "approval.approved",
+      "environment": "local",
+      "runtime": "harn",
+      "tenant_id": "local",
+      "workspace_id": "burin-local",
+      "job_id": "daily-digest",
+      "workflow_id": "workflow://local/start-my-day",
+      "run_id": "run-local-digest-001",
+      "source_timestamp": "2026-05-11T14:02:00Z",
+      "summary": "Operator approved the Slack follow-up.",
+      "approval": {
+        "request_id": "approval-digest-send-slack",
+        "status": "approved",
+        "requested_at": "2026-05-11T14:01:20Z",
+        "decided_at": "2026-05-11T14:02:00Z",
+        "reviewer": "operator",
+        "summary": "Send the drafted Slack follow-up."
+      }
+    },
+    {
+      "kind": "run.succeeded",
+      "environment": "local",
+      "runtime": "harn",
+      "tenant_id": "local",
+      "workspace_id": "burin-local",
+      "job_id": "daily-digest",
+      "workflow_id": "workflow://local/start-my-day",
+      "run_id": "run-local-digest-001",
+      "queue": "workflow.default",
+      "queue_depth": 0,
+      "source_timestamp": "2026-05-11T14:03:00Z",
+      "summary": "Digest finished with three triage cards.",
+      "result": {"cards": 3, "messages_sent": 1}
+    },
+    {
+      "kind": "receipt.available",
+      "environment": "local",
+      "runtime": "harn",
+      "tenant_id": "local",
+      "workspace_id": "burin-local",
+      "job_id": "daily-digest",
+      "workflow_id": "workflow://local/start-my-day",
+      "run_id": "run-local-digest-001",
+      "source_timestamp": "2026-05-11T14:03:05Z",
+      "summary": "Run receipt is ready.",
+      "receipt_refs": [
+        {
+          "kind": "receipt",
+          "id": "receipt-digest-001",
+          "label": "Digest receipt",
+          "url": "harn://local/receipts/receipt-digest-001"
+        }
+      ]
+    },
+    {
+      "kind": "run.queued",
+      "environment": "local",
+      "runtime": "harn",
+      "tenant_id": "local",
+      "workspace_id": "burin-local",
+      "job_id": "stale-pr-nudger",
+      "workflow_id": "workflow://local/stale-pr-nudger",
+      "run_id": "run-local-stale-pr-001",
+      "queue": "workflow.default",
+      "queue_depth": 1,
+      "source_timestamp": "2026-05-11T14:05:00Z",
+      "summary": "Stale PR nudge run queued."
+    },
+    {
+      "kind": "run.failed",
+      "environment": "local",
+      "runtime": "harn",
+      "tenant_id": "local",
+      "workspace_id": "burin-local",
+      "job_id": "stale-pr-nudger",
+      "workflow_id": "workflow://local/stale-pr-nudger",
+      "run_id": "run-local-stale-pr-001",
+      "queue": "workflow.default",
+      "queue_depth": 0,
+      "source_timestamp": "2026-05-11T14:05:30Z",
+      "summary": "GitHub connector call failed permanently.",
+      "error": "permission_denied"
+    },
+    {
+      "kind": "dlq.created",
+      "environment": "local",
+      "runtime": "harn",
+      "tenant_id": "local",
+      "workspace_id": "burin-local",
+      "job_id": "stale-pr-nudger",
+      "workflow_id": "workflow://local/stale-pr-nudger",
+      "run_id": "run-local-stale-pr-001",
+      "event_id": "trigger_evt_stale_pr_001",
+      "source_timestamp": "2026-05-11T14:05:35Z",
+      "summary": "Stale PR nudge moved to DLQ.",
+      "dlq": {
+        "dlq_id": "dlq-stale-pr-001",
+        "state": "pending",
+        "attempts": 2,
+        "error_class": "permission_denied",
+        "final_error": "GitHub installation token is unavailable."
+      }
+    },
+    {
+      "kind": "replay_fixture.available",
+      "environment": "local",
+      "runtime": "harn",
+      "tenant_id": "local",
+      "workspace_id": "burin-local",
+      "job_id": "stale-pr-nudger",
+      "workflow_id": "workflow://local/stale-pr-nudger",
+      "run_id": "run-local-stale-pr-001",
+      "source_timestamp": "2026-05-11T14:05:40Z",
+      "summary": "Replay fixture is available for the DLQ failure.",
+      "replay_refs": [
+        {
+          "kind": "replay_fixture",
+          "id": "replay-stale-pr-001",
+          "label": "Stale PR replay",
+          "url": "harn://local/replays/replay-stale-pr-001"
+        }
+      ]
+    }
+  ]
+}

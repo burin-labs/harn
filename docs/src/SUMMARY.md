@@ -100,6 +100,7 @@
 - [Orchestrator](./orchestrator.md)
 - [Hot reload](./orchestrator/hot-reload.md)
 - [Orchestrator DLQ management](./orchestrator/dlq.md)
+- [Dashboard job envelopes](./orchestrator/dashboard-jobs.md)
 - [Orchestrator backpressure](./orchestrator/backpressure.md)
 - [Worker dispatch](./orchestrator/worker-dispatch.md)
 - [Orchestrator secrets](./orchestrator/secrets.md)

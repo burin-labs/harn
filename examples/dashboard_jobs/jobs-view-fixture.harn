@@ -1,0 +1,20 @@
+import { dashboard_job_event, dashboard_jobs_view } from "std/dashboard/jobs"
+
+fn fixture(name) {
+  let root = project_root() ?? cwd()
+  return json_parse(read_file(path_join(root, "examples/dashboard_jobs/fixtures/" + name + ".json")))
+}
+
+pipeline default() {
+  let local = fixture("local_job_stream")
+  var events = []
+  for item in local.events {
+    events = events.push(dashboard_job_event(item.kind, item))
+  }
+  events = events.push(dashboard_job_event("run.started", fixture("cloud_managed_run")))
+  let view = dashboard_jobs_view(events, {title: "Jobs", generated_at: "fixture"})
+  for job in view.jobs {
+    println(job.job_id + " " + job.status)
+  }
+  println("jobs=" + to_string(len(view.jobs)))
+}
