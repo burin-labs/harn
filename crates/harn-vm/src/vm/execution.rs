@@ -6,8 +6,13 @@ use crate::value::{ModuleFunctionRegistry, VmError, VmValue};
 
 use super::{CallFrame, LocalSlot, Vm};
 
-const CANCEL_GRACE_INSTRUCTIONS: usize = 1024;
 const CANCEL_GRACE_ASYNC_OP: Duration = Duration::from_millis(250);
+
+#[derive(Clone, Copy)]
+enum DeadlineKind {
+    Scope,
+    InterruptHandler,
+}
 
 impl Vm {
     /// Execute a compiled chunk.
@@ -131,7 +136,7 @@ impl Vm {
         });
 
         loop {
-            if let Some(err) = self.pending_scope_interrupt() {
+            if let Some(err) = self.pending_scope_interrupt().await {
                 match self.handle_error(err) {
                     Ok(None) => continue,
                     Ok(Some(val)) => return Ok(val),
@@ -306,6 +311,20 @@ impl Vm {
     }
 }
 
+fn next_deadline(
+    scope_deadline: Option<Instant>,
+    interrupt_handler_deadline: Option<Instant>,
+) -> (Option<Instant>, Option<DeadlineKind>) {
+    match (scope_deadline, interrupt_handler_deadline) {
+        (Some(scope), Some(interrupt)) if interrupt < scope => {
+            (Some(interrupt), Some(DeadlineKind::InterruptHandler))
+        }
+        (Some(scope), _) => (Some(scope), Some(DeadlineKind::Scope)),
+        (None, Some(interrupt)) => (Some(interrupt), Some(DeadlineKind::InterruptHandler)),
+        (None, None) => (None, None),
+    }
+}
+
 fn step_runtime_error_message(error: &VmError) -> String {
     match error {
         VmError::Thrown(VmValue::Dict(dict)) => dict
@@ -323,7 +342,7 @@ pub(crate) enum StepBoundaryOutcome {
 
 impl crate::vm::Vm {
     pub(crate) async fn execute_one_cycle(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
-        if let Some(err) = self.pending_scope_interrupt() {
+        if let Some(err) = self.pending_scope_interrupt().await {
             match self.handle_error(err) {
                 Ok(None) => return Ok(None),
                 Ok(Some(val)) => return Ok(Some((val, false))),
@@ -397,39 +416,20 @@ impl crate::vm::Vm {
         }
     }
 
-    fn pending_scope_interrupt(&mut self) -> Option<VmError> {
-        if self.is_cancel_requested() {
-            match self.cancel_grace_instructions_remaining.as_mut() {
-                Some(0) => {
-                    self.cancel_spawned_tasks();
-                    return Some(Self::cancelled_error());
-                }
-                Some(remaining) => *remaining -= 1,
-                None => self.cancel_grace_instructions_remaining = Some(CANCEL_GRACE_INSTRUCTIONS),
-            }
-        } else {
-            self.cancel_grace_instructions_remaining = None;
-        }
-        if let Some(&(deadline, _)) = self.deadlines.last() {
-            if Instant::now() >= deadline {
-                self.deadlines.pop();
-                return Some(Self::deadline_exceeded_error());
-            }
-        }
-        None
-    }
-
     async fn execute_op_with_scope_interrupts(
         &mut self,
         op: u8,
     ) -> Result<Option<VmValue>, VmError> {
         enum ScopeInterruptResult {
             Op(Result<Option<VmValue>, VmError>),
-            Deadline,
+            Deadline(DeadlineKind),
             CancelTimedOut,
         }
 
-        let deadline = self.deadlines.last().map(|(deadline, _)| *deadline);
+        let (deadline, deadline_kind) = next_deadline(
+            self.deadlines.last().map(|(deadline, _)| *deadline),
+            self.interrupt_handler_deadline,
+        );
         let cancel_token = self.cancel_token.clone();
 
         if deadline.is_none() && cancel_token.is_none() {
@@ -463,7 +463,9 @@ impl crate::vm::Vm {
             tokio::pin!(op_future);
             tokio::select! {
                 result = &mut op_future => ScopeInterruptResult::Op(result),
-                _ = deadline_sleep, if has_deadline => ScopeInterruptResult::Deadline,
+                _ = deadline_sleep, if has_deadline => {
+                    ScopeInterruptResult::Deadline(deadline_kind.unwrap_or(DeadlineKind::Scope))
+                },
                 _ = cancel_sleep, if has_cancel => {
                     let grace = tokio::time::sleep(CANCEL_GRACE_ASYNC_OP);
                     tokio::pin!(grace);
@@ -477,13 +479,22 @@ impl crate::vm::Vm {
 
         match result {
             ScopeInterruptResult::Op(result) => result,
-            ScopeInterruptResult::Deadline => {
+            ScopeInterruptResult::Deadline(DeadlineKind::Scope) => {
                 self.deadlines.pop();
                 self.cancel_spawned_tasks();
                 Err(Self::deadline_exceeded_error())
             }
+            ScopeInterruptResult::Deadline(DeadlineKind::InterruptHandler) => {
+                Err(Self::interrupt_handler_timeout_error())
+            }
             ScopeInterruptResult::CancelTimedOut => {
                 self.cancel_spawned_tasks();
+                let signal = self
+                    .take_host_interrupt_signal()
+                    .unwrap_or_else(|| "SIGINT".to_string());
+                if self.has_interrupt_handler_for(&signal) {
+                    self.dispatch_interrupt_handlers(&signal).await?;
+                }
                 Err(Self::cancelled_error())
             }
         }

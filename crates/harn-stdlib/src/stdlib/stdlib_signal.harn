@@ -1,0 +1,28 @@
+// std/signal — cooperative process interruption helpers.
+/** Register a process interrupt handler. */
+pub fn on_interrupt(handler, options = nil) {
+  return __signal_on_interrupt(handler, options)
+}
+
+/** Remove an interrupt handler returned by `on_interrupt`. */
+pub fn off_interrupt(handle) {
+  return __signal_off_interrupt(handle)
+}
+
+/** Return true after the current VM observes an interrupt. */
+pub fn interrupted() -> bool {
+  return __signal_interrupted()
+}
+
+/** Run `body` with an interrupt handler that is always unregistered afterward. */
+pub fn with_interrupt(handler, body, options = nil) {
+  let registration = on_interrupt(handler, options)
+  try {
+    let result = body()
+    off_interrupt(registration)
+    return result
+  } catch (e) {
+    off_interrupt(registration)
+    throw e
+  }
+}

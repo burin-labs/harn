@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
@@ -1336,6 +1336,119 @@ log(contains(unwrap_err(result), "cancelled"))
 }"#,
     );
     assert_eq!(out, "[harn] true\n[harn] true");
+}
+
+#[test]
+fn test_std_signal_handlers_are_lifo_and_removable() {
+    let out = run_output(
+        r#"
+import "std/signal"
+
+pipeline t() {
+  let first = on_interrupt({ -> log("a") }, {once: false})
+  let second = on_interrupt({ -> log("b") }, {once: false})
+  __signal_raise("SIGINT")
+  off_interrupt(second)
+  __signal_raise("SIGINT")
+  log(interrupted())
+  off_interrupt(first.handle)
+}
+"#,
+    );
+    assert_eq!(out, "[harn] b\n[harn] a\n[harn] a\n[harn] true");
+}
+
+#[test]
+fn test_with_interrupt_unregisters_after_throw() {
+    let out = run_output(
+        r#"
+import "std/signal"
+
+pipeline t() {
+  try {
+    with_interrupt({ -> log("leaked") }, { -> throw "boom" }, {once: false})
+  } catch (e) {
+  }
+  let raised = try {
+    __signal_raise("SIGINT")
+    "not interrupted"
+  } catch (e) {
+    "interrupted"
+  }
+  log(raised)
+}
+"#,
+    );
+    assert_eq!(out, "[harn] interrupted");
+}
+
+#[test]
+fn test_interrupt_handler_graceful_timeout_is_enforced() {
+    let out = run_output(
+        r#"
+import "std/signal"
+
+pipeline t() {
+  on_interrupt({ ->
+    var spin = 0
+    while true { spin = spin + 1 }
+  }, {graceful_timeout_ms: 0})
+  let result = try {
+    __signal_raise("SIGINT")
+    "missed timeout"
+  } catch (e) {
+    e
+  }
+  log(result)
+}
+"#,
+    );
+    assert_eq!(out, "[harn] kind:interrupted:handler_timeout");
+}
+
+#[test]
+fn test_host_signal_token_dispatches_matching_signal() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let mut vm = Vm::new();
+        vm.register_builtin("term_marker", |_, out| {
+            out.push_str("[harn] term\n");
+            Ok(VmValue::Nil)
+        });
+        vm.register_builtin("int_marker", |_, out| {
+            out.push_str("[harn] int\n");
+            Ok(VmValue::Nil)
+        });
+        let term_options = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "signals".to_string(),
+            VmValue::List(Rc::new(vec![VmValue::String(Rc::from("SIGTERM"))])),
+        )])));
+        let int_options = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "signals".to_string(),
+            VmValue::List(Rc::new(vec![VmValue::String(Rc::from("SIGINT"))])),
+        )])));
+        vm.register_interrupt_handler(
+            VmValue::BuiltinRef(Rc::from("term_marker")),
+            Some(&term_options),
+        )
+        .unwrap();
+        vm.register_interrupt_handler(
+            VmValue::BuiltinRef(Rc::from("int_marker")),
+            Some(&int_options),
+        )
+        .unwrap();
+
+        let cancel_token = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let signal_token = std::sync::Arc::new(std::sync::Mutex::new(Some("SIGTERM".to_string())));
+        vm.install_interrupt_signal_token(signal_token);
+        vm.install_cancel_token(cancel_token);
+
+        assert!(vm.pending_scope_interrupt().await.is_none());
+        assert_eq!(vm.output().trim_end(), "[harn] term");
+    });
 }
 
 #[test]

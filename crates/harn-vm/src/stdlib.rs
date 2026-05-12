@@ -195,6 +195,10 @@ pub fn stdlib_builtin_names() -> Vec<String> {
         "await",
         "cancel",
         "cancel_graceful",
+        "__signal_interrupted",
+        "__signal_off_interrupt",
+        "__signal_on_interrupt",
+        "__signal_raise",
         "is_cancelled",
     ] {
         names.push(extra.to_string());
