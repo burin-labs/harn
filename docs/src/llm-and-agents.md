@@ -103,6 +103,14 @@ verifier, and completer loops. See [Agent loops](./llm/agent_loop.md).
 agent's clarification questions. See
 [simulated users for eval harnesses](./llm/agent_loop.md#simulated-users-for-eval-harnesses).
 
+## Interactive chat loops
+
+`std/agent/chat` provides `agent_chat_loop(...)` for operator-message /
+model-turn harnesses. It preserves one `agent_loop` session across turns, routes
+shared slash commands through `agent_chat_route_input(...)`, and supports a
+terminal `wait_for_user` tool. See
+[interactive chat loops](./llm/agent_loop.md#interactive-chat-loops).
+
 ## Daemon stdlib wrappers
 
 Use `daemon_spawn`, `daemon_trigger`, `daemon_snapshot`, `daemon_stop`, and

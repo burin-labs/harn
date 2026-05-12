@@ -264,8 +264,9 @@ pub enum ToolExecutor {
     ProviderNative,
 }
 
-/// Events emitted by the agent loop. The first five variants map 1:1
-/// to ACP `sessionUpdate` variants; the last three are harn-internal.
+/// Events emitted by the agent loop. Some variants map 1:1 to ACP
+/// `sessionUpdate` variants; Harn-specific lifecycle events ride on the
+/// extension stream.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
@@ -381,6 +382,15 @@ pub enum AgentEvent {
         session_id: String,
         iteration: usize,
         turn_info: serde_json::Value,
+    },
+    /// Emitted when a first-class agent session is explicitly closed by
+    /// `agent_session_close`. This gives event-log consumers a typed
+    /// terminal marker even when no final model turn runs.
+    SessionClosed {
+        session_id: String,
+        reason: String,
+        status: String,
+        metadata: serde_json::Value,
     },
     JudgeDecision {
         session_id: String,
@@ -620,6 +630,7 @@ impl AgentEvent {
             | Self::Plan { session_id, .. }
             | Self::TurnStart { session_id, .. }
             | Self::TurnEnd { session_id, .. }
+            | Self::SessionClosed { session_id, .. }
             | Self::JudgeDecision { session_id, .. }
             | Self::TypedCheckpoint { session_id, .. }
             | Self::FeedbackInjected { session_id, .. }

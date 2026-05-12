@@ -1,0 +1,415 @@
+// @harn-entrypoint-category agent.stdlib
+import { agent_loop } from "std/agent/loop"
+import { filter_nil, pick_keys } from "std/collections"
+
+fn __chat_agent_option_keys() {
+  return [
+    "provider",
+    "model",
+    "model_alias",
+    "model_tier",
+    "max_tokens",
+    "temperature",
+    "top_p",
+    "top_k",
+    "stop",
+    "seed",
+    "frequency_penalty",
+    "presence_penalty",
+    "response_format",
+    "schema",
+    "thinking",
+    "reasoning_effort",
+    "reasoning_policy",
+    "thinking_policy",
+    "reasoning_scale",
+    "problem_scale",
+    "reasoning_task",
+    "tools",
+    "tool_choice",
+    "cache",
+    "timeout",
+    "structural_experiment",
+    "loop_until_done",
+    "max_iterations",
+    "max_nudges",
+    "nudge",
+    "turn_policy",
+    "stop_after_successful_tools",
+    "require_successful_tools",
+    "tool_retries",
+    "tool_backoff_ms",
+    "tool_format",
+    "native_tool_fallback",
+    "llm_caller",
+    "tool_caller",
+    "llm_options",
+    "iteration_budget",
+    "loop_control",
+    "verify_completion",
+    "verify_completion_judge",
+    "done_judge",
+    "done_sentinel",
+    "max_verify_attempts",
+    "llm_retries",
+    "llm_backoff_ms",
+    "context_callback",
+    "context_filter",
+    "timestamp_messages",
+    "message_decorator",
+    "prompts",
+    "prompt_overrides",
+    "llm_transcript_dir",
+    "stall_diagnostics",
+    "skills",
+    "skill_match",
+    "working_files",
+    "mcp_servers",
+    "tool_search",
+    "tool_search_limit",
+    "tool_search_strategy",
+    "autonomy_budget",
+    "policy",
+    "approval_policy",
+    "command_policy",
+    "permissions",
+    "daemon",
+    "wake_interval_ms",
+    "watch_paths",
+    "consolidate_on_idle",
+    "compaction",
+    "compact_threshold",
+    "compact_keep_first",
+    "compact_keep_last",
+    "idle_watchdog_attempts",
+    "profile",
+  ]
+}
+
+fn __chat_dict(value, fallback = {}) {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return fallback
+}
+
+fn __chat_tool_name(entry) {
+  if type_of(entry) != "dict" {
+    return ""
+  }
+  if entry?.name != nil {
+    return to_string(entry.name)
+  }
+  if type_of(entry?.function) == "dict" {
+    return to_string(entry.function?.name ?? "")
+  }
+  return ""
+}
+
+fn __chat_has_tool(registry, name) {
+  let entries = registry?.tools ?? []
+  if type_of(entries) != "list" {
+    return false
+  }
+  for entry in entries {
+    if __chat_tool_name(entry) == name {
+      return true
+    }
+  }
+  return false
+}
+
+/** agent_chat_wait_for_user_tools adds the terminal wait_for_user tool. */
+pub fn agent_chat_wait_for_user_tools(registry = nil) {
+  let tools = registry ?? tool_registry()
+  if __chat_has_tool(tools, "wait_for_user") {
+    return tools
+  }
+  return tool_define(
+    tools,
+    "wait_for_user",
+    "Pause the agent turn and ask the operator for another message.",
+    {
+      executor: "harn",
+      parameters: {
+        question: {
+          type: "string",
+          description: "Question or prompt to show the operator before resuming.",
+          required: false,
+        },
+      },
+      returns: {type: "object"},
+      annotations: {readOnlyHint: true, destructiveHint: false, idempotentHint: true},
+      handler: { args -> return {stop_reason: "wait_for_user", question: to_string(args?.question ?? "")} },
+    },
+  )
+}
+
+fn __chat_default_help(handlers = nil) {
+  var commands = ["/exit", "/quit", "/help", "/?"]
+  if type_of(handlers) == "dict" {
+    for key in handlers.keys() {
+      if starts_with(key, "/") && !contains(commands, key) {
+        commands = commands.push(key)
+      }
+    }
+  }
+  return "Commands: " + join(commands, ", ")
+}
+
+/** agent_chat_route_input applies the shared slash-command convention. */
+pub fn agent_chat_route_input(line, state = nil, handlers = nil) {
+  let current = __chat_dict(state)
+  let text = trim(to_string(line ?? ""))
+  if text == "" {
+    return {kind: "handled", state: current}
+  }
+  if !starts_with(text, "/") {
+    return {kind: "send", message: text, state: current}
+  }
+  let parts = split(text, " ")
+  let command = parts[0]
+  if command == "/exit" || command == "/quit" {
+    return {kind: "exit", reason: "operator_exit", command: command, state: current}
+  }
+  if command == "/help" || command == "/?" {
+    return {kind: "handled", command: command, message: __chat_default_help(handlers), state: current}
+  }
+  let handler = if type_of(handlers) == "dict" {
+    handlers[command]
+  } else {
+    nil
+  }
+  if handler != nil {
+    if type_of(handler) != "closure" {
+      throw "agent_chat_route_input: slash command handler for " + command + " must be a closure"
+    }
+    return __chat_normalize_user_decision(
+      handler({line: text, command: command, args: parts.slice(1), state: current}),
+      current,
+    )
+  }
+  return {
+    kind: "handled",
+    command: command,
+    error: "unknown_command",
+    message: "Unknown command: " + command,
+    state: current,
+  }
+}
+
+fn __chat_default_user_input(opts, state) {
+  let line = read_line()
+  if line == nil {
+    return {kind: "exit", reason: "eof", state: state}
+  }
+  return agent_chat_route_input(line, state, opts?.slash_commands)
+}
+
+fn __chat_normalize_user_decision(decision, state) {
+  if type_of(decision) == "string" {
+    return {kind: "send", message: decision, state: state}
+  }
+  if decision == nil {
+    return {kind: "handled", state: state}
+  }
+  if type_of(decision) != "dict" {
+    throw "agent_chat_loop: on_user_input must return a dict, string, or nil"
+  }
+  let kind = decision?.kind ?? if decision?.message != nil {
+    "send"
+  } else {
+    "handled"
+  }
+  if kind != "send" && kind != "handled" && kind != "exit" {
+    throw "agent_chat_loop: on_user_input kind must be send, handled, or exit"
+  }
+  let next_state = if decision?.state != nil {
+    __chat_dict(decision.state)
+  } else {
+    state
+  }
+  return decision + {kind: kind, state: next_state}
+}
+
+fn __chat_wait_for_user_callback(user_callback) {
+  return { turn ->
+    if contains(turn?.successful_tool_names ?? [], "wait_for_user") {
+      return {stop: true, stop_reason: "wait_for_user"}
+    }
+    if user_callback != nil {
+      return user_callback(turn)
+    }
+    return nil
+  }
+}
+
+fn __chat_turn_options(opts, decision, session_id) {
+  let top_level = pick_keys(opts ?? {}, __chat_agent_option_keys(), {drop_nil: true})
+  let configured = __chat_dict(opts?.agent_options) + __chat_dict(opts?.options)
+  let per_turn = __chat_dict(decision?.next_options)
+  var merged = top_level + configured + per_turn + {session_id: session_id}
+  if opts?.wait_for_user_tool ?? true {
+    merged = merged + {tools: agent_chat_wait_for_user_tools(merged?.tools)}
+  }
+  merged = merged + {post_turn_callback: __chat_wait_for_user_callback(merged?.post_turn_callback)}
+  return filter_nil(merged)
+}
+
+fn __chat_state(state, session_id, turns, input_events, last_result = nil) {
+  return __chat_dict(state)
+    + filter_nil(
+    {session_id: session_id, turns: turns, input_events: input_events, last_result: last_result},
+  )
+}
+
+fn __chat_wait_question(result) {
+  let calls = result?.tools?.calls ?? []
+  if type_of(calls) != "list" {
+    return nil
+  }
+  var question = nil
+  for call in calls {
+    let name = call?.name ?? call?.tool_name
+    if name == "wait_for_user" {
+      question = call?.arguments?.question ?? call?.input?.question ?? question
+    }
+  }
+  return question
+}
+
+fn __chat_after_model(callback, result, state) {
+  if callback == nil {
+    return state
+  }
+  if type_of(callback) != "closure" {
+    throw "agent_chat_loop: on_model_turn must be a closure or nil"
+  }
+  let update = callback(result, state)
+  if update == nil {
+    return state
+  }
+  if type_of(update) != "dict" {
+    throw "agent_chat_loop: on_model_turn must return a dict or nil"
+  }
+  if update?.state != nil {
+    return __chat_dict(update.state)
+  }
+  return state + update
+}
+
+fn __chat_finish(
+  session_id,
+  state,
+  turns,
+  input_events,
+  last_result,
+  stop_reason,
+  close_session,
+  transcript_path,
+) {
+  let transcript = agent_session_snapshot(session_id)
+  let final_state = __chat_state(state, session_id, turns, input_events, last_result)
+  if close_session {
+    agent_session_close(session_id, {reason: stop_reason})
+  }
+  return {
+    session_id: session_id,
+    turns: turns,
+    input_events: input_events,
+    stop_reason: stop_reason,
+    last_result: last_result,
+    transcript: transcript,
+    transcript_path: transcript_path,
+    state: final_state,
+  }
+}
+
+/** agent_chat_loop runs an operator-message / agent-turn loop around agent_loop. */
+pub fn agent_chat_loop(opts = nil) {
+  let config = __chat_dict(opts)
+  let session_id = agent_session_open(config?.session_id)
+  let max_turns = config?.max_turns ?? 0
+  let max_input_events = config?.max_input_events
+  let close_session = config?.close_session ?? true
+  let transcript_path = config?.transcript_path ?? config?.llm_transcript_dir
+  let user_input = config?.on_user_input
+  if user_input != nil && type_of(user_input) != "closure" {
+    throw "agent_chat_loop: on_user_input must be a closure or nil"
+  }
+  var turns = 0
+  var input_events = 0
+  var last_result = nil
+  var state = __chat_state(config?.state ?? config?.initial_state, session_id, turns, input_events)
+  while max_turns <= 0 || turns < max_turns {
+    if max_input_events != nil && input_events >= max_input_events {
+      return __chat_finish(
+        session_id,
+        state,
+        turns,
+        input_events,
+        last_result,
+        "input_exhausted",
+        close_session,
+        transcript_path,
+      )
+    }
+    let raw_decision = if user_input == nil {
+      __chat_default_user_input(config, state)
+    } else {
+      user_input(state)
+    }
+    input_events = input_events + 1
+    let decision = __chat_normalize_user_decision(raw_decision, state)
+    state = __chat_state(decision.state, session_id, turns, input_events, last_result)
+    if decision.kind == "exit" {
+      return __chat_finish(
+        session_id,
+        state,
+        turns,
+        input_events,
+        last_result,
+        decision?.reason ?? "operator_exit",
+        close_session,
+        transcript_path,
+      )
+    }
+    if decision.kind == "handled" {
+      continue
+    }
+    let message = to_string(decision?.message ?? "")
+    if trim(message) == "" {
+      continue
+    }
+    let turn_options = __chat_turn_options(config, decision, session_id)
+    let run = try {
+      agent_loop(message, config?.system_prompt ?? config?.system, turn_options)
+    }
+    if is_err(run) {
+      if close_session {
+        agent_session_close(
+          session_id,
+          {reason: "error", status: "error", error: to_string(unwrap_err(run))},
+        )
+      }
+      throw unwrap_err(run)
+    }
+    let result = unwrap(run)
+    turns = turns + 1
+    let wait_question = __chat_wait_question(result)
+    state = state + filter_nil({last_wait_for_user_question: wait_question})
+    state = __chat_state(state, session_id, turns, input_events, result)
+    state = __chat_after_model(config?.on_model_turn, result, state)
+    last_result = result
+  }
+  return __chat_finish(
+    session_id,
+    state,
+    turns,
+    input_events,
+    last_result,
+    "max_turns",
+    close_session,
+    transcript_path,
+  )
+}

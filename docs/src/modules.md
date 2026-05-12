@@ -870,6 +870,16 @@ For background or delegated execution, use the worker lifecycle builtins
 directly from the runtime, or the `worker_*` helpers above when you need the
 normalized request/provenance views.
 
+### std/agent/chat
+
+Interactive chat-loop helpers built on `agent_loop` sessions:
+
+| Function | Description |
+|---|---|
+| `agent_chat_loop(opts)` | Run an operator-input / model-turn loop around `agent_loop`, preserving one session across turns and closing it with a typed reason by default |
+| `agent_chat_route_input(line, state?, handlers?)` | Apply the shared slash-command convention (`/exit`, `/quit`, `/help`, custom handlers) and return a normalized `{kind, message?, state?}` decision |
+| `agent_chat_wait_for_user_tools(registry?)` | Add a `wait_for_user` tool to a registry; the chat loop stops that turn with `stop_reason: "wait_for_user"` and returns to user input |
+
 ### std/agent/user
 
 Simulated-user helpers for eval harnesses:

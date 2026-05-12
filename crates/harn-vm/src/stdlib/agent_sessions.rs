@@ -79,9 +79,9 @@ const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .arity(VmBuiltinArity::Range { min: 2, max: 3 })
         .doc("Fork an agent session at a message boundary."),
     SyncBuiltin::new("agent_session_close", agent_session_close_builtin)
-        .signature("agent_session_close(id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Close an agent session."),
+        .signature("agent_session_close(id, status?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .doc("Close an agent session and optionally record a close reason."),
     SyncBuiltin::new("agent_session_trim", agent_session_trim_builtin)
         .signature("agent_session_trim(id, keep_last)")
         .arity(VmBuiltinArity::Exact(2))
@@ -224,6 +224,51 @@ fn seed_result_error(message: impl Into<String>) -> VmValue {
         "ok": false,
         "error": message.into(),
     }))
+}
+
+fn dict_string_field(dict: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+    match dict.get(key) {
+        Some(VmValue::String(value)) if !value.trim().is_empty() => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn close_status_arg(args: &[VmValue]) -> Result<(String, String, serde_json::Value), VmError> {
+    match args.get(1) {
+        None | Some(VmValue::Nil) => Ok((
+            "closed".to_string(),
+            "closed".to_string(),
+            serde_json::Value::Null,
+        )),
+        Some(VmValue::String(value)) => {
+            let reason = value.trim();
+            if reason.is_empty() {
+                return Err(err(
+                    "agent_session_close: `status` string must not be empty",
+                ));
+            }
+            Ok((
+                reason.to_string(),
+                reason.to_string(),
+                serde_json::Value::Null,
+            ))
+        }
+        Some(VmValue::Dict(dict)) => {
+            let reason = dict_string_field(dict, "reason")
+                .or_else(|| dict_string_field(dict, "stop_reason"))
+                .or_else(|| dict_string_field(dict, "status"))
+                .unwrap_or_else(|| "closed".to_string());
+            let status = dict_string_field(dict, "status").unwrap_or_else(|| reason.clone());
+            Ok((
+                reason,
+                status,
+                crate::llm::helpers::vm_value_to_json(args.get(1).expect("status arg")),
+            ))
+        }
+        _ => Err(err(
+            "agent_session_close: `status` must be a string, dict, or nil",
+        )),
+    }
 }
 
 fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -386,7 +431,8 @@ fn agent_session_close_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
             "agent_session_close: unknown session id '{id}'"
         )));
     }
-    agent_sessions::close(&id);
+    let (reason, status, metadata) = close_status_arg(args)?;
+    agent_sessions::close_with_status(&id, reason, status, metadata);
     Ok(VmValue::Nil)
 }
 

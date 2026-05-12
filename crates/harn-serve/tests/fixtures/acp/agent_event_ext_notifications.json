@@ -25,6 +25,19 @@
     "jsonrpc": "2.0",
     "method": "_harn/agentEvent",
     "params": {
+      "kind": "session_closed",
+      "metadata": {
+        "idle_ms": 5000
+      },
+      "reason": "timeout",
+      "sessionId": "session-1",
+      "status": "timeout"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
       "iteration": 0,
       "judgeDurationMs": 42,
       "kind": "judge_decision",

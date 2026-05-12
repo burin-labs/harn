@@ -73,7 +73,7 @@ the "one-shot" call shape.
 | `agent_session_compact(id, opts)` | `int` | Runs the LLM/truncate/observation-mask/custom compactor. Unknown keys in `opts` error. |
 | `agent_session_inject(id, message)` | `nil` | Appends a `{role, content, …}` message. Missing `role` errors. |
 | `agent_session_seed_from_jsonl(jsonl_path, opts?)` | `dict` | Creates a new session from a replayable `llm_transcript.jsonl` sidecar. |
-| `agent_session_close(id)` | `nil` | Evicts immediately. |
+| `agent_session_close(id, status?)` | `nil` | Evicts immediately and records an `agent_session_closed` event. `status` may be a string reason or a dict such as `{reason: "timeout"}`. |
 
 ### `agent_session_compact` options
 
@@ -142,7 +142,9 @@ wraps `Rc` and the agent loop runs on a pinned tokio `LocalSet` task.
 
 An LRU cap (default 128 sessions per VM) evicts the least-recently
 accessed session when a new one is opened over the cap.
-`agent_session_close` evicts immediately regardless of the cap.
+`agent_session_close` evicts immediately regardless of the cap. When passed a
+reason string or status dict, the close reason is emitted to the agent event
+stream before the session is removed.
 
 ## Subscribers
 

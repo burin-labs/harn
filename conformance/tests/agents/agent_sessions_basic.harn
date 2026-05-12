@@ -1,26 +1,44 @@
+import { agent_capture_events } from "std/agent/events"
+
 pipeline main(task) {
   let s = agent_session_open()
-  assert(agent_session_exists(s), "open returns an id that exists")
-  assert(s == agent_session_open(s), "open(id) is idempotent")
-  assert(agent_session_length(s) == 0, "new session is empty")
+  require agent_session_exists(s), "open returns an id that exists"
+  require s == agent_session_open(s), "open(id) is idempotent"
+  require agent_session_length(s) == 0, "new session is empty"
   agent_session_inject(s, {role: "user", content: "hello"})
   agent_session_inject(s, {role: "assistant", content: "hi"})
-  assert(agent_session_length(s) == 2, "inject appends")
+  require agent_session_length(s) == 2, "inject appends"
   let snap = agent_session_snapshot(s)
-  assert(len(snap["messages"]) == 2, "snapshot mirrors transcript")
-  assert(snap["id"] == s, "snapshot preserves id")
+  require len(snap["messages"]) == 2, "snapshot mirrors transcript"
+  require snap["id"] == s, "snapshot preserves id"
   agent_session_reset(s)
-  assert(agent_session_length(s) == 0, "reset clears history")
-  assert(agent_session_exists(s), "reset preserves id")
+  require agent_session_length(s) == 0, "reset clears history"
+  require agent_session_exists(s), "reset preserves id"
   agent_session_inject(s, {role: "user", content: "one"})
   agent_session_inject(s, {role: "user", content: "two"})
   agent_session_inject(s, {role: "user", content: "three"})
   let kept = agent_session_trim(s, 2)
-  assert(kept == 2, "trim returns kept count")
+  require kept == 2, "trim returns kept count"
   let after = agent_session_snapshot(s)
-  assert(after["messages"][0]["content"] == "two", "trim drops oldest")
-  assert(after["messages"][1]["content"] == "three", "trim retains newest")
+  require after["messages"][0]["content"] == "two", "trim drops oldest"
+  require after["messages"][1]["content"] == "three", "trim retains newest"
   agent_session_close(s)
-  assert(!agent_session_exists(s), "close evicts")
+  require !agent_session_exists(s), "close evicts"
+  let close_session = "close-status-" + uuid()
+  let captured = agent_capture_events(
+    close_session,
+    fn() {
+      let _ = agent_session_open(close_session)
+      agent_session_close(close_session, {reason: "timeout", status: "idle", source: "test"})
+      return agent_session_exists(close_session)
+    },
+  )
+  require !captured.result, "close with status evicts"
+  require len(captured.events) == 1, "close emits one terminal event"
+  let event = captured.events[0]
+  require event.type == "session_closed", "close event has stable type"
+  require event.reason == "timeout", "close event carries reason"
+  require event.status == "idle", "close event carries status"
+  require event.metadata.source == "test", "close event carries metadata"
   log("agent_sessions basic tests passed")
 }

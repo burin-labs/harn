@@ -301,6 +301,41 @@ pub fn close(id: &str) {
     });
 }
 
+pub fn close_with_status(
+    id: &str,
+    reason: impl Into<String>,
+    status: impl Into<String>,
+    metadata: serde_json::Value,
+) -> bool {
+    if !exists(id) {
+        return false;
+    }
+    let reason = reason.into();
+    let status = status.into();
+    let event_metadata = serde_json::json!({
+        "reason": reason,
+        "status": status,
+        "metadata": metadata,
+    });
+    let transcript_event = crate::llm::helpers::transcript_event(
+        "agent_session_closed",
+        "system",
+        "internal",
+        "Agent session closed",
+        Some(event_metadata.clone()),
+    );
+    let _ = append_event(id, transcript_event);
+    crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::SessionClosed {
+        session_id: id.to_string(),
+        reason,
+        status,
+        metadata,
+    });
+    close(id);
+    crate::agent_events::clear_session_sinks(id);
+    true
+}
+
 pub fn reset_transcript(id: &str) -> bool {
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
@@ -1066,10 +1101,12 @@ fn branch_event_index(transcript: &VmValue, keep_first: usize) -> usize {
 mod tests {
     use super::*;
     use crate::agent_events::{
-        emit_event, reset_all_sinks, session_external_sink_count, AgentEvent,
+        emit_event, register_sink, reset_all_sinks, session_external_sink_count, AgentEvent,
+        AgentEventSink,
     };
     use crate::event_log::{active_event_log, EventLog, Topic};
     use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
 
     fn make_msg(role: &str, content: &str) -> VmValue {
         let mut m: BTreeMap<String, VmValue> = BTreeMap::new();
@@ -1115,6 +1152,17 @@ mod tests {
             .unwrap_or(0)
     }
 
+    struct CapturingSink(Arc<Mutex<Vec<AgentEvent>>>);
+
+    impl AgentEventSink for CapturingSink {
+        fn handle_event(&self, event: &AgentEvent) {
+            self.0
+                .lock()
+                .expect("capture sink poisoned")
+                .push(event.clone());
+        }
+    }
+
     #[test]
     fn records_system_prompt_as_metadata_event_without_message() {
         reset_session_store();
@@ -1142,6 +1190,43 @@ mod tests {
         );
         assert_eq!(message_count(&id), 1);
         assert_eq!(event_count_by_kind(&id, "system_prompt"), 1);
+    }
+
+    #[test]
+    fn close_with_status_emits_terminal_event_and_clears_sinks() {
+        reset_all_sinks();
+        let id = open_or_create(Some("close-reason-session".into()));
+        inject_message(&id, make_msg("user", "hello")).unwrap();
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        register_sink(&id, Arc::new(CapturingSink(captured.clone())));
+        assert_eq!(session_external_sink_count(&id), 1);
+
+        assert!(close_with_status(
+            &id,
+            "timeout",
+            "timeout",
+            serde_json::json!({"idle_ms": 5000}),
+        ));
+
+        assert!(!exists(&id));
+        assert_eq!(session_external_sink_count(&id), 0);
+        let events = captured.lock().expect("capture sink poisoned");
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            AgentEvent::SessionClosed {
+                session_id,
+                reason,
+                status,
+                metadata,
+            } => {
+                assert_eq!(session_id, "close-reason-session");
+                assert_eq!(reason, "timeout");
+                assert_eq!(status, "timeout");
+                assert_eq!(metadata["idle_ms"], 5000);
+            }
+            other => panic!("expected SessionClosed, got {other:?}"),
+        }
+        reset_all_sinks();
     }
 
     #[test]

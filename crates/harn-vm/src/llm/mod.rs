@@ -480,6 +480,7 @@ pub use self::agent_runtime::{
 };
 pub(crate) use self::agent_runtime::{
     current_host_bridge, emit_agent_event as emit_live_agent_event,
+    emit_agent_event_sync as emit_live_agent_event_sync,
 };
 pub(crate) use self::api::vm_call_llm_full;
 pub use self::api::{

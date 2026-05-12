@@ -1,0 +1,56 @@
+import { agent_chat_loop, agent_chat_route_input } from "std/agent/chat"
+
+pipeline default() {
+  let routed = agent_chat_route_input("/help", {}, {"/runs": { _req -> {kind: "handled", message: "runs"} }})
+  println(routed.kind)
+  println(contains(routed.message, "/runs"))
+  llm_mock_clear()
+  llm_mock(
+    {
+      text: "Need more info.",
+      tool_calls: [{id: "wait-1", name: "wait_for_user", arguments: {question: "Which branch?"}}],
+    },
+  )
+  llm_mock({text: "Done."})
+  let input_count = atomic(0)
+  let model_count = atomic(0)
+  let wait_count = atomic(0)
+  let result = agent_chat_loop(
+    {
+      session_id: "agent-chat-loop-conformance",
+      provider: "mock",
+      tool_format: "native",
+      max_turns: 2,
+      on_user_input: { state ->
+        let n = atomic_add(input_count, 1)
+        if n == 0 {
+          return {kind: "send", message: "start"}
+        }
+        if n == 1 {
+          return {kind: "handled", state: state + {handled_once: true}}
+        }
+        if n == 2 {
+          return {kind: "send", message: "main"}
+        }
+        return {kind: "exit", reason: "operator_exit"}
+      },
+      on_model_turn: { turn, state ->
+        let _ = atomic_add(model_count, 1)
+        if turn.stop_reason == "wait_for_user" {
+          let _ = atomic_add(wait_count, 1)
+        }
+        return {state: state + {last_stop: turn.stop_reason}}
+      },
+    },
+  )
+  println(result.turns)
+  println(result.stop_reason)
+  println(result.last_result?.visible_text)
+  println(result.state.handled_once)
+  println(result.state.last_wait_for_user_question)
+  println(atomic_get(input_count))
+  println(atomic_get(model_count))
+  println(atomic_get(wait_count))
+  println(len(result.transcript.messages))
+  println(agent_session_exists("agent-chat-loop-conformance"))
+}

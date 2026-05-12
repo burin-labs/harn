@@ -89,6 +89,7 @@ fn __interpret_verdict(verdict) {
     return {
       kind: "rich",
       stop: stop,
+      stop_reason: verdict?.stop_reason,
       message: verdict?.message,
       next_options: verdict?.next_options,
       llm_options: llm_options,
@@ -150,9 +151,14 @@ fn __post_turn_verdict_result(session, opts, verdict) {
     agent_session_inject_feedback(session.session_id, "post_turn", verdict.message)
   }
   if verdict.stop {
+    let stop_reason = if verdict?.stop_reason != nil && verdict.stop_reason != "" {
+      to_string(verdict.stop_reason)
+    } else {
+      "post_turn_stop"
+    }
     return {
       kind: "break",
-      stop_reason: "post_turn_stop",
+      stop_reason: stop_reason,
       needs_verify: opts?.verify_completion != nil,
       next_options: verdict?.next_options,
       llm_options: verdict?.llm_options,
