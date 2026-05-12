@@ -152,6 +152,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple(
+        "__io_read_line",
+        &[Param::optional("options", TY_DICT_OR_NIL)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "__llm_cache_key",
         &[
             Param::new("prompt", TY_ANY),

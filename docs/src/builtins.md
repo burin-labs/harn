@@ -1305,7 +1305,15 @@ examples.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
+| `eprint(msg)` | msg: any | nil | Write text to stderr without a trailing newline |
+| `eprintln(msg)` | msg: any | nil | Write text to stderr with a trailing newline |
+| `read_stdin()` | — | string or nil | Read the remaining stdin contents |
+| `read_line()` | — | string or nil | Read one stdin line without the trailing newline |
+| `is_stdin_tty()` / `is_stdout_tty()` / `is_stderr_tty()` | — | bool | Return whether the corresponding process stream is attached to a terminal |
 | `prompt_user(msg)` | msg: string (optional) | string | Display message, read line from stdin |
+
+For structured interactive input, import `read_line`, `read_password`,
+`is_tty`, and `write_stderr` from `std/io`.
 
 ## Host interop
 

@@ -374,6 +374,8 @@ Imports starting with `std/` load embedded stdlib modules:
 - `import "std/async"` — polling and retry helpers (wait_for, retry_until,
   retry_predicate_with_backoff, circuit_call)
 - `import "std/vision"` — deterministic OCR helpers (`ocr(image, options?)`)
+- `import "std/io"` — terminal IO helpers (is_tty, read_line,
+  read_password, write_stderr)
 - `import "std/prompt_library"` — reusable prompt fragments, cache metadata,
   tenant-scoped k-means hotspot proposals, and review-queue records
 - `import "std/agent_state"` — durable session-scoped state helpers

@@ -571,6 +571,21 @@ claims, and audit records:
 See [Postgres](./postgres.md) for parameter binding, transaction settings,
 RLS examples, pool options, and migration boundaries.
 
+### std/io
+
+Terminal-oriented helpers for scripts that need direct operator input without
+shelling out to `bash`:
+
+| Function | Description |
+|---|---|
+| `is_tty(fd?)` | Return whether fd `0`, `1`, or `2` is attached to a terminal; defaults to stdin |
+| `read_line(opts?)` | Read one line from stdin and return `{ok, value?, status?, error?}`; supports `prompt`, `timeout_ms`, `trim`, `echo`, and `raw` options |
+| `read_password(prompt?, timeout_ms?)` | Convenience wrapper around `read_line` with terminal echo disabled |
+| `write_stderr(text)` | Write text to stderr without appending a newline |
+
+`read_line` statuses are `ok`, `eof`, `timeout`, `interrupt`, and `error`.
+Prompts are written to stderr with ANSI sequences preserved.
+
 ### std/runtime
 
 Generic host/runtime helpers that are useful across many hosts:
