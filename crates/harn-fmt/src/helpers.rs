@@ -246,6 +246,7 @@ pub(crate) fn escape_string(s: &str) -> String {
         .replace('\r', "\\r")
         .replace('\t', "\\t")
         .replace('\0', "\\0")
+        .replace("${", "\\${")
 }
 
 /// Format the `(error_var: Type)` portion of a catch clause.

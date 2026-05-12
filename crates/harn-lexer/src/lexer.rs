@@ -426,7 +426,7 @@ impl Lexer {
                         .collect();
                     let indent = common_indent(&full_text);
                     let segments = if indent > 0 {
-                        segments
+                        let stripped_segments = segments
                             .into_iter()
                             .map(|seg| match seg {
                                 StringSegment::Literal(s) => {
@@ -434,7 +434,8 @@ impl Lexer {
                                 }
                                 other => other,
                             })
-                            .collect()
+                            .collect();
+                        strip_trailing_newline_segments(stripped_segments)
                     } else {
                         strip_trailing_newline_segments(segments)
                     };
@@ -487,6 +488,21 @@ impl Lexer {
                 self.advance();
                 segments.push(StringSegment::Expression(expr, expr_line, expr_col));
                 continue;
+            }
+
+            if self.source[self.pos] == '\\'
+                && self.peek() == Some('$')
+                && self.source.get(self.pos + 2) == Some(&'{')
+            {
+                // Only an unpaired backslash escapes `${`; pairs remain literal text.
+                let preceding_backslashes =
+                    value.chars().rev().take_while(|ch| *ch == '\\').count();
+                if preceding_backslashes % 2 == 0 {
+                    self.advance();
+                    value.push('$');
+                    self.advance();
+                    continue;
+                }
             }
 
             if self.source[self.pos] == '\n' {
@@ -975,6 +991,36 @@ mod tests {
         } else {
             panic!("Expected interpolated string");
         }
+    }
+
+    #[test]
+    fn test_multiline_string_escaped_dollar_before_interpolation() {
+        let mut lexer = Lexer::new("\"\"\"\n  hi \\${VAR}\n  hello ${name}\n\"\"\"");
+        let tokens = lexer.tokenize().unwrap();
+        if let TokenKind::InterpolatedString(segs) = &tokens[0].kind {
+            assert_eq!(segs.len(), 2);
+            assert_eq!(segs[0], StringSegment::Literal("hi ${VAR}\nhello ".into()));
+            assert!(matches!(&segs[1], StringSegment::Expression(e, _, _) if e == "name"));
+        } else {
+            panic!("Expected interpolated string");
+        }
+    }
+
+    #[test]
+    fn test_multiline_string_escaped_dollar_without_interpolation() {
+        let mut lexer = Lexer::new("\"\"\"\n  hi \\${VAR}\n\"\"\"");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::StringLiteral("hi ${VAR}".into()));
+    }
+
+    #[test]
+    fn test_multiline_string_preserves_non_interpolation_dollar_escape() {
+        let mut lexer = Lexer::new("\"\"\"\n  echo \\$PATH\n\"\"\"");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(
+            tokens[0].kind,
+            TokenKind::StringLiteral("echo \\$PATH".into())
+        );
     }
 
     #[test]
