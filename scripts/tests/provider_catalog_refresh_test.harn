@@ -1,0 +1,422 @@
+// Unit tests for the provider catalog refresh workflow.
+//
+// Covers the pure-logic helpers (normalization, drift, report
+// rendering) plus the adapter contracts via `http_mock` fixtures —
+// HTML pricing tables, JSON API responses, key-required gating, and
+// cross-source conflict resolution.
+import "../provider_catalog_refresh.harn"
+import "../provider_catalog_sources.harn"
+
+let FIXTURE_BASE = {observed_at: "2026-05-11T00:00:00Z", http_options: {fetched_at: "fixture-time"}}
+
+fn make_env(secrets) {
+  return FIXTURE_BASE + {secrets: secrets ?? {}}
+}
+
+fn provider_obs(model_id, pricing, ctx) {
+  return observation(
+    "anthropic",
+    model_id,
+    {context_window: ctx, pricing: pricing},
+    {
+      source_url: "https://example.com/anthropic",
+      source_kind: "html",
+      source_owner: "provider",
+      observed_at: "2026-05-11T00:00:00Z",
+      fetched_at: "fixture-time",
+      confidence: "high",
+    },
+  )
+}
+
+fn aggregator_obs(model_id, pricing) {
+  return observation(
+    "anthropic",
+    model_id,
+    {pricing: pricing},
+    {
+      source_url: "https://example.com/openrouter",
+      source_kind: "json",
+      source_owner: "aggregator",
+      observed_at: "2026-05-11T00:00:00Z",
+      fetched_at: "fixture-time",
+      confidence: "medium",
+    },
+  )
+}
+
+let SAMPLE_CATALOG = {
+  models: [
+    {
+      id: "claude-haiku-4-5-20251001",
+      provider: "anthropic",
+      name: "Claude Haiku 4.5",
+      context_window: 200000,
+      pricing: {input_per_mtok: 1.0, output_per_mtok: 5.0, cache_read_per_mtok: 0.1, cache_write_per_mtok: 1.25},
+    },
+    {
+      id: "claude-opus-4-7-20260301",
+      provider: "anthropic",
+      name: "Claude Opus 4.7",
+      context_window: 200000,
+      pricing: {input_per_mtok: 15.0, output_per_mtok: 75.0, cache_read_per_mtok: 1.5, cache_write_per_mtok: 18.75},
+    },
+  ],
+}
+
+@test
+pipeline test_normalize_picks_provider_owned_on_conflict(task) {
+  let raw = [
+    aggregator_obs("claude-haiku-4-5-20251001", {input_per_mtok: 1.5, output_per_mtok: 7.5}),
+    provider_obs("claude-haiku-4-5-20251001", {input_per_mtok: 1.0, output_per_mtok: 5.0}, 200000),
+  ]
+  let outcome = normalize_observations(raw)
+  assert_eq(len(outcome.observations), 1)
+  let merged = outcome.observations[0]
+  assert_eq(merged.pricing.input_per_mtok, 1.0)
+  assert_eq(merged.pricing.output_per_mtok, 5.0)
+  assert_eq(merged.source_owner, "provider")
+  assert_eq(len(merged.sources), 2)
+  assert_eq(len(outcome.conflicts), 2)
+  assert_eq(outcome.conflicts[0].field, "pricing.input_per_mtok")
+  assert_eq(outcome.conflicts[0].kept, 1.0)
+  assert_eq(outcome.conflicts[0].dropped, 1.5)
+}
+
+@test
+pipeline test_normalize_merges_disjoint_fields(task) {
+  let raw = [
+    provider_obs("claude-haiku-4-5-20251001", {input_per_mtok: 1.0, output_per_mtok: 5.0}, nil),
+    aggregator_obs("claude-haiku-4-5-20251001", {cache_read_per_mtok: 0.1}),
+  ]
+  let outcome = normalize_observations(raw)
+  let merged = outcome.observations[0]
+  assert_eq(merged.pricing.input_per_mtok, 1.0)
+  assert_eq(merged.pricing.cache_read_per_mtok, 0.1)
+  assert_eq(len(outcome.conflicts), 0)
+}
+
+@test
+pipeline test_build_drift_flags_added_changed_unknown(task) {
+  let obs_existing = provider_obs(
+    "claude-haiku-4-5-20251001",
+    {input_per_mtok: 1.0, output_per_mtok: 5.0, cache_read_per_mtok: 0.1, cache_write_per_mtok: 1.25},
+    200000,
+  )
+  let obs_changed = provider_obs(
+    "claude-opus-4-7-20260301",
+    {input_per_mtok: 20.0, output_per_mtok: 100.0, cache_read_per_mtok: 2.0, cache_write_per_mtok: 25.0},
+    200000,
+  )
+  let obs_added = provider_obs("claude-haiku-5-20260601", nil, 250000)
+  let observations = [obs_existing, obs_changed, obs_added]
+  let drift = build_drift(observations, SAMPLE_CATALOG)
+  assert_eq(len(drift.added), 1)
+  assert_eq(drift.added[0].model_id, "claude-haiku-5-20260601")
+  assert_eq(len(drift.changed), 1)
+  assert_eq(drift.changed[0].observation.model_id, "claude-opus-4-7-20260301")
+  assert_eq(len(drift.changed[0].pricing_changes), 4)
+  assert_eq(len(drift.unknown_pricing), 1)
+  assert_eq(drift.unknown_pricing[0].model_id, "claude-haiku-5-20260601")
+  assert_eq(len(drift.removed), 0)
+}
+
+@test
+pipeline test_build_drift_skips_removal_for_unseen_provider(task) {
+  let other_provider_obs = observation(
+    "openai",
+    "gpt-4o",
+    {pricing: {input_per_mtok: 2.5, output_per_mtok: 10.0}},
+    {
+      source_url: "https://example.com/openai",
+      source_kind: "html",
+      source_owner: "provider",
+      observed_at: "2026-05-11T00:00:00Z",
+      fetched_at: "fixture-time",
+      confidence: "high",
+    },
+  )
+  // OpenAI source observed but anthropic source absent -> anthropic catalog entries should not be reported as removed.
+  let drift = build_drift([other_provider_obs], SAMPLE_CATALOG)
+  assert_eq(len(drift.removed), 0)
+}
+
+@test
+pipeline test_build_drift_reports_removal_when_provider_observed(task) {
+  let only_one = provider_obs(
+    "claude-haiku-4-5-20251001",
+    {input_per_mtok: 1.0, output_per_mtok: 5.0, cache_read_per_mtok: 0.1, cache_write_per_mtok: 1.25},
+    200000,
+  )
+  let drift = build_drift([only_one], SAMPLE_CATALOG)
+  assert_eq(len(drift.removed), 1)
+  assert_eq(drift.removed[0].id, "claude-opus-4-7-20260301")
+}
+
+@test
+pipeline test_render_markdown_report_includes_diagnostics(task) {
+  let obs = provider_obs(
+    "claude-haiku-4-5-20251001",
+    {input_per_mtok: 1.0, output_per_mtok: 5.0, cache_read_per_mtok: 0.1, cache_write_per_mtok: 1.25},
+    200000,
+  )
+  let drift = build_drift([obs], SAMPLE_CATALOG)
+  let runs = [
+    {
+      id: "anthropic",
+      kind: "html",
+      source_owner: "provider",
+      url: "https://example.com/anthropic",
+      status: "ok",
+      reason: nil,
+      requires_key: false,
+      key_envs: [],
+    },
+  ]
+  let report = render_markdown_report(drift, [], runs, {generated_at: "fixture-time", run_mode: "fixtures"})
+  assert(contains(report, "# Provider catalog refresh — drift report"))
+  assert(contains(report, "## Adapter runs"))
+  assert(contains(report, "## Added models"))
+  assert(contains(report, "## Removed models"))
+  assert(contains(report, "claude-opus-4-7-20260301"))
+}
+
+@test
+pipeline test_render_candidate_toml_emits_added_and_changed_only(task) {
+  let added_obs = provider_obs("claude-haiku-5-20260601", nil, 250000)
+  let changed_obs = provider_obs(
+    "claude-opus-4-7-20260301",
+    {input_per_mtok: 20.0, output_per_mtok: 100.0, cache_read_per_mtok: 2.0, cache_write_per_mtok: 25.0},
+    200000,
+  )
+  // Unchanged observation should NOT appear in the candidate.
+  let unchanged_obs = provider_obs(
+    "claude-haiku-4-5-20251001",
+    {input_per_mtok: 1.0, output_per_mtok: 5.0, cache_read_per_mtok: 0.1, cache_write_per_mtok: 1.25},
+    200000,
+  )
+  let drift = build_drift([added_obs, changed_obs, unchanged_obs], SAMPLE_CATALOG)
+  let toml = render_candidate_toml(drift, {generated_at: "fixture-time", run_mode: "fixtures"})
+  assert(contains(toml, "# added"))
+  assert(contains(toml, "[models.\"claude-haiku-5-20260601\"]"))
+  assert(contains(toml, "# changed (was: claude-opus-4-7-20260301)"))
+  assert(contains(toml, "[models.\"claude-opus-4-7-20260301\"]"))
+  assert(!contains(toml, "[models.\"claude-haiku-4-5-20251001\"]"))
+}
+
+@test
+pipeline test_render_candidate_toml_handles_no_changes(task) {
+  let unchanged_obs = provider_obs(
+    "claude-haiku-4-5-20251001",
+    {input_per_mtok: 1.0, output_per_mtok: 5.0, cache_read_per_mtok: 0.1, cache_write_per_mtok: 1.25},
+    200000,
+  )
+  // Need to observe both anthropic catalog entries so removal logic doesn't add the missing one.
+  let unchanged_obs_2 = provider_obs(
+    "claude-opus-4-7-20260301",
+    {input_per_mtok: 15.0, output_per_mtok: 75.0, cache_read_per_mtok: 1.5, cache_write_per_mtok: 18.75},
+    200000,
+  )
+  let drift = build_drift([unchanged_obs, unchanged_obs_2], SAMPLE_CATALOG)
+  let toml = render_candidate_toml(drift, {generated_at: "fixture-time", run_mode: "fixtures"})
+  assert(contains(toml, "No additions or changes detected"))
+}
+
+@test
+pipeline test_html_adapter_parses_table(task) {
+  http_mock_clear()
+  http_mock(
+    "GET",
+    "https://example.com/pricing",
+    {
+      status: 200,
+      headers: {"content-type": "text/html"},
+      body: """
+        <html><body><table>
+          <tr><th>Model</th><th>Input ($/MTok)</th><th>Output ($/MTok)</th><th>Context</th></tr>
+          <tr><td>claude-haiku-4-5-20251001</td><td>1.00</td><td>5.00</td><td>200000</td></tr>
+        </table></body></html>
+        """,
+    },
+  )
+  let env = make_env(nil)
+  let config = {
+    id: "pricing",
+    provider: "anthropic",
+    source_url: "https://example.com/pricing",
+    column_map: [
+      {header: "Model", field: "model_id"},
+      {header: "Input ($/MTok)", field: "input_per_mtok"},
+      {header: "Output ($/MTok)", field: "output_per_mtok"},
+      {header: "Context", field: "context_window"},
+    ],
+  }
+  let result = html_pricing_table_adapter(env, config)
+  assert_eq(result.run.status, "ok")
+  assert_eq(result.run.source_owner, "provider")
+  assert_eq(len(result.observations), 1)
+  let obs = result.observations[0]
+  assert_eq(obs.model_id, "claude-haiku-4-5-20251001")
+  assert_eq(obs.pricing.input_per_mtok, 1.0)
+  assert_eq(obs.pricing.output_per_mtok, 5.0)
+  assert_eq(obs.context_window, 200000)
+  assert_eq(obs.source_kind, "html")
+}
+
+@test
+pipeline test_html_adapter_skips_columns_not_in_map(task) {
+  http_mock_clear()
+  http_mock(
+    "GET",
+    "https://example.com/pricing",
+    {
+      status: 200,
+      headers: {"content-type": "text/html"},
+      body: """
+        <html><body><table>
+          <tr><th>Model</th><th>Input ($/MTok)</th><th>Output ($/MTok)</th><th>Cache read ($/MTok)</th><th>Context</th></tr>
+          <tr><td>gpt-4o</td><td>2.50</td><td>10.00</td><td>1.25</td><td>200000</td></tr>
+        </table></body></html>
+        """,
+    },
+  )
+  let env = make_env(nil)
+  let config = {
+    id: "pricing",
+    provider: "openai",
+    source_url: "https://example.com/pricing",
+    column_map: [
+      {header: "Model", field: "model_id"},
+      {header: "Input ($/MTok)", field: "input_per_mtok"},
+      {header: "Output ($/MTok)", field: "output_per_mtok"},
+      {header: "Cache read ($/MTok)", field: "cache_read_per_mtok"},
+      {header: "Context", field: "context_window"},
+    ],
+  }
+  let result = html_pricing_table_adapter(env, config)
+  let obs = result.observations[0]
+  // No `Cache write` column in either fixture or column_map -> must remain nil.
+  assert_eq(obs.pricing.cache_write_per_mtok, nil)
+  assert_eq(obs.pricing.cache_read_per_mtok, 1.25)
+  assert_eq(obs.context_window, 200000)
+}
+
+@test
+pipeline test_html_adapter_reports_fetch_error(task) {
+  http_mock_clear()
+  http_mock(
+    "GET",
+    "https://example.com/missing",
+    {status: 404, headers: {"content-type": "text/html"}, body: ""},
+  )
+  let env = make_env(nil)
+  let config = {
+    id: "pricing",
+    provider: "anthropic",
+    source_url: "https://example.com/missing",
+    column_map: [{header: "Model", field: "model_id"}],
+  }
+  let result = html_pricing_table_adapter(env, config)
+  assert_eq(result.run.status, "error")
+  assert_eq(len(result.observations), 0)
+}
+
+@test
+pipeline test_json_adapter_parses_payload(task) {
+  http_mock_clear()
+  http_mock(
+    "GET",
+    "https://example.com/models",
+    {
+      status: 200,
+      headers: {"content-type": "application/json"},
+      body: "{\"data\":[{\"id\":\"claude-haiku-4-5-20251001\",\"name\":\"Claude Haiku 4.5\",\"context_length\":200000}]}",
+    },
+  )
+  let env = make_env(nil)
+  let config = {
+    id: "json",
+    provider: "anthropic",
+    source_url: "https://example.com/models",
+    source_owner: "aggregator",
+    confidence: "medium",
+    mapper: { payload ->
+      var entries = []
+      for record in payload?.data ?? [] {
+        entries = entries
+          + [{model_id: record.id, name: record?.name, context_window: record?.context_length}]
+      }
+      return entries
+    },
+  }
+  let result = json_api_adapter(env, config)
+  assert_eq(result.run.status, "ok")
+  assert_eq(len(result.observations), 1)
+  let obs = result.observations[0]
+  assert_eq(obs.source_kind, "json")
+  assert_eq(obs.source_owner, "aggregator")
+  assert_eq(obs.confidence, "medium")
+  assert_eq(obs.context_window, 200000)
+}
+
+@test
+pipeline test_key_required_adapter_skips_without_key(task) {
+  let env = make_env({})
+  let config = {
+    id: "fireworks-models-api",
+    kind: "json",
+    source_owner: "provider",
+    source_url: "https://api.fireworks.ai/inference/v1/models",
+    key_envs: ["FIREWORKS_API_KEY"],
+    adapter: { _ -> {run: {}, observations: []} },
+  }
+  let result = key_required_adapter(env, config)
+  assert_eq(result.run.status, "skipped")
+  assert_eq(result.run.requires_key, true)
+  assert_eq(result.run.key_envs, ["FIREWORKS_API_KEY"])
+  assert(contains(result.run.reason, "FIREWORKS_API_KEY"))
+  assert_eq(len(result.observations), 0)
+}
+
+@test
+pipeline test_key_required_adapter_runs_with_key(task) {
+  http_mock_clear()
+  http_mock(
+    "GET",
+    "https://api.fireworks.ai/inference/v1/models",
+    {
+      status: 200,
+      headers: {"content-type": "application/json"},
+      body: "{\"data\":[{\"id\":\"fireworks-x\",\"name\":\"Fireworks X\"}]}",
+    },
+  )
+  let env = make_env({FIREWORKS_API_KEY: "fixture-secret"})
+  let json_config = {
+    id: "fireworks-models-api",
+    provider: "fireworks",
+    source_url: "https://api.fireworks.ai/inference/v1/models",
+    source_owner: "provider",
+    confidence: "high",
+    mapper: { payload ->
+      var entries = []
+      for record in payload?.data ?? [] {
+        entries = entries + [{model_id: record.id, name: record?.name}]
+      }
+      return entries
+    },
+  }
+  let config = {
+    id: "fireworks-models-api",
+    kind: "json",
+    source_owner: "provider",
+    source_url: "https://api.fireworks.ai/inference/v1/models",
+    key_envs: ["FIREWORKS_API_KEY"],
+    adapter: { e -> json_api_adapter(e, json_config) },
+  }
+  let result = key_required_adapter(env, config)
+  assert_eq(result.run.status, "ok")
+  assert_eq(result.run.requires_key, true)
+  assert_eq(result.run.key_envs, ["FIREWORKS_API_KEY"])
+  assert_eq(len(result.observations), 1)
+  assert_eq(result.observations[0].model_id, "fireworks-x")
+}

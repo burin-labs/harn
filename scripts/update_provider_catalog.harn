@@ -1,0 +1,351 @@
+// Provider catalog refresh entry script.
+//
+// Runs a configured set of source adapters, normalizes the
+// observations against `llm_provider_catalog()`, and writes:
+//
+//   .harn-runs/provider_catalog/drift-report.md
+//   .harn-runs/provider_catalog/candidate.toml
+//
+// Usage:
+//
+//   harn run scripts/update_provider_catalog.harn               # fixtures
+//   harn run scripts/update_provider_catalog.harn -- --live     # live sources
+//   harn run scripts/update_provider_catalog.harn -- --check    # compare
+//                                                                 against
+//                                                                 committed
+//                                                                 golden
+//
+// `--check` is the CI gate that powers `make check-provider-catalog-drift`.
+// It runs with the bundled fixtures and verifies the generated
+// markdown report matches the committed golden file under
+// `scripts/provider_catalog_fixtures/expected_drift_report.md`. Run
+// `--check --update` to refresh the golden after intentional adapter
+// or library changes.
+import "./provider_catalog_refresh.harn"
+import "./provider_catalog_sources.harn"
+
+let RUN_OUTPUT_DIR = ".harn-runs/provider_catalog"
+
+let FIXTURE_DIR = "scripts/provider_catalog_fixtures"
+
+let EXPECTED_REPORT_PATH = "scripts/provider_catalog_fixtures/expected_drift_report.md"
+
+let EXPECTED_CANDIDATE_PATH = "scripts/provider_catalog_fixtures/expected_candidate.toml"
+
+let BASELINE_CATALOG_PATH = "scripts/provider_catalog_fixtures/baseline_catalog.json"
+
+let FIXED_OBSERVED_AT = "2026-05-11T00:00:00Z"
+
+let FIXED_FETCHED_AT = "fixture-time"
+
+fn __install_fixture_mocks() {
+  http_mock_clear()
+  http_mock(
+    "GET",
+    "https://www.anthropic.com/pricing",
+    {
+      status: 200,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        etag: "\"fixture\"",
+        "last-modified": "Mon, 11 May 2026 00:00:00 GMT",
+      },
+      body: read_file(path_join(FIXTURE_DIR, "anthropic_pricing.html")),
+    },
+  )
+  http_mock(
+    "GET",
+    "https://platform.openai.com/docs/pricing",
+    {
+      status: 200,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        etag: "\"fixture\"",
+        "last-modified": "Mon, 11 May 2026 00:00:00 GMT",
+      },
+      body: read_file(path_join(FIXTURE_DIR, "openai_pricing.html")),
+    },
+  )
+  http_mock(
+    "GET",
+    "https://openrouter.ai/api/v1/models",
+    {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        etag: "\"fixture\"",
+        "last-modified": "Mon, 11 May 2026 00:00:00 GMT",
+      },
+      body: read_file(path_join(FIXTURE_DIR, "openrouter_models.json")),
+    },
+  )
+}
+
+fn __rate_per_mtok_from_per_token(value) {
+  if value == nil {
+    return nil
+  }
+  // OpenRouter quotes pricing as USD per token in a string; multiply
+  // to per-million-tokens and round to a stable 6-digit precision so
+  // float artifacts don't show up in committed candidate diffs.
+  return round(to_float(value) * 1000000.0 * 1000000.0) / 1000000.0
+}
+
+fn __openrouter_mapper(payload) {
+  var entries = []
+  for record in payload?.data ?? [] {
+    let id = record?.id
+    if id == nil || id == "" {
+      continue
+    }
+    let pricing = record?.pricing
+    var pricing_dict = {}
+    let input_rate = __rate_per_mtok_from_per_token(pricing?.prompt)
+    let output_rate = __rate_per_mtok_from_per_token(pricing?.completion)
+    if input_rate != nil {
+      pricing_dict = pricing_dict + {input_per_mtok: input_rate}
+    }
+    if output_rate != nil {
+      pricing_dict = pricing_dict + {output_per_mtok: output_rate}
+    }
+    let pricing_value = if len(pricing_dict) == 0 {
+      nil
+    } else {
+      pricing_dict
+    }
+    let entry = {
+      provider: record?.provider ?? "openrouter",
+      model_id: id,
+      name: record?.name,
+      context_window: record?.context_length,
+      pricing: pricing_value,
+    }
+    entries = entries + [entry]
+  }
+  return entries
+}
+
+fn __fireworks_mapper(payload) {
+  var entries = []
+  for record in payload?.data ?? [] {
+    if record?.id != nil {
+      entries = entries + [{model_id: record.id, name: record?.name}]
+    }
+  }
+  return entries
+}
+
+fn __fireworks_adapter(env) {
+  let config = {
+    id: "fireworks-models-api",
+    provider: "fireworks",
+    source_url: "https://api.fireworks.ai/inference/v1/models",
+    source_owner: "provider",
+    confidence: "high",
+    terms_notes: "Requires FIREWORKS_API_KEY; uses the standard /models endpoint.",
+    mapper: __fireworks_mapper,
+  }
+  return json_api_adapter(env, config)
+}
+
+fn __anthropic_spec() {
+  let config = {
+    id: "anthropic-pricing-page",
+    provider: "anthropic",
+    source_url: "https://www.anthropic.com/pricing",
+    confidence: "high",
+    terms_notes: "Public pricing page; provider-owned source.",
+    column_map: [
+      {header: "Model", field: "model_id"},
+      {header: "Input ($/MTok)", field: "input_per_mtok"},
+      {header: "Output ($/MTok)", field: "output_per_mtok"},
+      {header: "Cache read ($/MTok)", field: "cache_read_per_mtok"},
+      {header: "Cache write ($/MTok)", field: "cache_write_per_mtok"},
+      {header: "Context", field: "context_window"},
+    ],
+  }
+  return {run_fn: { env -> html_pricing_table_adapter(env, config) }}
+}
+
+fn __openai_spec() {
+  let config = {
+    id: "openai-pricing-page",
+    provider: "openai",
+    source_url: "https://platform.openai.com/docs/pricing",
+    confidence: "high",
+    terms_notes: "Public pricing page; provider-owned source.",
+    column_map: [
+      {header: "Model", field: "model_id"},
+      {header: "Input ($/MTok)", field: "input_per_mtok"},
+      {header: "Output ($/MTok)", field: "output_per_mtok"},
+      {header: "Cache read ($/MTok)", field: "cache_read_per_mtok"},
+      {header: "Context", field: "context_window"},
+    ],
+  }
+  return {run_fn: { env -> html_pricing_table_adapter(env, config) }}
+}
+
+fn __openrouter_spec() {
+  let config = {
+    id: "openrouter-models-api",
+    provider: "openrouter",
+    source_url: "https://openrouter.ai/api/v1/models",
+    source_owner: "aggregator",
+    confidence: "medium",
+    terms_notes: "OpenRouter public /models index; secondary triangulation source.",
+    mapper: __openrouter_mapper,
+  }
+  return {run_fn: { env -> json_api_adapter(env, config) }}
+}
+
+fn __fireworks_spec() {
+  let config = {
+    id: "fireworks-models-api",
+    kind: "json",
+    source_owner: "provider",
+    source_url: "https://api.fireworks.ai/inference/v1/models",
+    key_envs: ["FIREWORKS_API_KEY"],
+    adapter: __fireworks_adapter,
+  }
+  return {key_envs: config.key_envs, run_fn: { env -> key_required_adapter(env, config) }}
+}
+
+fn __adapter_specs() {
+  return [__anthropic_spec(), __openai_spec(), __openrouter_spec(), __fireworks_spec()]
+}
+
+fn __load_secrets(live, specs) {
+  if !live {
+    return {}
+  }
+  var secrets = {}
+  for spec in specs {
+    for name in spec?.key_envs ?? [] {
+      let value = env(name)
+      if value != nil {
+        secrets = secrets + {[name]: value}
+      }
+    }
+  }
+  return secrets
+}
+
+/**
+ * Run every configured adapter, returning the per-source `run` rows
+ * plus the flat list of raw observations they emitted.
+ */
+pub fn run_adapters(env: dict, specs: list<dict>) -> dict {
+  var runs = []
+  var raw = []
+  for spec in specs {
+    let result = spec.run_fn(env)
+    runs = runs + [result.run]
+    for obs in result.observations {
+      raw = raw + [obs]
+    }
+  }
+  return {runs: runs, observations: raw}
+}
+
+fn __ensure_run_dir() {
+  if !file_exists(RUN_OUTPUT_DIR) {
+    mkdir(RUN_OUTPUT_DIR)
+  }
+}
+
+fn __build_meta(run_mode, observed_at) {
+  return {generated_at: observed_at, run_mode: run_mode}
+}
+
+fn __compose_report(env, specs, catalog, run_mode) {
+  let adapter_outcome = run_adapters(env, specs)
+  let normalized = normalize_observations(adapter_outcome.observations)
+  let drift = build_drift(normalized.observations, catalog)
+  let meta = __build_meta(run_mode, env.observed_at)
+  return {
+    report: render_markdown_report(drift, normalized.conflicts, adapter_outcome.runs, meta),
+    candidate: render_candidate_toml(drift, meta),
+    drift: drift,
+    runs: adapter_outcome.runs,
+    observations: normalized.observations,
+  }
+}
+
+fn __write_outputs(outcome) {
+  __ensure_run_dir()
+  write_file(path_join(RUN_OUTPUT_DIR, "drift-report.md"), outcome.report)
+  write_file(path_join(RUN_OUTPUT_DIR, "candidate.toml"), outcome.candidate)
+}
+
+fn __check_against_golden(outcome, update) -> int {
+  if update {
+    write_file(EXPECTED_REPORT_PATH, outcome.report)
+    write_file(EXPECTED_CANDIDATE_PATH, outcome.candidate)
+    println("Updated " + EXPECTED_REPORT_PATH)
+    println("Updated " + EXPECTED_CANDIDATE_PATH)
+    return 0
+  }
+  let expected_report = if file_exists(EXPECTED_REPORT_PATH) {
+    read_file(EXPECTED_REPORT_PATH)
+  } else {
+    ""
+  }
+  let expected_candidate = if file_exists(EXPECTED_CANDIDATE_PATH) {
+    read_file(EXPECTED_CANDIDATE_PATH)
+  } else {
+    ""
+  }
+  if outcome.report != expected_report {
+    eprintln("provider catalog drift report drifted from " + EXPECTED_REPORT_PATH)
+    eprintln("Run scripts/update_provider_catalog.harn -- --check --update after reviewing.")
+    return 1
+  }
+  if outcome.candidate != expected_candidate {
+    eprintln("provider catalog candidate TOML drifted from " + EXPECTED_CANDIDATE_PATH)
+    eprintln("Run scripts/update_provider_catalog.harn -- --check --update after reviewing.")
+    return 1
+  }
+  return 0
+}
+
+pipeline main(task) {
+  let live = argv.contains("--live")
+  let check = argv.contains("--check")
+  let update = argv.contains("--update")
+  let specs = __adapter_specs()
+  let observed_at = if live {
+    date_now_iso()
+  } else {
+    FIXED_OBSERVED_AT
+  }
+  if !live {
+    __install_fixture_mocks()
+  }
+  let env_data = {
+    observed_at: observed_at,
+    secrets: __load_secrets(live, specs),
+    http_options: if live {
+      nil
+    } else {
+      {fetched_at: FIXED_FETCHED_AT}
+    },
+  }
+  let run_mode = if live {
+    "live"
+  } else {
+    "fixtures"
+  }
+  let catalog = if live {
+    llm_provider_catalog()
+  } else {
+    json_parse(read_file(BASELINE_CATALOG_PATH))
+  }
+  let outcome = __compose_report(env_data, specs, catalog, run_mode)
+  if check {
+    return __check_against_golden(outcome, update)
+  }
+  __write_outputs(outcome)
+  println("wrote " + path_join(RUN_OUTPUT_DIR, "drift-report.md"))
+  println("wrote " + path_join(RUN_OUTPUT_DIR, "candidate.toml"))
+  return 0
+}
