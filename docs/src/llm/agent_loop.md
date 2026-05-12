@@ -171,6 +171,41 @@ bound any codebase-research loop. Simulated-user decisions also emit
 `simulated_user_budget_exhausted` so evals can audit when the harness user
 intervened.
 
+### Interactive chat loops
+
+Use `std/agent/chat` when a harness wants an operator-typed chat loop instead
+of hand-driving `agent_loop` one turn at a time. `agent_chat_loop(...)` owns the
+session, calls `on_user_input(state)` before each model turn, preserves the
+same `session_id` across turns, and closes the session with a typed reason
+unless `close_session: false` is set.
+
+```harn,ignore
+import { agent_chat_loop, agent_chat_route_input } from "std/agent/chat"
+
+let result = agent_chat_loop({
+  session_id: "review-chat",
+  provider: "ollama",
+  model: "qwen3.6-coding",
+  tools: coding_tools,
+  tool_format: "native",
+  on_user_input: { state ->
+    let line = read_line()
+    if line == nil {
+      return {kind: "exit", reason: "timeout"}
+    }
+    return agent_chat_route_input(line, state, {
+      "/runs": { req -> {kind: "handled", message: render_recent_runs(req.state)} },
+    })
+  },
+  on_model_turn: { turn, state -> {state: state + {last_text: turn.visible_text}} },
+})
+```
+
+The chat loop adds a Harn-handled `wait_for_user` tool by default. When the
+model calls it, the current `agent_loop` turn stops with
+`stop_reason: "wait_for_user"` and the wrapper returns to `on_user_input`.
+Pass `wait_for_user_tool: false` to keep the tool registry unchanged.
+
 ### agent_loop options
 
 Same as `llm_call`, plus additional options:
@@ -715,10 +750,11 @@ It may return:
 
 - a `string` to inject as the next user-visible message
 - a `bool` where `true` stops the current stage immediately after the turn
-- a `dict` with optional `message`, `stop`, `next_options`, and `llm_options`
-  fields. `message` is injected as runtime feedback. `next_options` merges into
-  the next loop iteration's options; `llm_options` merges into the next LLM
-  call's `llm_options` dict.
+- a `dict` with optional `message`, `stop`, `stop_reason`, `next_options`, and
+  `llm_options` fields. `message` is injected as runtime feedback.
+  `stop_reason` overrides the default `"post_turn_stop"` reason when `stop` is
+  true. `next_options` merges into the next loop iteration's options;
+  `llm_options` merges into the next LLM call's `llm_options` dict.
 
 Example: after a required read succeeds, ask the model to synthesize the final
 answer with no more native tool calls:

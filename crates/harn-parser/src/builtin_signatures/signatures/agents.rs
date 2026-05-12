@@ -146,6 +146,25 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple(
+        "agent_chat_loop",
+        &[Param::optional("opts", TY_DICT_OR_NIL)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_chat_route_input",
+        &[
+            Param::new("line", TY_ANY),
+            Param::optional("state", TY_DICT_OR_NIL),
+            Param::optional("handlers", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_chat_wait_for_user_tools",
+        &[Param::optional("registry", TY_DICT_OR_NIL)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "agent_llm_turn",
         &[
             Param::new("prompt", TY_STRING),
@@ -279,7 +298,10 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     ),
     BuiltinSignature::simple(
         "agent_session_close",
-        &[Param::new("id", TY_STRING)],
+        &[
+            Param::new("id", TY_STRING),
+            Param::optional("status", TY_STRING_OR_DICT),
+        ],
         TY_NIL,
     ),
     BuiltinSignature::simple(

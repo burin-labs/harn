@@ -232,6 +232,12 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
                 "tool_names": ["read_file", "grep"]
             }),
         },
+        AgentEvent::SessionClosed {
+            session_id: "session-1".to_string(),
+            reason: "timeout".to_string(),
+            status: "timeout".to_string(),
+            metadata: serde_json::json!({"idle_ms": 5000}),
+        },
         AgentEvent::JudgeDecision {
             session_id: "session-1".to_string(),
             iteration: 0,

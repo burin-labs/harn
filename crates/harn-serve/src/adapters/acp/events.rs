@@ -686,6 +686,22 @@ impl AgentEventSink for AcpAgentEventSink {
                     serde_json::json!({"iteration": iteration, "turnInfo": turn_info}),
                 );
             }
+            AgentEvent::SessionClosed {
+                session_id,
+                reason,
+                status,
+                metadata,
+            } => {
+                self.emit_agent_event_ext(
+                    "session_closed",
+                    session_id,
+                    serde_json::json!({
+                        "reason": reason,
+                        "status": status,
+                        "metadata": metadata,
+                    }),
+                );
+            }
             AgentEvent::JudgeDecision {
                 session_id,
                 iteration,

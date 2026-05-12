@@ -30,6 +30,15 @@ condensed series summaries instead of full per-patch history.
   `page` prints directly when stdout is not interactive, `no_pager` is set, or
   `$PAGER=cat`; otherwise it uses `$PAGER` with `less -R -F -X` defaults and
   falls back to print output when the pager binary is unavailable.
+- **Interactive agent chat loop primitive (#1545).** Added `std/agent/chat`
+  with `agent_chat_loop(...)`, `agent_chat_route_input(...)`, and
+  `agent_chat_wait_for_user_tools(...)` so harnesses can share one
+  operator-message / model-turn loop instead of reimplementing session
+  management, slash-command routing, and `wait_for_user` turn stops. A
+  post-turn callback can now set a typed `stop_reason` when it stops the
+  loop, and `agent_session_close(id, status?)` records an
+  `agent_session_closed` event before evicting the session so timeout and
+  interruption closes are visible in event logs.
 
 ## v0.8.11
 

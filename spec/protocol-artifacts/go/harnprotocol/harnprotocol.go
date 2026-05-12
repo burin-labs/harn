@@ -119,6 +119,7 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"judge_decision",
 	"loop_control_decision",
 	"loop_stuck",
+	"session_closed",
 	"tool_call_audit",
 	"typed_checkpoint",
 	"turn_end",
