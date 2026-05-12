@@ -82,7 +82,7 @@ described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/path`, `std/edit`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
 `std/llm/handlers`, `std/llm/budget`, `std/llm/prompts`, `std/vision`,
 `std/context`, `std/agent_state`, `std/agents`, `std/agent/user`,
-`std/runtime`, `std/command`, `std/git`, `std/review`,
+`std/runtime`, `std/command`, `std/tui`, `std/git`, `std/review`,
 `std/experiments`,
 `std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
 `std/triage`, `std/worktree`, `std/checkpoint`, `std/personas/prelude`,
@@ -123,6 +123,7 @@ import "std/prompt_library"
 import "std/review"
 import "std/text"
 import "std/triage"
+import "std/tui"
 import "std/vision"
 ```
 
@@ -659,6 +660,36 @@ let step = command_step("verify package", ["cargo", "test", "-p", "harn-vm"], {
     return nil
   },
 })
+```
+
+### std/tui
+
+Terminal presentation helpers for interactive scripts:
+
+| Function | Description |
+|---|---|
+| `page(opts)` | Show a text or markdown artifact through `$PAGER` when stdout is a TTY; otherwise print the full artifact and footer. Returns `{ok, paged, error?}` |
+| `terminal_width(default_width?)` | Return the current terminal width, falling back to `default_width` or 80 |
+| `rule(char?, width?)` | Return `char` repeated to `width`, or to the terminal width when width is omitted |
+| `clear()` | Write the ANSI clear-screen sequence to stdout |
+
+`page` accepts `{title?, body, format?, no_pager?, footer?}`. `format` may be
+`"text"` or `"markdown"`; markdown currently passes through raw so callers can
+choose their own renderer before paging. In pager mode Harn respects `$PAGER`,
+adds `-R -F -X` for `less`, falls back to printing when the pager is missing,
+and treats `$PAGER=cat` as print-only.
+
+```harn
+import { page } from "std/tui"
+
+let result = page({
+  title: "Release audit",
+  body: audit_markdown,
+  format: "markdown",
+})
+if !result.ok {
+  eprintln(result.error ?? "pager failed")
+}
 ```
 
 ### std/git

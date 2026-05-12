@@ -369,6 +369,8 @@ Imports starting with `std/` load embedded stdlib modules:
   ui_tool_result_validate, ui_host_capabilities, ui_host_supports_apps,
   ui_select_for_host, ui_tool_call_envelope, ui_context_update_envelope,
   ui_resource_csp_header, ui_resource_sandbox_attr)
+- `import "std/tui"` — terminal presentation helpers (page,
+  terminal_width, rule, clear)
 - `import "std/collections"` — collection utilities (filter_nil, store_stale,
   store_refresh)
 - `import "std/async"` — polling and retry helpers (wait_for, retry_until,

@@ -62,6 +62,7 @@ pub(crate) mod tools;
 pub mod tracing;
 mod transcript_compact;
 mod triggers_stdlib;
+mod tui;
 mod types;
 mod url_parse;
 mod vision;
@@ -130,6 +131,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     testbench::register_testbench_builtins(vm);
     project::register_project_builtins(vm);
     tracing::register_tracing_builtins(vm);
+    tui::register_tui_builtins(vm);
 }
 
 /// Register agent builtins (requires network access and async runtime).

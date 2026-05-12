@@ -1,0 +1,41 @@
+/** std/tui - terminal presentation helpers for interactive scripts. */
+type PageFormat = "text" | "markdown"
+
+type PageOptions = {
+  title?: string,
+  body: string,
+  format?: PageFormat,
+  no_pager?: bool,
+  footer?: string,
+}
+
+type PageResult = {ok: bool, paged: bool, error?: string}
+
+/** page shows a text or markdown artifact through a pager when stdout is interactive. */
+pub fn page(opts: PageOptions) -> PageResult {
+  return __tui_page(opts)
+}
+
+/** terminal_width returns the current terminal width, or default_width when unknown. */
+pub fn terminal_width(default_width = 80) -> int {
+  return __tui_terminal_width(default_width)
+}
+
+/** rule returns a repeated character line sized to width or the terminal width. */
+pub fn rule(char = "─", width = nil) -> string {
+  let mark = if type_of(char) == "string" && len(char) > 0 {
+    substring(char, 0, 1)
+  } else {
+    "─"
+  }
+  let resolved_width = width ?? terminal_width()
+  if resolved_width <= 0 {
+    return ""
+  }
+  return mark.repeat(resolved_width)
+}
+
+/** clear writes the ANSI clear-screen sequence to stdout. */
+pub fn clear() {
+  __tui_clear()
+}

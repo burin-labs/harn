@@ -228,6 +228,18 @@ In tests: `mock_stdin(text)` / `unmock_stdin()`,
 `mock_tty(stream, bool)` / `unmock_tty()`,
 `capture_stderr_start()` / `capture_stderr_take()`.
 
+For long terminal artifacts, import `std/tui`:
+
+```harn
+import { page, rule, terminal_width, clear } from "std/tui"
+
+let result = page({title: "Audit", body: markdown, format: "markdown"})
+```
+
+`page(...)` uses `$PAGER` when stdout is a TTY, adds `-R -F -X` for `less`,
+falls back to full print output when stdout is not interactive or the pager is
+missing, and returns `{ok, paged, error?}`.
+
 ## Time, sleep, monotonic clock
 
 - `now_ms()` — wall-clock millis since UNIX_EPOCH (`int`).

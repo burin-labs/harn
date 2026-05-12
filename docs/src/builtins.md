@@ -586,6 +586,10 @@ does **not** drain the iterator.
 | `runtime_paths()` | none | dict | Resolved runtime path model: `{execution_root, asset_root, state_root, run_root, worktree_root}` |
 | `date_iso()` | none | string | Current UTC time in ISO 8601 format (e.g., `"2026-03-29T14:30:00.123Z"`) |
 
+For interactive terminal presentation, import `std/tui`. It provides
+`page({title?, body, format?, no_pager?, footer?})`, `terminal_width()`,
+`rule()`, and `clear()` on top of the TTY-aware stdout primitives.
+
 ## Regular expressions
 
 | Function | Parameters | Returns | Description |
