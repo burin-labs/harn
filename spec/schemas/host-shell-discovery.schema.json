@@ -59,6 +59,7 @@
     },
     "shell_invocation_request": {
       "type": "object",
+      "description": "When neither shell_id nor shell is supplied, hosts resolve the invocation with the selected default shell.",
       "properties": {
         "shell_id": { "type": "string" },
         "shell": { "$ref": "#/$defs/shell" },
@@ -66,7 +67,6 @@
         "login": { "type": "boolean", "default": false },
         "interactive": { "type": "boolean", "default": false }
       },
-      "anyOf": [{ "required": ["shell_id"] }, { "required": ["shell"] }],
       "additionalProperties": false
     },
     "shell_invocation_response": {

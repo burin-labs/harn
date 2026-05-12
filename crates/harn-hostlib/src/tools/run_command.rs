@@ -5,8 +5,9 @@
 //!
 //! Behavior:
 //! - `argv` remains the recommended default, with no shell parsing.
-//! - Shell execution is only available when callers explicitly set
-//!   `mode: "shell"` and provide a `shell` object.
+//! - Shell execution is available when callers explicitly set
+//!   `mode: "shell"`; callers can provide a `shell` object or `shell_id`,
+//!   otherwise the host default shell is used.
 //! - `capture_stderr: false` collapses stderr into stdout instead of dropping
 //!   it.
 //! - There is no implicit cap of 300s on `timeout_ms`; the caller decides.

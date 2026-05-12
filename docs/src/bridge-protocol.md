@@ -575,10 +575,11 @@ Response:
 }
 ```
 
-Shell-mode command runners must pass a shell object or a shell ID
-resolved through this capability. `argv` mode remains preferred for
-programmatic execution; shell mode is for user-authored commands and
-interactive shell semantics. The normative JSON Schema lives at
+Shell-mode command runners may pass a shell object or a shell ID
+resolved through this capability, and otherwise use the selected default
+shell. `argv` mode remains preferred for programmatic execution; shell
+mode is for user-authored commands and interactive shell semantics. The
+normative JSON Schema lives at
 `spec/schemas/host-shell-discovery.schema.json`.
 
 ## Skill registry

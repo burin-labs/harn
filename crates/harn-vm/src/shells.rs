@@ -145,13 +145,26 @@ pub fn resolve_invocation_from_vm_params(
 pub fn resolve_shell_from_vm_params(
     params: &BTreeMap<String, VmValue>,
 ) -> Result<ShellDescriptor, String> {
-    if let Some(shell) = params.get("shell").and_then(|value| value.as_dict()) {
-        return shell_descriptor_from_vm_dict(shell);
+    if let Some(value) = params.get("shell") {
+        if let Some(shell) = value.as_dict() {
+            return shell_descriptor_from_vm_dict(shell);
+        }
+        if !matches!(value, VmValue::Nil) {
+            return Err(format!("shell must be a dict, got {}", value.type_name()));
+        }
     }
-    if let Some(shell_id) = params.get("shell_id").and_then(vm_string) {
-        return shell_by_id(shell_id);
+    if let Some(value) = params.get("shell_id") {
+        if let Some(shell_id) = vm_string(value) {
+            return shell_by_id(shell_id);
+        }
+        if !matches!(value, VmValue::Nil) {
+            return Err(format!(
+                "shell_id must be a string, got {}",
+                value.type_name()
+            ));
+        }
     }
-    Err("shell mode requires `shell` or `shell_id`".to_string())
+    get_default_shell().ok_or_else(|| "no default shell available".to_string())
 }
 
 pub fn shell_descriptor_to_vm_value(shell: &ShellDescriptor) -> VmValue {
@@ -609,5 +622,39 @@ mod tests {
         assert_eq!(invocation.program, "/bin/zsh");
         assert_eq!(invocation.args, vec!["-i", "-l", "-c", "echo ok"]);
         assert_eq!(invocation.command_arg_index, 3);
+    }
+
+    #[test]
+    fn invocation_without_explicit_shell_uses_default_shell() {
+        clear_selected_default_shell_for_test();
+        let default_shell = get_default_shell().expect("test host should expose a default shell");
+
+        let mut params = BTreeMap::new();
+        params.insert("command".to_string(), string("echo default-shell"));
+
+        let invocation = resolve_invocation_from_vm_params(&params).unwrap();
+        assert_eq!(invocation.shell, default_shell);
+        assert_eq!(invocation.program, default_shell.path);
+        assert_eq!(
+            invocation.args[invocation.command_arg_index],
+            "echo default-shell"
+        );
+    }
+
+    #[test]
+    fn malformed_explicit_shell_fields_do_not_fall_back_to_default() {
+        let mut params = BTreeMap::new();
+        params.insert("shell".to_string(), VmValue::Int(1));
+        assert_eq!(
+            resolve_shell_from_vm_params(&params).unwrap_err(),
+            "shell must be a dict, got int"
+        );
+
+        let mut params = BTreeMap::new();
+        params.insert("shell_id".to_string(), VmValue::Int(1));
+        assert_eq!(
+            resolve_shell_from_vm_params(&params).unwrap_err(),
+            "shell_id must be a string, got int"
+        );
     }
 }

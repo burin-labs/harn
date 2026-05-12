@@ -20,15 +20,6 @@ pub fn runtime_approved_plan() -> string {
   return host_call("runtime.approved_plan", {}) ?? ""
 }
 
-fn __process_shell_options(options) {
-  let opts = options ?? {}
-  if opts?.shell != nil || opts?.shell_id != nil {
-    return opts
-  }
-  let shell = host_call("process.get_default_shell", {})
-  return opts + {shell_id: shell?.id}
-}
-
 /** process_run. */
 pub fn process_run(argv: list<string>, options = nil) {
   let opts = options ?? {}
@@ -37,7 +28,7 @@ pub fn process_run(argv: list<string>, options = nil) {
 
 /** process_shell. */
 pub fn process_shell(command: string, options = nil) {
-  let opts = __process_shell_options(options)
+  let opts = options ?? {}
   return host_call("process.exec", filter_nil(opts + {mode: "shell", command: command})) ?? {}
 }
 
