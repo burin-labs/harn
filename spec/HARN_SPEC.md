@@ -395,6 +395,11 @@ Imports starting with `std/` load embedded stdlib modules:
   (verify_then_act, bounded_loop, cheap_classify_then_escalate,
   parallel_sweep_with_circuit_breaker, with_audit_receipt,
   with_approval_gate)
+- `import "std/personas/bulletins"` — transparent profile bulletin proposals
+  and host-owned decisions (bulletin_propose, bulletin_emit, bulletin_accept,
+  bulletin_reject, bulletin_expire, bulletin_supersede, bulletin_decide,
+  bulletin_apply_decisions, bulletin_partition, bulletin_active,
+  bulletin_render_for_prompt, bulletin_dedupe)
 
 These modules are compiled into the interpreter binary and require no
 filesystem access.

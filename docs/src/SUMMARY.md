@@ -58,6 +58,7 @@
 - [Skills](./skills.md)
 - [Personas](./personas.md)
   - [Persona Prelude](./personas/prelude.md)
+  - [Profile bulletins](./personas/profile-bulletins.md)
   - [Merge Captain](./personas/merge-captain.md)
 - [Skill provenance](./skill-provenance.md)
 - [Sessions](./sessions.md)

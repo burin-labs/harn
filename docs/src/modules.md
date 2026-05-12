@@ -86,6 +86,7 @@ described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/experiments`,
 `std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
 `std/triage`, `std/worktree`, `std/checkpoint`, `std/personas/prelude`,
+`std/personas/bulletins`,
 `std/connectors/shared`, and provider-specific `std/connectors/...` modules).
 These add layered
 utilities on top of the core builtins; the core builtins themselves are
@@ -116,6 +117,7 @@ import "std/llm/prompts"
 import "std/math"
 import "std/monitors"
 import "std/path"
+import "std/personas/bulletins"
 import "std/personas/prelude"
 import "std/prompt_library"
 import "std/review"
@@ -845,6 +847,27 @@ Helpers for isolated git worktree execution built on `exec_at(...)` and
 | `worktree_status(path)` | Run `git status --short --branch` in the worktree |
 | `worktree_diff(path, base_ref?)` | Render diff output for the worktree |
 | `worktree_shell(path, script)` | Run an arbitrary shell command inside the worktree |
+
+### std/personas/bulletins
+
+Transparent profile bulletin envelopes for durable persona facts. See
+[Profile bulletins](./personas/profile-bulletins.md) for the full envelope and
+review semantics.
+
+| Function | Description |
+|---|---|
+| `bulletin_propose(input, options?)` | Build a `harn.profile_bulletin.v1` proposal with stable id, evidence, source, and privacy fields |
+| `bulletin_id(scope, scope_key, subject, assertion, persona?)` | Compute the stable bulletin id for matching/dedupe |
+| `bulletin_validate(bulletin)` | Throw if the envelope is missing required fields or has out-of-range confidence |
+| `bulletin_emit(input, options?)` | Append a `proposed` bulletin to `personas.bulletins.proposed` and return an emit receipt |
+| `bulletin_decide(bulletin, action, options?)` | Build a typed `harn.profile_bulletin_decision.v1` envelope without emitting |
+| `bulletin_emit_decision(decision, options?)` | Append a decision envelope to `personas.bulletins.decisions` |
+| `bulletin_accept` / `bulletin_reject` / `bulletin_expire` / `bulletin_supersede` | Decide-and-emit shorthands |
+| `bulletin_apply_decisions(bulletins, decisions)` | Project the latest decision per id onto bulletins |
+| `bulletin_partition(bulletins)` | Group bulletins by status |
+| `bulletin_active(bulletins, now?)` | Return `accepted` bulletins still within their TTL |
+| `bulletin_render_for_prompt(bulletins, options?)` | Render an audit-friendly prompt block distinguishing accepted facts from proposals |
+| `bulletin_dedupe(bulletins)` | Drop duplicate bulletins by stable id |
 
 ### std/personas/prelude
 

@@ -2001,6 +2001,50 @@ let rendered = ui_select_for_host(result, host_capabilities)
 Examples: `examples/ui_resource/dashboard-widget.harn`,
 `examples/ui_resource/review-form.harn`.
 
+### Profile bulletins stdlib
+
+Use `std/personas/bulletins` when an agent learns a durable fact about a
+person, project, team, or task. Bulletins are proposals — they never silently
+enter durable context, and hosts emit separate decision events so the review
+trail is replayable:
+
+```harn
+import { bulletin_propose, bulletin_emit, bulletin_accept, bulletin_render_for_prompt } from "std/personas/bulletins"
+
+let bulletin = bulletin_propose(
+  {
+    scope: "user",
+    scope_key: "kenneth@example.com",
+    subject: "kenneth",
+    persona: "burin_home",
+    assertion: "prefers concise responses without trailing summaries",
+    confidence: 0.92,
+    source: {agent: "burin_home_curator"},
+    evidence: [{kind: "user_msg", ref: "msg-42"}],
+    privacy: {sync: "local_only"},
+  },
+)
+let _proposal = bulletin_emit(bulletin)
+let _accepted = bulletin_accept(bulletin, {decided_by: "user"})
+```
+
+- `bulletin_propose(input, options?)` returns `harn.profile_bulletin.v1` with
+  `id`, `scope`, `scope_key`, `subject`, `assertion`, `status` (always
+  `proposed` by default), `confidence` in `[0, 1]`, structured `evidence`,
+  `source`, `privacy`, `proposed_at`, optional `expires_at` and `review_after`,
+  and optional `supersedes` list.
+- `bulletin_emit(input, options?)` always writes status `proposed` to
+  `personas.bulletins.proposed`, even when the input has a different status.
+- `bulletin_accept` / `bulletin_reject` / `bulletin_expire` /
+  `bulletin_supersede` build and emit a typed
+  `harn.profile_bulletin_decision.v1` envelope on
+  `personas.bulletins.decisions`. `bulletin_supersede` requires at least one
+  prior bulletin id.
+- `bulletin_active(bulletins, now?)` returns only `accepted` bulletins still
+  within their TTL; `bulletin_render_for_prompt(bulletins, options?)` renders
+  prompt-ready text that visibly separates accepted facts from proposals
+  pending review. Pass `{include_proposed: false}` to drop proposals.
+
 Workflow stages pick up a session id from `model_policy.session_id`;
 two stages sharing an id share their conversation automatically. The
 pre-0.7 `transcript_policy` dict (with `mode: "reset" | "fork"`) was
