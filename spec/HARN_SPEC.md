@@ -206,6 +206,7 @@ A trailing newline before the closing `"""` is removed.
 Multi-line strings support `${expression}` interpolation with automatic indent
 stripping. If at least one `${...}` interpolation is present, the result is an
 `interpolatedString` token; otherwise it is a plain `stringLiteral` token.
+Use `\${` for a literal `${` sequence inside a multi-line string.
 
 ```harn
 let name = "world"

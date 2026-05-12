@@ -1546,6 +1546,18 @@ fn test_multiline_interpolated_string_preserves_verbatim_body() {
 }
 
 #[test]
+fn test_string_literal_escapes_interpolation_start() {
+    let source = "pipeline test(task) {\n  let s = \"\\${VAR}\"\n  log(s)\n}\n";
+    let out = format_source(source).unwrap();
+    assert_eq!(
+        out, source,
+        "formatter should preserve escaped interpolation starts"
+    );
+    let out2 = format_source(&out).unwrap();
+    assert_eq!(out, out2, "formatter should be idempotent");
+}
+
+#[test]
 fn test_multi_nil_coalescing_chain_wraps_each_operand() {
     // A chain of ≥3 `??` operators must wrap with each operator at
     // line start and a +2-space continuation indent relative to the

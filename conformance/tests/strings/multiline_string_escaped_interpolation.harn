@@ -1,0 +1,14 @@
+pipeline test(task) {
+  let name = "world"
+  let single = "\${VAR}"
+  log("single=${single}")
+  let multi = """
+    shell \${VAR:-default}
+    harn ${name}
+    """
+  log(multi)
+  let escaped_only = """
+    only \${VAR}
+    """
+  log(escaped_only)
+}
