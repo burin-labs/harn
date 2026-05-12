@@ -716,6 +716,13 @@ impl super::super::Vm {
             Self::bind_param_slots(&mut local_slots, &closure.func, &args, false);
             let initial_local_slots = local_slots.clone();
 
+            // Inherit the popped frame's iterator depth so iterators
+            // pushed by for-loops inside the caller (`return f(...)` from
+            // inside `for x in xs { ... }`) get torn down when the
+            // tail-called callee eventually returns, instead of leaking
+            // into the caller's caller.
+            let saved_iterator_depth = popped.saved_iterator_depth;
+            self.iterators.truncate(saved_iterator_depth);
             let argc = args.len();
             self.frames.push(CallFrame {
                 chunk: Rc::clone(&closure.func.chunk),
@@ -724,7 +731,7 @@ impl super::super::Vm {
                 saved_env: parent_env,
                 initial_env: Some(initial_env),
                 initial_local_slots: Some(initial_local_slots),
-                saved_iterator_depth: self.iterators.len(),
+                saved_iterator_depth,
                 fn_name: closure.func.name.clone(),
                 argc,
                 saved_source_dir,

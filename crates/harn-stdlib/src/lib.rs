@@ -994,7 +994,7 @@ mod tests {
             .into_iter()
             .map(|function| function.name)
             .collect::<BTreeSet<_>>();
-        for name in ["page", "terminal_width", "rule", "clear"] {
+        for name in ["page", "terminal_width", "rule", "clear", "select_from"] {
             assert!(exports.contains(name), "std/tui should export {name}");
         }
     }

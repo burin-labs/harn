@@ -1,0 +1,70 @@
+// Exercises the numbered fallback in std/tui::select_from end-to-end.
+// External backends (fzf/gum) take over the controlling tty and can't
+// be driven from a captured-stdout test runner; we pin them off with
+// `prefer_external: "none"` and validate the parsing + cancel paths
+// under `mock_stdin`.
+import { select_from } from "std/tui"
+
+fn show(result) {
+  let value_kind = type_of(result?.value)
+  let value_repr = if value_kind == "dict" {
+    result.value?.id ?? to_string(result.value)
+  } else {
+    if value_kind == "list" {
+      var parts = []
+      for entry in result.value {
+        let part = if type_of(entry) == "dict" {
+          entry?.id ?? to_string(entry)
+        } else {
+          to_string(entry)
+        }
+        parts = parts + [part]
+      }
+      "[" + join(parts, ",") + "]"
+    } else {
+      to_string(result.value)
+    }
+  }
+  println("ok=" + to_string(result.ok) + " status=" + result.status + " value=" + value_repr)
+}
+
+pipeline default() {
+  let items = [{id: "alpha", label: "Alpha — recent"}, {id: "beta", title: "Beta"}, "gamma"]
+  // 1) Pick the second item by typing "2".
+  mock_stdin("2\n")
+  show(select_from(items, {prefer_external: "none", prompt: "Pick"}))
+  unmock_stdin()
+  // 2) Empty input + default_index falls through to the default.
+  mock_stdin("\n")
+  show(select_from(items, {prefer_external: "none", default_index: 0}))
+  unmock_stdin()
+  // 3) "/exit" cancels and returns the supplied cancel_value.
+  mock_stdin("/exit\n")
+  show(select_from(items, {prefer_external: "none", cancel_value: "ABORTED"}))
+  unmock_stdin()
+  // 4) EOF (no input at all) maps to status "eof".
+  mock_stdin("")
+  show(select_from(items, {prefer_external: "none"}))
+  unmock_stdin()
+  // 5) Out-of-range token surfaces an error, not a panic.
+  mock_stdin("99\n")
+  show(select_from(items, {prefer_external: "none"}))
+  unmock_stdin()
+  // 6) Multi-select parses comma-separated 1-based indices.
+  mock_stdin("1,3\n")
+  show(select_from(items, {prefer_external: "none", multi: true}))
+  unmock_stdin()
+  // 7) Custom display function overrides the dict-key heuristic.
+  mock_stdin("1\n")
+  show(
+    select_from(
+      items,
+      {prefer_external: "none", display: { item -> "<" + item?.id ?? to_string(item) + ">" }},
+    ),
+  )
+  unmock_stdin()
+  // 8) Empty items list is an error, not a hang.
+  show(select_from([], {prefer_external: "none"}))
+  // 9) Invalid prefer_external is rejected up front.
+  show(select_from(items, {prefer_external: "rofi"}))
+}

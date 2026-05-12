@@ -1,0 +1,29 @@
+/**
+ * Regression: `return f(...)` inside a `for x in [...]` loop is
+ * tail-call-optimized. The compiler must hand the tail-called frame
+ * the iterator depth from the *popped* frame, not the live depth, or
+ * iterators pushed by the caller's for-loop leak into the caller's
+ * caller — making the outer loop iterate too many times.
+ */
+fn first_value(item) -> any {
+  if type_of(item) == "dict" {
+    for key in ["a", "b", "c"] {
+      if item[key] != nil {
+        return to_string(item[key])
+      }
+    }
+  }
+  return to_string(item)
+}
+
+pipeline default() {
+  let items = [{a: "one"}, {b: "two"}, {c: "three"}]
+  var picked = []
+  for item in items {
+    picked = picked + [first_value(item)]
+  }
+  println(len(picked))
+  for value in picked {
+    println(value)
+  }
+}
