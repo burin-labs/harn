@@ -184,6 +184,13 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::optional("signal", TY_STRING)],
         TY_NIL,
     ),
+    BuiltinSignature::simple("__tui_clear", &[], TY_NIL),
+    BuiltinSignature::simple("__tui_page", &[Param::new("options", TY_DICT)], TY_DICT),
+    BuiltinSignature::simple(
+        "__tui_terminal_width",
+        &[Param::optional("default_width", TY_INT)],
+        TY_INT,
+    ),
     BuiltinSignature::simple(
         "__waitpoint_cancel",
         &[

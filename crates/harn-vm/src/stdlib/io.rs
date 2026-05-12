@@ -120,7 +120,7 @@ fn write_stderr(line: &str) {
     }
 }
 
-fn write_stdout(out: &mut String, text: &str) {
+pub(crate) fn write_stdout(out: &mut String, text: &str) {
     if stdout_passthrough_enabled() {
         let mut stdout = std::io::stdout().lock();
         let _ = stdout.write_all(text.as_bytes());
@@ -477,7 +477,7 @@ fn read_stdin_line_real_with_options(options: &ReadLineOptions) -> ReadLineOutco
     }
 }
 
-fn is_tty_for(stream: &str) -> bool {
+pub(crate) fn is_tty_for(stream: &str) -> bool {
     let mocked = TTY_MOCK.with(|t| {
         let mock = *t.borrow();
         match stream {

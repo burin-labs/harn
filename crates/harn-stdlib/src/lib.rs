@@ -150,6 +150,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_cli.harn"),
     },
     StdlibSource {
+        module: "tui",
+        source: include_str!("stdlib/stdlib_tui.harn"),
+    },
+    StdlibSource {
         module: "jsonl",
         source: include_str!("stdlib/stdlib_jsonl.harn"),
     },
@@ -981,6 +985,17 @@ mod tests {
             "git_toolbox_tools",
         ] {
             assert!(exports.contains(name), "std/git should export {name}");
+        }
+    }
+
+    #[test]
+    fn tui_stdlib_module_exports_terminal_helpers() {
+        let exports = public_functions_for_module("tui")
+            .into_iter()
+            .map(|function| function.name)
+            .collect::<BTreeSet<_>>();
+        for name in ["page", "terminal_width", "rule", "clear"] {
+            assert!(exports.contains(name), "std/tui should export {name}");
         }
     }
 

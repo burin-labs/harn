@@ -25,6 +25,11 @@ condensed series summaries instead of full per-patch history.
   `ok`/`eof`/`timeout`/`interrupt`/`error` statuses, writes prompts to stderr
   with ANSI preserved, supports sub-second Unix timeouts without shelling out
   to `bash`, and disables terminal echo for password-style prompts.
+- **Terminal pager helpers (#1543).** Added `std/tui` with `page(...)` for
+  long text/markdown artifacts, `terminal_width()`, `rule()`, and `clear()`.
+  `page` prints directly when stdout is not interactive, `no_pager` is set, or
+  `$PAGER=cat`; otherwise it uses `$PAGER` with `less -R -F -X` defaults and
+  falls back to print output when the pager binary is unavailable.
 
 ## v0.8.11
 

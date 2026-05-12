@@ -1,0 +1,12 @@
+import { page, rule, terminal_width } from "std/tui"
+
+pipeline test(task) {
+  println(rule("=", 5))
+  println(rule("ab", 3))
+  println(terminal_width(1) > 0)
+  mock_tty("stdout", false)
+  let result = page({title: "Report", body: "alpha\nbeta", format: "markdown"})
+  println("paged=" + to_string(result.paged))
+  println("ok=" + to_string(result.ok))
+  unmock_tty()
+}
