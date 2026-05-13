@@ -1,0 +1,181 @@
+# Layered Runtime Configuration
+
+Harn runtime configuration is a typed, layered document used by the CLI, VM
+hosts, and downstream products to explain model policy, permissions, protocol
+endpoints, package and skill sources, logging, replay, redaction, and runtime
+limits.
+
+The canonical file shape is `harn.config.toml`. Existing `harn.toml` manifests
+can also carry a `[config]` table for repo-checked package or agent defaults.
+
+## Commands
+
+```bash
+harn config inspect
+harn config inspect --explain
+harn config inspect --config ./harn.config.toml --managed ./org-policy.toml --explain
+harn config validate ./harn.config.toml ./org-policy.toml
+harn config schema --output docs/src/schemas/harn-config.schema.json
+```
+
+`inspect --explain` prints the redacted merged config, each loaded layer, and a
+per-field explanation containing the winning source plus shadowed, locked, or
+denied candidates. Secret-shaped fields and high-confidence secret strings are
+redacted with the same runtime redaction policy used for transcripts and event
+logs.
+
+`validate` parses local, project, and managed overlays with the same typed
+schema used by `inspect`. When no path is provided, it validates discovered
+files.
+
+`schema` emits the JSON Schema used by editor integrations. The checked-in
+schema is available at `docs/src/schemas/harn-config.schema.json`.
+
+## Precedence
+
+Layers are merged from lowest to highest precedence:
+
+1. Built-in defaults compiled into `harn-vm`.
+2. Legacy provider compatibility from `HARN_PROVIDERS_CONFIG` or
+   `~/.config/harn/providers.toml`.
+3. Runtime install defaults.
+4. Remote defaults from an explicitly trusted URL.
+5. User config.
+6. Project config from the nearest `harn.config.toml`.
+7. Repo manifest config from the nearest `harn.toml` `[config]` table.
+8. Explicit `--config` files.
+9. Managed policy files.
+10. Environment overrides.
+
+Managed policies are merged before environment overrides so organizations can
+choose which fields stay adjustable. A managed file can set:
+
+```toml
+[policy]
+locked_fields = ["limits.network", "permissions.default"]
+denied_fields = ["endpoints.mcp.untrusted"]
+```
+
+Locked fields keep the managed value even if a later environment override tries
+to replace it. Denied fields reject later candidates entirely.
+
+## File Locations
+
+Runtime install defaults:
+
+| OS | Default path | Override |
+|---|---|---|
+| macOS/Linux | `/etc/harn/config.toml` | `HARN_CONFIG_INSTALL_DEFAULTS` |
+| Windows | `%PROGRAMDATA%\Harn\config.toml` | `HARN_CONFIG_INSTALL_DEFAULTS` |
+
+User config:
+
+| OS | Default path | Override |
+|---|---|---|
+| macOS/Linux | `$XDG_CONFIG_HOME/harn/config.toml`, or `~/.config/harn/config.toml` | `HARN_CONFIG_USER` |
+| Windows | `%APPDATA%\Harn\config.toml` | `HARN_CONFIG_USER` |
+
+Managed policy:
+
+| OS | Default path | Override |
+|---|---|---|
+| All | none | `HARN_CONFIG_MANAGED` |
+
+`HARN_CONFIG_INSTALL_DEFAULTS`, `HARN_CONFIG_USER`, and `HARN_CONFIG_MANAGED`
+accept platform path lists, so multiple files can be supplied with `:` on
+macOS/Linux or `;` on Windows.
+
+Project discovery walks up from the current directory, stops at `.git`, and
+checks at most 16 parent directories. It looks for `harn.config.toml` and
+`harn.toml`.
+
+Remote defaults use `HARN_CONFIG_REMOTE_DEFAULTS_URL` or
+`--remote-defaults-url`. Harn fetches them only when
+`HARN_CONFIG_TRUST_REMOTE=1` is present, and only from `https://` or localhost
+URLs. This keeps enterprise bootstrap explicit while leaving cloud policy
+distribution decoupled from local OSS Harn.
+
+## Environment Overrides
+
+Environment overrides are intentionally small and explainable:
+
+| Variable | Field |
+|---|---|
+| `HARN_CONFIG_JSON` | Arbitrary JSON config overlay |
+| `HARN_DEFAULT_PROVIDER` | `models.default_provider` |
+| `HARN_DEFAULT_MODEL` | `models.default_model` |
+| `HARN_LOG_LEVEL` | `logging.level` |
+| `HARN_RETENTION_DAYS` | `retention.days` |
+| `HARN_REDACTION_MODE` | `redaction.mode` |
+| `HARN_TOKEN_BUDGET` | `limits.tokens` |
+| `HARN_BUDGET_USD` | `limits.budget_usd` |
+| `HARN_MAX_CONCURRENCY` | `limits.concurrency` |
+| `HARN_NETWORK_MODE` | `limits.network` |
+| `HARN_FILESYSTEM_MODE` | `limits.filesystem` |
+| `HARN_SANDBOX_MODE` | `limits.sandbox` |
+| `HARN_REPLAY_ENABLED` | `replay.enabled` |
+
+## Local OSS Example
+
+```toml
+schema_version = 1
+
+[models]
+default_provider = "ollama"
+default_model = "qwen3:14b"
+capability_refs = ["local-qwen"]
+
+[permissions]
+default = "ask"
+
+[limits]
+network = "ask"
+filesystem = "sandboxed"
+sandbox = "process"
+tokens = 200000
+concurrency = 4
+
+[logging]
+level = "info"
+
+[redaction]
+mode = "standard"
+extra_fields = ["internal_audit_token"]
+```
+
+## Org-Managed Example
+
+```toml
+[permissions]
+default = "deny"
+
+[limits]
+network = "offline"
+filesystem = "sandboxed"
+sandbox = "worktree"
+
+[retention]
+days = 14
+
+[policy]
+locked_fields = [
+  "permissions.default",
+  "limits.network",
+  "limits.filesystem",
+  "limits.sandbox",
+  "retention.days",
+]
+denied_fields = ["endpoints.mcp.experimental"]
+```
+
+## Compatibility
+
+Existing provider config keeps working. `HARN_PROVIDERS_CONFIG` and
+`~/.config/harn/providers.toml` are still consumed by the LLM runtime, and
+`harn config inspect --explain` projects that legacy provider surface into the
+canonical `models` section so teams can see where those values came from.
+
+Existing project manifests keep working as well. The richer package manifest
+schema still owns `[llm]`, `[capabilities]`, connectors, triggers, personas,
+and package metadata. New runtime policy belongs in `harn.config.toml` or in a
+`[config]` table inside `harn.toml` when it should be checked in with a package.

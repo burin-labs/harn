@@ -121,6 +121,28 @@ harn completions fish
 Generated completions include subcommands plus static candidates for known
 provider and model values.
 
+## harn config
+
+Inspect, validate, and emit schemas for layered runtime configuration.
+
+```bash
+harn config inspect
+harn config inspect --explain
+harn config inspect --config ./harn.config.toml --managed ./org-policy.toml --explain
+harn config validate ./harn.config.toml
+harn config schema --output docs/src/schemas/harn-config.schema.json
+```
+
+| Command | Description |
+|---|---|
+| `inspect` | Print the redacted merged runtime config |
+| `inspect --explain` | Include per-field provenance, shadowed candidates, and managed policy lock status |
+| `validate` | Validate local, project, or managed overlays against the typed config shape |
+| `schema` | Print the editor JSON Schema for `harn.config.toml` |
+
+See [Layered runtime configuration](./configuration.md) for precedence, file
+locations, environment override names, and managed policy examples.
+
 ## harn playground
 
 Run a pipeline against a Harn-native host module for fast local iteration.

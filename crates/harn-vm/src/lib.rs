@@ -16,6 +16,7 @@ mod builtin_id;
 pub mod checkpoint;
 mod chunk;
 mod compiler;
+pub mod config;
 pub mod connectors;
 pub mod corrections;
 pub mod egress;

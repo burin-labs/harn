@@ -2,9 +2,9 @@ use std::path::PathBuf;
 use std::time::Duration as StdDuration;
 
 use super::{
-    CheckOutputFormat, Cli, Command, CompletionShell, ConnectCommand, ConnectorCommand,
-    CrystallizeCommand, FlowArchivistCommand, FlowCommand, McpCommand, ModelsCommand,
-    OrchestratorCommand, OrchestratorDeployProvider, OrchestratorLogFormat,
+    CheckOutputFormat, Cli, Command, CompletionShell, ConfigCommand, ConnectCommand,
+    ConnectorCommand, CrystallizeCommand, FlowArchivistCommand, FlowCommand, McpCommand,
+    ModelsCommand, OrchestratorCommand, OrchestratorDeployProvider, OrchestratorLogFormat,
     OrchestratorQueueCommand, OrchestratorTenantCommand, PackageArtifactsCommand,
     PackageCacheCommand, PackageCommand, PersonaCommand, ProjectTemplate, RunsCommand,
     SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TraceCommand,
@@ -33,6 +33,52 @@ fn test_parses_conformance_target_selection() {
     );
     assert!(args.verbose);
     assert!(args.differential_optimizations);
+}
+
+#[test]
+fn test_parses_config_inspect_explain() {
+    let cli = Cli::parse_from([
+        "harn",
+        "config",
+        "inspect",
+        "--explain",
+        "--config",
+        "local.toml",
+        "--managed",
+        "managed.toml",
+    ]);
+
+    let Command::Config(args) = cli.command.unwrap() else {
+        panic!("expected config command");
+    };
+    let ConfigCommand::Inspect(inspect) = args.command else {
+        panic!("expected inspect command");
+    };
+    assert!(inspect.explain);
+    assert_eq!(inspect.config_files, vec![PathBuf::from("local.toml")]);
+    assert_eq!(inspect.managed_files, vec![PathBuf::from("managed.toml")]);
+}
+
+#[test]
+fn test_parses_config_validate_and_schema() {
+    let cli = Cli::parse_from(["harn", "config", "validate", "--managed", "policy.toml"]);
+    let Command::Config(args) = cli.command.unwrap() else {
+        panic!("expected config command");
+    };
+    let ConfigCommand::Validate(validate) = args.command else {
+        panic!("expected validate command");
+    };
+    assert!(validate.managed);
+    assert_eq!(validate.files, vec![PathBuf::from("policy.toml")]);
+
+    let cli = Cli::parse_from(["harn", "config", "schema", "--output", "schema.json"]);
+    let Command::Config(args) = cli.command.unwrap() else {
+        panic!("expected config command");
+    };
+    let ConfigCommand::Schema(schema) = args.command else {
+        panic!("expected schema command");
+    };
+    assert_eq!(schema.output, Some(PathBuf::from("schema.json")));
 }
 
 #[test]
