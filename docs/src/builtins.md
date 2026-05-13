@@ -2165,22 +2165,93 @@ execution time.
 ```harn
 agent_loop("task", "system", {
   approval_policy: {
+    rules: [
+      {deny: {path: "**/.env*"}, reason: "credential file"},
+      {ask: {tool: "edit_*", path: "src/**"}, reason: "workspace edit"},
+      {deny: {tool: "run_command", command: ["*curl*", "*wget*"]}}
+    ],
     auto_approve: ["read*", "list_*"],
     auto_deny: ["shell*"],
     require_approval: ["edit_*", "write_*"],
-    write_path_allowlist: ["/workspace/**"]
+    write_path_allowlist: ["/workspace/**"],
+    repeat_limit: 3
   }
 })
 ```
 
-Evaluation order: `auto_deny` → `write_path_allowlist` → `auto_approve` →
-`require_approval`. Tools that match no pattern default to `AutoApproved`.
-`require_approval` calls the host via the canonical ACP
-`session/request_permission` request and **fails closed** if the host
-does not implement it. Policies compose
+`rules` is the typed policy DSL. Each rule uses `allow`, `ask`, or `deny`
+shorthand, or `{action: "ask", match: {...}}`. Match fields are ANDed inside a
+rule and accept strings or string lists:
+
+| Field | Matches |
+|---|---|
+| `tool` | Tool-name glob |
+| `tool_kind` | Annotated ACP tool kind (`read`, `edit`, `execute`, `fetch`, ...) |
+| `side_effect` | Annotated side-effect level (`read_only`, `workspace_write`, `process_exec`, `network`) |
+| `path` | Declared path arguments from `ToolAnnotations.arg_schema.path_params` |
+| `command` / `command_identity` | Shell text or normalized argv/program identity |
+| `url` / `domain` / `method` | URL strings, normalized host domains, and HTTP methods found in tool args |
+| `mcp_server` / `mcp_tool` | MCP owner inferred from `<server>__<tool>` names or MCP arg metadata |
+| `agent` / `persona` / `mode` | Agent/persona/mode identity from args or trigger context |
+| `capability` | Annotated capability operation such as `workspace.read_text` |
+| `repeat_count_gte` | Same `(session, tool, args)` call count threshold |
+
+Deny beats ask, and ask beats allow regardless of rule order. Legacy
+`auto_deny`, `require_approval`, and `auto_approve` are evaluated through the
+same precedence model, so old policy bags remain valid while the richer DSL is
+available. Tools that match no pattern default to `AutoApproved`.
+
+When an `approval_policy` is active, Harn denies sensitive path strings such as
+`.env`, private keys, and credential files by default. Declared host-absolute
+paths outside the workspace are also denied unless `external_roots` explicitly
+allows the root or `allow_external_paths: true` is set. Set
+`allow_sensitive_paths: true` only when a host already mediates secret reads.
+
+`ask` and `require_approval` call the host via the canonical ACP
+`session/request_permission` request and **fail closed** if the host does not
+implement it. The prompt payload includes a `policyDecision` receipt with the
+matched rule, risk labels, normalized context, and rationale. Permission grant
+and denial transcript events carry the same receipt under
+`metadata.policy_decision` for replay and audit.
+
+Example profiles:
+
+```harn
+let local_dev_policy = {
+  rules: [
+    {allow: {tool_kind: ["read", "search"]}},
+    {ask: {tool_kind: ["edit", "move"], path: "src/**"}, reason: "workspace mutation"},
+    {deny: {command: ["*curl*", "*wget*"]}, reason: "downloaded shell is not allowed"}
+  ],
+  repeat_limit: 3
+}
+
+let ci_headless_policy = {
+  rules: [
+    {allow: {tool_kind: ["read", "search"]}},
+    {allow: {tool: "run_command", command_identity: ["cargo", "npm", "make"]}},
+    {deny: "*"}
+  ],
+  allow_sensitive_paths: false,
+  repeat_limit: 1,
+  repeat_action: "deny"
+}
+
+let managed_enterprise_policy = {
+  rules: [
+    {ask: {side_effect: ["workspace_write", "process_exec", "network"]}, reason: "managed approval"},
+    {deny: {domain: ["*.pastebin.com", "*.ngrok.io"]}},
+    {deny: {path: ["**/.env*", "**/.aws/credentials"]}}
+  ],
+  external_roots: ["/tmp/harn-approved"]
+}
+```
+
+Policies compose
 across nested scopes with most-restrictive intersection: auto-deny and
 require-approval take the union, while `auto_approve` and
-`write_path_allowlist` take the intersection.
+`write_path_allowlist` take the intersection. Rule lists concatenate and retain
+deny/ask/allow precedence; repeat limits keep the smaller threshold.
 
 Example (`agent.harn`):
 

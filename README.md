@@ -315,6 +315,11 @@ defaults, safe, prompts, catalog).
 - Per-agent capability policies with argument-level constraints: `agent_loop`
   accepts a `policy` dict to scope tool permissions, including `tool_arg_constraints`
   for pattern-matching on tool arguments.
+- Rule-based approval policies: `approval_policy.rules` expresses allow/ask/deny
+  over tool names/kinds, side-effect levels, declared paths, command identity,
+  URLs/domains/methods, MCP identity, agent/persona/mode, and repeat counts,
+  with deny-by-default sensitive path guards and replayable policy-decision
+  receipts in permission events and host approval prompts.
 - Dynamic per-agent permissions: `agent_loop`, `sub_agent_run`, and
   `spawn_agent` accept `permissions` with `allow` / `deny` tool rules, VM
   predicates over the tool args, and `on_escalation` callbacks that can grant a

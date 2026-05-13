@@ -1009,6 +1009,18 @@ lineage metadata.
 - `error: {category, message, tool?}` when the child fails or a narrowed tool
   policy rejects a call
 
+`agent_loop(...)`, `sub_agent_run(...)`, and `spawn_agent(...)` accept
+`approval_policy` for declarative allow/ask/deny gating before a tool runs.
+Use `approval_policy.rules` for typed matching over tool name/kind,
+side-effect level, declared paths, commands, URLs/domains/methods, MCP identity,
+agent/persona/mode, capability operation, and repeated-call counts. Deny wins
+over ask, ask wins over allow, and unmatched tools are approved. Active
+approval policies deny sensitive filenames such as `.env` and private keys by
+default, and declared host-absolute paths outside the workspace require an
+explicit `external_roots` allowance. Ask decisions call
+`session/request_permission`; the host request and the transcript event both
+carry a `policyDecision` receipt with matched rule and rationale.
+
 `agent_loop(...)`, `sub_agent_run(...)`, and `spawn_agent(...)` also accept a
 `permissions` dict for per-agent dynamic policy. `allow` and `deny` entries can
 be tool-name glob lists, argument pattern lists, or Harn predicates over the tool

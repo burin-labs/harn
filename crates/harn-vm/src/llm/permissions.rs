@@ -46,18 +46,27 @@ pub(crate) fn permission_transcript_event(
     reason: &str,
     escalated: bool,
 ) -> VmValue {
-    crate::llm::helpers::transcript_event(
-        kind,
-        "tool",
-        "internal",
-        reason,
-        Some(serde_json::json!({
-            "tool_name": tool_name,
-            "arguments": args,
-            "reason": reason,
-            "escalated": escalated,
-        })),
-    )
+    permission_transcript_event_with_policy(kind, tool_name, args, reason, escalated, None)
+}
+
+pub(crate) fn permission_transcript_event_with_policy(
+    kind: &str,
+    tool_name: &str,
+    args: &serde_json::Value,
+    reason: &str,
+    escalated: bool,
+    policy_decision: Option<serde_json::Value>,
+) -> VmValue {
+    let mut metadata = serde_json::json!({
+        "tool_name": tool_name,
+        "arguments": args,
+        "reason": reason,
+        "escalated": escalated,
+    });
+    if let Some(policy_decision) = policy_decision {
+        metadata["policy_decision"] = policy_decision;
+    }
+    crate::llm::helpers::transcript_event(kind, "tool", "internal", reason, Some(metadata))
 }
 
 thread_local! {

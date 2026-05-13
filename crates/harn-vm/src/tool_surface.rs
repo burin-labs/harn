@@ -789,22 +789,41 @@ fn validate_approval_patterns(
         ),
     ] {
         for pattern in patterns {
-            if pattern.contains('*') {
-                continue;
-            }
-            if !active_names
-                .iter()
-                .any(|name| crate::orchestration::glob_match(pattern, name))
-            {
-                diagnostics.push(
-                    ToolSurfaceDiagnostic::warning(
-                        "TOOL_SURFACE_APPROVAL_PATTERN_NO_MATCH",
-                        format!("{field} pattern '{pattern}' matches no active tool"),
-                    )
-                    .with_field(field),
-                );
-            }
+            validate_approval_tool_pattern(pattern, field, active_names, diagnostics);
         }
+    }
+    for (index, rule) in approval.rules.iter().enumerate() {
+        for pattern in &rule.matches.tool {
+            validate_approval_tool_pattern(
+                pattern,
+                &format!("approval_policy.rules[{index}].tool"),
+                active_names,
+                diagnostics,
+            );
+        }
+    }
+}
+
+fn validate_approval_tool_pattern(
+    pattern: &str,
+    field: &str,
+    active_names: &BTreeSet<String>,
+    diagnostics: &mut Vec<ToolSurfaceDiagnostic>,
+) {
+    if pattern.contains('*') {
+        return;
+    }
+    if !active_names
+        .iter()
+        .any(|name| crate::orchestration::glob_match(pattern, name))
+    {
+        diagnostics.push(
+            ToolSurfaceDiagnostic::warning(
+                "TOOL_SURFACE_APPROVAL_PATTERN_NO_MATCH",
+                format!("{field} pattern '{pattern}' matches no active tool"),
+            )
+            .with_field(field),
+        );
     }
 }
 
@@ -1368,6 +1387,34 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.code == "TOOL_SURFACE_PROMPT_TOOL_NOT_IN_POLICY"));
+    }
+
+    #[test]
+    fn approval_rule_tool_references_are_reported() {
+        let approval_policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+            "rules": [
+                {"ask": {"tool": "missing_tool"}, "reason": "unknown"},
+                {"allow": {"tool": "read_*"}}
+            ]
+        }))
+        .unwrap();
+        let report = validate_tool_surface(&ToolSurfaceInput {
+            native_tools: Some(vec![serde_json::json!({
+                "name": "read_file",
+                "parameters": {"type": "object"},
+            })]),
+            approval_policy: Some(approval_policy),
+            ..ToolSurfaceInput::default()
+        });
+
+        assert!(report.diagnostics.iter().any(|d| {
+            d.code == "TOOL_SURFACE_APPROVAL_PATTERN_NO_MATCH"
+                && d.field.as_deref() == Some("approval_policy.rules[0].tool")
+        }));
+        assert!(!report.diagnostics.iter().any(|d| {
+            d.code == "TOOL_SURFACE_APPROVAL_PATTERN_NO_MATCH"
+                && d.field.as_deref() == Some("approval_policy.rules[1].tool")
+        }));
     }
 
     #[test]
