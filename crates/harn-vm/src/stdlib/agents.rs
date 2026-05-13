@@ -27,6 +27,7 @@ use self::agents_workers::{
     WORKER_REGISTRY,
 };
 use self::sub_agent::{execute_sub_agent, parse_sub_agent_request};
+use crate::orchestration::ArtifactRecord;
 use crate::stdlib::registration::{
     async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
@@ -99,11 +100,42 @@ pub(super) struct SubAgentExecutionResult {
     pub(super) transcript: VmValue,
 }
 
+struct WorkerReplayCarry {
+    artifacts: Vec<ArtifactRecord>,
+    transcript: Option<VmValue>,
+    parent_worker_id: String,
+    worker_id: String,
+    resume_workflow: bool,
+    child_run_path: Option<String>,
+    reset_sub_agent_session: bool,
+}
+
 fn restart_worker_run(
     worker: &mut WorkerState,
     next_task: &str,
     clear_latest_payload: bool,
 ) -> Result<(), VmError> {
+    reset_worker_for_replay(worker, next_task, clear_latest_payload)
+}
+
+fn reset_worker_for_replay(
+    worker: &mut WorkerState,
+    next_task: &str,
+    clear_latest_payload: bool,
+) -> Result<(), VmError> {
+    reset_worker_runtime_state(worker, next_task, clear_latest_payload);
+    let carry = worker_replay_carry(worker)?;
+    worker.transcript = carry.transcript.clone();
+    ensure_worker_config_session_ids(&mut worker.config, &carry.worker_id);
+    apply_worker_replay_config(&mut worker.config, next_task, carry);
+    Ok(())
+}
+
+fn reset_worker_runtime_state(
+    worker: &mut WorkerState,
+    next_task: &str,
+    clear_latest_payload: bool,
+) {
     worker.cancel_token = Arc::new(AtomicBool::new(false));
     worker.task = next_task.to_string();
     worker.history.push(next_task.to_string());
@@ -116,66 +148,105 @@ fn restart_worker_run(
     if clear_latest_payload {
         worker.latest_payload = None;
     }
-    let next_artifacts = apply_worker_artifact_policy(&worker.artifacts, &worker.carry_policy);
-    let next_transcript =
-        apply_worker_transcript_policy(worker.transcript.clone(), &worker.carry_policy)?;
-    worker.transcript = next_transcript.clone();
-    let worker_parent = worker.id.clone();
-    let worker_id = worker.id.clone();
-    let resume_workflow = worker.carry_policy.resume_workflow;
-    let child_run_path = worker.child_run_path.clone();
-    ensure_worker_config_session_ids(&mut worker.config, &worker_id);
-    match &mut worker.config {
+}
+
+fn worker_replay_carry(worker: &WorkerState) -> Result<WorkerReplayCarry, VmError> {
+    Ok(WorkerReplayCarry {
+        artifacts: apply_worker_artifact_policy(&worker.artifacts, &worker.carry_policy),
+        transcript: apply_worker_transcript_policy(
+            worker.transcript.clone(),
+            &worker.carry_policy,
+        )?,
+        parent_worker_id: worker.id.clone(),
+        worker_id: worker.id.clone(),
+        resume_workflow: worker.carry_policy.resume_workflow,
+        child_run_path: worker.child_run_path.clone(),
+        reset_sub_agent_session: matches!(
+            worker.carry_policy.transcript_mode.as_str(),
+            "fork" | "reset"
+        ),
+    })
+}
+
+fn apply_worker_replay_config(
+    config: &mut WorkerConfig,
+    next_task: &str,
+    carry: WorkerReplayCarry,
+) {
+    match config {
         WorkerConfig::Workflow {
             artifacts, options, ..
-        } => {
-            if !next_artifacts.is_empty() {
-                *artifacts = next_artifacts.clone();
-            }
-            options.insert(
-                "parent_worker_id".to_string(),
-                VmValue::String(Rc::from(worker_parent)),
-            );
-            if let Some(transcript) = next_transcript.clone() {
-                options.insert("transcript".to_string(), transcript);
-            } else {
-                options.remove("transcript");
-            }
-            if resume_workflow {
-                if let Some(child_run_path) = child_run_path {
-                    options.insert(
-                        "resume_path".to_string(),
-                        VmValue::String(Rc::from(child_run_path)),
-                    );
-                }
-            } else {
-                options.remove("resume_path");
-            }
-        }
+        } => apply_workflow_replay_config(artifacts, options, carry),
         WorkerConfig::Stage {
             artifacts,
             transcript,
             ..
-        } => {
-            if !next_artifacts.is_empty() {
-                *artifacts = next_artifacts;
-            }
-            *transcript = next_transcript;
-        }
+        } => apply_stage_replay_config(artifacts, transcript, carry),
         WorkerConfig::SubAgent { spec } => {
-            spec.task = next_task.to_string();
-            if matches!(
-                worker.carry_policy.transcript_mode.as_str(),
-                "fork" | "reset"
-            ) {
-                spec.session_id = format!("sub_agent_session_{}", uuid::Uuid::now_v7());
-                spec.options.insert(
-                    "session_id".to_string(),
-                    VmValue::String(Rc::from(spec.session_id.clone())),
-                );
-            }
+            apply_sub_agent_replay_config(spec, next_task, carry.reset_sub_agent_session);
         }
     }
+}
+
+fn apply_workflow_replay_config(
+    artifacts: &mut Vec<ArtifactRecord>,
+    options: &mut BTreeMap<String, VmValue>,
+    carry: WorkerReplayCarry,
+) {
+    if !carry.artifacts.is_empty() {
+        *artifacts = carry.artifacts;
+    }
+    options.insert(
+        "parent_worker_id".to_string(),
+        VmValue::String(Rc::from(carry.parent_worker_id)),
+    );
+    if let Some(transcript) = carry.transcript {
+        options.insert("transcript".to_string(), transcript);
+    } else {
+        options.remove("transcript");
+    }
+    if carry.resume_workflow {
+        if let Some(child_run_path) = carry.child_run_path {
+            options.insert(
+                "resume_path".to_string(),
+                VmValue::String(Rc::from(child_run_path)),
+            );
+        }
+    } else {
+        options.remove("resume_path");
+    }
+}
+
+fn apply_stage_replay_config(
+    artifacts: &mut Vec<ArtifactRecord>,
+    transcript: &mut Option<VmValue>,
+    carry: WorkerReplayCarry,
+) {
+    if !carry.artifacts.is_empty() {
+        *artifacts = carry.artifacts;
+    }
+    *transcript = carry.transcript;
+}
+
+fn apply_sub_agent_replay_config(spec: &mut SubAgentRunSpec, next_task: &str, reset_session: bool) {
+    spec.task = next_task.to_string();
+    if reset_session {
+        spec.session_id = format!("sub_agent_session_{}", uuid::Uuid::now_v7());
+        spec.options.insert(
+            "session_id".to_string(),
+            VmValue::String(Rc::from(spec.session_id.clone())),
+        );
+    }
+}
+
+fn respawn_worker_task(state: Rc<RefCell<WorkerState>>) -> Result<(), VmError> {
+    {
+        let worker = state.borrow();
+        if worker.carry_policy.persist_state {
+            persist_worker_state_snapshot(&worker)?;
+        }
+    }
+    spawn_worker_task(state);
     Ok(())
 }
 
@@ -362,11 +433,8 @@ async fn send_input_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
             )));
         }
         restart_worker_run(&mut worker, &next_task, true)?;
-        if worker.carry_policy.persist_state {
-            persist_worker_state_snapshot(&worker)?;
-        }
         drop(worker);
-        spawn_worker_task(state.clone());
+        respawn_worker_task(state.clone())?;
         let summary = worker_summary(&state.borrow())?;
         Ok(summary)
     })
@@ -411,12 +479,9 @@ async fn worker_trigger_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
             )));
         }
         restart_worker_run(&mut worker, &next_task, false)?;
-        if worker.carry_policy.persist_state {
-            persist_worker_state_snapshot(&worker)?;
-        }
         let snapshot = worker_event_snapshot(&worker);
         drop(worker);
-        spawn_worker_task(state.clone());
+        respawn_worker_task(state.clone())?;
         Ok(snapshot)
     })?;
     // Emit the progressed lifecycle *after* the new cycle has been
