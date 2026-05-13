@@ -178,6 +178,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/llm/media.harn"),
     },
     StdlibSource {
+        module: "llm/options",
+        source: include_str!("stdlib/llm/options.harn"),
+    },
+    StdlibSource {
         module: "llm/catalog",
         source: include_str!("stdlib/llm/catalog.harn"),
     },

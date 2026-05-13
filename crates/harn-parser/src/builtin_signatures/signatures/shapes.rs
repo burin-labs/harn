@@ -23,8 +23,8 @@
 //! pattern to inputs and to other return contracts.
 
 use super::{
-    ShapeFieldDescriptor, Ty, TY_ANY, TY_BOOL, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT, TY_INT, TY_LIST,
-    TY_NIL, TY_STRING, TY_STRING_OR_NIL,
+    ShapeFieldDescriptor, Ty, TY_ANY, TY_BOOL, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT,
+    TY_INT, TY_LIST, TY_NIL, TY_STRING, TY_STRING_OR_NIL,
 };
 
 const TY_BOOL_OR_DICT: Ty = Ty::Union(&[TY_BOOL, TY_DICT]);
@@ -261,37 +261,105 @@ pub(crate) const AGENT_SESSION_COMPACT_OPTS: Ty = Ty::Shape(&[
 // ---------------------------------------------------------------------------
 
 /// Options dict for `llm_call`, `llm_call_safe`, `llm_call_structured`,
-/// `llm_stream_call`, and friends. Field set lifted from
-/// `docs/llm/harn-quickref.md` and the canonical `llm_call` options table.
-///
-/// **Not yet applied** to the parser signatures: `llm_call*` is called from
-/// `agent_loop` / `agent_turn` with dicts that include broader runtime
-/// types (e.g. `tools` as a tool_registry-dict, plus loop-control fields like
-/// `loop_until_done` / `max_iterations`). Adoption is gated on the internal
-/// callers converging on this shape.
-#[allow(dead_code)]
+/// `llm_stream_call`, and friends. Mirrors the runtime extractor in
+/// `crates/harn-vm/src/llm/helpers/options.rs` plus the structured-call
+/// conveniences rewritten before extraction.
 pub(crate) const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
+    // Routing.
     ShapeFieldDescriptor::optional("model", TY_STRING),
+    ShapeFieldDescriptor::optional("model_tier", TY_STRING),
     ShapeFieldDescriptor::optional("provider", TY_STRING),
+    ShapeFieldDescriptor::optional("route_policy", Ty::Union(&[TY_STRING, TY_DICT])),
+    ShapeFieldDescriptor::optional("prefer", Ty::Union(&[TY_STRING, TY_LIST])),
+    ShapeFieldDescriptor::optional("fallback_strategy", TY_STRING),
+    ShapeFieldDescriptor::optional("strategy", TY_STRING),
+    ShapeFieldDescriptor::optional("fallback_chain", Ty::Union(&[TY_STRING, TY_LIST])),
+    ShapeFieldDescriptor::optional("budget_usd", Ty::Union(&[TY_FLOAT, TY_INT])),
+    // Conversation and system-prompt composition.
+    ShapeFieldDescriptor::optional("system", TY_STRING),
+    ShapeFieldDescriptor::optional("messages", TY_LIST),
+    ShapeFieldDescriptor::optional("session_id", TY_STRING),
+    ShapeFieldDescriptor::optional("system_preamble", TY_ANY),
+    ShapeFieldDescriptor::optional("system_prefix", TY_ANY),
+    ShapeFieldDescriptor::optional("system_context", TY_ANY),
+    ShapeFieldDescriptor::optional("system_prompt_parts", TY_ANY),
+    ShapeFieldDescriptor::optional("system_appendix", TY_ANY),
+    ShapeFieldDescriptor::optional("system_suffix", TY_ANY),
+    // Generation.
     ShapeFieldDescriptor::optional("max_tokens", TY_INT),
     ShapeFieldDescriptor::optional("temperature", TY_FLOAT),
     ShapeFieldDescriptor::optional("top_p", TY_FLOAT),
+    ShapeFieldDescriptor::optional("top_k", TY_INT),
+    ShapeFieldDescriptor::optional("logprobs", TY_BOOL),
+    ShapeFieldDescriptor::optional("top_logprobs", TY_INT),
     ShapeFieldDescriptor::optional("stop", Ty::Union(&[TY_STRING, TY_LIST])),
-    ShapeFieldDescriptor::optional("system", TY_STRING),
-    ShapeFieldDescriptor::optional("tools", TY_LIST),
-    ShapeFieldDescriptor::optional("tool_choice", Ty::Union(&[TY_STRING, TY_DICT])),
-    ShapeFieldDescriptor::optional("schema", TY_ANY),
-    ShapeFieldDescriptor::optional("schema_retries", TY_INT),
-    ShapeFieldDescriptor::optional("schema_recover", TY_BOOL),
-    ShapeFieldDescriptor::optional("cache", Ty::Union(&[TY_BOOL, TY_DICT])),
-    ShapeFieldDescriptor::optional("transcript", TY_ANY),
-    ShapeFieldDescriptor::optional("budget", Ty::Union(&[TY_FLOAT, TY_INT, TY_DICT])),
-    ShapeFieldDescriptor::optional("mock", TY_ANY),
-    ShapeFieldDescriptor::optional("messages", TY_LIST),
-    ShapeFieldDescriptor::optional("session_id", TY_STRING),
-    ShapeFieldDescriptor::optional("response_format", Ty::Union(&[TY_STRING, TY_DICT])),
-    ShapeFieldDescriptor::optional("metadata", TY_DICT),
     ShapeFieldDescriptor::optional("seed", TY_INT),
+    ShapeFieldDescriptor::optional("frequency_penalty", TY_FLOAT),
+    ShapeFieldDescriptor::optional("presence_penalty", TY_FLOAT),
+    // Structured output.
+    ShapeFieldDescriptor::optional("response_format", Ty::Union(&[TY_STRING, TY_DICT])),
+    ShapeFieldDescriptor::optional("output_format", Ty::Union(&[TY_STRING, TY_DICT])),
+    ShapeFieldDescriptor::optional("schema", TY_ANY),
+    ShapeFieldDescriptor::optional("json_schema", TY_ANY),
+    ShapeFieldDescriptor::optional("output_schema", TY_ANY),
+    ShapeFieldDescriptor::optional("output_validation", TY_STRING),
+    ShapeFieldDescriptor::optional("schema_retries", TY_INT),
+    ShapeFieldDescriptor::optional("schema_retry_nudge", Ty::Union(&[TY_BOOL, TY_STRING])),
+    ShapeFieldDescriptor::optional("retries", TY_INT),
+    ShapeFieldDescriptor::optional("schema_recover", TY_BOOL),
+    ShapeFieldDescriptor::optional("repair", Ty::Union(&[TY_BOOL, TY_DICT])),
+    ShapeFieldDescriptor::optional("llm_repair", Ty::Union(&[TY_BOOL, TY_DICT])),
+    // Reasoning / multimodal options.
+    ShapeFieldDescriptor::optional("thinking", Ty::Union(&[TY_BOOL, TY_STRING, TY_DICT])),
+    ShapeFieldDescriptor::optional("reasoning_effort", TY_STRING),
+    ShapeFieldDescriptor::optional("interleaved_thinking", TY_BOOL),
+    ShapeFieldDescriptor::optional("anthropic_beta_features", Ty::Union(&[TY_STRING, TY_LIST])),
+    ShapeFieldDescriptor::optional("vision", TY_BOOL),
+    ShapeFieldDescriptor::optional("audio", TY_BOOL),
+    ShapeFieldDescriptor::optional("pdf", TY_BOOL),
+    // Tools and progressive disclosure. Runtime accepts either a raw tool
+    // list or a tool_registry dict.
+    ShapeFieldDescriptor::optional("tools", Ty::Union(&[TY_LIST, TY_DICT])),
+    ShapeFieldDescriptor::optional("tool_choice", Ty::Union(&[TY_STRING, TY_DICT])),
+    ShapeFieldDescriptor::optional("tool_search", Ty::Union(&[TY_BOOL, TY_STRING, TY_DICT])),
+    ShapeFieldDescriptor::optional("tool_format", TY_STRING),
+    // Caching, budgets, retries, and transport.
+    ShapeFieldDescriptor::optional("cache", Ty::Union(&[TY_BOOL, TY_DICT])),
+    ShapeFieldDescriptor::optional("budget", Ty::Union(&[TY_FLOAT, TY_INT, TY_DICT])),
+    ShapeFieldDescriptor::optional("llm_retries", TY_INT),
+    ShapeFieldDescriptor::optional("llm_backoff_ms", TY_INT),
+    ShapeFieldDescriptor::optional("timeout", TY_INT),
+    ShapeFieldDescriptor::optional("idle_timeout", TY_INT),
+    ShapeFieldDescriptor::optional("stream", TY_BOOL),
+    // Provider-specific and advanced request shaping.
+    ShapeFieldDescriptor::optional("anthropic", TY_DICT),
+    ShapeFieldDescriptor::optional("openai", TY_DICT),
+    ShapeFieldDescriptor::optional("openrouter", TY_DICT),
+    ShapeFieldDescriptor::optional("together", TY_DICT),
+    ShapeFieldDescriptor::optional("groq", TY_DICT),
+    ShapeFieldDescriptor::optional("deepseek", TY_DICT),
+    ShapeFieldDescriptor::optional("fireworks", TY_DICT),
+    ShapeFieldDescriptor::optional("huggingface", TY_DICT),
+    ShapeFieldDescriptor::optional("local", TY_DICT),
+    ShapeFieldDescriptor::optional("mlx", TY_DICT),
+    ShapeFieldDescriptor::optional("vllm", TY_DICT),
+    ShapeFieldDescriptor::optional("tgi", TY_DICT),
+    ShapeFieldDescriptor::optional("dashscope", TY_DICT),
+    ShapeFieldDescriptor::optional("gemini", TY_DICT),
+    ShapeFieldDescriptor::optional("azure_openai", TY_DICT),
+    ShapeFieldDescriptor::optional("bedrock", TY_DICT),
+    ShapeFieldDescriptor::optional("ollama", TY_DICT),
+    ShapeFieldDescriptor::optional("vertex", TY_DICT),
+    ShapeFieldDescriptor::optional("mock", TY_ANY),
+    ShapeFieldDescriptor::optional("fake", TY_DICT),
+    ShapeFieldDescriptor::optional("prefill", TY_STRING),
+    ShapeFieldDescriptor::optional(
+        "structural_experiment",
+        Ty::Union(&[TY_STRING, TY_DICT, TY_CLOSURE]),
+    ),
+    // Legacy/runtime-adjacent keys handled at the boundary.
+    ShapeFieldDescriptor::optional("transcript", TY_ANY),
+    ShapeFieldDescriptor::optional("metadata", TY_DICT),
 ]);
 
 // ---------------------------------------------------------------------------
