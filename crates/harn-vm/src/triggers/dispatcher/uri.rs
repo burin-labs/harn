@@ -100,6 +100,52 @@ impl DispatchUri {
             Self::Persona { name } => format!("persona://{name}"),
         }
     }
+
+    pub fn trust_boundary(&self) -> &'static str {
+        match self {
+            Self::Local { .. } => "local_process",
+            Self::A2a { .. } => "federated_a2a",
+            Self::Worker { .. } => "event_log_worker_queue",
+            Self::Persona { .. } => "persona_runtime",
+        }
+    }
+
+    pub fn execution_location(&self) -> &'static str {
+        match self {
+            Self::Local { .. } => "in_process",
+            Self::A2a { .. } => "remote",
+            Self::Worker { .. } => "queued",
+            Self::Persona { .. } => "managed_persona",
+        }
+    }
+
+    pub fn remote_identity(&self) -> Option<String> {
+        match self {
+            Self::A2a { target, .. } => Some(crate::a2a::target_agent_label(target)),
+            _ => None,
+        }
+    }
+
+    pub fn dispatch_boundary_metadata(
+        &self,
+    ) -> std::collections::BTreeMap<String, serde_json::Value> {
+        let mut metadata = std::collections::BTreeMap::new();
+        metadata.insert(
+            "trust_boundary".to_string(),
+            serde_json::json!(self.trust_boundary()),
+        );
+        metadata.insert(
+            "execution_location".to_string(),
+            serde_json::json!(self.execution_location()),
+        );
+        if let Some(remote_identity) = self.remote_identity() {
+            metadata.insert(
+                "remote_identity".to_string(),
+                serde_json::json!(remote_identity),
+            );
+        }
+        metadata
+    }
 }
 
 impl From<&TriggerHandlerSpec> for DispatchUri {

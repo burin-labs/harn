@@ -61,6 +61,7 @@ impl Dispatcher {
             "target_uri".to_string(),
             serde_json::json!(route.target_uri()),
         );
+        record.metadata.extend(route.dispatch_boundary_metadata());
         record.metadata.insert(
             "terminal_status".to_string(),
             serde_json::json!(terminal_status),

@@ -1,0 +1,15 @@
+[package]
+name = "local-a2a-dispatch-demo"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "issue-triage"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "a2a://127.0.0.1:8787/triage"
+allow_cleartext = true
+dedupe_key = "event.dedupe_key"
+retry = { max = 1, backoff = "immediate" }

@@ -1,0 +1,21 @@
+import "std/triggers"
+
+/** Return deterministic issue triage output from normalized issue input. */
+pub fn triage_issue_payload(raw, trace_id, replay_of_event_id) -> dict {
+  let issue = raw.issue ?? raw
+  let title = issue.title ?? "untitled issue"
+  return {
+    status: "triaged",
+    labels: ["needs-owner"],
+    title: title,
+    trace_id: trace_id,
+    replay_of_event_id: replay_of_event_id,
+  }
+}
+
+/** Return deterministic issue triage output for local and A2A dispatch demos. */
+pub fn triage_issue(event: TriggerEvent) -> dict {
+  let raw = event.provider_payload.raw ?? {}
+  let context = handler_context()
+  return triage_issue_payload(raw, context?.trace_id ?? event.trace_id, context?.replay_of_event_id)
+}

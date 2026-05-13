@@ -386,6 +386,8 @@ pub(super) enum MockA2aResponse {
         state: String,
         handle: serde_json::Value,
     },
+    Timeout(String),
+    Denied(String),
     /// Return a protocol error carrying `message`.
     Protocol(String),
     /// Block until the cancel broadcast fires, then return `Cancelled`.
@@ -434,7 +436,7 @@ impl crate::a2a::A2aClient for InProcessMockA2aClient {
         let endpoint = crate::a2a::ResolvedA2aEndpoint {
             card_url: format!("https://{}/.well-known/agent-card.json", target),
             rpc_url: format!("https://{}/rpc", target),
-            agent_id: None,
+            agent_id: Some(format!("agent:{target}")),
             target_agent: crate::a2a::target_agent_label(target),
         };
 
@@ -458,6 +460,12 @@ impl crate::a2a::A2aClient for InProcessMockA2aClient {
                     handle: handle.clone(),
                 },
             )),
+            MockA2aResponse::Timeout(message) => {
+                Err(crate::a2a::A2aClientError::Timeout(message.clone()))
+            }
+            MockA2aResponse::Denied(message) => {
+                Err(crate::a2a::A2aClientError::Denied(message.clone()))
+            }
             MockA2aResponse::Protocol(message) => {
                 Err(crate::a2a::A2aClientError::Protocol(message.clone()))
             }

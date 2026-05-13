@@ -44,6 +44,8 @@ pub enum A2aClientError {
     InvalidTarget(String),
     Discovery(String),
     Protocol(String),
+    Denied(String),
+    Timeout(String),
     Cancelled(String),
 }
 
@@ -53,6 +55,8 @@ impl std::fmt::Display for A2aClientError {
             Self::InvalidTarget(message)
             | Self::Discovery(message)
             | Self::Protocol(message)
+            | Self::Denied(message)
+            | Self::Timeout(message)
             | Self::Cancelled(message) => f.write_str(message),
         }
     }
@@ -105,6 +109,8 @@ enum AgentCardFetchError {
     Cancelled(String),
     Discovery(String),
     ConnectRefused(String),
+    Denied(String),
+    Timeout(String),
 }
 
 pub async fn dispatch_trigger_event(
@@ -227,6 +233,14 @@ pub async fn dispatch_trigger_event(
                 result: inline,
             },
         ));
+    }
+
+    if state == "rejected" {
+        record_a2a_metric(raw_target, "failed", started.elapsed());
+        return Err(A2aClientError::Denied(format!(
+            "A2A task rejected by remote agent: {}",
+            task_status_message(&result).unwrap_or("permission rejected")
+        )));
     }
 
     if let Some(config) = push_config {
@@ -379,6 +393,12 @@ async fn resolve_endpoint(
                 Err(AgentCardFetchError::Cancelled(message)) => {
                     return Err(A2aClientError::Cancelled(message));
                 }
+                Err(AgentCardFetchError::Timeout(message)) => {
+                    return Err(A2aClientError::Timeout(message));
+                }
+                Err(AgentCardFetchError::Denied(message)) => {
+                    return Err(A2aClientError::Denied(message));
+                }
                 Err(error) => {
                     last_error = Some(agent_card_fetch_error_message(&error));
                     last_scheme_error = Some(error);
@@ -407,6 +427,9 @@ async fn fetch_agent_card(
         response = crate::llm::shared_utility_client().get(card_url).send() => {
             match response {
                 Ok(response) => Ok(response),
+                Err(error) if error.is_timeout() => Err(AgentCardFetchError::Timeout(
+                    format!("A2A HTTP request timed out: {error}")
+                )),
                 Err(error) if is_connect_refused(&error) => Err(AgentCardFetchError::ConnectRefused(
                     format!("A2A HTTP request failed: {error}")
                 )),
@@ -419,6 +442,15 @@ async fn fetch_agent_card(
             "A2A agent-card fetch cancelled".to_string()
         )),
     }?;
+    if matches!(
+        response.status(),
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+    ) {
+        return Err(AgentCardFetchError::Denied(format!(
+            "GET {card_url} returned HTTP {}",
+            response.status()
+        )));
+    }
     if !response.status().is_success() {
         return Err(AgentCardFetchError::Discovery(format!(
             "GET {card_url} returned HTTP {}",
@@ -605,7 +637,7 @@ fn resolve_declared_url(
     ensure_cleartext_allowed(&url, allow_cleartext, label)?;
     let declared_authority = url_authority(&url)?;
     if !authorities_equivalent(&declared_authority, requested_authority) {
-        return Err(A2aClientError::Discovery(format!(
+        return Err(A2aClientError::Denied(format!(
             "A2A {label} authority mismatch: requested '{requested_authority}', card returned '{declared_authority}'"
         )));
     }
@@ -642,7 +674,9 @@ fn should_try_cleartext_fallback(
         return false;
     }
     match error {
-        AgentCardFetchError::Cancelled(_) => false,
+        AgentCardFetchError::Cancelled(_)
+        | AgentCardFetchError::Denied(_)
+        | AgentCardFetchError::Timeout(_) => false,
         AgentCardFetchError::ConnectRefused(_) => true,
         AgentCardFetchError::Discovery(_) => is_loopback_authority(authority),
     }
@@ -656,7 +690,7 @@ fn ensure_cleartext_allowed(
     if allow_cleartext || url.scheme() != "http" {
         return Ok(());
     }
-    Err(A2aClientError::Discovery(format!(
+    Err(A2aClientError::Denied(format!(
         "cleartext A2A {label} '{url}' requires `allow_cleartext = true` on the trigger binding"
     )))
 }
@@ -721,7 +755,9 @@ fn agent_card_fetch_error_message(error: &AgentCardFetchError) -> String {
     match error {
         AgentCardFetchError::Cancelled(message)
         | AgentCardFetchError::Discovery(message)
-        | AgentCardFetchError::ConnectRefused(message) => message.clone(),
+        | AgentCardFetchError::ConnectRefused(message)
+        | AgentCardFetchError::Denied(message)
+        | AgentCardFetchError::Timeout(message) => message.clone(),
     }
 }
 
@@ -769,6 +805,15 @@ async fn send_jsonrpc(
         "A2A task dispatch cancelled",
     )
     .await?;
+    if matches!(
+        response.status(),
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+    ) {
+        return Err(A2aClientError::Denied(format!(
+            "A2A task dispatch returned HTTP {}",
+            response.status()
+        )));
+    }
     if !response.status().is_success() {
         return Err(A2aClientError::Protocol(format!(
             "A2A task dispatch returned HTTP {}",
@@ -787,8 +832,13 @@ async fn send_http(
     cancelled_message: &'static str,
 ) -> Result<reqwest::Response, A2aClientError> {
     tokio::select! {
-        response = request.send() => response
-            .map_err(|error| A2aClientError::Protocol(format!("A2A HTTP request failed: {error}"))),
+        response = request.send() => response.map_err(|error| {
+            if error.is_timeout() {
+                A2aClientError::Timeout(format!("A2A HTTP request timed out: {error}"))
+            } else {
+                A2aClientError::Protocol(format!("A2A HTTP request failed: {error}"))
+            }
+        }),
         _ = recv_cancel(cancel_rx) => Err(A2aClientError::Cancelled(cancelled_message.to_string())),
     }
 }
@@ -800,6 +850,21 @@ fn task_state(task: &Value) -> Result<&str, A2aClientError> {
         .ok_or_else(|| {
             A2aClientError::Protocol("A2A task response missing result.status.state".to_string())
         })
+}
+
+fn task_status_message(task: &Value) -> Option<&str> {
+    task.pointer("/status/message/parts")
+        .and_then(Value::as_array)
+        .and_then(|parts| {
+            parts.iter().find_map(|part| {
+                if part.get("type").and_then(Value::as_str) == Some("text") {
+                    part.get("text").and_then(Value::as_str).map(str::trim)
+                } else {
+                    None
+                }
+            })
+        })
+        .filter(|message| !message.is_empty())
 }
 
 fn extract_inline_result(task: &Value) -> Value {

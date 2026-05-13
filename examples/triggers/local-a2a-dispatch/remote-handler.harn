@@ -1,0 +1,11 @@
+import { triage_issue_payload } from "lib"
+
+pipeline default(task) {
+  let envelope = json_parse(task)
+  let raw = envelope.event.provider_payload?.raw ?? {}
+  println(
+    json_stringify(
+      triage_issue_payload(raw, envelope.event.trace_id, envelope.event.replay_of_event_id),
+    ),
+  )
+}

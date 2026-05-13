@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -332,6 +333,12 @@ pub(super) enum FlowControlOutcome {
     Skip {
         reason: String,
     },
+}
+
+#[derive(Debug)]
+pub(super) struct DispatchCallResult {
+    pub(super) output: serde_json::Value,
+    pub(super) metadata: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Debug)]

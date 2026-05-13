@@ -1,0 +1,68 @@
+import "std/triggers"
+import { triage_issue_payload } from "lib"
+
+fn local_triage(event: TriggerEvent) -> dict {
+  let raw = event.provider_payload.raw ?? {}
+  let context = handler_context()
+  return triage_issue_payload(raw, context?.trace_id ?? event.trace_id, context?.replay_of_event_id)
+}
+
+fn register_local() {
+  return trigger_register(
+    {
+      id: "issue-triage-local-demo",
+      kind: "webhook",
+      provider: "github",
+      match: {events: ["issues.opened"]},
+      handler: local_triage,
+      retry: {max: 1, backoff: "immediate"},
+    },
+  )
+}
+
+fn register_remote(port) {
+  return trigger_register(
+    {
+      id: "issue-triage-a2a-demo",
+      kind: "webhook",
+      provider: "github",
+      match: {events: ["issues.opened"]},
+      handler: "a2a://127.0.0.1:" + port + "/triage",
+      allow_cleartext: true,
+      retry: {max: 1, backoff: "immediate"},
+    },
+  )
+}
+
+fn fire(handle, suffix) {
+  return trigger_fire(
+    handle,
+    {
+      id: "evt-demo-" + suffix,
+      provider: "github",
+      kind: "issues.opened",
+      trace_id: "trace-demo-" + suffix,
+      dedupe_key: "demo:" + suffix,
+      issue: {title: "Trust boundary dispatch demo"},
+    },
+  )
+}
+
+pipeline default() {
+  let port = env_or("HARN_DEMO_REMOTE_PORT", "8787")
+  let local = fire(register_local(), "local")
+  let remote = fire(register_remote(port), "a2a")
+  println(
+    json_stringify(
+      {
+        local_status: local.status,
+        remote_status: remote.status,
+        same_logical_output: local.result.status == remote.result.status
+          && local.result.title == remote.result.title
+          && local.result.labels[0] == remote.result.labels[0],
+        local_result: local.result,
+        remote_result: remote.result,
+      },
+    ),
+  )
+}
