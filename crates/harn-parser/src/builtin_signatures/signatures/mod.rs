@@ -10,6 +10,7 @@ mod flow;
 mod integrations;
 mod project;
 mod schema;
+mod shapes;
 mod stdlib;
 mod workflow;
 

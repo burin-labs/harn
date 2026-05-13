@@ -322,11 +322,26 @@ impl TypeChecker {
                     // `{drop_nil?: bool}` slot must reject a `drop_nil: string`
                     // literal at the call site instead of silently accepting.
                     None => expected_field.optional,
-                    Some(actual_field) => self.types_compatible(
-                        &expected_field.type_expr,
-                        &actual_field.type_expr,
-                        scope,
-                    ),
+                    Some(actual_field) => {
+                        // Treat an explicit `nil` literal as equivalent to
+                        // omitting an optional field so callers can write
+                        // `{flag: nil}` to mean "use the default" without
+                        // having to drop the key. Required fields still
+                        // reject `nil` unless the declared type permits it.
+                        if expected_field.optional
+                            && matches!(
+                                &actual_field.type_expr,
+                                TypeExpr::Named(n) if n == "nil"
+                            )
+                        {
+                            return true;
+                        }
+                        self.types_compatible(
+                            &expected_field.type_expr,
+                            &actual_field.type_expr,
+                            scope,
+                        )
+                    }
                 }
             }),
             // dict<K, V> expected, Shape actual → all field values must match V

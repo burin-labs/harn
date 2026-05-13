@@ -186,6 +186,10 @@ fn matches_type_with_generics(
         },
         TypeExpr::Shape(fields) => match value {
             VmValue::Dict(map) => fields.iter().all(|f| match map.get(&f.name) {
+                // Optional fields treat an explicit `nil` value the same as
+                // "field missing" so callers can write `{flag: nil}` to mean
+                // "default" without having to omit the key entirely.
+                Some(VmValue::Nil) if f.optional => true,
                 Some(v) => {
                     matches_type_with_generics(v, &f.type_expr, type_params, nominal_type_names)
                 }
@@ -193,6 +197,7 @@ fn matches_type_with_generics(
             }),
             VmValue::StructInstance { .. } => {
                 fields.iter().all(|f| match value.struct_field(&f.name) {
+                    Some(VmValue::Nil) if f.optional => true,
                     Some(v) => {
                         matches_type_with_generics(v, &f.type_expr, type_params, nominal_type_names)
                     }
