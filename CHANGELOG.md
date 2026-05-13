@@ -6,6 +6,18 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Local/A2A dispatch replay proof (#1586).** Trigger dispatch now records
+  trust-boundary and remote identity metadata on action-graph nodes, outbox
+  success records, and TrustGraph terminal records. A2A dispatch also
+  classifies cleartext/authority denials, timeouts, incompatible response
+  schemas, and remote `rejected` task states distinctly, with a new
+  `examples/triggers/local-a2a-dispatch` reference flow and replay-oracle
+  fixture proving local and A2A handlers can preserve logical output.
+
 ## v0.8.13
 
 ### Changed (breaking)

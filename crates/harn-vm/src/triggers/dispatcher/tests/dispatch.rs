@@ -160,6 +160,140 @@ async fn a2a_handler_returns_inline_result_and_emits_a2a_action_graph() {
                 logged.headers.get("trace_id").map(String::as_str) == Some("trace_inline")
                     && logged.payload["context"]["target_agent"] == serde_json::json!("triage")
             }));
+            assert!(graph.iter().any(|(_, logged)| {
+                logged.payload["observability"]["action_graph_nodes"]
+                    .as_array()
+                    .is_some_and(|nodes| {
+                        nodes.iter().any(|node| {
+                            node["kind"] == serde_json::json!("a2a_hop")
+                                && node["metadata"]["trust_boundary"]
+                                    == serde_json::json!("federated_a2a")
+                                && node["metadata"]["execution_location"]
+                                    == serde_json::json!("remote")
+                                && node["metadata"]["remote_identity"]
+                                    == serde_json::json!("triage")
+                                && node["metadata"]["remote_agent_id"]
+                                    == serde_json::json!("agent:mock-a2a/triage")
+                        })
+                    })
+            }));
+
+            let trust_records = crate::query_trust_records(
+                &log,
+                &crate::TrustQueryFilters {
+                    agent: Some("github-a2a-review".to_string()),
+                    action: Some("github.issues.opened".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("query trust records");
+            assert!(trust_records.iter().any(|logged| {
+                logged.metadata["trust_boundary"] == serde_json::json!("federated_a2a")
+                    && logged.metadata["remote_identity"] == serde_json::json!("triage")
+            }));
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true, flavor = "current_thread")]
+async fn local_and_a2a_handlers_preserve_logical_output_and_replay_shape() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let expected = serde_json::json!({
+                "status": "triaged",
+                "labels": ["needs-owner"],
+            });
+            let (_local_dir, local_log, local_dispatcher) = dispatcher_fixture(
+                r#"
+import "std/triggers"
+
+pub fn local_fn(_event: TriggerEvent) -> dict {
+  return {status: "triaged", labels: ["needs-owner"]}
+}
+"#,
+                "local_fn",
+                None,
+                TriggerRetryConfig::default(),
+            )
+            .await;
+            let mut local_event = trigger_event("issues.opened", "delivery-local-equivalent");
+            local_event.trace_id = TraceId("trace-equivalent".to_string());
+            let local_outcome = local_dispatcher
+                .dispatch_event(local_event)
+                .await
+                .expect("local dispatch succeeds")
+                .pop()
+                .expect("local outcome");
+            let local_outbox = read_topic(local_log.clone(), "trigger.outbox").await;
+            let local_attempts = read_topic(local_log.clone(), "trigger.attempts").await;
+
+            let mock_client = InProcessMockA2aClient::new(MockA2aResponse::Inline {
+                task_id: "task-equivalent".to_string(),
+                result: expected.clone(),
+            });
+            let (_a2a_dir, a2a_log, a2a_dispatcher) = a2a_dispatcher_fixture(
+                "mock-a2a/triage".to_string(),
+                TriggerRetryConfig::default(),
+                false,
+                mock_client,
+            )
+            .await;
+            let mut a2a_event = trigger_event("issues.opened", "delivery-a2a-equivalent");
+            a2a_event.trace_id = TraceId("trace-equivalent".to_string());
+            let a2a_outcome = a2a_dispatcher
+                .dispatch_event(a2a_event)
+                .await
+                .expect("A2A dispatch succeeds")
+                .pop()
+                .expect("A2A outcome");
+            let a2a_outbox = read_topic(a2a_log.clone(), "trigger.outbox").await;
+            let a2a_attempts = read_topic(a2a_log.clone(), "trigger.attempts").await;
+
+            assert_eq!(local_outcome.result, Some(expected.clone()));
+            assert_eq!(a2a_outcome.result, Some(expected));
+            assert_eq!(
+                local_outbox
+                    .iter()
+                    .map(|(_, event)| event.kind.as_str())
+                    .collect::<Vec<_>>(),
+                a2a_outbox
+                    .iter()
+                    .map(|(_, event)| event.kind.as_str())
+                    .collect::<Vec<_>>(),
+            );
+            assert_eq!(
+                local_attempts
+                    .iter()
+                    .map(|(_, event)| event.kind.as_str())
+                    .collect::<Vec<_>>(),
+                a2a_attempts
+                    .iter()
+                    .map(|(_, event)| event.kind.as_str())
+                    .collect::<Vec<_>>(),
+            );
+
+            let local_success = local_outbox
+                .iter()
+                .find(|(_, event)| event.kind == "dispatch_succeeded")
+                .expect("local dispatch_succeeded");
+            let a2a_success = a2a_outbox
+                .iter()
+                .find(|(_, event)| event.kind == "dispatch_succeeded")
+                .expect("A2A dispatch_succeeded");
+            assert_eq!(
+                local_success.1.payload["dispatch_metadata"]["trust_boundary"],
+                serde_json::json!("local_process")
+            );
+            assert_eq!(
+                a2a_success.1.payload["dispatch_metadata"]["trust_boundary"],
+                serde_json::json!("federated_a2a")
+            );
+            assert_eq!(
+                a2a_success.1.payload["dispatch_metadata"]["remote_identity"],
+                serde_json::json!("triage")
+            );
         })
         .await;
 }
@@ -308,7 +442,7 @@ async fn a2a_handler_rejects_cleartext_by_default() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let mock_client = InProcessMockA2aClient::new(MockA2aResponse::Protocol(
+            let mock_client = InProcessMockA2aClient::new(MockA2aResponse::Denied(
                 "A2A endpoint uses cleartext HTTP; set allow_cleartext = true to opt in"
                     .to_string(),
             ));
@@ -325,11 +459,125 @@ async fn a2a_handler_rejects_cleartext_by_default() {
                 .await
                 .expect("cleartext denial returns terminal outcome");
             assert_eq!(outcomes.len(), 1);
-            assert_eq!(outcomes[0].status, DispatchStatus::Dlq);
+            assert_eq!(outcomes[0].status, DispatchStatus::Failed);
             assert!(outcomes[0]
                 .error
                 .as_deref()
                 .is_some_and(|message| message.contains("allow_cleartext = true")));
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true, flavor = "current_thread")]
+async fn a2a_timeout_retries_then_dlqs() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let mock_client = InProcessMockA2aClient::new(MockA2aResponse::Timeout(
+                "A2A HTTP request timed out".to_string(),
+            ));
+            let (_dir, log, dispatcher) = a2a_dispatcher_fixture(
+                "mock-a2a/triage".to_string(),
+                TriggerRetryConfig::new(1, RetryPolicy::Linear { delay_ms: 0 }),
+                false,
+                mock_client,
+            )
+            .await;
+
+            let outcomes = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-a2a-timeout"))
+                .await
+                .expect("timeout returns terminal outcome");
+            assert_eq!(outcomes.len(), 1);
+            assert_eq!(outcomes[0].status, DispatchStatus::Dlq);
+            assert!(outcomes[0]
+                .error
+                .as_deref()
+                .is_some_and(|message| message.contains("timed out")));
+
+            let attempts = read_topic(log.clone(), "trigger.attempts").await;
+            assert!(attempts.iter().any(|(_, event)| {
+                event.kind == "attempt_recorded"
+                    && event.payload["outcome"] == serde_json::json!("timeout")
+            }));
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true, flavor = "current_thread")]
+async fn a2a_incompatible_schema_dlqs() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let mock_client = InProcessMockA2aClient::new(MockA2aResponse::Protocol(
+                "A2A task response missing result.status.state".to_string(),
+            ));
+            let (_dir, _log, dispatcher) = a2a_dispatcher_fixture(
+                "mock-a2a/triage".to_string(),
+                TriggerRetryConfig::new(1, RetryPolicy::Linear { delay_ms: 0 }),
+                false,
+                mock_client,
+            )
+            .await;
+
+            let outcomes = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-a2a-schema"))
+                .await
+                .expect("schema mismatch returns terminal outcome");
+            assert_eq!(outcomes.len(), 1);
+            assert_eq!(outcomes[0].status, DispatchStatus::Dlq);
+            assert!(outcomes[0]
+                .error
+                .as_deref()
+                .is_some_and(|message| message.contains("result.status.state")));
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true, flavor = "current_thread")]
+async fn a2a_permission_rejection_fails_closed_without_retry() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let mock_client = InProcessMockA2aClient::new(MockA2aResponse::Denied(
+                "A2A task rejected by remote agent: permission denied".to_string(),
+            ));
+            let (_dir, log, dispatcher) = a2a_dispatcher_fixture(
+                "mock-a2a/triage".to_string(),
+                TriggerRetryConfig::new(3, RetryPolicy::Linear { delay_ms: 0 }),
+                false,
+                mock_client.clone(),
+            )
+            .await;
+
+            let outcomes = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-a2a-denied"))
+                .await
+                .expect("permission rejection returns terminal outcome");
+            assert_eq!(outcomes.len(), 1);
+            assert_eq!(outcomes[0].status, DispatchStatus::Failed);
+            assert_eq!(outcomes[0].attempt_count, 1);
+            assert!(outcomes[0]
+                .error
+                .as_deref()
+                .is_some_and(|message| message.contains("permission denied")));
+            assert_eq!(mock_client.take_calls().await.len(), 1);
+
+            let trust_records = crate::query_trust_records(
+                &log,
+                &crate::TrustQueryFilters {
+                    agent: Some("github-a2a-review".to_string()),
+                    action: Some("github.issues.opened".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("query trust records");
+            assert!(trust_records.iter().any(|event| {
+                event.outcome == crate::TrustOutcome::Denied
+                    && event.metadata["terminal_status"] == serde_json::json!("failed")
+                    && event.metadata["trust_boundary"] == serde_json::json!("federated_a2a")
+            }));
         })
         .await;
 }

@@ -1,11 +1,12 @@
 # Trigger manifest examples
 
 These examples show ready-to-customize `[[triggers]]` shapes. Each directory
-contains `harn.toml`, `lib.harn`, `README.md`, and `SKILL.md`:
+contains `harn.toml`, `lib.harn`, `README.md`, and `SKILL.md` unless noted:
 
 - `cron-daily-digest/`: cron schedule + local handler
 - `github-new-issue/`: webhook trigger + local predicate + local handler
 - `a2a-reviewer-fanout/`: a2a-push trigger + remote A2A handler
+- `local-a2a-dispatch/`: one handler with local and A2A trigger manifests
 - `stream-fan-in/`: multi-source handler combining cron and Kafka stream bindings
 - `github-stale-pr-nudger/`: scheduled stale pull-request follow-up
 - `github-release-notes-generator/`: release note generation from GitHub events

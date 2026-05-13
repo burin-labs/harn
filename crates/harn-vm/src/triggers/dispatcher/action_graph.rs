@@ -207,6 +207,7 @@ pub(super) fn dispatch_node_metadata(
         "target_uri".to_string(),
         serde_json::json!(route.target_uri()),
     );
+    metadata.extend(route.dispatch_boundary_metadata());
     metadata.insert("attempt".to_string(), serde_json::json!(attempt));
     metadata.insert(
         "trigger_id".to_string(),

@@ -61,6 +61,13 @@ Harn currently accepts three handler forms:
 
 Unsupported URI schemes fail fast at load time.
 
+Switching a handler between local and A2A dispatch is intentionally a manifest
+change, not a handler-source change. Keep the same trigger id and event match,
+then change `handler = "handlers::on_event"` to an `a2a://...` target when the
+trust boundary moves out of process. See
+[Local and A2A dispatch](../orchestrator/local-a2a-dispatch.md) for the replay
+and observability contract.
+
 `a2a://...` handlers accept one extra opt-in field:
 
 - `allow_cleartext = true` permits HTTP A2A card discovery / JSON-RPC dispatch

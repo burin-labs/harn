@@ -103,6 +103,7 @@
 - [Dashboard job envelopes](./orchestrator/dashboard-jobs.md)
 - [Orchestrator backpressure](./orchestrator/backpressure.md)
 - [Worker dispatch](./orchestrator/worker-dispatch.md)
+- [Local and A2A dispatch](./orchestrator/local-a2a-dispatch.md)
 - [Orchestrator secrets](./orchestrator/secrets.md)
 - [Multi-tenant orchestrator](./orchestrator/multi-tenant.md)
 - [Connector OAuth](./orchestrator/oauth.md)

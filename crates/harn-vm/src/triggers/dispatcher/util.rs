@@ -257,9 +257,7 @@ pub(super) fn duration_between_ms(later_ms: i64, earlier_ms: i64) -> Duration {
     Duration::from_millis(later_ms.saturating_sub(earlier_ms).max(0) as u64)
 }
 
-pub(super) fn dispatch_result_status(
-    result: &Result<serde_json::Value, DispatchError>,
-) -> &'static str {
+pub(super) fn dispatch_result_status<T>(result: &Result<T, DispatchError>) -> &'static str {
     match result {
         Ok(_) => "succeeded",
         Err(DispatchError::Waiting(_)) => "waiting",

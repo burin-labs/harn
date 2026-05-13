@@ -83,8 +83,8 @@ use action_graph::{
 use state::install_test_inbox_dequeued_signal;
 use state::{notify_test_inbox_dequeued, ACTIVE_DISPATCHER_STATE, ACTIVE_DISPATCH_IS_REPLAY};
 use types::{
-    AcquiredFlowControl, ConcurrencyLease, DispatchSkipStage, DispatcherRuntimeState,
-    FlowControlOutcome, SingletonLease, DEFAULT_AUTONOMY_BUDGET_REVIEWER,
+    AcquiredFlowControl, ConcurrencyLease, DispatchCallResult, DispatchSkipStage,
+    DispatcherRuntimeState, FlowControlOutcome, SingletonLease, DEFAULT_AUTONOMY_BUDGET_REVIEWER,
 };
 use util::{
     accepted_at_ms, binding_key_from_parts, build_batched_event, cancelled_dispatch_outcome,
@@ -1218,7 +1218,9 @@ impl Dispatcher {
             let completed_at = now_rfc3339();
 
             match result {
-                Ok(result) => {
+                Ok(dispatch_result) => {
+                    let result = dispatch_result.output;
+                    let dispatch_metadata = dispatch_result.metadata;
                     let attempt_record = DispatchAttemptRecord {
                         trigger_id: binding.id.as_str().to_string(),
                         binding_key: binding.binding_key(),
@@ -1247,6 +1249,7 @@ impl Dispatcher {
                             "attempt": attempt,
                             "handler_kind": route.kind(),
                             "target_uri": route.target_uri(),
+                            "dispatch_metadata": dispatch_metadata,
                             "result": result,
                             "replay_of_event_id": replay_of_event_id,
                         }),
@@ -1266,12 +1269,16 @@ impl Dispatcher {
                             "binding_key": binding.binding_key(),
                             "handler_kind": route.kind(),
                             "target_uri": route.target_uri(),
+                            "dispatch_metadata": dispatch_metadata,
                             "result": result,
                             "replay_of_event_id": replay_of_event_id,
                         }),
                         replay_of_event_id.as_ref(),
                     )
                     .await?;
+                    let mut node_metadata =
+                        dispatch_success_metadata(&route, binding, &event, attempt, &result);
+                    node_metadata.extend(dispatch_metadata.clone());
                     self.emit_action_graph(
                         &event,
                         vec![RunActionGraphNodeRecord {
@@ -1286,9 +1293,7 @@ impl Dispatcher {
                             worker_id: None,
                             run_id: None,
                             run_path: None,
-                            metadata: dispatch_success_metadata(
-                                &route, binding, &event, attempt, &result,
-                            ),
+                            metadata: node_metadata,
                         }],
                         Vec::new(),
                         serde_json::json!({
@@ -1299,6 +1304,7 @@ impl Dispatcher {
                             "attempt": attempt,
                             "handler_kind": route.kind(),
                             "target_uri": route.target_uri(),
+                            "dispatch_metadata": dispatch_metadata,
                             "result": result,
                             "replay_of_event_id": replay_of_event_id,
                         }),
@@ -1984,7 +1990,7 @@ impl Dispatcher {
         autonomy_tier: AutonomyTier,
         wait_lease: Option<DispatchWaitLease>,
         cancel_rx: &mut broadcast::Receiver<()>,
-    ) -> Result<serde_json::Value, DispatchError> {
+    ) -> Result<DispatchCallResult, DispatchError> {
         match route {
             DispatchUri::Local { .. } => {
                 let TriggerHandlerSpec::Local { closure, .. } = &binding.handler else {
@@ -2006,7 +2012,10 @@ impl Dispatcher {
                         cancel_rx,
                     )
                     .await?;
-                Ok(vm_value_to_json(&value))
+                Ok(DispatchCallResult {
+                    output: vm_value_to_json(&value),
+                    metadata: route.dispatch_boundary_metadata(),
+                })
             }
             DispatchUri::A2a {
                 target,
@@ -2017,7 +2026,7 @@ impl Dispatcher {
                         "dispatcher shutdown cancelled A2A dispatch".to_string(),
                     ));
                 }
-                let (_endpoint, ack) = self
+                let (endpoint, ack) = self
                     .a2a_client
                     .dispatch(
                         target,
@@ -2032,11 +2041,45 @@ impl Dispatcher {
                         crate::a2a::A2aClientError::Cancelled(message) => {
                             DispatchError::Cancelled(message)
                         }
+                        crate::a2a::A2aClientError::Denied(message) => {
+                            DispatchError::Denied(message)
+                        }
+                        crate::a2a::A2aClientError::Timeout(message) => {
+                            DispatchError::Timeout(message)
+                        }
                         other => DispatchError::A2a(other.to_string()),
                     })?;
+                let mut metadata = route.dispatch_boundary_metadata();
+                metadata.insert(
+                    "target_agent".to_string(),
+                    serde_json::json!(endpoint.target_agent),
+                );
+                metadata.insert("card_url".to_string(), serde_json::json!(endpoint.card_url));
+                metadata.insert("rpc_url".to_string(), serde_json::json!(endpoint.rpc_url));
+                if let Some(agent_id) = endpoint.agent_id {
+                    metadata.insert("remote_agent_id".to_string(), serde_json::json!(agent_id));
+                }
                 match ack {
-                    crate::a2a::DispatchAck::InlineResult { result, .. } => Ok(result),
-                    crate::a2a::DispatchAck::PendingTask { handle, .. } => Ok(handle),
+                    crate::a2a::DispatchAck::InlineResult { task_id, result } => {
+                        metadata.insert("task_id".to_string(), serde_json::json!(task_id));
+                        metadata.insert("state".to_string(), serde_json::json!("completed"));
+                        Ok(DispatchCallResult {
+                            output: result,
+                            metadata,
+                        })
+                    }
+                    crate::a2a::DispatchAck::PendingTask {
+                        task_id,
+                        state,
+                        handle,
+                    } => {
+                        metadata.insert("task_id".to_string(), serde_json::json!(task_id));
+                        metadata.insert("state".to_string(), serde_json::json!(state));
+                        Ok(DispatchCallResult {
+                            output: handle,
+                            metadata,
+                        })
+                    }
                 }
             }
             DispatchUri::Worker { queue } => {
@@ -2053,8 +2096,13 @@ impl Dispatcher {
                     })
                     .await
                     .map_err(DispatchError::from)?;
-                Ok(serde_json::to_value(receipt)
-                    .map_err(|error| DispatchError::Serde(error.to_string()))?)
+                let mut metadata = route.dispatch_boundary_metadata();
+                metadata.insert("queue_name".to_string(), serde_json::json!(queue));
+                Ok(DispatchCallResult {
+                    output: serde_json::to_value(receipt)
+                        .map_err(|error| DispatchError::Serde(error.to_string()))?,
+                    metadata,
+                })
             }
             DispatchUri::Persona { .. } => {
                 let TriggerHandlerSpec::Persona {
@@ -2077,8 +2125,11 @@ impl Dispatcher {
                 )
                 .await
                 .map_err(DispatchError::Local)?;
-                Ok(serde_json::to_value(receipt)
-                    .map_err(|error| DispatchError::Serde(error.to_string()))?)
+                Ok(DispatchCallResult {
+                    output: serde_json::to_value(receipt)
+                        .map_err(|error| DispatchError::Serde(error.to_string()))?,
+                    metadata: route.dispatch_boundary_metadata(),
+                })
             }
         }
     }
