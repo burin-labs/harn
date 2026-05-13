@@ -27,6 +27,16 @@ use super::{
     TY_NIL, TY_STRING, TY_STRING_OR_NIL,
 };
 
+const TY_BOOL_OR_DICT: Ty = Ty::Union(&[TY_BOOL, TY_DICT]);
+const TY_BOOL_OR_DICT_OR_NIL: Ty = Ty::Union(&[TY_BOOL, TY_DICT, TY_NIL]);
+const TY_INT_OR_FLOAT_OR_DICT: Ty = Ty::Union(&[TY_INT, TY_FLOAT, TY_DICT]);
+const TY_LIST_OR_STRING: Ty = Ty::Union(&[TY_LIST, TY_STRING]);
+const TY_STRING_OR_DICT: Ty = Ty::Union(&[TY_STRING, TY_DICT]);
+const TY_STRING_OR_DICT_OR_BOOL: Ty = Ty::Union(&[TY_STRING, TY_DICT, TY_BOOL]);
+const TY_STRING_OR_DICT_OR_NIL: Ty = Ty::Union(&[TY_STRING, TY_DICT, TY_NIL]);
+const TY_STRING_OR_LIST: Ty = Ty::Union(&[TY_STRING, TY_LIST]);
+const TY_TOOL_REGISTRY_OR_LIST: Ty = Ty::Union(&[TY_LIST, TY_DICT]);
+
 // ---------------------------------------------------------------------------
 // Agent option bags
 // ---------------------------------------------------------------------------
@@ -38,11 +48,6 @@ use super::{
 /// that constraint (would require a sum-of-shapes), but the runtime returns a
 /// clear error.
 ///
-/// **Not yet applied** to the parser signature: the runtime call-site type
-/// check rejects internally-passed dicts whose `tools` field is a
-/// tool_registry-dict (vs the documented `list`). Tracked for adoption once
-/// `agent_loop` / `agent_turn` / `sub_agent_run` converge on this shape.
-#[allow(dead_code)]
 pub(crate) const AGENT_SPAWN_CONFIG: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("task", TY_STRING),
     ShapeFieldDescriptor::optional("name", TY_STRING),
@@ -55,43 +60,157 @@ pub(crate) const AGENT_SPAWN_CONFIG: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("options", TY_DICT),
     ShapeFieldDescriptor::optional("execution", TY_DICT),
     ShapeFieldDescriptor::optional("audit", TY_DICT),
-    ShapeFieldDescriptor::optional("artifact_mode", TY_STRING),
-    ShapeFieldDescriptor::optional("transcript_mode", TY_ANY),
-    ShapeFieldDescriptor::optional("context_policy", TY_ANY),
-    ShapeFieldDescriptor::optional("resume_workflow", TY_BOOL),
-    ShapeFieldDescriptor::optional("persist_state", TY_BOOL),
-    ShapeFieldDescriptor::optional("retriggerable", TY_BOOL),
+    ShapeFieldDescriptor::optional("carry", TY_DICT),
     ShapeFieldDescriptor::optional("policy", TY_ANY),
+    ShapeFieldDescriptor::optional("tools", TY_LIST),
 ]);
 
 /// Options dict accepted by `sub_agent_run` / `sub_agent_request` as their
 /// second positional argument. `task` is provided separately as the first
 /// positional arg, so this shape has *all* fields optional.
 ///
-/// Field set mirrors `parse_sub_agent_request` in
-/// `crates/harn-vm/src/stdlib/agents_sub_agent.rs`.
+/// Field set includes the sub-agent controls consumed by
+/// `std/agent/workers.harn` plus the documented `agent_loop` / `llm_call`
+/// options forwarded to the child loop.
 ///
-/// **Not yet applied** to the parser signature for the same reason as
-/// [`AGENT_SPAWN_CONFIG`].
-#[allow(dead_code)]
 pub(crate) const SUB_AGENT_OPTIONS: Ty = Ty::Shape(&[
+    // Request envelope / worker controls.
     ShapeFieldDescriptor::optional("_type", TY_STRING),
     ShapeFieldDescriptor::optional("name", TY_STRING),
     ShapeFieldDescriptor::optional("system", TY_STRING),
     ShapeFieldDescriptor::optional("session_id", TY_STRING),
     ShapeFieldDescriptor::optional("background", TY_BOOL),
+    ShapeFieldDescriptor::optional("carry", TY_DICT),
     ShapeFieldDescriptor::optional("allowed_tools", TY_LIST),
     ShapeFieldDescriptor::optional("policy", TY_ANY),
     ShapeFieldDescriptor::optional("returns_schema", TY_ANY),
     ShapeFieldDescriptor::optional("returns", TY_DICT),
     ShapeFieldDescriptor::optional("execution", TY_DICT),
+    ShapeFieldDescriptor::optional("request", TY_ANY),
+    ShapeFieldDescriptor::optional("research_questions", TY_LIST),
+    ShapeFieldDescriptor::optional("questions", TY_LIST),
+    ShapeFieldDescriptor::optional("action_items", TY_LIST),
+    ShapeFieldDescriptor::optional("actions", TY_LIST),
+    ShapeFieldDescriptor::optional("workflow_stages", TY_LIST),
+    ShapeFieldDescriptor::optional("stages", TY_LIST),
+    ShapeFieldDescriptor::optional("verification_steps", TY_LIST),
+    ShapeFieldDescriptor::optional("verification", TY_LIST),
+    // Provider / LLM-call controls forwarded through agent_loop.
     ShapeFieldDescriptor::optional("model", TY_STRING),
     ShapeFieldDescriptor::optional("provider", TY_STRING),
     ShapeFieldDescriptor::optional("max_tokens", TY_INT),
     ShapeFieldDescriptor::optional("temperature", TY_FLOAT),
-    ShapeFieldDescriptor::optional("tools", TY_LIST),
-    ShapeFieldDescriptor::optional("artifact_mode", TY_STRING),
-    ShapeFieldDescriptor::optional("transcript_mode", TY_ANY),
+    ShapeFieldDescriptor::optional("top_p", TY_FLOAT),
+    ShapeFieldDescriptor::optional("top_k", TY_INT),
+    ShapeFieldDescriptor::optional("stop", TY_STRING_OR_LIST),
+    ShapeFieldDescriptor::optional("seed", TY_INT),
+    ShapeFieldDescriptor::optional("frequency_penalty", TY_FLOAT),
+    ShapeFieldDescriptor::optional("presence_penalty", TY_FLOAT),
+    ShapeFieldDescriptor::optional("response_format", TY_STRING_OR_DICT),
+    ShapeFieldDescriptor::optional("schema", TY_ANY),
+    ShapeFieldDescriptor::optional("schema_retries", TY_INT),
+    ShapeFieldDescriptor::optional("schema_recover", TY_BOOL),
+    ShapeFieldDescriptor::optional("cache", TY_BOOL_OR_DICT),
+    ShapeFieldDescriptor::optional("transcript", TY_ANY),
+    ShapeFieldDescriptor::optional("budget", TY_INT_OR_FLOAT_OR_DICT),
+    ShapeFieldDescriptor::optional("budget_usd", Ty::Union(&[TY_INT, TY_FLOAT])),
+    ShapeFieldDescriptor::optional("mock", TY_ANY),
+    ShapeFieldDescriptor::optional("messages", TY_LIST),
+    ShapeFieldDescriptor::optional("metadata", TY_DICT),
+    ShapeFieldDescriptor::optional("tool_choice", TY_STRING_OR_DICT),
+    ShapeFieldDescriptor::optional("thinking", TY_ANY),
+    ShapeFieldDescriptor::optional("reasoning_effort", TY_STRING),
+    ShapeFieldDescriptor::optional("interleaved_thinking", TY_BOOL),
+    ShapeFieldDescriptor::optional("anthropic_beta_features", TY_LIST),
+    // Agent-loop controls.
+    ShapeFieldDescriptor::optional("profile", TY_STRING),
+    ShapeFieldDescriptor::optional("loop_until_done", TY_BOOL),
+    ShapeFieldDescriptor::optional("done_sentinel", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::optional("max_iterations", TY_INT),
+    ShapeFieldDescriptor::optional("iteration_budget", TY_STRING_OR_DICT_OR_NIL),
+    ShapeFieldDescriptor::optional("loop_control", TY_ANY),
+    ShapeFieldDescriptor::optional("max_nudges", TY_INT),
+    ShapeFieldDescriptor::optional("nudge", TY_STRING),
+    ShapeFieldDescriptor::optional("llm_caller", TY_ANY),
+    ShapeFieldDescriptor::optional("tool_caller", TY_ANY),
+    ShapeFieldDescriptor::optional("llm_retries", TY_INT),
+    ShapeFieldDescriptor::optional("llm_backoff_ms", TY_INT),
+    ShapeFieldDescriptor::optional("reasoning_policy", TY_ANY),
+    ShapeFieldDescriptor::optional("thinking_policy", TY_ANY),
+    ShapeFieldDescriptor::optional("reasoning_scale", TY_STRING),
+    ShapeFieldDescriptor::optional("problem_scale", TY_STRING),
+    ShapeFieldDescriptor::optional("reasoning_task", TY_STRING),
+    ShapeFieldDescriptor::optional("task_kind", TY_STRING),
+    ShapeFieldDescriptor::optional("tools", TY_TOOL_REGISTRY_OR_LIST),
+    ShapeFieldDescriptor::optional("tool_format", TY_STRING),
+    ShapeFieldDescriptor::optional("native_tool_fallback", TY_STRING),
+    ShapeFieldDescriptor::optional("tool_search", TY_DICT),
+    ShapeFieldDescriptor::optional("tool_retries", TY_INT),
+    ShapeFieldDescriptor::optional("tool_backoff_ms", TY_INT),
+    ShapeFieldDescriptor::optional("stop_after_successful_tools", TY_LIST),
+    ShapeFieldDescriptor::optional("require_successful_tools", TY_LIST),
+    ShapeFieldDescriptor::optional("turn_policy", TY_DICT),
+    ShapeFieldDescriptor::optional("require_action_or_yield", TY_BOOL),
+    ShapeFieldDescriptor::optional("tool_examples", TY_STRING),
+    ShapeFieldDescriptor::optional("shared_types", TY_STRING),
+    ShapeFieldDescriptor::optional("stall_diagnostics", TY_BOOL_OR_DICT_OR_NIL),
+    ShapeFieldDescriptor::optional("permissions", TY_ANY),
+    ShapeFieldDescriptor::optional("approval_policy", TY_ANY),
+    ShapeFieldDescriptor::optional("command_policy", TY_ANY),
+    ShapeFieldDescriptor::optional("autonomy_budget", TY_ANY),
+    ShapeFieldDescriptor::optional("token_budget", TY_INT),
+    ShapeFieldDescriptor::optional("output_format", TY_ANY),
+    ShapeFieldDescriptor::optional("json_schema", TY_ANY),
+    ShapeFieldDescriptor::optional("output_schema", TY_ANY),
+    ShapeFieldDescriptor::optional("root_task", TY_STRING),
+    ShapeFieldDescriptor::optional("deliverables", TY_LIST),
+    ShapeFieldDescriptor::optional("task_ledger", TY_DICT),
+    ShapeFieldDescriptor::optional("persona", TY_STRING),
+    // Daemon / compaction / prompt-context controls.
+    ShapeFieldDescriptor::optional("daemon", TY_BOOL),
+    ShapeFieldDescriptor::optional("persist_path", TY_STRING),
+    ShapeFieldDescriptor::optional("resume_path", TY_STRING),
+    ShapeFieldDescriptor::optional("wake_interval_ms", TY_INT),
+    ShapeFieldDescriptor::optional("watch_paths", TY_LIST_OR_STRING),
+    ShapeFieldDescriptor::optional("consolidate_on_idle", TY_BOOL),
+    ShapeFieldDescriptor::optional("compaction", TY_STRING_OR_DICT_OR_BOOL),
+    ShapeFieldDescriptor::optional("auto_compact", TY_BOOL_OR_DICT),
+    ShapeFieldDescriptor::optional("compact_threshold", TY_INT),
+    ShapeFieldDescriptor::optional("compact_keep_first", TY_INT),
+    ShapeFieldDescriptor::optional("compact_keep_last", TY_INT),
+    ShapeFieldDescriptor::optional("compact_strategy", TY_STRING),
+    ShapeFieldDescriptor::optional("compact_callback", TY_ANY),
+    ShapeFieldDescriptor::optional("idle_watchdog_attempts", TY_INT),
+    ShapeFieldDescriptor::optional("context_callback", TY_ANY),
+    ShapeFieldDescriptor::optional("context_filter", TY_ANY),
+    ShapeFieldDescriptor::optional("timestamp_messages", TY_BOOL),
+    ShapeFieldDescriptor::optional("message_timestamps", TY_BOOL),
+    ShapeFieldDescriptor::optional("message_decorator", TY_ANY),
+    ShapeFieldDescriptor::optional("decorate_message", TY_ANY),
+    ShapeFieldDescriptor::optional("prompts", TY_DICT),
+    ShapeFieldDescriptor::optional("prompt_overrides", TY_DICT),
+    ShapeFieldDescriptor::optional("post_turn_callback", TY_ANY),
+    ShapeFieldDescriptor::optional("verify_completion", TY_ANY),
+    ShapeFieldDescriptor::optional("verify_completion_judge", TY_BOOL_OR_DICT),
+    ShapeFieldDescriptor::optional("done_judge", TY_BOOL_OR_DICT),
+    ShapeFieldDescriptor::optional("max_verify_attempts", TY_INT),
+    ShapeFieldDescriptor::optional("llm_transcript_dir", TY_STRING),
+    ShapeFieldDescriptor::optional("skills", TY_ANY),
+    ShapeFieldDescriptor::optional("skill_registry", TY_ANY),
+    ShapeFieldDescriptor::optional("skill_match", TY_DICT),
+    ShapeFieldDescriptor::optional("skill_catalog_limit", TY_INT),
+    ShapeFieldDescriptor::optional("skill_catalog_budget", TY_INT),
+    ShapeFieldDescriptor::optional("skill_catalog_always", TY_BOOL),
+    ShapeFieldDescriptor::optional("working_files", TY_LIST_OR_STRING),
+    ShapeFieldDescriptor::optional("mcp_servers", TY_LIST),
+    ShapeFieldDescriptor::optional("mcp_initialize_advisory", TY_BOOL),
+    ShapeFieldDescriptor::optional("mcp_context", TY_DICT),
+    ShapeFieldDescriptor::optional("system_preamble", TY_ANY),
+    ShapeFieldDescriptor::optional("system_prefix", TY_ANY),
+    ShapeFieldDescriptor::optional("system_context", TY_ANY),
+    ShapeFieldDescriptor::optional("system_prompt_parts", TY_ANY),
+    ShapeFieldDescriptor::optional("system_appendix", TY_ANY),
+    ShapeFieldDescriptor::optional("system_suffix", TY_ANY),
 ]);
 
 /// Configuration accepted by `daemon_spawn`.
@@ -108,17 +227,23 @@ pub(crate) const DAEMON_CONFIG: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("event_queue_capacity", TY_INT),
     ShapeFieldDescriptor::optional("model", TY_STRING),
     ShapeFieldDescriptor::optional("provider", TY_STRING),
-    ShapeFieldDescriptor::optional("tools", TY_LIST),
+    ShapeFieldDescriptor::optional("max_iterations", TY_INT),
+    ShapeFieldDescriptor::optional("tools", TY_TOOL_REGISTRY_OR_LIST),
+    ShapeFieldDescriptor::optional("wake_interval_ms", TY_INT),
+    ShapeFieldDescriptor::optional("watch_paths", TY_LIST_OR_STRING),
+    ShapeFieldDescriptor::optional("consolidate_on_idle", TY_BOOL),
+    ShapeFieldDescriptor::optional("idle_watchdog_attempts", TY_INT),
     ShapeFieldDescriptor::optional("options", TY_DICT),
 ]);
 
 /// `agent_session_seed_from_jsonl` `opts?` argument.
 pub(crate) const AGENT_SESSION_SEED_OPTS: Ty = Ty::Shape(&[
-    ShapeFieldDescriptor::optional("id", TY_STRING),
-    ShapeFieldDescriptor::optional("model", TY_STRING),
+    ShapeFieldDescriptor::optional("truncate_to_last", TY_INT),
+    ShapeFieldDescriptor::optional("drop_tool_calls", TY_BOOL),
+    ShapeFieldDescriptor::optional("rename_session", TY_STRING),
+    ShapeFieldDescriptor::optional("validate", TY_BOOL),
     ShapeFieldDescriptor::optional("provider", TY_STRING),
-    ShapeFieldDescriptor::optional("system", TY_STRING),
-    ShapeFieldDescriptor::optional("tool_format", TY_STRING),
+    ShapeFieldDescriptor::optional("model", TY_STRING),
 ]);
 
 /// `agent_session_compact` `opts?` argument.

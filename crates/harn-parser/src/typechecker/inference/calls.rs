@@ -47,6 +47,79 @@ impl TypeChecker {
         Some((entry.0.as_str(), entry.1.as_ref()))
     }
 
+    fn single_shape_fields(ty: &TypeExpr) -> Option<&[ShapeField]> {
+        match ty {
+            TypeExpr::Shape(fields) => Some(fields),
+            TypeExpr::Union(members) => {
+                let mut shape = None;
+                for member in members {
+                    match member {
+                        TypeExpr::Named(name) if name == "nil" => {}
+                        TypeExpr::Shape(fields) if shape.is_none() => {
+                            shape = Some(fields.as_slice())
+                        }
+                        TypeExpr::Shape(_) => return None,
+                        _ => return None,
+                    }
+                }
+                shape
+            }
+            _ => None,
+        }
+    }
+
+    fn check_builtin_literal_shape_keys(
+        &mut self,
+        builtin_name: &str,
+        param_name: &str,
+        expected: &TypeExpr,
+        arg: &SNode,
+    ) {
+        // Structural shapes remain width-subtyped elsewhere. These option bags
+        // are closed user-facing surfaces where a misspelled literal key is
+        // almost certainly a bug.
+        if !matches!(
+            (builtin_name, param_name),
+            ("spawn_agent", "config")
+                | ("sub_agent_run", "options")
+                | ("sub_agent_request", "options")
+        ) {
+            return;
+        }
+        let Some(expected_fields) = Self::single_shape_fields(expected) else {
+            return;
+        };
+        let Node::DictLiteral(entries) = &arg.node else {
+            return;
+        };
+        let known_fields = expected_fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>();
+        for entry in entries {
+            let key = match &entry.key.node {
+                Node::StringLiteral(key) | Node::RawStringLiteral(key) | Node::Identifier(key) => {
+                    key
+                }
+                _ => continue,
+            };
+            if known_fields.iter().any(|field| field == key) {
+                continue;
+            }
+            let max_dist = if key.len() <= 4 { 1 } else { 2 };
+            let suggestion =
+                crate::diagnostic::find_closest_match(key, known_fields.iter().copied(), max_dist);
+            let mut message = format!(
+                "argument `{param_name}` for builtin `{builtin_name}` has unknown option key `{key}`"
+            );
+            if let Some(close) = suggestion {
+                message.push_str(&format!(" — did you mean `{close}`?"));
+            }
+            let help = format!("available option keys: {}", known_fields.join(", "));
+            self.error_at_with_help(message, entry.key.span, help);
+        }
+    }
+
     /// Collapse the field types of a shape into a single value type. Used when
     /// binding `dict<string, V>` against a heterogeneous shape literal — V is
     /// the union of every field type, simplified so a homogeneous shape stays
@@ -206,6 +279,7 @@ impl TypeChecker {
                         &call_scope,
                     );
                 }
+                self.check_builtin_literal_shape_keys(name, param.name, &expected, arg);
             }
         }
 
