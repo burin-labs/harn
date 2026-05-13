@@ -1,0 +1,26 @@
+name: Harn Replay Benchmark
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  replay-benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Harn
+        run: cargo install --git https://github.com/burin-labs/harn --locked harn-cli
+
+      - name: Run replay benchmark
+        run: harn bench replay --json --output replay-benchmark.json
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: harn-replay-benchmark
+          path: replay-benchmark.json

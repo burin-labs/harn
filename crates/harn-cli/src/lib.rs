@@ -752,14 +752,7 @@ async fn async_main() {
             )
         }
         Command::Repl => commands::repl::run_repl().await,
-        Command::Bench(args) => {
-            commands::bench::run_bench(
-                &args.file,
-                args.iterations,
-                run_profile_options(&args.profile),
-            )
-            .await
-        }
+        Command::Bench(args) => commands::bench::run(args).await,
         Command::TestBench(args) => commands::test_bench::run(args.command).await,
         Command::Viz(args) => commands::viz::run_viz(&args.file, args.output.as_deref()),
         Command::Install(args) => package::install_packages(

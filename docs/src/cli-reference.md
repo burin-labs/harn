@@ -205,12 +205,15 @@ control-flow blocks directly.
 
 ## harn bench
 
-Benchmark a `.harn` file over repeated runs.
+Benchmark a `.harn` file over repeated runs, or score deterministic replay
+fixtures.
 
 ```bash
 harn bench main.harn
 harn bench main.harn --iterations 25
 harn bench main.harn --iterations 25 --profile-json bench.json
+harn bench replay --json --output replay-benchmark.json
+harn bench replay conformance/replay-oracle/fixtures --filter approval --json
 ```
 
 `harn bench` parses and compiles the file once, executes it with a fresh VM for
@@ -220,6 +223,26 @@ total. `--profile` prints the aggregate categorical timing rollup; `--profile-js
 writes a JSON report with `iterations[]`, `mean_ms`, `p50_ms`, `p95_ms`,
 `stddev_ms`, and `rollup`. `HARN_PROFILE=1` and `HARN_PROFILE_JSON=<path>` work
 as environment aliases.
+
+`harn bench replay` reads `benchmarks/replay/suite.json` by default. It emits
+schema `harn.replay_benchmark.report.v1`, including Harn Cloud ingest metadata,
+fixture receipts, replay-fidelity scores, permission-preservation scores,
+tool-call drift counts, transcript drift counts, observed interaction totals,
+and first-divergence triage data. Use `--output <path>` to write the JSON report
+and `--json` to print it to stdout. The command exits non-zero when any fixture
+fails its expected replay result.
+
+External trace pairs can be adapted with the documented OpenCode-inspired JSONL
+adapter:
+
+```bash
+harn bench replay \
+  --adapter opencode-jsonl \
+  --external-first benchmarks/replay/adapters/opencode/first.jsonl \
+  --external-second benchmarks/replay/adapters/opencode/second.jsonl \
+  --external-name opencode-permission-run \
+  --json
+```
 
 ## harn viz
 

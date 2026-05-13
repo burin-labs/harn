@@ -54,6 +54,9 @@ pub use release_fixture::*;
 mod replay_oracle;
 pub use replay_oracle::*;
 
+mod replay_bench;
+pub use replay_bench::*;
+
 mod policy;
 pub use policy::*;
 

@@ -1,0 +1,22 @@
+{
+  "schema_version": "harn.replay_benchmark.suite.v1",
+  "name": "harn-canonical-replay-determinism",
+  "description": "Canonical replay benchmark suite for Harn Cloud leaderboard ingestion.",
+  "fixtures": [
+    {
+      "id": "simple_tool_run",
+      "path": "benchmarks/replay/fixtures/simple_tool_run.valid.json",
+      "category": "simple_tool_run"
+    },
+    {
+      "id": "permission_gated_edit",
+      "path": "conformance/replay-oracle/fixtures/approval_tool_call.valid.json",
+      "category": "permission_decision_preservation"
+    },
+    {
+      "id": "event_triggered_multi_step_workflow",
+      "path": "conformance/replay-oracle/fixtures/worker_a2a_path.valid.json",
+      "category": "event_triggered_workflow"
+    }
+  ]
+}
