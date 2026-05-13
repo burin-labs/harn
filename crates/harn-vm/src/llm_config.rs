@@ -219,6 +219,14 @@ pub struct ModelDef {
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub pricing: Option<ModelPricing>,
+    #[serde(default)]
+    pub deprecated: bool,
+    #[serde(default)]
+    pub deprecation_note: Option<String>,
+    #[serde(default)]
+    pub quality_tags: Vec<String>,
+    #[serde(default)]
+    pub prefer_prefill_done: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -326,6 +334,12 @@ fn read_external_config(path: &str, verbose: bool) -> Option<ProvidersConfig> {
             None
         }
     }
+}
+
+/// Parse a provider/model catalog overlay in the same shape as
+/// `providers.toml` or `[llm]` package-manifest sections.
+pub fn parse_config_toml(src: &str) -> Result<ProvidersConfig, toml::de::Error> {
+    toml::from_str::<ProvidersConfig>(src)
 }
 
 /// Returns the filesystem path of the currently-loaded providers config, if
@@ -1610,6 +1624,10 @@ fn default_config() -> ProvidersConfig {
                     cache_read_per_mtok: Some(0.3),
                     cache_write_per_mtok: Some(3.75),
                 }),
+                deprecated: false,
+                deprecation_note: None,
+                quality_tags: Vec::new(),
+                prefer_prefill_done: None,
             },
         ),
         (
@@ -1627,6 +1645,10 @@ fn default_config() -> ProvidersConfig {
                     cache_read_per_mtok: None,
                     cache_write_per_mtok: None,
                 }),
+                deprecated: false,
+                deprecation_note: None,
+                quality_tags: Vec::new(),
+                prefer_prefill_done: None,
             },
         ),
         (
@@ -1639,6 +1661,10 @@ fn default_config() -> ProvidersConfig {
                 stream_timeout: None,
                 capabilities: vec!["tools".to_string(), "streaming".to_string()],
                 pricing: None,
+                deprecated: false,
+                deprecation_note: None,
+                quality_tags: Vec::new(),
+                prefer_prefill_done: None,
             },
         ),
         (
@@ -1651,9 +1677,59 @@ fn default_config() -> ProvidersConfig {
                 stream_timeout: Some(300.0),
                 capabilities: vec!["tools".to_string(), "streaming".to_string()],
                 pricing: None,
+                deprecated: false,
+                deprecation_note: None,
+                quality_tags: Vec::new(),
+                prefer_prefill_done: None,
             },
         ),
     ]));
+
+    let mut local_model =
+        |id: &str, name: &str, stream_timeout: f64, prefer_prefill_done: Option<bool>| {
+            config.models.insert(
+                id.to_string(),
+                ModelDef {
+                    name: name.to_string(),
+                    provider: "local".to_string(),
+                    context_window: 131_072,
+                    runtime_context_window: None,
+                    stream_timeout: Some(stream_timeout),
+                    capabilities: vec!["streaming".to_string(), "thinking".to_string()],
+                    pricing: None,
+                    deprecated: false,
+                    deprecation_note: None,
+                    quality_tags: Vec::new(),
+                    prefer_prefill_done,
+                },
+            );
+        };
+    local_model("gemma-4-e2b-it", "Gemma 4 E2B (local)", 300.0, Some(true));
+    local_model("gemma-4-e4b-it", "Gemma 4 E4B (local)", 300.0, Some(true));
+    local_model("gemma-4-26b-a4b-it", "Gemma 4 26B MoE (local)", 600.0, None);
+    local_model("gemma-4-31b-it", "Gemma 4 31B (local)", 600.0, None);
+
+    config.models.insert(
+        "unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string(),
+        ModelDef {
+            name: "Qwen3.6 27B (MLX 4-bit)".to_string(),
+            provider: "mlx".to_string(),
+            context_window: 262_144,
+            runtime_context_window: None,
+            stream_timeout: Some(900.0),
+            capabilities: vec![
+                "tools".to_string(),
+                "vision".to_string(),
+                "streaming".to_string(),
+                "thinking".to_string(),
+            ],
+            pricing: None,
+            deprecated: false,
+            deprecation_note: None,
+            quality_tags: Vec::new(),
+            prefer_prefill_done: None,
+        },
+    );
 
     config.models.extend(canonical_priced_models());
 
@@ -1700,6 +1776,10 @@ fn canonical_priced_models() -> BTreeMap<String, ModelDef> {
                     cache_read_per_mtok: cache_read,
                     cache_write_per_mtok: cache_write,
                 }),
+                deprecated: false,
+                deprecation_note: None,
+                quality_tags: Vec::new(),
+                prefer_prefill_done: None,
             },
         );
     };
@@ -1788,6 +1868,10 @@ fn canonical_priced_models() -> BTreeMap<String, ModelDef> {
                     cache_read_per_mtok: cache_read,
                     cache_write_per_mtok: None,
                 }),
+                deprecated: false,
+                deprecation_note: None,
+                quality_tags: Vec::new(),
+                prefer_prefill_done: None,
             },
         );
     };
@@ -1826,6 +1910,10 @@ fn canonical_priced_models() -> BTreeMap<String, ModelDef> {
                     cache_read_per_mtok: cache_read,
                     cache_write_per_mtok: None,
                 }),
+                deprecated: false,
+                deprecation_note: None,
+                quality_tags: Vec::new(),
+                prefer_prefill_done: None,
             },
         );
     };
@@ -1861,6 +1949,10 @@ fn canonical_priced_models() -> BTreeMap<String, ModelDef> {
                 cache_read_per_mtok: None,
                 cache_write_per_mtok: None,
             }),
+            deprecated: false,
+            deprecation_note: None,
+            quality_tags: Vec::new(),
+            prefer_prefill_done: None,
         },
     );
     out.insert(
@@ -1878,6 +1970,10 @@ fn canonical_priced_models() -> BTreeMap<String, ModelDef> {
                 cache_read_per_mtok: None,
                 cache_write_per_mtok: None,
             }),
+            deprecated: false,
+            deprecation_note: None,
+            quality_tags: Vec::new(),
+            prefer_prefill_done: None,
         },
     );
     out
@@ -2248,6 +2344,10 @@ mod tests {
                     cache_read_per_mtok: Some(0.25),
                     cache_write_per_mtok: None,
                 }),
+                deprecated: false,
+                deprecation_note: None,
+                quality_tags: Vec::new(),
+                prefer_prefill_done: None,
             },
         );
         overlay

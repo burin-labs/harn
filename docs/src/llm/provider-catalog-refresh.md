@@ -36,6 +36,50 @@ harn run scripts/update_provider_catalog.harn -- --check --update
 The CI gate is wired into `make check-provider-catalog-drift` and runs
 from `make all`.
 
+## Generated catalog artifacts
+
+The runtime provider config remains the source of truth, but Harn also
+checks in generated artifacts under `spec/provider-catalog/` so
+downstream hosts do not need to parse Harn internals:
+
+- `provider-catalog.json` — normalized providers, models, aliases,
+  variants, QC defaults, capabilities, pricing, deprecation metadata,
+  endpoint/auth metadata, and provider caveats;
+- `provider-catalog.schema.json` — JSON Schema for the catalog
+  contract;
+- `harn-provider-catalog.ts` — TypeScript types plus compatibility
+  helpers such as `MODEL_CATALOG`, `ALIASES`, `QC_DEFAULTS`,
+  `entryFor`, and `pricingFor`;
+- `HarnProviderCatalog.swift` — Swift `Codable` types plus the
+  embedded catalog JSON string.
+
+Use the `providers` command group for the artifact lifecycle:
+
+```bash
+# Regenerate all checked-in artifacts.
+harn providers export
+
+# Validate logical catalog invariants, JSON Schema compatibility, and
+# checked-in artifact drift.
+harn providers validate --check-artifacts
+
+# Run the existing refresh workflow through the command group.
+harn providers refresh --check
+```
+
+`make gen-provider-catalog` runs `harn providers export`, and
+`make check-provider-catalog` runs
+`harn providers validate --check-artifacts`. The full `make all` gate
+includes both `check-provider-catalog` and the refresh workflow drift
+gate.
+
+For local or private models, pass a providers-style TOML overlay to
+`harn providers validate --overlay <path>` or
+`harn providers export --overlay <path>`. Overlays are merged with the
+same precedence as runtime provider config, so private providers,
+aliases, deprecation notes, quality tags, pricing, and transport
+settings can be validated before they are published.
+
 ## Architecture
 
 Three layers, kept deliberately small so other repos can extend or

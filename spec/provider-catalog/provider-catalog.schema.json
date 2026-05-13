@@ -1,0 +1,456 @@
+{
+  "$defs": {
+    "alias": {
+      "additionalProperties": false,
+      "properties": {
+        "model_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "provider": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "tool_format": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "model_id",
+        "provider"
+      ],
+      "type": "object"
+    },
+    "auth": {
+      "additionalProperties": false,
+      "properties": {
+        "env": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "header": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "style": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "style",
+        "env",
+        "required"
+      ],
+      "type": "object"
+    },
+    "deprecation": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "deprecated"
+          ]
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "type": "object"
+    },
+    "endpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "base_url": {
+          "type": "string"
+        },
+        "base_url_env": {
+          "type": "string"
+        },
+        "chat_endpoint": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "completion_endpoint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "base_url",
+        "chat_endpoint"
+      ],
+      "type": "object"
+    },
+    "modalities": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "output": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "input",
+        "output"
+      ],
+      "type": "object"
+    },
+    "model": {
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "capability_tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "context_window": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "deprecation": {
+          "$ref": "#/$defs/deprecation"
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "modalities": {
+          "$ref": "#/$defs/modalities"
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "prefer_prefill_done": {
+          "type": "boolean"
+        },
+        "pricing": {
+          "$ref": "#/$defs/pricing"
+        },
+        "prompt_cache": {
+          "type": "boolean"
+        },
+        "provider": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "quality_tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reasoning": {
+          "$ref": "#/$defs/reasoning"
+        },
+        "runtime_context_window": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stream_timeout": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "structured_output": {
+          "type": "string"
+        },
+        "tool_support": {
+          "$ref": "#/$defs/tool_support"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "provider",
+        "aliases",
+        "context_window",
+        "modalities",
+        "tool_support",
+        "structured_output",
+        "reasoning",
+        "prompt_cache",
+        "deprecation",
+        "quality_tags",
+        "capability_tags"
+      ],
+      "type": "object"
+    },
+    "pricing": {
+      "additionalProperties": false,
+      "properties": {
+        "cache_read_per_mtok": {
+          "minimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cache_write_per_mtok": {
+          "minimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "input_per_mtok": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "output_per_mtok": {
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "input_per_mtok",
+        "output_per_mtok"
+      ],
+      "type": "object"
+    },
+    "provider": {
+      "additionalProperties": false,
+      "properties": {
+        "auth": {
+          "$ref": "#/$defs/auth"
+        },
+        "caveats": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "classification": {
+          "enum": [
+            "hosted",
+            "local"
+          ]
+        },
+        "display_name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/endpoint"
+        },
+        "features": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "latency_p50_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "protocols": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rpm": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "display_name",
+        "classification",
+        "endpoint",
+        "auth",
+        "protocols",
+        "features",
+        "caveats"
+      ],
+      "type": "object"
+    },
+    "reasoning": {
+      "additionalProperties": false,
+      "properties": {
+        "effort_supported": {
+          "type": "boolean"
+        },
+        "interleaved_supported": {
+          "type": "boolean"
+        },
+        "modes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "none_supported": {
+          "type": "boolean"
+        },
+        "preserve_thinking": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "modes",
+        "effort_supported",
+        "none_supported",
+        "interleaved_supported",
+        "preserve_thinking"
+      ],
+      "type": "object"
+    },
+    "tool_support": {
+      "additionalProperties": false,
+      "properties": {
+        "max_tools": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "native": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "boolean"
+        },
+        "tool_search": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "native",
+        "text",
+        "tool_search"
+      ],
+      "type": "object"
+    },
+    "variant": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "model_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "provider": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "description",
+        "model_id",
+        "provider",
+        "source"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://harnlang.com/schemas/provider-catalog.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "aliases": {
+      "items": {
+        "$ref": "#/$defs/alias"
+      },
+      "type": "array"
+    },
+    "generated_by": {
+      "type": "string"
+    },
+    "models": {
+      "items": {
+        "$ref": "#/$defs/model"
+      },
+      "type": "array"
+    },
+    "providers": {
+      "items": {
+        "$ref": "#/$defs/provider"
+      },
+      "type": "array"
+    },
+    "qc_defaults": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "schema": {
+      "const": "https://harnlang.com/schemas/provider-catalog.v1.json"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "variants": {
+      "items": {
+        "$ref": "#/$defs/variant"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "schema",
+    "generated_by",
+    "providers",
+    "models",
+    "aliases",
+    "variants",
+    "qc_defaults"
+  ],
+  "title": "Harn provider catalog",
+  "type": "object"
+}

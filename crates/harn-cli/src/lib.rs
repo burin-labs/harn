@@ -22,8 +22,8 @@ use std::{env, fs, process, thread};
 use cli::{
     Cli, Command, CompletionShell, MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs,
     PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PersonaCommand,
-    PersonaSupervisionCommand, RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand,
-    SkillTrustCommand, SkillsCommand, ToolCommand,
+    PersonaSupervisionCommand, ProvidersCommand, RunsCommand, ServeCommand, SkillCommand,
+    SkillKeyCommand, SkillTrustCommand, SkillsCommand, ToolCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -600,6 +600,23 @@ async fn async_main() {
             .await
         }
         Command::Models(args) => commands::models::run(args).await,
+        Command::Providers(args) => match args.command {
+            ProvidersCommand::Refresh(refresh) => {
+                if let Err(error) = commands::providers::run_refresh(&refresh).await {
+                    command_error(&error);
+                }
+            }
+            ProvidersCommand::Validate(validate) => {
+                if let Err(error) = commands::providers::run_validate(&validate) {
+                    command_error(&error);
+                }
+            }
+            ProvidersCommand::Export(export) => {
+                if let Err(error) = commands::providers::run_export(&export) {
+                    command_error(&error);
+                }
+            }
+        },
         Command::Try(args) => commands::try_cmd::run(args).await,
         Command::Quickstart(args) => {
             if let Err(error) = commands::quickstart::run_quickstart(&args).await {

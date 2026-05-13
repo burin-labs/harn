@@ -571,6 +571,14 @@ recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
 
+[[provider.local]]
+model_match = "gemma-4*"
+thinking_modes = ["enabled"]
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+
 # Apple Silicon MLX server (mlx-vlm). OpenAI-compat with vision; honors
 # the same `chat_template_kwargs.preserve_thinking` knob as vLLM, since
 # mlx-vlm reuses HF tokenizers / chat templates.

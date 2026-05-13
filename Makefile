@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts conformance protocol-conformance replay-oracle replay-bench bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec lint-test-patterns check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift
+.PHONY: setup install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts conformance protocol-conformance replay-oracle replay-bench bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-provider-catalog check-provider-catalog gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec lint-test-patterns check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts conformance protocol-conformance replay-oracle replay-bench check-highlight check-protocol-artifacts check-bindings check-session-bundle-schema check-language-spec check-trigger-quickref check-provider-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart lint-test-patterns check-receipt-structs check-provider-catalog-drift portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts conformance protocol-conformance replay-oracle replay-bench check-highlight check-protocol-artifacts check-bindings check-session-bundle-schema check-language-spec check-trigger-quickref check-provider-matrix check-provider-catalog check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart lint-test-patterns check-receipt-structs check-provider-catalog-drift portal-check
 
 check: all
 
@@ -307,6 +307,16 @@ check-provider-matrix:
 		exit 1; \
 	fi
 	@echo "    Harn provider matrix OK."
+
+# Regenerate the checked-in provider/model catalog JSON, schema, and downstream bindings.
+gen-provider-catalog:
+	cargo run --quiet --bin harn -- providers export
+
+# CI guard: fail if checked-in provider/model catalog artifacts drift.
+check-provider-catalog:
+	@echo "=== Checking provider catalog artifacts ==="
+	@cargo run --quiet --bin harn -- providers validate --check-artifacts
+	@echo "    Harn provider catalog artifacts OK."
 
 # Regenerate the connector capability parity matrix from package manifests.
 gen-connector-matrix:
