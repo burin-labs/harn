@@ -1294,8 +1294,10 @@ notifications, and forwards permission prompts through
 Use `--profile` / `HARN_PROFILE=1` to print one categorical timing rollup per
 executed `session/prompt`; use `--profile-json <path>` /
 `HARN_PROFILE_JSON=<path>` to append per-turn NDJSON records with
-`turn`, `session_id`, and `rollup`. `--trace` / `HARN_TRACE=1` enables the LLM
-trace summary printed when the stdio server shuts down.
+`turn`, `session_id`, and `rollup`. File-backed ACP prompts report `vm_setup`
+as a profile bucket and reuse a prepared VM baseline while preserving clean
+per-turn execution state. `--trace` / `HARN_TRACE=1` enables the LLM trace
+summary printed when the stdio server shuts down.
 
 See [MCP and ACP Integration](./mcp-and-acp.md) and
 [Outbound workflow server](./harn-serve.md) for protocol details.

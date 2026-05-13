@@ -2,6 +2,7 @@
 //! ACP bridge, and loads MCP clients from host capabilities.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
@@ -14,42 +15,48 @@ pub(super) struct PromptGlobals<'a> {
     pub messages: &'a [serde_json::Value],
 }
 
-/// Execute a compiled chunk with ACP bridge builtins.
-pub(super) async fn execute_chunk(
-    chunk: harn_vm::Chunk,
-    bridge: Rc<AcpBridge>,
-    host_bridge: Rc<harn_vm::bridge::HostBridge>,
-    prompt: PromptGlobals<'_>,
-    source_path: Option<&std::path::Path>,
-    cwd: &std::path::Path,
+pub(super) struct VmSetup<'a> {
+    pub source: &'a str,
+    pub baseline: Option<&'a harn_vm::VmBaseline>,
+    pub baseline_cache_hit: Option<bool>,
+    pub baseline_prepare_ms: u64,
+    pub source_path: Option<&'a Path>,
+    pub cwd: &'a Path,
+    pub runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
+}
+
+fn pipeline_name_for(source_path: Option<&Path>) -> String {
+    source_path
+        .and_then(|p| p.file_stem())
+        .and_then(|s| s.to_str())
+        .unwrap_or("acp")
+        .to_string()
+}
+
+async fn configure_stable_vm(
+    vm: &mut harn_vm::Vm,
+    source: &str,
+    source_path: Option<&Path>,
+    cwd: &Path,
     runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
 ) -> Result<String, String> {
-    let vm_setup_started = Instant::now();
-    let mut vm = harn_vm::Vm::new();
-    harn_vm::register_vm_stdlib(&mut vm);
+    harn_vm::register_vm_stdlib(vm);
     // Metadata/store rooted at harn.toml when present; cwd otherwise.
     let source_parent = source_path.and_then(|p| p.parent()).unwrap_or(cwd);
     let project_root = harn_vm::stdlib::process::find_project_root(source_parent)
         .or_else(|| harn_vm::stdlib::process::find_project_root(cwd));
     let store_base = project_root.as_deref().unwrap_or(cwd);
-    harn_vm::register_store_builtins(&mut vm, store_base);
-    harn_vm::register_metadata_builtins(&mut vm, store_base);
-    let pipeline_name = source_path
-        .and_then(|p| p.file_stem())
-        .and_then(|s| s.to_str())
-        .unwrap_or("acp");
-    harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
-    bridge.set_script_name(pipeline_name);
+    harn_vm::register_store_builtins(vm, store_base);
+    harn_vm::register_metadata_builtins(vm, store_base);
+    let pipeline_name = pipeline_name_for(source_path);
+    harn_vm::register_checkpoint_builtins(vm, store_base, &pipeline_name);
     if let Some(ref root) = project_root {
         vm.set_project_root(root);
     }
 
     if let Some(path) = source_path {
         let path_str = path.to_string_lossy();
-        let source = std::fs::read_to_string(path).map_err(|error| {
-            format!("failed to read pipeline source '{path_str}' for diagnostic context: {error}")
-        })?;
-        vm.set_source_info(&path_str, &source);
+        vm.set_source_info(&path_str, source);
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
                 vm.set_source_dir(parent);
@@ -59,7 +66,56 @@ pub(super) async fn execute_chunk(
         vm.set_source_dir(cwd);
     }
 
-    runtime_configurator.configure(&mut vm, source_path).await?;
+    runtime_configurator.configure(vm, source_path).await?;
+    Ok(pipeline_name)
+}
+
+pub(super) async fn prepare_vm_baseline(
+    source: &str,
+    source_path: &Path,
+    cwd: &Path,
+    runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
+) -> Result<harn_vm::VmBaseline, String> {
+    let mut vm = harn_vm::Vm::new();
+    configure_stable_vm(
+        &mut vm,
+        source,
+        Some(source_path),
+        cwd,
+        runtime_configurator,
+    )
+    .await?;
+    Ok(vm.baseline())
+}
+
+/// Execute a compiled chunk with ACP bridge builtins.
+pub(super) async fn execute_chunk(
+    chunk: harn_vm::Chunk,
+    bridge: Rc<AcpBridge>,
+    host_bridge: Rc<harn_vm::bridge::HostBridge>,
+    prompt: PromptGlobals<'_>,
+    setup: VmSetup<'_>,
+) -> Result<String, String> {
+    let vm_setup_started = Instant::now();
+    let vm_setup_span =
+        harn_vm::tracing::span_start(harn_vm::tracing::SpanKind::VmSetup, "acp_vm_setup".into());
+    let pipeline_name = pipeline_name_for(setup.source_path);
+    bridge.set_script_name(&pipeline_name);
+
+    let mut vm = if let Some(baseline) = setup.baseline {
+        baseline.instantiate()
+    } else {
+        let mut vm = harn_vm::Vm::new();
+        configure_stable_vm(
+            &mut vm,
+            setup.source,
+            setup.source_path,
+            setup.cwd,
+            setup.runtime_configurator,
+        )
+        .await?;
+        vm
+    };
 
     vm.set_global("prompt", harn_vm::VmValue::String(Rc::from(prompt.text)));
     vm.set_global(
@@ -72,7 +128,7 @@ pub(super) async fn execute_chunk(
     );
     vm.set_global(
         "cwd",
-        harn_vm::VmValue::String(Rc::from(cwd.to_string_lossy().as_ref())),
+        harn_vm::VmValue::String(Rc::from(setup.cwd.to_string_lossy().as_ref())),
     );
 
     let mcp_globals = load_host_mcp_clients(host_bridge.clone()).await;
@@ -85,7 +141,7 @@ pub(super) async fn execute_chunk(
     // Forward unknown builtins to the ACP client as `builtin_call` JSON-RPC
     // until host-local pseudo-builtins are migrated to typed host
     // capabilities and explicit Harn stdlib wrappers.
-    host_bridge.set_script_name(pipeline_name);
+    host_bridge.set_script_name(&pipeline_name);
     vm.set_bridge(host_bridge.clone());
 
     // Replace the text-only agent_loop with a tool-aware variant that
@@ -99,19 +155,46 @@ pub(super) async fn execute_chunk(
     // call_start/call_end notifications through the bridge.
     harn_vm::llm::register_llm_call_structured_with_bridge(&mut vm, host_bridge);
 
-    let vm_setup_ms = vm_setup_started.elapsed().as_millis() as u64;
+    let dynamic_setup_ms = vm_setup_started.elapsed().as_millis() as u64;
+    let vm_setup_ms = setup.baseline_prepare_ms.saturating_add(dynamic_setup_ms);
+    harn_vm::tracing::span_set_metadata(
+        vm_setup_span,
+        "baseline_cache",
+        serde_json::Value::String(
+            match setup.baseline_cache_hit {
+                Some(true) => "hit",
+                Some(false) => "miss",
+                None => "none",
+            }
+            .to_string(),
+        ),
+    );
+    harn_vm::tracing::span_set_metadata(
+        vm_setup_span,
+        "vm_setup_ms",
+        serde_json::json!(vm_setup_ms),
+    );
+    harn_vm::tracing::span_end(vm_setup_span);
     bridge.send_log(
         "info",
         &format!("ACP_BOOT: vm_setup_ms={vm_setup_ms} pipeline={pipeline_name}"),
         Some(serde_json::json!({
-            "pipeline": pipeline_name,
+            "pipeline": pipeline_name.as_str(),
             "vm_setup_ms": vm_setup_ms,
+            "vm_setup_dynamic_ms": dynamic_setup_ms,
+            "vm_baseline_prepare_ms": setup.baseline_prepare_ms,
+            "vm_baseline_cache": match setup.baseline_cache_hit {
+                Some(true) => "hit",
+                Some(false) => "miss",
+                None => "none",
+            },
         })),
     );
 
     let execution = harn_vm::orchestration::RunExecutionRecord {
-        cwd: Some(cwd.to_string_lossy().into_owned()),
-        source_dir: source_path
+        cwd: Some(setup.cwd.to_string_lossy().into_owned()),
+        source_dir: setup
+            .source_path
             .and_then(|p| p.parent())
             .map(|p| p.to_string_lossy().into_owned()),
         ..Default::default()
@@ -130,7 +213,7 @@ pub(super) async fn execute_chunk(
         "info",
         &format!("ACP_BOOT: execute_ms={execute_ms} pipeline={pipeline_name}"),
         Some(serde_json::json!({
-            "pipeline": pipeline_name,
+            "pipeline": pipeline_name.as_str(),
             "execute_ms": execute_ms,
         })),
     );

@@ -25,7 +25,7 @@ pub use async_builtin::{
 pub use builtin::{VmBuiltinArity, VmBuiltinKind, VmBuiltinMetadata};
 pub use debug::{DebugAction, DebugState};
 pub use modules::resolve_module_import_path;
-pub use state::Vm;
+pub use state::{Vm, VmBaseline};
 
 pub(crate) use state::{
     CallFrame, ExceptionHandler, InterruptHandler, IterState, LocalSlot, ScopeSpan,

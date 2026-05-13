@@ -245,6 +245,110 @@ pub struct Vm {
     pub(crate) debug_hook: Option<Box<DebugHook>>,
 }
 
+/// Reusable VM baseline for hosts that need many clean executions with the
+/// same stable builtin/source setup.
+///
+/// The baseline intentionally does not snapshot execution state. Each
+/// instantiation gets fresh stacks, frames, tasks, cancellation fields, sync
+/// primitives, shared cells/maps/mailboxes, and debug state. Builtin tables are
+/// shared through `Rc` until a per-execution rebind needs copy-on-write.
+#[derive(Clone)]
+pub struct VmBaseline {
+    builtins: Rc<BTreeMap<String, VmBuiltinFn>>,
+    async_builtins: Rc<BTreeMap<String, VmAsyncBuiltinFn>>,
+    builtin_metadata: Rc<BTreeMap<String, VmBuiltinMetadata>>,
+    builtins_by_id: Rc<BTreeMap<BuiltinId, VmBuiltinEntry>>,
+    builtin_id_collisions: Rc<HashSet<BuiltinId>>,
+    source_dir: Option<std::path::PathBuf>,
+    source_file: Option<String>,
+    source_text: Option<String>,
+    project_root: Option<std::path::PathBuf>,
+    globals: Rc<BTreeMap<String, VmValue>>,
+    denied_builtins: Rc<HashSet<String>>,
+}
+
+impl VmBaseline {
+    pub fn from_vm(vm: &Vm) -> Self {
+        Self {
+            builtins: Rc::clone(&vm.builtins),
+            async_builtins: Rc::clone(&vm.async_builtins),
+            builtin_metadata: Rc::clone(&vm.builtin_metadata),
+            builtins_by_id: Rc::clone(&vm.builtins_by_id),
+            builtin_id_collisions: Rc::clone(&vm.builtin_id_collisions),
+            source_dir: vm.source_dir.clone(),
+            source_file: vm.source_file.clone(),
+            source_text: vm.source_text.clone(),
+            project_root: vm.project_root.clone(),
+            globals: Rc::clone(&vm.globals),
+            denied_builtins: Rc::clone(&vm.denied_builtins),
+        }
+    }
+
+    pub fn instantiate(&self) -> Vm {
+        let mut source_cache = BTreeMap::new();
+        if let (Some(file), Some(text)) = (&self.source_file, &self.source_text) {
+            source_cache.insert(std::path::PathBuf::from(file), text.clone());
+        }
+        if let Some(dir) = &self.source_dir {
+            crate::stdlib::set_thread_source_dir(dir);
+        }
+
+        let mut vm = Vm {
+            stack: Vec::with_capacity(256),
+            env: VmEnv::new(),
+            output: String::new(),
+            builtins: Rc::clone(&self.builtins),
+            async_builtins: Rc::clone(&self.async_builtins),
+            builtin_metadata: Rc::clone(&self.builtin_metadata),
+            builtins_by_id: Rc::clone(&self.builtins_by_id),
+            builtin_id_collisions: Rc::clone(&self.builtin_id_collisions),
+            iterators: Vec::new(),
+            frames: Vec::new(),
+            exception_handlers: Vec::new(),
+            spawned_tasks: BTreeMap::new(),
+            sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
+            shared_state_runtime: Rc::new(crate::shared_state::VmSharedStateRuntime::new()),
+            held_sync_guards: Vec::new(),
+            task_counter: 0,
+            runtime_context_counter: 0,
+            runtime_context: crate::runtime_context::RuntimeContext::root(),
+            deadlines: Vec::new(),
+            breakpoints: BTreeMap::new(),
+            function_breakpoints: std::collections::BTreeSet::new(),
+            pending_function_bp: None,
+            step_mode: false,
+            step_frame_depth: 0,
+            stopped: false,
+            last_line: 0,
+            source_dir: self.source_dir.clone(),
+            imported_paths: Vec::new(),
+            module_cache: Rc::new(BTreeMap::new()),
+            source_cache: Rc::new(source_cache),
+            source_file: self.source_file.clone(),
+            source_text: self.source_text.clone(),
+            bridge: None,
+            denied_builtins: Rc::clone(&self.denied_builtins),
+            cancel_token: None,
+            interrupt_signal_token: None,
+            cancel_grace_instructions_remaining: None,
+            interrupt_handlers: Vec::new(),
+            next_interrupt_handle: 1,
+            pending_interrupt_signal: None,
+            interrupted: false,
+            dispatching_interrupt: false,
+            interrupt_handler_deadline: None,
+            error_stack_trace: Vec::new(),
+            yield_sender: None,
+            project_root: self.project_root.clone(),
+            globals: Rc::clone(&self.globals),
+            debug_hook: None,
+        };
+
+        crate::stdlib::rebind_execution_state_builtins(&mut vm);
+        vm
+    }
+}
+
 impl Vm {
     pub(crate) fn fresh_local_slots(chunk: &Chunk) -> Vec<LocalSlot> {
         chunk
@@ -449,6 +553,10 @@ impl Vm {
             globals: Rc::new(BTreeMap::new()),
             debug_hook: None,
         }
+    }
+
+    pub fn baseline(&self) -> VmBaseline {
+        VmBaseline::from_vm(self)
     }
 
     /// Set the bridge for delegating unknown builtins in bridge mode.
@@ -686,5 +794,82 @@ impl Drop for Vm {
 impl Default for Vm {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use super::*;
+
+    fn baseline_with_stdlib(source: &str) -> VmBaseline {
+        let mut vm = Vm::new();
+        crate::register_vm_stdlib(&mut vm);
+        vm.set_source_info("baseline_test.harn", source);
+        vm.set_global("stable_global", VmValue::String(Rc::from("baseline")));
+        vm.baseline()
+    }
+
+    #[test]
+    fn vm_baseline_instantiates_clean_mutable_execution_state() {
+        let baseline = baseline_with_stdlib("pipeline main() { println(stable_global) }");
+
+        let mut dirty = baseline.instantiate();
+        dirty.stack.push(VmValue::Int(42));
+        dirty.output.push_str("dirty");
+        dirty.task_counter = 9;
+        dirty.runtime_context_counter = 7;
+        dirty
+            .error_stack_trace
+            .push(("main".to_string(), 1, 1, None));
+
+        let clean = baseline.instantiate();
+        assert!(clean.stack.is_empty());
+        assert!(clean.output.is_empty());
+        assert!(clean.frames.is_empty());
+        assert!(clean.exception_handlers.is_empty());
+        assert!(clean.spawned_tasks.is_empty());
+        assert!(clean.held_sync_guards.is_empty());
+        assert_eq!(clean.task_counter, 0);
+        assert_eq!(clean.runtime_context_counter, 0);
+        assert!(clean.deadlines.is_empty());
+        assert!(clean.cancel_token.is_none());
+        assert!(clean.interrupt_handlers.is_empty());
+        assert!(clean.error_stack_trace.is_empty());
+        assert!(clean.bridge.is_none());
+        assert!(clean
+            .globals
+            .get("stable_global")
+            .is_some_and(|value| value.display() == "baseline"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn vm_baseline_rebinds_shared_state_builtins_per_instance() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let source = r#"
+pipeline main() {
+  let cell = shared_cell({scope: "task_group", key: "turn", initial: 0})
+  println(shared_get(cell))
+  shared_set(cell, shared_get(cell) + 1)
+}"#;
+                let chunk = crate::compile_source(source).expect("compile");
+                let baseline = baseline_with_stdlib(source);
+
+                let mut first = baseline.instantiate();
+                first.execute(&chunk).await.expect("first execute");
+                assert_eq!(first.output(), "0\n");
+
+                let mut second = baseline.instantiate();
+                second.execute(&chunk).await.expect("second execute");
+                assert_eq!(
+                    second.output(),
+                    "0\n",
+                    "shared state created by the first VM must not leak into the next baseline instance"
+                );
+            })
+            .await;
     }
 }

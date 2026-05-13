@@ -21,6 +21,12 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Reusable ACP VM baselines (#1563).** File-backed `session/prompt` turns now
+  cache a prepared VM baseline separately from the compiled bytecode cache, so
+  repeated turns reuse stable stdlib/project/source setup while instantiating a
+  clean execution VM for prompt globals, output, bridge state, tasks,
+  cancellation, sync primitives, and shared state. ACP profile rollups now
+  include a `vm_setup` bucket for prompt-turn setup diagnostics.
 - **Profiling for ACP and benchmark workflows (#1559).** `harn serve acp` now
   supports `--profile`, `--profile-json`, and `--trace`, with
   `HARN_PROFILE`, `HARN_PROFILE_JSON`, and `HARN_TRACE` aliases. ACP profile

@@ -26,6 +26,8 @@ pub enum SpanKind {
     Spawn,
     /// A `@step`-annotated function while its frame is on the call stack.
     Step,
+    /// Host-side VM setup before user bytecode starts executing.
+    VmSetup,
 }
 
 impl SpanKind {
@@ -39,6 +41,7 @@ impl SpanKind {
             Self::Parallel => "parallel",
             Self::Spawn => "spawn",
             Self::Step => "step",
+            Self::VmSetup => "vm_setup",
         }
     }
 }
