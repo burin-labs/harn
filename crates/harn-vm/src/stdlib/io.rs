@@ -8,6 +8,7 @@ use std::sync::Mutex;
 #[cfg(unix)]
 use std::time::Instant;
 
+use crate::stdlib::options::{self, ErrorKind, OptionsParser};
 use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuiltin};
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
@@ -386,70 +387,47 @@ fn read_line_result(outcome: ReadLineOutcome) -> VmValue {
     VmValue::Dict(Rc::new(out))
 }
 
-fn read_line_field_bool(
-    dict: &BTreeMap<String, VmValue>,
-    field: &str,
-    default: bool,
-) -> Result<bool, VmError> {
-    match dict.get(field) {
-        None | Some(VmValue::Nil) => Ok(default),
-        Some(VmValue::Bool(value)) => Ok(*value),
-        Some(_) => Err(VmError::Runtime(format!(
-            "std/io.read_line: `{field}` must be a bool"
-        ))),
-    }
-}
+const READ_LINE_FN: &str = "std/io.read_line";
 
-fn read_line_field_timeout_ms(dict: &BTreeMap<String, VmValue>) -> Result<Option<u64>, VmError> {
-    match dict.get("timeout_ms") {
+fn parse_read_line_timeout_ms(value: Option<&VmValue>) -> Result<Option<u64>, VmError> {
+    match value {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::Int(value)) | Some(VmValue::Duration(value)) => {
             if *value < 0 {
-                return Err(VmError::Runtime(
-                    "std/io.read_line: `timeout_ms` must be non-negative".to_string(),
-                ));
+                return Err(VmError::Runtime(format!(
+                    "{READ_LINE_FN}: `timeout_ms` must be non-negative"
+                )));
             }
             Ok(Some(*value as u64))
         }
-        Some(_) => Err(VmError::Runtime(
-            "std/io.read_line: `timeout_ms` must be an int, duration, or nil".to_string(),
-        )),
+        Some(value) => Err(VmError::Runtime(format!(
+            "{READ_LINE_FN}: `timeout_ms` must be an int, duration, or nil (got {})",
+            value.type_name()
+        ))),
     }
 }
 
 fn parse_read_line_options(args: &[VmValue]) -> Result<ReadLineOptions, VmError> {
     if args.len() > 1 {
-        return Err(VmError::Runtime(
-            "std/io.read_line: expected at most one options dict".to_string(),
-        ));
+        return Err(VmError::Runtime(format!(
+            "{READ_LINE_FN}: expected at most one options dict"
+        )));
     }
-    let Some(value) = args.first() else {
+    let Some(dict) =
+        options::optional_dict_arg(args, 0, READ_LINE_FN, "options", ErrorKind::Runtime)?
+    else {
         return Ok(ReadLineOptions::default());
     };
-    if matches!(value, VmValue::Nil) {
-        return Ok(ReadLineOptions::default());
-    }
-    let VmValue::Dict(dict) = value else {
-        return Err(VmError::Runtime(
-            "std/io.read_line: options must be a dict or nil".to_string(),
-        ));
+    let mut parser = OptionsParser::new(READ_LINE_FN, dict, ErrorKind::Runtime);
+    let options = ReadLineOptions {
+        prompt: parser.optional_string_raw("prompt")?.unwrap_or_default(),
+        timeout_ms: parse_read_line_timeout_ms(parser.raw("timeout_ms"))?,
+        trim: parser.bool_or("trim", true)?,
+        echo: parser.bool_or("echo", true)?,
+        raw: parser.bool_or("raw", false)?,
     };
-    let prompt = match dict.get("prompt") {
-        None | Some(VmValue::Nil) => String::new(),
-        Some(VmValue::String(value)) => value.to_string(),
-        Some(_) => {
-            return Err(VmError::Runtime(
-                "std/io.read_line: `prompt` must be a string".to_string(),
-            ));
-        }
-    };
-    Ok(ReadLineOptions {
-        prompt,
-        timeout_ms: read_line_field_timeout_ms(dict)?,
-        trim: read_line_field_bool(dict, "trim", true)?,
-        echo: read_line_field_bool(dict, "echo", true)?,
-        raw: read_line_field_bool(dict, "raw", false)?,
-    })
+    parser.finish_strict(&[])?;
+    Ok(options)
 }
 
 fn read_line_from_mock_or_real(options: &ReadLineOptions) -> ReadLineOutcome {
@@ -1120,6 +1098,31 @@ mod tests {
     #[test]
     fn progress_bar_falls_back_to_empty_bar_for_zero_total() {
         assert_eq!(render_progress_bar(2, 0, 5), "[-----]");
+    }
+
+    #[test]
+    fn read_line_options_preserve_prompt_whitespace() {
+        let mut options = BTreeMap::new();
+        options.insert("prompt".to_string(), VmValue::String(Rc::from("  > ")));
+        options.insert("trim".to_string(), VmValue::Bool(false));
+
+        let parsed = super::parse_read_line_options(&[VmValue::Dict(Rc::new(options))]).unwrap();
+
+        assert_eq!(parsed.prompt, "  > ");
+        assert!(!parsed.trim);
+    }
+
+    #[test]
+    fn read_line_options_reject_unknown_keys() {
+        let mut options = BTreeMap::new();
+        options.insert("promtp".to_string(), VmValue::String(Rc::from("> ")));
+
+        let err = super::parse_read_line_options(&[VmValue::Dict(Rc::new(options))]).unwrap_err();
+
+        match err {
+            crate::value::VmError::Runtime(message) => assert!(message.contains("promtp")),
+            other => panic!("expected Runtime error, got {other:?}"),
+        }
     }
 
     #[cfg(unix)]

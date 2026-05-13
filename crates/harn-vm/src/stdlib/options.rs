@@ -247,6 +247,23 @@ impl<'a> OptionsParser<'a> {
         }
     }
 
+    /// Optional string field that preserves the value exactly. Use this for
+    /// fields where leading/trailing whitespace is part of the public contract.
+    pub(crate) fn optional_string_raw(
+        &mut self,
+        key: &'static str,
+    ) -> Result<Option<String>, VmError> {
+        self.mark(key);
+        match self.dict.get(key) {
+            None | Some(VmValue::Nil) => Ok(None),
+            Some(VmValue::String(s)) => Ok(Some(s.to_string())),
+            Some(value) => Err(self.err(format_args!(
+                "`{key}` must be a string or nil (got {})",
+                value.type_name()
+            ))),
+        }
+    }
+
     pub(crate) fn optional_bool(&mut self, key: &'static str) -> Result<Option<bool>, VmError> {
         self.mark(key);
         match self.dict.get(key) {
@@ -384,6 +401,26 @@ mod tests {
         let d = dict(&[("name", VmValue::String(Rc::from("  joe  ")))]);
         let mut p = OptionsParser::new("agent", &d, ErrorKind::Runtime);
         assert_eq!(p.optional_string("name").unwrap().as_deref(), Some("joe"));
+    }
+
+    #[test]
+    fn parser_optional_string_raw_preserves_whitespace() {
+        let d = dict(&[("prompt", VmValue::String(Rc::from("  >  ")))]);
+        let mut p = OptionsParser::new("std/io.read_line", &d, ErrorKind::Runtime);
+        assert_eq!(
+            p.optional_string_raw("prompt").unwrap().as_deref(),
+            Some("  >  ")
+        );
+    }
+
+    #[test]
+    fn parser_optional_string_raw_accepts_empty_string() {
+        let d = dict(&[("prompt", VmValue::String(Rc::from("")))]);
+        let mut p = OptionsParser::new("std/io.read_line", &d, ErrorKind::Runtime);
+        assert_eq!(
+            p.optional_string_raw("prompt").unwrap().as_deref(),
+            Some("")
+        );
     }
 
     #[test]

@@ -3,41 +3,72 @@ use std::collections::BTreeMap;
 use super::super::parse_context_policy;
 use super::WorkerCarryPolicy;
 use crate::orchestration::{select_artifacts, ArtifactRecord, CapabilityPolicy, ContextPolicy};
+use crate::stdlib::options::{ErrorKind, OptionsParser};
 use crate::value::{VmError, VmValue};
+
+const SPAWN_AGENT_FN: &str = "spawn_agent";
+
+fn default_worker_carry_policy() -> WorkerCarryPolicy {
+    WorkerCarryPolicy {
+        artifact_mode: "inherit".to_string(),
+        transcript_mode: "inherit".to_string(),
+        context_policy: ContextPolicy::default(),
+        resume_workflow: true,
+        persist_state: true,
+        retriggerable: false,
+        policy: None,
+    }
+}
+
+fn display_non_empty(value: Option<&VmValue>) -> Option<String> {
+    match value {
+        None | Some(VmValue::Nil) => None,
+        Some(value) => {
+            let rendered = value.display();
+            if rendered.is_empty() {
+                None
+            } else {
+                Some(rendered)
+            }
+        }
+    }
+}
 
 pub(in crate::stdlib::agents) fn parse_worker_carry_policy(
     dict: &BTreeMap<String, VmValue>,
 ) -> Result<WorkerCarryPolicy, VmError> {
-    let carry = dict
-        .get("carry")
-        .and_then(|value| value.as_dict())
-        .cloned()
-        .unwrap_or_default();
-    let artifact_mode = carry
-        .get("artifact_mode")
-        .or_else(|| carry.get("artifacts"))
-        .map(|value| value.display())
-        .filter(|value| !value.is_empty())
+    let mut parent = OptionsParser::new(SPAWN_AGENT_FN, dict, ErrorKind::Runtime);
+    let Some(carry) = parent.optional_dict("carry")? else {
+        return Ok(default_worker_carry_policy());
+    };
+
+    let mut parser = OptionsParser::new(SPAWN_AGENT_FN, carry, ErrorKind::Runtime);
+    let artifacts_alias = parser.raw("artifacts");
+    let transcript_alias = parser.raw("transcript");
+    let context_policy_value = parser.raw("context_policy");
+    let artifact_mode = display_non_empty(parser.raw("artifact_mode").or(artifacts_alias))
         .unwrap_or_else(|| "inherit".to_string());
-    let transcript_mode = carry
-        .get("transcript_mode")
-        .or_else(|| carry.get("transcript"))
+    let transcript_mode = parser
+        .raw("transcript_mode")
+        .or(transcript_alias)
         .map(parse_transcript_mode)
         .transpose()?
         .unwrap_or_else(|| "inherit".to_string());
-    let context_policy = parse_context_policy(carry.get("context_policy").or_else(|| {
-        carry
-            .get("artifacts")
-            .filter(|value| value.as_dict().is_some())
-    }))?;
+    let context_policy = parse_context_policy(
+        context_policy_value.or_else(|| artifacts_alias.filter(|value| value.as_dict().is_some())),
+    )?;
+    let resume_workflow = parser.bool_or("resume_workflow", true)?;
+    let persist_state = parser.bool_or("persist_state", true)?;
+    let retriggerable = parser.bool_or("retriggerable", false)?;
+    parser.finish_strict(&["policy", "tools"])?;
 
     Ok(WorkerCarryPolicy {
         artifact_mode,
         transcript_mode,
         context_policy,
-        resume_workflow: !matches!(carry.get("resume_workflow"), Some(VmValue::Bool(false))),
-        persist_state: !matches!(carry.get("persist_state"), Some(VmValue::Bool(false))),
-        retriggerable: matches!(carry.get("retriggerable"), Some(VmValue::Bool(true))),
+        resume_workflow,
+        persist_state,
+        retriggerable,
         policy: None,
     })
 }
@@ -56,7 +87,7 @@ pub(super) fn parse_transcript_mode(value: &VmValue) -> Result<String, VmError> 
     match mode.as_str() {
         "inherit" | "fork" | "reset" | "compact" => Ok(mode),
         _ => Err(VmError::Runtime(format!(
-            "spawn_agent: carry.transcript_mode must be one of inherit, fork, reset, compact; got `{mode}`"
+            "{SPAWN_AGENT_FN}: carry.transcript_mode must be one of inherit, fork, reset, compact; got `{mode}`"
         ))),
     }
 }
@@ -64,7 +95,7 @@ pub(super) fn parse_transcript_mode(value: &VmValue) -> Result<String, VmError> 
 pub(super) fn parse_worker_policy_value(value: &VmValue) -> Result<CapabilityPolicy, VmError> {
     let json = crate::llm::helpers::vm_value_to_json(value);
     serde_json::from_value(json)
-        .map_err(|e| VmError::Runtime(format!("spawn_agent: policy parse error: {e}")))
+        .map_err(|e| VmError::Runtime(format!("{SPAWN_AGENT_FN}: policy parse error: {e}")))
 }
 
 pub(super) fn worker_policy_value(value: Option<&VmValue>) -> Option<&VmValue> {
@@ -78,9 +109,9 @@ fn parse_worker_tools_policy(value: Option<&VmValue>) -> Result<Option<Capabilit
     let tools = match value {
         VmValue::List(list) => list,
         _ => {
-            return Err(VmError::Runtime(
-                "spawn_agent: tools shorthand must be a list of strings".to_string(),
-            ))
+            return Err(VmError::Runtime(format!(
+                "{SPAWN_AGENT_FN}: tools shorthand must be a list of strings"
+            )))
         }
     };
     let mut allowed = Vec::new();
@@ -88,9 +119,9 @@ fn parse_worker_tools_policy(value: Option<&VmValue>) -> Result<Option<Capabilit
         let name = match tool {
             VmValue::String(text) => text.trim().to_string(),
             _ => {
-                return Err(VmError::Runtime(
-                    "spawn_agent: tools shorthand must be a list of strings".to_string(),
-                ))
+                return Err(VmError::Runtime(format!(
+                    "{SPAWN_AGENT_FN}: tools shorthand must be a list of strings"
+                )))
             }
         };
         if !name.is_empty() && !allowed.contains(&name) {
@@ -98,9 +129,9 @@ fn parse_worker_tools_policy(value: Option<&VmValue>) -> Result<Option<Capabilit
         }
     }
     if allowed.is_empty() {
-        return Err(VmError::Runtime(
-            "spawn_agent: tools shorthand must include at least one tool name".to_string(),
-        ));
+        return Err(VmError::Runtime(format!(
+            "{SPAWN_AGENT_FN}: tools shorthand must include at least one tool name"
+        )));
     }
     Ok(Some(CapabilityPolicy {
         tools: allowed,
@@ -127,7 +158,7 @@ pub(super) fn resolve_worker_policy(
         (Some(policy), Some(tool_policy)) => Some(
             policy
                 .intersect(&tool_policy)
-                .map_err(|e| VmError::Runtime(format!("spawn_agent: {e}")))?,
+                .map_err(|e| VmError::Runtime(format!("{SPAWN_AGENT_FN}: {e}")))?,
         ),
         (Some(policy), None) => Some(policy),
         (None, Some(tool_policy)) => Some(tool_policy),
@@ -143,7 +174,7 @@ pub(in super::super) fn resolve_inherited_worker_policy(
     match (parent, requested) {
         (Some(parent), Some(requested)) => {
             Ok(Some(parent.intersect(&requested).map_err(|e| {
-                VmError::Runtime(format!("spawn_agent: {e}"))
+                VmError::Runtime(format!("{SPAWN_AGENT_FN}: {e}"))
             })?))
         }
         (Some(parent), None) => Ok(Some(parent)),

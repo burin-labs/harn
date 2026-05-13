@@ -18,6 +18,10 @@ condensed series summaries instead of full per-patch history.
   Migration: rename the keys in your `daemon_spawn({...})` calls. No
   in-repo callers used the deprecated aliases; this only affects external
   scripts.
+- **Strict option-bag parsing for remaining stdlib agent/IO configs (#1568).**
+  `spawn_agent`, `sub_agent_run`'s normalized host request, worker carry
+  policy bags, worker snapshots, and `std/io.read_line` now reject unknown
+  closed-schema option keys instead of silently ignoring typos.
 
 ### Added
 
