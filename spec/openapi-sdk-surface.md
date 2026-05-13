@@ -1,14 +1,20 @@
 # Harn SDK OpenAPI Surface Audit
 
 `spec/openapi.yaml` is the canonical source for generated Harn Agents API SDKs.
-It covers the public REST and server-sent event surface under `/v1` that SDKs
-can model as normal request/response operations.
+It covers the public REST and server-sent event surface exposed by
+`harn serve api`, including the stable local discovery paths and `/v1`
+operations that SDKs can model as normal request/response operations.
 
 ## Included
 
 - Protocol discovery and public agent-card endpoints.
+- Local server discovery and status endpoints:
+  `/openapi.json`, `/health`, `/version`, `/v1/runtime`, `/v1/capabilities`,
+  and `/v1/tools`.
 - Personas, workspaces, sessions, tasks, branches, messages, artifacts, events,
   receipts, memories, vaults, connectors, skills, outcomes, and quotas.
+- Local permission request inspection and response endpoints that forward ACP
+  `session/request_permission` and Harn HITL decisions through the runtime.
 - SSE entry points modeled as HTTP `GET` operations:
   `/v1/events/stream`, `/v1/sessions/{session_id}/events/stream`, and
   `/v1/tasks/{task_id}/stream`.

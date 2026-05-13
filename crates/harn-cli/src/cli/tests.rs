@@ -389,6 +389,56 @@ fn test_parses_serve_acp() {
 }
 
 #[test]
+fn test_parses_serve_api() {
+    let cli = Cli::parse_from([
+        "harn",
+        "serve",
+        "api",
+        "--bind",
+        "127.0.0.1:9898",
+        "--public-url",
+        "https://agent.example.test",
+        "--api-key",
+        "alpha,beta",
+        "--hmac-secret",
+        "shared",
+        "--tls",
+        "pem",
+        "--cert",
+        "tls/cert.pem",
+        "--key",
+        "tls/key.pem",
+        "--trace",
+        "--profile-json",
+        "profiles/api.ndjson",
+        "agent.harn",
+    ]);
+
+    let Command::Serve(args) = cli.command.unwrap() else {
+        panic!("expected serve command");
+    };
+    let crate::cli::ServeCommand::Api(serve) = args.command else {
+        panic!("expected serve api");
+    };
+    assert_eq!(serve.bind.to_string(), "127.0.0.1:9898");
+    assert_eq!(
+        serve.public_url.as_deref(),
+        Some("https://agent.example.test")
+    );
+    assert_eq!(serve.api_key, vec!["alpha".to_string(), "beta".to_string()]);
+    assert_eq!(serve.hmac_secret.as_deref(), Some("shared"));
+    assert_eq!(serve.tls, crate::cli::ServeTlsMode::Pem);
+    assert_eq!(serve.cert, Some(PathBuf::from("tls/cert.pem")));
+    assert_eq!(serve.key, Some(PathBuf::from("tls/key.pem")));
+    assert!(serve.trace);
+    assert_eq!(
+        serve.profile.json_path.as_deref(),
+        Some(std::path::Path::new("profiles/api.ndjson"))
+    );
+    assert_eq!(serve.file, "agent.harn");
+}
+
+#[test]
 fn test_parses_runs_inspect_compare() {
     let cli = Cli::parse_from([
         "harn",

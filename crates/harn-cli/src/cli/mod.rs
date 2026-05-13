@@ -124,8 +124,8 @@ pub(crate) use quickstart::QuickstartArgs;
 pub(crate) use run::RunArgs;
 pub(crate) use runs::{EvalArgs, ReplayArgs, RunsArgs, RunsCommand};
 pub(crate) use serve::{
-    A2aServeArgs, McpServeTransport, ServeAcpArgs, ServeArgs, ServeCommand, ServeMcpArgs,
-    ServeTlsMode,
+    A2aServeArgs, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeArgs, ServeCommand,
+    ServeMcpArgs, ServeTlsMode,
 };
 pub(crate) use session::{
     SessionArgs, SessionCommand, SessionExportArgs, SessionImportArgs, SessionSchemaArgs,

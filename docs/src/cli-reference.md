@@ -1279,9 +1279,21 @@ harn serve agent.harn                      # legacy A2A shorthand
 harn serve --port 3000 agent.harn          # legacy A2A shorthand with custom port
 harn serve acp agent.harn                  # ACP session server over stdio
 harn serve acp --profile-json /tmp/acp.ndjson agent.harn
+harn serve api agent.harn                  # local OpenAPI + SSE Agents API
+harn serve api --bind 127.0.0.1:8787 agent.harn
 harn serve mcp server.harn                 # exported pub fn -> MCP tools over stdio
 harn serve mcp --transport http server.harn
 ```
+
+`harn serve api` starts the local Harn Agents HTTP API. It serves
+`/openapi.json`, health/version/runtime/capability metadata, session and task
+CRUD, SSE event streams, local tool-registry inspection, workspace file helpers,
+and permission request response endpoints. Prompt execution, cancellation, and
+approval decisions are routed through the packaged ACP session runtime so API
+clients share the same transcript, EventLog, replay, and host-permission paths
+as ACP hosts. Use `--api-key <key>` / `HARN_SERVE_API_KEY`,
+`--hmac-secret <secret>` / `HARN_SERVE_HMAC_SECRET`, and the shared `--tls`
+flags to protect non-discovery routes.
 
 `harn serve mcp` uses the shared `harn-serve` dispatch core and maps each
 exported `pub fn` in the target module to one MCP tool. Tool schemas are

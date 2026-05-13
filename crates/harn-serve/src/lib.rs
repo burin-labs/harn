@@ -19,6 +19,7 @@ pub use adapters::acp::{
     run_acp_channel_server, run_acp_server, AcpProfileConfig, AcpRuntimeConfigurator, AcpServer,
     AcpServerConfig, NoopAcpRuntimeConfigurator,
 };
+pub use adapters::api::{ApiHttpServeOptions, ApiServer, ApiServerConfig};
 pub use adapters::mcp::{
     McpHttpServeOptions, McpServer, McpServerConfig, McpStdioServer, MCP_PROTOCOL_VERSION,
 };

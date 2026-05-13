@@ -611,6 +611,11 @@ async fn async_main() {
                     command_error(&error);
                 }
             }
+            ServeCommand::Api(args) => {
+                if let Err(error) = commands::serve::run_api_server(&args).await {
+                    command_error(&error);
+                }
+            }
             ServeCommand::Mcp(args) => {
                 if let Err(error) = commands::serve::run_mcp_server(&args).await {
                     command_error(&error);
@@ -1060,7 +1065,7 @@ fn normalize_serve_args(mut raw_args: Vec<String>) -> Vec<String> {
         && raw_args.get(1).is_some_and(|arg| arg == "serve")
         && !matches!(
             raw_args.get(2).map(String::as_str),
-            Some("acp" | "a2a" | "mcp" | "-h" | "--help")
+            Some("acp" | "a2a" | "api" | "mcp" | "-h" | "--help")
         )
     {
         raw_args.insert(2, "a2a".to_string());
