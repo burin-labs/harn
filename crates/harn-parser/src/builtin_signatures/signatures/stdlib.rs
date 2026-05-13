@@ -1,5 +1,9 @@
 //! Core stdlib builtin signatures that are not in the higher-level namespaces.
 
+use super::shapes::{
+    DAEMON_CONFIG, DAEMON_SUMMARY, IO_RESULT_ENVELOPE, PAGER_OPTIONS, READ_LINE_OPTIONS,
+    SIGNAL_HANDLER_OPTIONS,
+};
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_BYTES, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL,
     TY_DURATION, TY_FLOAT, TY_INT, TY_LIST, TY_NEVER, TY_NIL, TY_NUMBER, TY_STRING,
@@ -153,8 +157,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     ),
     BuiltinSignature::simple(
         "__io_read_line",
-        &[Param::optional("options", TY_DICT_OR_NIL)],
-        TY_DICT,
+        &[Param::optional(
+            "options",
+            Ty::Union(&[READ_LINE_OPTIONS, TY_NIL]),
+        )],
+        IO_RESULT_ENVELOPE,
     ),
     BuiltinSignature::simple(
         "__llm_cache_key",
@@ -175,7 +182,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         "__signal_on_interrupt",
         &[
             Param::new("handler", TY_CLOSURE),
-            Param::optional("options", TY_DICT_OR_NIL),
+            Param::optional("options", Ty::Union(&[SIGNAL_HANDLER_OPTIONS, TY_NIL])),
         ],
         TY_DICT,
     ),
@@ -185,7 +192,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_NIL,
     ),
     BuiltinSignature::simple("__tui_clear", &[], TY_NIL),
-    BuiltinSignature::simple("__tui_page", &[Param::new("options", TY_DICT)], TY_DICT),
+    BuiltinSignature::simple(
+        "__tui_page",
+        &[Param::new("options", PAGER_OPTIONS)],
+        TY_DICT,
+    ),
     BuiltinSignature::simple(
         "__tui_terminal_width",
         &[Param::optional("default_width", TY_INT)],
@@ -640,17 +651,25 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple("cwd", &[], TY_STRING),
-    BuiltinSignature::simple("daemon_resume", &[Param::new("path", TY_STRING)], TY_DICT),
+    BuiltinSignature::simple(
+        "daemon_resume",
+        &[Param::new("path", TY_STRING)],
+        DAEMON_SUMMARY,
+    ),
     BuiltinSignature::simple(
         "daemon_snapshot",
         &[Param::new("handle", TY_STRING_OR_DICT)],
-        TY_DICT,
+        DAEMON_SUMMARY,
     ),
-    BuiltinSignature::simple("daemon_spawn", &[Param::new("config", TY_DICT)], TY_DICT),
+    BuiltinSignature::simple(
+        "daemon_spawn",
+        &[Param::new("config", DAEMON_CONFIG)],
+        DAEMON_SUMMARY,
+    ),
     BuiltinSignature::simple(
         "daemon_stop",
         &[Param::new("handle", TY_STRING_OR_DICT)],
-        TY_DICT,
+        DAEMON_SUMMARY,
     ),
     BuiltinSignature::simple(
         "daemon_trigger",
@@ -658,7 +677,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::new("handle", TY_STRING_OR_DICT),
             Param::new("event", TY_ANY),
         ],
-        TY_DICT,
+        DAEMON_SUMMARY,
     ),
     BuiltinSignature::simple(
         "date_add",

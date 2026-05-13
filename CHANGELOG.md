@@ -8,6 +8,17 @@ condensed series summaries instead of full per-patch history.
 
 ## Unreleased
 
+### Changed (breaking)
+
+- **`daemon_spawn` config canonical field names.** Dropped the deprecated
+  aliases `prompt` (use `task`), `state_dir` (use `persist_path`), and
+  `queue_capacity` (use `event_queue_capacity`). The previous fallback
+  chain that accepted either name has been removed; calls using the old
+  names now error with `daemon_spawn: config must include \`task\`` (etc.).
+  Migration: rename the keys in your `daemon_spawn({...})` calls. No
+  in-repo callers used the deprecated aliases; this only affects external
+  scripts.
+
 ### Added
 
 - **Profiling for ACP and benchmark workflows (#1559).** `harn serve acp` now
@@ -16,6 +27,22 @@ condensed series summaries instead of full per-patch history.
   JSON is appended as one NDJSON object per prompt turn. `harn bench` now shares
   the profile flags, reports p50/p95/stddev wall-time stats, and can write a
   JSON benchmark report with per-iteration profile rollups.
+- **Typed stdlib option-bag + return-value records.** Started declaring
+  structural `Ty::Shape` aliases for the stdlib's well-known dicts so
+  literal-call sites get autocomplete and typo detection at parse time
+  (matches the precedent set by `schema_recover`'s envelope). Applied to:
+  `daemon_spawn` config + return (`DAEMON_CONFIG`, `DAEMON_SUMMARY`),
+  `__io_read_line` (`READ_LINE_OPTIONS`, `IO_RESULT_ENVELOPE`),
+  `__tui_page` (`PAGER_OPTIONS`), `__signal_on_interrupt`
+  (`SIGNAL_HANDLER_OPTIONS`), `agent_session_seed_from_jsonl`
+  (`AGENT_SESSION_SEED_OPTS`), `agent_session_compact`
+  (`AGENT_SESSION_COMPACT_OPTS`), `agent_session_ancestry`
+  (`SESSION_ANCESTRY` return), and `spawn_agent` (`WORKER_SUMMARY`
+  return). Shapes for `AGENT_SPAWN_CONFIG`, `SUB_AGENT_OPTIONS`, and
+  `LLM_CALL_OPTIONS` are defined in
+  `crates/harn-parser/src/builtin_signatures/signatures/shapes.rs` and
+  documented; full enforcement on those slots is deferred until internal
+  callers (`agent_loop`, `agent_turn`) converge on the documented shape.
 - **`std/tui::select_from` picker (#1544).** Added
   `select_from(items, opts?)` to `std/tui` so harness scripts stop
   hand-rolling fzf detection plus numbered-menu fallbacks. The picker
@@ -55,6 +82,41 @@ condensed series summaries instead of full per-patch history.
   loop, and `agent_session_close(id, status?)` records an
   `agent_session_closed` event before evicting the session so timeout and
   interruption closes are visible in event logs.
+
+### Changed
+
+- **Optional shape fields treat explicit `nil` as "missing".** Both the
+  runtime type-check (`crates/harn-vm/src/typecheck.rs`) and the static
+  type-checker (`crates/harn-parser/src/typechecker/inference/subtyping.rs`)
+  now accept `{flag: nil}` against an optional shape field whose declared
+  type doesn't include `nil`. Previously an explicit `nil` value had to
+  match the declared field type; with this change, optional fields are
+  treated uniformly as "the caller may omit the key OR pass `nil`",
+  matching user intuition for option bags. Required fields still reject
+  `nil` unless the declared type permits it.
+
+### Internal
+
+- **Shared option-bag parsing helpers** at
+  `crates/harn-vm/src/stdlib/options.rs`. `OptionsParser` plus
+  `dict_arg`/`required_string_arg`/`optional_string_arg`/`required_int_arg`
+  let stdlib builtins extract option dicts without rebuilding
+  `dict.get().map().filter().ok_or_else()` chains, with strict
+  unknown-key detection available for closed-schema bags. `agents_daemon`
+  and `agent_sessions` consolidated onto these helpers; the previous
+  duplicate `require_dict_arg` / `required_string_arg` / `optional_string`
+  / `opt_string` / `arg_string_required` / `arg_int_required` helpers
+  with mismatched signatures and error kinds were removed.
+- **Shared structural-record `Ty::Shape` aliases** at
+  `crates/harn-parser/src/builtin_signatures/signatures/shapes.rs` for
+  agent / sub-agent / daemon / LLM / IO / TUI / signal option bags and
+  worker / daemon / session return contracts. See the "Added" entry above
+  for which slots are wired up today.
+- **Refactored `spawn_agent_builtin` and `sub_agent_run_builtin`** to share
+  a single `finalize_and_run_worker` helper that handles
+  persistence-snapshot, registry insertion, task spawn, optional terminal
+  wait, and summary emission. Replaces ~14 duplicated lines of
+  WorkerState lifecycle.
 
 ### Fixed
 

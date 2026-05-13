@@ -38,6 +38,7 @@ mod math;
 mod memory;
 mod monitors;
 mod multipart;
+mod options;
 mod path;
 mod postgres;
 pub mod process;

@@ -256,20 +256,43 @@ async fn sub_agent_run_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         snapshot_path: worker_snapshot_path(&worker_id),
         audit,
     }));
+    finalize_and_run_worker(state, false, "sub_agent worker").await
+}
+
+/// Persist + register + spawn a freshly-built worker, optionally block until
+/// it reaches a terminal state, and return the worker summary dict.
+///
+/// Shared by `spawn_agent_builtin` (background or `wait: true`) and
+/// `sub_agent_run_builtin` (background) so persistence / registry / task
+/// spawn / summary stay in one place.
+async fn finalize_and_run_worker(
+    state: Rc<RefCell<WorkerState>>,
+    wait_for_terminal: bool,
+    wait_context: &'static str,
+) -> Result<VmValue, VmError> {
     {
         let worker = state.borrow();
         if worker.carry_policy.persist_state {
             persist_worker_state_snapshot(&worker)?;
         }
     }
+    let worker_id = state.borrow().id.clone();
     WORKER_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .insert(worker_id.clone(), state.clone());
+        registry.borrow_mut().insert(worker_id, state.clone());
     });
     spawn_worker_task(state.clone());
-    let summary = worker_summary(&state.borrow())?;
-    Ok(summary)
+    if wait_for_terminal {
+        wait_for_worker_terminal(state.clone(), wait_context).await?;
+    }
+    worker_summary(&state.borrow())
+}
+
+fn worker_mode_label(config: &WorkerConfig) -> &'static str {
+    match config {
+        WorkerConfig::Workflow { .. } => "workflow",
+        WorkerConfig::Stage { .. } => "stage",
+        WorkerConfig::SubAgent { .. } => "sub_agent",
+    }
 }
 
 async fn spawn_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
@@ -280,12 +303,7 @@ async fn spawn_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let worker_id = next_worker_id();
     let created_at = uuid::Uuid::now_v7().to_string();
     ensure_worker_config_session_ids(&mut init.config, &worker_id);
-    let mode = match &init.config {
-        WorkerConfig::Workflow { .. } => "workflow",
-        WorkerConfig::Stage { .. } => "stage",
-        WorkerConfig::SubAgent { .. } => "sub_agent",
-    }
-    .to_string();
+    let mode = worker_mode_label(&init.config).to_string();
     let mut audit = init.audit.clone().normalize();
     audit.worker_id = Some(worker_id.clone());
     audit.execution_kind = Some(mode.clone());
@@ -319,23 +337,7 @@ async fn spawn_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         snapshot_path: worker_snapshot_path(&worker_id),
         audit,
     }));
-    {
-        let worker = state.borrow();
-        if worker.carry_policy.persist_state {
-            persist_worker_state_snapshot(&worker)?;
-        }
-    }
-    WORKER_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .insert(worker_id.clone(), state.clone());
-    });
-    spawn_worker_task(state.clone());
-    if init.wait {
-        wait_for_worker_terminal(state.clone(), "spawn_agent worker").await?;
-    }
-    let summary = worker_summary(&state.borrow())?;
-    Ok(summary)
+    finalize_and_run_worker(state, init.wait, "spawn_agent worker").await
 }
 
 async fn send_input_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {

@@ -12,8 +12,8 @@ Start a daemon-mode agent and return a daemon handle dict.
 
 Required config:
 
-- `task` or `prompt`
-- `persist_path` or `state_dir`
+- `task`
+- `persist_path`
 
 Useful optional config:
 
@@ -77,8 +77,8 @@ in-flight trigger is re-queued so `daemon_resume(...)` can replay it safely.
 ### `daemon_resume(path)`
 
 Resume a daemon from its persisted state directory. The path is the same root
-directory you passed as `persist_path` / `state_dir` to `daemon_spawn(...)`,
-not the inner `daemon.json` snapshot file.
+directory you passed as `persist_path` to `daemon_spawn(...)`, not the inner
+`daemon.json` snapshot file.
 
 If the daemon stopped with queued or in-flight trigger events, they are restored
 and replayed after resume.

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use crate::bridge::HostBridge;
 use crate::llm::daemon::{load_snapshot, DaemonSnapshot};
 use crate::orchestration::DaemonEventKindRecord;
+use crate::stdlib::options::{self, ErrorKind};
 use crate::stdlib::registration::{
     async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
@@ -134,7 +135,7 @@ async fn daemon_spawn_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
         VmError::Runtime("daemon_spawn requires an async builtin VM context".to_string())
     })?;
-    let config = require_dict_arg(&args, 0, "daemon_spawn")?;
+    let config = options::dict_arg(&args, 0, "daemon_spawn", "config", ErrorKind::Runtime)?;
     let spec = parse_spawn_spec(config, None, None)?;
     if find_daemon_by_root(&spec.persist_root)
         .is_some_and(|state| state.borrow().status == "running")
@@ -327,7 +328,8 @@ async fn daemon_resume_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
         VmError::Runtime("daemon_resume requires an async builtin VM context".to_string())
     })?;
-    let persist_root = required_string_arg(&args, 0, "daemon_resume", "path")?;
+    let persist_root =
+        options::required_string_arg(&args, 0, "daemon_resume", "path", ErrorKind::Runtime)?;
     let paths = daemon_paths(&persist_root);
     let snapshot = load_snapshot(&paths.snapshot_path)?;
     let meta = read_meta(&paths.meta_path)?;
@@ -505,33 +507,6 @@ async fn daemon_resume_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(summary)
 }
 
-fn require_dict_arg<'a>(
-    args: &'a [VmValue],
-    idx: usize,
-    fn_name: &str,
-) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
-    match args.get(idx) {
-        Some(VmValue::Dict(dict)) => Ok(dict),
-        _ => Err(VmError::Runtime(format!(
-            "{fn_name}: expected a config dict"
-        ))),
-    }
-}
-
-fn required_string_arg(
-    args: &[VmValue],
-    idx: usize,
-    fn_name: &str,
-    arg_name: &str,
-) -> Result<String, VmError> {
-    match args.get(idx) {
-        Some(VmValue::String(text)) if !text.trim().is_empty() => Ok(text.to_string()),
-        _ => Err(VmError::Runtime(format!(
-            "{fn_name}: `{arg_name}` must be a non-empty string"
-        ))),
-    }
-}
-
 fn optional_string(dict: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
     dict.get(key)
         .map(VmValue::display)
@@ -566,29 +541,21 @@ fn parse_spawn_spec(
     };
     for key in [
         "name",
-        "prompt",
         "task",
         "system",
         "options",
         "event_queue_capacity",
-        "queue_capacity",
-        "state_dir",
+        "persist_path",
+        "session_id",
     ] {
         options.remove(key);
     }
 
     let prompt = optional_string(config, "task")
-        .or_else(|| optional_string(config, "prompt"))
-        .ok_or_else(|| {
-            VmError::Runtime("daemon_spawn: config must include `task` or `prompt`".to_string())
-        })?;
-    let persist_root = optional_string(config, "persist_path")
-        .or_else(|| optional_string(config, "state_dir"))
-        .ok_or_else(|| {
-            VmError::Runtime(
-                "daemon_spawn: config must include `persist_path` or `state_dir`".to_string(),
-            )
-        })?;
+        .ok_or_else(|| VmError::Runtime("daemon_spawn: config must include `task`".to_string()))?;
+    let persist_root = optional_string(config, "persist_path").ok_or_else(|| {
+        VmError::Runtime("daemon_spawn: config must include `persist_path`".to_string())
+    })?;
     let paths = daemon_paths(&persist_root);
     let id = explicit_id.unwrap_or_else(next_daemon_id);
     let name = optional_string(config, "name").unwrap_or_else(|| id.clone());
@@ -597,7 +564,6 @@ fn parse_spawn_spec(
     let system = explicit_system.or_else(|| optional_string(config, "system"));
     let event_queue_capacity = config
         .get("event_queue_capacity")
-        .or_else(|| config.get("queue_capacity"))
         .and_then(|value| value.as_int())
         .and_then(|value| usize::try_from(value).ok())
         .filter(|value| *value > 0)

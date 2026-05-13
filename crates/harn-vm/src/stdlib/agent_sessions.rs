@@ -10,10 +10,14 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use crate::agent_sessions;
+use crate::stdlib::options::{self, ErrorKind};
 use crate::stdlib::registration::{
     async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{VmError, VmValue};
+
+/// Sessions raise catchable errors (callers may `try`/`recover`).
+const ERR_KIND: ErrorKind = ErrorKind::Thrown;
 use crate::vm::{Vm, VmBuiltinArity};
 
 pub fn register_agent_session_builtins(vm: &mut Vm) {
@@ -113,45 +117,56 @@ const AGENT_SESSION_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
     .async_(AGENT_SESSION_ASYNC_PRIMITIVES);
 
 fn err(msg: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(msg.into())))
+    ERR_KIND.err(msg.into())
 }
 
+/// Thin local re-exports so each builtin can keep its call sites short. The
+/// shared helpers in [`crate::stdlib::options`] handle the actual logic and
+/// error-kind selection.
 fn arg_string_opt(
     args: &[VmValue],
     idx: usize,
-    fn_name: &str,
+    fn_name: &'static str,
     arg_name: &str,
 ) -> Result<Option<String>, VmError> {
+    // Preserve the prior contract: do *not* trim — sessions accept whitespace
+    // strings for nested-id round-trips.
     match args.get(idx) {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::String(s)) => Ok(Some(s.to_string())),
-        _ => Err(err(format!(
-            "{fn_name}: `{arg_name}` must be a string or nil"
-        ))),
+        _ => Err(options::fn_err(
+            fn_name,
+            ERR_KIND,
+            format_args!("`{arg_name}` must be a string or nil"),
+        )),
     }
 }
 
 fn arg_string_required(
     args: &[VmValue],
     idx: usize,
-    fn_name: &str,
+    fn_name: &'static str,
     arg_name: &str,
 ) -> Result<String, VmError> {
+    // Preserve the prior contract: accept empty strings here (sessions used
+    // `arg_string_required` without trim/empty checks).
     match args.get(idx) {
         Some(VmValue::String(s)) => Ok(s.to_string()),
-        _ => Err(err(format!("{fn_name}: `{arg_name}` must be a string"))),
+        _ => Err(options::fn_err(
+            fn_name,
+            ERR_KIND,
+            format_args!("`{arg_name}` must be a string"),
+        )),
     }
 }
 
 fn arg_int_required(
     args: &[VmValue],
     idx: usize,
-    fn_name: &str,
+    fn_name: &'static str,
     arg_name: &str,
 ) -> Result<i64, VmError> {
-    args.get(idx)
-        .and_then(VmValue::as_int)
-        .ok_or_else(|| err(format!("{fn_name}: `{arg_name}` must be an int")))
+    options::required_int_arg(args, idx, fn_name, arg_name, ERR_KIND)
 }
 
 fn arg_bool_opt(
